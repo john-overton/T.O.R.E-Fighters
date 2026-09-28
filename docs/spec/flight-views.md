@@ -135,7 +135,8 @@ visual range. Once the target is beyond it the views lose it for good, and
 coming back inside does not restore it; a new selection is needed. The
 selection itself, radar support, missile guidance, the HUD square and the
 Shift-4 target window still drop at once. Easy targeting keeps the target for
-the views as before.
+the views as before. Mission recordings keep this view target, and a replay's
+target views on the player follow it ([cameras](../REPLAYS.md#cameras)).
 
 ## F7 bearing compass
 

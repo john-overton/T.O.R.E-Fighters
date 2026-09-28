@@ -449,6 +449,23 @@ pub(crate) fn describe(event: &Event, names: &Names) -> String {
             opt(event, field::COMMAND).unwrap_or_default(),
             quoted(&event.text)
         ),
+        kind::PLAYER_VIEW_TARGET => {
+            let new = event.object.map(|id| names.who(id));
+            let old = event.id(field::FROM).map(|id| names.who(id));
+            let name = |who: Option<String>| who.unwrap_or_else(|| "none".into());
+            let held = event.flag(field::HELD) == Some(true);
+            let line = if old.is_some() && old == new {
+                let how = if held {
+                    "held by sight"
+                } else {
+                    "back on the sensors"
+                };
+                format!("{s} view target {} {how}", name(new))
+            } else {
+                format!("{s} view target {} -> {}", name(old), name(new))
+            };
+            line + &because(event)
+        }
         kind::PLAYER_BOOKMARK => format!("Bookmark{}", quoted(&event.text)),
         kind::SYSTEM_PAUSE => "Paused".into(),
         kind::SYSTEM_RESUME => "Resumed".into(),

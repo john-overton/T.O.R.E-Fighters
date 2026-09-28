@@ -126,7 +126,7 @@ stalling, which only a machine far busier than the game itself would cause.
 | AI | `ai.activity` (with how long the old activity lasted), `ai.target` (with priority and score), `ai.weapon_phase` (with the store and the weapon service's words), `ai.airfield_phase`, each with its reason ([below](#reasons-for-ai-decisions)); `ai.defense` when missile defense starts, changes maneuver, releases chaff or flares, or ends; also when anonymous gun/hit evidence starts, changes kind or clears, identifying which threat has motion priority, and when a launch warning arrives or is dropped; `ai.fallback` the first time each aircraft uses each fitted stand-in rule; `ai.ejection` when the ejection check finds a hazard, the pilot ejects, a go-around replaces an ejection, or the hazard passes |
 | Communication | Every entry of the [communication journal](#communication-journal) and of the AI message journal, with trigger, rolls, outcome and reason ([below](#communication-events)); and `comms.hud` for every cockpit message line: shown, a repeat that moved the line on screen to the bottom with a fresh timer, or pushed off the screen by newer lines |
 | Audio | `audio.effect` (impacts, explosions, and each chaff cartridge's and flare's release sound, marked `own` when the player's own aircraft released it), `audio.release` (weapon release sounds), `audio.tone` (the seeker tone, its loudness and whether its weapon aims at the surface), `audio.stall_warning`, `audio.ejection` (warnings, seat, parachute, a wingman ejecting), `audio.device` (gear, flaps, hook, brake) and `audio.music` (every input of the situation music, the score they ask for, and why) |
-| Player and system | `player.command` (combat commands and trigger releases), `player.bookmark`, `system.pause`, `system.resume`, `system.time_scale`, `system.cheat`, `system.restart` (first in a recording that follows a restart), `system.end`, `system.gap`, and `system.note` when a tick held more than the format stores or a journal overflowed |
+| Player and system | `player.command` (combat commands and trigger releases), `player.view_target` (the target your target views follow, from the first frame and again whenever it changes, including when the sensors drop it and the views hold it by sight within visual range, and when it goes to none), `player.bookmark`, `system.pause`, `system.resume`, `system.time_scale`, `system.cheat`, `system.restart` (first in a recording that follows a restart), `system.end`, `system.gap`, and `system.note` when a tick held more than the format stores or a journal overflowed |
 | Display trees | `ai.thought` for every AI aircraft, `flight.telemetry` for every aircraft that flies, `weapon.guidance` for every guided missile ([below](#display-trees)) |
 
 Every second a frame carries a checksum of all aircraft's exact state,
@@ -480,8 +480,9 @@ beyond them.
 - A jump in ticks, for example if the recorder falls behind, starts a new
   chunk and reads back as a gap.
 - New kinds of data arrive as new entries, fields and flag bits within the
-  version: released chaff and flares (`combat.countermeasure`) and the
-  `flame` flag came this way. A reader ignores flag bits it does not know,
+  version: released chaff and flares (`combat.countermeasure`), the
+  `flame` flag and the player's view target (`player.view_target`) came
+  this way. A reader ignores flag bits it does not know,
   and a recording from before them has no releases and no lit flames: its
   chaff and flares were short effects, which the viewer does not draw, as
   flight no longer draws them.
@@ -834,8 +835,11 @@ as in flight.
   the aircraft and hide it (there is no cockpit in a replay), and track,
   threat, wing, target, fly-by and missile views work from it. The target is
   that aircraft's own target when the recording has its AI target changes,
-  otherwise the player's designated target, which the recording notes with
-  every command the player gives. A view that cannot be shown (no target, no
+  otherwise the player's recorded view target (`player.view_target`), so the
+  player's target views hold a dropped target by sight and let it go exactly
+  as they did in flight. A recording from before view targets were recorded
+  uses the player's designated target, which it notes with every command the
+  player gives. A view that cannot be shown (no target, no
   wingman, no missile) says why and shows the aircraft from outside; once
   the aircraft has left the recording (a wreck that exploded), the camera
   stays where it was. The viewer opens in the external view of the player.

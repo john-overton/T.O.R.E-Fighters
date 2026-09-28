@@ -557,19 +557,28 @@ fn markers(events: &[TimedEvent]) -> Vec<Marker> {
 }
 
 /// Each aircraft's recorded target over time: the tick and the target,
-/// `None` once it has none. AI aircraft have their target changes; the
-/// player's designation is noted with every command the player gives.
-fn targets(events: &[TimedEvent]) -> BTreeMap<u32, Vec<(u64, Option<u32>)>> {
+/// `None` once it has none. AI aircraft have their target changes. The
+/// player's is the view target live flight's target views followed, sight
+/// hold included; a recording from before those were recorded has the
+/// player's designation, noted with every command the player gives.
+pub(super) fn targets(events: &[TimedEvent]) -> BTreeMap<u32, Vec<(u64, Option<u32>)>> {
+    let viewed = events
+        .iter()
+        .any(|e| e.event.kind == vocab::kind::PLAYER_VIEW_TARGET);
     let mut out: BTreeMap<u32, Vec<(u64, Option<u32>)>> = BTreeMap::new();
     for e in events {
+        let Some(subject) = e.event.subject else {
+            continue;
+        };
         let target = match e.event.kind.as_str() {
+            vocab::kind::PLAYER_VIEW_TARGET => e.event.object,
+            // With view targets recorded, they alone give the player's.
+            _ if viewed && subject == 0 => continue,
             vocab::kind::AI_TARGET => e.event.object.or_else(|| e.event.id(vocab::field::TO)),
             vocab::kind::PLAYER_COMMAND => e.event.object,
             _ => continue,
         };
-        if let Some(subject) = e.event.subject {
-            out.entry(subject).or_default().push((e.tick, target));
-        }
+        out.entry(subject).or_default().push((e.tick, target));
     }
     out
 }
@@ -2851,5 +2860,39 @@ mod tests {
         };
         let player = targets(&[command(5, Some(3)), command(9, None)]);
         assert_eq!(player[&0], [(5, Some(3)), (9, None)]);
+        // A recording with view targets follows them alone for the player,
+        // sight hold and drop included; AI aircraft keep their own.
+        let view = |tick, target: Option<u32>, held: bool| TimedEvent {
+            tick,
+            event: {
+                let event = tore_replay::Event::new(vocab::kind::PLAYER_VIEW_TARGET)
+                    .with_subject(0)
+                    .with(vocab::field::HELD, held);
+                match target {
+                    Some(id) => event.with_object(id),
+                    None => event,
+                }
+            },
+        };
+        let ai = TimedEvent {
+            tick: 6,
+            event: tore_replay::Event::new(vocab::kind::AI_TARGET)
+                .with_subject(1)
+                .with_object(0),
+        };
+        let viewed = targets(&[
+            view(0, None, false),
+            command(5, Some(3)),
+            view(5, Some(3), false),
+            ai,
+            command(8, None),
+            view(8, Some(3), true),
+            view(12, None, false),
+        ]);
+        assert_eq!(
+            viewed[&0],
+            [(0, None), (5, Some(3)), (8, Some(3)), (12, None)]
+        );
+        assert_eq!(viewed[&1], [(6, Some(0))]);
     }
 }

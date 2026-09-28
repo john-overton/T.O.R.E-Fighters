@@ -192,6 +192,15 @@ pub mod kind {
     /// A player command reached the game. Subject: the player's aircraft.
     /// Fields: `command` (Text). Text: what it did.
     pub const PLAYER_COMMAND: &str = "player.command";
+    /// The target the player's target views (F4, F7, F8) follow changed:
+    /// the displayed target, or a dropped one the pilot can still see
+    /// within visual range. Subject: the player's aircraft. Object: the new
+    /// view target, none when there is none. Fields: `from` (Id: the one
+    /// before, when there was one), `held` (Bool: the sensors dropped it
+    /// and the views keep it by sight), `reason`. A new entry marks a change
+    /// of target or of `held`; the first frame carries the starting state,
+    /// so a recording with none predates them.
+    pub const PLAYER_VIEW_TARGET: &str = "player.view_target";
     /// The player marked a moment (Ctrl+B). Text: the note, if any.
     pub const PLAYER_BOOKMARK: &str = "player.bookmark";
     /// The game paused.
@@ -262,6 +271,7 @@ pub mod kind {
         AUDIO_EJECTION,
         AUDIO_DEVICE,
         PLAYER_COMMAND,
+        PLAYER_VIEW_TARGET,
         PLAYER_BOOKMARK,
         SYSTEM_PAUSE,
         SYSTEM_RESUME,
@@ -365,6 +375,8 @@ pub mod field {
     pub const AFTER_TICK: &str = "after_tick";
     /// The player's own aircraft made the sound.
     pub const OWN: &str = "own";
+    /// The views keep a target the sensors dropped, by sight.
+    pub const HELD: &str = "held";
     /// A position in feet, world axes.
     pub const POSITION: [&str; 3] = [X_FT, Y_FT, Z_FT];
     /// A velocity in feet per second, world axes.

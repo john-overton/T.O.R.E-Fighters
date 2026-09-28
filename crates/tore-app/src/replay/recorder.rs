@@ -202,6 +202,37 @@ fn tone_event(last: Option<(Tone, f64)>, now: Option<(Tone, f64)>) -> Option<Eve
     }
 }
 
+/// The player's view target as recorded: the target the flight views
+/// follow, and whether the views keep it by sight after the sensors
+/// dropped it.
+type ViewTarget = (Option<u32>, bool);
+
+/// The `player.view_target` entry for `now` against what was `last`
+/// recorded: at the first look, and whenever the target or its sight hold
+/// changes.
+fn view_target_event(last: Option<ViewTarget>, now: ViewTarget) -> Option<Event> {
+    if last == Some(now) {
+        return None;
+    }
+    let (target, held) = now;
+    let mut event = Event::new(kind::PLAYER_VIEW_TARGET)
+        .with_subject(0)
+        .with(field::HELD, held);
+    if let Some(id) = target {
+        event = event.with_object(id);
+    }
+    if let Some(from) = last.and_then(|(id, _)| id) {
+        event = event.with(field::FROM, replay::Value::Id(from));
+    }
+    if held {
+        event = event.with(
+            field::REASON,
+            "the sensors dropped it and it is within visual range",
+        );
+    }
+    Some(event)
+}
+
 /// Pause, time compression and cheats, compared each frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Session {
@@ -239,6 +270,8 @@ pub struct Recorder {
     tone: Option<(Tone, f64)>,
     stall: Option<&'static str>,
     danger: bool,
+    /// The player's view target as last recorded.
+    view: Option<ViewTarget>,
     session: Option<Session>,
     bookmarks: u32,
     frames: u64,
@@ -316,6 +349,7 @@ impl Recorder {
             tone: None,
             stall: None,
             danger: false,
+            view: None,
             session: None,
             bookmarks: 0,
             frames: 0,
@@ -510,8 +544,9 @@ impl Recorder {
         self.release_held();
     }
 
-    /// Cockpit messages, player commands, released chaff and flares and the
-    /// player's decoy rolls collected since the last look.
+    /// Cockpit messages, player commands, the player's view target,
+    /// released chaff and flares and the player's decoy rolls collected
+    /// since the last look.
     fn collect(&mut self, ui: Option<&mut flight_ui::FlightUi>, combat: &mut combat::Combat) {
         if let Some(ui) = ui {
             for (text, shown) in ui.take_notes() {
@@ -553,6 +588,15 @@ impl Recorder {
             }
             self.note(event);
         }
+        // Looked at after each tick and before the next, so a change a
+        // command makes between ticks lands on the tick on screen, like
+        // the command.
+        let view = combat.state.view_target().map(|t| t.id);
+        let held = view.is_some() && combat.state.display_target().map(|t| t.id) != view;
+        if let Some(event) = view_target_event(self.view, (view, held)) {
+            self.note(event);
+        }
+        self.view = Some((view, held));
         self.countermeasures(combat);
     }
 
@@ -2006,6 +2050,162 @@ mod tests {
     }
 
     #[test]
+    fn the_view_target_is_noted_on_change_only() {
+        let entry = |last, now| view_target_event(last, now);
+        // The first look records the starting state, even without a target.
+        let start = entry(None, (None, false)).unwrap();
+        assert_eq!(start.kind, kind::PLAYER_VIEW_TARGET);
+        assert_eq!((start.subject, start.object), (Some(0), None));
+        assert_eq!(start.flag(field::HELD), Some(false));
+        assert!(entry(Some((None, false)), (None, false)).is_none());
+        let picked = entry(Some((None, false)), (Some(4), false)).unwrap();
+        assert_eq!(picked.object, Some(4));
+        assert!(picked.get(field::FROM).is_none());
+        assert!(entry(Some((Some(4), false)), (Some(4), false)).is_none());
+        // The sensors drop it and the views hold it by sight: same target,
+        // a new entry that says so and why.
+        let held = entry(Some((Some(4), false)), (Some(4), true)).unwrap();
+        assert_eq!((held.object, held.id(field::FROM)), (Some(4), Some(4)));
+        assert_eq!(held.flag(field::HELD), Some(true));
+        assert!(held.string(field::REASON).is_some());
+        assert!(entry(Some((Some(4), true)), (Some(4), true)).is_none());
+        // Out of sight: down to none, from the held one.
+        let dropped = entry(Some((Some(4), true)), (None, false)).unwrap();
+        assert_eq!((dropped.object, dropped.id(field::FROM)), (None, Some(4)));
+        assert_eq!(dropped.flag(field::HELD), Some(false));
+    }
+
+    /// Combat with a synthetic radar reaching 90 nmi and the 10 nmi visual
+    /// channel, so the player can designate a contact and keep it by sight.
+    fn sighted(config: &live::Configuration) -> live::State {
+        use tore_sim::sensors;
+        let volume = |nmi: f64| sensors::Volume {
+            azimuth_rad: 1.,
+            elevation_rad: 1.,
+            minimum_ft: 0.,
+            maximum_ft: nmi * sensors::FEET_PER_NAUTICAL_MILE,
+            minimum_relative_ft: f64::NEG_INFINITY,
+            maximum_relative_ft: f64::INFINITY,
+        };
+        let mut config = config.clone();
+        config.sensors.radar = Some(sensors::RadarProfile {
+            record: "SYNTHETIC.SEE".into(),
+            search: volume(90.),
+            track: volume(50.),
+            look_down: 0.,
+            preset: sensors::Preset::Advanced,
+            notch: sensors::Preset::Advanced.notch(),
+            resistance: sensors::Preset::Advanced.resistance(),
+            band: 0,
+            source_flags: [0; 2],
+            source_doppler: [0; 3],
+        });
+        config.sensors.visual = Some(sensors::profile::VisualProfile {
+            record: "SYNTHETIC.VIS".into(),
+            search: volume(10.),
+            track: volume(5.),
+        });
+        live::State::new(config, true).unwrap()
+    }
+
+    #[test]
+    fn a_recorded_view_target_holds_by_sight_drops_and_reads_back() {
+        let dir = crate::replay::tests::TempDir::new("recorder-view-target");
+        let roster = [replay::AircraftInfo {
+            id: 0,
+            label: "You".into(),
+            human: true,
+            ..Default::default()
+        }];
+        let mut recorder = Recorder::start(
+            dir.path().join("view.tore-replay"),
+            &replay::Header::default(),
+            &roster,
+        )
+        .unwrap();
+        recorder.wait_for_writer();
+        let mut combat = fixture::combat(Vec::new(), Vec::new());
+        combat.state = sighted(combat.state.configuration());
+        let player = fixture::player();
+        combat.restart_render(&player, None);
+        let snapshot = combat.render_snapshot().clone();
+        let mut ui = flight_ui::FlightUi::default();
+        let launcher = combat::launcher(&player);
+        let blind = live::Launcher {
+            radar: false,
+            radar_power: false,
+            ..launcher
+        };
+        combat.state.range_target(launcher);
+        let mut number = 0;
+        let mut run = |recorder: &mut Recorder, combat: &mut combat::Combat, with, ticks| {
+            for _ in 0..ticks {
+                combat.state.step(false, with, |_, _| 0.);
+                tick(recorder, combat, &snapshot, number, &mut ui);
+                number += 1;
+            }
+            number - 1
+        };
+        let on_screen = run(&mut recorder, &mut combat, launcher, 120);
+        // Between ticks the player designates the contact.
+        combat.command(live::Command::Designate, launcher);
+        let id = combat.state.designated().expect("a radar contact");
+        run(&mut recorder, &mut combat, launcher, 120);
+        // Radar off: the sensors drop it, the views hold it by sight.
+        run(&mut recorder, &mut combat, blind, 120);
+        assert!(combat.state.display_target().is_none());
+        assert_eq!(combat.state.view_target().map(|t| t.id), Some(id));
+        recorder.bookmark();
+        // Past visual range it is gone.
+        let far = [launcher.position[0], launcher.position[1], -70_000.];
+        combat
+            .state
+            .targets
+            .iter_mut()
+            .find(|t| t.id == id)
+            .unwrap()
+            .position = far;
+        run(&mut recorder, &mut combat, blind, 30);
+        assert!(combat.state.view_target().is_none());
+        let path = recorder
+            .finish(&replay::Footer {
+                end_tick: number,
+                ..Default::default()
+            })
+            .unwrap();
+        let recording = replay::Recording::open(path).unwrap();
+        let views: Vec<(u64, Option<u32>, Option<bool>)> = recording
+            .events()
+            .iter()
+            .filter(|e| e.event.kind == kind::PLAYER_VIEW_TARGET)
+            .map(|e| (e.tick, e.event.object, e.event.flag(field::HELD)))
+            .collect();
+        // One entry per change, not one a tick: the start, the designation
+        // on the tick on screen, the hold and the drop.
+        assert_eq!(views.len(), 4, "{views:?}");
+        assert_eq!(views[0], (0, None, Some(false)));
+        assert_eq!(views[1], (on_screen, Some(id), Some(false)));
+        assert_eq!((views[2].1, views[2].2), (Some(id), Some(true)));
+        assert_eq!((views[3].1, views[3].2), (None, Some(false)));
+        assert!(views[2].0 > views[1].0 && views[3].0 > views[2].0);
+        // The replay viewer follows them for the player.
+        let targets = super::super::viewer::targets(recording.events());
+        let player: Vec<(u64, Option<u32>)> = views.iter().map(|v| (v.0, v.1)).collect();
+        assert_eq!(targets[&0], player);
+        // The summary's bookmark window says so in words.
+        let mut summary = Vec::new();
+        replay::export::write_summary(
+            &recording,
+            &replay::export::SummaryOptions::default(),
+            &mut summary,
+        )
+        .unwrap();
+        let summary = String::from_utf8(summary).unwrap();
+        assert!(summary.contains("You view target none -> "), "{summary}");
+        assert!(summary.contains(" held by sight because the sensors dropped it"));
+    }
+
+    #[test]
     fn notes_between_ticks_land_on_the_tick_on_screen() {
         let (mut recorder, receiver) = Recorder::detached(64, &[]);
         let mut combat = fixture::combat(Vec::new(), Vec::new());
@@ -2034,9 +2234,11 @@ mod tests {
             .map(|e| e.kind.as_str())
             .filter(|kind| !kind.starts_with("audio."))
             .collect();
+        // The first frame opens with the starting view target.
         assert_eq!(
             kinds,
             [
+                kind::PLAYER_VIEW_TARGET,
                 kind::PLAYER_BOOKMARK,
                 kind::SYSTEM_PAUSE,
                 kind::COMMS_HUD,
