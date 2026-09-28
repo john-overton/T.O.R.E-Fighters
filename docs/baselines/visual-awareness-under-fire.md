@@ -74,7 +74,7 @@ recognizing the shot. Rear aircraft remained unresponsive to the attack.
 There were no aircraft-specific exceptions in this matrix.
 
 Exact opponents: F18.PT (F/A-18D), RAFALE.PT (Rafale C), F14.PT (F-14D),
-A4E.PT, X31.PT, MIG29.PT, SU27.PT, MIG21.PT, SU25.PT, MIG23.PT, SU35.PT,
+A4E.PT, F31.PT (X-31 EFM), MIG29.PT, SU27.PT, MIG21.PT, SU25.PT, MIG23.PT, SU35.PT,
 F22.PT, F22N.PT and the separate `faxx` identity. The F/A-XX is an opinionated
 variant using F-22N source resources, not a substitution for another aircraft.
 

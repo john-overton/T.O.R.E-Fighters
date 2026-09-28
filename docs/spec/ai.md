@@ -369,6 +369,13 @@ and support gates. Per-store profiles, full gun lead, burst randomization,
 in-flight support transitions and missile limits remain in research.
 No single fixed gun range or unlimited-ammunition behavior is implied.
 
+The [gun-employment investigation](../baselines/ai-gun-employment.md) identifies
+three current host gaps: expiry parks this service until all target selection
+is lost, imported gun authorizations contain only one representative group, and
+reload restarts initial preparation. The AI launch bridge also points gun rounds
+at the target's present position. The [proposed correction](ai-gun-employment.md)
+is not implemented and does not claim these host choices were original behavior.
+
 API consequence: supply a typed weapon profile, compatible-station availability,
 lock/blocking results, preparation status and per-station feedback. Search and
 preparation clocks belong to persistent actor/service state. Do not redraw or

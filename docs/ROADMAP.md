@@ -609,6 +609,25 @@ attitude check before replay reconstruction. Surface firing AI, full environment
 visibility, aircraft-specific cockpit blind sectors and original-game timing
 remain separate work. Milestones are reported in the session for Jeeves.
 
+#### AI gun employment and timeout recovery
+
+The 2026-09-28 [investigation](baselines/ai-gun-employment.md) explains the
+reported lack of enemy gunfire: sparse two-round groups followed by a permanent
+weapon-service expiry while a target remains selected. Source inspection also
+finds direct-to-current-position gun launches. Research is complete;
+[correction requirements and authored defaults](spec/ai-gun-employment.md) are
+proposed, not implemented.
+
+1. Replace terminal expiry with bounded retry without clearing legitimate
+   aircraft awareness. Test restored solutions and changed targets across every
+   profile, plus blocked/empty/hold cases and missile-service behavior.
+2. Deliver gun readiness, physical burst accounting and a valid fixed-barrel
+   lead solution together. Reuse shared projectile mechanics and preserve finite
+   inventory, recall, threat responses and compatibility modes.
+3. Validate sustained close fights, not only initial acquisition: repeat the
+   Su-27 case, a non-stealth control, all skills and the supported flight
+   adapters. Record actual rounds, solutions, ammo and outcomes beyond timeout.
+
 #### AI backlog (2026-09-17)
 
 Established rules with tests are listed in the
