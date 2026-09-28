@@ -2,7 +2,6 @@
 use crate::{
     flight_ui::FlightUi,
     instruments::{Instruments, Layout},
-    menu::State,
 };
 use std::{
     fs,
@@ -82,8 +81,6 @@ pub struct Preferences {
     /// by default.
     pub debug_panels: bool,
     pub brightness: i16,
-    pub music: bool,
-    pub effects: bool,
     /// Borderless fullscreen, the default for an interactive start. A future
     /// Pref menu row hooks into this `fullscreen` field; `menu.rs` owns that
     /// row.
@@ -91,7 +88,7 @@ pub struct Preferences {
     pub fullscreen: bool,
 }
 impl Preferences {
-    pub fn capture(ui: &FlightUi, i: &Instruments, m: &State, fullscreen: bool) -> Self {
+    pub fn capture(ui: &FlightUi, i: &Instruments, fullscreen: bool) -> Self {
         let (large, small) = if i.layout == Layout::Large {
             (&i.pages, &i.other_pages)
         } else {
@@ -113,12 +110,10 @@ impl Preferences {
             weapon_diagnostics: ui.weapon_diagnostics,
             debug_panels: ui.debug_panels,
             brightness: ui.brightness,
-            music: m.music,
-            effects: m.effects,
             fullscreen,
         }
     }
-    pub fn apply(&self, ui: &mut FlightUi, i: &mut Instruments, m: &mut State) {
+    pub fn apply(&self, ui: &mut FlightUi, i: &mut Instruments) {
         i.layout = if self.small {
             Layout::Small
         } else {
@@ -143,9 +138,6 @@ impl Preferences {
         ui.weapon_diagnostics = self.weapon_diagnostics;
         ui.debug_panels = self.debug_panels;
         ui.brightness = self.brightness;
-        ui.effects = self.effects;
-        m.music = self.music;
-        m.effects = self.effects;
     }
     pub fn text(&self) -> String {
         fn pages(p: &[u8]) -> String {
@@ -156,7 +148,7 @@ impl Preferences {
             }
         }
         format!(
-            "tore-preferences 6\nzoom {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nweapon-diagnostics {}\ndebug-panels {}\nbrightness {}\nmusic {}\neffects {}\nfullscreen {}\n",
+            "tore-preferences 7\nzoom {}\nradar-range {}\nrcs-range {}\nradar-channel {}\nradar-history {}\nselected {}\nsmall {}\nlarge-pages {}\nsmall-pages {}\ncockpit {}\nhud {}\nladder {}\nweapon-diagnostics {}\ndebug-panels {}\nbrightness {}\nfullscreen {}\n",
             self.zoom,
             self.radar_range,
             self.rcs_range,
@@ -172,8 +164,6 @@ impl Preferences {
             self.weapon_diagnostics,
             self.debug_panels,
             self.brightness,
-            self.music,
-            self.effects,
             self.fullscreen
         )
     }
@@ -190,6 +180,7 @@ impl Preferences {
             Some("tore-preferences 4") => 4,
             Some("tore-preferences 5") => 5,
             Some("tore-preferences 6") => 6,
+            Some("tore-preferences 7") => 7,
             _ => return Err("unsupported preferences version".into()),
         };
         for line in lines {
@@ -232,7 +223,10 @@ impl Preferences {
             3 => 16,
             4 => 17,
             5 => 16 + usize::from(diagnostics_saved),
-            _ => 18,
+            6 => 18,
+            // Version 7 moved Music and Effects to the Sound/Music Prefs
+            // settings file.
+            _ => 16,
         };
         if values.len() != expected {
             return Err("unknown preference".into());
@@ -261,6 +255,12 @@ impl Preferences {
             }
             Ok(n)
         };
+        if version < 7 {
+            // The retired Music and Effects switches are validated here and
+            // carried to the sound settings by `legacy_sound`.
+            boolean("music")?;
+            boolean("effects")?;
+        }
         let zoom = get("zoom")?.parse::<f32>().map_err(|_| "invalid zoom")?;
         if !zoom.is_finite() || !(0.5..=4.).contains(&zoom) {
             return Err("zoom outside bounds".into());
@@ -313,8 +313,6 @@ impl Preferences {
             weapon_diagnostics: diagnostics_saved && boolean("weapon-diagnostics")?,
             debug_panels: version >= 6 && boolean("debug-panels")?,
             brightness,
-            music: boolean("music")?,
-            effects: boolean("effects")?,
             // Files written before version 4 predate the window mode, and
             // borderless fullscreen is the default, so they start fullscreen.
             fullscreen: if version < 4 {
@@ -325,6 +323,16 @@ impl Preferences {
         })
     }
 }
+/// The Music and Effects switches of a preferences file written before
+/// version 7, for a profile that has no sound settings file yet.
+pub fn legacy_sound(text: &str) -> Option<(bool, bool)> {
+    Preferences::parse(text).ok()?;
+    let value = |key: &str| {
+        text.lines()
+            .find_map(|line| line.strip_prefix(key)?.strip_prefix(' ')?.parse().ok())
+    };
+    Some((value("music")?, value("effects")?))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,16 +340,14 @@ mod tests {
     fn saving_restores_both_layouts_and_display_choices() {
         let mut ui = FlightUi::default();
         let mut i = Instruments::default();
-        let mut menu = State::new(vec![], true);
         ui.cockpit = false;
         ui.weapon_diagnostics = true;
         ui.debug_panels = true;
         ui.zoom = 1.7;
-        menu.effects = false;
         i.pages = vec![9, 5];
         i.other_pages = vec![7, 8, 4];
         i.radar_range = 1;
-        let saved = Preferences::capture(&ui, &i, &menu, false);
+        let saved = Preferences::capture(&ui, &i, false);
         let path = std::env::temp_dir().join(format!(
             "tore-prefs-{}-{}",
             std::process::id(),
@@ -356,12 +362,12 @@ mod tests {
         ui = FlightUi::default();
         assert!(!ui.weapon_diagnostics && !ui.debug_panels);
         i = Instruments::default();
-        loaded.apply(&mut ui, &mut i, &mut menu);
+        loaded.apply(&mut ui, &mut i);
         assert!(ui.weapon_diagnostics && ui.debug_panels);
         assert_eq!(i.pages, vec![9, 5]);
         i.toggle_layout();
         assert_eq!(i.pages, vec![7, 8, 4]);
-        assert!(!ui.cockpit && !menu.effects);
+        assert!(!ui.cockpit);
         assert_eq!(ui.zoom, 1.7);
         assert_eq!(i.radar_range, 1);
         assert!(!loaded.fullscreen);
@@ -384,28 +390,35 @@ mod tests {
             weapon_diagnostics: true,
             debug_panels: true,
             brightness: 3,
-            music: false,
-            effects: true,
             fullscreen: false,
         };
         assert_eq!(Preferences::parse(&p.text()).unwrap(), p);
-        assert!(p.text().starts_with("tore-preferences 6\n"));
+        assert!(p.text().starts_with("tore-preferences 7\n"));
+        assert_eq!(legacy_sound(&p.text()), None);
+        // Version 6 still carries Music and Effects, which move to the
+        // sound settings.
+        let six = p.text().replace("tore-preferences 7", "tore-preferences 6")
+            + "music false\neffects true\n";
+        assert_eq!(Preferences::parse(&six).unwrap(), p);
+        assert_eq!(legacy_sound(&six), Some((false, true)));
+        assert!(Preferences::parse(&six.replace("music false\n", "")).is_err());
+        assert!(Preferences::parse(&six.replace("music false", "music 0")).is_err());
         assert!(!p.text().contains("rwr-range"));
         assert!(
             p.text()
                 .contains("\nweapon-diagnostics true\ndebug-panels true\n")
         );
-        // Version 6 needs both switches, spelled out.
+        // Versions 6 and 7 need both switches, spelled out.
         for broken in [
             p.text().replace("debug-panels true\n", ""),
             p.text().replace("weapon-diagnostics true\n", ""),
             p.text().replace("debug-panels true", "debug-panels 1"),
+            six.replace("debug-panels true\n", ""),
         ] {
             assert!(Preferences::parse(&broken).is_err(), "{broken}");
         }
         // A version 5 file predates the debug panels: they load off.
-        let five = p
-            .text()
+        let five = six
             .replace("tore-preferences 6", "tore-preferences 5")
             .replace("debug-panels true\n", "");
         let off = Preferences {
@@ -426,7 +439,7 @@ mod tests {
         // with the panel hidden.
         let early = five.replace("weapon-diagnostics true\n", "");
         assert_eq!(Preferences::parse(&early).unwrap(), hidden);
-        // Saving writes version 6 again, with both switches off.
+        // Saving writes version 7, with both switches off.
         assert!(
             hidden
                 .text()

@@ -32,7 +32,7 @@ This is the first native menu slice, researched against the user's local media o
 | `BODYFONT.PIC` | `FA_1.LIB` | Original small font used for temporary placeholder messages |
 | `CHOOSEAC.DLG` | `FA_2.LIB` | Original eight button labels and positions |
 | `MAINMENU.MNU`, `FMENUD.MNU` | `FA_2.LIB` | Imported for menu research; runtime submenu structure is still authored |
-| `&CLICK.11K`, `&BUTTON.11K`, `&TOGGLE1.5K` | `FA_2.LIB` | Recovered cue bank; activation uses BUTTON and toggles use TOGGLE1. CLICK is retained for research. Hover/focus is silent. |
+| `&CLICK.11K`, `&BUTTON.11K`, `&TOGGLE1.5K` | `FA_2.LIB` | Recovered cue bank; activation uses BUTTON. TOGGLE1 is imported but no current control plays it: the Sound/Music Prefs lever uses `&SWITCH.11K`. CLICK is retained for research. Hover/focus is silent. |
 | `AIR003.11K` | `FA_4B.LIB` (optional) | Recorded PCM music preview; 278,585 samples at the inferred 11,025 Hz rate (~25.27 seconds) |
 
 There are 22 selected resources including optional music. All were decompressed by Rust and compared byte for byte against the reference Python decoders. Only these resources are imported into the app cache. The separate [general extraction tool](../EXTRACTION.md) can unpack every resource for research. No photo is used as the rendered background; the app reconstructs the scene from retail resources.
@@ -100,9 +100,9 @@ The app previews that original PCM recording at low volume and allows disabling 
 
 - The six available activity buttons stay on the menu and briefly announce “coming soon.” Replay/continue are inert.
 - `?` contains stub Help/About and working Exit to Desktop (portable wording for the recovered Windows exit action).
-- `Pref` contains stub Graphics/Sound/Controls and working session-only music/effects toggles.
+- `Pref` contains Graphics..., Sound..., Controls... and Re-import media.... Sound... opens the retail [Sound/Music Prefs](../spec/sound-prefs.md) dialog.
 - `Multi` contains stub Host Game/Join Game/Player Setup. These labels/groupings and dropdown chrome are authored scaffolding, not a claimed decoded retail tree.
-- Tab/arrows and Enter navigate; Escape dismisses; M toggles music; Command-Q/Alt-F4 and window close exit.
+- Tab/arrows and Enter navigate; Escape dismisses; Command-Q/Alt-F4 and window close exit.
 
 ## Provenance and reproduction
 
@@ -154,7 +154,7 @@ The in-flight `Control` root now opens the T.O.R.E binding/rumble editor. Its ro
 capture workflow, calibration fields and Save/Back actions are authored, not
 recovered FMENUD callbacks. The bounded reader and imported source tree are
 unchanged. Other source roots and the keyboard-help reference remain available.
-Normal-session music/effects and flight display/instrument preferences persist;
+Normal-session sound settings and flight display/instrument preferences persist;
 the earlier session-only behavior is superseded. See [input settings](../INPUT.md).
 
 ## Creator and ordnance menu-tree recovery, 2026-09-14

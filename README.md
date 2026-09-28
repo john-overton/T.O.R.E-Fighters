@@ -198,7 +198,7 @@ A source build imports local `gameassets/fighters-anthology/` media, or the sour
 cargo run --locked -p tore-app -- --import /path/to/fighters-anthology
 ```
 
-Use **? → Exit to Desktop** or close the window to quit. Escape dismisses a dropdown, Tab/arrows and Enter navigate, and M toggles music. `Pref` also toggles music and effects.
+Use **? → Exit to Desktop** or close the window to quit. Escape dismisses a dropdown and Tab/arrows and Enter navigate. **Pref → Sound...** sets the sound and music volumes.
 
 To check startup, render one frame, and exit without audio:
 

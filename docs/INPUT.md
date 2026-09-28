@@ -228,7 +228,9 @@ a profile saved with them.
 Normal sessions also save `preferences-v1.conf`: large/small instrument page sets,
 active layout/selection, scope settings, cockpit/HUD/ladder visibility, the
 weapon diagnostic panel (`weapon-diagnostics`, off by default), HUD
-brightness, zoom and music/effects. The file format is now **version 5**. The
+brightness and zoom. The file format is now **version 7**; version 7 moved
+music and effects to the Sound/Music Prefs file `sound-v1.conf`
+([spec](spec/sound-prefs.md)), and older files still load. The
 retired `radar-mode` and `rwr-range` keys are gone (the RWR follows the shared
 radar range), `rcs-range`, `radar-channel` and `radar-history` are present, and
 `fullscreen` stores the window mode, so the exposure page's scale, the selected
@@ -841,8 +843,8 @@ headless actors without sensors retain their explicit direct-awareness fallback.
 Protect me needs no selected or currently detected attacker.
 The first living wingman alone replies to an accepted engage/protect assignment.
 Commands take effect immediately, independently of their radio recordings.
-A new command interrupts queued old command audio. Sound off mutes radio along
-with effects; an independent radio-traffic preference remains unimplemented.
+A new command interrupts queued old command audio. The Sound/Music Prefs Radio
+Msg slider sets radio loudness, and Overall at off mutes it with the effects.
 Missing recordings or an old cache leaves commands and text operational.
 Reimport user-owned media to load [verified radio mappings](formats/radio.md).
 

@@ -298,6 +298,8 @@ mod tests {
             burner: None,
             stall: None,
             stall_cue: None,
+            rwr: None,
+            rwr_tone: None,
             flight_on: true,
             flight_paused: false,
             ejection_warning: false,
@@ -306,10 +308,10 @@ mod tests {
             engine_place: super::super::spatial::Placed::inside(),
             last_listener: None,
             voices: Vec::new(),
+            engine_cues: Vec::new(),
             ui_voices: Vec::new(),
             radio: std::collections::VecDeque::new(),
-            music_on: true,
-            effects_on: false,
+            volumes: super::super::Volumes::FULL,
         }
     }
     #[test]
@@ -321,11 +323,11 @@ mod tests {
             assert_eq!(mixer.sample(4.), 0.);
         }
         mixer.flight_paused = false;
-        mixer.music_on = false;
+        mixer.volumes.flight_music = 0.;
         for _ in 0..20 {
             assert_eq!(mixer.sample(4.), 0.);
         }
-        mixer.music_on = true;
+        mixer.volumes.flight_music = 1.;
         assert_eq!(mixer.sample(4.), 0.08);
         assert_eq!(mixer.sample(4.), -0.08);
         mixer.music.scene(Scene::Main);
@@ -335,7 +337,7 @@ mod tests {
         mixer.music.scene(Scene::Score(0));
         assert_eq!(mixer.sample(4.), 0.08);
         mixer.flight_paused = true;
-        mixer.effects_on = true;
+        mixer.volumes.overall = 1.;
         let clip = Arc::new(Clip {
             samples: vec![192, 192],
             rate: 4.,
@@ -396,7 +398,7 @@ mod tests {
         let mut music = prepared(&[255, b'T', 0, 1, 249, 254, 3, 0, 0, 0]);
         music.scores[1] = Some(prepare(&[255, b'T', 0, 2, 249, 254, 3, 0, 0, 0]));
         let mut m = mixer(music);
-        m.music_on = true;
+        m.volumes.flight_music = 1.;
         m.music.stop();
         let calm = Inputs::default();
         let fight = Inputs {
@@ -413,9 +415,9 @@ mod tests {
         m.situation(&calm, 2.01);
         assert_eq!(m.sample(4.), 0.08, "NORMAL after the boundary");
         // Music off: nothing is chosen, and turning it on starts afresh.
-        m.music_on = false;
+        m.volumes.flight_music = 0.;
         m.situation(&fight, 3.1);
-        m.music_on = true;
+        m.volumes.flight_music = 1.;
         m.situation(&calm, 3.2);
         assert_eq!(m.sample(4.), 0.08);
     }

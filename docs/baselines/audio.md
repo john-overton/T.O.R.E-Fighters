@@ -99,6 +99,6 @@ No MIDI-only fallback is planned in this slice. Main/briefing context resets and
 their use in the development creator/viewer are explicitly authored.
 
 Windows/macOS runtime and human listening comparison with the original game
-were not performed. The flight Sound command still toggles effects only; music
-uses the saved main-menu preference. No new submenu screen or volume mixer was
-scheduled. No retail bytes or derivative audio are committed.
+were not performed. At the time the flight Sound command toggled effects only; it
+has since been replaced by the [Sound/Music Prefs](../spec/sound-prefs.md)
+dialog and its volume sliders. No retail bytes or derivative audio are committed.

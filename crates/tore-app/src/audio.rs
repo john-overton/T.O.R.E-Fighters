@@ -44,6 +44,9 @@ struct Mixer {
     burner: Option<Voice>,
     stall: Option<Voice>,
     stall_cue: Option<&'static str>,
+    /// The RWR warning tone sounding, if any, and its loop.
+    rwr: Option<Voice>,
+    rwr_tone: Option<crate::rwr_tone::Tone>,
     flight_on: bool,
     flight_paused: bool,
     ejection_warning: bool,
@@ -56,10 +59,58 @@ struct Mixer {
     /// starts again.
     last_listener: Option<(u8, [f64; 3])>,
     voices: Vec<Voice>,
+    /// Engine start and stop sounds, which follow the Engine level.
+    engine_cues: Vec<Voice>,
     ui_voices: Vec<Voice>,
     radio: VecDeque<RadioVoice>,
-    music_on: bool,
-    effects_on: bool,
+    volumes: Volumes,
+}
+/// The Sound/Music Prefs settings as mixer levels, each relative to TORE's
+/// own mix (1 at the slider's default, 0 off), and the stereo image
+/// ([spec](../../../docs/spec/sound-prefs.md)).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Volumes {
+    pub overall: f32,
+    pub engine: f32,
+    pub weapon_lock: f32,
+    pub rwr: f32,
+    pub stall: f32,
+    pub radio: f32,
+    pub flight_music: f32,
+    pub other_music: f32,
+    /// Stereo Separation, 0 (mono) to 100; 50 leaves directions as heard.
+    pub separation: u8,
+    /// Left and right exchanged.
+    pub swap: bool,
+}
+impl Volumes {
+    /// Every level off, the mixer's state until the saved settings arrive.
+    pub const SILENT: Self = Self {
+        overall: 0.,
+        engine: 0.,
+        weapon_lock: 0.,
+        rwr: 0.,
+        stall: 0.,
+        radio: 0.,
+        flight_music: 0.,
+        other_music: 0.,
+        separation: 50,
+        swap: false,
+    };
+    /// Every level full with the full stereo image.
+    #[cfg(test)]
+    pub const FULL: Self = Self {
+        overall: 1.,
+        engine: 1.,
+        weapon_lock: 1.,
+        rwr: 1.,
+        stall: 1.,
+        radio: 1.,
+        flight_music: 1.,
+        other_music: 1.,
+        separation: 50,
+        swap: false,
+    };
 }
 pub struct Audio {
     _stream: cpal::Stream,
@@ -235,6 +286,11 @@ const ENGINE_STOP: &str = "engineOffSound";
 fn engine_gain(throttle: f64) -> f32 {
     0.08 + 0.15 * throttle as f32
 }
+/// The RWR warning tone's level at the default settings. The original plays
+/// it at 200 of 255 scaled by RWR 50% and Overall 75% twice, and an ordinary
+/// level-255 effect at 255 scaled by Overall once; TORE plays such an effect
+/// at 0.4, so the tone keeps that ratio.
+const RWR_LEVEL: f32 = 0.4 * 200. / 255. * 0.5 * 0.75;
 /// Afterburner loop gain while the burner is lit.
 const BURNER_GAIN: f32 = 0.15;
 /// The engine recordings an aircraft profile names.
@@ -281,7 +337,7 @@ fn cue(action: Action) -> Option<&'static str> {
         | Action::FreeFlight
         | Action::Replays
         | Action::Back => Some("&BUTTON.11K"),
-        Action::Music(_) | Action::Effects(_) => Some("&TOGGLE1.5K"),
+        Action::Toggle => Some("&SWITCH.11K"),
         Action::RockerUp => Some("&ROCKUP.11K"),
         Action::RockerDown => Some("&ROCKDN.11K"),
         Action::OrdnanceWeapon => Some("&ARMWPN.5K"),
@@ -364,6 +420,8 @@ impl Audio {
             burner: None,
             stall: None,
             stall_cue: None,
+            rwr: None,
+            rwr_tone: None,
             flight_on: false,
             flight_paused: false,
             ejection_warning: false,
@@ -372,11 +430,11 @@ impl Audio {
             engine_place: spatial::Placed::inside(),
             last_listener: None,
             voices: Vec::with_capacity(8),
+            engine_cues: Vec::new(),
             ui_voices: Vec::with_capacity(8),
             radio: VecDeque::new(),
             // Stay silent until the app has restored the user's saved preferences.
-            music_on: false,
-            effects_on: false,
+            volumes: Volumes::SILENT,
         }));
         let device = cpal::default_host()
             .default_output_device()
@@ -558,6 +616,27 @@ impl Audio {
         }
     }
 
+    /// This tick's RWR warning tone. A new tone starts its recording from
+    /// the beginning; the same tone keeps looping.
+    pub fn rwr(&self, tone: Option<crate::rwr_tone::Tone>) {
+        if let Ok(mut m) = self.mixer.lock()
+            && m.rwr_tone != tone
+        {
+            m.rwr_tone = tone;
+            m.rwr = tone
+                .and_then(|t| self.clips.get(t.recording()))
+                .map(|clip| Voice {
+                    clip: clip.clone(),
+                    position: 0.,
+                });
+            if tone.is_some() {
+                // The player's own seeker tone is silent under a warning and
+                // starts again from the beginning after it.
+                m.seeker_cue = None;
+                m.seeker_voice = None;
+            }
+        }
+    }
     pub fn seeker(&self, state: Option<tore_sim::combat::live::SeekerTone>) {
         if let Ok(mut mixer) = self.mixer.lock() {
             mixer.set_seeker(&self.clips, state);
@@ -592,7 +671,7 @@ impl Audio {
     }
     pub fn controls(&self, before: &crate::flight::State, after: &crate::flight::State) {
         if let Ok(mut m) = self.mixer.lock()
-            && m.effects_on
+            && m.effects_on()
             && !m.flight_paused
         {
             for name in actuator_cues(before, after).into_iter().flatten() {
@@ -623,11 +702,14 @@ impl Audio {
             m.seeker_cue = None;
             m.stall = None;
             m.stall_cue = None;
+            m.rwr = None;
+            m.rwr_tone = None;
             m.engine = None;
             m.burner = None;
             m.engine_gain = 0.;
             m.burner_gain = 0.;
             m.voices.clear();
+            m.engine_cues.clear();
             m.radio.clear();
             m.engine_place = spatial::Placed::inside();
             m.last_listener = None;
@@ -672,11 +754,14 @@ impl Audio {
                 m.seeker_cue = None;
                 m.stall = None;
                 m.stall_cue = None;
+                m.rwr = None;
+                m.rwr_tone = None;
                 m.engine = None;
                 m.burner = None;
                 m.engine_gain = 0.;
                 m.burner_gain = 0.;
                 m.voices.clear();
+                m.engine_cues.clear();
                 m.radio.clear();
             }
             m.flight_on = state.is_some();
@@ -692,6 +777,7 @@ impl Audio {
                     m.engine_gain = 0.;
                     m.burner_gain = 0.;
                     m.voices.clear();
+                    m.engine_cues.clear();
                     m.radio.clear();
                     m.engine_aircraft = Some(a.id);
                 }
@@ -725,14 +811,14 @@ impl Audio {
                 }
                 if s.escape.is_none()
                     && (m.engine_gain > 0.) != s.engine
-                    && m.effects_on
-                    && m.voices.len() < 8
+                    && m.effects_on()
+                    && m.engine_cues.len() < 8
                     && let Some(clip) = a
                         .sounds
                         .get(if s.engine { ENGINE_START } else { ENGINE_STOP })
                         .and_then(|n| self.clips.get(n))
                 {
-                    m.voices.push(Voice {
+                    m.engine_cues.push(Voice {
                         clip: clip.clone(),
                         position: 0.,
                     });
@@ -750,14 +836,19 @@ impl Audio {
             }
         }
     }
-    /// Restore user preferences without synthesizing a menu click at startup.
-    pub fn preferences(&self, music: bool, effects: bool) {
+    /// The Sound/Music Prefs levels, applied at once. Turning Overall off
+    /// drops pending and playing effects, as the old Effects switch did.
+    pub fn set_volumes(&self, volumes: Volumes) {
         if let Ok(mut mixer) = self.mixer.lock() {
-            mixer.music_on = music;
-            mixer.effects_on = effects;
-            if !effects {
+            mixer.volumes = volumes;
+            mixer.spatial.stereo = spatial::Stereo {
+                separation: volumes.separation,
+                swap: volumes.swap,
+            };
+            if !mixer.effects_on() {
                 mixer.spatial.clear();
                 mixer.voices.clear();
+                mixer.engine_cues.clear();
                 mixer.radio.clear();
                 mixer.ui_voices.clear();
             }
@@ -767,21 +858,6 @@ impl Audio {
         let Ok(mut mixer) = self.mixer.lock() else {
             return;
         };
-        match action {
-            Action::Music(enabled) => {
-                mixer.music_on = enabled;
-            }
-            Action::Effects(enabled) => {
-                mixer.effects_on = enabled;
-                if !enabled {
-                    mixer.spatial.clear();
-                    mixer.ui_voices.clear();
-                    mixer.voices.clear();
-                    mixer.radio.clear();
-                }
-            }
-            _ => {}
-        }
         let name = cue(action.clone());
         if let Some(clip) = name.and_then(|n| self.clips.get(n)) {
             mixer.play_ui(clip, action == Action::OrdnanceFuel);
@@ -794,6 +870,7 @@ impl Mixer {
         clips: &BTreeMap<String, Arc<Clip>>,
         state: Option<tore_sim::combat::live::SeekerTone>,
     ) {
+        let state = state.filter(|_| self.rwr_tone.is_none());
         self.seeker.target =
             state.map_or(0., |cue| cue.strength.clamp(0., 1.)) * self.seeker_volume;
         self.seeker.ground = state.is_some_and(|cue| cue.ground);
@@ -816,8 +893,12 @@ impl Mixer {
     }
 }
 impl Mixer {
+    /// Sound effects play at all: Overall is above off.
+    fn effects_on(&self) -> bool {
+        self.volumes.overall > 0.
+    }
     fn situation(&mut self, inputs: &situation::Inputs, now: f64) {
-        if !self.music_on {
+        if self.volumes.flight_music <= 0. {
             self.situation.silence();
             self.music.set_hold(false);
             return;
@@ -831,7 +912,7 @@ impl Mixer {
         self.music.set_hold(self.situation.waiting(inputs));
     }
     fn play_ui(&mut self, clip: &Arc<Clip>, reuse_active: bool) {
-        if self.effects_on
+        if self.effects_on()
             && self.ui_voices.len() < 8
             && !(reuse_active
                 && self
@@ -905,7 +986,7 @@ pub(crate) fn stall_cue(
 }
 impl Mixer {
     fn escape_voice(&mut self, clips: &BTreeMap<String, Arc<Clip>>, name: &str, urgent: bool) {
-        if !self.effects_on || self.flight_paused {
+        if !self.effects_on() || self.flight_paused {
             return;
         }
         if urgent {
@@ -929,7 +1010,7 @@ impl Mixer {
         }
     }
     fn escape_effect(&mut self, clips: &BTreeMap<String, Arc<Clip>>, name: &str) {
-        if self.effects_on
+        if self.effects_on()
             && !self.flight_paused
             && self.voices.len() < 8
             && let Some(clip) = clips.get(name)
@@ -1006,7 +1087,7 @@ impl Mixer {
         if interrupt {
             self.cancel_radio(source);
         }
-        if !self.effects_on || self.flight_paused {
+        if !self.effects_on() || self.flight_paused {
             return;
         }
         for stem in stems {
@@ -1035,7 +1116,7 @@ impl Mixer {
         stems: &[String],
         source: RadioSource,
     ) {
-        if !self.effects_on || self.flight_paused {
+        if !self.effects_on() || self.flight_paused {
             return;
         }
         let voices: Vec<_> = stems
@@ -1070,7 +1151,7 @@ impl Mixer {
         if self.flight_paused {
             return;
         }
-        let enabled = self.effects_on;
+        let enabled = self.effects_on();
         let velocity = match self.last_listener {
             Some((view, last)) if view == listener.view => {
                 std::array::from_fn(|i| (listener.position[i] - last[i]) * 120.)
@@ -1094,12 +1175,25 @@ impl Mixer {
                     velocity,
                     DOPPLER_LIMITS,
                 );
-                self.engine_place.aim(Some(mix), pitch);
+                self.engine_place.aim(Some(mix), pitch, self.spatial.stereo);
             }
-            None => self.engine_place.aim(None, 1.),
+            None => self.engine_place.aim(None, 1., self.spatial.stereo),
         }
+        // Other aircraft's engines follow the Engine level; fires do not.
+        let engine = self.volumes.engine;
+        let loops: Vec<LoopSource> = loops
+            .iter()
+            .map(|l| LoopSource {
+                gain: if matches!(l.key.0, 1 | 2) {
+                    l.gain * engine
+                } else {
+                    l.gain
+                },
+                ..l.clone()
+            })
+            .collect();
         self.spatial
-            .loops(clips, listener, velocity, loops, enabled);
+            .loops(clips, listener, velocity, &loops, enabled);
         if enabled {
             for name in releases {
                 if let Some(clip) = clips.get(*name) {
@@ -1122,12 +1216,14 @@ impl Mixer {
     }
     fn frame(&mut self, rate: f64) -> [f32; 2] {
         let local = self.sample(rate);
-        let mut spatial = if self.effects_on && self.flight_on && !self.flight_paused {
-            self.spatial.sample(rate)
+        let live = self.effects_on() && self.flight_on && !self.flight_paused;
+        let overall = self.volumes.overall;
+        let mut spatial = if live {
+            self.spatial.sample(rate).map(|v| v * overall)
         } else {
             [0.; 2]
         };
-        if self.flight_on && !self.flight_paused && self.effects_on {
+        if live {
             // The engine and afterburner, from the cockpit or the aircraft.
             let pitch = self.engine_place.pitch();
             let mut engine = 0.;
@@ -1137,7 +1233,8 @@ impl Mixer {
             if let Some(v) = &mut self.burner {
                 engine += v.next(rate / pitch, true) * self.burner_gain;
             }
-            let [left, right] = self.engine_place.apply(engine, rate);
+            let level = overall * self.volumes.engine;
+            let [left, right] = self.engine_place.apply(engine * level, rate);
             spatial[0] += left;
             spatial[1] += right;
         }
@@ -1146,42 +1243,53 @@ impl Mixer {
             (local + spatial[1]).clamp(-1., 1.),
         ]
     }
+    /// The centred part of the mix: cockpit sounds, speech and music.
     fn sample(&mut self, rate: f64) -> f32 {
-        let mut value = self.seeker.sample(
-            rate,
-            self.flight_on && !self.flight_paused && self.effects_on,
-        );
+        let v = self.volumes;
+        let live = self.flight_on && !self.flight_paused && self.effects_on();
+        // Overall scales the tone channels twice, as retail does.
+        let tones = v.overall * v.overall;
+        let mut value = self.seeker.sample(rate, live) * tones * v.weapon_lock;
         if let Some(voice) = &mut self.seeker_voice {
-            value = if self.flight_on && !self.flight_paused && self.effects_on {
-                voice.next(rate, true) * self.seeker.gain as f32
+            value = if live {
+                voice.next(rate, true) * self.seeker.gain as f32 * tones * v.weapon_lock
             } else {
                 0.
             };
         }
-        if self.music_on && !(self.flight_on && self.flight_paused) {
-            value += self.music.next(rate) * 0.16;
+        if live && let Some(voice) = &mut self.rwr {
+            value += voice.next(rate, true) * RWR_LEVEL * tones * v.rwr;
         }
-        if self.flight_on
-            && !self.flight_paused
-            && self.effects_on
-            && let Some(v) = &mut self.stall
-        {
-            value += v.next(rate, true) * 0.4;
+        if !(self.flight_on && self.flight_paused) {
+            let level = if self.flight_on {
+                v.flight_music
+            } else {
+                v.other_music
+            };
+            if level > 0. {
+                value += self.music.next(rate) * 0.16 * level * v.overall;
+            }
         }
-        if self.effects_on && !(self.flight_on && self.flight_paused) {
+        if live && let Some(voice) = &mut self.stall {
+            value += voice.next(rate, true) * 0.4 * v.overall * v.stall;
+        }
+        if self.effects_on() && !(self.flight_on && self.flight_paused) {
             for voice in &mut self.voices {
-                value += voice.next(rate, false) * 0.4;
+                value += voice.next(rate, false) * 0.4 * v.overall;
+            }
+            for voice in &mut self.engine_cues {
+                value += voice.next(rate, false) * 0.4 * v.overall * v.engine;
             }
             if let Some(voice) = self.radio.front_mut() {
-                value += voice.voice.next(rate, false) * 0.4;
+                value += voice.voice.next(rate, false) * 0.4 * v.overall * v.radio;
                 if voice.voice.finished() {
                     self.radio.pop_front();
                 }
             }
         }
-        if self.effects_on {
+        if self.effects_on() {
             for voice in &mut self.ui_voices {
-                value += voice.next(rate, false) * 0.4;
+                value += voice.next(rate, false) * 0.4 * v.overall;
             }
         }
         value.clamp(-1., 1.)
@@ -1209,6 +1317,7 @@ fn build<T: cpal::SizedSample + cpal::FromSample<f32>>(
                 }
             }
             mixer.voices.retain(|v| !v.finished());
+            mixer.engine_cues.retain(|v| !v.finished());
             mixer.ui_voices.retain(|v| !v.finished());
         },
         |error| eprintln!("Audio stream error: {error}"),
@@ -1455,7 +1564,7 @@ mod tests {
     #[test]
     fn ejection_audio_is_optional_serial_and_pause_aware() {
         let mut mixer = test_mixer();
-        mixer.effects_on = true;
+        mixer.volumes.overall = 1.;
         mixer.flight_on = true;
         let clip = Arc::new(Clip {
             samples: vec![150; 80],
@@ -1482,6 +1591,69 @@ mod tests {
         mixer.sample(8000.);
         assert_eq!(mixer.radio.front().unwrap().voice.position, before);
     }
+    #[test]
+    fn rwr_tone_loops_centred_scaled_by_rwr_and_overall_twice() {
+        let mut m = test_mixer();
+        m.stall = None;
+        m.stall_cue = None;
+        m.volumes.overall = 0.5;
+        m.volumes.rwr = 0.5;
+        m.rwr_tone = Some(crate::rwr_tone::Tone::RadarLock);
+        m.rwr = Some(Voice {
+            clip: Arc::new(Clip {
+                samples: vec![255, 255],
+                rate: 4.,
+            }),
+            position: 0.,
+        });
+        let full = 127. / 128. * RWR_LEVEL;
+        for _ in 0..4 {
+            let [left, right] = m.frame(4.);
+            assert!((left - full * 0.125).abs() < 1e-6, "{left}");
+            assert_eq!(left, right, "centred");
+        }
+        // Stereo width and swap never move a centred tone.
+        m.volumes.separation = 0;
+        m.volumes.swap = true;
+        let [left, right] = m.frame(4.);
+        assert_eq!(left, right);
+        // A warning silences the player's own seeker tone.
+        let clips = BTreeMap::new();
+        m.set_seeker(
+            &clips,
+            Some(tore_sim::combat::live::SeekerTone {
+                strength: 1.,
+                ground: false,
+                radar: false,
+                locked: true,
+            }),
+        );
+        assert_eq!(m.seeker.target, 0.);
+        m.flight_paused = true;
+        assert_eq!(m.frame(4.), [0.; 2], "pause mutes it");
+    }
+    #[test]
+    fn stereo_separation_follows_the_original_angle_law() {
+        let pan = |separation, swap, degrees: f32| {
+            spatial::Stereo { separation, swap }.pan(degrees.to_radians().sin())
+        };
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-5;
+        assert!(
+            close(pan(50, false, 20.), 20f32.to_radians().sin()),
+            "50 is as heard"
+        );
+        assert_eq!(pan(0, false, 60.), 0., "MIN is mono");
+        assert!(close(pan(25, false, 60.), 30f32.to_radians().sin()));
+        // The default 80 widens 2.875 times: hard over from about 32 degrees.
+        assert!(close(pan(80, false, 20.), 57.5f32.to_radians().sin()));
+        assert_eq!(pan(80, false, 32.), 1.);
+        assert_eq!(pan(100, false, 22.), 1.);
+        assert!(
+            close(pan(80, true, -20.), 57.5f32.to_radians().sin()),
+            "swap"
+        );
+        assert_eq!(pan(100, true, 0.), 0.);
+    }
     fn test_mixer() -> Mixer {
         Mixer {
             spatial: spatial::Scene::default(),
@@ -1502,6 +1674,8 @@ mod tests {
                 position: 0.,
             }),
             stall_cue: Some("&STALL.5K"),
+            rwr: None,
+            rwr_tone: None,
             flight_on: true,
             flight_paused: false,
             ejection_warning: false,
@@ -1510,10 +1684,14 @@ mod tests {
             engine_place: spatial::Placed::inside(),
             last_listener: None,
             voices: Vec::new(),
+            engine_cues: Vec::new(),
             ui_voices: Vec::new(),
             radio: VecDeque::new(),
-            music_on: false,
-            effects_on: true,
+            volumes: Volumes {
+                flight_music: 0.,
+                other_music: 0.,
+                ..Volumes::FULL
+            },
         }
     }
 
@@ -1534,9 +1712,9 @@ mod tests {
         assert_eq!(m.sample(4.), 0.);
         assert_eq!(m.stall.as_ref().unwrap().position, position);
         m.flight_paused = false;
-        m.effects_on = false;
+        m.volumes.overall = 0.;
         assert_eq!(m.sample(4.), 0.);
-        m.effects_on = true;
+        m.volumes.overall = 1.;
         m.stall = None;
         assert_eq!(m.sample(4.), 0.);
         // Recorded seeker PCM replaces the oscillator, loops and freezes on pause.
@@ -1556,9 +1734,9 @@ mod tests {
         assert_eq!(m.sample(4.), 0.);
         assert_eq!(m.seeker_voice.as_ref().unwrap().position, position);
         m.flight_paused = false;
-        m.effects_on = false;
+        m.volumes.overall = 0.;
         assert_eq!(m.sample(4.), 0.);
-        m.effects_on = true;
+        m.volumes.overall = 1.;
         m.seeker.target = 0.;
         assert_eq!(m.sample(4.), 0.);
     }
@@ -1638,7 +1816,7 @@ mod tests {
         mixer.ui_voices[0].position = 4.;
         mixer.play_ui(&clip, true);
         assert_eq!(mixer.ui_voices.len(), 2);
-        mixer.effects_on = false;
+        mixer.volumes.overall = 0.;
         mixer.ui_voices.clear();
         mixer.play_ui(&clip, false);
         assert!(mixer.ui_voices.is_empty());
@@ -1743,7 +1921,7 @@ mod tests {
         assert!(m.radio.is_empty());
         m.enqueue_radio(&clips, &phrases, &["^FIRST"; 20], RadioSource::Wing, true);
         assert_eq!(m.radio.len(), 16);
-        m.effects_on = false;
+        m.volumes.overall = 0.;
         m.enqueue_radio(&clips, &phrases, &["^SECOND"], RadioSource::Wing, true);
         assert!(m.radio.is_empty());
     }
@@ -1811,7 +1989,7 @@ mod tests {
         m.cancel_radio(RadioSource::Airport);
         assert_eq!(m.sample(4.), 0.);
         assert!(m.radio.is_empty());
-        m.effects_on = false;
+        m.volumes.overall = 0.;
         m.enqueue_radio(&clips, &phrases, &["^TOWER"], RadioSource::Airport, true);
         assert!(m.radio.is_empty());
     }

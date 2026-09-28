@@ -72,6 +72,7 @@ coaching, G sounds, fuel calls and missile warnings, and who is labelled speakin
 launch, hit and kill calls, contact and waypoint reports, and who hears them.
 [Keyboard](keyboard.md) records the original's in-flight key table, and
 [countermeasures](countermeasures.md) specifies the player's chaff and flare
-release.
+release. [Sound/Music Prefs](sound-prefs.md) specifies the volume dialog: its
+layout, defaults, and which sounds and music each slider scales.
 Supporting research lives in [`../formats/`](../formats/), measured evidence in
 [`../baselines/`](../baselines/), and frozen archives in [`../research/`](../research/).

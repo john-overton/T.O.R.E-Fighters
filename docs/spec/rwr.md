@@ -10,7 +10,8 @@
 
 ## Scope
 
-This specification defines the cockpit RWR presentation. The simulation owns
+This specification defines the cockpit RWR presentation and its warning
+tones. The simulation owns
 emitter reception, missile observation and threat classification. The
 instrument displays one actor-owned snapshot and cannot create or alter threat
 knowledge.
@@ -84,8 +85,110 @@ missile is destroyed, impacts or otherwise leaves its lifecycle.
 The RWR window being closed or set to a shorter scale does not affect simulation
 knowledge. A failed RWR panel draws no electronic presentation. Receiver failure
 does not erase a missile independently seen by a pilot or AI, although the
-failed panel cannot present that observation. Audible warning changes are
-outside this specification.
+failed panel cannot present that observation. A failed receiver does not
+silence the [warning tones](#warning-tones).
+
+## Warning tones
+
+The RWR has three recordings in the user's FA_2.LIB. At most one warning tone
+sounds at a time. It starts from the beginning of its recording when its
+condition starts, repeats the recording back to back while the condition
+holds, and stops the moment the condition ends. The highest row that applies
+wins:
+
+| Rank | Condition | Recording | Recording length | What it sounds like |
+| ---: | --- | --- | ---: | --- |
+| 1 | A radar-guided missile is in flight with the player's aircraft as its target | `&RWRLOCK.5K` | 1.47 s | Fast, uneven beeps, about 0.25 s apart |
+| 2 | An infrared-guided missile is in flight with the player's aircraft as its target | `&RWRLOCK.5K` | 1.47 s | Same recording as rank 1 |
+| 3 | An enemy holds a radar-guided missile lock on the player's aircraft | `&RWRDTCT.5K` | 3.18 s | Slow beep groups, about 0.8 s apart |
+| 4 | An enemy holds an infrared-guided missile lock on the player's aircraft | `&RWRIR.5K` | 1.07 s | Six even beeps, about 0.18 s apart |
+
+- **Guidance.** Radar-guided means seeker class 3 and infrared-guided means
+  class 2, the classes the
+  [cockpit voice warnings](cockpit-voice.md#missile-warnings) use. Missiles of
+  any other class never sound a tone.
+- **Missile in flight.** The same count that drives the
+  [flight music](flight-music.md) danger rule: a missile joins or leaves it the
+  moment it acquires or drops the player as its target, and the count is
+  rebuilt every 2 seconds. An AIM-120 more than 30,380 ft (5.0 nm) from the
+  player is not counted, so its tone begins when it closes inside that range.
+  A missile decoyed onto chaff or a flare no longer targets the player and
+  stops sounding.
+- **Lock.** An AI aircraft or ground unit whose target is the player, with a
+  class 2 or 3 missile selected, has passed its seeker lock check with a clear
+  line of sight and is waiting out the weapon's tracking delay or firing. Each
+  refresh keeps the warning alive for four quarter-second clock steps, so the
+  tone ends 0.75 to 1 second after the last refresh. Searching and preparing
+  before lock sound nothing.
+- **Changing condition.** Moving to another row stops the old tone and starts
+  the new one from its beginning, even between ranks 1 and 2, which share a
+  recording.
+- **Own seeker tone.** While any warning tone sounds, the player's own seeker
+  tones (the IR growl and the radar tracking and lock tones in the
+  [sound spec](sound.md)) are silent. They start again from the beginning
+  when the warning ends.
+- **`&RWRMISS.5K`** is in the archive but the reviewed build never plays it.
+
+| Level component | Value |
+| --- | --- |
+| Base level | 200 on the 0 to 255 sound scale |
+| RWR slider | Multiplies by its percentage; default 50 |
+| Overall slider | Multiplies by its percentage **twice**; default 75 |
+| Arithmetic | `200 * RWR / 100`, then `* Overall / 100`, then `* Overall / 100`, dropping fractions at each step |
+| Level at defaults | 56 |
+| Level at RWR 100, Overall 100 | 200 |
+| Level at RWR 100, Overall 75 | 112 |
+| RWR slider at 0 | Silent |
+| Slider change while sounding | Applies at once |
+| Distance, direction, view | None: same level, centered in both channels, in cockpit and external views |
+
+The tones follow the player's own aircraft, whichever aircraft the view shows,
+and need that aircraft to exist and be active. They do not depend on the
+receiver being installed or working, on the RWR window being open or on its
+range, or on the threat appearing on the scope.
+
+Pause mutes every effect, the tone included. Game time stops, so no warning
+expires while paused, and a tone whose condition still holds is heard again on
+resume. The fade that accompanies the `&HRTBEAT.11K` heartbeat applies to all
+effects and also fades this tone, down to silence at its strongest.
+
+The manual describes one tone for radar and one for infrared, slow when a
+seeker tracks you and fast when a missile is inbound. The executable is the
+authority here: infrared lock uses a fast recording, and both inbound classes
+share `&RWRLOCK.5K`.
+
+### Mapping to TORE's RWR states
+
+| Tone condition | Existing TORE state | Gap |
+| --- | --- | --- |
+| Ranks 1 and 2, missile in flight | The flight music danger rule already lists live projectiles marked incoming whose target is the player, with the AIM-120 rule. The RWR `Incoming` indicator is a different, receiver-evidence state with a stale grace, so it must not drive the tone. | Split that list by the weapon's seeker signature, 3 or 2. |
+| Ranks 3 and 4, lock | The RWR `Tracking` indicator and `Painting` emitter state exist with no producer. The AI controller's weapon phase already reports `Tracking` (lock held, waiting the tracking delay) and `Fire`. | A per-actor feed: target is the player, phase `Tracking` or `Fire`, the seeker signature of the store being locked, held 1 s. TORE's AI keeps no selected station, per the flight music code. Whether TORE ground units run the same weapon service was not checked. |
+| Level, pause, centering | Host mixer and the Sound/Music Prefs RWR and Overall words | None beyond applying Overall twice. |
+
+### Implementation in TORE
+
+Implementation mode, 2026-09-28. `rwr_tone.rs` chooses the tone every fixed
+step and the mixer loops it, centred, restarting on a change of tone.
+
+| Component | Behaviour in TORE | Provenance |
+| --- | --- | --- |
+| Ranks 1 and 2 | Live projectiles marked incoming whose target is the player, by the weapon's seeker class, with the AIM-120 rule, checked every step rather than every 2 seconds | spec-derived; step rate fitted |
+| Ranks 3 and 4 | AI aircraft on the enemy side whose target is the player, weapon phase tracking or firing, and whose chosen station carries a class 2 or 3 weapon; held four quarter-second clock steps past the last refresh | spec-derived |
+| Level | 0.4 times the original's ratio of this tone to a full-level effect at the default settings, then RWR and OVERALL relative to their defaults, OVERALL twice | spec-derived ratio; absolute level fitted |
+| Own seeker | Silent while a warning sounds; it restarts from the beginning afterwards | spec-derived |
+| Ejection and death | No tone once the player has ejected or the pilot is dead | fitted, retail unknown |
+| Ground units | No lock warning: TORE's ground units do not run the AI weapon service | unknown |
+| Replays | The tone is not recorded, so a replay is silent here | fitted gap |
+
+### Unknown
+
+| Missing fact | Next research step |
+| --- | --- |
+| How often an AI refreshes the lock warning, so whether the rank 3 and 4 tone is continuous or can gap during a long lock | Trace the call rate of the AI weapons procedure per object |
+| Whether a missile that hits or is destroyed stops its tone at once or up to 2 s later | Check every projectile removal path for a target clear |
+| Whether remote human players' locks sound a tone in multiplayer | Review the network paths for writers of the lock warning |
+| Whether tones stop when the player ejects or is destroyed | Trace the player's object and state after ejection and destruction |
+| What drives the heartbeat fade | Sound or G-effects research on `&HRTBEAT.11K` |
 
 ## Provenance
 
@@ -114,6 +217,15 @@ unknown guidance are opinionated development rules shared with the
 The manual establishes flashing but does not establish its exact cadence or
 these missing-data presentations.
 
+The warning tones are native: recovered by static disassembly of FA.EXE 1.02F,
+SHA-256 `e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`,
+with FA_2.LIB SHA-256
+`fb8b30216e739292489d4872cc440debec334e14f8b9a3d0e340092445246198`.
+Addresses and evidence are in the [RWR tone notes](../formats/rwr.md). The
+described beep spacing is a rough measurement of the decoded recordings, a
+listening aid rather than a decoded field. The manual's warning tone text is on
+printed page 131, PDF page 135.
+
 ## Acceptance
 
 Synthetic presentation tests cover the RWR scale at every radar setting,
@@ -121,5 +233,9 @@ including the 50-mile cap at 100 and 150, the RWR buttons stepping the shared
 range, the 10-mile start, cardinal bearings, ranged, bearing-only and
 out-of-scale plots, manual emitter shapes, steady and flashing
 missiles, both phases at their exact tick boundaries, stale contacts, `R` and
-`I` states, jammer state and receiver failure. A display smoke test must also
+`I` states, jammer state and receiver failure. Synthetic tone tests cover the
+rank order, the start, loop and stop of each recording, the restart between
+ranks 1 and 2, the 4-step lock hold at its boundary, silence of the player's
+seeker tones during a warning, the level at the table's slider settings, and a
+failed receiver still sounding. A display smoke test must also
 confirm the assembled instrument with original runtime art and font assets.

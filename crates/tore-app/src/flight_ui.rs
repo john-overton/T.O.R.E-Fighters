@@ -53,8 +53,9 @@ pub enum Command {
     SensorHistory,
     /// Request the passive infrared channel.
     SensorInfrared,
-    Effects(bool),
     ControlsOpen,
+    /// Pref > Sound...: the Sound/Music Prefs screen over the paused flight.
+    SoundOpen,
     InstrumentSelect(usize),
     InstrumentCycle(i32),
     InstrumentControl(usize),
@@ -133,7 +134,6 @@ pub struct FlightUi {
     pub zoom: f32,
     pub look: [f32; 2],
     pub time_scale: f64,
-    pub effects: bool,
     /// Message lines shown at the bottom of the flight view, oldest first.
     pub notices: std::collections::VecDeque<(String, Instant)>,
     /// Every message line and what became of it, for the recorder.
@@ -163,7 +163,6 @@ impl Default for FlightUi {
             zoom: 1.,
             look: [0.; 2],
             time_scale: 1.,
-            effects: true,
             notices: Default::default(),
             notes: Default::default(),
             help: false,
@@ -407,15 +406,7 @@ impl FlightUi {
                 self.brightness = (self.brightness + 16).min(256);
                 Command::Click
             }
-            "Sound..." => {
-                self.effects = !self.effects;
-                self.message(if self.effects {
-                    "Sound on"
-                } else {
-                    "Sound off"
-                });
-                Command::Effects(self.effects)
-            }
+            "Sound..." => Command::SoundOpen,
             "1x" | "2x" | "4x" | "8x" | "Slow-motion" => {
                 self.time_scale = match label {
                     "2x" => 2.,

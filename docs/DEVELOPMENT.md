@@ -155,12 +155,13 @@ cargo run --locked -p tore-app -- --smoke-test
 
 This uses the imported menu, a real 960 × 720 window (never fullscreen, so the presented frame keeps a known size) and GPU, prints the renderer, presents one frame without audio, and exits. It is not a headless simulation test. Normal mode waits while idle and schedules frames for short hover transitions and placeholder messages.
 
-`--no-audio` silences a session. Normal playback uses the system's default output device, original PCM effects, recorded main/briefing playlists and the retail [situation scores](spec/flight-music.md) during flight when available. Device initialization failure is reported and the menu continues silently. Main-menu M toggles music; `Pref` exposes music/effect toggles. Music follows the saved preference into flight and freezes on flight pause. In-flight Sound still toggles effects only. No MIDI or synth is used. See [music behavior and limits](formats/music.md) and [combat audio](audio.md). Music/effects and flight display preferences are restored from `preferences-v1.conf` in the application data directory.
+`--no-audio` silences a session. Normal playback uses the system's default output device, original PCM effects, recorded main/briefing playlists and the retail [situation scores](spec/flight-music.md) during flight when available. Device initialization failure is reported and the menu continues silently. Pref > Sound... in the main menu and in the paused flight menu opens the retail Sound/Music Prefs dialog: nine volume sliders and the channel swap switch, heard live while they move, kept by OK and saved to `sound-v1.conf` in the application data directory ([spec](spec/sound-prefs.md)). Music freezes on flight pause. No MIDI or synth is used. See [music behavior and limits](formats/music.md) and [combat audio](audio.md). Flight display preferences are restored from `preferences-v1.conf`.
 
-Profiles without saved preferences start with Music On. Saved Music On/Off still
-overrides that default; imported sample ownership or a silent diagnostic run does
-not choose the setting. If an older profile saved Music Off, use M or Pref to
-enable it. See the [startup regression](baselines/menu-music-startup.md).
+A profile saved before the Sound dialog existed carries its old Music and
+Effects switches over once: Music Off becomes both music sliders at off, and
+Effects Off becomes Overall at off. Imported sample ownership or a silent
+diagnostic run does not choose the setting. See the
+[startup regression](baselines/menu-music-startup.md).
 
 ## Explore media and capture previews
 
@@ -171,7 +172,7 @@ cargo run --locked -p tore-app -- --snapshot .local/exploration/menu.ppm
 cargo run --locked -p tore-app -- --snapshot .local/exploration/pref.ppm --snapshot-state pref
 ```
 
-The inventory records archive SHA-256 hashes, entry offsets, compression headers, and format counts without extracting everything. Snapshots render the native CPU menu canvas without a GPU/audio device; they are not window screenshots. States: `normal`, `hover`, `pressed`, `help`, `pref`, `multi`, and `controls`, `controls-keyboard`, `controls-mouse` and `controls-head` for the input configuration screen with a synthetic Xbox-layout gamepad, `controls-search` (the gamepad's actions searched for "fire") and `controls-search-keys` (keyboard actions on Shift keys), and `graphics` for the Graphics options screen with the default settings (with no GPU to ask, it shows Off, 2x and 4x anti-aliasing as available and 8x as unavailable). `replays`, `replays-settings` and `replays-delete` show the Replays screen over a synthetic list of recordings (no recordings are read), with the auto-delete settings or the delete confirmation open. Snapshots default to CHOOSEV for repeatability; `--background` overrides it. On macOS, convert for viewing with `sips -s format png .local/exploration/menu.ppm --out .local/exploration/menu.png`. Keep all resulting retail derivatives ignored.
+The inventory records archive SHA-256 hashes, entry offsets, compression headers, and format counts without extracting everything. Snapshots render the native CPU menu canvas without a GPU/audio device; they are not window screenshots. States: `normal`, `hover`, `pressed`, `help`, `pref`, `multi`, and `controls`, `controls-keyboard`, `controls-mouse` and `controls-head` for the input configuration screen with a synthetic Xbox-layout gamepad, `controls-search` (the gamepad's actions searched for "fire") and `controls-search-keys` (keyboard actions on Shift keys), `graphics` for the Graphics options screen with the default settings (with no GPU to ask, it shows Off, 2x and 4x anti-aliasing as available and 8x as unavailable), and `sound` for the Sound/Music Prefs dialog with sample levels and the swap switch at YES. `replays`, `replays-settings` and `replays-delete` show the Replays screen over a synthetic list of recordings (no recordings are read), with the auto-delete settings or the delete confirmation open. Snapshots default to CHOOSEV for repeatability; `--background` overrides it. On macOS, convert for viewing with `sips -s format png .local/exploration/menu.ppm --out .local/exploration/menu.png`. Keep all resulting retail derivatives ignored.
 
 For the general extractor, use `python3 tools/extract_assets.py --dry-run` followed by `python3 tools/extract_assets.py`. It runs the standalone Rust tool in release mode without the app's window/audio dependencies. See [EXTRACTION.md](EXTRACTION.md) for filters, alternate source directories, and reports.
 

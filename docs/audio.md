@@ -14,6 +14,11 @@ agent-fitted playback constants. All distances below are feet, all time is
 simulation time, and the simulation remains fixed at 120 Hz. No audio output
 or listener calculation changes flight, seekers, damage or AI decisions.
 
+Every level below is the level at the default
+[Sound/Music Prefs](spec/sound-prefs.md) settings. Each slider scales its own
+sounds by its level over its default, and the stereo slider and channel swap
+reshape every positioned sound's pan (see that spec's Implementation section).
+
 ## Seeker growl
 
 The air-to-air IR growl loops `&IR1.11K` continuously across lock changes.

@@ -59,9 +59,12 @@ mod renderer;
 mod replay;
 mod rocker;
 mod roster_animation;
+mod rwr_tone;
 mod scope;
 mod sim_renderer;
 mod smoke_renderer;
+mod sound_prefs;
+mod sound_screen;
 mod startup;
 mod static_art;
 mod surface_lighting;
@@ -171,6 +174,8 @@ struct App {
     flight_clock: flight::Clock,
     /// Situation music observations; audio only, never read by the simulation.
     flight_music: flight_music::Observer,
+    /// The RWR warning tones' lock memory, reset with each flight.
+    rwr_warnings: rwr_tone::Warnings,
     vapor: tore_sim::vapor::Vapor,
     turbulence: tore_sim::turbulence::Turbulence,
     turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng,
@@ -227,6 +232,10 @@ struct App {
     graphics: graphics::Options,
     /// Where the Graphics screen saves them; `None` for diagnostics.
     graphics_path: Option<PathBuf>,
+    /// The Sound/Music Prefs settings in effect, handed to the mixer.
+    sound: sound_prefs::Settings,
+    /// Where the Sound screen saves them; `None` for diagnostics.
+    sound_path: Option<PathBuf>,
     pointer: Option<(f64, f64)>,
     modifiers: ModifiersState,
     smoke_test: bool,
@@ -239,6 +248,9 @@ struct App {
     controls: Option<controls_editor::Editor>,
     /// The Graphics options screen, open over the main menu.
     graphics_screen: Option<graphics_screen::Editor>,
+    /// The Sound/Music Prefs screen, open over the main menu or the paused
+    /// flight menu.
+    sound_screen: Option<sound_screen::Screen>,
     /// The mission replay viewer, while `Screen::Replay` shows it.
     replay: Option<Box<replay::host::Replay>>,
     /// Cursor position while the right button drags mouse look.
@@ -566,7 +578,6 @@ impl App {
         let text = preferences::Preferences::capture(
             &self.flight_ui,
             &self.instruments,
-            &self.menu.state,
             self.fullscreen_preference,
         )
         .text();
@@ -759,6 +770,14 @@ impl App {
             "menu-back" | "menu" => Some("Escape"),
             _ => None,
         };
+        // Controller menu buttons work the Sound screen while it is open.
+        if let Some(screen) = &mut self.sound_screen {
+            let Some(key) = key else {
+                return Action::None;
+            };
+            let outcome = screen.key(key, false);
+            return self.sound_result(outcome);
+        }
         // Controller menu buttons navigate the Graphics screen while it is open.
         if let Some(editor) = &mut self.graphics_screen {
             let Some(key) = key else {
@@ -1217,7 +1236,15 @@ impl App {
                 }
                 Action::None
             }
-            Command::Effects(on) => Action::Effects(on),
+            Command::SoundOpen => {
+                self.flight_ui.menu = true;
+                self.input.context(true, self.focused);
+                self.camera.keys.clear();
+                self.combat.cancel();
+                self.flight_clock.remainder = 0.;
+                self.open_sound(true);
+                Action::Click
+            }
             Command::ControlsOpen => {
                 self.flight_ui.menu = true;
                 self.input.context(true, self.focused);
@@ -1466,6 +1493,46 @@ impl App {
         self.graphics_screen = Some(graphics_screen::Editor::new(current, supported, context));
         self.mouse_look = None;
     }
+    /// Pref > Sound... in the main menu, or over the paused flight menu.
+    fn open_sound(&mut self, in_flight: bool) {
+        self.sound_screen = Some(sound_screen::Screen::new(self.sound, in_flight));
+        self.mouse_look = None;
+    }
+    fn sound_result(&mut self, outcome: sound_screen::Outcome) -> Action {
+        use sound_screen::Outcome;
+        let Some(screen) = &self.sound_screen else {
+            return Action::None;
+        };
+        let draft = screen.draft;
+        let in_flight = screen.in_flight;
+        // Levels apply on OK, except Other music, heard as it moves.
+        if let Some(audio) = &self.audio {
+            match outcome {
+                Outcome::Preview | Outcome::Cancel => audio.set_volumes(screen.heard().volumes()),
+                Outcome::Save => audio.set_volumes(draft.volumes()),
+                _ => {}
+            }
+        }
+        match outcome {
+            Outcome::None | Outcome::Redraw | Outcome::Preview => Action::None,
+            Outcome::Save | Outcome::Cancel => {
+                if outcome == Outcome::Save {
+                    self.sound = draft;
+                    if let Some(path) = &self.sound_path
+                        && let Err(e) = self.sound.save(path)
+                    {
+                        log::warn!("Sound settings not saved: {e}");
+                    }
+                }
+                self.sound_screen = None;
+                if in_flight {
+                    self.flight_ui.controls_closed();
+                }
+                self.menu.state.cancel();
+                Action::Click
+            }
+        }
+    }
     fn graphics_result(&mut self, result: controls_editor::ResultAction) -> Action {
         use controls_editor::ResultAction;
         match result {
@@ -1534,6 +1601,7 @@ impl App {
             Action::Replays => self.open_replays("Main menu"),
             Action::Controls => self.open_controls("Main menu"),
             Action::Graphics => self.open_graphics("Main menu"),
+            Action::Sound => self.open_sound(false),
             Action::WatchReplay(ref path) => self.watch_replay(path),
             Action::ReimportMedia => {
                 // The pack on disk is still valid here, so the menu the player
@@ -1542,13 +1610,6 @@ impl App {
                 self.finished = true;
                 event_loop.exit();
                 return;
-            }
-            Action::Music(on) => {
-                self.menu.state.music = on;
-            }
-            Action::Effects(on) => {
-                self.menu.state.effects = on;
-                self.flight_ui.effects = on;
             }
             Action::Theater(index) => {
                 if let Err(e) = self.combat.finish_recording() {
@@ -2019,6 +2080,7 @@ impl App {
                     &self.world,
                     ground_airport,
                 ));
+                self.rwr_warnings = Default::default();
                 self.reset_vapor();
                 self.previous_flight = self.flight.clone();
                 self.g_effects = Default::default();
@@ -2028,17 +2090,11 @@ impl App {
                 let saved = preferences::Preferences::capture(
                     &self.flight_ui,
                     &self.instruments,
-                    &self.menu.state,
                     self.fullscreen_preference,
                 );
                 self.flight_ui.reset_for_flight();
                 self.live_debug.reset();
-                saved.apply(
-                    &mut self.flight_ui,
-                    &mut self.instruments,
-                    &mut self.menu.state,
-                );
-                self.flight_ui.effects = self.menu.state.effects;
+                saved.apply(&mut self.flight_ui, &mut self.instruments);
                 if self.ground_start.is_some() {
                     self.flight_ui
                         .message("Ground start: B releases brakes; PageUp adds throttle.");
@@ -2328,6 +2384,9 @@ impl ApplicationHandler for App {
                 if let Some(editor) = &mut self.graphics_screen {
                     editor.cancel_press();
                 }
+                if let Some(screen) = &mut self.sound_screen {
+                    screen.cancel_press();
+                }
                 if let Some(screen) = &mut self.replays_screen {
                     screen.cancel_press();
                 }
@@ -2342,6 +2401,14 @@ impl ApplicationHandler for App {
             WindowEvent::CursorMoved { position, .. } => {
                 let point = renderer.viewport().point(position.x, position.y);
                 self.pointer = Some((position.x, position.y));
+                if let Some(screen) = &mut self.sound_screen {
+                    let outcome = screen.moved(point);
+                    let action = self.sound_result(outcome);
+                    if outcome != sound_screen::Outcome::None {
+                        self.action(event_loop, action);
+                    }
+                    return;
+                }
                 if self.controls.is_some()
                     || self.graphics_screen.is_some()
                     || (self.screen == Screen::Main && self.replays_screen.is_some())
@@ -2394,7 +2461,10 @@ impl ApplicationHandler for App {
                 if notches == 0 {
                     return;
                 }
-                if let Some(editor) = &mut self.controls {
+                if let Some(screen) = &mut self.sound_screen {
+                    let outcome = screen.wheel(notches);
+                    self.sound_result(outcome)
+                } else if let Some(editor) = &mut self.controls {
                     let result = editor.wheel(notches);
                     self.controls_result(result)
                 } else if let Some(editor) = &mut self.graphics_screen {
@@ -2444,6 +2514,9 @@ impl ApplicationHandler for App {
                 if let Some(editor) = &mut self.graphics_screen {
                     editor.cancel_press();
                 }
+                if let Some(screen) = &mut self.sound_screen {
+                    screen.cancel_press();
+                }
                 if let Some(screen) = &mut self.replays_screen {
                     screen.cancel_press();
                 }
@@ -2454,6 +2527,18 @@ impl ApplicationHandler for App {
                 self.combat.cancel();
                 self.modifiers = ModifiersState::empty();
                 Action::None
+            }
+            WindowEvent::MouseInput { state, button, .. } if self.sound_screen.is_some() => {
+                let point = self
+                    .pointer
+                    .and_then(|(x, y)| renderer.viewport().point(x, y));
+                let screen = self.sound_screen.as_mut().expect("guarded");
+                let outcome = if button == MouseButton::Left {
+                    screen.button(point, state == ElementState::Pressed)
+                } else {
+                    sound_screen::Outcome::None
+                };
+                self.sound_result(outcome)
             }
             WindowEvent::MouseInput { state, button, .. } if self.controls.is_some() => {
                 let point = self
@@ -2709,6 +2794,14 @@ impl ApplicationHandler for App {
                     return;
                 }
                 if event.state == ElementState::Pressed
+                    && let Some(screen) = &mut self.sound_screen
+                {
+                    let outcome = screen.key(&name, self.modifiers.shift_key());
+                    let action = self.sound_result(outcome);
+                    self.action(event_loop, action);
+                    return;
+                }
+                if event.state == ElementState::Pressed
                     && let Some(editor) = &mut self.graphics_screen
                 {
                     let result = editor.key(&name, self.modifiers.shift_key());
@@ -2886,6 +2979,15 @@ impl ApplicationHandler for App {
                         }
                         if let Some(editor) = &self.graphics_screen {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
+                        }
+                        if let Some(screen) = &mut self.sound_screen {
+                            animating |= screen.animate();
+                            if screen.take_switch_sound()
+                                && let Some(audio) = &self.audio
+                            {
+                                audio.action(Action::Toggle);
+                            }
+                            screen.draw(&mut self.menu.pixels, &self.menu.sprites);
                         }
                         if let Some(screen) = &mut self.replays_screen {
                             // Exports and details are read in the
@@ -3429,6 +3531,16 @@ impl ApplicationHandler for App {
                                     mission,
                                 );
                                 audio.situation(&music.inputs, music.now);
+                                let locks = self
+                                    .ai_wings
+                                    .as_ref()
+                                    .map_or_else(Vec::new, |w| w.locks_on_player());
+                                audio.rwr(self.rwr_warnings.step(
+                                    self.combat.state.tick(),
+                                    rwr_tone::inbound(&self.combat.state, self.flight.position),
+                                    &locks,
+                                    self.flight.escape.is_some() || self.flight.systems.pilot.dead,
+                                ));
                                 // Addressed to the player's flight; the label
                                 // (crew or YOU) is unresolved in retail, so this
                                 // choice is fitted. The mission result comes
@@ -4077,6 +4189,15 @@ impl ApplicationHandler for App {
                         );
                         if let Some(editor) = &self.controls {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
+                        }
+                        if let Some(screen) = &mut self.sound_screen {
+                            screen.animate();
+                            if screen.take_switch_sound()
+                                && let Some(audio) = &self.audio
+                            {
+                                audio.action(Action::Toggle);
+                            }
+                            screen.draw(&mut self.menu.pixels, &self.menu.sprites);
                         }
                         self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
                         if let Some(audio) = &self.audio {
@@ -7450,7 +7571,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display.
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; M toggles music; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -8355,6 +8476,25 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             for p in menu.pixels.chunks_exact(4) {
                 f.write_all(&p[..3])?;
             }
+        } else if snapshot_state == "sound" {
+            // Non-default levels and the switch at YES, so every knob and
+            // the switch's other position can be inspected.
+            let mut settings = sound_prefs::Settings::default();
+            for (i, slider) in sound_prefs::Slider::ALL.into_iter().enumerate() {
+                settings.set(slider, [80, 70, 55, 45, 70, 90, 20, 60, 75][i]);
+            }
+            settings.swap = true;
+            menu.preview_state("normal")?;
+            menu.render();
+            let mut screen = sound_screen::Screen::new(settings, false);
+            screen.animate();
+            screen.draw(&mut menu.pixels, &menu.sprites);
+            use std::io::Write;
+            let mut f = std::fs::File::create(&path)?;
+            write!(f, "P6\n640 480\n255\n")?;
+            for p in menu.pixels.chunks_exact(4) {
+                f.write_all(&p[..3])?;
+            }
         } else if let Some(tab) = snapshot_state.strip_prefix("controls") {
             // A synthetic Xbox-layout pad with its defaults, so the screen
             // can be inspected without hardware.
@@ -9159,6 +9299,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         preference_saved: String::new(),
         graphics,
         graphics_path,
+        sound: sound_prefs::Settings::default(),
+        sound_path: if preferences_enabled {
+            Some(assets::data_directory()?.join("sound-v1.conf"))
+        } else {
+            None
+        },
         input_recording,
         recorded_ticks: 0,
         input,
@@ -9172,6 +9318,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         flight,
         flight_clock: flight::Clock { remainder: 0. },
         flight_music: Default::default(),
+        rwr_warnings: Default::default(),
         vapor: probe_vapor,
         turbulence: probe_turbulence,
         turbulence_rng: probe_turbulence_rng,
@@ -9228,6 +9375,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         reimport: None,
         controls: None,
         graphics_screen: None,
+        sound_screen: None,
         replay,
         mouse_look: None,
         wheel: 0.,
@@ -9254,11 +9402,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         match preferences::read(&path) {
             Ok(text) => match preferences::Preferences::parse(&text) {
                 Ok(saved) => {
-                    saved.apply(
-                        &mut app.flight_ui,
-                        &mut app.instruments,
-                        &mut app.menu.state,
-                    );
+                    saved.apply(&mut app.flight_ui, &mut app.instruments);
                     if std::env::args().any(|a| a == "--instrument-layout")
                         && app.instruments.layout != instrument_layout
                     {
@@ -9296,13 +9440,29 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             }
         }
     }
+    if let Some(path) = app.sound_path.clone() {
+        // A profile saved before the Sound screen carries its Music and
+        // Effects switches over once.
+        let legacy = app
+            .preference_path
+            .as_deref()
+            .and_then(|p| preferences::read(p).ok())
+            .and_then(|text| preferences::legacy_sound(&text))
+            .map(|(music, effects)| sound_prefs::Settings::from_legacy(music, effects));
+        app.sound = sound_prefs::Settings::load(&path, legacy.unwrap_or_default());
+        if legacy.is_some()
+            && !path.exists()
+            && let Err(e) = app.sound.save(&path)
+        {
+            log::warn!("Sound settings not saved: {e}");
+        }
+    }
     if app.native_tables.is_some() {
         app.flight_ui.cheats.no_turbulence = true;
     }
     app.preference_saved = preferences::Preferences::capture(
         &app.flight_ui,
         &app.instruments,
-        &app.menu.state,
         app.fullscreen_preference,
     )
     .text();
@@ -9312,7 +9472,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             Screen::Main => audio::music::Scene::Main,
             _ => audio::music::Scene::Brief,
         });
-        audio.preferences(app.menu.state.music, app.menu.state.effects);
+        audio.set_volumes(app.sound.volumes());
         // A replay starts silent; its sound follows the playhead.
         if app.screen == Screen::Replay {
             audio.restart_flight();

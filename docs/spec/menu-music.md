@@ -11,16 +11,18 @@
 Implementation specification, 2026-09-22. Menu music uses the existing
 [recorded retail playlists and playback rules](../formats/music.md#runtime-scope-and-boundaries).
 
-Music is enabled by default for a profile without saved preferences. A saved
-Music On or Off value overrides that default. This is an agent-selected host
-preference rule, not evidence of the original game's initial preference.
+Menu music plays by default for a profile without saved sound settings. Saved
+[Sound/Music Prefs](sound-prefs.md) levels override that default, and a profile
+saved before that dialog existed carries its old Music On or Off choice over.
+This is an agent-selected host preference rule, not evidence of the original
+game's initial preference.
 Starting without an audio device, requesting silent diagnostics, or transferring
 sample buffers into the audio player must not change the Music preference.
 Missing optional music media still follows the existing explicit silence and
 diagnostic behavior; no substitute track is added.
 
-The main-menu M key and Music option continue to toggle the saved preference.
-Mute retains playback position. Ordinary menu and Quick Mission playback uses
+The Other music slider sets menu music loudness; at off the playback position
+is kept. Ordinary menu and Quick Mission playback uses
 its existing playlist, gain and transitions. This fix changes initialization
 only, not track selection, sample data, mixer timing or explicit saved choices.
 

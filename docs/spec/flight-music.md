@@ -236,9 +236,13 @@ call.
   missing phrase is only found when it is due. Each distinct fault is printed
   once. Fitted.
 - Pause keeps freezing the current phrase, which resumes where it stopped. This
-  is TORE's existing behaviour; the retail behaviour is unknown.
-- With Music off nothing plays and nothing is chosen; turning it on starts a
-  fresh choice. Music can currently only be switched from the main menu.
+  is TORE's existing behaviour. Retail mutes every mixer voice while paused but
+  lets the phrase run on silently, and starts no new phrase until resume
+  ([Sound/Music Prefs research](sound-prefs.md)); TORE keeps its freeze.
+- With the In-Flight music slider at off nothing plays and nothing is chosen;
+  raising it starts a fresh choice. The slider is on the
+  [Sound/Music Prefs](sound-prefs.md) dialog, in the main menu and the paused
+  flight menu.
 - A crash without ejecting keeps the situation music, as retail is unknown.
 
 ## Unknowns and next research steps

@@ -33,13 +33,14 @@ pub enum Action {
     Aircraft(usize),
     Back,
     Exit,
-    Music(bool),
-    Effects(bool),
+    /// A lever on a settings screen reached its sounding frame.
+    Toggle,
     ReimportMedia,
     /// The top bar's Replays entry: opens the Replays screen.
     Replays,
     Controls,
     Graphics,
+    Sound,
     /// Opens the mission replay viewer on a recording.
     #[allow(dead_code)] // Sent by the Replays screen's Watch button.
     WatchReplay(std::path::PathBuf),
@@ -50,8 +51,6 @@ pub struct State {
     pub pressed: Option<Target>,
     pub focus: Option<Target>,
     pub open: Option<usize>,
-    pub music: bool,
-    pub effects: bool,
     pub toast: Option<(String, Instant)>,
     keyboard: bool,
     glow: Vec<f32>,
@@ -84,7 +83,7 @@ const BADGE_SIZE: usize = 64;
 const VERSION_BADGE: (i32, i32) = (14, 408);
 const VERSION_LABEL: (i32, i32) = (86, 433);
 impl State {
-    pub fn new(buttons: Vec<Button>, music: bool) -> Self {
+    pub fn new(buttons: Vec<Button>) -> Self {
         let count = buttons.len();
         Self {
             buttons,
@@ -92,8 +91,6 @@ impl State {
             pressed: None,
             focus: None,
             open: None,
-            music,
-            effects: true,
             toast: None,
             keyboard: false,
             glow: vec![0.0; count],
@@ -113,8 +110,6 @@ impl State {
                 "Sound...".into(),
                 "Controls...".into(),
                 "Re-import media...".into(),
-                format!("Music: {}", if self.music { "On" } else { "Off" }),
-                format!("Effects: {}", if self.effects { "On" } else { "Off" }),
             ],
             2 => vec![
                 "Host Game...".into(),
@@ -223,6 +218,10 @@ impl State {
                         self.cancel();
                         return Action::Graphics;
                     }
+                    if bar == 1 && row == 1 {
+                        self.cancel();
+                        return Action::Sound;
+                    }
                     if bar == 1 && row == 2 {
                         self.cancel();
                         return Action::Controls;
@@ -230,14 +229,6 @@ impl State {
                     if bar == 1 && row == 3 {
                         self.cancel();
                         return Action::ReimportMedia;
-                    }
-                    if bar == 1 && row == 4 {
-                        self.music = !self.music;
-                        return Action::Music(self.music);
-                    }
-                    if bar == 1 && row == 5 {
-                        self.effects = !self.effects;
-                        return Action::Effects(self.effects);
                     }
                     if let Some(item) = self.items(bar).get(row) {
                         self.toast = Some((
@@ -267,10 +258,6 @@ impl State {
             "Escape" => {
                 self.cancel();
                 Action::None
-            }
-            "m" | "M" => {
-                self.music = !self.music;
-                Action::Music(self.music)
             }
             "Enter" | " " => self.focus.map(|t| self.activate(t)).unwrap_or(Action::None),
             "ArrowDown" | "ArrowUp" if self.open.is_some_and(|bar| !self.items(bar).is_empty()) => {
@@ -359,7 +346,7 @@ pub(crate) struct Sprite {
 }
 pub struct Menu {
     pub state: State,
-    sprites: BTreeMap<String, Sprite>,
+    pub(crate) sprites: BTreeMap<String, Sprite>,
     pub quick_sprites: BTreeMap<String, Sprite>,
     pub pixels: Vec<u8>,
     background: String,
@@ -427,9 +414,7 @@ impl Menu {
             .clone()
             .try_into()
             .map_err(|_| "invalid background palette")?;
-        // Audio already owns the sample buffers. Music defaults on regardless
-        // of that ownership; saved preferences override it later in startup.
-        let mut state = State::new(assets.buttons, true);
+        let mut state = State::new(assets.buttons);
         // Native bar origins are 70, 185 and 76, respectively (FA.EXE 0x4a091a..64).
         state.bar_offset = match background.as_str() {
             "CHOOSEAC.PIC" => -6,
@@ -503,6 +488,8 @@ impl Menu {
         // than MENUFONT.PIC, which smears over the artwork once the canvas is
         // scaled up. Built once here so `render` does not rebuild it a frame.
         sprites.insert("VERSIONFONT".into(), flat_font_large([255, 255, 255]));
+        // Action button labels on dialogs over the menu, such as Sound.
+        sprites.insert("QUICKFONT".into(), flat_font([232, 233, 230]));
         // This is the project logo, not imported retail art. The committed RGBA
         // derivative avoids adding an image decoder to the runtime.
         let badge: &[u8; BADGE_SIZE * BADGE_SIZE * 4] =
@@ -925,59 +912,7 @@ mod tests {
                     label: format!("Activity {i}"),
                 })
                 .collect(),
-            true,
         )
-    }
-    #[test]
-    fn startup_music_survives_audio_ownership_and_saved_off_still_wins() {
-        let mut assets = Assets {
-            creator_options: tore_formats::ui::creator::Options {
-                fields: vec![],
-                targets: vec![],
-            },
-            theater_resources: BTreeMap::new(),
-            pics: ["CHOOSEV.PIC", "QUIKMIS3.PIC"]
-                .into_iter()
-                .map(|name| {
-                    (
-                        name.into(),
-                        tore_formats::Pic {
-                            width: 1,
-                            height: 1,
-                            pixels: vec![0],
-                            mask: vec![true],
-                            palette: vec![[0; 3]; 256],
-                            glyphs: vec![],
-                        },
-                    )
-                })
-                .collect(),
-            buttons: vec![],
-            sounds: [(tore_formats::music::MAIN[0].into(), vec![192, 192])].into(),
-            music_scores: BTreeMap::new(),
-            palette: [[0; 3]; 256],
-        };
-        // Production startup gives audio the PCM buffers before building the menu.
-        let audio_clips = std::mem::take(&mut assets.sounds);
-        assert!(!audio_clips.is_empty());
-        let mut menu = Menu::new(assets, Some("CHOOSEV")).unwrap();
-        assert!(
-            menu.state.music,
-            "a fresh profile must not mute imported menu music"
-        );
-
-        let mut ui = crate::flight_ui::FlightUi::default();
-        let mut instruments = crate::instruments::Instruments::default();
-        let mut saved =
-            crate::preferences::Preferences::capture(&ui, &instruments, &menu.state, true);
-        saved.music = false;
-        let saved = crate::preferences::Preferences::parse(&saved.text()).unwrap();
-        saved.apply(&mut ui, &mut instruments, &mut menu.state);
-        assert!(
-            !menu.state.music,
-            "an explicit saved mute must be preserved"
-        );
-        assert_eq!(menu.state.key("m", false), Action::Music(true));
     }
     #[test]
     fn click_requires_release_on_same_enabled_control() {
@@ -1121,12 +1056,27 @@ mod tests {
         assert_eq!(s.open, None);
     }
     #[test]
-    fn keyboard_skips_disabled_actions_and_toggles_music() {
+    fn keyboard_skips_disabled_actions() {
         let mut s = state();
         for _ in 0..12 {
             s.key("Tab", false);
             assert!(!matches!(s.focus, Some(Target::Button(3 | 6))));
         }
-        assert_eq!(s.key("m", false), Action::Music(false));
+    }
+    #[test]
+    fn pref_lists_sound_and_opens_it() {
+        let mut s = state();
+        s.open = Some(1);
+        assert_eq!(
+            s.items(1),
+            [
+                "Graphics...",
+                "Sound...",
+                "Controls...",
+                "Re-import media..."
+            ]
+        );
+        assert_eq!(s.activate(Target::Item(1)), Action::Sound);
+        assert_eq!(s.open, None);
     }
 }

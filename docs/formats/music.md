@@ -140,8 +140,9 @@ belongs to audio, independent of authoritative 120 Hz simulation. A local xorshi
 RNG chooses phrases; it does not consume simulation RNG. Music uses wall-clock
 audio samples and is not sped up by flight time scaling.
 
-Menu mute and flight pause retain playheads, with no hidden catch-up. In flight,
-Music off also stops the situation choice, and Music on starts a fresh one. UI clicks have a
+Menu music at off and flight pause retain playheads, with no hidden catch-up. In
+flight, the In-Flight music slider at off also stops the situation choice, and
+raising it starts a fresh one. UI clicks have a
 separate bounded voice pool and remain audible while the flight menu is paused.
 Local effects pools permit eight voices each; [spatial effects](../audio.md) have
 a separate sixteen-voice limit. Ordinary playback resolves clips before
@@ -150,10 +151,10 @@ in its callback. Missing selected phrases and exhausted score budgets stop that
 music context; diagnostics are emitted outside the callback, once per scene and
 fault. In flight the selector chooses again 10 game seconds later.
 
-Main-menu M / Pref still controls saved music preference. In-flight Sound still
-controls effects only; a full flight volume/settings mixer remains deferred.
-The [startup preference rule](../spec/menu-music.md) keeps the initial Music
-setting independent of which subsystem owns the imported sample buffers.
+Music loudness follows the [Sound/Music Prefs](../spec/sound-prefs.md) In-Flight
+and Other sliders, from the main menu or the paused flight menu. The
+[startup preference rule](../spec/menu-music.md) keeps the initial music setting
+independent of which subsystem owns the imported sample buffers.
 
 ## In-flight score selection
 

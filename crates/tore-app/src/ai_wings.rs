@@ -863,6 +863,35 @@ impl AiWings {
         &self.mission
     }
 
+    /// The seeker class (2 infrared, 3 radar) of each missile lock an enemy
+    /// holds on the player: its target is the player and its weapon service
+    /// has passed the lock check with a guided store chosen, and is waiting
+    /// out the tracking delay or firing. Read-only, for the RWR warning
+    /// tones (docs/spec/rwr.md#warning-tones).
+    pub fn locks_on_player(&self) -> Vec<u8> {
+        use tore_sim::ai::weapon_service::Phase;
+        self.mission
+            .actors()
+            .iter()
+            .filter(|actor| {
+                actor.alive()
+                    && actor.controller().target() == Some(PLAYER_ID)
+                    && matches!(
+                        actor.controller().weapon_phase(),
+                        Phase::Tracking | Phase::Fire
+                    )
+                    && self
+                        .slot(actor.id())
+                        .is_some_and(|slot| slot.side.is_enemy())
+            })
+            .filter_map(|actor| {
+                let chosen = actor.controller().trace().weapons.as_ref()?.chosen?;
+                let weapon = self.weapons.get(&(actor.id(), chosen.0))?;
+                matches!(weapon.seeker.signature, 2 | 3).then_some(weapon.seeker.signature)
+            })
+            .collect()
+    }
+
     /// Recent B47 deliveries, newest last, as (receiving actor, missile id).
     pub fn threat_reports(&self) -> &[(u32, u32)] {
         &self.threat_reports

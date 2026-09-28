@@ -46,6 +46,14 @@ const ART: &[&str] = &[
     "BODYFONT.PIC",
     "ARMFONT.PIC",
     "SMLFONT.PIC",
+    // The Sound/Music Prefs dialog (sound_screen.rs).
+    "SNDPREF.PIC",
+    "SLIDERV.PIC",
+    "TOGGLE00.PIC",
+    "TOGGLE01.PIC",
+    "TOGGLE02.PIC",
+    "TOGGLE03.PIC",
+    "TOGGLE04.PIC",
 ];
 const DATA: &[&str] = &[
     "CHOOSEAC.DLG",
@@ -54,6 +62,11 @@ const DATA: &[&str] = &[
     "&CLICK.11K",
     "&BUTTON.11K",
     "&TOGGLE1.5K",
+    "&SWITCH.11K",
+    // RWR warning tones (rwr_tone.rs); &RWRMISS.5K is never played.
+    "&RWRLOCK.5K",
+    "&RWRDTCT.5K",
+    "&RWRIR.5K",
 ];
 /// Sanity bounds on the import pack, far above a full Fighters Anthology
 /// import (about 4,100 resources and 180 MB in 2026-09), so a corrupt file is
@@ -187,6 +200,9 @@ impl Assets {
             "&GEARUP.5K",
             "&STALLWR.5K",
             "&STALL.5K",
+            "&RWRLOCK.5K",
+            "&RWRDTCT.5K",
+            "&RWRIR.5K",
             "WIN11.FNT",
             "HUDSYM11.FNT",
             "HUD11.FNT",

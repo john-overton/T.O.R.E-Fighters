@@ -41,10 +41,10 @@ impl Placed {
             target_pitch: 1.,
         }
     }
-    pub fn aim(&mut self, mix: Option<Mix>, pitch: f64) {
+    pub fn aim(&mut self, mix: Option<Mix>, pitch: f64, stereo: Stereo) {
         match mix {
             Some(mix) => {
-                self.target = stereo_gain(mix);
+                self.target = stereo_gain(mix, stereo);
                 self.cutoff = mix.cutoff;
             }
             None => {
@@ -90,8 +90,40 @@ struct LoopVoice {
 /// Loops played at once, loudest first.
 const MAX_LOOPS: usize = 10;
 
+/// The Stereo Separation slider, 0 to 100, and Swap Left/Right Channels,
+/// applied to every positioned sound (docs/spec/sound-prefs.md#stereo).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stereo {
+    pub separation: u8,
+    pub swap: bool,
+}
+impl Default for Stereo {
+    /// Separation 50 leaves every direction as heard.
+    fn default() -> Self {
+        Self {
+            separation: 50,
+            swap: false,
+        }
+    }
+}
+impl Stereo {
+    /// A sound's pan, -1 left to 1 right, after separation and swap. The
+    /// pan's angle from ahead (behind mirrors to the front) is widened by
+    /// `(s - 50) / 16` of itself above 50 and narrowed by `(s - 50) / 50`
+    /// below it, up to hard left or right; 0 is mono.
+    pub fn pan(self, pan: f32) -> f32 {
+        let angle = pan.clamp(-1., 1.).asin().to_degrees();
+        let s = f32::from(self.separation) - 50.;
+        let factor = if s > 0. { s / 16. } else { s / 50. };
+        let pan = (angle + factor * angle).clamp(-90., 90.).to_radians().sin();
+        if self.swap { -pan } else { pan }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Scene {
+    /// Set by the mixer from the Sound/Music Prefs.
+    pub stereo: Stereo,
     field: Field<Arc<Clip>>,
     passes: Passes,
     voices: Vec<SpatialVoice>,
@@ -99,7 +131,10 @@ pub(super) struct Scene {
 }
 impl Scene {
     pub fn clear(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            stereo: self.stereo,
+            ..Self::default()
+        };
     }
     /// This tick's fires and engines, heard from `listener` moving at
     /// `listener_velocity`. The loudest play; the rest, and any that ended,
@@ -158,7 +193,7 @@ impl Scene {
                     gain: 0.,
                     heard: true,
                 });
-                voice.placed.aim(Some(mix), pitch);
+                voice.placed.aim(Some(mix), pitch, self.stereo);
                 voice.gain = mix.gain;
                 voice.heard = true;
             }
@@ -171,6 +206,7 @@ impl Scene {
                     cutoff: voice.placed.cutoff,
                 }),
                 voice.placed.target_pitch,
+                self.stereo,
             );
         }
         self.loops.retain(|_, v| v.heard || !v.placed.silent());
@@ -193,9 +229,9 @@ impl Scene {
             let mix = acoustics::mix(voice.kind, voice.position, listener);
             if mix != voice.mix {
                 voice.mix = mix;
-                voice.target_gain = stereo_gain(mix);
                 voice.filter_rate = 0.;
             }
+            voice.target_gain = stereo_gain(mix, self.stereo);
         }
         for event in emissions.iter().chain(&passes) {
             let name = match event.kind {
@@ -269,8 +305,8 @@ impl Scene {
             position: arrival.position,
             cockpit,
             filtered: 0.,
-            stereo_gain: stereo_gain(arrival.mix),
-            target_gain: stereo_gain(arrival.mix),
+            stereo_gain: stereo_gain(arrival.mix, self.stereo),
+            target_gain: stereo_gain(arrival.mix, self.stereo),
             filter_rate: 0.,
             filter_alpha: 0.,
             gain_smoothing: 0.,
@@ -310,10 +346,11 @@ impl Scene {
         out
     }
 }
-fn stereo_gain(mix: Mix) -> [f32; 2] {
+fn stereo_gain(mix: Mix, stereo: Stereo) -> [f32; 2] {
+    let pan = stereo.pan(mix.pan);
     [
-        mix.gain * ((1. - mix.pan) * 0.5).sqrt(),
-        mix.gain * ((1. + mix.pan) * 0.5).sqrt(),
+        mix.gain * ((1. - pan) * 0.5).sqrt(),
+        mix.gain * ((1. + pan) * 0.5).sqrt(),
     ]
 }
 
