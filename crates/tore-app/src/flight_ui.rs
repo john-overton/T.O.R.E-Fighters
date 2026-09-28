@@ -1,5 +1,7 @@
 //! Desktop input and the imported in-flight menu. Unported commands stay explicit.
-use crate::{hud::Paint, menu::Canvas};
+use crate::hud::Paint;
+use crate::menu::Canvas;
+use crate::pause_menu::{self, Event, Look, PauseMenu};
 use std::time::{Duration, Instant};
 use tore_formats::{font::Font, ui::MenuNode};
 use tore_input::Switch;
@@ -56,6 +58,8 @@ pub enum Command {
     ControlsOpen,
     /// Pref > Sound...: the Sound/Music Prefs screen over the paused flight.
     SoundOpen,
+    /// Pref > Graphics...: the Graphics options screen over the paused flight.
+    GraphicsOpen,
     InstrumentSelect(usize),
     InstrumentCycle(i32),
     InstrumentControl(usize),
@@ -66,7 +70,53 @@ pub enum Command {
     /// Ctrl+B: mark this moment in the mission recording.
     Bookmark,
 }
-type Control = (usize, (i32, i32, i32, i32), String);
+/// The flight menu's bottom buttons, left to right.
+const BUTTONS: [&str; 3] = ["Resume flight", "Restart free flight", "Keyboard shortcuts"];
+/// How flight presents the shared paused menu.
+const LOOK: Look = Look {
+    title: "GAME PAUSED",
+    buttons: &BUTTONS,
+    help: flight_help,
+};
+/// The flight keyboard help: the stock keys, then every shortcut in the
+/// imported menu.
+fn flight_help(tree: &[MenuNode]) -> Vec<String> {
+    let mut lines: Vec<String> = vec![
+        "DESKTOP KEYBOARD COMMANDS - Esc returns".into(),
+        "Arrows: pitch/bank | End/PgDn or Z/X: rudder | 7/8: throttle -/+5%".into(),
+        "1..5: idle/25/50/75/100% | 6: afterburner | Shift-B: burner".into(),
+        "G: gear | F: flaps | B: brake | H: hook | O: bays | E: engine".into(),
+        "Shift-E twice within 2 seconds: eject (release between presses)".into(),
+        "F1 front / F2 back / F3 up / F4 track / F5 inbound missile".into(),
+        "F6 wing / F7 player-target / F8 target-player / F9 fly-by".into(),
+        "F10 external / F12 missile-target / V save Other View".into(),
+        "Alt+view target / Ctrl+view last missile (Alt-F4 exits)".into(),
+        "Shift-arrows look/orbit / Shift-/ or keypad 5 center".into(),
+        "Shift-M: map | M: sensor channel | Shift-U: HUD".into(),
+        "Ctrl-Tab/Ctrl-Shift-Tab: instrument | Ctrl-1..6: slot".into(),
+        "Ctrl-Shift-1..4: stock instrument buttons (T.O.R.E)".into(),
+        "T/Shift-T: radar target | Enter/apostrophe: visual target | Space: fire".into(),
+        "A: heading/altitude | Ctrl-A: waypoint autopilot".into(),
+        "I: infrared | R: radar | Y: contact history | J: own ECM".into(),
+        "N: NAV/ILS mode | W/Shift-W: next/previous waypoint".into(),
+        "Insert: chaff | Delete: flare (keypad 0 and . also work)".into(),
+        "Click a contact to designate it; ; or L clears the designation".into(),
+        "D damage report | Range: Ctrl-Shift-I incoming | Shift-Y target ECM".into(),
+        "[ / ] NAV/weapons | Shift-K jettison".into(),
+        "Tower: Shift-N airport | Shift-L landing | Ctrl-Shift-R/C repeat/cancel".into(),
+        "Wing: Alt-1 straight, 2-5 break, 6-9 approach, E/R/W engage, B bug out".into(),
+        "Alt-T formation | Alt-H/V spacing/stack | Alt-0/Alt-Shift-1..4 address".into(),
+        "Pad: hold Select, RB fire / LB weapon / A target / B clear".into(),
+        "Select+X previous weapon / Y ECM / L3 radar / R3 jettison".into(),
+        "Select+Dpad: up target / down hit / left chaff / right flare".into(),
+        "Select+Start target ECM / Guide incoming; F10 external".into(),
+        "Right-drag: mouse look | Esc > Control: remap any key".into(),
+        "Stock keys shown here; docs/CONTROLS.md lists them all".into(),
+        "SOURCE MENU SHORTCUTS:".into(),
+    ];
+    pause_menu::shortcut_lines(tree, &mut lines);
+    lines
+}
 /// Flight messages: HUD-colored text in the HUD's font and size, with no
 /// background, centered at the bottom of the view, newest at the bottom, each
 /// shown for five seconds, at most seven lines. Opinionated, requested by John
@@ -138,12 +188,8 @@ pub struct FlightUi {
     pub notices: std::collections::VecDeque<(String, Instant)>,
     /// Every message line and what became of it, for the recorder.
     notes: std::collections::VecDeque<(String, Shown)>,
-    pub help: bool,
-    root: usize,
-    path: Vec<usize>,
-    focus: usize,
-    pressed: Option<usize>,
-    help_page: usize,
+    /// Where the Escape menu is: tab, submenu, focus and help pages.
+    pub pause: PauseMenu,
     /// The HUD bank scale's gyro; a new flight starts it at the aircraft's bank.
     pub bank_gyro: crate::hud::BankGyro,
 }
@@ -165,12 +211,7 @@ impl Default for FlightUi {
             time_scale: 1.,
             notices: Default::default(),
             notes: Default::default(),
-            help: false,
-            root: 0,
-            path: vec![],
-            focus: 0,
-            pressed: None,
-            help_page: 0,
+            pause: PauseMenu::default(),
             bank_gyro: Default::default(),
         }
     }
@@ -254,7 +295,7 @@ impl FlightUi {
     }
     pub fn cancel_press(&mut self) {
         self.map.cancel_press();
-        self.pressed = None;
+        self.pause.cancel_press();
     }
     pub fn message(&mut self, text: impl Into<String>) {
         let text = text.into();
@@ -294,13 +335,6 @@ impl FlightUi {
         self.message(format!("{label}: not implemented yet"));
         Command::Click
     }
-    fn rows<'a>(&self, tree: &'a [MenuNode]) -> &'a [MenuNode] {
-        let mut rows = &tree[self.root].children[..];
-        for &index in &self.path {
-            rows = &rows[index].children;
-        }
-        rows
-    }
     pub fn activate(&mut self, label: &str, shortcut: &str) -> Command {
         if let Some(view) = crate::flight_views::key(shortcut) {
             return Command::View(view);
@@ -316,8 +350,7 @@ impl FlightUi {
             "End mission" => Command::End,
             "Exit to Windows" => Command::Exit,
             "Keyboard shortcuts" => {
-                self.help = true;
-                self.help_page = 0;
+                self.pause.open_help();
                 Command::Click
             }
             "Paused" => {
@@ -407,6 +440,7 @@ impl FlightUi {
                 Command::Click
             }
             "Sound..." => Command::SoundOpen,
+            "Graphics..." => Command::GraphicsOpen,
             "1x" | "2x" | "4x" | "8x" | "Slow-motion" => {
                 self.time_scale = match label {
                     "2x" => 2.,
@@ -434,21 +468,26 @@ impl FlightUi {
         }
     }
     fn select(&mut self, tree: &[MenuNode], index: usize) -> Command {
-        self.focus = index;
-        let rows = self.rows(tree);
-        if index >= rows.len() {
+        let Some(node) = self.pause.focus_row(tree, index) else {
             return Command::None;
-        }
-        let node = &rows[index];
+        };
         if node.label == "Controls" || node.label == "Controls..." {
             return Command::ControlsOpen;
         }
         if !node.children.is_empty() {
-            self.path.push(index);
-            self.focus = 0;
+            self.pause.enter(index);
             Command::Click
         } else {
             self.activate(&node.label, &node.shortcut)
+        }
+    }
+    /// The menu is showing tab `index`: the Control tab opens the controls
+    /// screen.
+    fn switched(tree: &[MenuNode], index: usize) -> Command {
+        if tree[index].label == "Control" {
+            Command::ControlsOpen
+        } else {
+            Command::None
         }
     }
     pub fn key(
@@ -487,13 +526,7 @@ impl FlightUi {
             }
         }
         if key == "Escape" {
-            self.pressed = None;
-            if self.help {
-                self.help = false;
-            } else if !self.path.is_empty() {
-                self.path.pop();
-                self.focus = 0;
-            } else {
+            if !self.pause.back() {
                 self.menu = !self.menu;
             }
             return Command::None;
@@ -505,43 +538,11 @@ impl FlightUi {
             return self.activate("End mission", "");
         }
         if self.menu {
-            if self.help {
-                if matches!(key, "ArrowRight" | "PageDown" | "Space" | "Enter") {
-                    self.help_page += 1;
-                }
-                if matches!(key, "ArrowLeft" | "PageUp") {
-                    self.help_page = self.help_page.saturating_sub(1);
-                }
-                return Command::None;
-            }
-            let len = self.rows(tree).len();
-            match key {
-                "ArrowDown" | "Tab" => self.focus = (self.focus + 1) % len,
-                "ArrowUp" => self.focus = (self.focus + len - 1) % len,
-                "ArrowRight" => {
-                    if !self.rows(tree)[self.focus].children.is_empty() {
-                        return self.select(tree, self.focus);
-                    }
-                    self.root = (self.root + 1) % tree.len();
-                    self.path.clear();
-                    self.focus = 0;
-                    if tree[self.root].label == "Control" {
-                        return Command::ControlsOpen;
-                    }
-                }
-                "ArrowLeft" => {
-                    if self.path.pop().is_none() {
-                        self.root = (self.root + tree.len() - 1) % tree.len();
-                    }
-                    self.focus = 0;
-                    if self.path.is_empty() && tree[self.root].label == "Control" {
-                        return Command::ControlsOpen;
-                    }
-                }
-                "Enter" | "Space" => return self.select(tree, self.focus),
-                _ => {}
-            }
-            return Command::None;
+            return match self.pause.key(key, tree) {
+                Event::Select(index) => self.select(tree, index),
+                Event::Switched(index) => Self::switched(tree, index),
+                _ => Command::None,
+            };
         }
         if alt && !ctrl && !shift && key == "F4" {
             return Command::Exit;
@@ -725,7 +726,7 @@ impl FlightUi {
             "Numpad5" => Command::CenterLook,
             "F11" => {
                 self.menu = true;
-                self.help = true;
+                self.pause.help = true;
                 Command::None
             }
             "d" => Command::DamageReport,
@@ -750,202 +751,35 @@ impl FlightUi {
             _ => Command::None,
         }
     }
+    /// The menu's controls as drawn, for tests.
+    #[cfg(test)]
+    fn controls(&self, tree: &[MenuNode]) -> Vec<pause_menu::Control> {
+        self.pause
+            .controls(tree, &BUTTONS, &|label| self.cheat_state(label))
+    }
     /// The controls screen closed; the flight menu reopens at its first tab.
     pub fn controls_closed(&mut self) {
-        self.root = 0;
-        self.path.clear();
-        self.focus = 0;
-    }
-    // Top buttons, source rows and development session actions share hit/render geometry.
-    fn controls(&self, tree: &[MenuNode]) -> Vec<Control> {
-        let mut out = vec![];
-        if self.help {
-            return vec![
-                (300, (480, 430, 140, 24), "Next page / Enter".into()),
-                (301, (20, 430, 140, 24), "Back / Escape".into()),
-            ];
-        }
-        let mut x = 4;
-        for (i, n) in tree.iter().enumerate() {
-            let w = n.label.len() as i32 * 7 + 16;
-            out.push((100 + i, (x, 2, w, 22), n.label.clone()));
-            x += w;
-        }
-        let rows = self.rows(tree);
-        for (i, n) in rows.iter().enumerate() {
-            let label = if n.label == "Exit to Windows" {
-                "Exit to Desktop"
-            } else {
-                &n.label
-            };
-            out.push((
-                i,
-                (142, 50 + i as i32 * 19, 356, 19),
-                format!(
-                    "{label}  {}{}",
-                    self.cheat_state(&n.label).unwrap_or(&n.shortcut),
-                    if n.children.is_empty() { "" } else { " >" }
-                ),
-            ));
-        }
-        for (i, label) in ["Resume flight", "Restart free flight", "Keyboard shortcuts"]
-            .iter()
-            .enumerate()
-        {
-            out.push((
-                200 + i,
-                (10 + i as i32 * 210, 448, 200, 23),
-                (*label).into(),
-            ));
-        }
-        out
+        self.pause.show_tab(0);
     }
     pub fn pointer(&mut self, tree: &[MenuNode], point: Option<(f64, f64)>, down: bool) -> Command {
-        let hit = point.and_then(|(x, y)| {
-            self.controls(tree)
-                .into_iter()
-                .find_map(|(id, (rx, ry, w, h), _)| {
-                    ((rx as f64..(rx + w) as f64).contains(&x)
-                        && (ry as f64..(ry + h) as f64).contains(&y))
-                    .then_some(id)
-                })
-        });
-        if down {
-            self.pressed = hit;
-            return Command::None;
-        }
-        let pressed = self.pressed.take();
-        if hit != pressed {
-            return Command::None;
-        }
-        match hit {
-            Some(300) => {
-                self.help_page += 1;
-                Command::Click
-            }
-            Some(301) => {
-                self.help = false;
-                Command::Click
-            }
-            Some(id) if id >= 200 => self.activate(
-                ["Resume flight", "Restart free flight", "Keyboard shortcuts"][id - 200],
-                "",
-            ),
-            Some(id) if id >= 100 => {
-                if tree[id - 100].label == "Control" {
+        match self.pause.pointer(tree, &LOOK, point, down) {
+            Event::None | Event::Switched(_) => Command::None,
+            Event::Click => Command::Click,
+            Event::Button(index) => self.activate(BUTTONS[index], ""),
+            Event::Tab(index) => {
+                if tree[index].label == "Control" {
                     return Command::ControlsOpen;
                 }
-                self.root = id - 100;
-                self.path.clear();
-                self.focus = 0;
+                self.pause.show_tab(index);
                 Command::Click
             }
-            Some(id) => self.select(tree, id),
-            None => Command::None,
+            Event::Select(index) => self.select(tree, index),
         }
     }
     pub fn draw(&mut self, pixels: &mut [u8], font: &Font, tree: &[MenuNode]) {
         if self.menu {
-            Canvas(pixels).rect((0, 0, 640, 26), [200, 207, 219, 255]);
-            if self.help {
-                Canvas(pixels).rect((10, 40, 620, 398), [24, 34, 45, 255]);
-                let mut lines: Vec<String> = vec![
-                    "DESKTOP KEYBOARD COMMANDS - Esc returns".into(),
-                    "Arrows: pitch/bank | End/PgDn or Z/X: rudder | 7/8: throttle -/+5%".into(),
-                    "1..5: idle/25/50/75/100% | 6: afterburner | Shift-B: burner".into(),
-                    "G: gear | F: flaps | B: brake | H: hook | O: bays | E: engine".into(),
-                    "Shift-E twice within 2 seconds: eject (release between presses)".into(),
-                    "F1 front / F2 back / F3 up / F4 track / F5 inbound missile".into(),
-                    "F6 wing / F7 player-target / F8 target-player / F9 fly-by".into(),
-                    "F10 external / F12 missile-target / V save Other View".into(),
-                    "Alt+view target / Ctrl+view last missile (Alt-F4 exits)".into(),
-                    "Shift-arrows look/orbit / Shift-/ or keypad 5 center".into(),
-                    "Shift-M: map | M: sensor channel | Shift-U: HUD".into(),
-                    "Ctrl-Tab/Ctrl-Shift-Tab: instrument | Ctrl-1..6: slot".into(),
-                    "Ctrl-Shift-1..4: stock instrument buttons (T.O.R.E)".into(),
-                    "T/Shift-T: radar target | Enter/apostrophe: visual target | Space: fire"
-                        .into(),
-                    "A: heading/altitude | Ctrl-A: waypoint autopilot".into(),
-                    "I: infrared | R: radar | Y: contact history | J: own ECM".into(),
-                    "N: NAV/ILS mode | W/Shift-W: next/previous waypoint".into(),
-                    "Insert: chaff | Delete: flare (keypad 0 and . also work)".into(),
-                    "Click a contact to designate it; ; or L clears the designation".into(),
-                    "D damage report | Range: Ctrl-Shift-I incoming | Shift-Y target ECM".into(),
-                    "[ / ] NAV/weapons | Shift-K jettison".into(),
-                    "Tower: Shift-N airport | Shift-L landing | Ctrl-Shift-R/C repeat/cancel"
-                        .into(),
-                    "Wing: Alt-1 straight, 2-5 break, 6-9 approach, E/R/W engage, B bug out".into(),
-                    "Alt-T formation | Alt-H/V spacing/stack | Alt-0/Alt-Shift-1..4 address".into(),
-                    "Pad: hold Select, RB fire / LB weapon / A target / B clear".into(),
-                    "Select+X previous weapon / Y ECM / L3 radar / R3 jettison".into(),
-                    "Select+Dpad: up target / down hit / left chaff / right flare".into(),
-                    "Select+Start target ECM / Guide incoming; F10 external".into(),
-                    "Right-drag: mouse look | Esc > Control: remap any key".into(),
-                    "Stock keys shown here; docs/CONTROLS.md lists them all".into(),
-                    "SOURCE MENU SHORTCUTS:".into(),
-                ];
-                fn add(tree: &[MenuNode], lines: &mut Vec<String>) {
-                    for n in tree {
-                        if !n.shortcut.is_empty() {
-                            lines.push(format!("{}: {}", n.shortcut, n.label));
-                        }
-                        add(&n.children, lines);
-                    }
-                }
-                add(tree, &mut lines);
-                let pages = lines.len().div_ceil(23);
-                let start = (self.help_page % pages) * 23;
-                let mut p = Paint {
-                    pixels,
-                    clip: (16, 44, 608, 390),
-                    color: [223, 233, 240, 255],
-                };
-                for (i, line) in lines.iter().skip(start).take(23).enumerate() {
-                    p.text(font, line, 20, 50 + i as i32 * 16);
-                }
-            } else {
-                Canvas(pixels).rect(
-                    (138, 28, 364, 22 + self.rows(tree).len() as i32 * 19),
-                    [160, 172, 186, 255],
-                );
-                let mut p = Paint {
-                    pixels,
-                    clip: (0, 0, 640, 480),
-                    color: [15, 30, 50, 255],
-                };
-                p.text(
-                    font,
-                    if self.path.is_empty() {
-                        "GAME PAUSED"
-                    } else {
-                        "SUBMENU - Left / Escape to go back"
-                    },
-                    146,
-                    34,
-                );
-            }
-            for (id, r, label) in self.controls(tree) {
-                let selected = (!self.help && (id == self.focus || id == 100 + self.root))
-                    || self.pressed == Some(id);
-                Canvas(pixels).rect(
-                    r,
-                    if selected {
-                        [62, 86, 118, 255]
-                    } else {
-                        [201, 210, 222, 255]
-                    },
-                );
-                let mut p = Paint {
-                    pixels,
-                    clip: r,
-                    color: if selected {
-                        [247, 250, 255, 255]
-                    } else {
-                        [20, 39, 65, 255]
-                    },
-                };
-                p.text(font, &label, r.0 + 5, r.1 + 6);
-            }
+            self.pause
+                .draw(pixels, font, tree, &LOOK, &|label| self.cheat_state(label));
         } else if self.paused {
             Canvas(pixels).rect((222, 35, 196, 22), [20, 30, 40, 230]);
             Paint {
@@ -1223,7 +1057,7 @@ mod tests {
         assert_eq!(ui.key("v", false, false, false, &[]), Command::StoreView);
         assert_eq!(ui.activate("Current", ""), Command::Panel(1));
         ui.key("F11", false, false, false, &[]);
-        assert!(ui.help && ui.menu);
+        assert!(ui.pause.help && ui.menu);
         assert_eq!(ui.key("F7", false, false, false, &[]), Command::None);
     }
     #[test]
@@ -1555,7 +1389,7 @@ mod tests {
         );
         u.controls_closed();
         assert!(u.menu);
-        assert_eq!(u.root, 0);
+        assert_eq!(u.pause.root, 0);
         assert_eq!(t[1].children[0].label, "Keyboard");
     }
     #[test]
@@ -1609,9 +1443,9 @@ mod tests {
         u.key("Escape", false, false, false, &tree);
         u.key("ArrowDown", false, false, false, &tree);
         u.key("Enter", false, false, false, &tree);
-        assert_eq!(u.path, vec![1]);
+        assert_eq!(u.pause.path, vec![1]);
         u.key("Escape", false, false, false, &tree);
-        assert!(u.menu && u.path.is_empty());
+        assert!(u.menu && u.pause.path.is_empty());
         u.key("p", false, true, false, &tree);
         assert!(!u.frozen());
         assert_eq!(

@@ -1024,7 +1024,11 @@ cannot be rebound yet, and profiles do not change them.
   length.
 - **Screenshots:** H hides the whole interface and the pointer while playback
   and camera keys keep working. P saves the view without the interface as a
-  PNG. Esc shows a hidden interface, otherwise returns to the Replays screen.
+  PNG.
+- **Pause menu:** Esc opens flight's Escape menu over the replay, pausing it;
+  the arrows, Tab, Enter, Space and clicks work it as in flight, and Esc at
+  its top level plays on as before. See
+  [the pause menu](REPLAYS.md#pause-menu).
 
 As in flight, letters are read by their physical key and the keypad works as
 the navigation keys whatever NumLock says. Alt+Enter, Alt+F4 and, on macOS,

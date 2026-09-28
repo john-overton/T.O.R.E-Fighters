@@ -20,6 +20,7 @@ pub mod library;
 pub mod live;
 pub mod overlay;
 pub mod panels;
+pub mod pause;
 pub mod playback;
 pub mod png;
 pub mod recorder;

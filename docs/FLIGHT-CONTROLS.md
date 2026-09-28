@@ -136,6 +136,8 @@ The runtime reads **? / Control / Pref / View / Window / Cheat / Multi / Pos**, 
 
 The menu pauses flight and engine loops. Focus loss pauses and clears held controls; resume explicitly with Ctrl-P or the menu. Closing the menu preserves a pre-existing explicit/focus pause. Opening menus never advances a hidden backlog of simulation time.
 
+**Escape → Pref → Graphics...** opens the Graphics options screen over the paused flight, and **Sound...** the retail Sound/Music Prefs dialog; closing either returns to the menu. Graphics changes apply to the view at once. The menu's tabs, rows, bottom buttons and keyboard help are drawn by a widget the [replay viewer's pause menu](REPLAYS.md#pause-menu) shares (`pause_menu.rs`); flight keeps its own rows, actions and help text.
+
 **Escape → Pref → Weapon diagnostics?** shows or hides the upper-right weapon diagnostic panel: launch mode, seeker status, RELEASE LOCK, range, closure, estimated flight time, target aspect and the three most recent guided shots. It is off by default, reads On or Off beside the row, shows a short "Weapon diagnostics: on/off" message and is saved with the other flight preferences. With it off, the large layout's top-right instrument sits in its normal corner and the panel's click areas do nothing. The row is an authored addition after the retail Pref rows, not part of `FMENUD.MNU`; opinionated, requested by John on 2026-09-23 (the label and On/Off readout are agent choices). `--weapon-diagnostics` starts a launch with it shown, including captures.
 
 **Escape → Pref → Debug panels?** turns on the debugging aids of the
