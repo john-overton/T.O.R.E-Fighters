@@ -214,8 +214,15 @@ pub struct SearchContact {
 
 /// Perceived missile defense resolved by the shared defensive policy. It
 /// contains no hidden target or launcher information.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DefenseSource {
+    Missile,
+    IncomingFire,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MissileDefense {
+pub struct DefenseMotion {
+    pub source: DefenseSource,
     pub heading_deg: f64,
     pub pitch_deg: f64,
 }
@@ -629,6 +636,7 @@ impl Activity {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct IntentBatch {
     pub motion: Option<MotionIntent>,
+    pub gun_aim: Option<super::gunnery::Aim>,
     pub sensor: SensorIntent,
     pub weapons: Vec<WeaponIntent>,
     pub devices: Option<DeviceIntent>,
@@ -709,6 +717,11 @@ pub struct Controller {
     experience: ResolvedExperience,
     random: DecisionRandom,
     service: weapon_service::WeaponService,
+    gun_views: Vec<super::gunnery::View>,
+    gun_cycles: std::collections::BTreeMap<u8, super::gunnery::Cycle>,
+    gun_phase: Option<weapon_service::Phase>,
+    damage_recovery: bool,
+    gun_tracking: Option<super::gunnery::View>,
     variation: FormationVariation,
     smooth_variation: [f64; 3],
     variation_tick: Option<u64>,
@@ -734,7 +747,7 @@ pub struct Controller {
     search_started_tick: Option<u64>,
     search_orbit_altitude_ft: Option<f64>,
     completed_search: Option<SearchContact>,
-    missile_defense: Option<MissileDefense>,
+    defense_motion: Option<DefenseMotion>,
     defense_motion_id: Option<u64>,
     mission_target: Option<Option<u32>>,
     mission_rejoin: Option<[f64; 3]>,
@@ -805,11 +818,11 @@ impl Controller {
         self.mission_rejoin = point;
     }
 
-    /// Survival maneuvers are driven by perceived missile records. Entering
+    /// Survival maneuvers are driven by perceived missile or incoming-fire evidence. Entering
     /// or leaving defense invalidates a previous tactic, without losing the
     /// independently observed offensive target or the aircraft's memory.
-    pub fn set_missile_defense(&mut self, defense: Option<MissileDefense>) {
-        if self.missile_defense.is_some() != defense.is_some() {
+    pub fn set_defense_motion(&mut self, defense: Option<DefenseMotion>) {
+        if self.defense_motion.is_some() != defense.is_some() {
             self.active = None;
             self.pursuit = None;
             self.search_started_tick = None;
@@ -817,7 +830,7 @@ impl Controller {
             self.defense_motion_id = None;
             self.next_choice_quarters = 0;
         }
-        self.missile_defense = defense;
+        self.defense_motion = defense;
     }
 
     /// Supply the remembered contact to investigate. This record is frozen:
@@ -868,6 +881,11 @@ impl Controller {
             ));
         }
         Ok(Self {
+            gun_views: Vec::new(),
+            gun_cycles: Default::default(),
+            gun_phase: None,
+            damage_recovery: false,
+            gun_tracking: None,
             identity,
             profile,
             experience,
@@ -918,7 +936,7 @@ impl Controller {
             search_started_tick: None,
             search_orbit_altitude_ft: None,
             completed_search: None,
-            missile_defense: None,
+            defense_motion: None,
             defense_motion_id: None,
             mission_target: None,
             mission_rejoin: None,
@@ -976,12 +994,28 @@ impl Controller {
 
     /// The weapon service's current phase (B42).
     pub fn weapon_phase(&self) -> weapon_service::Phase {
-        self.service.phase()
+        self.gun_phase.unwrap_or(self.service.phase())
+    }
+
+    pub fn set_damage_recovery(&mut self, recovery: bool) {
+        self.damage_recovery = recovery;
+    }
+
+    pub fn set_gun_views(&mut self, views: Vec<super::gunnery::View>) {
+        self.gun_views = views;
     }
 
     /// The weapon service's pending deadline, in quarter-second counts.
     pub fn weapon_deadline(&self) -> Option<u64> {
-        self.service.deadline()
+        if self.gun_phase.is_some() {
+            let gun = self.gun_tracking?;
+            self.gun_cycles
+                .get(&gun.station.0)?
+                .deadline(self.last_tick?)
+                .map(|tick| tick / 30)
+        } else {
+            self.service.deadline()
+        }
     }
 
     /// The maneuver being flown, if any.
@@ -1097,7 +1131,7 @@ impl Controller {
         // 6. Motion. An active maneuver runs to its completion rule before a
         //    new tactic is chosen (B13), except when a higher reason restarts
         //    the script.
-        if let Some(defense) = self.missile_defense {
+        if let Some(defense) = self.defense_motion {
             let id = *self.defense_motion_id.get_or_insert_with(|| {
                 let id = self.next_motion_id;
                 self.next_motion_id += 1;
@@ -1126,10 +1160,30 @@ impl Controller {
                 afterburner: false,
             });
             batch.activity = Some(Activity::Defending);
-            self.trace.0.motion.branch = MotionBranch::MissileDefense {
-                heading_deg: defense.heading_deg,
-                pitch_deg: defense.pitch_deg,
+            self.trace.0.motion.branch = if defense.source == DefenseSource::IncomingFire {
+                MotionBranch::IncomingFire {
+                    heading_deg: defense.heading_deg,
+                    pitch_deg: defense.pitch_deg,
+                }
+            } else {
+                MotionBranch::MissileDefense {
+                    heading_deg: defense.heading_deg,
+                    pitch_deg: defense.pitch_deg,
+                }
             };
+        } else if self.damage_recovery {
+            let request = MotionRequest::new(
+                self.home_heading(frame, frame.own.heading_deg.round() as i32),
+                PitchRequest::Explicit(0),
+                Bank::Unconstrained,
+                SpeedRequest::Explicit(ScalarSpeed(
+                    (frame.own.limits.minimum.0 * 1.6).min(frame.own.limits.maximum.0),
+                )),
+                Duration::Timed(1),
+            );
+            batch.motion = Some(self.resolve(frame, clock, request, None, None, &mut batch)?);
+            batch.activity = Some(Activity::ReturningToBase);
+            self.trace.0.motion.branch = MotionBranch::DamageRecovery;
         } else if let Some(point) = self.mission_rejoin.filter(|_| !recovering) {
             let delta = std::array::from_fn::<_, 3, _>(|i| point[i] - frame.own.position[i]);
             let heading = delta[0].atan2(delta[2]).to_degrees();
@@ -1172,6 +1226,64 @@ impl Controller {
             batch.activity = Some(Activity::Searching);
             self.trace.0.motion.branch = MotionBranch::SearchBearing {
                 bearing_deg: bearing,
+            };
+        } else if !recovering
+            && !self.active.is_some_and(|a| a.ordered)
+            && view.is_some()
+            && let Some(gun) = self.gun_tracking
+            && let Some(solution) = gun.solution
+        {
+            let direction = solution.aim.direction;
+            let heading = direction[0]
+                .atan2(direction[2])
+                .to_degrees()
+                .rem_euclid(360.);
+            let pitch = direction[1]
+                .atan2(direction[0].hypot(direction[2]))
+                .to_degrees()
+                - frame.own.body_pitch_offset_deg;
+            let speed = (gun.target_speed + (solution.range_ft - 1500.) / 10.).clamp(
+                (frame.own.limits.minimum.0 * 1.25).min(frame.own.limits.maximum.0),
+                frame.own.limits.maximum.0,
+            );
+            let id = *self.defense_motion_id.get_or_insert_with(|| {
+                let id = self.next_motion_id;
+                self.next_motion_id += 1;
+                id
+            });
+            let request = MotionRequest::new(
+                heading.round() as i32,
+                PitchRequest::Explicit(pitch.round() as i32),
+                Bank::Unconstrained,
+                SpeedRequest::Explicit(ScalarSpeed(speed)),
+                Duration::Timed(1),
+            );
+            batch.motion = Some(MotionIntent {
+                id,
+                request,
+                heading_deg: heading,
+                flight_path_pitch_deg: pitch,
+                speed: ScalarSpeed(speed),
+                bank: Bank::Unconstrained,
+                completion: Completion::Deadline(
+                    motion::deadline_for(Duration::Timed(1), clock).expect("timed gun tracking"),
+                ),
+                steering_point: None,
+                mode: CommandMode::OtherState,
+                formation_flight: false,
+                afterburner: false,
+            });
+            batch.gun_aim = Some(solution.aim);
+            batch.activity = Some(if self.gun_phase == Some(weapon_service::Phase::Fire) {
+                Activity::Attacking
+            } else if solution.aligned {
+                Activity::Pursuing
+            } else {
+                Activity::Acquiring
+            });
+            self.trace.0.motion.branch = MotionBranch::GunTracking {
+                heading_deg: heading,
+                pitch_deg: pitch,
             };
         } else {
             self.motion(
@@ -1649,6 +1761,124 @@ impl Controller {
         };
         let mut stations = Vec::new();
         let station = self.choose_station(frame, class, target, batch, &mut stations);
+        let chosen_gun = station
+            .and_then(|i| {
+                self.gun_views
+                    .iter()
+                    .find(|g| g.station == frame.stations[i].station)
+            })
+            .copied();
+        self.gun_tracking = (station.is_none() || chosen_gun.is_some())
+            .then(|| {
+                self.gun_views
+                    .iter()
+                    .find(|g| {
+                        g.target == target.map(|t| t.id)
+                            && g.target.is_some()
+                            && g.solution.is_some()
+                            && frame.stations.iter().any(|s| {
+                                s.station == g.station
+                                    && target.is_some_and(|t| {
+                                        matches!(
+                                            s.verdict(&frame.own, &t, class),
+                                            StationVerdict::Usable { .. }
+                                                | StationVerdict::OutsideEnvelope
+                                        )
+                                    })
+                                    && !s.inhibited
+                                    && !matches!(s.rounds, weapon_service::Rounds::Finite(0))
+                                    && g.solution.is_some_and(|p| {
+                                        p.range_ft >= s.minimum_range_ft
+                                            && s.maximum_range_ft.is_none_or(|m| p.range_ft <= m)
+                                    })
+                            })
+                    })
+                    .copied()
+            })
+            .flatten();
+        if self.recipient.target_order == Some(wing::TargetOrder::HoldFire) {
+            self.gun_tracking = None;
+        }
+        for (id, cycle) in &mut self.gun_cycles {
+            if chosen_gun.is_none_or(|g| g.station.0 != *id) {
+                cycle.advance(frame.tick, None, false, 1, 1);
+            }
+        }
+        self.gun_phase = None;
+        self.trace.0.gun = self.gun_tracking.map(|view| {
+            let cycle = self.gun_cycles.entry(view.station.0).or_default();
+            super::gunnery::Trace {
+                view,
+                phase: cycle.phase(frame.tick),
+                deadline: cycle.deadline(frame.tick),
+                requested_round: false,
+            }
+        });
+        if let Some(gun) = chosen_gun {
+            let ready = !(self.recipient.target_order == Some(wing::TargetOrder::HoldFire))
+                && gun.target == target.map(|t| t.id)
+                && gun.solution.is_some_and(|s| s.aligned)
+                && target.is_some_and(|t| !t.terrain_blocked);
+            let cycle = self.gun_cycles.entry(gun.station.0).or_default();
+            let fired = cycle.advance(frame.tick, gun.target, ready, gun.rounds, gun.period_ticks);
+            let phase = cycle.phase(frame.tick);
+            let deadline = cycle.deadline(frame.tick);
+            self.gun_phase = Some(phase);
+            let inputs = ServiceInputs {
+                target: target.map(|t| WeaponTargetId(t.id)),
+                station: Some(gun.station),
+                unready: false,
+                lock: if ready {
+                    LockStatus::Locked {
+                        tracking_delay: Delay::quarters(0),
+                    }
+                } else {
+                    LockStatus::Failed
+                },
+                path_blocked: target.is_some_and(|t| t.terrain_blocked),
+                pacing: frame.stations[station.unwrap()].pacing,
+            };
+            let outcome = if fired {
+                let request = weapon_service::FireRequest {
+                    actor: self.identity.actor,
+                    station: gun.station,
+                    target: WeaponTargetId(gun.target.unwrap()),
+                    request_id: weapon_service::RequestId(self.next_request_id),
+                };
+                self.next_request_id += 1;
+                batch.weapons.push(WeaponIntent { request });
+                batch.activity = Some(Activity::Attacking);
+                ServiceOutcome::Fire(request)
+            } else {
+                ServiceOutcome::Waiting(phase)
+            };
+            self.trace.0.gun = Some(super::gunnery::Trace {
+                view: gun,
+                phase,
+                deadline,
+                requested_round: fired,
+            });
+            self.trace.0.weapons = Some(WeaponTrace {
+                class,
+                stations,
+                chosen: Some(gun.station),
+                lock: LockTrace {
+                    locked: ready,
+                    has_target: target.is_some(),
+                    has_station: true,
+                    target_ahead: geometry.and_then(|g| g.angles).map(|a| a.ahead),
+                    terrain_blocked: inputs.path_blocked,
+                },
+                inputs,
+                phase_before: phase,
+                outcome: Some(outcome),
+                burst_pacing_restart: false,
+                phase_after: phase,
+                deadline: deadline.map(|tick| tick / 30),
+            });
+            return Ok(ready);
+        }
+
         let angles = geometry.and_then(|g| g.angles);
         let locked = target.is_some()
             && station.is_some()

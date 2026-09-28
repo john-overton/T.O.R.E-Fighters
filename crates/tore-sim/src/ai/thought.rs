@@ -92,6 +92,7 @@ pub struct ControllerTrace {
     pub geometry: Option<TargetGeometry>,
     /// Store choice, lock and the weapon service (B42, B45).
     pub weapons: Option<WeaponTrace>,
+    pub gun: Option<super::gunnery::Trace>,
     /// Which motion branch produced this tick's maneuver.
     pub motion: MotionTrace,
     /// The tactical choice, when a new maneuver was chosen this tick.
@@ -310,14 +311,30 @@ pub struct MotionTrace {
 /// controller tries them.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum MotionBranch {
+    DamageRecovery,
+    GunTracking {
+        heading_deg: f64,
+        pitch_deg: f64,
+    },
     #[default]
     None,
     /// The shared missile-defense policy is flying the aircraft.
-    MissileDefense { heading_deg: f64, pitch_deg: f64 },
+    MissileDefense {
+        heading_deg: f64,
+        pitch_deg: f64,
+    },
+    IncomingFire {
+        heading_deg: f64,
+        pitch_deg: f64,
+    },
     /// Flying back toward an escorted aircraft or a patrol region.
-    MissionRejoin { point: [f64; 3] },
+    MissionRejoin {
+        point: [f64; 3],
+    },
     /// Searching along a bearing an escort was given.
-    SearchBearing { bearing_deg: f64 },
+    SearchBearing {
+        bearing_deg: f64,
+    },
     /// An ordered approach is still closing on its target.
     OrderedApproach {
         target: u32,
@@ -334,7 +351,9 @@ pub enum MotionBranch {
         orbiting: bool,
     },
     /// An Ace gave up a search after two minutes.
-    SearchAbandoned { contact: SearchContact },
+    SearchAbandoned {
+        contact: SearchContact,
+    },
     /// Flying the formation slot.
     Formation(FormationTrace),
     /// The running maneuver continues until its completion rule fires.
@@ -471,6 +490,11 @@ pub struct ActiveManeuverView {
 /// What the mission runtime decided for one actor on its latest step.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ActorTrace {
+    pub damage: super::damage::Trace,
+    pub lookout: Option<super::awareness::Lookout>,
+    pub visual: Vec<super::awareness::VisualTrace>,
+    pub observation_sources: Vec<(u32, super::awareness::SourceTimestamps)>,
+    pub fire: super::incoming_fire::Trace,
     /// The mission tick this record describes; `None` before the first step.
     pub tick: Option<u64>,
     pub path: ActorPath,
@@ -513,6 +537,7 @@ impl ActorTrace {
 /// Which way through the mission step the actor went.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ActorPath {
+    DamageHold,
     #[default]
     NotRun,
     /// Destroyed, or the pilot has ejected: nothing flies.
@@ -665,6 +690,8 @@ pub enum Message {
     /// A neutral AI leader released itself to free target selection after a
     /// perceived attack on its wing or a charge.
     FreeSelection { trigger: ObservedAttack },
+    /// A current hostile contact permitted by the leader's mission.
+    ContactSelection { target: u32 },
     /// A wing command over the wing channel (B43, B46). Boxed: a landing
     /// order carries the airport's anchor points.
     WingRequest(Box<WingRequest>),

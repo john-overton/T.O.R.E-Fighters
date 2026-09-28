@@ -146,11 +146,62 @@ their hit points run out.
   as a wreck, and the kill goes to its last attacker as the
   [debrief](debrief.md#kills) describes.
 
-**Agent decisions, fitted:** AI pilots do not yet react to their faults. A
-wounded AI pilot does not head home, and an AI aircraft does not throttle back
-for a damaged compressor or oil pump. That is AI behaviour work for a later
-task. An AI aircraft's fault thresholds use its hit points, while the player's
-use twice the hit points, following the existing damage capacities.
+### AI pilot response to faults
+
+Requested by John on 2026-09-28. The decisions below are agent-authored,
+**fitted** responses to the existing component model. Original AI fault-response
+thresholds and procedures are unknown. No hit points, fault probabilities or
+failure progression change: AI milestones still use AI hit points, and the
+player uses twice the aircraft hit points. Dummy and straight-flight fixtures
+continue ignoring all faults in their fixed-course movement and decisions.
+
+- An active pilot wound, fuel leak/feed failure, engine damage or shutdown,
+  compressor fault, oil/hydraulic failure, damaged flight controls, jammed
+  throttle, wing damage or weakened structure ends offensive engagement.
+  The aircraft returns to its known home runway using the existing landing
+  sequence. An existing landing remains valid. This decision stays committed
+  through transient defense, later formation/attack orders and wound treatment.
+  A new explicit landing destination is still accepted. Without a runway it
+  heads toward the known home position; without either, it holds a level heading
+  and reports that no recovery destination is known. No destination is invented.
+- A damaged aircraft on the ground holds idle throttle and brakes rather than
+  starting or continuing a departure. Landing rollout and taxi-clear continue
+  through the existing sequence. Ordinary ground treatment still stops bleeding.
+- A damaged compressor or reduced oil pressure requests at most **25% throttle**
+  and no afterburner. Existing component rules determine whether this prevents
+  failure or merely delays it. Low-speed flight at/below **1.35 times minimum
+  speed**, a descent faster than **10 ft/s below 500 ft AGL**, and airborne
+  takeoff/climb-out, final or go-around allow the flight controller's required
+  military power instead. These safety exceptions can still worsen engine
+  damage. A jammed lever remains jammed; the policy never writes over it.
+- Other engine faults request no afterburner and return home, but do not impose
+  an arbitrary low-throttle limit where the component has no throttle-dependent
+  failure. A recoverable flameout holds at most **25%** through the component's
+  six-second restart interval, then requests **50%** to complete its required
+  throttle cycle. Permanent power loss cannot be restarted this way.
+- Recovery flight uses at most **30 degrees of bank** and **2.5 G**, bounded by
+  the aircraft's existing limits. Route, marshal and approach speed requests
+  are capped at **1.6 times minimum speed**, with the airbrake above that request
+  by **20 ft/s**. Lower final-approach speeds and full-power terrain/go-around
+  commands retain their existing rules. Slowing the recovery prevents the lower
+  bank limit from creating wide, repeated misses of the approach gates.
+  A weakened structure additionally caps the
+  requested load **0.25 G below** its existing failure threshold. These are
+  requested limits, not a clamp or repair of actual motion. Defensive maneuvers,
+  terrain avoidance and the existing unrecoverable-flight ejection remain.
+- Fuel, engine, hydraulic or imminent-explosion fire makes a live airborne
+  pilot eligible to eject after **0.25 seconds**, using the existing seat and
+  escape mechanics and John's existing **70% chance per second**. The first
+  opportunity is one second after danger begins; failed rolls can still be fatal. The current component model has no extinguisher and becomes
+  fatal in five or ten seconds. Grounded aircraft hold instead. Healthy aircraft,
+  dead pilots, unavailable seats and dummy aircraft never gain this response.
+- Avionics and hardpoint faults retain their existing sensor, weapon and ECM
+  gates. They do not grant missing contacts or repair failed equipment.
+
+Replay thought records explain the fault, recovery destination, throttle request,
+safety exception, jammed-lever limit and restricted maneuvering. Fault responses
+use live component state, not the diagnostic record. Validation is recorded in
+[AI damage-response checks](../baselines/ai-damage-response.md).
 
 ## Regional structural damage
 
@@ -170,8 +221,8 @@ and tail damage T, each clamped to 0..1:
   separate from actual held surface positions; severed geometry cannot regain
   effectiveness by freezing a surface or switching flight adapters.
 
-The regional rule complements individual subsystem faults and is not applied to
-autonomous aircraft controls. A wing with 75% regional damage (its partial-tear visual is currently hidden)
+The regional rule complements individual subsystem faults in both player and
+AI flight. Dummy aircraft retain their fixed-course exception. A wing with 75% regional damage (its partial-tear visual is currently hidden)
 therefore loses 45% roll authority, 26.25% lift and produces 26.25% roll bias,
 before additional subsystem penalties. The exact retail coefficients are unknown.
 Ownship damage reports cap at 99% while any hit points remain; 100% means
@@ -202,4 +253,5 @@ thermal/leak/fire timing, stochastic failure probability, repair/refueling and
 medical-treatment rules. Next research: bounded review of DAMAGEUpdate and the
 Systems draw inputs with the same build. Restricted native-table research flight
 keeps its existing solver; host failure effects are applied without changing the
-selected adapter. No AI decision-making or autonomous aircraft work is in scope.
+selected adapter. The AI response above is an authored addition; original fault-response tactics
+remain unknown.

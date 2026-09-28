@@ -1031,3 +1031,188 @@ fn queued_wingmen_hold_short_then_depart_without_retracing_the_parking_route() {
             .all(|a| a.airfield_phase().is_none())
     );
 }
+
+#[test]
+fn wounded_pilot_stops_attack_returns_lands_and_is_treated() {
+    let mut mission = AiMission::new();
+    let mut actor = hornet(1, 0, [0., 4000., -30000.], 0.);
+    actor.set_home_runway(Some(runway()));
+    actor.flight_mut().systems.hit(34, 0.7);
+    mission.push(actor);
+    let output = step(&mut mission, None);
+    assert!(output.launches.is_empty());
+    let actor = mission.actor(1).unwrap();
+    assert_eq!(
+        actor.damage_return(),
+        Some(super::super::damage::Reason::Pilot)
+    );
+    assert_eq!(actor.landing_order().unwrap().reason, LandingReason::Damage);
+    assert!(matches!(
+        actor.airfield_phase(),
+        Some(Phase::Inbound | Phase::Marshal)
+    ));
+    assert!(actor.controller().target().is_none());
+    for order in [
+        WingRequest::FormationSelection(Formation::Echelon),
+        WingRequest::TargetAssignment(super::super::wing::TargetOrder::FreeSelection),
+    ] {
+        assert_eq!(
+            mission.order(1, order).unwrap().unwrap(),
+            ReceiverOutcome::Rejected(RejectReason::DamageRecovery)
+        );
+    }
+    assert_eq!(
+        mission
+            .order(1, land(LandingReason::Ordered))
+            .unwrap()
+            .unwrap(),
+        ReceiverOutcome::AppliedNoMotion
+    );
+    mission
+        .order(
+            1,
+            WingRequest::TargetAssignment(super::super::wing::TargetOrder::HoldFire),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        mission.actor(1).unwrap().landing_order().unwrap().reason,
+        LandingReason::Ordered
+    );
+    fly_until_parked(&mut mission, 1, 850);
+    let actor = mission.actor(1).unwrap();
+    assert_parked_on_runway(actor);
+    assert!(!actor.flight().systems.pilot.wounded() && !actor.flight().systems.pilot.dead);
+}
+
+#[test]
+fn faults_hold_departure_but_dummies_ignore_even_fatal_system_faults() {
+    let mut mission = AiMission::new();
+    let mut actor = parked(1, 0, [0., 0., -3000.]);
+    actor.flight_mut().systems.hit(7, 0.7);
+    mission.push(actor);
+    for _ in 0..240 {
+        assert!(step(&mut mission, None).launches.is_empty());
+        let actor = mission.actor(1).unwrap();
+        assert_eq!(actor.last_input().throttle, Some(0.));
+        assert_eq!(actor.activity(), Activity::Waiting);
+        assert!(actor.trace().damage.ground_hold);
+    }
+    assert!(mission.actor(1).unwrap().flight().speed < 1.);
+    let mut dummy = hornet(2, 0, [0., 5000., 0.], 0.);
+    dummy.set_dummy();
+    for fault in [7, 11, 26, 34] {
+        dummy.flight_mut().systems.hit(fault, 0.7);
+    }
+    let start = dummy.flight().position;
+    let velocity = dummy.flight().velocity;
+    let mut mission = AiMission::new();
+    mission.push(dummy);
+    for _ in 0..1200 {
+        step(&mut mission, None);
+    }
+    let actor = mission.actor(2).unwrap();
+    assert!(actor.alive() && actor.flight().escape.is_none());
+    assert!(actor.damage_return().is_none());
+    for i in 0..3 {
+        assert!((actor.flight().position[i] - start[i] - velocity[i] * 10.).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn compressor_policy_preserves_safety_and_jammed_throttle_in_both_adapters() {
+    for researched in [false, true] {
+        let mut actor = hornet(1, 0, [0., 8000., 0.], 0.);
+        if researched {
+            actor.flight_mut().enable_research(1).unwrap();
+        }
+        actor.flight_mut().systems.hit(7, 0.8);
+        let mut mission = AiMission::new();
+        mission.push(actor);
+        step(&mut mission, None);
+        let actor = mission.actor(1).unwrap();
+        assert!(actor.last_input().throttle.is_some_and(|t| t <= 0.25));
+        assert!(!actor.flight().burner);
+        assert_eq!(actor.activity(), Activity::ReturningToBase);
+        let actor = mission.actor_mut(1).unwrap();
+        actor.flight_mut().speed = actor.speed_limits().minimum.0 * 1.2;
+        step(&mut mission, None);
+        assert!(mission.actor(1).unwrap().trace().damage.safety_power);
+        let actor = mission.actor_mut(1).unwrap();
+        actor.flight_mut().speed = 800.;
+        actor.flight_mut().throttle = 0.8;
+        actor.flight_mut().systems.hit(29, 0.8);
+        step(&mut mission, None);
+        let actor = mission.actor(1).unwrap();
+        assert!(actor.last_input().throttle.is_some_and(|t| t <= 0.25));
+        assert_eq!(actor.flight().throttle, 0.8);
+        assert_eq!(actor.trace().damage.throttle_locked, Some(0.8));
+    }
+}
+
+#[test]
+fn airborne_fire_ejects_alive_after_confirmation_and_ground_fire_does_not() {
+    for grounded in [false, true] {
+        let mut actor = if grounded {
+            parked(1, 0, [0., 0., -3000.])
+        } else {
+            hornet(1, 0, [0., 8000., 0.], 0.)
+        };
+        let mut profile = synthetic_profile(AircraftId::F18);
+        profile.fields.get_mut("flags").unwrap().value = "16".into();
+        let position = actor.flight().position;
+        actor.flight = flight::State::new(&profile, position).unwrap();
+        if grounded {
+            actor.flight.enable_research(1).unwrap();
+            actor.flight.start_on_runway(position, 0.).unwrap();
+        }
+        actor.flight_mut().systems.hit(11, 0.7);
+        actor.escape_monitor = crate::ejection::Monitor::seeded(0);
+        let mut mission = AiMission::new();
+        mission.push(actor);
+        for _ in 0..119 {
+            step(&mut mission, None);
+        }
+        assert!(mission.actor(1).unwrap().flight().escape.is_none());
+        step(&mut mission, None);
+        let actor = mission.actor(1).unwrap();
+        assert_eq!(actor.flight().escape.is_some(), !grounded);
+        assert!(!actor.flight().systems.pilot.dead);
+    }
+}
+
+#[test]
+fn wounded_aircraft_of_every_profile_defend_then_resume_recovery_without_hidden_targets() {
+    for id in AircraftId::SELECTABLE {
+        for researched in [false, true] {
+            let mut start = setup(1, 1, 0, [0., 8000., 0.], 0.);
+            start.identity.aircraft = id;
+            start.home_airport = None;
+            start.flight =
+                flight::State::new(&synthetic_profile(id), start.flight.position).unwrap();
+            if researched {
+                start.flight.enable_research(1).unwrap();
+            }
+            start.flight.systems.hit(34, 0.7);
+            let mut actor = AiActor::new(start).unwrap();
+            actor.report_hit();
+            let mut mission = AiMission::new();
+            mission.push(actor);
+            assert!(step(&mut mission, None).launches.is_empty());
+            assert_eq!(mission.actor(1).unwrap().activity(), Activity::Defending);
+            for _ in 0..241 {
+                assert!(step(&mut mission, None).launches.is_empty());
+            }
+            let actor = mission.actor(1).unwrap();
+            assert_eq!(
+                actor.activity(),
+                Activity::ReturningToBase,
+                "{id:?} researched={researched}"
+            );
+            assert!(actor.controller().target().is_none());
+            assert!(!actor.trace().damage.home_known);
+            assert!(actor.landing_order().is_none());
+            assert!(actor.own_state(&|_, _| 0.).g_limit <= 2.5);
+        }
+    }
+}

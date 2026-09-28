@@ -96,6 +96,8 @@ pub enum Hazard {
     Destroyed,
     Dive,
     Lift,
+    /// AI-only response to a modeled fire that cannot be extinguished.
+    Fire,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Assessment {

@@ -24,8 +24,8 @@ This specification does not establish original-game parity.
 
 The [visual-contact and incoming-fire investigation](../baselines/visual-awareness-under-fire.md)
 found shared limits in neutral leader release, rear lookout and gun/hit defense.
-Its [proposed repair contract](visual-awareness-under-fire.md) is not implemented;
-the current rules below remain the shipped behavior.
+Its [repair contract](visual-awareness-under-fire.md) is implemented, including
+lookout, mission-permitted contact release and anonymous incoming-fire defense.
 
 ### Component provenance
 
@@ -99,10 +99,11 @@ retention duration and memory capacity depend on resolved pilot skill.
 Memory capacity for Average, Experienced and Ace is bounded by the mission
 aircraft count.
 
-The visual detection volume is a circular forward cone with a 60-degree
-half-angle, identical at every skill, with skill changing range only. Measure 3D
-angle from the aircraft nose and spatial distance; include exact angle/range
-boundaries. This is separate from B01's ahead/off-beam combat predicate. Terrain
+Each visual attention sample is a circular cone with a 60-degree half-angle,
+identical at every skill, with skill changing range only. Measure 3D angle from
+the gaze direction and spatial distance; include exact angle/range boundaries.
+The [pilot lookout](visual-awareness-under-fire.md#seeing-an-aircraft-and-choosing-to-engage)
+combines the forward cone, a timed scan and attention to a last measured point. This is separate from B01's ahead/off-beam combat predicate. Terrain
 blocks visual acquisition. Reuse available environmental visibility limits,
 capped by the skill range; any missing cloud/night occlusion remains explicitly
 fitted and must not be described as complete weather visibility. Do not alter
@@ -475,7 +476,8 @@ Quick Mission starts every wing on both sides in formation with neutral
 engagement permission, including wings assigned free fire, intercept or escort.
 Mission objectives describe duties and remain separate from permission to begin
 combat. Neutral aircraft run their sensors and retain observations, but neither
-a detected hostile nor a remembered target starts a pursuit. This startup and
+a detected hostile nor a remembered target independently starts a pursuit before
+permission. The AI leader can now grant permission on an eligible current contact. This startup and
 recall policy is opinionated behavior requested on 2026-09-22.
 
 Accepted engage-target, attack-on-contact, engage-from-formation and protect-me
@@ -495,14 +497,16 @@ accounting is a fitted limitation of the burst scheduler.
 AI-led wings remain neutral until their leader issues an engagement order.
 The M1 automatic leader responds to a newly perceived attack on itself, a wing
 member or an assigned protected aircraft by releasing its wing to perform their
-assigned duties. Merely detecting a hostile does not trigger that order. This
-attack-triggered leader decision is an agent-authored interpretation of neutral
-AI leadership. Reports reach leaders on the next tick; the leader's order is
+assigned duties. A current hostile contact can also trigger release when its
+mission policy permits engagement, provided the leader has not been explicitly
+recalled. This is an agent-authored extension of the original attack-only rule.
+The automatic order applies only to still-neutral wing members, preserving any
+individual assignment already accepted. Reports reach leaders on the next tick; the leader's order is
 delivered after that tick's decisions and takes effect on the following tick.
 The human-led wing never receives an automatic AI-leader release. A recalled
 individual remains neutral when the rest of its wing is already engaged.
 
-Missile evasion and countermeasures remain available during neutral flight.
+Missile evasion and countermeasures, and [gun/hit defense](visual-awareness-under-fire.md#breaking-and-returning-to-the-mission), remain available during neutral flight.
 A newly perceived identified attacker can also authorize immediate individual
 self-defense. After recall, already known missiles and pre-order attack reports
 cannot restart offensive combat; a new perceived attack or a new accepted lead

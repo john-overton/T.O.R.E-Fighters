@@ -45,13 +45,20 @@ pub struct AdapterOutput {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ControlAdapter {
     last_requested: Option<SteeringState>,
+    gun_aim: Option<super::gunnery::Aim>,
 }
 
 impl ControlAdapter {
     pub fn new() -> Self {
         Self {
             last_requested: None,
+            gun_aim: None,
         }
+    }
+
+    /// Feed forward the changing observed lead while gun tracking is active.
+    pub fn set_gun_aim(&mut self, aim: Option<super::gunnery::Aim>) {
+        self.gun_aim = aim;
     }
 
     /// The attitude the previous call asked for, or `None` before the first.
@@ -109,7 +116,12 @@ impl ControlAdapter {
             Bank::Explicit(deg) => f64::from(deg).clamp(-maximum_bank_deg, maximum_bank_deg),
             Bank::Unconstrained => {
                 let rate = heading_error_deg(current.heading_deg, heading_request_deg).to_radians()
-                    / BANK_COMMAND_LEAD_SECONDS;
+                    / if self.gun_aim.is_some() {
+                        0.6
+                    } else {
+                        BANK_COMMAND_LEAD_SECONDS
+                    }
+                    + self.gun_aim.map_or(0., |a| a.heading_rate);
                 let bank_limit = maximum_bank_deg
                     .min(if intent.formation_flight { 60.0 } else { 75.0 })
                     .min((1.0 / g_limit.max(1.0)).acos().to_degrees());
@@ -208,6 +220,9 @@ impl ControlAdapter {
                 / 100.0;
         low /= loading;
         high /= loading;
+        if state.systems.has(30) {
+            low = low.max(-g_limit);
+        }
         let mut flap_gain = 1.0;
         if state.research.is_some() {
             if let Some(continuous) = crate::flight::low_speed_positive_g_ceiling(
@@ -243,7 +258,10 @@ impl ControlAdapter {
             .clamp(-90.0, 90.0);
         let pitch_error = (pitch_goal - current.flight_path_pitch_deg).to_radians();
         let desired_g = ((current.flight_path_pitch_deg.to_radians().cos()
-            + state.speed * pitch_error / (3.0 * 32.174))
+            + state.speed
+                * (pitch_error / if self.gun_aim.is_some() { 0.8 } else { 3.0 }
+                    + self.gun_aim.map_or(0., |a| a.pitch_rate))
+                / 32.174)
             / state.bank.cos().max(0.25))
         .clamp(low, g_limit.max(low));
         let delta = desired_g / (authority * flap_gain).max(0.01) - 1.0;

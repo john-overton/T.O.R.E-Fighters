@@ -21,11 +21,29 @@ pub struct Solution {
     pub range_ft: f64,
     pub maximum_range_ft: f64,
     pub radar: bool,
+    pub travel_ft: f64,
+    pub drop_ft: f64,
+    pub flight_speed_fps: f64,
+    pub fall_speed_fps: f64,
     pub arc_fraction: f64,
 }
 
 /// Solve the visual 1,000-foot pipper or a radar target lead.
 pub fn solve(
+    weapon: &Weapon,
+    launcher: &Launcher,
+    mount: Vector,
+    target: Option<TargetObservation>,
+) -> Result<Option<Solution>> {
+    let target = (launcher.radar && launcher.radar_power)
+        .then_some(target)
+        .flatten();
+    solve_observed(weapon, launcher, mount, target)
+}
+
+/// The shared trajectory using explicitly permitted observations. Visual AI
+/// measurements need no radar emission; this does not alter the player's scope.
+pub fn solve_observed(
     weapon: &Weapon,
     launcher: &Launcher,
     mount: Vector,
@@ -52,9 +70,7 @@ pub fn solve(
             + launcher.basis.up[i] * mount[1]
             + launcher.basis.forward[i] * mount[2]
     });
-    let radar_target = (launcher.radar && launcher.radar_power)
-        .then_some(target)
-        .flatten();
+    let radar_target = target;
     let radar = radar_target.is_some();
     let movement = &weapon.movement;
     let mut speed_f8 = launch_speed(movement, (launcher.speed_fps * 256.) as i32)? * 256;
@@ -124,6 +140,10 @@ pub fn solve(
                 range_ft: indicated_range,
                 maximum_range_ft: maximum,
                 radar,
+                travel_ft: range,
+                drop_ft: drop,
+                flight_speed_fps: f64::from(speed_f8) / 256.,
+                fall_speed_fps: f64::from(fall.velocity_f8) / 256.,
                 arc_fraction: range_arc_fraction(indicated_range, maximum),
             }));
         }
@@ -181,12 +201,12 @@ pub fn range_arc_fraction(range_ft: f64, maximum_range_ft: f64) -> f64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{attitude::Basis, sensors};
     use tore_formats::{aircraft::AircraftId, weapons::*};
 
-    fn weapon() -> Weapon {
+    pub(crate) fn weapon() -> Weapon {
         let zone = Zone {
             heading: 12000,
             pitch: 12000,

@@ -121,10 +121,39 @@ impl ThreatService {
         tick: u64,
         receiver: Receiver,
         missiles: &[MissileSnapshot],
-        mut terrain_clear: F,
+        terrain_clear: F,
     ) where
         F: FnMut(Vector, Vector) -> bool,
     {
+        self.observe_with_visual(
+            tick,
+            receiver,
+            missiles,
+            |position| {
+                visual_eligible(
+                    receiver.skill,
+                    receiver.position,
+                    receiver.heading_deg,
+                    receiver.pitch_deg,
+                    position,
+                    receiver.visibility_limit_ft,
+                    true,
+                )
+            },
+            terrain_clear,
+        );
+    }
+
+    /// AI callers supply their current lookout geometry. Warning electronics,
+    /// visual motion measurement and lifecycle rules are shared with the player.
+    pub fn observe_with_visual(
+        &mut self,
+        tick: u64,
+        receiver: Receiver,
+        missiles: &[MissileSnapshot],
+        mut visual_attention: impl FnMut(Vector) -> bool,
+        mut terrain_clear: impl FnMut(Vector, Vector) -> bool,
+    ) {
         debug_assert_eq!(receiver.id, self.receiver_id);
         for stored in self.contacts.values_mut() {
             stored.current_this_tick = false;
@@ -156,15 +185,8 @@ impl ThreatService {
                 .then(|| electronic_evidence(self.receiver_id, missile))
                 .flatten();
             let visible = receiver.visual_operating
-                && visual_eligible(
-                    receiver.skill,
-                    receiver.position,
-                    receiver.heading_deg,
-                    receiver.pitch_deg,
-                    missile.position,
-                    receiver.visibility_limit_ft,
-                    terrain_clear(receiver.position, missile.position),
-                );
+                && visual_attention(missile.position)
+                && terrain_clear(receiver.position, missile.position);
 
             if own_launch {
                 let due = self.contacts.get(&missile.id).is_none_or(|stored| {

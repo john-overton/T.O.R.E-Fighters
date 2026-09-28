@@ -340,6 +340,23 @@ where
     })
 }
 
+/// The same terrain/speed guard serves missile and gunfire jinks.
+pub fn safe_jink(
+    own: DefenseOwn,
+    heading: f64,
+    mut terrain: impl FnMut(Vector) -> f64,
+) -> MotionSuggestion {
+    MotionSuggestion {
+        maneuver: Maneuver::Jink,
+        heading_deg: heading,
+        flight_path_pitch_deg: if dive_is_safe(own, heading, &mut terrain) {
+            DIVE_PITCH_DEG
+        } else {
+            own.flight_path_pitch_deg.max(0.)
+        },
+    }
+}
+
 fn angle_delta(from: f64, to: f64) -> f64 {
     (to - from + 180.0).rem_euclid(360.0) - 180.0
 }

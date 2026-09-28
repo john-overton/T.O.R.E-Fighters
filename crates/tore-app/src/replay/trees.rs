@@ -497,12 +497,29 @@ pub fn motion_branch(
 ) -> (&'static str, String) {
     match branch {
         MotionBranch::None => ("none", String::new()),
+        MotionBranch::DamageRecovery => ("damage recovery", "returning with weapons held".into()),
+        MotionBranch::GunTracking {
+            heading_deg,
+            pitch_deg,
+        } => (
+            "gun lead tracking",
+            format!("heading {heading_deg:.1}, flight pitch {pitch_deg:.1}"),
+        ),
         MotionBranch::MissileDefense {
             heading_deg,
             pitch_deg,
         } => (
             "missile defense",
             format!("heading {:.0}, pitch {:.0}", heading_deg, pitch_deg),
+        ),
+        MotionBranch::IncomingFire {
+            heading_deg,
+            pitch_deg,
+        } => (
+            "incoming fire defense",
+            format!(
+                "heading {heading_deg:.0}, pitch {pitch_deg:.0}; shooter identity not required"
+            ),
         ),
         MotionBranch::MissionRejoin { .. } => (
             "rejoining",
@@ -559,6 +576,7 @@ pub fn motion_branch(
 pub fn branch_code(controller: &ControllerTrace, actor: &ActorTrace) -> u8 {
     if actor.path != ActorPath::Controller {
         return match actor.path {
+            ActorPath::DamageHold => 23,
             ActorPath::NotRun => 0,
             ActorPath::Destroyed => 20,
             ActorPath::Dummy => 21,
@@ -568,7 +586,10 @@ pub fn branch_code(controller: &ControllerTrace, actor: &ActorTrace) -> u8 {
     }
     match controller.motion.branch {
         MotionBranch::None => 1,
+        MotionBranch::DamageRecovery => 13,
         MotionBranch::MissileDefense { .. } => 2,
+        MotionBranch::IncomingFire { .. } => 11,
+        MotionBranch::GunTracking { .. } => 12,
         MotionBranch::MissionRejoin { .. } => 3,
         MotionBranch::SearchBearing { .. } => 4,
         MotionBranch::OrderedApproach { .. } => 5,
@@ -664,7 +685,7 @@ pub fn service_text(outcome: &ServiceOutcome, at: &dyn Fn(u64) -> String) -> Str
         ServiceOutcome::StoreDepleted { deadline } => {
             format!("store empty after firing; retry at {}", at(*deadline))
         }
-        ServiceOutcome::WindowExpired => "the 15 s window to fire expired".into(),
+        ServiceOutcome::WindowExpired => "attempt expired; bounded retry pending".into(),
     }
 }
 
@@ -797,6 +818,49 @@ fn experience_note(experience: ResolvedExperience) -> &'static str {
     }
 }
 
+fn thought_perception(tree: &mut Tree, t: &Thought) {
+    if let Some(lookout) = t.actor.lookout {
+        tree.text(
+            0,
+            "Lookout",
+            ["forward", "right", "rear", "left", "above", "below"][lookout.sector],
+            "body-relative scan; forward and measured attention also available",
+        );
+        for sight in &t.actor.visual {
+            tree.text(
+                1,
+                &(t.who)(sight.id),
+                format!("{:.1} nm", sight.distance_ft / 6076.),
+                sight.result.label(),
+            );
+        }
+    }
+    if !t.actor.observation_sources.is_empty() {
+        tree.text(
+            0,
+            "Current observations",
+            "sensor sources",
+            "current measured contacts, separate from target permission",
+        );
+        for (id, sources) in &t.actor.observation_sources {
+            let mut names = Vec::new();
+            if sources.visual.is_some() {
+                names.push("visual");
+            }
+            if sources.radar.is_some() {
+                names.push("radar");
+            }
+            if sources.infrared.is_some() {
+                names.push("infrared");
+            }
+            if sources.fixture.is_some() {
+                names.push("fixture");
+            }
+            tree.text(1, &(t.who)(*id), names.join(", "), "");
+        }
+    }
+}
+
 /// Builds an AI aircraft's thought tree. See docs/REPLAYS.md for the layout.
 pub fn ai_thought(t: &Thought) -> Vec<Node> {
     let mut tree = Tree::default();
@@ -806,6 +870,93 @@ pub fn ai_thought(t: &Thought) -> Vec<Node> {
     // A clock time rather than a running count, so the line stays the same
     // from sample to sample; a panel shows the time in it from the two.
     tree.text(1, "Since", clock(t.activity_since), "");
+    if let Some(cue) = t.actor.fire.cue {
+        tree.text(
+            0,
+            "Incoming fire",
+            cue.evidence.label(),
+            "no shooter identity granted",
+        );
+        tree.text(
+            1,
+            "Observed",
+            clock(cue.observed_tick),
+            "expires after 2 seconds without new evidence",
+        );
+        tree.text(
+            1,
+            "Response",
+            if t.actor.fire.selected {
+                "jink"
+            } else {
+                "missile defense takes priority"
+            },
+            "gun-only danger consumes no devices",
+        );
+    }
+
+    if let Some(reason) = t.actor.damage.returning {
+        let d = t.actor.damage;
+        tree.text(
+            0,
+            "Damage response",
+            reason.label(),
+            if d.ground_hold {
+                "holding on the ground"
+            } else {
+                "offensive engagement ended"
+            },
+        );
+        tree.text(
+            1,
+            "Recovery",
+            if d.runway_known {
+                "landing at a known runway"
+            } else if d.home_known {
+                "home position only; no runway known"
+            } else {
+                "no destination known; holding heading"
+            },
+            "defense and terrain avoidance remain available",
+        );
+        tree.text(
+            1,
+            "Power policy",
+            match d.response.power {
+                tore_sim::ai::damage::Power::Normal => "military power as needed",
+                tore_sim::ai::damage::Power::Protect => "protect engine: at most 25%",
+                tore_sim::ai::damage::Power::RestartIdle => "flameout: low throttle to arm restart",
+                tore_sim::ai::damage::Power::RestartRaise => "restart: raise throttle to 50%",
+            },
+            if d.safety_power {
+                "flight safety permits power above the protective cap"
+            } else {
+                "component fault response"
+            },
+        );
+        if let Some(throttle) = d.throttle_requested {
+            tree.text(
+                1,
+                "Throttle requested",
+                format!("{:.0}%", throttle * 100.),
+                "request before mechanical limits",
+            );
+        }
+        if let Some(throttle) = d.throttle_locked {
+            tree.text(
+                1,
+                "Throttle jammed",
+                format!("{:.0}%", throttle * 100.),
+                "the pilot cannot move the lever",
+            );
+        }
+        tree.text(
+            1,
+            "Maneuver limits",
+            format!("30 deg bank, {:.2} G", d.response.g_cap.unwrap_or(2.5)),
+            "existing aircraft limits still apply",
+        );
+    }
     let fresh = t.fresh();
     thought_target(&mut tree, t, fresh);
     if fresh {
@@ -818,9 +969,61 @@ pub fn ai_thought(t: &Thought) -> Vec<Node> {
             tree.text(1, "Phase", phase_label(t.weapon_phase), "");
         }
     }
+    if fresh && let Some(gun) = t.controller.gun {
+        tree.text(
+            0,
+            "Gunnery",
+            if gun.requested_round {
+                "round requested"
+            } else {
+                "waiting"
+            },
+            "fixed barrel; measured target motion only",
+        );
+        tree.text(
+            1,
+            "Ammunition",
+            format!("{:?}", gun.view.ammunition),
+            "before this tick's release; debit only emitted rounds",
+        );
+        if let Some(solution) = gun.view.solution {
+            tree.text(
+                1,
+                "Barrel",
+                if solution.aligned {
+                    "on predicted volume"
+                } else {
+                    "not aligned"
+                },
+                "actual bullets use the shared dispersion",
+            );
+            tree.text(
+                1,
+                "Predicted miss",
+                format!("{:.1} ft", solution.miss_ft),
+                "before dispersion",
+            );
+            tree.text(
+                1,
+                "Flight time",
+                format!("{:.2} s", solution.seconds),
+                "shared projectile trajectory",
+            );
+        }
+        tree.text(
+            1,
+            "Cycle",
+            phase_label(gun.phase),
+            "0.5 s burst, 0.5 s recovery; cadence retained",
+        );
+        if let Some(due) = gun.deadline {
+            tree.text(1, "Cycle ends", clock(due), "simulation time");
+        }
+    }
     thought_defense(&mut tree, t);
     thought_motion(&mut tree, t, fresh);
     thought_steering(&mut tree, t);
+    thought_perception(&mut tree, t);
     thought_fuel(&mut tree, t, fresh);
     thought_airfield(&mut tree, t);
     thought_ejection(&mut tree, t);
@@ -1385,6 +1588,7 @@ fn thought_motion(tree: &mut Tree, t: &Thought, fresh: bool) {
             ActorPath::Dummy => "a training target flying straight",
             ActorPath::NotRun => "not stepped yet",
             ActorPath::Controller => "the decision did not run this tick",
+            ActorPath::DamageHold => "holding on the ground because of system damage",
         };
         tree.text(0, "Motion", "not deciding", why);
     }
@@ -1620,9 +1824,15 @@ pub fn hazard_text(assessment: &tore_sim::ejection::Assessment) -> String {
         tore_sim::ejection::Hazard::Destroyed => "the aircraft is destroyed",
         tore_sim::ejection::Hazard::Dive => "a dive it cannot pull out of",
         tore_sim::ejection::Hazard::Lift => "not enough lift to stay up",
+        tore_sim::ejection::Hazard::Fire => "uncontained fire will destroy the aircraft",
     };
     if assessment.impact_seconds.is_finite() {
-        format!("{what}, impact in {:.1} s", assessment.impact_seconds)
+        let end = if assessment.hazard == tore_sim::ejection::Hazard::Fire {
+            "fatal fire in"
+        } else {
+            "impact in"
+        };
+        format!("{what}, {end} {:.1} s", assessment.impact_seconds)
     } else {
         what.into()
     }

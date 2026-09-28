@@ -568,7 +568,7 @@ Contrails last two simulation minutes: steady opacity for one minute, then
 fade smoothly to invisible during the last minute. Pausing freezes their age;
 stopping emission leaves existing puffs to finish their normal lifetime.
 Reset restores intact aircraft and clears smoke. Regional thresholds, visual changes and smoke timing are fitted. Detached reviewed pieces inherit aircraft motion, fall, then disappear
-with a brief ground-hit animation. AI damage uses the fitted health-to-authority rule in the [AI spec](spec/ai.md#live-integration-and-authored-boundaries); the player retains the existing flight adapters. See [damage and smoke behavior](spec/damage-smoke.md).
+with a brief ground-hit animation. AI aircraft take the shared Realistic system faults and use [fault responses](spec/systems-damage.md#ai-pilot-response-to-faults) to recover, protect engines and limit maneuvering. Dummies retain fixed-course behavior. The existing flight adapters stay selectable. See [damage and smoke behavior](spec/damage-smoke.md).
 
 Damage appearance can be inspected with `--damage-preview 0..1` and
 `--damage-preview-section nose|cockpit|core|left-wing|right-wing|tail`, together

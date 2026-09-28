@@ -7,6 +7,9 @@ pub struct Pilot {
     pub ejected: bool,
 }
 impl Pilot {
+    pub fn wounded(&self) -> bool {
+        self.remaining.is_some() && !self.dead && !self.ejected
+    }
     /// Immediate lethal injury, distinct from the timed wound progression.
     pub fn kill(&mut self) -> bool {
         if self.dead {

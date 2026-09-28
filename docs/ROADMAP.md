@@ -589,22 +589,45 @@ Report slice milestones in the session for Jeeves until the PM file is restored.
 Research completed on 2026-09-28 for John's F-22/Su-27 report and requested
 all-variant check. The [baseline](baselines/visual-awareness-under-fire.md)
 separates visual acquisition, neutral engagement permission and missing gunfire
-self-defense. The [proposed contract](spec/visual-awareness-under-fire.md)
+self-defense. The [behavior contract](spec/visual-awareness-under-fire.md)
 records agent-authored tuning and the explicit policy changes. Implementation
-has not started. Preserve radar stealth, exact aircraft identities and all
-flight/weapon compatibility paths.
+is complete in the isolated `fix/visual-awareness-under-fire` branch; the
+[implementation baseline](baselines/incoming-fire-implementation.md) records
+acceptance. Radar stealth, exact identities and normal flight/weapon defaults
+are preserved.
 
 | Order | Work | Exit evidence |
 | --- | --- | --- |
-| 1. Reproducible scenarios and explanations | Extend the headless probe with explicit opponent, geometry, weapon and adapter selection. Record actual sensor observations and rejection reasons separately from target choice. Add controlled anonymous air/ground projectile and damage fixtures. | The current Su-27 failures reproduce without a private harness; recordings distinguish unseen, seen-but-held, anonymous danger and rejected evidence. |
-| 2. Defense without an offensive target | Give gun trajectories, close passes and weapon hits a shared incoming-fire cue in `tore-sim`; the app supplies observations/damage. Separate shooter identification from self-preservation and remove the dependency on a selected target. | Front/rear/anonymous hits and near misses request defense; harmless fire, terrain masking, stale cues and burst spam do not manufacture attackers. |
-| 3. Safe jink and threat arbitration | Reuse current flight-limited jink/dive behavior; combine missile and gun danger into one response, keep terrain/energy protection and return-to-duty behavior. | Measured controls and trajectories show a safe break, not just a new label. Gun-only cues consume no countermeasures. Controlled AAA and SAM cases exercise the victim without requiring a new ground AI. |
-| 4. Lookout and leader decisions | Implement the proposed side/rear visual lookout and mission-aware contact response. Update the current neutral-leader contract explicitly; retain human wing orders, hold, recall and mission restrictions. | All aircraft can notice visible F-22s and take the response their duty permits. No radar-signature workaround, automatic revenge target or hidden tracking. |
-| 5. Integrated acceptance | Repeat the full matchup matrix at all four skills, front/side/rear and boundary geometries, both legacy/researched paths, repeated seeds, terrain/energy limits and mixed air/ground fire. Keep native-table research separate. | Replay reconstruction and deterministic comparisons, repository checks and display captures pass; outcome/flight safety limits are reported separately from perception. |
+| 1. Reproducible scenarios and explanations, implemented | Extend the headless probe with explicit opponent, geometry, weapon and adapter selection. Record actual sensor observations and rejection reasons separately from target choice. Add controlled anonymous air/ground projectile and damage fixtures. | The current Su-27 failures reproduce without a private harness; recordings distinguish unseen, seen-but-held, anonymous danger and rejected evidence. |
+| 2. Defense without an offensive target, implemented | Give gun trajectories, close passes and weapon hits a shared incoming-fire cue in `tore-sim`; the app supplies observations/damage. Separate shooter identification from self-preservation and remove the dependency on a selected target. | Front/rear/anonymous hits and near misses request defense; harmless fire, terrain masking, stale cues and burst spam do not manufacture attackers. |
+| 3. Safe jink and threat arbitration, implemented | Reuse current flight-limited jink/dive behavior; combine missile and gun danger into one response, keep terrain/energy protection and return-to-duty behavior. | Measured controls and trajectories show a safe break, not just a new label. Gun-only cues consume no countermeasures. Controlled AAA and SAM cases exercise the victim without requiring a new ground AI. |
+| 4. Lookout and leader decisions, implemented | Implement the proposed side/rear visual lookout and mission-aware contact response. Update the current neutral-leader contract explicitly; retain human wing orders, hold, recall and mission restrictions. | All aircraft can notice visible F-22s and take the response their duty permits. No radar-signature workaround, automatic revenge target or hidden tracking. |
+| 5. Integrated acceptance, measured | Repeat the full matchup matrix at all four skills, front/side/rear and boundary geometries, both legacy/researched paths, repeated seeds, terrain/energy limits and mixed air/ground fire. Keep native-table research separate. | Replay reconstruction and deterministic comparisons, repository checks and display captures pass; outcome/flight safety limits are reported separately from perception. |
 
-Deliver the zero-target self-defense repair before broadening engagement policy.
-Surface firing AI, full environmental visibility and original-game timing remain
-separate work. Report these milestones in the session for Jeeves.
+The probe also now records real AI bank and pitch, with a direct flight-to-drawn
+attitude check before replay reconstruction. Surface firing AI, full environmental
+visibility, aircraft-specific cockpit blind sectors and original-game timing
+remain separate work. Milestones are reported in the session for Jeeves.
+
+#### AI gun employment and timeout recovery
+
+Implemented on 2026-09-28. The [investigation](baselines/ai-gun-employment.md)
+identified sparse groups, terminal timeout and target-directed launches. The
+[correction](spec/ai-gun-employment.md) now provides bounded expiry retry,
+physical burst accounting, fixed-barrel lead and replay explanations.
+[Validation](baselines/ai-gun-implementation.md) records component checks and
+sustained imported fights. Original gun timing and skill accuracy remain unknown;
+hard-turn tracking is still fitted. Surface firing AI remains separate work.
+
+#### AI response to system damage
+
+Implemented after integrating main's Realistic NPC damage. Pilots react to live
+faults, stop offensive engagement, use their existing recovery destination and
+protect engines where flight safety permits. The existing physical model still
+owns jammed controls, progressive failures and death. Dummies retain fixed-course
+behavior and damage capacities are unchanged. [Authored contract](spec/systems-damage.md#ai-pilot-response-to-faults),
+[validation](baselines/ai-damage-response.md). Original fault-response tactics,
+unreachable-field diversion and component repair remain outside this delivery.
 
 #### AI backlog (2026-09-17)
 

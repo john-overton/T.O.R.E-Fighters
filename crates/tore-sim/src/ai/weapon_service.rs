@@ -20,9 +20,9 @@
 //!   `Withheld(PathBlocked)`; the spec only says the check precedes firing.
 //! - The 10% half-second addition applies to the search, prepare, lock-retry
 //!   and no-station delays, not to the weapon's own tracking delay.
-//! - The 15 s window opens at Prepare entry and reopens after a shot or a
-//!   lock loss; after expiry the service parks in `WindowExpired` until the
-//!   target is lost, because the spec records no consequence.
+//! - The 15 s window opens at Prepare entry and reopens after a shot or lock
+//!   loss. Expiry retries after 2 to 2.5 seconds without forgetting the target
+//!   (opinionated recovery, docs/spec/ai-gun-employment.md).
 //! - The relative-altitude and signature checks sit under B45's range
 //!   checking flag together with the range limits.
 
@@ -200,7 +200,7 @@ pub enum Phase {
     Tracking,
     Fire,
     Reload,
-    /// The 15 s preparation/lock window expired; consequence unresolved.
+    /// An expired attempt awaits its bounded retry.
     WindowExpired,
 }
 
@@ -237,8 +237,8 @@ pub enum ServiceOutcome {
     /// After firing the station no longer resolves; no-station retry scheduled.
     StoreDepleted { deadline: u64 },
     /// B42's 15 s preparation/lock window expired before firing. The spec
-    /// does not say what follows, so the service reports this and waits for
-    /// the host; it only leaves this phase when the target is lost.
+    /// does not establish recovery; the authored retry deadline is available
+    /// through `deadline`, with target knowledge preserved.
     WindowExpired,
 }
 
@@ -260,7 +260,9 @@ enum State {
     },
     Fire,
     Reload,
-    WindowExpired,
+    WindowExpired {
+        retry_at: u64,
+    },
 }
 
 /// Persistent per-actor weapon service state (B42). One per actor; it keeps
@@ -291,7 +293,7 @@ impl WeaponService {
             State::Tracking { .. } => Phase::Tracking,
             State::Fire => Phase::Fire,
             State::Reload => Phase::Reload,
-            State::WindowExpired => Phase::WindowExpired,
+            State::WindowExpired { .. } => Phase::WindowExpired,
         }
     }
     /// The pending finite deadline of the current phase, in quarter counts.
@@ -301,7 +303,8 @@ impl WeaponService {
             State::Prepare { ready_at, .. } => Some(ready_at),
             State::LockCheck { retry_at, .. } => retry_at,
             State::Tracking { fire_at } => Some(fire_at),
-            State::Fire | State::Reload | State::WindowExpired => None,
+            State::WindowExpired { retry_at } => Some(retry_at),
+            State::Fire | State::Reload => None,
         }
     }
     /// Experience spec: a successful device reaction postpones a finite
@@ -319,11 +322,11 @@ impl WeaponService {
             } => retry_at,
             State::Prepare { ready_at, .. } => ready_at,
             State::Tracking { fire_at } => fire_at,
+            State::WindowExpired { retry_at } => retry_at,
             State::Search { retry_at: None }
             | State::LockCheck { retry_at: None, .. }
             | State::Fire
-            | State::Reload
-            | State::WindowExpired => return None,
+            | State::Reload => return None,
         };
         *deadline += extra;
         Some(*deadline)
@@ -415,7 +418,9 @@ impl WeaponService {
                     return Ok(self.enter_search());
                 }
                 if now >= window_ends {
-                    self.state = State::WindowExpired;
+                    let retry_at =
+                        now + u64::from(Self::gated(NO_STATION_RETRY, random).quarter_count());
+                    self.state = State::WindowExpired { retry_at };
                     return Ok(ServiceOutcome::WindowExpired);
                 }
                 if now < ready_at {
@@ -438,7 +443,9 @@ impl WeaponService {
                     return Ok(self.enter_search());
                 }
                 if now >= window_ends {
-                    self.state = State::WindowExpired;
+                    let retry_at =
+                        now + u64::from(Self::gated(NO_STATION_RETRY, random).quarter_count());
+                    self.state = State::WindowExpired { retry_at };
                     return Ok(ServiceOutcome::WindowExpired);
                 }
                 if retry_at.is_some_and(|at| now < at) {
@@ -478,11 +485,22 @@ impl WeaponService {
                     "B42 burst/reload pacing after a launch with a resolving station",
                 ));
             }
-            State::WindowExpired => {
+            State::WindowExpired { retry_at } => {
                 if inputs.target.is_none() {
                     self.enter_search()
-                } else {
+                } else if now < retry_at {
                     ServiceOutcome::WindowExpired
+                } else {
+                    let window_ends = now + u64::from(PREPARATION_WINDOW.quarter_count());
+                    if inputs.station.is_none() {
+                        self.no_station_retry(now, window_ends, random)
+                    } else {
+                        self.state = State::LockCheck {
+                            retry_at: None,
+                            window_ends,
+                        };
+                        self.check_lock(now, inputs, random)
+                    }
                 }
             }
         })
@@ -1608,6 +1626,71 @@ mod tests {
             service.advance(25 * Q, &inputs(), &mut random).unwrap(),
             ServiceOutcome::Fire(_)
         ));
+    }
+
+    #[test]
+    fn expired_attempt_recovers_with_a_continuously_valid_or_replaced_target() {
+        for aircraft in AircraftId::SELECTABLE {
+            for replace in [false, true] {
+                let mut service =
+                    WeaponService::new(ActorId(1), TimingProfile::for_aircraft(aircraft));
+                let mut random = DecisionRandom::seeded(1);
+                let blocked = ServiceInputs {
+                    station: None,
+                    lock: LockStatus::Failed,
+                    ..inputs()
+                };
+                for tick in 0..=1800 {
+                    service.advance(tick, &blocked, &mut random).unwrap();
+                }
+                assert_eq!(service.phase(), Phase::WindowExpired);
+                let ready = ServiceInputs {
+                    target: Some(TargetId(if replace { 8 } else { 7 })),
+                    lock: LockStatus::Locked {
+                        tracking_delay: Delay::quarters(0),
+                    },
+                    ..inputs()
+                };
+                let mut fired = None;
+                for tick in 1801..=2101 {
+                    if matches!(
+                        service.advance(tick, &ready, &mut random).unwrap(),
+                        ServiceOutcome::Fire(_)
+                    ) {
+                        fired = Some(tick);
+                        break;
+                    }
+                }
+                assert!(fired.is_some(), "{aircraft:?} replace={replace}");
+            }
+        }
+    }
+
+    #[test]
+    fn retries_do_not_bypass_an_empty_station_failed_lock_or_blocked_path() {
+        for blocked in [
+            ServiceInputs {
+                station: None,
+                ..inputs()
+            },
+            ServiceInputs {
+                lock: LockStatus::Failed,
+                ..inputs()
+            },
+            ServiceInputs {
+                path_blocked: true,
+                ..inputs()
+            },
+        ] {
+            let mut service = service(AircraftId::F18);
+            let mut random = DecisionRandom::seeded(1);
+            for tick in 0..7200 {
+                assert!(!matches!(
+                    service.advance(tick, &blocked, &mut random).unwrap(),
+                    ServiceOutcome::Fire(_)
+                ));
+            }
+        }
     }
 
     #[test]

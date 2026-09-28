@@ -794,6 +794,8 @@ pub struct MotionSummary {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RejectReason {
+    /// A damaged aircraft must finish its recovery. It can accept a new runway.
+    DamageRecovery,
     /// Constant-motion training targets do not accept maneuver/formation orders.
     Dummy,
     /// The maneuver eligibility gate rejected the recipient's state.

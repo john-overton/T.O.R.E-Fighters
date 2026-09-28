@@ -21,12 +21,15 @@
 pub mod airfield;
 pub mod awareness;
 pub mod controller;
+pub mod damage;
 pub mod defense;
 pub mod engagement;
 pub mod experience;
 pub mod fitted;
 pub mod formation;
 pub mod geometry;
+pub mod gunnery;
+pub mod incoming_fire;
 pub mod launch;
 pub mod mission;
 pub mod motion;

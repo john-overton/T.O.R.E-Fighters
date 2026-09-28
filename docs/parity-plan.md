@@ -142,19 +142,35 @@ parity. [Stage validation](baselines/ai-awareness.md). The
 observations/memory first, then search, missile defense and RWR, mission
 priorities and integrated combat acceptance. Existing actor-owned sensors,
 stores, flight and controllers provide the foundation; seeker activation/pitbull
-and broader mission integration remain partial. Acceptance covers the twelve
-ported aircraft at all four resolved skills. Surface AI and other behavior
+and broader mission integration remain partial. The acceptance target is the current
+selectable roster at all four resolved skills. Surface AI and other behavior
 families remain outside this scope. `--fixture-wings` and all three flight paths
 remain available.
 
-**Next AI repair: visual contact and incoming fire.** The
-[F-22/Su-27 investigation](baselines/visual-awareness-under-fire.md) found shared
-neutral-engagement, rear-lookout and gun/hit-defense gaps across all selectable
-opponents. Research and the [proposed contract](spec/visual-awareness-under-fire.md)
-are complete; gameplay fixes are not implemented. The
-[delivery plan](ROADMAP.md#visual-contact-and-incoming-fire-repair) starts with
-reproducible traces and defense without an offensive target, then safe jinks,
-lookout and explicit leader-policy changes. Radar stealth remains intact.
+**Visual contact and incoming-fire repair is implemented.** The
+[F-22/Su-27 investigation](baselines/visual-awareness-under-fire.md) led to
+side/rear lookout, mission-permitted leader contact release and target-independent
+gun/hit defense. The [contract](spec/visual-awareness-under-fire.md) records the
+authored tuning; the [implementation baseline](baselines/incoming-fire-implementation.md)
+records aircraft/skill/adapter coverage and remaining limits. Headless probes now
+select opponents, geometry, skill and flight adapter, inject controlled threats,
+and record actual AI attitude. Radar stealth and normal adapter defaults are
+unchanged. Surface firing AI, full weather visibility, cockpit blind sectors and
+retail timing remain separate work.
+
+**AI gun employment implemented.** Expired attempts retry, and live guns use
+physical bursts, observed-motion lead and barrel alignment with per-round debit.
+[Validation](baselines/ai-gun-implementation.md) includes sustained Su-27 fights
+at every skill with both flight models, non-stealth controls and shared-physics
+regressions. [Authored rules and remaining approximations](spec/ai-gun-employment.md)
+cover gun tracking and original skill/accuracy policy. Difficult turning fights
+remain a tuning area, separate from the repaired permanent weapon timeout.
+
+**AI fault response implemented.** The AI branch incorporates main's Realistic
+NPC system damage. Pilots now commit to recovery and make protective control
+requests from live faults. Dummies and health thresholds are unchanged.
+[Rules and limitations](spec/systems-damage.md#ai-pilot-response-to-faults),
+[rebase and validation](baselines/ai-damage-response.md).
 
 1. **Missile tuning and remaining evidence.** Stages 1 through 5 shipped for
    current stores, with controlled emitter fixtures. Four guidance types, silent

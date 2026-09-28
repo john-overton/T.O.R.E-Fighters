@@ -369,6 +369,12 @@ and support gates. Per-store profiles, full gun lead, burst randomization,
 in-flight support transitions and missile limits remain in research.
 No single fixed gun range or unlimited-ammunition behavior is implied.
 
+The [gun-employment correction](ai-gun-employment.md) adds an authored bounded
+retry after expiry, plus a separate live-gun ready/burst/recovery cycle. It
+replaces sparse representative-group gun releases with individually accounted
+rounds and physical barrel lead. These are authored host corrections, not claims
+that the original used the same recovery or aiming policy.
+
 API consequence: supply a typed weapon profile, compatible-station availability,
 lock/blocking results, preparation status and per-station feedback. Search and
 preparation clocks belong to persistent actor/service state. Do not redraw or
@@ -996,15 +1002,17 @@ through `Controller::fallbacks`.
 | `pursuit` | B15 frame and speed bands, B44 lead scaling and bypass | Speed estimator and prediction time |
 | `targeting` | B41 retention, eligibility and three-penalty ranking | Priority route, surface selector |
 | `steering` | B44 approach without overshoot, turn rate and radius from G and speed, roll caps, authority floors and mode limits, terrain floor and cadence, ceiling, ground and gravity overrides (the ground pitch hold and turn floor are used by `airfield`) | Base pitch rate, second bank-bound term; the authority curve shapes are labeled fitted |
-| `weapon_service` | B42 phases and retries, timing profiles for all twelve aircraft, B45 ammunition debit, seeker envelopes by role, detection range and stated signature modifiers, class eligibility, store score, in-flight track check and AI support extension, device schedule | Burst pacing after a shot, hit-chance rule, signature producers that need sensor state |
+| `weapon_service` | B42 phases and retries, timing profiles for all twelve aircraft, B45 ammunition debit, seeker envelopes by role, detection range and stated signature modifiers, class eligibility, store score, in-flight track check and AI support extension, device schedule | Missile burst pacing after a shot, hit-chance rule, signature producers that need sensor state |
+| `gunnery` | [Live gun employment](ai-gun-employment.md): shared-physics lead, fixed-barrel release, individual-round burst/recovery and tracking | Original skill accuracy, timing and maneuvering-target tracking |
 | `threat` | B47 warning delay, receiver gates, countermeasure gate and dispenser selection, decoy roll, script fallback reversal, reason ranking | Decoyed-missile time shortening, restart effect on an in-flight move |
-| `route` | B48 waypoint completion by octant, route command with landing hand-off, leader jitter and floors, join-landing, cruise speed, fuel states, wingman bingo route (also flown by leaders and singletons, fitted) | Damage-triggered disengagement |
+| `route` | B48 waypoint completion by octant, route command with landing hand-off, leader jitter and floors, join-landing, cruise speed, fuel states, wingman bingo route (also flown by leaders and singletons, fitted) | Original damage-triggered disengagement policy; authored response is in `damage` |
 | `airfield` | [AI airfield sequences](ai-airfield.md): hold, turn and runway-free gates, taxi-out, line-up, roll, climb-out, marshal square, approach gates, final, rollout, taxi-back and parking slots; bug-out, bingo, ordered and join landings; player landing priority | Vertical, STOVL and carrier variants; retail nose attitudes on final and rollout and the stopped pivot have fitted substitutes |
 | `wing` | B43 spacing clamps, formation table and names, player spacing values, mode 9 speed, control side effects, target sharing cap; B46 receiver outcomes, player break/approach values, reply rules | Approach steering point, mode 9 negative-band entry |
 | `fitted` | One named, documented fitted rule per unresolved branch a fighter/strike actor can reach, with its constants | Nothing; this file exists because the branches are unresolved |
 | `controller` | `Controller::new` and `Controller::step`, persistent state, seeded draws at documented decision points only, reason ranking, target selection, tactical choice, motion resolution, weapon cadence, wing requests, fuel | Families other than fighter/strike are rejected, not served fighter behavior |
 | `steering_adapter` | Motion intent to flight controls through the B44 rate limits, and the AI-only experience G adjustment | Ceiling test and ground contact are caller concerns; the control gains are fitted |
 | `mission` | Actor-owned sensors, stores, flight model and decision state; ammunition debited before a launch event | Missile physics deliberately not duplicated; the host realises each launch |
+| `damage` | [Authored fault responses](systems-damage.md#ai-pilot-response-to-faults): recovery commitment, power protection/restart, maneuver limits and fire danger | Original AI procedures; unreachable or missing recovery runway and irrecoverable failures can still be fatal |
 | `launch` | Quick Mission launch payload: side, wing, member, aircraft, resolved experience and the enemy-skill override | Nothing; loadout carriage stays with the host |
 
 Fitted and opinionated choices are listed in each file's module comment and in
@@ -1155,8 +1163,11 @@ Fuel and engine state can prevent acceleration even at full throttle.
 Imported AI stores use the same payload convention as player live combat:
 external equipment plus non-internal remaining rounds times nonnegative source
 weapon weight. A release subtracts only the mass of ammunition actually debited.
-Until axis-specific AI damage is connected, health reduces requested G and roll
-authority linearly. This is a controller restriction, not extra physics power.
+Remaining health still reduces requested G and roll authority linearly as a
+fitted controller restriction. Actual axis-specific faults and regional damage
+also act through the shared flight model. [Fault responses](systems-damage.md#ai-pilot-response-to-faults)
+end offensive engagement when recovery is needed and add protective power,
+speed and maneuver requests. These never overwrite achieved flight motion.
 
 ## Live integration and authored boundaries
 
@@ -1177,9 +1188,10 @@ are behavior fixes, not evidence of retail combat parity. Validation lives in
 - Imported AI actors carry their own PT default weapons and ECM counts. Using
   the PT default loadout when Quick Mission provides no AI loadout is an
   opinionated agent choice. A projectile owns its selected weapon record; guns
-  remain unguided. Actual-round debit comes from that record. One representative
-  projectile per imported release is fitted to the existing live weapon adapter;
-  the synthetic fixture's ten-projectile gun burst is not an imported loadout.
+  remain unguided. Live guns authorize individual rounds, then debit at physical
+  emission after capacity and barrel checks. Their fitted tracking and authored
+  burst policy are specified in [gun employment](ai-gun-employment.md). Synthetic
+  fixtures retain their earlier prepaid representative-group path.
 - Selected-store range, separate angular and relative-altitude limits, mount
   position, target class, required emission and supporting sensor gates precede
   release. The existing host envelope geometry remains fitted. Terrain checking

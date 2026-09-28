@@ -63,7 +63,7 @@ fn neutral_wing_mission() -> AiMission {
 }
 
 #[test]
-fn both_wings_start_neutral_despite_visible_opponents_and_keep_their_objectives() {
+fn neutral_ai_wings_release_on_mission_permitted_contact_and_keep_objectives() {
     let mut mission = neutral_wing_mission();
     let mut intercept = assignment(
         engagement::Role::Intercept,
@@ -76,20 +76,16 @@ fn both_wings_start_neutral_despite_visible_opponents_and_keep_their_objectives(
         .set_assignment(intercept.clone());
     mission.start_in_formation();
 
-    for tick in 0..4 {
-        let world = world_with(&mission, []);
-        let output = mission.step(&world, &flat, TimeOfDay(tick)).unwrap();
-        assert!(
-            output.launches.is_empty(),
-            "launched on neutral tick {tick}"
-        );
-        for id in 1..=4 {
-            let actor = mission.actor(id).unwrap();
-            assert!(actor.is_neutral(), "actor {id} left formation on contact");
-            assert_eq!(actor.controller().target(), None);
-            assert_eq!(actor.search_target, None);
-        }
-    }
+    assert!(mission.actors().iter().all(AiActor::is_neutral));
+    let world = world_with(&mission, []);
+    let output = mission.step(&world, &flat, TimeOfDay(0)).unwrap();
+    assert!(output.launches.is_empty());
+    assert!(mission.actors().iter().all(|a| !a.is_neutral()));
+    // Orders are consumed after the decisions, so contact starts pursuit next tick.
+    mission
+        .step(&world_with(&mission, []), &flat, TimeOfDay(1))
+        .unwrap();
+    assert_eq!(mission.actor(1).unwrap().controller().target(), Some(3));
     assert_eq!(mission.actor(1).unwrap().assignment(), &intercept);
     assert!(mission.actor(1).unwrap().awareness().snapshot(3).is_some());
 }
@@ -169,6 +165,12 @@ fn ai_leader_releases_its_wing_on_a_fresh_attack_but_not_another_wing() {
     other_wing.identity.wing = 1;
     mission.push(AiActor::new(other_wing).unwrap());
     mission.start_in_formation();
+    for id in [3, 4, 5] {
+        mission.actor_mut(id).unwrap().set_assignment(assignment(
+            engagement::Role::Disengage,
+            engagement::Stance::SelfDefense,
+        ));
+    }
     mission.report_attack_evidence(
         2,
         engagement::ThreatReport {
@@ -264,6 +266,12 @@ fn recall_ignores_a_missile_report_waiting_for_the_leader() {
         alive: true,
     };
     let mut mission = neutral_wing_mission();
+    for actor in mission.actors_mut() {
+        actor.set_assignment(assignment(
+            engagement::Role::Disengage,
+            engagement::Stance::SelfDefense,
+        ));
+    }
     mission.set_missiles(vec![missile(90)]);
     let first = mission
         .step(&world_with(&mission, []), &flat, TimeOfDay(0))

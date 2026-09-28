@@ -48,6 +48,7 @@ fn reject_reason(reason: RejectReason) -> String {
         RejectReason::IneligibleState(state) => {
             format!("its state ({state}) does not allow a maneuver")
         }
+        RejectReason::DamageRecovery => "it is returning because of system damage".into(),
         RejectReason::BuggedOut => "it bugged out and no longer answers".into(),
         RejectReason::Landed => "it has landed".into(),
         RejectReason::OnAirfield => "taking off, landing or on the ground".into(),
@@ -182,6 +183,25 @@ impl Recorder {
             match &entry.message {
                 Message::AttackEvidence(attack) => self.attack(entry, attack, events),
                 Message::FreeSelection { trigger } => self.free_selection(entry, trigger, events),
+                Message::ContactSelection { target } => {
+                    let name = who(&self.infos, *target);
+                    let reason = format!(
+                        "current hostile contact {name} is permitted by the assigned mission"
+                    );
+                    for receipt in &entry.receipts {
+                        events.push(
+                            Event::new(kind::COMMS_ORDER)
+                                .with(field::MESSAGE, self.why.message())
+                                .with(field::RECIPIENTS, vec![receipt.actor])
+                                .with_subject(receipt.actor)
+                                .with(field::ORDER, "free selection")
+                                .with(field::TRIGGER, reason.as_str())
+                                .with(field::OUTCOME, "applied")
+                                .with_text("leader released its wing on contact"),
+                        );
+                        self.why.hear(receipt.actor, reason.clone());
+                    }
+                }
                 Message::WingRequest(request) => self.wing_request(entry, request, events),
                 // An escort's changed selection shows in its thought tree.
                 Message::EscortPriority { .. } => {}

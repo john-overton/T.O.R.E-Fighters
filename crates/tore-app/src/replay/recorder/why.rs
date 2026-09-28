@@ -106,6 +106,7 @@ struct Mind {
     airfield: Option<AirfieldPhase>,
     /// Threat and maneuver of the defense in force.
     defense: Option<(u32, &'static str)>,
+    fire: Option<(tore_sim::ai::incoming_fire::Evidence, bool)>,
     ejection: Option<&'static str>,
     /// Fitted fallbacks already reported.
     fallbacks: BTreeSet<&'static str>,
@@ -285,6 +286,10 @@ fn activity_reason(look: &Look, activity: Activity) -> String {
             }
         }
         Activity::Defending => match (fresh, trace.motion.branch) {
+            (true, MotionBranch::IncomingFire { .. }) => look.act.fire.cue.map_or_else(
+                || "incoming fire defense".to_owned(),
+                |cue| format!("jink: {}", cue.evidence.label()),
+            ),
             (true, MotionBranch::MissileDefense { .. }) => match look.actor.defense_decision() {
                 Some(d) => {
                     let (maneuver, _) = trees::defense_maneuver(&d);
@@ -329,9 +334,22 @@ fn activity_reason(look: &Look, activity: Activity) -> String {
             None => "pursuing".to_owned(),
         },
         Activity::Acquiring => {
-            let why = trace.weapons.as_ref().filter(|_| fresh).and_then(|w| {
-                trees::fire_reason(w, target, &look.act.stations, &|q| look.at_quarter(q))
-            });
+            let why = trace
+                .gun
+                .filter(|_| fresh)
+                .and_then(|g| g.view.solution)
+                .filter(|s| !s.aligned)
+                .map(|s| {
+                    format!(
+                        "fixed barrel misses the predicted target by {:.1} ft",
+                        s.miss_ft
+                    )
+                })
+                .or_else(|| {
+                    trace.weapons.as_ref().filter(|_| fresh).and_then(|w| {
+                        trees::fire_reason(w, target, &look.act.stations, &|q| look.at_quarter(q))
+                    })
+                });
             match (target, why) {
                 (Some(t), Some(why)) => format!("{} chosen; no firing solution yet: {why}", who(t)),
                 (Some(t), None) => format!("{} chosen; no firing solution yet", who(t)),
@@ -360,6 +378,15 @@ fn activity_reason(look: &Look, activity: Activity) -> String {
             Some(RejoinReason::OutsidePatrol) => "outside its patrol region".to_owned(),
             None => "flying back to a friendly".to_owned(),
         },
+        Activity::ReturningToBase if look.actor.damage_return().is_some() => {
+            format!(
+                "{}: recovering with weapons held",
+                look.actor.damage_return().unwrap().label()
+            )
+        }
+        Activity::Waiting if look.act.damage.ground_hold => {
+            "holding on the ground because of system damage".into()
+        }
         Activity::ReturningToBase => {
             let state = trace.fuel.and_then(|f| f.state).filter(|_| fresh);
             match state {
@@ -892,6 +919,35 @@ fn decide(look: &Look, mind: &mut Mind, fallbacks: &[Fallback], events: &mut Vec
     }
     mind.defense = now;
 
+    // Anonymous gun/hit evidence is independent of the missile warning record.
+    let fire = look.act.fire;
+    let fire_now = fire.cue.map(|cue| (cue.evidence, fire.selected));
+    if fire_now != mind.fire {
+        let mut event = Event::new(kind::AI_DEFENSE).with_subject(id).with(
+            field::REACTION,
+            if fire.selected {
+                "jink under fire"
+            } else if fire.cue.is_some() {
+                "gunfire known; missile defense selected"
+            } else {
+                "incoming fire cleared"
+            },
+        );
+        if let Some(cue) = fire.cue {
+            event = event.with(field::REASON, cue.evidence.label());
+            if let Some(round) = cue.round {
+                event = event.with(field::THREAT, Value::Id(round));
+            }
+        } else {
+            event = event.with(
+                field::REASON,
+                "two seconds without new fire evidence; missile defense and mission restrictions still apply",
+            );
+        }
+        events.push(event);
+    }
+    mind.fire = fire_now;
+
     // Fitted fallbacks, the first time each is used.
     let mut used: Vec<Fallback> = fallbacks.to_vec();
     if let Some(adapter) = look.act.fly.as_ref().and_then(|f| f.adapter.as_ref()) {
@@ -970,6 +1026,9 @@ fn defense_event(look: &Look, d: &tore_sim::ai::defense::DefenseDecision, change
         (false, _) => burst,
     };
     let mut reason = trees::defense_reasons(d, Some(look.actor.experience()));
+    if look.act.fire.selected {
+        reason.push_str("; gun/hit cue takes motion priority, missile devices still apply");
+    }
     if change && d.motion.is_some() {
         reason = if reason.is_empty() {
             heading
