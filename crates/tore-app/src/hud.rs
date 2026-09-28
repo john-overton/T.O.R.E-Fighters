@@ -107,8 +107,52 @@ fn bank_scale(p: &mut Paint<'_>, font: &Font, bank: f64) {
     p.line((316., base_y), (324., base_y));
     p.line((324., base_y), (320., tip_y));
 }
+/// Where a bank mark sits on the arc. The scale turns with the horizon: in a
+/// right bank the horizon turns counter-clockwise, carrying the zero mark to
+/// the right of the fixed index.
 fn bank_tick_angle(mark: i32, bank: f64) -> f64 {
-    (f64::from(mark) - bank.to_degrees() + 180.).rem_euclid(360.) - 180.
+    (bank.to_degrees() - f64::from(mark) + 180.).rem_euclid(360.) - 180.
+}
+/// The bank scale's gyro: the shown bank follows the aircraft through a
+/// damped spring, so it glides after a quick roll and settles with a slight
+/// overshoot instead of copying every frame. Opinionated, requested by John on
+/// 2026-09-28; the constants are fitted.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BankGyro {
+    shown: Option<f64>,
+    rate: f64,
+}
+/// Natural frequency in radians per second, and damping ratio: about 0.14
+/// seconds behind a steady roll, settling within 0.6 seconds, 5% overshoot.
+const GYRO_FREQUENCY: f64 = 10.;
+const GYRO_DAMPING: f64 = 0.7;
+const GYRO_STEP: f64 = 1. / 480.;
+impl BankGyro {
+    /// Advance by `elapsed` seconds toward the aircraft's `bank`, and return
+    /// the bank to show. The first call shows the bank as it is.
+    pub fn follow(&mut self, bank: f64, elapsed: f64) -> f64 {
+        use std::f64::consts::{PI, TAU};
+        let Some(mut shown) = self.shown else {
+            self.shown = Some(bank);
+            return bank;
+        };
+        let steps = (elapsed.clamp(0., 0.25) / GYRO_STEP).ceil() as usize;
+        let step = if steps == 0 {
+            0.
+        } else {
+            elapsed.clamp(0., 0.25) / steps as f64
+        };
+        for _ in 0..steps {
+            // The short way round, so full rolls pass through 180 smoothly.
+            let error = (bank - shown + PI).rem_euclid(TAU) - PI;
+            self.rate += (GYRO_FREQUENCY.powi(2) * error
+                - 2. * GYRO_DAMPING * GYRO_FREQUENCY * self.rate)
+                * step;
+            shown = (shown + self.rate * step + PI).rem_euclid(TAU) - PI;
+        }
+        self.shown = Some(shown);
+        shown
+    }
 }
 pub fn heading(yaw: f64) -> f64 {
     yaw.to_degrees().rem_euclid(360.)
@@ -185,6 +229,7 @@ pub fn draw(
     zoom: f32,
     ils: Option<(&tore_sim::airport::Guidance, &str, &str)>,
     wind: Option<&tore_sim::runway_wind::Assessment>,
+    gyro_bank: f64,
 ) {
     let mut p = Paint {
         pixels,
@@ -352,7 +397,7 @@ pub fn draw(
         p.text(font, "ENGINE OFF", 283, 306);
     } else if !weapons {
         p.clip = HUD_CLIP;
-        bank_scale(&mut p, font, s.bank);
+        bank_scale(&mut p, font, gyro_bank);
     }
 }
 fn wind_label(wind: &tore_sim::runway_wind::Assessment) -> String {
@@ -406,14 +451,70 @@ mod tests {
         assert_eq!(bank_tick_angle(30, 30f64.to_radians()), 0.);
         assert_eq!(bank_tick_angle(-30, (-30f64).to_radians()), 0.);
         assert_eq!(bank_tick_angle(0, 360f64.to_radians()), 0.);
-        assert!((bank_tick_angle(-180, 179f64.to_radians()) - 1.).abs() < 1e-9);
-        assert!((bank_tick_angle(-180, 181f64.to_radians()) + 1.).abs() < 1e-9);
+        assert!((bank_tick_angle(-180, 179f64.to_radians()) + 1.).abs() < 1e-9);
+        assert!((bank_tick_angle(-180, 181f64.to_radians()) - 1.).abs() < 1e-9);
+        // A right bank carries the zero mark right of the index, as the
+        // horizon turns counter-clockwise; a left bank carries it left.
+        assert_eq!(bank_tick_angle(0, 30f64.to_radians()), 30.);
+        assert!(bank_point(bank_tick_angle(0, 30f64.to_radians()), BANK_RADIUS).0 > 320.);
+        assert!(bank_point(bank_tick_angle(0, (-30f64).to_radians()), BANK_RADIUS).0 < 320.);
         let left = bank_point(-30., BANK_RADIUS);
         let center = bank_point(0., BANK_RADIUS);
         let right = bank_point(30., BANK_RADIUS);
         assert!((right.0 - left.0 - 223.).abs() < 1e-9);
         assert!((center.1 - left.1 - 223. * (1. - 30f64.to_radians().cos())).abs() < 1e-9);
         assert_eq!(center.1, 358.);
+    }
+    #[test]
+    fn bank_gyro_glides_and_settles() {
+        let degrees = |r: f64| r.to_degrees();
+        let mut gyro = BankGyro::default();
+        assert_eq!(gyro.follow(0.3, 0.1), 0.3, "starts at the aircraft's bank");
+        assert_eq!(gyro.follow(0.3, 0.), 0.3);
+        // A sudden 30 degree roll: behind at first, a small overshoot, settled
+        // within 0.6 seconds.
+        let target = 0.3 + 30f64.to_radians();
+        let mut peak = f64::MIN;
+        let mut shown = Vec::new();
+        for _ in 0..120 {
+            let bank = gyro.follow(target, 1. / 120.);
+            peak = peak.max(bank);
+            shown.push(bank);
+        }
+        assert!(degrees(target - shown[5]) > 15., "{}", degrees(shown[5]));
+        let overshoot = degrees(peak - target);
+        assert!((0.5..2.).contains(&overshoot), "{overshoot}");
+        assert!(
+            shown[72..]
+                .iter()
+                .all(|b| degrees((b - target).abs()) < 0.6)
+        );
+        // Paused, it holds.
+        assert_eq!(gyro.follow(-1., 0.), shown[119]);
+    }
+    #[test]
+    fn bank_gyro_lags_a_steady_roll_and_passes_through_180() {
+        let rate = 90f64.to_radians();
+        let wrap = |a: f64| {
+            (a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+        };
+        for hz in [30., 60., 144.] {
+            let mut gyro = BankGyro::default();
+            let mut bank = 0.;
+            gyro.follow(bank, 0.);
+            let mut previous = 0.;
+            for _ in 0..(3. * hz) as usize {
+                bank = wrap(bank + rate / hz);
+                let shown = gyro.follow(bank, 1. / hz);
+                // Never a jump, even crossing 180 degrees.
+                assert!(wrap(shown - previous).abs() < 2. * rate / hz + 0.01);
+                previous = shown;
+            }
+            // Behind a steady roll by 2 * damping / frequency seconds, less
+            // the half frame each held input sample leads by.
+            let lag = wrap(bank - previous) / rate;
+            assert!((lag - (0.14 - 0.5 / hz)).abs() < 0.003, "{hz} Hz: {lag}");
+        }
     }
     #[test]
     fn heading_wrap_and_horizon_projection() {
@@ -594,6 +695,7 @@ mod tests {
                 1.,
                 None,
                 None,
+                state.bank,
             );
             draw(
                 &mut without,
@@ -607,6 +709,7 @@ mod tests {
                 1.,
                 None,
                 None,
+                state.bank,
             );
             let visible = (297..316).any(|x| {
                 let at = (240 * 640 + x) * 4;
@@ -647,6 +750,7 @@ mod tests {
             1.,
             None,
             None,
+            state.bank,
         );
         draw(
             &mut without,
@@ -660,6 +764,7 @@ mod tests {
             1.,
             None,
             None,
+            state.bank,
         );
         let horizon = project(state.pitch, 0., 0., 0., 1.).unwrap().1.round() as usize;
         let compact = ladder_project(state.pitch, 0., 0., 0., 1.)

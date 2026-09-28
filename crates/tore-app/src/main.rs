@@ -3844,6 +3844,10 @@ impl ApplicationHandler for App {
                             &self.instruments,
                         );
                         self.menu.pixels.fill(0);
+                        let gyro_bank = self.flight_ui.bank_gyro.follow(
+                            presented.bank,
+                            if self.flight_ui.frozen() { 0. } else { elapsed },
+                        );
                         if self.flight_ui.hud && self.view_rig.cockpit(self.flight_view) {
                             let airport_aircraft =
                                 airport_aircraft(&self.world, &presented, self.airport_nav_mode);
@@ -3876,6 +3880,7 @@ impl ApplicationHandler for App {
                                 self.flight_canvas.hud_zoom(1.),
                                 ils,
                                 airport_wind(&self.world, &presented, guidance.as_ref()).as_ref(),
+                                gyro_bank,
                             );
                         }
                         let target_friendly = self.combat.state.display_target().is_some_and(|target| {

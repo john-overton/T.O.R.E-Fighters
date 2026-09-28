@@ -143,6 +143,8 @@ pub struct FlightUi {
     focus: usize,
     pressed: Option<usize>,
     help_page: usize,
+    /// The HUD bank scale's gyro; a new flight starts it at the aircraft's bank.
+    pub bank_gyro: crate::hud::BankGyro,
 }
 impl Default for FlightUi {
     fn default() -> Self {
@@ -169,6 +171,7 @@ impl Default for FlightUi {
             focus: 0,
             pressed: None,
             help_page: 0,
+            bank_gyro: Default::default(),
         }
     }
 }

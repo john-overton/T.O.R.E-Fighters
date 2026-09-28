@@ -69,6 +69,21 @@ arc 223 reference pixels wide, showing angular offsets within plus/minus
 labels every thirty degrees and full-roll wrapping. The fixed index is below
 the arc. These are display geometry choices, not aircraft bank limits.
 
+The scale turns with the horizon. In a right bank the horizon turns
+counter-clockwise on the HUD, so the zero mark moves right of the index and the
+index reads the bank angle from the marks to the left of zero; a left bank is
+the mirror image. Before 2026-09-28 the scale turned against the horizon, which
+the player reports in GitHub issue #1 called out.
+
+The scale is gyro-driven, requested by John on 2026-09-28: the bank it shows
+follows the aircraft's bank through a damped spring (natural frequency 10
+radians per second, damping ratio 0.7) instead of copying it every frame. It
+trails a steady roll by about 0.14 seconds, settles within about 0.6 seconds of
+a sudden change, overshooting a 30 degree step by about 1.4 degrees, takes
+the short way through 180 degrees, holds while paused and starts each flight
+at the aircraft's bank. The pitch ladder, horizon and flight path marker still
+follow the aircraft exactly. The constants are fitted agent choices.
+
 At John's request, weapon information sits directly below the boxed values.
 Status, ammunition, mode/estimate and readiness occupy x=207, y=259/271/283/295
 below airspeed. Range, closure and aspect occupy x=402, y=259/271/283 below
