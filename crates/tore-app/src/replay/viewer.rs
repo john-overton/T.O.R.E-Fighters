@@ -18,6 +18,7 @@ use crate::replay::devices::DeviceTrack;
 use crate::replay::drone::{Drone, Mode};
 use crate::replay::overlay::{self, Control, Marker, MarkerKind, Model, Placement};
 use crate::replay::panels::{self, Data, Kind, Panels, RecordedTrees};
+use crate::replay::pause;
 use crate::replay::playback::Playback;
 use crate::replay::sound::{self, ReplaySound};
 use crate::replay::tracks::{Scanner, Tracks};
@@ -156,6 +157,8 @@ pub struct Options {
     pub ui: Ui,
     /// Debug panels to open on the first frame.
     pub panels: Vec<Request>,
+    /// Start with the Escape menu open at this page, for captures.
+    pub menu: Option<pause::Start>,
 }
 
 /// How long one frame's parts took, in milliseconds, for the
@@ -176,8 +179,16 @@ pub struct Timing {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     None,
+    /// The Escape menu moved: a click sound.
+    Click,
     /// Back to the menu.
     Leave,
+    /// Quit the game, from the Escape menu.
+    Exit,
+    /// Open the Graphics options screen over the paused replay.
+    Graphics,
+    /// Open the Sound/Music Prefs screen over the paused replay.
+    Sound,
     /// Save the frame as a PNG.
     Screenshot,
 }
@@ -334,6 +345,9 @@ struct PanelLayer<'a> {
 /// Everything drawn over the 3D view in one frame.
 struct Interface<'a> {
     hidden: bool,
+    /// The 640x480 layer with the transport bar, timer and notices; left
+    /// out under the Escape menu, whose buttons sit where the bar is.
+    bar: bool,
     labels: &'a [Label],
     model: &'a Model,
     panels: PanelLayer<'a>,
@@ -378,9 +392,11 @@ fn compose(
             f64::from(overlay::HEIGHT as i32 - overlay::BAR_TOP),
         );
     }
-    layer.fill(0);
-    overlay::draw(layer, font, interface.model);
-    canvas.anchored_layer(layer);
+    if interface.bar {
+        layer.fill(0);
+        overlay::draw(layer, font, interface.model);
+        canvas.anchored_layer(layer);
+    }
     if let Some(menu) = panels.menu {
         canvas.centered_rects(panels.pixels, &[menu]);
     }
@@ -651,6 +667,8 @@ pub struct Viewer {
     shown: bool,
     camera_error: Option<&'static str>,
     pub ui: Ui,
+    /// The Escape menu, and the play state it paused while open.
+    pause: pause::Menu,
     /// Held drone movement keys.
     held: BTreeSet<String>,
     bar: overlay::Pointer,
@@ -755,6 +773,7 @@ impl Viewer {
         }
         let mut rig = Rig::default();
         rig.select(Reference::Aircraft(selected));
+        let pause = pause::Menu::new(&ownship.flight_menu);
         let mut viewer = Self {
             path: path.to_path_buf(),
             scanner: Scanner::start(Arc::clone(&recording)),
@@ -815,6 +834,7 @@ impl Viewer {
             shown: false,
             camera_error: None,
             ui: options.ui,
+            pause,
             held: BTreeSet::new(),
             bar: overlay::Pointer::default(),
             dragging: None,
@@ -829,6 +849,10 @@ impl Viewer {
         }
         if options.ui.comms {
             viewer.panels.open_comms(None);
+        }
+        if let Some(start) = options.menu {
+            viewer.open_pause();
+            viewer.pause.open_at(start, &mut viewer.clock);
         }
         Ok(viewer)
     }
@@ -997,9 +1021,50 @@ impl Viewer {
         }
     }
 
+    /// Esc: opens the Escape menu over the view, pausing playback, and
+    /// lets go of every held key, drag and press.
+    fn open_pause(&mut self) {
+        self.pause.open(&mut self.clock);
+        self.menu = None;
+        self.release();
+    }
+
+    /// Carries out an Escape menu choice.
+    fn pause_choice(&mut self, choice: pause::Choice) -> Command {
+        use pause::{Choice, Part};
+        match choice {
+            Choice::None => Command::None,
+            Choice::Click => Command::Click,
+            Choice::Leave => Command::Leave,
+            Choice::Exit => Command::Exit,
+            Choice::Graphics => Command::Graphics,
+            Choice::Sound => Command::Sound,
+            Choice::Toggle(part) => {
+                match part {
+                    Part::Labels => self.ui.labels = !self.ui.labels,
+                    Part::Timer => self.ui.timer = !self.ui.timer,
+                    Part::Trails => self.ui.trails = !self.ui.trails,
+                    Part::Comms => {
+                        self.panels.toggle_comms();
+                        self.ui.comms = self.panels.comms_open();
+                    }
+                }
+                Command::Click
+            }
+        }
+    }
+
     /// A key pressed or released. `name` is the key as the app names it
-    /// (letters lower case, `` ` `` for the backquote key).
+    /// (letters lower case, `` ` `` for the backquote key). While the
+    /// Escape menu is open it takes every key.
     pub fn key(&mut self, name: &str, pressed: bool, repeat: bool, shift: bool) -> Command {
+        if self.pause.is_open() {
+            if !pressed {
+                return Command::None;
+            }
+            let choice = self.pause.key(name, &mut self.clock);
+            return self.pause_choice(choice);
+        }
         if matches!(name, "w" | "a" | "s" | "d" | "e" | "q") {
             if pressed {
                 self.held.insert(name.to_owned());
@@ -1095,13 +1160,7 @@ impl Viewer {
                 });
             }
             "p" => return Command::Screenshot,
-            "Escape" => {
-                if self.ui.hidden {
-                    self.ui.hidden = false;
-                } else {
-                    return Command::Leave;
-                }
-            }
+            "Escape" => self.open_pause(),
             key => {
                 if let Some(view) = flight_views::key(key) {
                     self.set_view(view);
@@ -1127,6 +1186,7 @@ impl Viewer {
         self.right_click = None;
         self.left_owner = None;
         self.bar = overlay::Pointer::default();
+        self.pause.widget.cancel_press();
     }
 
     /// The layer point under a view point, when the interface shows.
@@ -1154,6 +1214,9 @@ impl Viewer {
         size: [u32; 2],
         radians: [f64; 2],
     ) {
+        if self.pause.is_open() {
+            return;
+        }
         if let Some((click, _)) = &mut self.right_click {
             click.moved(window);
         }
@@ -1188,9 +1251,15 @@ impl Viewer {
     }
 
     /// The left button went down or up at `point` in view pixels: the
-    /// right-click menu takes it while open (a press outside closes it),
-    /// then the debug panels, then the transport bar.
-    pub fn left(&mut self, pressed: bool, point: Option<[f64; 2]>, size: [u32; 2]) {
+    /// Escape menu takes it while open, then the right-click menu (a press
+    /// outside closes it), then the debug panels, then the transport bar.
+    pub fn left(&mut self, pressed: bool, point: Option<[f64; 2]>, size: [u32; 2]) -> Command {
+        if self.pause.is_open() {
+            // The menu is drawn where flight draws it, centred on the view.
+            let at = point.map(|p| Placement::new(size).centered(p));
+            let choice = self.pause.pointer(at, pressed, &mut self.clock);
+            return self.pause_choice(choice);
+        }
         let layer = self.layer_point(point, size);
         let at = self.panel_point(point, size);
         if pressed {
@@ -1206,7 +1275,7 @@ impl Viewer {
                 Owner::Bar
             };
             self.left_owner = Some(owner);
-            return;
+            return Command::None;
         }
         match self.left_owner.take() {
             Some(Owner::Menu) => {
@@ -1215,7 +1284,7 @@ impl Viewer {
                     self.menu = None;
                     self.perform(action);
                 }
-                return;
+                return Command::None;
             }
             Some(Owner::Panels) => {
                 let data = ReplayData {
@@ -1228,12 +1297,12 @@ impl Viewer {
                 };
                 self.panels.up(self.layout, at, &data);
                 self.ui.comms = self.panels.comms_open();
-                return;
+                return Command::None;
             }
             Some(Owner::Bar) | None => {}
         }
         let Some(control) = self.bar.up(layer) else {
-            return;
+            return Command::None;
         };
         if !overlay::transport(control, &mut self.clock) {
             match control {
@@ -1243,6 +1312,7 @@ impl Viewer {
                 _ => {}
             }
         }
+        Command::None
     }
 
     /// The right button went down or up at `window`, in window pixels, and
@@ -1257,6 +1327,11 @@ impl Viewer {
         size: [u32; 2],
         slop: f64,
     ) {
+        if self.pause.is_open() {
+            self.dragging = None;
+            self.right_click = None;
+            return;
+        }
         if pressed {
             self.dragging = Some(window);
             self.right_click = point.map(|p| (RightClick::press(window, slop), p));
@@ -1273,6 +1348,9 @@ impl Viewer {
     /// Mouse wheel notches: a menu or panel under the pointer scrolls,
     /// otherwise the drone's speed, or zoom in a flight view.
     pub fn wheel(&mut self, notches: i32) {
+        if self.pause.is_open() {
+            return;
+        }
         if let Some(menu) = &mut self.menu
             && self.point.is_some_and(|at| menu.contains(at))
         {
@@ -1519,9 +1597,10 @@ impl Viewer {
         self.ui.comms = self.panels.comms_open();
     }
 
-    /// The UI covers the view: the pointer shows.
+    /// The UI covers the view, or the Escape menu is open: the pointer
+    /// shows.
     pub fn pointer_visible(&self) -> bool {
-        !self.ui.hidden
+        !self.ui.hidden || self.pause.is_open()
     }
 
     /// The target of `id` at `tick` as the recording knows it.
@@ -1815,13 +1894,16 @@ impl Viewer {
 
     /// Advances playback by the real time since the last frame and draws
     /// it: the 3D view through the same renderer calls live flight makes,
-    /// then the interface. The stretch played sounds on `audio`.
+    /// then the interface. The stretch played sounds on `audio`. `screen`
+    /// is a 640x480 layer the app draws over everything, the Graphics or
+    /// Sound screen opened from the Escape menu.
     pub fn frame(
         &mut self,
         renderer: &mut Renderer,
         canvas: &mut FlightCanvas,
         shift: bool,
         audio: Option<&crate::audio::Audio>,
+        screen: Option<&[u8]>,
     ) -> AppResult<Timing> {
         self.enter(renderer);
         let now = Instant::now();
@@ -1951,6 +2033,9 @@ impl Viewer {
         renderer.cockpit(&player, &camera, false, false, &[], &self.world.palette);
         let composed = Instant::now();
         self.overlay(&picture, tick, &camera, size, canvas);
+        if let Some(screen) = screen {
+            canvas.legacy_layer(screen, 1.);
+        }
         let drawn = Instant::now();
         let presented = renderer.draw(
             &canvas.pixels,
@@ -2035,6 +2120,7 @@ impl Viewer {
             &mut self.layer,
             &Interface {
                 hidden: self.ui.hidden,
+                bar: !self.pause.is_open(),
                 labels: &labels,
                 model: &model,
                 panels: PanelLayer {
@@ -2049,6 +2135,20 @@ impl Viewer {
                 }),
             },
         );
+        // The Escape menu goes over everything, the hidden interface too,
+        // where flight draws its own.
+        if self.pause.is_open() {
+            self.layer.fill(0);
+            let ui = self.ui;
+            self.pause.widget.draw(
+                &mut self.layer,
+                &self.ownship.font,
+                &self.pause.tree,
+                &pause::LOOK,
+                &|label| pause::state(&ui, label),
+            );
+            canvas.legacy_layer(&self.layer, 1.);
+        }
     }
 
     /// Saves the last frame's 3D view, without the interface, as a PNG in
@@ -2126,6 +2226,7 @@ mod tests {
         }
         let mut interface = Interface {
             hidden: false,
+            bar: true,
             labels: &labels,
             model: &model,
             panels: PanelLayer {
@@ -2286,12 +2387,163 @@ mod tests {
         assert!(v.ui.trails);
         assert_eq!(trails::LENGTHS[v.ui.trail_length], 60);
         assert_eq!(press(&mut v, "p"), Command::Screenshot);
-        // H hides everything; Esc first shows it again, then leaves.
+        // H hides everything. Esc opens the menu over the hidden
+        // interface, with the pointer; closing it leaves the interface
+        // hidden.
         press(&mut v, "h");
         assert!(v.ui.hidden && !v.pointer_visible());
         assert_eq!(press(&mut v, "Escape"), Command::None);
-        assert!(!v.ui.hidden);
-        assert_eq!(press(&mut v, "Escape"), Command::Leave);
+        assert!(v.pause.is_open() && v.ui.hidden && v.pointer_visible());
+        assert_eq!(press(&mut v, "Escape"), Command::None);
+        assert!(!v.pause.is_open() && v.ui.hidden && !v.pointer_visible());
+    }
+
+    /// Clicks at a point of the 640x480 layer on a 4:3 view twice its size.
+    fn click(v: &mut Viewer, (x, y): (f64, f64)) -> Command {
+        let (at, size) = (Some([x * 2., y * 2.]), [1280, 960]);
+        v.left(true, at, size);
+        v.left(false, at, size)
+    }
+
+    /// Where the Escape menu's tabs, rows and bottom buttons are drawn.
+    const QUESTION_TAB: (f64, f64) = (10., 10.);
+    const PREF_TAB: (f64, f64) = (40., 10.);
+    const RESUME: (f64, f64) = (100., 455.);
+    fn menu_row(index: usize) -> (f64, f64) {
+        (200., 55. + 19. * index as f64)
+    }
+
+    #[test]
+    fn escape_opens_a_menu_that_pauses_and_resumes_as_before() {
+        let dir = TempDir::new("viewer-escape-menu");
+        let mut v = viewer(&dir, &Options::default());
+        // Playing backwards at 2x, a drone key held.
+        press(&mut v, "j");
+        press(&mut v, "ArrowUp");
+        press(&mut v, "w");
+        assert_eq!(press(&mut v, "Escape"), Command::None);
+        assert!(v.pause.is_open() && v.clock.paused() && v.held.is_empty());
+        // It takes every key and click while open; Space and Enter choose
+        // the focused row, as in flight.
+        for key in ["h", "l", "w", "Tab", "n"] {
+            assert_eq!(press(&mut v, key), Command::None);
+        }
+        assert_eq!(press(&mut v, "p"), Command::None);
+        assert!(v.pause.is_open() && v.clock.paused() && !v.ui.hidden && v.held.is_empty());
+        assert!(v.ui.labels && v.selected == 0);
+        v.wheel(3);
+        assert_eq!(v.zoom, 1.);
+        // Resume plays on in the same direction and speed.
+        assert_eq!(click(&mut v, RESUME), Command::Click);
+        assert!(!v.pause.is_open() && !v.clock.paused());
+        assert_eq!(
+            (v.clock.direction(), v.clock.speed()),
+            (Direction::Reverse, 2.)
+        );
+        // Paused before, paused after; Esc at the top level resumes too.
+        press(&mut v, "k");
+        press(&mut v, "Escape");
+        press(&mut v, "Escape");
+        assert!(!v.pause.is_open() && v.clock.paused());
+        // An open right-click menu closes first.
+        press(&mut v, "m");
+        assert!(v.menu.is_some());
+        press(&mut v, "Escape");
+        assert!(v.menu.is_none() && !v.pause.is_open());
+        press(&mut v, "Escape");
+        assert!(v.pause.is_open());
+    }
+
+    #[test]
+    fn the_escape_menu_ends_exits_opens_screens_and_sets_the_clock() {
+        let dir = TempDir::new("viewer-escape-rows");
+        let mut v = viewer(&dir, &Options::default());
+        press(&mut v, "Escape");
+        // ? > End Replay and Exit to Desktop, by mouse and by keyboard.
+        assert_eq!(click(&mut v, menu_row(0)), Command::Leave);
+        assert_eq!(click(&mut v, menu_row(1)), Command::Exit);
+        press(&mut v, "ArrowUp");
+        assert_eq!(press(&mut v, "Enter"), Command::Leave);
+        // Pref > Graphics... and Sound... open those screens.
+        assert_eq!(click(&mut v, PREF_TAB), Command::Click);
+        assert_eq!(click(&mut v, menu_row(0)), Command::Graphics);
+        assert_eq!(click(&mut v, menu_row(1)), Command::Sound);
+        assert!(v.pause.is_open());
+        // Time > 2x: the clock runs at 2x forwards once the menu closes.
+        assert_eq!(click(&mut v, menu_row(2)), Command::Click);
+        assert_eq!(click(&mut v, menu_row(3)), Command::Click);
+        assert!(v.pause.is_open() && v.clock.paused());
+        assert_eq!(
+            (v.clock.direction(), v.clock.speed()),
+            (Direction::Forward, 2.)
+        );
+        assert_eq!(click(&mut v, RESUME), Command::Click);
+        assert!(!v.clock.paused() && v.clock.speed() == 2.);
+        // Slow-motion, 1x, 4x and 8x set their speeds.
+        press(&mut v, "Escape");
+        for (row, speed) in [(1, 0.5), (2, 1.), (4, 4.), (5, 8.)] {
+            click(&mut v, menu_row(row));
+            assert_eq!(v.clock.speed(), speed);
+        }
+        // Paused closes the menu, pausing a replay that was playing and
+        // playing one that was paused.
+        click(&mut v, menu_row(0));
+        assert!(!v.pause.is_open() && v.clock.paused());
+        press(&mut v, "Escape");
+        click(&mut v, menu_row(0));
+        assert!(!v.pause.is_open() && !v.clock.paused() && v.clock.speed() == 8.);
+        // Back up to the Pref rows, then the ? tab.
+        press(&mut v, "Escape");
+        press(&mut v, "Escape");
+        assert_eq!(v.pause.widget.rows(&v.pause.tree).len(), 7);
+        click(&mut v, QUESTION_TAB);
+        assert_eq!(
+            v.pause.widget.rows(&v.pause.tree)[0].label,
+            pause::END_REPLAY
+        );
+    }
+
+    #[test]
+    fn escape_menu_rows_switch_the_interface_parts() {
+        let dir = TempDir::new("viewer-escape-parts");
+        let mut v = viewer(&dir, &Options::default());
+        press(&mut v, "Escape");
+        click(&mut v, PREF_TAB);
+        let before = v.ui;
+        let state = |v: &Viewer, label| pause::state(&v.ui, label);
+        assert_eq!(state(&v, pause::COMMS), Some("Off"));
+        for row in 3..7 {
+            assert_eq!(click(&mut v, menu_row(row)), Command::Click);
+        }
+        assert_eq!(
+            (v.ui.labels, v.ui.timer, v.ui.trails, v.ui.comms),
+            (!before.labels, !before.timer, !before.trails, !before.comms)
+        );
+        assert!(v.panels.comms_open());
+        assert_eq!(state(&v, pause::COMMS), Some("On"));
+        assert_eq!(state(&v, "Graphics..."), None);
+    }
+
+    #[test]
+    fn replay_menu_option_opens_the_menu_paused_at_a_page() {
+        let dir = TempDir::new("viewer-escape-start");
+        let options = Options {
+            menu: Some(pause::Start::Time),
+            ..Options::default()
+        };
+        let mut v = viewer(&dir, &options);
+        assert!(v.pause.is_open() && v.clock.paused());
+        assert_eq!(v.pause.widget.rows(&v.pause.tree)[5].label, "8x");
+        // It was playing, so closing it plays.
+        press(&mut v, "Escape");
+        press(&mut v, "Escape");
+        assert!(!v.pause.is_open() && !v.clock.paused());
+        let options = Options {
+            menu: Some(pause::Start::Help),
+            ..Options::default()
+        };
+        let v = viewer(&dir, &options);
+        assert!(v.pause.widget.help);
     }
 
     #[test]
@@ -2732,6 +2984,7 @@ mod tests {
             speed: Some(-4.),
             ui: Ui::parse("trails,comms").unwrap(),
             panels: Request::parse("thought, telemetry,menu").unwrap(),
+            menu: None,
         };
         let mut v = viewer(&dir, &options);
         assert!(v.panels.comms_open());

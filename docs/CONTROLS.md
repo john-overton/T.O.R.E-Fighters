@@ -291,4 +291,5 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Replay viewer | R / Shift+R | Flight path trails on or off / next trail length (10, 30, 60, 120 or 300 seconds) |
 | Replay viewer | H | Hide or show the whole interface and the pointer; playback and camera keys keep working |
 | Replay viewer | P | Save the view, without the interface, as a PNG in `screenshots/` |
-| Replay viewer | Esc | Show the interface if it is hidden, otherwise back to the Replays screen |
+| Replay viewer | Esc | The pause menu, over the view even with the interface hidden: pauses playback; Esc again or Resume replay plays on as before, and ? > End Replay goes back to the Replays screen |
+| Replay viewer, pause menu open | Arrow keys, Tab, Enter / Space, Esc, left click | Move, choose and back out, as in the flight menu; every other key and click waits until it closes |

@@ -131,7 +131,7 @@ The temporary Terrain Viewer button is replaced by Free Flight. The creator star
 
 This recovers the supplied FA tree including `?`, Control, Pref, View, Window, Cheat, Multi, Map and Pos. It supersedes treating the flight menu tree as entirely authored. Runtime validates that reviewed root structure before presenting it. Generic menu flags, check-state callbacks, visibility of Map/Pos in different native modes, and other editions remain unverified. Native tree recovery does not implement its underlying cheats, multiplayer or flight systems.
 
-`flight_ui.rs` provides keyboard/mouse traversal and action dispatch, with matching press/release and silent hover. Native actions without a port show explicit feedback. The paused overlay's placement, submenu presentation, and bottom Resume/Restart/Keyboard Shortcuts actions are authored. Portable Exit to Desktop wording replaces the source Exit to Windows label. Source labels/accelerators remain external imported data. See [controls](../FLIGHT-CONTROLS.md).
+`pause_menu.rs` provides keyboard/mouse traversal, hit geometry and drawing, with matching press/release and silent hover; `flight_ui.rs` dispatches the flight actions, and the [replay viewer](../REPLAYS.md#pause-menu) builds its own smaller tree from the imported `?` and `Pref` rows on the same widget. Native actions without a port show explicit feedback. The paused overlay's placement, submenu presentation, and bottom Resume/Restart/Keyboard Shortcuts actions are authored. Portable Exit to Desktop wording replaces the source Exit to Windows label. Source labels/accelerators remain external imported data. See [controls](../FLIGHT-CONTROLS.md).
 
 ## Briefing text selectors, 2026-09-14
 

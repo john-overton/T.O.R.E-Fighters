@@ -758,9 +758,10 @@ agent choices too.
   double-click it). A recording that cannot be opened stays on the Replays
   screen, with the reason on its status line.
 - From the command line: `tore-app --watch-replay FILE`.
-- Esc leaves the viewer and returns to the Replays screen, with the list read
-  again, including when the viewer was started from the command line. The
-  game's own world and aircraft come back as they were.
+- Esc opens the viewer's [pause menu](#pause-menu); its End Replay returns
+  to the Replays screen, with the list read again, including when the
+  viewer was started from the command line. The game's own world and
+  aircraft come back as they were.
 
 The viewer builds the recorded world (map, weather choice, time of day,
 wind and cloud deck) from the header, so a replay looks the same whatever
@@ -826,7 +827,43 @@ as in flight.
 | R / Shift+R | Trails on or off / next trail length |
 | H | Hide or show the whole interface and the pointer |
 | P | Save the view without the interface as a PNG |
-| Esc | Show the interface if hidden, otherwise leave |
+| Esc | The [pause menu](#pause-menu); again, or Resume replay, to close it |
+
+### Pause menu
+
+Esc opens flight's paused Escape menu over the replay, drawn the same way
+(tab strip, rows, bottom buttons, keyboard help) and worked the same way:
+the arrows, Tab, Enter and Space, or clicks, with matching press and
+release. An open right-click menu closes first. Opening it pauses playback
+and hides the transport bar under its buttons; closing it plays on in the
+speed and direction it had, or stays paused if it was paused. While it is
+open it takes every key and click, so the bar, drones, right-drag and the
+viewer's keys do nothing, and the pointer shows even with the interface
+hidden. Closing it leaves a hidden interface hidden.
+
+The menu is built from the imported `FMENUD.MNU` tree, keeping the retail
+labels of the rows that mean something in a replay, in retail order. A
+replay draws no cockpit, HUD or instrument windows and its debug panels are
+always there, so the other Pref rows and tabs are left out. Without the
+imported tree the same rows are authored.
+
+| Row | What it does |
+| --- | --- |
+| ? > End Replay | Back to the Replays screen, as Esc used to be |
+| ? > Exit to Desktop (Alt-F4) | Quits the game, as in flight |
+| Pref > Graphics... | The Graphics options screen over the paused replay; changes apply to the view at once |
+| Pref > Sound... | The Sound/Music Prefs screen over the paused replay, as in flight |
+| Pref > Time > Paused | Closes the menu, leaving the replay paused if it was playing and playing if it was paused |
+| Pref > Time > Slow-motion, 1x, 2x, 4x, 8x | Playback at 0.5x to 8x forwards once the menu closes; the menu stays open, as flight's time rows do |
+| Pref > Name labels? / Mission timer? / Flight path trails? / Comms panel? | The same switches as N, T, R and C, with On or Off beside them |
+| Resume replay | Closes the menu |
+| Keyboard shortcuts | The replay's keys, as in the table above |
+
+Closing Graphics or Sound returns to the menu. The title reads REPLAY
+PAUSED. The pause menu is opinionated, requested by John on 2026-09-28,
+who chose the End Replay and Exit to Desktop labels; the four switch rows'
+labels, the title, the help text, hiding the bar and what the Time rows do
+are agent choices (2026-09-28).
 
 ### Cameras
 
@@ -930,8 +967,8 @@ There is no cockpit, HUD, instrument panel or mirror in a replay.
   Colours and lengths are fitted.
 - **Hide UI** (H or the Hide button): hides the bar, labels, subtitles,
   timer, debug panels, the right-click menu and the pointer; trails stay as
-  chosen, and playback and camera keys keep working. Esc brings the
-  interface back.
+  chosen, and playback and camera keys keep working. H brings the
+  interface back; the pause menu still opens over the hidden interface.
 - **Screenshots** (P): the 3D view without any interface, at the view's
   size (up to 1920x1080), saved as
   `screenshots/<recording>-tick<tick>.png` under the app data folder. The
@@ -1050,7 +1087,8 @@ For checking the viewer without a keyboard:
 ```sh
 tore-app --watch-replay FILE --capture-replay OUT.ppm --replay-tick N \
     [--flight-view 0..11] [--replay-aircraft ID] [--replay-drone] \
-    [--replay-ui labels,timer,trails,comms,subtitles] [--replay-clean]
+    [--replay-ui labels,timer,trails,comms,subtitles] [--replay-clean] \
+    [--replay-menu '?'|pref|time|help|graphics|sound]
 ```
 
 The capture waits for the background pass, draws the frame at tick `N`
@@ -1062,7 +1100,9 @@ starts with the interface hidden, as H hides it.
 and with `TORE_PERF_FRAMES=N` the viewer reports frame timings like live
 flight. `--replay-panels thought,telemetry,guidance,comms,menu` opens
 [debug panels](#debug-panels), or the right-click menu, on the selected
-aircraft for the capture.
+aircraft for the capture. `--replay-menu PAGE` opens the
+[pause menu](#pause-menu) at its `?` tab, Pref, Pref > Time or the keyboard
+help, or opens Graphics or Sound over it; `?` needs quoting in most shells.
 
 Measured on the development Mac (Apple M3, 1440x1080 view, release build,
 other work running on the machine) with a synthetic ten-minute recording of

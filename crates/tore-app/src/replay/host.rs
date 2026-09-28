@@ -110,8 +110,21 @@ impl App {
     fn replay_command(&mut self, event_loop: &ActiveEventLoop, command: Command) {
         match command {
             Command::None => {}
+            Command::Click => self.action(event_loop, Action::Click),
             Command::Leave => {
                 self.leave_replay();
+                self.action(event_loop, Action::Click);
+            }
+            // Escape > ? > Exit to Desktop quits as flight's does.
+            Command::Exit => self.action(event_loop, Action::Exit),
+            // Escape > Pref: the screens open over the paused replay and
+            // close back to its menu.
+            Command::Graphics => {
+                self.open_graphics("Replay paused");
+                self.action(event_loop, Action::Click);
+            }
+            Command::Sound => {
+                self.open_sound(true);
                 self.action(event_loop, Action::Click);
             }
             Command::Screenshot => {
@@ -141,6 +154,22 @@ impl App {
     ) -> Option<WindowEvent> {
         if self.replay.is_none() {
             return Some(event);
+        }
+        // The Graphics or Sound screen opened from the Escape menu takes the
+        // keys, pointer and wheel, through the app's own handlers for it.
+        if self.sound_screen.is_some() || self.graphics_screen.is_some() {
+            match &event {
+                WindowEvent::RedrawRequested => {
+                    self.replay_redraw(event_loop);
+                    return None;
+                }
+                WindowEvent::KeyboardInput { event: key, .. }
+                    if key.state == ElementState::Released =>
+                {
+                    return None;
+                }
+                _ => return Some(event),
+            }
         }
         match &event {
             WindowEvent::RedrawRequested => {
@@ -206,7 +235,9 @@ impl App {
                             let (point, size) = window
                                 .map(|w| view_point(renderer, w))
                                 .map_or((None, renderer.flight_size()), |(p, s)| (Some(p), s));
-                            replay.viewer.left(pressed, point, size);
+                            let command = replay.viewer.left(pressed, point, size);
+                            self.replay_command(event_loop, command);
+                            return None;
                         }
                         MouseButton::Right => {
                             if let Some(window) = window {
@@ -258,11 +289,32 @@ impl App {
         };
         let Replay { viewer, capture } = &mut **replay;
         let start = Instant::now();
+        // A screen opened from the Escape menu draws over the replay in the
+        // menu's 640x480 layer, as it does over the paused flight.
+        let screen = if self.graphics_screen.is_some() || self.sound_screen.is_some() {
+            self.menu.pixels.fill(0);
+            if let Some(editor) = &self.graphics_screen {
+                editor.draw(&mut self.menu.pixels, &self.hornet.font);
+            }
+            if let Some(screen) = &mut self.sound_screen {
+                screen.animate();
+                if screen.take_switch_sound()
+                    && let Some(audio) = &self.audio
+                {
+                    audio.action(Action::Toggle);
+                }
+                screen.draw(&mut self.menu.pixels, &self.menu.sprites);
+            }
+            Some(&self.menu.pixels[..])
+        } else {
+            None
+        };
         let result = viewer.frame(
             renderer,
             &mut self.flight_canvas,
             self.modifiers.shift_key(),
             self.audio.as_ref(),
+            screen,
         );
         renderer.window.set_cursor_visible(viewer.pointer_visible());
         match result {
