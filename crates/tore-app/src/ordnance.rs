@@ -1165,7 +1165,7 @@ fn validate_removed_stores(
                 )
                 .into());
             }
-            let listed = crate::combat_view::readout(&combat, &flight, 1.).weapons;
+            let listed = crate::combat_view::readout(&combat, &flight, flight.sensors, 1.).weapons;
             let carried: std::collections::BTreeSet<&str> = combat
                 .state
                 .configuration()

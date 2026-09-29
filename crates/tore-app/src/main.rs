@@ -236,6 +236,9 @@ struct App {
     /// next tick applies them (`World::step`), so a menu command given while
     /// the game is paused waits for the first tick after resuming.
     seat_commands: Vec<seats::SeatCommand>,
+    /// The cheats the mission has been told of; `None` until a flight's first
+    /// tick, so every flight starts by hearing them.
+    cheats_sent: Option<tore_sim::cheats::Cheats>,
     theater_resources: std::collections::BTreeMap<String, Vec<u8>>,
     camera: camera::Camera,
     quick: quick_mission::QuickMission,
@@ -1421,8 +1424,7 @@ impl App {
                 Action::None
             }
             Command::RadioSilence => {
-                let message = self.world.comms.toggle_silence(seats::SeatId::default());
-                self.flight_ui.message(message);
+                self.queue(seats::SeatCommand::RadioSilence);
                 Action::None
             }
             Command::DamageReport => {
@@ -2258,6 +2260,7 @@ impl App {
                     }
                 }
                 self.seat_commands.clear();
+                self.cheats_sent = None;
                 self.instruments.navigation = navigation::Navigation::default();
                 self.wing_recipient = None;
                 match restarted_flight.ai_aircraft {
@@ -2920,6 +2923,7 @@ impl ApplicationHandler for App {
                             combat_view::readout(
                                 &self.world.combat,
                                 &self.world.cockpits[OWN].flight,
+                                self.instruments.controls(),
                                 1.
                             )
                             .weapons,
@@ -3403,17 +3407,6 @@ impl ApplicationHandler for App {
                             );
                             audio.pause_flight(self.flight_ui.frozen());
                         }
-                        // Scope channel, display range and history are player
-                        // controls, applied as a simulation input so replay
-                        // reproduces every change and the labels never lag.
-                        self.world.cockpits[OWN].flight.sensors = self.instruments.controls();
-                        self.world.cockpits[OWN].flight.cheats = self.flight_ui.cheats;
-                        self.world.combat.state.cheats = self.flight_ui.cheats;
-                        if let Some(wings) = &mut self.world.ai_wings {
-                            self.world.combat.state.friendlies = wings.friendly_ids();
-                            wings.set_enemy_skill(self.flight_ui.cheats.enemy_ai);
-                            wings.set_guns_only(self.flight_ui.cheats.guns_only);
-                        }
                         // Pauses, time compression and cheats, noted as they happen.
                         if let Some(recording) = &mut self.replay_recorder {
                             recording.session(&self.flight_ui);
@@ -3459,10 +3452,28 @@ impl ApplicationHandler for App {
                                 tick: self.world.tick(),
                                 pilot,
                                 trigger: self.input.resolver.held("fire"),
+                                // Scope channel, display range and history are
+                                // player controls, part of the tick's input so
+                                // a recording reproduces every change.
+                                sensors: self.instruments.controls(),
                                 commands,
                             };
-                            let stepped =
-                                self.world.step(std::slice::from_ref(&input), &mut output);
+                            // The cheats the flight menu changed reach the
+                            // mission before any seat's commands.
+                            let cheats = self.flight_ui.cheats;
+                            let mission: Vec<_> = (self.cheats_sent != Some(cheats))
+                                .then(|| {
+                                    self.cheats_sent = Some(cheats);
+                                    world::MissionCommand::Settings(world::Settings { cheats })
+                                })
+                                .into_iter()
+                                .collect();
+                            let stepped = self.world.step_with(
+                                &mission,
+                                std::slice::from_ref(&input),
+                                &mut output,
+                                |_, _| Ok(()),
+                            );
                             if let Some(tape) = &mut self.combat_tape {
                                 tape.write_all(self.world.combat.take_tape());
                             }
@@ -3829,6 +3840,7 @@ impl ApplicationHandler for App {
                         self.instruments.combat = Some(combat_view::readout(
                             &self.world.combat,
                             &self.world.cockpits[OWN].flight,
+                            self.instruments.controls(),
                             self.instruments.rcs_scale_nmi(),
                         ));
                         if let Some(target) = self
@@ -10406,6 +10418,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         pointer: None,
         theater_resources,
         seat_commands: Vec::new(),
+        cheats_sent: None,
         camera,
         quick,
         screen: initial_screen,
@@ -10646,6 +10659,7 @@ fn show_selected_weapon_page(world: &world::World, instruments: &mut instruments
     let readout = combat_view::readout(
         &world.combat,
         &world.cockpits[OWN].flight,
+        instruments.controls(),
         instruments.rcs_scale_nmi(),
     );
     if let Some(index) = readout.weapons.iter().position(|row| row.2) {

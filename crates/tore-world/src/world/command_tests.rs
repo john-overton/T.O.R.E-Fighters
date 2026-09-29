@@ -127,6 +127,8 @@ fn state(world: &mut World) -> String {
                 (own.flight.position, own.flight.velocity, own.flight.speed),
                 (own.flight.fuel, own.flight.crashed),
                 (own.airport_nav_mode, own.airport_service.selected()),
+                (own.flight.sensors, own.flight.cheats, combat.cheats),
+                world.comms.radio_silence(crate::seats::SeatId(0)),
             )
         ),
         format!("{notes:?}"),
@@ -467,4 +469,105 @@ fn the_step_reports_the_state_after_the_commands_and_before_the_tick() {
         .unwrap();
     assert_eq!(seen, Some((!armed, tick, 0)));
     assert_eq!(world.tick(), tick + 1);
+}
+
+/// Two identical worlds; `old` does to the first what the frame loop did
+/// before the tick, and the second is given `mission` commands and `commands`.
+/// Both are given `sensors` as the tick's scope controls.
+fn same_as_old_with(
+    mission: Vec<MissionCommand>,
+    sensors: tore_sim::sensors::Controls,
+    commands: Vec<SeatCommand>,
+    old: impl FnOnce(&mut World),
+) -> (World, World, TickOutput) {
+    let (mut before, mut after) = (warmed(), warmed());
+    old(&mut before);
+    let mut out = TickOutput::default();
+    let mut plain = input(&before, Vec::new());
+    plain.sensors = sensors;
+    before.step(&[plain], &mut out).unwrap();
+    let mut commanded = input(&after, commands);
+    commanded.sensors = sensors;
+    after
+        .step_with(&mission, &[commanded], &mut out, |_, _| Ok(()))
+        .unwrap();
+    assert_eq!(state(&mut before), state(&mut after));
+    (before, after, out)
+}
+
+#[test]
+fn the_scope_controls_reach_the_flight_before_the_commands() {
+    use tore_sim::sensors::{Channel, Controls};
+    let controls = Controls {
+        channel: Channel::Infrared,
+        range_index: 2,
+        history: true,
+    };
+    let (_, after, _) = same_as_old_with(
+        Vec::new(),
+        controls,
+        vec![SeatCommand::Combat(Live::DesignateVisual)],
+        |world| {
+            world.cockpits[0].flight.sensors = controls;
+            old_combat(world, Live::DesignateVisual);
+        },
+    );
+    assert_eq!(after.cockpits[0].flight.sensors, controls);
+}
+
+#[test]
+fn a_settings_change_reaches_every_part_of_the_mission_before_the_commands() {
+    let cheats = tore_sim::cheats::Cheats {
+        unlimited_ammo: true,
+        no_crashes: true,
+        guns_only: true,
+        enemy_ai: Some(tore_sim::ai::Experience::Novice),
+        ..Default::default()
+    };
+    let (_, after, _) = same_as_old_with(
+        vec![MissionCommand::Settings(Settings { cheats })],
+        Default::default(),
+        vec![SeatCommand::Manual(Live::ToggleArm)],
+        |world| {
+            world.cockpits[0].flight.cheats = cheats;
+            world.combat.state.cheats = cheats;
+            let wings = world.ai_wings.as_mut().unwrap();
+            wings.set_enemy_skill(cheats.enemy_ai);
+            wings.set_guns_only(cheats.guns_only);
+            old_manual(world, Live::ToggleArm);
+        },
+    );
+    assert_eq!(after.cockpits[0].flight.cheats, cheats);
+    assert_eq!(after.combat.state.cheats, cheats);
+    // The commands see the new settings: the observer runs after them.
+    let mut world = warmed();
+    let mut out = TickOutput::default();
+    let mut seen = None;
+    let commanded = input(&world, vec![SeatCommand::Manual(Live::ToggleArm)]);
+    world
+        .step_with(
+            &[MissionCommand::Settings(Settings { cheats })],
+            &[commanded],
+            &mut out,
+            |world, _| {
+                seen = Some(world.combat.state.cheats);
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(seen, Some(cheats));
+}
+
+#[test]
+fn radio_silence_toggles_and_says_so() {
+    let (_, after, out) = same_as_old_with(
+        Vec::new(),
+        Default::default(),
+        vec![SeatCommand::RadioSilence],
+        |world| {
+            world.comms.toggle_silence(crate::seats::SeatId(0));
+        },
+    );
+    assert!(after.comms.radio_silence(crate::seats::SeatId(0)));
+    assert!(matches!(&out.cues[0], Cue::Message(text) if text == "Radio silence"));
 }

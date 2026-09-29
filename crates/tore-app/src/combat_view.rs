@@ -320,9 +320,12 @@ impl CombatView {
     }
 }
 
+/// `controls` are the seat's scope controls as they stand now, which the
+/// scope labels follow; the flight state takes them at the start of a tick.
 pub fn readout(
     combat: &Combat,
     s: &flight::State,
+    controls: tore_sim::sensors::Controls,
     rcs_scale: f64,
 ) -> crate::instruments::CombatReadout {
     // (source, name, rounds, selected, loaded at the start)
@@ -370,7 +373,7 @@ pub fn readout(
                 .find(|h| Some(h.profile.id) == target.aircraft)
                 .map(|h| h.profile.envelopes.clone())
         }),
-        scope: crate::scope::scope(&combat.state, s),
+        scope: crate::scope::scope(&combat.state, s, controls),
         rcs: crate::scope::rcs(&combat.state, s, rcs_scale),
         rwr_failed: combat.state.rwr_failed,
         rwr: rwr_readout(combat, s),
@@ -529,7 +532,7 @@ pub fn status(combat: &Combat, s: &flight::State) -> String {
                 }
             })
     });
-    let scope = crate::scope::scope(&combat.state, s);
+    let scope = crate::scope::scope(&combat.state, s, s.sensors);
     format!(
         "{} {} {}  {} C{} HIT {} | HP {} SYS {} ECM {} T-JAM {} IN {} | {} {} {:.0}NM {} CONTACTS{}{}",
         combat.state.configuration().stations[i].weapon.name,
@@ -1254,7 +1257,7 @@ mod empty_station_tests {
     use super::*;
     use tore_world::combat::fixtures::loaded;
     fn listed(c: &Combat, f: &flight::State) -> Vec<(String, u32, bool)> {
-        readout(c, f, 1.).weapons
+        readout(c, f, f.sensors, 1.).weapons
     }
     #[test]
     fn an_emptied_station_stays_empty_and_is_not_listed() {

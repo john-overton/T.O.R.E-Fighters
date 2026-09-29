@@ -174,13 +174,12 @@ fn relative(basis: &Basis, from: Vector, to: Vector) -> (f64, f64) {
     )
 }
 
-pub fn scope(state: &live::State, s: &flight::State) -> Scope {
+pub fn scope(state: &live::State, s: &flight::State, controls: sensors::Controls) -> Scope {
     let sensors = &state.sensors;
     let basis = Basis::new(s.yaw, s.pitch, s.bank);
     // Labels and the plotted scale follow the player's own controls, so they
     // never lag a step behind the switch that was just pressed. Contacts and
     // weapon support stay with the simulation that produced them.
-    let controls = s.sensors;
     let channel = controls.channel;
     let selected = sensors.selected();
     let acquired = sensors.acquired();

@@ -1149,9 +1149,10 @@ flowchart TB
 
 #### Seat input
 
-*B2 built (step 1 of 4: combat commands).* The render loop builds seat 0's input
-from today's sources: the pilot input, the trigger (Space and the bound fire
-control) and the commands given since the last tick. The app keeps them in one
+*B2 is under way (steps 1 and 2 of 4 built: combat commands, scope and
+settings).* The render loop builds seat 0's input from today's sources: the
+pilot input, the trigger (Space and the bound fire control), the scope controls
+and the commands given since the last tick. The app keeps them in one
 queue in the order given (`App::seat_commands`); the first tick of the next
 frame takes the whole queue, and `World::step` applies each command at the
 start of the tick to the plane the seat flies. That is when they take effect
@@ -1168,8 +1169,24 @@ today, because window events always arrive between frames.
 | `Manual(command)` | A key, button or menu command: arming, seeker mode, clearing the designation, jettison and the range and development commands. It lets go of the trigger, gives combat the command, and puts the payload weight right. Outside `--live-fire` only arming, seeker and designation work, and the pilot gets "Manual range command requires --live-fire". |
 | `RangeReset` | A new target on the range; "Target reset is available only with --live-fire" otherwise. |
 | `ReleaseChaff`, `ReleaseFlare` | One cartridge or flare, with the retail messages ("Chaff launched, 11 left", "Out of flares"). Refused when the aircraft is destroyed, the pilot has ejected or it has no hit points. |
+| `RadioSilence` | Toggles radio silence and tells the pilot ("Radio silence", "Radio traffic OK"). |
 | `ReleaseTrigger` | `Combat::cancel`, which a menu opening, a pause, a modifier key or losing focus does. |
 | `TriggerKey` | The Space key going down or up, with the app's "blocked" flag (paused, out of focus or a modifier held). |
+
+`SeatInput::sensors` carries the seat's scope controls (channel, display range
+and contact history). The step sets them on the seat's flight before that
+seat's commands, every tick; the app used to copy them into the flight once a
+frame. The scope's labels follow the controls as they stand now, not the
+flight's copy, so they never lag a switch that was just pressed.
+
+Settings are not a seat's: `World::step_with` takes `MissionCommand`s, applied
+at the start of the tick before any seat's commands. `Settings` holds the
+cheats (which include the enemy skill and guns only switches the AI reads), and
+the step puts them on every human-flown plane, combat and the AI wings. The
+app sends them on a flight's first tick and whenever the flight menu changes
+them; it used to copy them every frame. The friendly list that the designation
+keys skip is set when a flight starts (`World::restart`), since it never
+changes in flight.
 
 The messages the commands give the pilot come back as `Cue::Message` in the
 tick's output. `TickOutput::commanded` says how many of the first cues the
@@ -1186,11 +1203,18 @@ takes effect on the first tick after resuming, instead of at once. And the
 mission recording must keep listing a command on the frame before the tick that
 applies it, as it does today (done, above).
 
-*Agent decisions (B2):* a pause refuses chaff and flares in the app, since only
-the app knows about the pause. The other refusals are the tick's. The
-handlers' order is now the order given: before, weapon-page buttons ran at
-the tick and every other command ran at once, so two commands given in one
-frame could swap. The queue holds at most 256 commands.
+*Agent decisions (B2):*
+
+- A pause refuses chaff and flares in the app, since only the app knows about
+  the pause. The other refusals (destroyed, ejected, no hit points) are the
+  tick's.
+- The commands apply in the order given. Before, weapon-page buttons ran at the
+  tick and every other command ran at once, so two commands given in one frame
+  could swap.
+- The scope controls reach the flight before the seat's commands. The frame
+  loop used to copy them after the handlers had run, so a command given in the
+  same frame as a channel change saw the old channel; it now sees the new one.
+- The queue holds at most 256 commands.
 
 #### Combat: one ownship per human-flown aircraft
 

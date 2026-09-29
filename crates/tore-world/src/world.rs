@@ -21,6 +21,7 @@ use tore_sim::{attitude, flight};
 #[cfg(test)]
 mod command_tests;
 mod commands;
+pub use commands::{MissionCommand, Settings};
 #[cfg(test)]
 mod tick_tests;
 
@@ -322,6 +323,8 @@ impl World {
             bridge.apply_group_objectives(&ai.group_objectives, cockpit.flight.position);
             bridge.apply_group_survival(&ai.group_must_survive);
             bridge.mirror_pose_out(&mut self.combat.state.targets);
+            // The designation keys skip the player's friends.
+            self.combat.state.friendlies = bridge.friendly_ids();
             self.combat.ai_poses = !bridge.is_empty();
             ai_aircraft = Some(bridge.len());
             self.ai_wings = Some(bridge);
@@ -416,7 +419,7 @@ impl World {
     /// serve the first cockpit only (docs/ARCHITECTURE.md, "Where the code
     /// stands").
     pub fn step(&mut self, inputs: &[SeatInput], out: &mut TickOutput) -> WorldResult<()> {
-        self.step_observed(inputs, out, |_, _| Ok(()))
+        self.step_with(&[], inputs, out, |_, _| Ok(()))
     }
 
     /// [`Self::step`], calling `commands_applied` once the command phase is
@@ -429,12 +432,28 @@ impl World {
         out: &mut TickOutput,
         commands_applied: impl FnOnce(&mut World, &TickOutput) -> WorldResult<()>,
     ) -> WorldResult<()> {
+        self.step_with(&[], inputs, out, commands_applied)
+    }
+
+    /// The whole step: `mission` commands first, then each seat's, then
+    /// `commands_applied` as in [`Self::step_observed`].
+    pub fn step_with(
+        &mut self,
+        mission: &[MissionCommand],
+        inputs: &[SeatInput],
+        out: &mut TickOutput,
+        commands_applied: impl FnOnce(&mut World, &TickOutput) -> WorldResult<()>,
+    ) -> WorldResult<()> {
         *out = TickOutput::default();
         let inputs = self.cockpit_inputs(inputs)?;
         let Some(&first_input) = inputs.first() else {
             return Err("a tick needs a human-flown plane".into());
         };
-        // Commands first, in seat order, on each seat's own plane.
+        // Mission commands first, then each seat's commands in seat order on
+        // its own plane.
+        for command in mission {
+            self.apply_mission_command(command);
+        }
         let mut by_seat: Vec<(usize, &SeatInput)> = inputs.iter().copied().enumerate().collect();
         by_seat.sort_by_key(|(_, input)| input.seat);
         for (cockpit, input) in by_seat {

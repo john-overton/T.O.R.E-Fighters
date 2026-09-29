@@ -196,6 +196,10 @@ pub struct SeatInput {
     pub pilot: PilotInput,
     /// The trigger, Space or the bound fire control, is held.
     pub trigger: bool,
+    /// The seat's scope controls: channel, display range and contact history.
+    /// The step sets them on the seat's flight before its commands, so a
+    /// command given after a change sees it and the labels never lag.
+    pub sensors: tore_sim::sensors::Controls,
     /// Commands given since the last tick, applied in this order at its start.
     pub commands: Vec<SeatCommand>,
 }
@@ -230,6 +234,8 @@ pub enum SeatCommand {
     /// Let go of the trigger, which many UI events do: a menu opening, a
     /// pause, a modifier key or the window losing focus.
     ReleaseTrigger,
+    /// Toggle radio silence, which holds back the wing and crew calls.
+    RadioSilence,
     /// The Space key. `blocked` is set when the game was paused, out of
     /// focus or a modifier key was held: the key then only lets go.
     TriggerKey {

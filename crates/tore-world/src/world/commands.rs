@@ -4,9 +4,43 @@
 
 use super::{Cue, SeatInput, TickOutput, World};
 use crate::{combat, seats::SeatCommand};
-use tore_sim::combat::live::Command as Live;
+use tore_sim::{cheats::Cheats, combat::live::Command as Live};
+
+/// A change to the mission itself, applied at the start of the tick before
+/// any seat's commands. In single player the player gives them, from the
+/// cheats menu; in a hosted game only the host's would count.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MissionCommand {
+    /// New settings in force.
+    Settings(Settings),
+}
+
+/// The settings a mission runs under. What single player's flight menu
+/// changes are the cheats, which include the enemy skill and guns only
+/// switches the AI reads.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Settings {
+    pub cheats: Cheats,
+}
 
 impl World {
+    /// Puts a mission command into force: every human-flown plane, combat and
+    /// the AI wings take the new cheats.
+    pub(super) fn apply_mission_command(&mut self, command: &MissionCommand) {
+        match command {
+            MissionCommand::Settings(Settings { cheats }) => {
+                for cockpit in &mut self.cockpits {
+                    cockpit.flight.cheats = *cheats;
+                }
+                self.combat.state.cheats = *cheats;
+                if let Some(wings) = &mut self.ai_wings {
+                    wings.set_enemy_skill(cheats.enemy_ai);
+                    wings.set_guns_only(cheats.guns_only);
+                }
+            }
+        }
+    }
+
     /// Applies one seat's commands, in the order given, to the plane whose
     /// cockpit is `cockpit`. Each does what the old between-frames handler did
     /// at the same moment: window events arrive between frames, so the state
@@ -17,6 +51,7 @@ impl World {
         input: &SeatInput,
         out: &mut TickOutput,
     ) {
+        self.cockpits[cockpit].flight.sensors = input.sensors;
         for &command in &input.commands {
             match command {
                 SeatCommand::CycleWeapon { forward } => {
@@ -33,6 +68,10 @@ impl World {
                 SeatCommand::ReleaseChaff => self.release_countermeasure(cockpit, true, out),
                 SeatCommand::ReleaseFlare => self.release_countermeasure(cockpit, false, out),
                 SeatCommand::ReleaseTrigger => self.combat.cancel(),
+                SeatCommand::RadioSilence => {
+                    let message = self.comms.toggle_silence(input.seat);
+                    out.cues.push(Cue::Message(message.into()));
+                }
                 SeatCommand::TriggerKey {
                     down,
                     repeat,
