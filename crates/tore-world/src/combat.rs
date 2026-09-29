@@ -1330,6 +1330,44 @@ pub fn feedback(
 mod tests {
     use super::*;
 
+    /// An AI's hit on a human-flown aircraft is credited to the AI (John,
+    /// 2026-09-29), but not when the aircraft is then lost with no shooter:
+    /// to overspeed, the map edge or belly wear (lead's decision, 2026-09-29).
+    #[test]
+    fn an_ai_hit_is_not_credited_for_a_loss_with_no_shooter() {
+        use tore_sim::aircraft_systems::LossCause;
+        let world = crate::test_support::terrain();
+        let (mut c, mut f) = fixtures::loaded([500, 3]);
+        let own = c.own_id();
+        f.position = [2000., 8000., 2000.];
+        let l = launcher(&f);
+        c.state.command(own, live::Command::Incoming, l);
+        let forward = l.basis.forward;
+        let p = &mut c.state.projectiles[0];
+        p.owner = 7;
+        p.incoming = None;
+        p.position = std::array::from_fn(|i| l.position[i] + forward[i] * 100.);
+        p.previous = p.position;
+        let full = c.state.own().hp;
+        for _ in 0..120 {
+            c.step(&mut f, &world).unwrap();
+            if c.state.own().hp < full {
+                break;
+            }
+        }
+        assert!(
+            c.state.own().hp < full && c.state.own().hp > 0,
+            "the AI round hit"
+        );
+        assert_eq!(c.state.ledger.credit(own).map(|k| k.owner), Some(7));
+        f.systems.destroy(LossCause::Overspeed);
+        f.crashed = true;
+        c.step(&mut f, &world).unwrap();
+        assert_eq!(c.state.own().hp, 0);
+        assert_eq!(c.state.ledger.credit(own), None);
+        assert!(c.state.ledger.kills().iter().all(|k| k.victim != own));
+    }
+
     /// A human-flown aircraft lost to overspeed, the map edge or belly wear
     /// credits nobody, even when a shooter hit it earlier; an ordinary crash
     /// still goes to the last shooter (lead's decision, 2026-09-29).

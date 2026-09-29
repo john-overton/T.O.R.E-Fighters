@@ -1397,10 +1397,12 @@ through the player's damage pipeline but never reached the ledger, so a human wh
 shot down another human (or its own leader) was credited with nothing and a
 friendly-fire kill of a human never showed in the debrief. Now a hit on an
 ownship by another ownship's round records the shooter as the last hit on it, and
-a destroyed ownship is a recorded kill, as a hit on an AI row already was. An AI
-shooter's hit on an ownship is still not credited (*agent decision*): the replay
-recorder names the killer of the player from the ledger, so crediting it would
-add a killer to single player's recordings, which do not change. The ownship's
+a destroyed ownship is a recorded kill, as a hit on an AI row already was. The
+AI is credited too (John, 2026-09-29): an AI shooter's hit on an ownship is the
+last hit on it and its kill is the AI's, so the debrief and the replay recorder,
+which names the player's killer from the ledger, show it. Ten of single player's
+probe recordings changed with this rule in the stage C chain, in that event only. The diagnostic
+incoming round belongs to no aircraft and is credited to nobody. The ownship's
 own score (`hits`, `kills`) still counts hits on AI rows only, as before.
 
 A loss with no shooter credits nobody (lead's decision, 2026-09-29): a
@@ -1770,6 +1772,8 @@ baselines:
    that exist) without an audio device.
 5. The wing order call holds the radio channel whatever the audio (approved by
    John on 2026-09-29).
+6. Kill credit for every shooter of a human-flown aircraft, the AI included
+   (approved by John on 2026-09-29).
 
 Presentation only, with no change to simulation or recordings: per-camera
 weather, wing vapor, blackout and redout, the view rig and control-surface

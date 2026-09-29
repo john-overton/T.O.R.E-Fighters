@@ -3872,7 +3872,6 @@ impl State {
         if self.cheats.invulnerable() {
             ownship_hits.clear();
         }
-        let human_shooters: Vec<u32> = ships.iter().map(|o| o.aircraft).collect();
         for (n, amount, section, direct_gun, owner, weapon_flags) in ownship_hits {
             let own = &mut ships[rows[n].index];
             own.localized_damage
@@ -3896,13 +3895,12 @@ impl State {
             let alive = own.hp > 0;
             self.damage_ownship(own, amount, &mut events);
             if alive && amount > 0 {
-                // The debrief credits a human shooter with the kill, or, if the
-                // aircraft is lost another way, with the last hit on it, as it
-                // does for a hit on an AI aircraft. An AI shooter's hit on an
-                // ownship stays uncredited: the recording names the killer of
-                // the player from this ledger, and single player's recordings
-                // do not change.
-                if human_shooters.contains(&owner) {
+                // The debrief credits the shooter, human or AI, with the kill,
+                // or, if the aircraft is lost another way, with the last hit on
+                // it, as it does for a hit on an AI aircraft (John,
+                // 2026-09-29). The diagnostic incoming round belongs to no
+                // aircraft and is credited to nobody.
+                if owner != INCOMING_OWNER {
                     let credit = Kill {
                         owner,
                         victim: own.aircraft,
@@ -4672,6 +4670,40 @@ mod tests {
             );
         }
         assert!(state.own().hp < before);
+    }
+
+    #[test]
+    fn an_ai_shooter_is_credited_with_an_ownship_it_shoots_down() {
+        let fly = |owner: u32| {
+            let mut state = fixture(false);
+            state.own_mut().config.stations[0].weapon.source = "M61.JT".into();
+            state.own_mut().hp = 1;
+            let own = launcher();
+            state.command(0, Command::Incoming, own);
+            let p = &mut state.projectiles[0];
+            p.owner = owner;
+            p.incoming = None;
+            p.position = [0., 1000., 100.];
+            p.previous = p.position;
+            for _ in 0..120 {
+                state.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: false,
+                        launcher: own,
+                    }],
+                    |_, _| 0.,
+                );
+            }
+            assert_eq!(state.own().hp, 0);
+            state.ledger.kills().to_vec()
+        };
+        let kills = fly(7);
+        assert_eq!(kills.len(), 1, "{kills:?}");
+        assert_eq!((kills[0].owner, kills[0].victim), (7, 0));
+        assert!(kills[0].aircraft);
+        // The diagnostic incoming round belongs to no aircraft.
+        assert!(fly(INCOMING_OWNER).is_empty());
     }
 
     #[test]
