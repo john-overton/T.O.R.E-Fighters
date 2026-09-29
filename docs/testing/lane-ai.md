@@ -206,9 +206,6 @@ low-level class: `ai-big-a4e-vs-f22n-researched`, `ai-big-x31-vs-faxx-researched
 `ai-known-f22-leader-wingman-ukr3`, fuzz seeds 14, 32 and 53 and
 `ai-damaged-fault04-hit` and `-gun` now pass, and their markers are gone.
 
-- `ai-fuzz-0028`: the test harness cruises an F-22 at about 1,070 kt and its
-  F-22 wingmen follow it off the map edge (item 5). The same run shows a
-  collision between Friendly 2-3 and 2-4, not investigated.
 - `ai-theater-apa-takeoff-a3` (Santa Fe) and `ai-theater-lfa-takeoff-a3` (San
   Carlos): these ground starts use 1,074 ft strips; each wingman's takeoff roll
   runs off the end onto the grass at 70 to 90 kt before it lifts off, leaving
@@ -216,10 +213,10 @@ low-level class: `ai-big-a4e-vs-f22n-researched`, `ai-big-x31-vs-faxx-researched
 - `ai-theater-cub-takeoff-a1` (Key West, near the north edge): the airborne
   friendly wing starts on the runway heading, north, has no route and leaves
   the map after 163 s while the enemy is still alive (item 5 below).
-- With `TORE_AI_FUZZ=all` only: seeds 149, 180, 296, 309, 316, 338 and 399
-  (1,074 ft strips, as above) and seeds 183 and 266 (a loaded legacy-model
-  fighter near its top speed with less than 1 G sinks into flat ground; see
-  "Whole lane and all fuzz seeds on the merged tree").
+- Fuzz seeds 89, 149, 180, 296, 309, 316, 338 and 399 (most only with
+  `TORE_AI_FUZZ=all`): ground starts on the 1,074 ft strips, as above. Seeds
+  28, 183 and 266 pass since the AI speed limits (see "Weight-scaled stall
+  speeds").
 - Activity flapping and pitch-stick oscillation at a weapon's envelope edge,
   and mid-air collisions, are reported but allowed (see above and below);
   regression scenarios check strictly.
@@ -422,6 +419,48 @@ marked as known failures:
 Mid-air collisions outside the fuzz seeds: 11 (10 on the build before the
 landing work). The 400 fuzz seeds show 79, with no earlier all-seed count to
 compare.
+
+### Weight-scaled stall speeds (2026-09-29, 1d135fb)
+
+The flight agent's weight-scaled stall speeds raised every aircraft's slow
+edges, and 12 AI scenarios failed (six landing pairs, the ground landing,
+`ai-rtb-after-win`, `ai-long-guns-3v3`, `ai-long-15v15`, fuzz seeds 28 and
+43). `4e47944`:
+
+- The AI minimum speed was the slowest edge of any envelope row, the 0 G row
+  included: 114 kt for a fuelled F/A-18D that needs about 144 kt to hold 1 G,
+  so finals built on it sank. It is now never below
+  `flight::State::minimum_level_speed` in the current flap setting (the flight
+  agent's idea, applied with the current flaps rather than full flaps).
+- The AI maximum is now never above the fastest envelope row that still
+  leaves 1.2 G after the loading. Near the top speed only the 1 G row holds
+  and the legacy flight model (airborne AI starts) divides it by the
+  loading, so a loaded fighter at full power sank into flat ground at about
+  1,100 kt (seed 43 after the stall change, and the all-seed seeds 183 and
+  266 before it). All three now pass.
+- The final's lift margin drops from 1.3 to 1.15 G (1.3 now asked for more
+  than the 174 kt final cap) and the flare horizon from 6 to 4 s (the faster
+  final floated a high F/A-18D past KURILE 3's go-around point). The F/A-18D
+  now flies its final at 162 kt; threshold crossings over the whole lane
+  were 56 to 114 ft (median 62) at 122 to 169 kt (median 163).
+
+Whole lane with all 400 fuzz seeds on a frozen copy of that build: 1,063 of
+1,067 passed in 41 minutes at `--jobs 12`. The four failures: fuzz seeds 28,
+183 and 266 now pass (markers removed), and seed 89 is a new 1,074 ft strip
+case (an FA-XX at San Carlos no longer lifts off within the strip; marked).
+All 12 scenarios above pass. Mid-air collisions: 11 outside the fuzz seeds,
+84 in them.
+
+Short strips: with the heavier liftoff speeds more aircraft roll off the
+1,074 ft strips (Santa Fe, San Carlos, Goose Green, Santiago) before lifting
+off. AI wingmen are still placed there and roll off the end, leaving the
+probe's hazard open; the markers cover the lane's cases (two theater
+takeoffs, eight fuzz seeds). Whether Quick Mission should refuse a ground
+start on a strip too short for the aircraft, or the AI should hold its
+wingmen parked there, is still decision 11. World edge and overspeed: the
+Key West friendly wing still leaves the map by 163 s (its known failure);
+no AI aircraft in the lane was destroyed by the new overspeed rule, and the
+new top-speed limit keeps AI fighters below the 1 G row's edge.
 
 ### Fifth round (2026-09-29, review follow-ups)
 
