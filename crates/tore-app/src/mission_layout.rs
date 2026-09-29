@@ -1,10 +1,13 @@
-//! Quick Mission launch geometry, as plain functions of numbers: where the
-//! enemy group goes so it stays on the map, and where the player's wing parks
-//! for a ground start. The rules and numbers are in
+//! Quick Mission launch geometry and placement: where the enemy group goes so
+//! it stays on the map, where the player's wing parks for a ground start, and
+//! the layout a restart rebuilds. The rules and numbers are in
 //! `docs/spec/quick-mission-menu.md` ("Mission wings" and "Player ground
-//! start"). Nothing here reads the world or a flight model, so every rule can
-//! be tested with synthetic bounds and runways.
+//! start"). The creator's screen is in `quick_mission`; nothing here reaches
+//! the menu, the rocker, the loadout screen or any drawing type, so the mission
+//! core can use it. The geometry functions are plain functions of numbers, so
+//! every rule can be tested with synthetic bounds and runways.
 
+use crate::terrain::Terrain;
 use tore_sim::{
     ai::airfield::AirfieldAnchors,
     airport::{ApproachEnd, Runway},
@@ -321,6 +324,511 @@ pub fn relative_offsets(slots: &[[f64; 3]], heading: f64) -> Vec<[f64; 2]> {
         .collect()
 }
 
+pub fn runway_pose(world: &Terrain, object: u32) -> crate::AppResult<([f64; 3], f64)> {
+    let runway = world
+        .airport_scene
+        .runway(object)
+        .ok_or("Selected runway is unavailable; choose another airport.")?;
+    let (position, heading) = runway.departure_pose();
+    if !runway.surface.contains_horizontal(position[0], position[2]) {
+        return Err("Selected runway has no supported departure point".into());
+    }
+    Ok((position, heading))
+}
+
+/// `fitted`, agent decision 2026-09-23: buildings are checked at this height
+/// above the runway at every parking point, about a fighter's wheel-to-centre
+/// clearance, before any aircraft is placed there.
+const SLOT_PROBE_FT: f64 = 6.;
+
+/// Where the player's wing parks for a ground start.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroundLayout {
+    pub object: u32,
+    pub airport: u32,
+    pub runway: tore_sim::ai::airfield::RunwayView,
+    /// Departure heading down the runway, the leader's heading.
+    pub heading: f64,
+    /// True when the airport's own takeoff spot and taxiway queue are used;
+    /// false for the fitted staggered runway fallback.
+    pub anchored: bool,
+    /// Staggered fallback only: distance between parked aircraft.
+    pub spacing_ft: Option<f64>,
+    /// Surface points, leader (the player) first.
+    pub slots: Vec<[f64; 3]>,
+    /// Heading of each slot.
+    pub headings: Vec<f64>,
+}
+
+impl GroundLayout {
+    /// The same slots as [right, forward] offsets from the player's slot.
+    pub fn offsets(&self) -> Vec<[f64; 2]> {
+        relative_offsets(&self.slots, self.heading)
+    }
+
+    /// The departure handed to the AI wingmen.
+    pub fn departure(&self) -> crate::ai_wings::Departure {
+        crate::ai_wings::Departure {
+            runway: self.runway,
+            headings: self.headings.clone(),
+            slots: self.slots.clone(),
+        }
+    }
+}
+
+/// Place `count` aircraft (the player's whole wing) for a ground start. With
+/// the airport's own points the player takes the takeoff spot and wingmen the
+/// taxiway queue; otherwise the wing parks staggered on the runway. Every slot
+/// must be on the airport's paving, on a landable surface and clear of
+/// buildings. If the staggered layout cannot fit, its spacing tightens, and
+/// if none works the start is rejected with a message for the creator.
+pub fn ground_layout(world: &Terrain, object: u32, count: usize) -> crate::AppResult<GroundLayout> {
+    let runway = world
+        .airport_scene
+        .runway(object)
+        .ok_or("Selected runway is unavailable; choose another airport.")?;
+    let view = world
+        .runway_view(object)
+        .ok_or("Selected runway is unavailable; choose another airport.")?;
+    let buildings: Vec<u32> = world.airport_scene.objects.iter().map(|o| o.id).collect();
+    let check = |p: [f64; 3]| -> Result<[f64; 3], String> {
+        if !runway.surface.contains_horizontal(p[0], p[2]) {
+            return Err(if count > 1 {
+                "The selected runway is too short for your whole wing.".into()
+            } else {
+                "Selected runway has no supported departure point".into()
+            });
+        }
+        let surface = world.surface(p[0], p[2]);
+        if !surface.landable {
+            return Err("Selected runway does not provide a ground surface".into());
+        }
+        let probe = [p[0], surface.height + SLOT_PROBE_FT, p[2]];
+        if world
+            .solid_contact(probe, probe, buildings.iter().copied())
+            .is_some()
+        {
+            return Err("The runway start is obstructed. Choose another airport.".into());
+        }
+        Ok([p[0], surface.height, p[2]])
+    };
+    let heading = departure_heading(runway);
+    let mut check = check;
+    if let Some(slots) = view
+        .anchors
+        .as_ref()
+        .and_then(|anchors| anchored_slots(anchors, count, &mut check))
+    {
+        let (slots, headings) = slots.into_iter().unzip();
+        return Ok(GroundLayout {
+            object,
+            airport: runway.airport,
+            runway: view,
+            heading,
+            anchored: true,
+            spacing_ft: None,
+            slots,
+            headings,
+        });
+    }
+    let (spacing_ft, slots) = fit_runway_slots(runway, count, check).map_err(|why| {
+        if count > 1 {
+            format!("{why} Your wing of {count} could not be parked; choose another airport or fewer wingmen.")
+        } else {
+            why
+        }
+    })?;
+    Ok(GroundLayout {
+        object,
+        airport: runway.airport,
+        runway: view,
+        heading,
+        anchored: false,
+        spacing_ft: Some(spacing_ft),
+        headings: vec![heading; slots.len()],
+        slots,
+    })
+}
+
+/// Stand an aircraft in its parking slot: stationary, engine idling, gear and
+/// flaps down, brakes set. Rejects a slot where the aircraft itself would sit
+/// inside a building.
+pub fn place_on_runway(
+    world: &Terrain,
+    flight: &mut tore_sim::flight::State,
+    layout: &GroundLayout,
+    order: usize,
+) -> crate::AppResult<()> {
+    let position = *layout
+        .slots
+        .get(order)
+        .ok_or("The ground start has no slot for this aircraft")?;
+    let heading = layout
+        .headings
+        .get(order)
+        .copied()
+        .unwrap_or(layout.heading);
+    let mut candidate = flight.clone();
+    candidate.start_on_runway(position, heading)?;
+    if world
+        .solid_contact(
+            candidate.position,
+            candidate.position,
+            world.airport_scene.objects.iter().map(|o| o.id),
+        )
+        .is_some()
+    {
+        return Err("The runway start is obstructed. Choose another airport.".into());
+    }
+    *flight = candidate;
+    Ok(())
+}
+
+/// The player alone on the runway, as the `--ground-start` developer option
+/// and the straight-flight fixtures use it.
+pub fn apply_ground_start(
+    world: &Terrain,
+    flight: &mut tore_sim::flight::State,
+    object: u32,
+) -> crate::AppResult<u32> {
+    let layout = ground_layout(world, object, 1)?;
+    place_on_runway(world, flight, &layout, 0)?;
+    Ok(layout.airport)
+}
+
+/// Everything the creator decided about where aircraft start, kept so a
+/// restart rebuilds exactly the same scene.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MissionLayout {
+    /// The player's wing parked on this runway, for a ground start.
+    pub ground: Option<GroundLayout>,
+    /// Airborne start only: the turn added to the player's starting heading,
+    /// radians clockwise, so that the enemy ahead stays on the map. The whole
+    /// airborne scene turns with the player.
+    pub player_turn: f64,
+    /// Where the enemy group sits relative to the player.
+    pub enemy: EnemyAim,
+}
+
+impl MissionLayout {
+    /// Plan a mission around `start`, the player's pose before any ground
+    /// placement (a ground start takes the leader's runway slot instead).
+    /// `group` is every enemy aircraft's offset from the enemy placement
+    /// point ([`crate::ai_wings::enemy_group_offsets`]).
+    pub fn plan(
+        world: &Terrain,
+        start: &tore_sim::flight::State,
+        ground: Option<GroundLayout>,
+        group: &[[f64; 2]],
+        separation_ft: f64,
+    ) -> Self {
+        let (reference, heading) = match &ground {
+            Some(g) => ([g.slots[0][0], g.slots[0][2]], g.heading),
+            None => ([start.position[0], start.position[2]], start.yaw),
+        };
+        let enemy = aim_into_map(reference, heading, separation_ft, group, map_bounds(world));
+        Self {
+            player_turn: if ground.is_some() { 0. } else { enemy.turn },
+            ground,
+            enemy,
+        }
+    }
+
+    pub fn spawn_plan(&self) -> crate::ai_wings::SpawnPlan {
+        crate::ai_wings::SpawnPlan {
+            separation_ft: self.enemy.distance_ft,
+            // An airborne scene turns with the player; parked aircraft cannot,
+            // so only the enemy bearing changes.
+            enemy_turn: if self.ground.is_some() {
+                self.enemy.turn
+            } else {
+                0.
+            },
+            runway_slots: self.ground.as_ref().map(GroundLayout::offsets),
+        }
+    }
+
+    /// A line for the player when the chosen separation did not fit.
+    pub fn notice(&self) -> Option<String> {
+        self.enemy.shortened().then(|| {
+            format!(
+                "Enemy forces start {:.0} miles away: {:.0} miles does not fit this theater.",
+                (self.enemy.distance_ft / FEET_PER_NM).floor(),
+                self.enemy.requested_ft / FEET_PER_NM
+            )
+        })
+    }
+}
+
+/// The usable map for starting aircraft: the terrain less one cell each side.
+pub fn map_bounds(world: &Terrain) -> MapBounds {
+    let cell = f64::from(tore_formats::theater::CELL_FEET);
+    MapBounds::from_cells(
+        world.theater.cols,
+        world.theater.rows,
+        cell,
+        MAP_MARGIN_CELLS * cell,
+    )
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use super::*;
+    use crate::terrain::Terrain;
+    const RUNWAY: u32 = 0x4000_0001;
+
+    /// The synthetic terrain with one 6000 ft north-facing runway, its near
+    /// threshold 1096 ft into the map.
+    fn airfield(length_ft: f64) -> Terrain {
+        use tore_sim::airport::{Airport, Allegiance, OrientedBox, SourceKey, StaticObject};
+        let mut world = crate::terrain::tests::world();
+        let surface = OrientedBox {
+            center: [4096., 20., 4096.],
+            half: [1500., 2., length_ft / 2.],
+            heading: 0.,
+            pitch: 0.,
+            bank: 0.,
+        };
+        let scene = &mut world.airport_scene;
+        scene.objects.push(StaticObject {
+            id: RUNWAY,
+            source: SourceKey {
+                layout: "T.MM".into(),
+                ordinal: 1,
+            },
+            name: "Strip".into(),
+            object_type: "RNWY1.OT".into(),
+            bounds: surface,
+            hit_points: 100,
+            category: 0,
+            radar_signature: 1.,
+            infrared_signature: 0.,
+            runway: true,
+        });
+        scene.runways.push(tore_sim::airport::Runway {
+            object: RUNWAY,
+            airport: 9,
+            name: "Strip".into(),
+            surface,
+            approach_center: [4096., 20., 4096.],
+            elevation_ft: 20.,
+            heading: 0.,
+            length_ft,
+        });
+        scene.airports.push(Airport {
+            id: 9,
+            name: "Strip".into(),
+            runway_objects: vec![RUNWAY],
+            allegiance: Allegiance::Neutral,
+            neutral_permission: true,
+        });
+        world
+    }
+
+    fn hangar(world: &mut Terrain, id: u32, along_ft: f64) {
+        let near = 4096. - world.airport_scene.runways[0].length_ft / 2.;
+        building(world, id, 4096., near + along_ft);
+    }
+
+    fn building(world: &mut Terrain, id: u32, x: f64, z: f64) {
+        world
+            .airport_scene
+            .objects
+            .push(tore_sim::airport::StaticObject {
+                id,
+                source: tore_sim::airport::SourceKey {
+                    layout: "T.MM".into(),
+                    ordinal: id,
+                },
+                name: "Hangar".into(),
+                object_type: "HANGR.OT".into(),
+                bounds: tore_sim::airport::OrientedBox {
+                    center: [x, 30., z],
+                    half: [100., 30., 40.],
+                    heading: 0.,
+                    pitch: 0.,
+                    bank: 0.,
+                },
+                hit_points: 100,
+                category: 0x2000,
+                radar_signature: 1.,
+                infrared_signature: 0.,
+                runway: false,
+            });
+    }
+
+    #[test]
+    fn a_ground_start_parks_the_whole_wing_with_the_player_in_front() {
+        let world = airfield(6000.);
+        let layout = ground_layout(&world, RUNWAY, 5).unwrap();
+        assert_eq!((layout.airport, layout.spacing_ft), (9, Some(250.)));
+        assert!(!layout.anchored);
+        assert_eq!(layout.headings, [0.; 5]);
+        let near = 4096. - 3000.;
+        let expected = [
+            (0., 1100.),
+            (40., 850.),
+            (-40., 600.),
+            (40., 350.),
+            (-40., 100.),
+        ];
+        for (slot, (right, along)) in layout.slots.iter().zip(expected) {
+            assert!((slot[0] - 4096. - right).abs() < 1e-6);
+            assert!((slot[2] - near - along).abs() < 1e-6);
+            assert_eq!(slot[1], 20.);
+        }
+        assert_eq!(layout.offsets()[3], [40., -750.]);
+        let departure = layout.departure();
+        assert_eq!(departure.slots, layout.slots);
+        assert_eq!(departure.runway.object, RUNWAY);
+        // The player stands in the front slot on the researched model.
+        let mut player =
+            tore_sim::flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3])
+                .unwrap();
+        assert!(place_on_runway(&world, &mut player, &layout, 0).is_err());
+        player.enable_research(1).unwrap();
+        place_on_runway(&world, &mut player, &layout, 0).unwrap();
+        assert_eq!(
+            [player.position[0], player.position[2]],
+            [4096., near + 1100.]
+        );
+        assert!(player.brake_out && player.gear_down && player.speed == 0.);
+        // Alone, the player keeps the original single-aircraft start point.
+        let alone = ground_layout(&world, RUNWAY, 1).unwrap();
+        assert_eq!(alone.slots[0][2], near + 100.);
+    }
+
+    #[test]
+    fn airport_points_put_the_player_on_the_runway_and_wingmen_on_the_taxiway() {
+        use std::f64::consts::FRAC_PI_2;
+        let mut world = airfield(6000.);
+        let at = |x: f64, z: f64| [x, 20., z];
+        world.airfield_anchors.insert(
+            RUNWAY,
+            tore_sim::ai::airfield::AirfieldAnchors {
+                taxi_out: [
+                    at(5000., 1300.),
+                    at(4600., 1300.),
+                    at(4300., 1300.),
+                    at(4096., 1300.),
+                ],
+                takeoff_spot: at(4096., 1500.),
+                takeoff_heading: 0.,
+                landing_point: at(4096., 1340.),
+                landing_heading: 0.,
+                taxi_in: [
+                    at(4096., 6000.),
+                    at(4400., 6000.),
+                    at(4400., 1400.),
+                    at(5000., 1400.),
+                ],
+                parking: std::array::from_fn(|k| at(5000., 1500. + 200. * k as f64)),
+                parking_heading: FRAC_PI_2,
+            },
+        );
+        let layout = ground_layout(&world, RUNWAY, 3).unwrap();
+        assert!(layout.anchored && layout.spacing_ft.is_none());
+        assert_eq!(
+            layout.slots,
+            [at(4096., 1500.), at(4246., 1300.), at(4446., 1300.)]
+        );
+        assert_eq!(layout.headings, [0., -FRAC_PI_2, -FRAC_PI_2]);
+        assert!(layout.runway.anchors.is_some());
+        assert_eq!(layout.departure().headings, layout.headings);
+        assert_eq!(layout.offsets()[1], [150., -200.]);
+        let mut wingman =
+            tore_sim::flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3])
+                .unwrap();
+        wingman.enable_research(2).unwrap();
+        place_on_runway(&world, &mut wingman, &layout, 1).unwrap();
+        assert_eq!(
+            wingman.yaw.rem_euclid(std::f64::consts::TAU),
+            3. * FRAC_PI_2
+        );
+        // An obstructed queue slot moves the queue farther along the taxiway.
+        building(&mut world, 300, 4246., 1300.);
+        let layout = ground_layout(&world, RUNWAY, 3).unwrap();
+        assert_ne!(layout.slots[1], at(4246., 1300.));
+        // A building on the takeoff spot falls back to the staggered runway
+        // layout, which starts clear of it.
+        building(&mut world, 301, 4096., 1500.);
+        let layout = ground_layout(&world, RUNWAY, 3).unwrap();
+        assert!(!layout.anchored);
+        assert_eq!(layout.spacing_ft, Some(250.));
+    }
+
+    #[test]
+    fn blocked_or_short_runways_tighten_the_wing_then_refuse_it() {
+        // A hangar over the 250 ft leader slot moves everyone to 200 ft.
+        let mut world = airfield(6000.);
+        hangar(&mut world, 200, 1100.);
+        let layout = ground_layout(&world, RUNWAY, 5).unwrap();
+        assert_eq!(layout.spacing_ft, Some(200.));
+        assert!((layout.slots[0][2] - (4096. - 3000.) - 900.).abs() < 1e-6);
+        // A hangar on the last aircraft's slot leaves nothing to fall back to.
+        hangar(&mut world, 201, 100.);
+        let error = ground_layout(&world, RUNWAY, 5).unwrap_err().to_string();
+        assert!(
+            error.contains("obstructed") && error.contains("wing of 5"),
+            "{error}"
+        );
+        // A 600 ft strip only fits five aircraft at 100 ft spacing.
+        let short = airfield(600.);
+        assert_eq!(
+            ground_layout(&short, RUNWAY, 5).unwrap().spacing_ft,
+            Some(100.)
+        );
+        let error = ground_layout(&airfield(300.), RUNWAY, 5)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("too short"), "{error}");
+        assert!(ground_layout(&airfield(300.), RUNWAY, 1).is_ok());
+    }
+
+    #[test]
+    fn the_layout_turns_the_scene_in_the_air_and_only_the_enemy_on_the_ground() {
+        let world = airfield(6000.);
+        let ground = ground_layout(&world, RUNWAY, 3).unwrap();
+        let aim = EnemyAim {
+            turn: 0.5,
+            distance_ft: 100.5 * FEET_PER_NM,
+            requested_ft: 300. * FEET_PER_NM,
+        };
+        let airborne = MissionLayout {
+            ground: None,
+            player_turn: aim.turn,
+            enemy: aim,
+        };
+        let plan = airborne.spawn_plan();
+        assert_eq!(plan.enemy_turn, 0.);
+        assert_eq!(plan.separation_ft, 100.5 * FEET_PER_NM);
+        assert!(plan.runway_slots.is_none());
+        assert_eq!(
+            airborne.notice().unwrap(),
+            "Enemy forces start 100 miles away: 300 miles does not fit this theater."
+        );
+        let parked = MissionLayout {
+            ground: Some(ground.clone()),
+            player_turn: 0.,
+            enemy: EnemyAim::straight(5. * FEET_PER_NM),
+        };
+        assert!(parked.notice().is_none());
+        let parked = MissionLayout {
+            enemy: aim,
+            ..parked
+        };
+        let plan = parked.spawn_plan();
+        assert_eq!(plan.enemy_turn, 0.5);
+        assert_eq!(plan.runway_slots.unwrap(), ground.offsets());
+        // Planning from the runway uses the leader's slot and runway heading.
+        let start =
+            tore_sim::flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3])
+                .unwrap();
+        let planned = MissionLayout::plan(&world, &start, Some(ground), &[], 1000.);
+        assert_eq!(planned.player_turn, 0.);
+        assert_eq!(planned.enemy, EnemyAim::straight(1000.));
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

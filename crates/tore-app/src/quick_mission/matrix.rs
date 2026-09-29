@@ -108,7 +108,10 @@ impl Matrix<'_> {
                 let result = start
                     .enable_research(1)
                     .map_err(|e| e.to_string())
-                    .and_then(|()| ground_layout(world, object, parked).map_err(|e| e.to_string()))
+                    .and_then(|()| {
+                        crate::mission_layout::ground_layout(world, object, parked)
+                            .map_err(|e| e.to_string())
+                    })
                     .and_then(|layout| {
                         place_on_runway(world, &mut start, &layout, 0)
                             .map(|()| layout)
@@ -280,7 +283,7 @@ fn check_scene(
     wings: &[WingLaunch],
     altitude: f64,
 ) -> Option<String> {
-    let bounds = map_bounds(world);
+    let bounds = crate::mission_layout::map_bounds(world);
     let inside = |x: f64, z: f64| {
         (bounds.min[0]..=bounds.max[0]).contains(&x) && (bounds.min[1]..=bounds.max[1]).contains(&z)
     };

@@ -50,6 +50,7 @@ mod media_source;
 mod menu;
 mod mirrors;
 mod missile_acceptance;
+mod mission_layout;
 mod navigation;
 mod ocean;
 mod ordnance;
@@ -2048,10 +2049,10 @@ impl App {
                             .enable_research(1)
                             .map_err(|e| -> Box<dyn Error> { e.into() })
                             .and_then(|()| {
-                                quick_mission::ground_layout(&self.world.terrain, object, parked)
+                                mission_layout::ground_layout(&self.world.terrain, object, parked)
                             })
                             .and_then(|layout| {
-                                quick_mission::place_on_runway(
+                                mission_layout::place_on_runway(
                                     &self.world.terrain,
                                     &mut start,
                                     &layout,
@@ -2070,7 +2071,7 @@ impl App {
                     }
                     None => None,
                 };
-                let layout = quick_mission::MissionLayout::plan(
+                let layout = mission_layout::MissionLayout::plan(
                     &self.world.terrain,
                     &start,
                     ground_layout,
@@ -2831,7 +2832,7 @@ impl ApplicationHandler for App {
                                 .combat
                                 .mission_layout
                                 .as_ref()
-                                .map_or(0., |l| l.enemy.distance_ft / quick_mission::FEET_PER_NM),
+                                .map_or(0., |l| l.enemy.distance_ft / mission_layout::FEET_PER_NM),
                             self.world.combat.state.ammo,
                             self.world.combat.readout(&self.world.flight, 1.).weapons,
                         );
@@ -4574,7 +4575,7 @@ impl ProbePilot {
         flight: &mut flight::State,
         keys: &mut flight::PilotInput,
         world: &terrain::Terrain,
-        ground: Option<&quick_mission::GroundLayout>,
+        ground: Option<&mission_layout::GroundLayout>,
         script: &ProbeScript,
     ) {
         use flight::{PilotCommand::*, Switch};
@@ -5640,7 +5641,7 @@ fn ai_probe_run(
     let parked = match quick.ground_runway() {
         Some(object) => {
             flight.enable_research(1)?;
-            Some(quick_mission::ground_layout(
+            Some(mission_layout::ground_layout(
                 world,
                 object,
                 quick.player_wing_size(),
@@ -5648,7 +5649,7 @@ fn ai_probe_run(
         }
         None => None,
     };
-    let layout = quick_mission::MissionLayout::plan(
+    let layout = mission_layout::MissionLayout::plan(
         world,
         &flight,
         parked.clone(),
@@ -5679,11 +5680,11 @@ fn ai_probe_run(
         combat.state.armed = parked.is_none();
     }
     if let Some(ground) = &parked {
-        quick_mission::place_on_runway(world, &mut flight, ground, 0)?;
+        mission_layout::place_on_runway(world, &mut flight, ground, 0)?;
     }
     let airfields = ai_wings::Airfields::from_world(
         world,
-        parked.as_ref().map(quick_mission::GroundLayout::departure),
+        parked.as_ref().map(mission_layout::GroundLayout::departure),
     );
     let mut bridge = ai_wings::AiWings::build_mission(
         &wings,
@@ -5729,14 +5730,14 @@ fn ai_probe_run(
         parked.as_ref().map(|g| g.runway.length_ft.round()),
         parked.as_ref().map(|g| g.anchored),
         parked.as_ref().and_then(|g| g.spacing_ft),
-        layout.enemy.distance_ft / quick_mission::FEET_PER_NM,
-        layout.enemy.requested_ft / quick_mission::FEET_PER_NM,
+        layout.enemy.distance_ft / mission_layout::FEET_PER_NM,
+        layout.enemy.requested_ft / mission_layout::FEET_PER_NM,
         layout.enemy.turn.to_degrees()
     );
     if let Some(notice) = layout.notice() {
         println!("AI probe notice: {notice}");
     }
-    let bounds = quick_mission::map_bounds(world);
+    let bounds = mission_layout::map_bounds(world);
     for slot in bridge.slots() {
         let Some(actor) = bridge.mission().actor(slot.id) else {
             continue;
@@ -7027,8 +7028,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--separation" => {
                 let nm: f64 = args.next().ok_or("--separation needs a distance in nautical miles")?.parse().map_err(|e| bad_number(&arg, &e))?;
-                if !quick_mission::SEPARATION_NM.contains(&nm) {
-                    return Err(format!("--separation needs one of {:?} nautical miles", quick_mission::SEPARATION_NM).into());
+                if !mission_layout::SEPARATION_NM.contains(&nm) {
+                    return Err(format!("--separation needs one of {:?} nautical miles", mission_layout::SEPARATION_NM).into());
                 }
                 separation_nm = Some(nm);
             }
@@ -8623,7 +8624,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     );
                 }
             }
-            quick_mission::apply_ground_start(world, &mut state, object)?;
+            mission_layout::apply_ground_start(world, &mut state, object)?;
             println!(
                 "ground_start={object} position={:?} heading={:.3} gear={} brakes={}",
                 state.position,
@@ -8675,7 +8676,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 );
             }
             if let Some(variant) = flight_probe::LandingVariant::from_maneuver(&maneuver) {
-                let layout = quick_mission::ground_layout(world, object, 1)?;
+                let layout = mission_layout::ground_layout(world, object, 1)?;
                 let length = world
                     .airport_scene
                     .runway(object)
@@ -9369,7 +9370,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         quick.choose_ground_runway(object)?;
     }
     if let Some(nm) = separation_nm {
-        quick.draft.values[17] = quick_mission::SEPARATION_NM
+        quick.draft.values[17] = mission_layout::SEPARATION_NM
             .iter()
             .position(|choice| *choice == nm)
             .unwrap_or(quick.draft.values[17]);
@@ -9499,7 +9500,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         flight.enable_native(tables.clone(), 1)?;
     }
     if let Some(object) = ground_start {
-        let (position, heading) = quick_mission::runway_pose(&world, object)?;
+        let (position, heading) = mission_layout::runway_pose(&world, object)?;
         flight.position = [
             position[0],
             flight.position[1].max(position[1] + 5000.),
@@ -9699,7 +9700,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         combat.apply_startup_weapons();
     }
     if let Some(object) = ground_start {
-        quick_mission::apply_ground_start(&world, &mut flight, object)?;
+        mission_layout::apply_ground_start(&world, &mut flight, object)?;
         probe_vapor =
             tore_sim::vapor::Vapor::seeded(hornet.streamer_points(&flight).unwrap_or([[0.; 3]; 2]));
         if let Some(ticks) = flight_probe_ticks {

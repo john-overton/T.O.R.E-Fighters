@@ -919,8 +919,9 @@ These splits touch different files and can run in parallel:
   `Afterburner`) move to plain modules. `render_snapshot` splits its pose data
   from its vertex building.
 - `Terrain`: the simulation half apart from the scenery, as above.
-- Quick Mission setup (layout, ground layout, runway poses) apart from the
-  creator's UI; the debrief evaluator (`capture`, `report`) apart from its
+- Quick Mission setup apart from the creator's UI: `mission_layout.rs` holds
+  the mission layout, ground layout, runway poses and map bounds, and
+  `quick_mission.rs` keeps the creator's screen (done in this stage); the debrief evaluator (`capture`, `report`) apart from its
   pages; the target window's data apart from its refresh clock.
 - File writers and environment-variable reads leave simulation code, and `log`
   calls become output.
