@@ -26,12 +26,13 @@ python3 tools/battery.py --lane ai --jobs 6 --tag ai
 python3 tools/battery.py --scenario 'ai-regress-*'
 ```
 
-About 446 scenarios, each one `--ai-probe-ticks` run (plus the roster probe and
+About 584 scenarios, each one `--ai-probe-ticks` run (plus the roster probe and
 the 1,008-case probe matrix). With the other lanes running on the same Ryzen 9
 7900X, the whole lane took 26 minutes at `--jobs 5` (final run 2026-09-28:
 444 of 445 passed, the one failure is the known failure below). The probe
 matrix alone is about 16 minutes and the six 30-minute runs 1 to 5 minutes
-each; without them the lane takes about 12 minutes. A 15 v 15 probe holds
+each; without them the lane takes about 12 minutes. The 138 theater and
+takeoff scenarios added in the second round take about 10 minutes more. A 15 v 15 probe holds
 about 400 MB and its tick rate rises as aircraft are lost, so 30 simulated
 minutes cost about 4 minutes.
 
@@ -54,6 +55,9 @@ minutes cost about 4 minutes.
 | Determinism | `ai-determinism-*` | the same arguments run twice on fresh profile copies give identical output; `ai-determinism-recordings` records a 5 v 5 twice and `--recording-diff` must say they match |
 | Regressions | `ai-regress-*` | one per defect fixed below, checked strictly |
 | Acceptance probes | `ai-roster-probe`, `ai-probe-matrix` | the fixed roster and 1,008-encounter probes |
+| Other theaters | `ai-theater-*` | all 16 base theaters: a 4 v 4 fight, an 8 v 8 without the leader attacking, wing-of-3 takeoffs at airports 1 and 3, and a pair ordered to land at airport 1 |
+| Every aircraft's takeoff | `ai-takeoff-*` | all 14 aircraft as a ground-started pair at Zaporizhzhya (UKR 1), Ras Al Khaimah (PGU 2), Chateaudun (FRA 3) and Nuchon Ni (NSK 5) |
+| Long runs elsewhere | `ai-long-15v15-pgu`, `ai-long-15v15-vla` | 30 minutes of 15 v 15 in the Persian Gulf and Vladivostok |
 
 ## What is checked
 
@@ -92,6 +96,9 @@ never lands; or the same radio line repeats three times in five seconds.
 | An undamaged AI fighter eased into a rising hillside at 2 G | The pitch loop closed the terrain floor's demand over 3 seconds | `2a4cc9b`: below the floor the pitch error closes over 1 second (fitted) |
 | A wingman under missile attack switched between missile defense and formation flying on every tick for seconds (68 stick reversals in 2 s) and did neither | A seen missile's "incoming" judgment (closest approach within 1,000 ft) had no memory; the aircraft's own reaction moved the answer across the limit each tick | `8c46b58`: once incoming, a missile still in sight stays incoming for the existing 2-second grace (fitted). The RWR shares this and no longer flickers |
 
+| Two wingmen breaking out of formation at the same time turned into each other and collided (`ai-mission-hold-10v10`, `ai-mission-self-defense-10v10`) | Each scored its escape assuming the other would fly straight on; and for two aircraft already 50 ft apart every heading away scored the same, so straight ahead won | `b43c9b3`: a lower-ID aircraft that is itself breaking out is predicted along its chosen escape (repositioning aircraft already yield to lower IDs this way), and an aircraft already within 220 ft is scored on clearance from 2 s ahead (both fitted, in the AI spec). The formation diving-reversal test still passes |
+| The in-flight activity line kept saying "Friendly 1-2: Defending" for an aircraft destroyed a moment later | Changes inside the line's 2-second interval were dropped, including "Destroyed" | `04b0657`: a later change of the aircraft the line already names is posted as soon as the interval allows |
+
 Supporting commit: `17144d1` adds the per-tick checks and the lane's scenarios.
 
 ### Golden fingerprints
@@ -99,35 +106,28 @@ Supporting commit: `17144d1` adds the per-tick checks and the lane's scenarios.
 The terrain and incoming-missile fixes change behaviour, so three golden
 fingerprints (compared on Apple silicon only) will fail there until their
 values are updated from the macOS CI log: `ai/mission-engagement`,
-`combat/guided-missiles` and `combat/player-countermeasures`. On Linux the new
-totals are `0xd84f7b64adbdab50`, `0xefb2604ac7d9952f` and `0x24800010e49363c6`
-(macOS values may differ in the last bits). They were not edited here.
+`combat/guided-missiles` and `combat/player-countermeasures`. On Linux, after
+the merge with the menus lane (whose stores fix also moves
+`combat/guided-missiles`), the totals are `0xd84f7b64adbdab50`,
+`0x8d34dbfaca1b5ab8` and `0x24800010e49363c6` (macOS values may differ in the
+last bits). The formation and activity-line fixes move none. They were not
+edited here.
 
 ## Found, not fixed
 
-**AI aircraft collide in the air.** With the collision check added, 8 of the
-72 fight and mission scenarios had a mid-air collision between two AI
-aircraft of the same side, for example:
+**AI aircraft outside formation collide in the air.** After the formation
+fix, 18 of 86 fight, mission and big-fight scenarios still showed a mid-air
+collision (6 scenarios), all between aircraft that fly no formation:
 
 - Two AI wing leaders (Enemy 2-1 and Enemy 3-1 in `ai-fight-1v15-noattack`),
   both searching with no target, flew straight on headings 11 degrees apart
-  and closed at 145 ft/s until they hit at 62 s. Nothing steers an aircraft
-  that is not flying formation away from other traffic; the spec does not
-  say it should (see "Needs a decision").
-- Two wingmen breaking out of formation (Friendly 2-2 and 2-3 in
-  `ai-mission-hold-10v10`) each picked an escape heading on the same side:
-  the fitted escape score prefers the wing's formation side by 0.05 ft per
-  degree, and both share that side, so they turned together, flew about 50 ft
-  apart for 2.5 s and collided at 19.8 s. The formation spec (opinionated,
-  John 2026-09-18) wants departures to account for neighbours, but its
-  clearances are documented as margins, not guarantees. A likely cause: the
-  escape score is the closest approach over the next 8 seconds counted from
-  now, so for two aircraft already 50 ft apart every heading that moves away
-  scores the same 50 ft, and the straight-ahead candidate wins on its smaller
-  offset penalty. Scoring from 1 second ahead was tried and made the
-  synthetic diving-reversal test's minimum separation worse (240 ft against
-  its 250 ft requirement), so the fitted rule was left for a decision; splitting
-  a converging pair to opposite sides by position is another option.
+  and closed at 145 ft/s until they hit at 62 s.
+- Leaderless wingmen (`ai-fight-1v5-default`): after their leader died, four
+  wingmen all searched toward the same last-seen point, and two pairs collided
+  there.
+
+Nothing steers an aircraft that is not flying formation away from other
+traffic, and no spec says it should (see "Needs a decision", item 9).
 
 The lane reports these as `mid-air collision` anomalies but does not fail on
 them (see `KNOWN_ANOMALIES` in the scenario file).
@@ -140,6 +140,17 @@ them (see `KNOWN_ANOMALIES` in the scenario file).
   envelope is 2.2 G. See "Needs a decision". Other runs can show the same
   class; the failing scenario can change with any behaviour change because the
   fights are chaotic.
+- `ai-takeoff-nsk-a5-f22`, `-f22n`, `-faxx`: at Nuchon Ni the F-22-family
+  wingman chases its leader (which the test harness cruises at about 890 kt,
+  3,000 ft above the ground) at 1,065 kt, 1,300 ft above rising ground, and
+  flies into a hillside 145 s after takeoff. Same cause as the F-22N above.
+- `ai-theater-apa-takeoff-a3` (Santa Fe) and `ai-theater-lfa-takeoff-a3` (San
+  Carlos): these ground starts use 1,074 ft strips; each wingman's takeoff roll
+  runs off the end onto the grass at 70 to 90 kt before it lifts off, leaving
+  the probe's hazard open (item 12 below).
+- `ai-theater-cub-takeoff-a1` (Key West, near the north edge): the airborne
+  friendly wing starts on the runway heading, north, has no route and leaves
+  the map after 163 s (item 5 below).
 - Activity flapping and pitch-stick oscillation at a weapon's envelope edge,
   and mid-air collisions, are reported but allowed (see above and below);
   regression scenarios check strictly.
@@ -172,7 +183,10 @@ Behaviour the specs do not define, with the evidence. None of these were changed
    are recorded there as unknown.
 5. **Aircraft with no route leave the map.** In a hold mission the enemies hold
    their heading (B48) and fly off the terrain after about 16 minutes
-   (`ai-long-hold-4v4`). Nothing defines a map edge for AI.
+   (`ai-long-hold-4v4`). In a ground start near a map edge, the airborne
+   friendly wings start on the runway heading and leave within minutes (Key
+   West, 163 s); the "keep the enemy on the map" rule turns only the enemy
+   there. Nothing defines a map edge for AI.
 6. **Landing over hills.** A wing ordered to land at Simferopol flies the
    approach gates south of the field over rising ground. The fitted terrain
    correction holds the current heading, so an aircraft that just passed a gate
@@ -180,9 +194,12 @@ Behaviour the specs do not define, with the evidence. None of these were changed
    400 s, taxiing to parking another 330 s, and a wing of four needs more than
    30 minutes. Meanwhile a ground-started wingman still waiting cannot take off,
    because the runway gate stays closed while anyone flies the gates.
-7. **Fast low flight and the terrain look-ahead.** B44 looks 1,000 ft ahead.
-   At supersonic speed near the ground that is under a second of warning (see
-   Known failures).
+7. **Fast low flight and the terrain look-ahead.** B44 looks 1,000 ft ahead;
+   the [AI source notes](../formats/ai.md) confirm the fixed distance, so it
+   was not changed. At supersonic speed near the ground that is under a second
+   of warning, and it now costs the F-22-family wingmen at Nuchon Ni and an
+   F-22N in a 6 v 6 (see Known failures). A time-based look-ahead, or a speed
+   limit near the ground, would be a new rule.
 8. **A decoyed missile still kills.** A missile decoyed by chaff coasts on and
    can still hit an aircraft that flies straight into it. The shot table then
    says "spoofed" while the kill is credited (2 v 2, shot 1 at 10.7 s), and
@@ -198,15 +215,18 @@ Behaviour the specs do not define, with the evidence. None of these were changed
     Simferopol: 3 landing"), then takes off once the runway frees (645 s
     later, behind the others' long approaches) only to fly the marshal and
     approach and land again at 1,484 s. Bug out is ignored on the ground by
-    spec; the land order's spec (opinionated, John 2026-09-23) does not say.
-11. **The in-flight activity line after a death.** A "Destroyed" change inside
-   the 2-second message interval is dropped rather than queued, so the bar can
-   keep showing "Friendly 1-2: Defending" for an aircraft that has just died.
+    spec; the land order's spec ([AI airfield](../spec/ai-airfield.md),
+    [airports](../spec/airports.md), opinionated, John 2026-09-23) and the
+    [ground-start baseline](../baselines/ground-start.md) do not say what the
+    reply or the aircraft should do.
+11. **Short strips.** Quick Mission ground starts accept 1,074 ft strips
+    (Santa Fe, San Carlos), and fighters then roll off the end onto grass
+    before lifting off. No spec sets a minimum runway for an aircraft.
 
 ## Needs a human eye or ear
 
 - The in-flight AI activity line and target-window activity during the
-  envelope-edge dithering above, and after deaths.
+  envelope-edge dithering above, and after deaths (now fixed to catch up).
 - Radio chatter volume in 10 v 10 and larger fights (the probe prints only the
   first 40 lines heard; none repeated, none spoken by a dead pilot).
 - How the formation and missile-defense changes look in the cockpit view.
@@ -218,5 +238,19 @@ Behaviour the specs do not define, with the evidence. None of these were changed
 
 ## What was not run
 
-Windowed captures (this lane is headless only), other theaters than Ukraine,
-Windows and macOS, and a retail comparison.
+Windowed captures (this lane is headless only), theater layout variants
+(the `~` maps; only the 16 base theaters), Windows and macOS, and a retail
+comparison.
+
+### Second round (2026-09-28, after the merge with the menus lane)
+
+The merged branch passed 445 of 446 (the known F-22N failure). Investigated
+against the specs without a change: the defence dive-and-turn push (item 3:
+the fitted pitch law does exactly what the spec formula says), the approach
+over the hills (item 6: the fitted terrain correction is specified to hold
+heading), the terrain look-ahead (item 7: executable-confirmed 1,000 ft) and
+the land order on the ground (item 10: undefined). All 16 theaters' landing
+pairs parked (in 618 to 816 s), both 30-minute 15 v 15 runs abroad were clean,
+and the 138 new scenarios passed except the known failures above. Final run
+of the whole lane on the merged branch: 577 of 584 passed in 29 minutes at
+`--jobs 6`; the 7 failures are exactly the Known failures listed above.
