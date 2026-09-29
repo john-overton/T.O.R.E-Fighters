@@ -173,6 +173,11 @@ them (see `KNOWN_ANOMALIES` in the scenario file).
   envelope is 2.2 G. See "Needs a decision". Other runs can show the same
   class; the failing scenario can change with any behaviour change because the
   fights are chaotic.
+- After the third round's fixes changed the fights' paths, the same terrain
+  class also shows in `ai-big-x31-vs-faxx-researched` (an FA-XX at 958 kt) and
+  `ai-long-15v15` (an F/A-18D searching level at 3,000 ft, 446 kt, into a
+  hillside rising about 14 degrees; the floor gave 1.3 s of warning). Which
+  runs hit this class moves with any behaviour change.
 - `ai-takeoff-nsk-a5-f22`, `-f22n`, `-faxx`: at Nuchon Ni the F-22-family
   wingman chases its leader (which the test harness cruises at about 890 kt,
   3,000 ft above the ground) at 1,065 kt, 1,300 ft above rising ground, and
@@ -295,3 +300,6 @@ pairs parked (in 618 to 816 s), both 30-minute 15 v 15 runs abroad were clean,
 and the 138 new scenarios passed except the known failures above. Final run
 of the whole lane on the merged branch: 577 of 584 passed in 29 minutes at
 `--jobs 6`; the 7 failures are exactly the Known failures listed above.
+Third-round final run (with the replay and menus merges and the round-three
+fixes): 576 of 585 passed in 28 minutes; the 9 failures are the Known failures above (the
+terrain look-ahead class, the two short strips and Key West).
