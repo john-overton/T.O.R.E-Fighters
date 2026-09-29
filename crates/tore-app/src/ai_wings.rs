@@ -1988,10 +1988,13 @@ impl AiWings {
             .get(&event.actor)
             .copied()
             .unwrap_or((100, 100));
+        // Imported records can hold more than 100; like the player's own
+        // dispensers, a percentage above 100 counts as 100 (certain).
         let effectiveness = match event.class {
             SeekerClass::Infrared => effectiveness.0,
             SeekerClass::Radar => effectiveness.1,
-        };
+        }
+        .min(100);
         let flight = actor.flight();
         let release = tore_sim::combat::countermeasures::Release {
             position: flight.position,
@@ -2023,7 +2026,7 @@ impl AiWings {
                                 && flight.seeker.acquired
                                 && flight.seeker.observation.is_some()
                         }),
-                    decoy_susceptibility_percent: weapon.seeker.chaff_flare_chance,
+                    decoy_susceptibility_percent: weapon.seeker.chaff_flare_chance.min(100),
                 };
                 let decoy = threat::decoy_missile(
                     &missile,
@@ -4023,6 +4026,48 @@ pub(crate) mod tests {
             )
         );
     }
+    #[test]
+    fn imported_decoy_chances_above_100_count_as_certain() {
+        // Battery finding (2026-09-28): an imported missile whose chaff and
+        // flare chance is above 100 stopped the whole mission with "decoy
+        // percentages exceed 100" when an AI aircraft released a flare at it.
+        use tore_sim::ai::{
+            mission::DeviceEvent,
+            weapon_service::{RequestId, StationId},
+        };
+        let (mut wings, _) = build(None);
+        let mut combat = combat_fixture(true);
+        let mut weapon = combat.configuration().stations[0].weapon.clone();
+        weapon.seeker.signature = 2;
+        weapon.seeker.chaff_flare_chance = 150;
+        wings.device_effectiveness.insert(3, (200, 100));
+        wings.realise(
+            &LaunchEvent {
+                actor: 1,
+                station: StationId(0),
+                target: 3,
+                request_id: RequestId(3),
+                projectiles: 1,
+            },
+            &mut combat.projectiles,
+            &weapon,
+            0,
+            [0.0; 3],
+            None,
+        );
+        wings
+            .realise_device(
+                &DeviceEvent {
+                    actor: 3,
+                    class: SeekerClass::Infrared,
+                    released: 1,
+                },
+                &mut combat,
+            )
+            .unwrap();
+        assert_eq!(combat.projectiles[0].target, None);
+    }
+
     #[test]
     fn finite_missile_depletion_is_followed_by_actor_owned_gun_fire() {
         use tore_sim::ai::wing::{TargetOrder, WingRequest};

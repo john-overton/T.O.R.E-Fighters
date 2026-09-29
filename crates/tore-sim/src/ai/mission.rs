@@ -2483,7 +2483,8 @@ impl AiMission {
                     .find(|o| o.id == *id && o.alive && !o.destroyed)
             });
         // Wing abort (retail 0x4bc2a4): a joining wingman whose leader is
-        // neither landing nor on the ground stops landing.
+        // neither landing nor on the ground stops landing. A leader that has
+        // been destroyed is neither, so its wingmen stop following it down.
         let leader_landing = if member == 0 {
             true
         } else if let Some(leader) = external_leader {
@@ -2491,7 +2492,7 @@ impl AiMission {
         } else {
             wingmates()
                 .find(|a| a.identity.is_leader())
-                .is_none_or(|leader| {
+                .is_some_and(|leader| {
                     leader.airfield.as_ref().is_some_and(|s| !s.is_departure())
                         || leader.landing_order.is_some()
                         || leader.flight.research.as_ref().is_some_and(|r| r.on_ground)

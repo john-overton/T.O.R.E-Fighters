@@ -839,7 +839,8 @@ impl Instruments {
                     }
                     text(&mut r, &format!("SIG {:.0}", c.rcs.signature), 3, 103);
                 } else {
-                    text(&mut r, "NO EXPOSURE DATA", 19, 64);
+                    // Below the 270 and 90 labels, which sit on the horizontal axis.
+                    text(&mut r, "NO EXPOSURE DATA", 19, 68);
                 }
             }
             7 => {

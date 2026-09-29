@@ -18,6 +18,10 @@ use tore_input::{PilotCommand, PilotInput, Switch};
 /// Fitted heading-error response horizon; see the input-only control spec.
 pub const BANK_COMMAND_LEAD_SECONDS: f64 = 1.0;
 
+/// Fitted: the pitch-error response horizon while the flight path is below
+/// the terrain floor, in seconds; see the input-only control spec.
+pub const TERRAIN_PITCH_SECONDS: f64 = 1.0;
+
 /// Fitted: the speed error, in ft/s, that moves the throttle from closed to
 /// open in one tick. Rule: the throttle setting is the current setting plus
 /// the speed error divided by this reference, clamped to 0 through 1. A
@@ -135,6 +139,22 @@ impl ControlAdapter {
         // Contact is tracked by the hybrid adapter; without it the adapter
         // cannot see the ground from this signature and reports airborne.
         let on_ground = state.research.as_ref().is_some_and(|r| r.on_ground);
+        // Fitted (agent decision, 2026-09-28, overnight bug battery): an
+        // airborne aircraft whose flight path is below the B44 terrain floor
+        // levels its wings, so a steep turn cannot use the lift it needs to
+        // climb away from the ground, and closes the pitch error over
+        // [`TERRAIN_PITCH_SECONDS`] rather than three seconds (B44: pitch
+        // authority gains 20 degrees per second while the floor is active).
+        // The airfield terrain correction already levels the wings. Without
+        // it AI aircraft flew into the ground at full G while still turning
+        // toward a target, or eased into a rising hillside at 2 G.
+        let below_terrain_floor = !on_ground
+            && terrain_pitch_floor_deg.is_some_and(|floor| current.flight_path_pitch_deg < floor);
+        let bank_request_deg = if below_terrain_floor {
+            0.0
+        } else {
+            bank_request_deg
+        };
         let request = SteeringRequest {
             heading_deg: heading_request_deg,
             flight_path_pitch_deg: intent.flight_path_pitch_deg,
@@ -259,7 +279,14 @@ impl ControlAdapter {
         let pitch_error = (pitch_goal - current.flight_path_pitch_deg).to_radians();
         let desired_g = ((current.flight_path_pitch_deg.to_radians().cos()
             + state.speed
-                * (pitch_error / if self.gun_aim.is_some() { 0.8 } else { 3.0 }
+                * (pitch_error
+                    / if below_terrain_floor {
+                        TERRAIN_PITCH_SECONDS
+                    } else if self.gun_aim.is_some() {
+                        0.8
+                    } else {
+                        3.0
+                    }
                     + self.gun_aim.map_or(0., |a| a.pitch_rate))
                 / 32.174)
             / state.bank.cos().max(0.25))
@@ -771,6 +798,91 @@ mod tests {
         assert!(adapter.last_requested().is_none());
         assert!(call(&mut adapter, MAXIMUM_BANK, SECONDS_PER_TICK).is_ok());
         assert!(adapter.last_requested().is_some());
+    }
+
+    #[test]
+    fn below_the_terrain_floor_the_wings_level_before_the_turn() {
+        // Battery finding (2026-09-28): an AI F-14 at 72 degrees of bank and
+        // 20 degrees nose down kept turning at full G toward its target and
+        // flew into the ground with the terrain floor asking for a climb.
+        let banked_dive = |bank_deg: f64, path_deg: f64, altitude: f64| {
+            let mut s = State::new(&profile(), [0.0, altitude, 0.0]).unwrap();
+            s.yaw = 0.0;
+            s.bank = bank_deg.to_radians();
+            s.pitch = path_deg.to_radians();
+            let path = path_deg.to_radians();
+            s.velocity = [0.0, s.speed * path.sin(), s.speed * path.cos()];
+            s
+        };
+        let command = intent(120.0, 10.0, 700.0);
+        let s = banked_dive(70.0, -20.0, 1500.0);
+        let run = |floor| {
+            ControlAdapter::new()
+                .controls(
+                    &s,
+                    &command,
+                    &limits(),
+                    G_LIMIT,
+                    ROLL_LIMIT,
+                    MAXIMUM_BANK,
+                    floor,
+                    SECONDS_PER_TICK,
+                )
+                .unwrap()
+        };
+        // Above the floor the turn continues; below it the wings come level.
+        assert!(run(Some(-30.0)).input.roll > 0.0);
+        assert!(run(Some(-5.0)).input.roll < 0.0);
+        // Flown closed loop over flat ground, the aircraft recovers.
+        let mut s = banked_dive(70.0, -20.0, 1500.0);
+        let mut adapter = ControlAdapter::new();
+        let mut lowest = f64::MAX;
+        for _ in 0..1200 {
+            let out = adapter
+                .controls(
+                    &s,
+                    &command,
+                    &limits(),
+                    G_LIMIT,
+                    ROLL_LIMIT,
+                    MAXIMUM_BANK,
+                    Some(if s.position[1] < 1800.0 { 0.0 } else { -90.0 }),
+                    crate::flight::DT,
+                )
+                .unwrap();
+            s.step(&out.input, |_, _| 0.0);
+            lowest = lowest.min(s.position[1]);
+        }
+        assert!(!s.crashed, "flew into the ground");
+        assert!(lowest > 300.0, "lowest {lowest:.0} ft");
+        // Level at speed with the floor asking for 15 degrees of climb, the
+        // pull uses most of the G limit instead of easing up over 3 s.
+        let level = banked_dive(0.0, 0.0, 1500.0);
+        let pull = ControlAdapter::new()
+            .controls(
+                &level,
+                &intent(0.0, 0.0, level.speed),
+                &limits(),
+                G_LIMIT,
+                ROLL_LIMIT,
+                MAXIMUM_BANK,
+                Some(15.0),
+                SECONDS_PER_TICK,
+            )
+            .unwrap();
+        let ease = ControlAdapter::new()
+            .controls(
+                &level,
+                &intent(0.0, 15.0, level.speed),
+                &limits(),
+                G_LIMIT,
+                ROLL_LIMIT,
+                MAXIMUM_BANK,
+                None,
+                SECONDS_PER_TICK,
+            )
+            .unwrap();
+        assert!(pull.input.pitch > ease.input.pitch * 2.0);
     }
 
     #[test]
