@@ -294,6 +294,9 @@ pub const FLARE_PITCH_DEG: f64 = -1.5;
 /// Fitted height-to-sink horizon. A fast descent must start easing before
 /// the fixed 60 ft throttle-close height to allow the pitch controller to act.
 pub const FLARE_SETTLE_S: f64 = 6.0;
+/// Fitted (agent decision, 2026-09-29): wheel clearance over the ground
+/// short of the threshold below which a final holds level.
+pub const FINAL_TERRAIN_CLEARANCE_FT: f64 = 40.0;
 /// Fitted: wings held level below this wheel height.
 pub const WINGS_LEVEL_HEIGHT_FT: f64 = 50.0;
 /// Fitted: final lateral look-ahead bounds (a quarter of the remaining
@@ -1252,6 +1255,15 @@ impl Sequence {
                     .to_degrees()
                     .min(FLARE_PITCH_DEG);
                 pitch = pitch.max(flare);
+                // Fitted (agent decision, 2026-09-29): short of the threshold,
+                // where terrain can stand above the runway (KURILE 3, NSK 6),
+                // hold level rather than descend with the wheels closer than
+                // FINAL_TERRAIN_CLEARANCE_FT to the ground below.
+                if to_aim > crate::airport::AIM_PAST_THRESHOLD_FT
+                    && s.agl_ft - s.ground_clearance_ft < FINAL_TERRAIN_CLEARANCE_FT
+                {
+                    pitch = pitch.max(0.0);
+                }
                 let lookahead =
                     (to_aim * 0.25).clamp(FINAL_LOOKAHEAD_MIN_FT, FINAL_LOOKAHEAD_MAX_FT);
                 let h = self.course();
@@ -1605,6 +1617,22 @@ mod tests {
         // Under the floor the ordinary flare and landing rules apply instead.
         let (step, _) = final_step(PATH_LOST_FLOOR_FT - 20., 240.);
         assert!(!step.go_around);
+    }
+
+    #[test]
+    fn a_final_over_high_ground_short_of_the_threshold_holds_level() {
+        let pitch = |agl: f64| {
+            let mut seq = landing();
+            seq.phase = Phase::Final;
+            let mut s = on_final(&seq, 3000., 105., 240.);
+            s.agl_ft = agl;
+            match seq.step(&s).command.control {
+                Control::Air(g) => g.flight_path_pitch_deg,
+                other => panic!("{other:?}"),
+            }
+        };
+        assert!(pitch(113.) < -1.0, "over flat ground it descends");
+        assert!(pitch(8. + FINAL_TERRAIN_CLEARANCE_FT - 5.) >= 0.0);
     }
 
     #[test]

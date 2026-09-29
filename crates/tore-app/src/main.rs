@@ -5247,7 +5247,10 @@ impl ProbeWatch {
                 self.go_arounds.insert(slot.id, count);
                 // The wheel height over the threshold on final: the ILS
                 // path crosses it about 52 ft up.
-                if sequence.phase() == tore_sim::ai::airfield::Phase::Final {
+                if sequence.phase() == tore_sim::ai::airfield::Phase::Final
+                    && actor.alive()
+                    && !f.crashed
+                {
                     let point = sequence.landing_point();
                     let [x, y, z] = f.position;
                     let [vx, _, vz] = f.velocity;

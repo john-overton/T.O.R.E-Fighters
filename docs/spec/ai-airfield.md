@@ -148,7 +148,11 @@ its home airport at cruise speed.
   agent decision 2026-09-29: 232 ft/s, 137 kt, for a fuelled F/A-18D, where
   1.1 times the minimum gave 94 kt and a final that could not hold its path),
   under that 293 ft/s cap. The speedbrake stays closed while the aircraft is
-  below the final path (fitted, same date). It lets the hybrid model
+  below the final path (fitted, same date). Short of the threshold, with the
+  wheels less than 40 ft above the ground below, it holds level instead of
+  descending (fitted, same date: at KURILE 3 and NSK 6 the ground before the
+  threshold stands 65 to 71 ft above the runway, higher than the 3 degree
+  path; see [ILS checks](../testing/ils.md)). It lets the hybrid model
   set its own angle of attack, and eases its descent toward height above the wheels divided by 6 seconds,
   with a minimum 1.5 degree downward path, so a fast final has time to flare.
   On the 3 degree path at 137 kt that is a 12 ft/s sink eased to about 6 ft/s
