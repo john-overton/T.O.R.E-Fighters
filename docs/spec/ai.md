@@ -345,7 +345,12 @@ nominal two-second retry. The motion honours that retry as well: once no store
 resolves, gun lead tracking keeps the aircraft until the retry ends instead of
 handing it back to a missile tactic on the next tick the missile's zone test
 passes (agent decision 2026-09-29; without it a fighter at a zone edge swapped
-maneuvers every few ticks, its own stick input moving the zone test). Pre-firing service states can add half a second to a
+maneuvers every few ticks, its own stick input moving the zone test). Gun lead
+tracking is a 1-second timed motion, and by B13 a timed motion runs to its
+deadline unless an event replaces it, so a change of preferred store (gun to
+missile) does not end it before its second is up (agent decision 2026-09-29;
+a fighter whose best store alternated otherwise swapped maneuvers 30 times in
+3 seconds). Pre-firing service states can add half a second to a
 chosen delay with a 10% gate. These are eligible service times, subject to the
 clock and scheduling limits in B13, not a guaranteed time to the first shot.
 
@@ -517,11 +522,14 @@ The following implementation rules and thresholds are **fitted, agent-authored**
   response lag. Penalize absolute offset by 0.2 ft/degree; formation side adds
   only a 0.05 ft/degree preference. Terrain pitch protection still applies.
   Two additions (fitted, agent decision 2026-09-28, after the bug battery saw
-  two breaking-out wingmen collide): an aircraft already within 220 ft is scored
-  on its clearance from 2 seconds ahead, because from now every heading away
-  from it ties at the present distance; and a lower-ID aircraft that is itself
-  breaking out is predicted along its chosen escape (the same half-and-half
-  blend), as repositioning aircraft already yield to lower IDs' plans.
+  two breaking-out wingmen collide; corrected 2026-09-29 after review): a
+  heading that still closes on an aircraft is scored on its true closest
+  approach over the 8 seconds; only a heading that already opens from an
+  aircraft within 220 ft is scored on its distance 2 seconds ahead, because
+  from now every opening heading ties at the present distance; and a lower-ID
+  aircraft that is itself breaking out is predicted along its chosen escape
+  (the same half-and-half blend), as repositioning aircraft already yield to
+  lower IDs' plans.
 - Before an ordinary approach becomes an emergency, screen requested headings
   at 0, +/-15, +/-30 and +/-45 degrees against traffic over 10 seconds. Use the
   same equal current/candidate velocity weighting, cap clearance credit at
