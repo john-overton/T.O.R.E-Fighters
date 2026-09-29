@@ -35,7 +35,7 @@ python3 tools/battery.py --scenario 'flight-land-*' --jobs 6              # one 
 python3 tools/battery.py --scenario 'flight-livefire-f18-*' --windows 2   # windowed
 ```
 
-The whole lane is about 2,800 scenarios, 380 of them windowed (through `tools/agent-run.sh`).
+The whole lane is 2,953 scenarios, 356 of them windowed (through `tools/agent-run.sh`).
 The headless ones take about a second each; the missile acceptance runs take up to five minutes
 each and the windowed ones five to eight seconds. See "Runtime" at the end for the measured time.
 
@@ -82,7 +82,7 @@ is allowed a 400 ft longer roll.
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `--combat-smoke` failed for 13 of 14 aircraft (only the MiG-29 passed), since 0.1.0. | Not the game: the probe expected rules that have since changed on purpose. Radar power off now allows an unguided radar-missile release (feature matrix, "Uncued launch with the onboard seeker enabled"); surface weapons refuse the practice aircraft (`WrongTarget`); a fixture flying at the player can win the race against a slow gun and collide with it; the A-4E's guns need far more than forty hits to destroy the player fixture. | The probe now checks those rules and names the slot, weapon and reason when it fails (commit 503b580). All fourteen pass and are in the battery. |
-| A combat tape replayed with `--replay-combat` drifted its smoke differently from the live run (`TORE_COMBAT_EVIDENCE` smoke: "serialized live-fire replay diverged"). | The host sets the mission wind on the smoke and countermeasures before every step, but a tape does not record it, so the replay drifted them with no wind. The smoke also compared a live state without airfields to a replay that added them, and kept stepping a crashed flight. | The replay is given the theater's wind (`combat_tape.rs`); the smoke replays without airfields and starts its manual-command tape from a fresh flight. All fourteen aircraft roundtrip their tapes and are in the battery as `combatevidence-*` (commit below). |
+| A combat tape replayed with `--replay-combat` drifted its smoke differently from the live run (`TORE_COMBAT_EVIDENCE` smoke: "serialized live-fire replay diverged"). | The host sets the mission wind on the smoke and countermeasures before every step, but a tape does not record it, so the replay drifted them with no wind. The smoke also compared a live state without airfields to a replay that added them, and kept stepping a crashed flight. | The replay is given the theater's wind (`combat_tape.rs`); the smoke replays without airfields and starts its manual-command tape from a fresh flight. All fourteen aircraft roundtrip their tapes and are in the battery as `combatevidence-*` (commit "Give combat tape replays the mission wind and fix the smoke's tape roundtrip"). |
 | The RCS instrument window drew "NO EXPOSURE DATA" over the 270 bearing label. | Message placed at the left edge of the window. | Moved below the crosshair. The menus lane fixed the same line the same way; that version is the one merged. |
 
 No game defect was found in takeoff, landing, the manoeuvres, spin and stall recovery, faults,
@@ -148,4 +148,6 @@ None of these is defined in the specs, the manual text or the feature matrix, so
 
 ## Runtime
 
-RUNTIME_PLACEHOLDER
+The full lane, 2,953 scenarios with `--jobs 6 --windows 2`, took 1,646 seconds (27 minutes) on the
+24-thread dev machine with other agents running, and all of them passed. The missile acceptance
+runs (about five minutes each in a debug build) and the windowed frames set the length.
