@@ -97,6 +97,15 @@ use winit::{
     window::{CursorIcon, Fullscreen, Window, WindowId},
 };
 type AppResult<T> = Result<T, Box<dyn Error>>;
+
+/// A number given to a command-line option, or an error that names the
+/// option and what was typed rather than the parser's bare message.
+fn option_number<T: std::str::FromStr>(option: &str, value: &str) -> AppResult<T> {
+    value
+        .trim()
+        .parse()
+        .map_err(|_| format!("{option} needs a number, not '{value}'").into())
+}
 /// How an interactive start opens its window. Requested by John on 2026-09-22:
 /// the game runs native borderless fullscreen by default on every platform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2128,7 +2137,7 @@ impl App {
                 saved.apply(&mut self.flight_ui, &mut self.instruments);
                 if self.ground_start.is_some() {
                     self.flight_ui
-                        .message("Ground start: B releases brakes; PageUp adds throttle.");
+                        .message("Ground start: B releases brakes; 5 sets full throttle.");
                 }
                 if let Some(notice) = layout.as_ref().and_then(|l| l.notice()) {
                     self.flight_ui.message(notice);
@@ -2373,6 +2382,11 @@ impl ApplicationHandler for App {
                             self.combat.readout(&self.flight, 1.).weapons,
                         );
                     }
+                } else if self.screen == Screen::Flight {
+                    // A flight started straight from the command line records
+                    // itself like one started from the menu; captures, smoke
+                    // tests and timing runs have no recording library.
+                    self.start_replay_recording();
                 }
             }
             Err(error) => {
@@ -2792,6 +2806,18 @@ impl ApplicationHandler for App {
                     if !event.repeat {
                         self.toggle_fullscreen();
                     }
+                    return;
+                }
+                // Exit to desktop keeps its meaning over every screen, the
+                // controls, sound and graphics screens included.
+                if event.state == ElementState::Pressed
+                    && ((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
+                        || (self.modifiers.alt_key() && name == "F4"))
+                    && (self.controls.is_some()
+                        || self.sound_screen.is_some()
+                        || self.graphics_screen.is_some())
+                {
+                    self.action(event_loop, Action::Exit);
                     return;
                 }
                 // The controls screen takes every key press while it is open,
@@ -6590,6 +6616,18 @@ impl ApplicationHandler for LocateShell {
                 self.redraw();
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                // The game's quit shortcuts work here too, so the screen can
+                // be left from the keyboard where the desktop has no binding.
+                let quit_key = match &event.logical_key {
+                    Key::Named(winit::keyboard::NamedKey::F4) => self.modifiers.alt_key(),
+                    Key::Character(c) => self.modifiers.super_key() && c.eq_ignore_ascii_case("q"),
+                    _ => false,
+                };
+                if quit_key {
+                    self.outcome = ShellOutcome::Quit;
+                    event_loop.exit();
+                    return;
+                }
                 // Same window-mode toggle the game uses, before the field sees
                 // the key, so Alt-Enter never submits the locate form.
                 if self.modifiers.alt_key()
@@ -6986,7 +7024,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--no-controllers" => native_input = false,
             "--launch-quick-mission" => { launch_creator=true; initial_screen=Screen::Flight; },
             "--ground-start" => {
-                ground_start_airport=Some(args.next().ok_or("--ground-start needs an airport number")?.parse()?);
+                ground_start_airport=Some(option_number("--ground-start", &args.next().ok_or("--ground-start needs an airport number")?)?);
             }
             "--separation" => {
                 let nm: f64 = args.next().ok_or("--separation needs a distance in nautical miles")?.parse()?;
@@ -7198,20 +7236,22 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--ai-probe-ticks" | "--ai-roster-probe-ticks" => {
                 ai_roster_probe = arg == "--ai-roster-probe-ticks";
-                let ticks: usize = args
-                    .next()
-                    .ok_or("--ai-probe-ticks requires 1..216000")?
-                    .parse()?;
+                let ticks: usize = option_number(
+                    &arg,
+                    &args.next().ok_or("--ai-probe-ticks requires 1..216000")?,
+                )?;
                 if !(1..=216_000).contains(&ticks) {
-                    return Err("AI probe tick limit exceeded".into());
+                    return Err(format!("{arg} needs 1 to 216000 ticks, not {ticks}").into());
                 }
                 ai_probe = Some(ticks);
                 ai_wings_enabled = true;
             }
             "--record-mission" => {
-                record_mission = Some(PathBuf::from(
-                    args.next().ok_or("--record-mission needs a new path")?,
-                ));
+                let path = args.next().ok_or("--record-mission needs a new path")?;
+                if path.is_empty() {
+                    return Err("--record-mission needs a new path, not an empty one".into());
+                }
+                record_mission = Some(PathBuf::from(path));
             }
             "--verify-render" => verify_render = true,
             "--recording-info" => {
@@ -7241,10 +7281,12 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 ));
             }
             "--from" | "--to" => {
-                let seconds: f64 = args
-                    .next()
-                    .ok_or(format!("{arg} needs seconds of mission time"))?
-                    .parse()?;
+                let seconds: f64 = option_number(
+                    &arg,
+                    &args
+                        .next()
+                        .ok_or(format!("{arg} needs seconds of mission time"))?,
+                )?;
                 if !(seconds.is_finite() && seconds >= 0.) {
                     return Err(format!("{arg} needs seconds of mission time, 0 or more").into());
                 }
@@ -7259,15 +7301,15 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     args.next()
                         .ok_or("--ids needs aircraft ids such as 0,7")?
                         .split(',')
-                        .map(str::parse)
+                        .map(|id| option_number("--ids", id))
                         .collect::<Result<_, _>>()?,
                 );
             }
             "--rate" => {
-                let hz: f64 = args
-                    .next()
-                    .ok_or("--rate needs samples per second")?
-                    .parse()?;
+                let hz: f64 = option_number(
+                    "--rate",
+                    &args.next().ok_or("--rate needs samples per second")?,
+                )?;
                 if !(hz.is_finite() && hz > 0. && hz <= 120.) {
                     return Err("--rate needs samples per second above 0 and at most 120".into());
                 }
@@ -7312,11 +7354,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--list-inputs" => input_seconds = Some(2),
             "--monitor-inputs" => {
-                input_seconds = Some(
-                    args.next()
-                        .ok_or("--monitor-inputs needs seconds")?
-                        .parse::<u64>()?,
-                )
+                input_seconds = Some(option_number::<u64>(
+                    "--monitor-inputs",
+                    &args.next().ok_or("--monitor-inputs needs seconds")?,
+                )?)
             }
             "--write-input-profile" => {
                 write_input_profile = Some(PathBuf::from(
@@ -7553,23 +7594,25 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 smoke_test = true;
             }
             "--replay-tick" => {
-                replay_options.tick =
-                    Some(args.next().ok_or("--replay-tick needs a tick")?.parse()?);
+                replay_options.tick = Some(option_number(
+                    "--replay-tick",
+                    &args.next().ok_or("--replay-tick needs a tick")?,
+                )?);
             }
             "--replay-aircraft" => {
-                replay_options.aircraft = Some(
-                    args.next()
-                        .ok_or("--replay-aircraft needs an aircraft id")?
-                        .parse()?,
-                );
+                replay_options.aircraft = Some(option_number(
+                    "--replay-aircraft",
+                    &args.next().ok_or("--replay-aircraft needs an aircraft id")?,
+                )?);
             }
             "--replay-drone" => replay_options.drone = true,
             "--replay-speed" => {
-                replay_options.speed = Some(
-                    args.next()
-                        .ok_or("--replay-speed needs a speed such as 16 or -2")?
-                        .parse()?,
-                );
+                replay_options.speed = Some(option_number(
+                    "--replay-speed",
+                    &args
+                        .next()
+                        .ok_or("--replay-speed needs a speed such as 16 or -2")?,
+                )?);
             }
             "--replay-ui" => {
                 replay_options.ui = replay::viewer::Ui::parse(
@@ -9784,6 +9827,15 @@ mod startup_tests {
 
     fn path(text: &str) -> Option<PathBuf> {
         Some(PathBuf::from(text))
+    }
+
+    #[test]
+    fn a_bad_option_number_names_the_option_and_the_text() {
+        assert_eq!(option_number::<u64>("--replay-tick", " 12 ").unwrap(), 12);
+        assert_eq!(option_number::<f64>("--rate", "2.5").unwrap(), 2.5);
+        let error = option_number::<u64>("--replay-tick", "-5").unwrap_err();
+        assert_eq!(error.to_string(), "--replay-tick needs a number, not '-5'");
+        assert!(option_number::<f64>("--rate", "abc").is_err());
     }
 
     #[test]

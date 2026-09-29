@@ -64,6 +64,27 @@ class Scenario:
     notes: str = ""
     # Files (relative to the scenario's work folder) the run should produce.
     outputs: list[str] = dataclasses.field(default_factory=list)
+    # Follow-up commands run after the main one, in the same environment (for
+    # example reading a recording back). Their output is appended to the log
+    # and to what `expect`, `forbid` and `check` see.
+    then: list["Step"] = dataclasses.field(default_factory=list)
+    # Looks at the work folder (and the joined output) once everything has run.
+    check_work: Optional[Callable[[Path, str], list[str]]] = None
+    # A defect found and left for someone else: the scenario still runs, its
+    # failure is reported as known instead of failing the run, and it fails
+    # once it starts passing so the marker gets removed.
+    known_failure: str = ""
+
+
+@dataclasses.dataclass
+class Step:
+    """A follow-up command. `app` steps run the game binary, others run as given."""
+
+    args: list[str]
+    app: bool = True
+    expect_exit: Optional[int] = 0  # None accepts any exit code
+    window: bool = False
+    timeout: float = 120.0
 
 
 @dataclasses.dataclass
@@ -130,7 +151,46 @@ def judge(s: Scenario, output: str, code: Optional[int], timed_out: bool, work: 
             problems.append(f"expected file not written: {rel}")
     if s.check:
         problems.extend(s.check(output))
+    if s.check_work:
+        problems.extend(s.check_work(work, output))
     return problems
+
+
+def run_steps(
+    s: Scenario, opts: argparse.Namespace, env: dict, work: Path, output: str, step_problems: list[str],
+    window_slots: Optional[threading.Semaphore] = None,
+) -> str:
+    """Runs a scenario's follow-up commands, appending their output; returns the joined output."""
+    for i, step in enumerate(s.then):
+        step_cmd = [a.replace("{work}", str(work)) for a in step.args]
+        if step.app:
+            step_cmd = [opts.bin, *step_cmd]
+        if step.window:
+            step_cmd = [str(ROOT / "tools" / "agent-run.sh"), *step_cmd]
+        # A window step counts against the window limit unless the scenario already holds a slot.
+        slot = window_slots if (step.window and not s.window and window_slots) else None
+        if slot:
+            slot.acquire()
+        try:
+            done = subprocess.run(
+                step_cmd, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                errors="replace", timeout=step.timeout * opts.timeout_scale, start_new_session=True,
+            )
+            step_out, step_code = done.stdout, done.returncode
+        except subprocess.TimeoutExpired as e:
+            step_out = (e.stdout.decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or ""))
+            step_code = None
+            step_problems.append(f"step {i + 1} timed out")
+        except OSError as e:
+            step_out, step_code = f"could not run the step: {e}\n", None
+            step_problems.append(f"step {i + 1} could not run: {e}")
+        finally:
+            if slot:
+                slot.release()
+        output += f"\n$ then {i + 1}: {' '.join(step_cmd)}\n{step_out}"
+        if step_code is not None and step.expect_exit is not None and step_code != step.expect_exit:
+            step_problems.append(f"step {i + 1} exit code {step_code}, expected {step.expect_exit}")
+    return output
 
 
 def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: threading.Semaphore) -> Result:
@@ -144,7 +204,7 @@ def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: 
         cmd = [str(ROOT / "tools" / "agent-run.sh"), *cmd]
     env = dict(os.environ)
     env.update({"TORE_DATA_DIR": str(data), "TORE_NO_ERROR_DIALOG": "1", "RUST_BACKTRACE": "1"})
-    env.update(s.env)
+    env.update({k: v.replace("{work}", str(work)) for k, v in s.env.items()})
     timeout = s.timeout * opts.timeout_scale
     started = time.time()
     if s.window:
@@ -168,6 +228,8 @@ def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: 
             except subprocess.TimeoutExpired:
                 os.killpg(proc.pid, 9)
                 output, _ = proc.communicate()
+        step_problems: list[str] = []
+        output = run_steps(s, opts, env, work, output, step_problems, window_slots)
     finally:
         if s.window:
             window_slots.release()
@@ -175,10 +237,19 @@ def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: 
     log = run_dir / "logs" / f"{s.name}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(f"$ {' '.join(cmd)}\n\n{output}")
-    problems = judge(s, output, None if timed_out else proc.returncode, timed_out, work)
+    problems = judge(s, output, None if timed_out else proc.returncode, timed_out, work) + step_problems
+    if s.known_failure:
+        if problems:
+            problems = [f"known failure ({s.known_failure}): {p}" for p in problems[:1]]
+            passed = True
+        else:
+            problems = [f"known failure now passes, remove known_failure ({s.known_failure})"]
+            passed = False
+    else:
+        passed = not problems
     if not opts.keep_data:
         shutil.rmtree(data, ignore_errors=True)
-    return Result(s.name, s.lane, not problems, seconds, None if timed_out else proc.returncode, problems, cmd, str(log.relative_to(run_dir)))
+    return Result(s.name, s.lane, passed, seconds, None if timed_out else proc.returncode, problems, cmd, str(log.relative_to(run_dir)))
 
 
 def write_summary(run_dir: Path, results: list[Result], started: float) -> None:

@@ -584,6 +584,13 @@ Verified on Hyprland 0.56 (Lua `hyprctl dispatch`); older releases use the
 fallback `[rules] command` form. Prefer the windowless modes above where they
 answer the question.
 
+To press keys in such a window, `tools/battery_scenarios/_replay_drive.py` starts a
+game through the wrapper and sends key presses to that one window by process id
+(`hyprctl dispatch hl.dsp.send_shortcut`), then quits with Alt+F4; see the
+[replay lane](testing/lane-replay.md#how-the-checks-work) for what reaches the game
+(named keys and Ctrl combinations do; plain letters and digits did not) and the
+timing-run variables that keep a flight unpaused.
+
 In PowerShell, create `.local/headless` with `New-Item -ItemType Directory -Force .local/headless`,
 set `$env:TORE_DATA_DIR` to the absolute `.local/dev-profile` path, and run the
 same Cargo commands. Remove the environment override after the session with
