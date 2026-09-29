@@ -540,6 +540,55 @@ fn the_next_wingman_leads_when_the_leader_is_lost() {
 }
 
 #[test]
+fn aircraft_meeting_head_on_both_turn_right_and_pass_clear() {
+    // John, 2026-09-29: traffic avoidance outside formation.
+    let mut mission = AiMission::new();
+    mission.push(hornet(1, 0, [0., 6_000., -6_000.], 0.));
+    let mut other = hornet(2, 0, [0., 6_000., 6_000.], std::f64::consts::PI);
+    other.identity.wing = 2;
+    mission.push(other);
+    let held = |mission: &AiMission, id| mission.actor(id).unwrap().avoiding_heading_deg();
+    let speed = mission.actor(1).unwrap().flight().speed;
+    // Outside the look-ahead nothing changes.
+    step(&mut mission, None);
+    assert_eq!(held(&mission, 1), None, "closing at {:.0} ft/s", 2. * speed);
+    let mut started = false;
+    for _ in 0..10 * 120 {
+        step(&mut mission, None);
+        if held(&mission, 1).is_some() {
+            started = true;
+            break;
+        }
+    }
+    assert!(started);
+    assert_eq!(held(&mission, 1).map(f64::round), Some(AVOID_TURN_DEG));
+    assert_eq!(
+        held(&mission, 2).map(f64::round),
+        Some(180. + AVOID_TURN_DEG)
+    );
+    let mut closest = f64::INFINITY;
+    let mut cleared = None;
+    for tick in 0..20 * 120 {
+        step(&mut mission, None);
+        let (a, b) = (mission.actor(1).unwrap(), mission.actor(2).unwrap());
+        let d: f64 = (0..3)
+            .map(|i| (a.flight().position[i] - b.flight().position[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        closest = closest.min(d);
+        if cleared.is_none() && held(&mission, 1).is_none() {
+            cleared = Some(tick);
+        }
+        // The held heading never flaps to the other side.
+        if let Some(h) = held(&mission, 1) {
+            assert_eq!(h.round(), AVOID_TURN_DEG);
+        }
+    }
+    assert!(closest > AVOID_SEPARATION_FT, "closest {closest:.0} ft");
+    assert!(cleared.is_some(), "the avoidance ends once clear");
+}
+
+#[test]
 fn a_formation_order_cancels_an_ordered_landing_in_the_early_approach() {
     let mut mission = AiMission::new();
     mission.push(hornet(1, 1, [0., 6_000., -110_000.], 0.));

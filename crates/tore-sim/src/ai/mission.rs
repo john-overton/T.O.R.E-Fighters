@@ -257,6 +257,9 @@ pub struct AiActor {
     /// A join-the-leader landing was cancelled by order; it is not re-joined
     /// until the leader is no longer recovering (fitted, 2026-09-23).
     join_cancelled: bool,
+    /// Traffic avoidance in force: the tick it may end and the heading it
+    /// holds, in degrees.
+    avoiding: Option<(u64, f64)>,
     /// The running takeoff or landing sequence, if any.
     airfield: Option<super::airfield::Sequence>,
     /// Draws for the private return route, separate from decision draws.
@@ -323,6 +326,7 @@ impl AiActor {
             landing_order: None,
             bugged_out: false,
             join_cancelled: false,
+            avoiding: None,
             airfield: None,
             route_random: super::DecisionRandom::seeded(setup.seed ^ 0x6c61_6e64_696e_6721),
             pending_threats: Vec::new(),
@@ -448,6 +452,93 @@ impl AiActor {
 
     pub fn identity(&self) -> &ActorIdentity {
         &self.identity
+    }
+
+    /// Opinionated (requested by John, 2026-09-29; numbers are agent
+    /// decisions): an aircraft flying on its own (not in a formation
+    /// procedure, not defending against a missile or gunfire, not in an
+    /// airfield sequence) predicts its closest approach to every other
+    /// airborne aircraft, friend or foe, over [`AVOID_HORIZON_S`]. When one
+    /// comes inside [`AVOID_SEPARATION_FT`] plus [`AVOID_CLOSURE_S`] of the
+    /// closing speed, it takes up a heading [`AVOID_TURN_DEG`] away from the
+    /// other aircraft (to the right when meeting it head-on), keeping its
+    /// pitch, and holds that heading until [`AVOID_HOLD_TICKS`] after the last
+    /// predicted conflict so it does not flap. Nothing changes while no conflict is predicted.
+    fn avoid_traffic(
+        &mut self,
+        tick: u64,
+        mut intent: MotionIntent,
+        world: &[WorldObject],
+    ) -> MotionIntent {
+        let formation = self.controller.formation_trace().is_some();
+        let defending =
+            self.last_defense.is_some_and(|d| d.motion.is_some()) || self.fire_defending;
+        if formation || defending || self.airfield.is_some() || !self.alive {
+            self.avoiding = None;
+            return intent;
+        }
+        let p = self.flight.position;
+        let v = self.flight.velocity;
+        let mut conflict: Option<(f64, [f64; 3])> = None;
+        for other in world.iter().filter(|o| {
+            o.id != self.id() && o.is_aircraft && o.alive && !o.destroyed && !o.on_ground
+        }) {
+            let r: [f64; 3] = std::array::from_fn(|i| other.position[i] - p[i]);
+            let rv: [f64; 3] = std::array::from_fn(|i| other.velocity[i] - v[i]);
+            let rv2 = rv.iter().map(|x| x * x).sum::<f64>();
+            if rv2 < 1.0 {
+                continue;
+            }
+            let t = -r.iter().zip(&rv).map(|(a, b)| a * b).sum::<f64>() / rv2;
+            if !(0.0..=AVOID_HORIZON_S).contains(&t) {
+                continue;
+            }
+            let miss = (0..3)
+                .map(|i| (r[i] + rv[i] * t).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            // The aircraft it is attacking is closed on deliberately: only a
+            // near collision with it counts.
+            let safety = if self.controller.target() == Some(other.id) {
+                AVOID_TARGET_FT
+            } else {
+                AVOID_SEPARATION_FT + AVOID_CLOSURE_S * rv2.sqrt()
+            };
+            if miss < safety && conflict.is_none_or(|(best, _)| t < best) {
+                conflict = Some((t, r));
+            }
+        }
+        let heading = self.flight.yaw;
+        if let Some((_, r)) = conflict {
+            let target = match self.avoiding {
+                Some((_, target)) => target,
+                None => {
+                    // Bearing of the other aircraft off our nose, positive right.
+                    let bearing = (r[0].atan2(r[2]) - heading + std::f64::consts::PI)
+                        .rem_euclid(std::f64::consts::TAU)
+                        - std::f64::consts::PI;
+                    let side = if bearing.abs() < AVOID_HEAD_ON_DEG.to_radians() {
+                        1.0
+                    } else {
+                        -bearing.signum()
+                    };
+                    (heading.to_degrees() + side * AVOID_TURN_DEG).rem_euclid(360.0)
+                }
+            };
+            self.avoiding = Some((tick + AVOID_HOLD_TICKS, target));
+        } else if self.avoiding.is_some_and(|(until, _)| tick >= until) {
+            self.avoiding = None;
+        }
+        if let Some((_, target)) = self.avoiding {
+            intent.heading_deg = target;
+            intent.bank = super::motion::Bank::Unconstrained;
+        }
+        intent
+    }
+
+    /// The heading held to avoid other traffic, if any (for tests and traces).
+    pub fn avoiding_heading_deg(&self) -> Option<f64> {
+        self.avoiding.map(|(_, heading)| heading)
     }
 
     /// Leader succession renumbers a wing (see [`AiMission`]).
@@ -2375,7 +2466,10 @@ impl AiMission {
 
         // 6. Motion through the adapter and this actor's own flight model.
         actor.adapter.set_gun_aim(batch.gun_aim);
-        actor.fly(batch.motion.as_ref(), &own, ground, surface)?;
+        let motion = batch
+            .motion
+            .map(|intent| actor.avoid_traffic(tick, intent, world));
+        actor.fly(motion.as_ref(), &own, ground, surface)?;
         Ok(())
     }
 
@@ -3662,6 +3756,22 @@ fn dummy_frame(own: &OwnState) -> DecisionFrame<'static> {
 }
 
 /// The record's minimum-altitude value; 300 in every inspected record (B44).
+/// Traffic avoidance (John, 2026-09-29; numbers are agent decisions): look
+/// this far ahead for a closest approach, seconds.
+const AVOID_HORIZON_S: f64 = 6.0;
+/// Miss distance that counts as a conflict, feet, plus this many seconds of
+/// the closing speed (a head-on pair at 1,000 kt closure needs about 1,150 ft).
+const AVOID_SEPARATION_FT: f64 = 300.0;
+const AVOID_CLOSURE_S: f64 = 0.5;
+/// Miss distance that counts as a conflict with the aircraft's own target.
+const AVOID_TARGET_FT: f64 = 150.0;
+/// Heading change away from the conflict, degrees: modest, not a break.
+const AVOID_TURN_DEG: f64 = 30.0;
+/// Within this many degrees of the nose the other aircraft is head-on.
+const AVOID_HEAD_ON_DEG: f64 = 20.0;
+/// An avoidance holds its side at least this long, ticks (3 s).
+const AVOID_HOLD_TICKS: u64 = 360;
+
 /// Lost wing members are renumbered from here, out of the living order.
 const LOST_MEMBER_BASE: u8 = 100;
 

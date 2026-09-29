@@ -460,6 +460,23 @@ the general case separately). No radio call is made: the retail "You're the
 wingleader now" call is voiced only by a living previous leader
 ([radio chatter](radio-chatter.md)).
 
+### Traffic avoidance
+
+**Opinionated, requested by John on 2026-09-29; the numbers are agent
+decisions:** an AI aircraft flying on its own predicts its closest approach to
+every other airborne aircraft, friend or foe. A conflict is a closest approach
+within the next 6 s that misses by less than 300 ft plus half a second of the
+closing speed (so a fast head-on pass is seen earlier and given more room).
+Against the aircraft it is attacking only a miss under 150 ft counts, since it
+closes on that aircraft on purpose. On the first conflict it takes up a heading
+30 degrees off its current one, away from the other aircraft, or to the right
+when the other is within 20 degrees of its nose (head-on, as the rules of the
+air have both aircraft turn right). It keeps its pitch and speed, holds that
+heading until 3 s after the last predicted conflict, and never changes side
+while it holds, so it does not flap. Avoidance never overrides missile or gun
+defense, an airfield sequence, or a formation procedure (station keeping, a
+join or a rejoin): wingmen in formation are kept apart by their slots.
+
 ### Normal formation variation and transitions
 
 **Opinionated, requested by John on 2026-09-18:** tighten normal vertical
