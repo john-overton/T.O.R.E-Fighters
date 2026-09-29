@@ -77,6 +77,7 @@ mod sound_screen;
 mod startup;
 mod static_art;
 mod surface_lighting;
+mod target_preview;
 mod target_window;
 mod terrain;
 mod version;
@@ -232,7 +233,7 @@ struct App {
     screen: Screen,
     frame_time: Instant,
     instrument_time: Instant,
-    target_refresh: target_window::Refresh,
+    target_refresh: target_preview::Refresh,
     menu: Menu,
     audio: Option<audio::Audio>,
     wing_recipient: Option<u8>,
@@ -10212,7 +10213,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         screen: initial_screen,
         frame_time: Instant::now(),
         instrument_time: Instant::now(),
-        target_refresh: target_window::Refresh::new(),
+        target_refresh: target_preview::Refresh::new(),
         menu,
         audio,
         wing_recipient: None,

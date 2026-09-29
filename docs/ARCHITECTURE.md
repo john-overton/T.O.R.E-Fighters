@@ -555,7 +555,8 @@ and other surface objects. Original MCICONS artwork
 is optional for older caches. [Display rules](spec/flight-map.md).
 
 The [target window](spec/target-window.md) builds read-only presentation data in
-`tore-app::target_window`. It uses the same retained selection as the HUD,
+`tore-app::target_window`; its refresh clock, camera and picture contrast are
+in `tore-app::target_preview`. It uses the same retained selection as the HUD,
 existing aircraft activity, and an independent weather slot. Its asynchronous
 camera results carry the requested target identity so a changed selection cannot
 reuse another target's picture. No display state feeds combat decisions.
@@ -922,7 +923,8 @@ These splits touch different files and can run in parallel:
 - Quick Mission setup apart from the creator's UI: `mission_layout.rs` holds
   the mission layout, ground layout, runway poses and map bounds, and
   `quick_mission.rs` keeps the creator's screen (done in this stage); the debrief evaluator (`capture`, `report`) apart from its
-  pages; the target window's data apart from its refresh clock.
+  pages; the target window's data apart from its refresh clock (`target_window.rs`
+  keeps the data, `target_preview.rs` the clock and camera; done in this stage).
 - File writers and environment-variable reads leave simulation code, and `log`
   calls become output.
 

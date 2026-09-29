@@ -1221,7 +1221,7 @@ impl Instruments {
                         && let Some(pixels) = self.cameras.get(&4)
                     {
                         let mut gray = pixels.clone();
-                        crate::target_window::monochrome(&mut gray);
+                        crate::target_preview::monochrome(&mut gray);
                         r.sprite(
                             &Sprite {
                                 width: 138,
