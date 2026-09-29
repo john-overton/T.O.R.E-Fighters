@@ -1064,6 +1064,7 @@ mod landing_tests {
             supported: false,
             alive: true,
             speed_fps: 300.,
+            ground_clearance_ft: 0.,
         }
     }
 

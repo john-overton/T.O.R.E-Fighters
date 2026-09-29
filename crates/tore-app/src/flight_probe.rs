@@ -166,12 +166,12 @@ impl SpinRecovery {
     }
 }
 
-/// Glide slope the landing probe flies, degrees.
-const GLIDE_SLOPE_DEG: f64 = 3.;
+/// Glide slope the landing probe flies, degrees: the player's ILS path.
+const GLIDE_SLOPE_DEG: f64 = tore_sim::airport::GLIDE_SLOPE_DEGREES;
 /// Distance from the aim point where the landing probe starts, feet.
 pub const LANDING_START_FT: f64 = 4. * 6076.;
-/// The aim point sits this far past the threshold, feet.
-pub const AIM_PAST_THRESHOLD_FT: f64 = 1_000.;
+/// The aim point sits this far past the threshold, feet: the ILS aim point.
+pub const AIM_PAST_THRESHOLD_FT: f64 = tore_sim::airport::AIM_PAST_THRESHOLD_FT;
 /// Height above the wheels' support plane where the probe starts the flare.
 const FLARE_HEIGHT_FT: f64 = 30.;
 /// Ticks after touchdown the rollout may take before the probe gives up.
