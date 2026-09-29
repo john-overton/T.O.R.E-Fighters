@@ -1388,7 +1388,12 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             break;
         }
     }
-    for _ in 0..40 {
+    // Forty gun-sized hits kill most aircraft; the A-4E's guns are weaker, so
+    // keep hitting until the aircraft is destroyed.
+    for _ in 0..2000 {
+        if damaged.player_hp == 0 {
+            break;
+        }
         damaged.command(live::Command::DamagePlayer, l);
         replica.command(live::Command::DamagePlayer, l);
         let events = damaged.step(false, l, |_, _| 0.);
@@ -1577,6 +1582,37 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             if negative.rounds(index) != initial || negative.payload_lbs() != mass {
                 return Err("station failure changed ammunition/mass".into());
             }
+            // A surface weapon cannot engage the practice aircraft
+            // (docs/spec/missiles.md, target-role rules): the shot is refused,
+            // not spent, and there is no surface target to fire it at yet.
+            if tore_sim::combat::missiles::Profile::for_weapon(
+                &combat.state.configuration().stations[index].weapon,
+            )
+            .is_some_and(|p| p.role == tore_sim::combat::missiles::TargetRole::Surface)
+            {
+                let mut refused = combat.state.clone();
+                refused.step(true, l, |_, _| 0.);
+                if refused.readiness(l) != live::Readiness::WrongTarget
+                    || refused.ammo[index] != initial
+                    || !refused.projectiles.is_empty()
+                {
+                    return Err(format!(
+                        "surface weapon was not refused against the aircraft target: slot={} weapon={} readiness={:?}",
+                        index + 1,
+                        combat.state.configuration().stations[index].weapon.source,
+                        refused.readiness(l)
+                    )
+                    .into());
+                }
+                println!(
+                    "combat smoke {} slot={} {} class={class}: refused against aircraft target PASS",
+                    h.profile.name,
+                    index + 1,
+                    combat.state.configuration().stations[index].weapon.source,
+                );
+                combat.cancel();
+                continue;
+            }
             if index != 0 {
                 let mut no_target = combat.state.clone();
                 // Remove the fixture contact as well as its designation. A
@@ -1623,7 +1659,15 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 let mut tracking = combat.state.clone();
                 tracking.step(true, l, |_, _| 0.);
                 if tracking.projectiles.is_empty() {
-                    return Err("source guidance probe did not launch".into());
+                    return Err(format!(
+                        "source guidance probe did not launch: slot={} weapon={} readiness={:?} ammo={} initial={initial} mode={:?}",
+                        index + 1,
+                        weapon.source,
+                        combat.state.readiness(l),
+                        tracking.ammo[index],
+                        tracking.launch_mode
+                    )
+                    .into());
                 }
                 tracking.step(false, Launcher { radar: false, ..l }, |_, _| 0.);
                 let loses_track = weapon.seeker.signature == 3 && weapon.flags & 0x200 != 0;
@@ -1663,13 +1707,55 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     .signature
                     == 3
                 {
+                    // Passive channel: the switch stays on but nothing is
+                    // transmitting, so a radar weapon that needs the aircraft's
+                    // lock is inhibited.
                     let mut radar_off = combat.state.clone();
                     let off = Launcher { radar: false, ..l };
                     radar_off.step(true, off, |_, _| 0.);
-                    if radar_off.ammo[index] != initial
-                        || radar_off.readiness(off) != live::Readiness::RadarOff
+                    let profile = tore_sim::combat::missiles::Profile::for_weapon(
+                        &combat.state.configuration().stations[index].weapon,
+                    );
+                    let guided_by_radar = profile.is_none_or(|p| {
+                        p.guidance == tore_sim::combat::missiles::Guidance::Supported
+                    });
+                    if guided_by_radar
+                        // Losing the radar track may also drop the designation,
+                        // so any reason but Ready is a valid inhibit.
+                        && (radar_off.ammo[index] != initial
+                            || radar_off.readiness(off) == live::Readiness::Ready)
                     {
-                        return Err("radar-off launch was not inhibited".into());
+                        return Err(format!(
+                            "radar-off launch was not inhibited: slot={} weapon={} ammo={} initial={initial} readiness={:?} mode={:?}",
+                            index + 1,
+                            combat.state.configuration().stations[index].weapon.source,
+                            radar_off.ammo[index],
+                            radar_off.readiness(off),
+                            radar_off.launch_mode
+                        )
+                        .into());
+                    }
+                    // Power switch off: a reviewed radar missile may still be
+                    // released, permanently unguided (docs/features.md, "Uncued
+                    // launch with the onboard seeker enabled").
+                    if profile.is_some() {
+                        let mut dumb = combat.state.clone();
+                        let off = Launcher {
+                            radar: false,
+                            radar_power: false,
+                            ..l
+                        };
+                        dumb.step(true, off, |_, _| 0.);
+                        if dumb.ammo[index] != initial - 1
+                            || dumb.projectiles.iter().any(|p| p.target.is_some())
+                        {
+                            return Err(format!(
+                                "radar-power-off release was not an unguided shot: slot={} ammo={} initial={initial}",
+                                index + 1,
+                                dumb.ammo[index]
+                            )
+                            .into());
+                        }
                     }
                 }
             }
@@ -1696,6 +1782,7 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             let mut fired = 0;
             let mut impacts = 0;
             let mut destroyed = 0;
+            let mut collided = false;
             // Pulse for missiles, hold for gun. Two shots are available in the
             // smallest source station; damage remains source class-0 per hit.
             for tick in 0..6000 {
@@ -1725,6 +1812,10 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     match event {
                         Event::Fired(_) => fired += 1,
                         Event::Hit(_) => impacts += 1,
+                        // The fixture flies at the player, so a slow gun can
+                        // lose the race and the two aircraft collide; the
+                        // collision then zeroes what the rounds had not.
+                        Event::PlayerDestroyed => collided = true,
                         Event::Destroyed(_) => destroyed += 1,
                         _ => {}
                     }
@@ -1748,13 +1839,14 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                             )
                             .max(0)
                 })
-                || combat
-                    .state
-                    .history
-                    .iter()
-                    .map(|hit| hit.applied)
-                    .sum::<i32>()
-                    != combat.state.configuration().hit_points - combat.state.targets[0].hp
+                || (!collided
+                    && combat
+                        .state
+                        .history
+                        .iter()
+                        .map(|hit| hit.applied)
+                        .sum::<i32>()
+                        != combat.state.configuration().hit_points - combat.state.targets[0].hp)
                 || (class == 0
                     && !combat
                         .state
@@ -1762,10 +1854,16 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                         .iter()
                         .any(|e| e.kind == EffectKind::Destroyed))
             {
+                let applied: i32 = combat.state.history.iter().map(|hit| hit.applied).sum();
+                let wrong_class = combat.state.history.iter().find(|hit| hit.class != class);
                 return Err(format!(
-                    "combat smoke {} {} failed: fired={fired} hits={impacts} destroyed={destroyed}",
+                    "combat smoke {} {} failed: fired={fired} hits={impacts} destroyed={destroyed} class={class} ammo={}->{} applied={applied} lost_hp={} wrong_class={:?}",
                     h.profile.name,
-                    combat.state.configuration().stations[index].weapon.source
+                    combat.state.configuration().stations[index].weapon.source,
+                    initial,
+                    combat.state.ammo[index],
+                    combat.state.configuration().hit_points - combat.state.targets[0].hp,
+                    wrong_class.map(|hit| (hit.class, hit.nominal, hit.applied))
                 )
                 .into());
             }
