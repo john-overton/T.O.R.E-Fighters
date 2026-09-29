@@ -236,10 +236,8 @@ them (see `KNOWN_ANOMALIES` in the scenario file).
 
 Behaviour the specs do not define, with the evidence. None of these were changed.
 
-1. **Dithering between gun and missile.** The "no store" case is fixed from
-   B42's retry (above). A fighter whose chosen store alternates between its
-   gun and a missile at the zone edge still swaps maneuvers every few ticks
-   (`ai-pair-a4e-vs-mig29`); B42 has no retry for a change of store.
+1. **Dithering between gun and missile.** Fixed in the fifth round from B13
+   (timed motions run to their deadline); left here for the record.
 2. **Notch side on a head-on shot.** The notch turns 90 degrees toward the
    smaller turn with a tie break; with the radar source dead ahead the side
    flipped after one second (heading 288, then 108), wasting the roll-in.
@@ -325,6 +323,26 @@ Behaviour the specs do not define, with the evidence. None of these were changed
 Windowed captures (this lane is headless only), theater layout variants
 (the `~` maps; only the 16 base theaters), Windows and macOS, and a retail
 comparison.
+
+### Fifth round (2026-09-29, review follow-ups)
+
+- A review found that round two's breakout fix scored every heading from 2 s
+  ahead when within 220 ft, hiding conflicts inside the first 2 s (the winning
+  escape in its own test passed 26 ft away at 0.12 s). `b4f1d85` scores a
+  heading that still closes on its true closest approach and uses the 2 s
+  distance only for a heading that already opens. The unit test now asserts
+  the chosen escape's predicted separation; the diving-reversal minimum is
+  265 ft. On the same 132 fight, mission, objective and regression scenarios
+  the collision counter is unchanged (30 flags before and after), all between
+  wing leaders, different wings or opponents, none between formation
+  wingmen; `ai-pair-f18-vs-rafale` (a leader and wingman both released to
+  fight) collides identically on the previous build.
+- The gun and missile alternation (item 1 under decisions) is fixed by B13's
+  timed-motion rule: gun lead tracking is a 1-second motion and now runs to
+  its deadline (`3142392`, regression scenarios `ai-regress-gun-missile-flap-su35`
+  and `-a4e`, including the flight lane's `flight-attack-su35` case).
+- Final subset on the merged branch: 321 of 321 passed (fights, pairs,
+  missions, objectives, regressions, determinism), gates green.
 
 ### Fourth round (2026-09-29, all four lanes merged)
 
