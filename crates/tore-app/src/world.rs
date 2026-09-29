@@ -10,7 +10,7 @@
 
 use crate::{
     AppResult, ai_wings, aircraft_type, airfield_radio, attitude, combat, combat_tape, comms,
-    crew_voice, flight, quick_mission, radio_calls, terrain,
+    crew_voice, flight, mission_layout, radio_calls, terrain,
 };
 use std::collections::BTreeMap;
 use tore_sim::models::FlightModel;
@@ -82,7 +82,7 @@ pub struct Restarted {
     /// The airport of a ground start.
     pub ground_airport: Option<u32>,
     /// The Quick Mission layout the player was placed from.
-    pub layout: Option<quick_mission::MissionLayout>,
+    pub layout: Option<mission_layout::MissionLayout>,
     /// How many AI aircraft fly, when the AI flies the mission.
     pub ai_aircraft: Option<usize>,
 }
@@ -209,7 +209,7 @@ impl World {
         if let Some(object) = self.setup.ground_start {
             let (position, heading) = match &parked {
                 Some(ground) => (ground.slots[0], ground.heading),
-                None => quick_mission::runway_pose(&self.terrain, object)?,
+                None => mission_layout::runway_pose(&self.terrain, object)?,
             };
             self.flight.position[0] = position[0];
             self.flight.position[2] = position[2];
@@ -239,10 +239,12 @@ impl World {
         let ground_airport = match self.setup.ground_start {
             Some(object) => Some(match &parked {
                 Some(ground) => {
-                    quick_mission::place_on_runway(&self.terrain, &mut self.flight, ground, 0)
+                    mission_layout::place_on_runway(&self.terrain, &mut self.flight, ground, 0)
                         .map(|()| ground.airport)?
                 }
-                None => quick_mission::apply_ground_start(&self.terrain, &mut self.flight, object)?,
+                None => {
+                    mission_layout::apply_ground_start(&self.terrain, &mut self.flight, object)?
+                }
             }),
             None => None,
         };
@@ -274,7 +276,7 @@ impl World {
             // player's wingmen behind the player.
             let airfields = ai_wings::Airfields::from_world(
                 &self.terrain,
-                parked.as_ref().map(quick_mission::GroundLayout::departure),
+                parked.as_ref().map(mission_layout::GroundLayout::departure),
             );
             let mut bridge = ai_wings::AiWings::build_mission(
                 &ai.wings,

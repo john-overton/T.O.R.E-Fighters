@@ -5,10 +5,6 @@
 use crate::{ai_wings::AiWings, flight::State};
 use tore_sim::combat::live::Target;
 
-// Kept so `combat.rs` still names the target camera through here; it moves to
-// `target_preview` paths with the combat split, and this goes then.
-pub use crate::target_preview::{camera, fit};
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TargetObjective {
     Survive,

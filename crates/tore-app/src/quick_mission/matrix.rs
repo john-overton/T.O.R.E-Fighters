@@ -9,6 +9,7 @@
 //! an error the flight start would treat as fatal, a panic or an impossible
 //! position is a problem. Nothing here opens a window or reads a display.
 use super::*;
+use crate::mission_layout::{GroundLayout, MissionLayout, place_on_runway};
 use crate::{AppResult, ai_wings, aircraft::Airframe, combat};
 use std::collections::BTreeMap;
 use tore_formats::aircraft::AircraftId;

@@ -123,7 +123,7 @@ impl CombatView {
     pub fn target_camera(&self, combat: &Combat, player: &flight::State) -> Option<Camera> {
         let target = combat.state.display_target()?;
         let (position, _) = self.pose(combat, target);
-        Some(crate::target_window::camera(player.position, position))
+        Some(crate::target_preview::camera(player.position, position))
     }
 
     /// Populate all six creator wings in `combat`, retaining their sides for
@@ -132,7 +132,7 @@ impl CombatView {
         &mut self,
         combat: &mut Combat,
         wings: &[tore_sim::ai::launch::WingLaunch],
-        layout: &crate::quick_mission::MissionLayout,
+        layout: &crate::mission_layout::MissionLayout,
         data: &BTreeMap<String, Vec<u8>>,
     ) -> AppResult<()> {
         combat.mission_aircraft(wings, layout, data, &mut |id| self.load_model(id, data))?;
@@ -282,7 +282,7 @@ impl CombatView {
                         + basis.forward[i] * local[2]
                 })
             });
-            crate::target_window::fit(&mut camera, corners);
+            crate::target_preview::fit(&mut camera, corners);
         } else {
             let model = self
                 .models
@@ -318,7 +318,7 @@ impl CombatView {
                 crate::snapshot::set_devices(&mut pose, devices);
             }
             let vertices = model.vertices(&pose, &camera, world, scenery);
-            crate::target_window::fit(
+            crate::target_preview::fit(
                 &mut camera,
                 vertices
                     .chunks_exact(10)

@@ -124,7 +124,7 @@ pub struct Combat {
     dummies: Vec<(usize, Vector)>,
     mission_spawns: Option<Vec<crate::ai_wings::MissionSpawn>>,
     /// The accepted Quick Mission layout, kept so restart rebuilds it exactly.
-    pub mission_layout: Option<crate::quick_mission::MissionLayout>,
+    pub mission_layout: Option<crate::mission_layout::MissionLayout>,
     /// The other aircraft types this mission loaded, in draw order. The app
     /// keeps the drawn model of each beside them.
     dummy_types: Vec<Arc<AircraftType>>,
@@ -601,7 +601,7 @@ impl Combat {
     pub fn mission_aircraft(
         &mut self,
         wings: &[tore_sim::ai::launch::WingLaunch],
-        layout: &crate::quick_mission::MissionLayout,
+        layout: &crate::mission_layout::MissionLayout,
         data: &BTreeMap<String, Vec<u8>>,
         load: &mut dyn FnMut(AircraftId) -> AppResult<Arc<AircraftType>>,
     ) -> AppResult<()> {

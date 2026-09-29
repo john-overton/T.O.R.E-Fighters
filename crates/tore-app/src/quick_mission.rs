@@ -14,12 +14,6 @@ use tore_sim::ai::{
     launch::{Side, WingId, WingLaunch, WingSelection, legacy_pairs, resolve_wings},
 };
 pub mod matrix;
-// Kept so `combat.rs` and `world.rs` still name the placement types through
-// here; they move to `mission_layout` paths with the crate move, and these go
-// then.
-pub use crate::mission_layout::{
-    GroundLayout, MissionLayout, apply_ground_start, place_on_runway, runway_pose,
-};
 type Rect = (i32, i32, i32, i32);
 const POPUP: Rect = (185, 100, 270, 370);
 const ROWS: usize = 15;

@@ -727,8 +727,11 @@ probe runs the same tick, so headless runs now cover the live loop, and a
 fingerprint test (`world/tick_tests.rs`) pins its order. The terrain is split:
 `Terrain` (`terrain.rs`) holds what the simulation queries and `Scenery`
 (`scenery.rs`) what the renderer draws, and `App` holds a `Scenery` beside
-`World`. The crate move (A2) is still to come: the combat and aircraft types
-still mix simulation with presentation.
+`World`. The combat and aircraft split is done as well: `AircraftType` apart
+from `Airframe`, `Combat` apart from its art, models, readouts and tape file
+(`CombatView` in `combat_view.rs` holds the app's half), and the render
+snapshot's data (`snapshot.rs`) apart from its vertex building. The crate
+move itself (A2) is still to come.
 
 Stage B has not started. The player is `world.flight` plus one ownship's worth
 of player-only fields in `combat::live::State`; every AI aircraft is an
@@ -975,7 +978,7 @@ These splits touch different files and can run in parallel:
   the mission layout, ground layout, runway poses and map bounds, and
   `quick_mission.rs` keeps the creator's screen (done in this stage); the debrief evaluator (`capture`, `report`) apart from its
   pages; the target window's data apart from its refresh clock (`target_window.rs`
-  keeps the data, `target_preview.rs` the clock and camera; done in this stage).
+  keeps the data, `target_preview.rs` the clock and camera; done in this stage). The temporary re-exports these two splits left in `quick_mission.rs` and `target_window.rs` are gone: combat, its view and `world.rs` name `mission_layout` and `target_preview` directly.
 - File writers and environment-variable reads leave simulation code, and `log`
   calls become output. The formation trace is done: `AiWings` collects its rows
   in a bounded list, and `formation_trace.rs` in the app reads
