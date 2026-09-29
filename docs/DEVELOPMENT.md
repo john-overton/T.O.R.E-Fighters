@@ -560,6 +560,28 @@ Keep captures, logs and imported media under ignored directories. When using
 commands. The environment and other feature probes have their own exit paths;
 follow their documented commands elsewhere in this guide.
 
+### Windowed runs from scripts and agents
+
+`tools/agent-run.sh COMMAND [ARGS...]` runs any command with its window on a
+spare Hyprland workspace instead of the active one. The launch is silent (no
+focus change, no workspace switch) and floating, so the window keeps its
+requested size. Each concurrent run takes its own workspace from 91 to 99
+(`TORE_AGENT_WS_FIRST` and `TORE_AGENT_WS_LAST` change the range) and frees it
+on exit. Output, exit status and working directory behave as if the command ran
+directly, and stopping the wrapper with INT or TERM stops the command and its
+children. (SIGKILL cannot be caught, so a `kill -9` of the wrapper leaves the
+game running; close it with `pkill -x tore-app`.) Outside Hyprland it just runs
+the command in place. It needs no window
+rule and does not retitle the window.
+
+```sh
+TORE_DATA_DIR=.local/dev-profile tools/agent-run.sh cargo run --locked -p tore-app -- --smoke-test --no-audio
+```
+
+Verified on Hyprland 0.56 (Lua `hyprctl dispatch`); older releases use the
+fallback `[rules] command` form. Prefer the windowless modes above where they
+answer the question.
+
 In PowerShell, create `.local/headless` with `New-Item -ItemType Directory -Force .local/headless`,
 set `$env:TORE_DATA_DIR` to the absolute `.local/dev-profile` path, and run the
 same Cargo commands. Remove the environment override after the session with
