@@ -28,6 +28,10 @@ envelope's ceiling there is no speed range, so there is no ratio and no rule.
 | 1.0 and above | Full shake, and the cockpit message `OVERSPEED` every four seconds. | The player. |
 | 1.5 and above | The aircraft is lost through the ordinary destroyed path. | Every aircraft, the player and the AI. |
 
+An **Invulnerable** player (the Damage cheat, [cheats](cheats.md#behaviour-of-each-cheat)) is not lost to overspeed
+(John, 2026-09-29) but keeps the shake and the `OVERSPEED` message. Only the loss is skipped; an AI aircraft has
+no cheats.
+
 The shake is a view offset only. It is a pure function of the ratio and the
 simulation time (two noise terms at 23 and 31 Hz, 60 percent and 40 percent), so
 it repeats exactly, does not depend on the simulation tick rate and never touches

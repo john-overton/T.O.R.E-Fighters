@@ -33,6 +33,9 @@ credit (`Ledger::lose_without_credit`) so an earlier shooter's damage does not
 turn into a kill. It does not crash the ledger, which stays consistent.
 The AI probe's activity line names the cause.
 
+The 105 nm loss stays fatal for a player with the Invulnerable cheat on, so a cheating player cannot fly off forever
+(John, 2026-09-29), unlike the [overspeed](overspeed.md) loss, which Invulnerable skips.
+
 The check runs once per simulation tick on the aircraft's position. Long AI
 scenarios that used to leave the map now end cleanly with the aircraft lost.
 

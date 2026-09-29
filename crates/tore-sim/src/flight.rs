@@ -546,9 +546,12 @@ impl State {
         if self.crashed || self.systems.structure.failed {
             return;
         }
-        if self
-            .overspeed_ratio()
-            .is_some_and(|ratio| ratio >= OVERSPEED_DESTROY)
+        // An invulnerable player keeps the shake and the message but is not lost
+        // (John, 2026-09-29); the out-of-bounds loss stays fatal for everyone.
+        if !self.cheats.invulnerable()
+            && self
+                .overspeed_ratio()
+                .is_some_and(|ratio| ratio >= OVERSPEED_DESTROY)
         {
             self.systems
                 .destroy(crate::aircraft_systems::LossCause::Overspeed);
@@ -1824,6 +1827,22 @@ mod tests {
                     .any(|m| m.contains("overspeed"))
             );
         }
+    }
+    #[test]
+    fn an_invulnerable_player_is_not_lost_to_overspeed_but_still_feels_it() {
+        let mut s = State::new(&profile(), [0., 10_000., 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        s.cheats.damage = crate::cheats::Damage::Invulnerable;
+        s.speed = 1_700. * 1.6;
+        s.velocity = [0., 0., s.speed];
+        s.step(&PilotInput::default(), |_, _| 0.);
+        assert!(!s.crashed && s.systems.structure.cause.is_none());
+        assert!(s.overspeed_ratio().unwrap() > OVERSPEED_SHAKE_FULL);
+        assert!(crate::g_effects::overspeed_shake(s.overspeed_ratio().unwrap(), 1.3) != [0.; 2]);
+        // Out of bounds stays fatal with Invulnerable on.
+        s.systems
+            .destroy(crate::aircraft_systems::LossCause::OutOfBounds);
+        assert!(s.systems.fatal());
     }
     #[test]
     fn normal_flight_stays_under_the_overspeed_limits() {

@@ -173,6 +173,11 @@ class LossTests(unittest.TestCase):
         fast = EXTREMES.replace("speed_over_envelope_top=0.604", "speed_over_envelope_top=1.7")
         self.assertTrue(flight.check_dive(self.LOST + fast + "loss: cause=overspeed\n"))
 
+    def test_invulnerable_overspeed_is_not_a_loss(self):
+        kept = "ticks=600 speed_kt=900.0 altitude_ft=20000.0 fuel_lb=1.0 crashed=false\nloss: cause=none\n"
+        self.assertEqual(flight.check_overspeed_invulnerable(kept), [])
+        self.assertTrue(flight.check_overspeed_invulnerable(self.LOST + "loss: cause=overspeed\n"))
+
     def test_belly_checks(self):
         roll = "gear_pulled=true belly_wear_percent={} gear=0.00\nticks=9000 speed_kt=4.7 altitude_ft=8.0 fuel_lb=1.0 crashed=false\n"
         self.assertEqual(flight.check_belly_early(roll.format("27.1") + EXTREMES, "f18"), [])
