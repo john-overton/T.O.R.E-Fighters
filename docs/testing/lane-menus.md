@@ -18,11 +18,11 @@ cargo build --locked -p tore-app
 python3 tools/battery.py --lane menus --jobs 6 --windows 2 --tag menus
 ```
 
-It takes about thirty minutes on the dev machine (550 scenarios): the headless
-ones (CPU snapshots, instrument windows and headless mission starts, about 450)
-take five minutes, the windowed ones (about 95, each a real window through
-`tools/agent-run.sh`) about ten, and the creator probe `menus-validate-creator`
-about ten on its own. The
+It takes about eight minutes on the dev machine with six jobs and two windows
+(566 scenarios): the headless ones (CPU snapshots, instrument windows and headless
+mission starts, about 450) take a few minutes, the windowed ones (about 110, each a
+real window through `tools/agent-run.sh`) about six, and the creator probe
+`menus-validate-creator` about eight on its own, in parallel with the rest. The
 scenarios count as the pass or fail; pictures the scenarios write are checked
 for size and blankness, and were also looked at by the agent that wrote them.
 
