@@ -404,6 +404,19 @@ BAD_OPTIONS = {
     "lookat-bogus": (["--watch-replay", "{work}/a.tore-replay", "--replay-look-at", "bogus"], "aircraft:ID"),
     "watch-missing": (["--watch-replay", "{work}/none.tore-replay"], "none.tore-replay"),
     "capture-without-watch": (["--capture-replay", "{work}/c.ppm"], ""),
+    "probe-ticks-zero": (["--ai-probe-ticks", "0"], "needs 1 to 216000 ticks"),
+    "probe-ticks-word": (["--ai-probe-ticks", "many"], "--ai-probe-ticks needs a number"),
+    "ground-start-word": (["--ai-probe-ticks", "60", "--ground-start", "x"], "--ground-start needs a number"),
+    "ground-start-none": (["--ai-probe-ticks", "60", "--ground-start", "99"], "airport is unavailable"),
+    "separation-odd": (["--ai-probe-ticks", "60", "--separation", "3"], "--separation needs one of"),
+    "wing-size": (["--ai-probe-ticks", "60", "--probe-wing-size", "6"], "--probe-wing-size needs 1..5"),
+    "fight-size": (["--ai-probe-ticks", "60", "--probe-fight", "16:1"], "--probe-fight needs"),
+    "mission-preset": (["--ai-probe-ticks", "60", "--ai-mission", "bogus"], "unknown AI mission preset"),
+    "aircraft-name": (["--ai-probe-ticks", "60", "--aircraft", "bogus"], "supported aircraft"),
+    "theater-code": (["--ai-probe-ticks", "60", "--theater", "XXX"], "unknown retail map layout"),
+    "wing-order": (["--ai-probe-ticks", "60", "--probe-wing-order", "10:dance"], "--probe-wing-order needs"),
+    "fault-index": (["--ai-probe-ticks", "60", "--probe-fault", "10:99"], "fault index must be"),
+    "threat-kind": (["--ai-probe-ticks", "60", "--probe-threat", "10:nuke"], "unknown probe threat"),
 }
 
 

@@ -83,8 +83,34 @@ def live_scenario(name: str, args: list[str], *, frames: int = 240, audio: bool 
     )
 
 
+def restart_scenarios() -> list[Scenario]:
+    """The Quick Mission launch and restart check, over many setups: restart must restore the accepted start."""
+    out = []
+    setups: dict[str, list[str]] = {}
+    for airport in (1, 2, 3, 4, 5):
+        for wing in (1, 3, 5):
+            setups[f"ground-{airport}-wing{wing}"] = ["--ground-start", str(airport), "--probe-wing-size", str(wing)]
+    for sep in (1, 2, 5, 10, 20, 50, 100, 150, 200, 300):
+        setups[f"sep{sep}"] = ["--separation", str(sep)]
+    for mission in ("cap", "intercept", "escort", "self-defense", "hold"):
+        setups[f"mission-{mission}"] = ["--ai-mission", mission]
+    for name, extra in setups.items():
+        out.append(
+            Scenario(
+                name=f"replay-quick-restart-{name}",
+                lane="replay",
+                args=["--launch-quick-mission", *extra, "--smoke-test", "--no-audio"],
+                window=True,
+                timeout=200,
+                expect=[r"Quick Mission restart: PASS", r"Quick Mission launch: "],
+                forbid=[r"could not launch|did not restore"],
+            )
+        )
+    return out
+
+
 def scenarios() -> list[Scenario]:
-    out: list[Scenario] = []
+    out: list[Scenario] = restart_scenarios()
     for ac in AIRCRAFT:
         out.append(live_scenario(f"replay-live-free-{ac}", ["--free-flight", "--aircraft", ac, "--researched-flight"], frames=240))
     out.append(live_scenario("replay-live-free-legacy", ["--free-flight", "--legacy-flight"], frames=240))

@@ -7002,7 +7002,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--no-controllers" => native_input = false,
             "--launch-quick-mission" => { launch_creator=true; initial_screen=Screen::Flight; },
             "--ground-start" => {
-                ground_start_airport=Some(args.next().ok_or("--ground-start needs an airport number")?.parse()?);
+                ground_start_airport=Some(option_number("--ground-start", &args.next().ok_or("--ground-start needs an airport number")?)?);
             }
             "--separation" => {
                 let nm: f64 = args.next().ok_or("--separation needs a distance in nautical miles")?.parse()?;
@@ -7214,12 +7214,12 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--ai-probe-ticks" | "--ai-roster-probe-ticks" => {
                 ai_roster_probe = arg == "--ai-roster-probe-ticks";
-                let ticks: usize = args
-                    .next()
-                    .ok_or("--ai-probe-ticks requires 1..216000")?
-                    .parse()?;
+                let ticks: usize = option_number(
+                    &arg,
+                    &args.next().ok_or("--ai-probe-ticks requires 1..216000")?,
+                )?;
                 if !(1..=216_000).contains(&ticks) {
-                    return Err("AI probe tick limit exceeded".into());
+                    return Err(format!("{arg} needs 1 to 216000 ticks, not {ticks}").into());
                 }
                 ai_probe = Some(ticks);
                 ai_wings_enabled = true;
