@@ -1324,3 +1324,55 @@ pub fn fuzz_screens(
         Err(format!("screen input fuzz found {} problems", problems.len()).into())
     }
 }
+
+/// Prints every leaf of the retail in-flight menu bar (`FMENUD.MNU`, the
+/// manual's appendix D) with what activating it does in this game: a working
+/// command or toggle, or the "not implemented yet" message the game shows for
+/// an item it does not connect. `TORE_CREATOR_STAGE=menu` runs only this.
+pub fn flight_menu_table(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
+    let hornet = Airframe::load(data, AircraftId::F18)?;
+    fn walk(
+        nodes: &[tore_formats::ui::MenuNode],
+        path: &str,
+        out: &mut Vec<(String, String, String)>,
+    ) {
+        for node in nodes {
+            let here = if path.is_empty() {
+                node.label.clone()
+            } else {
+                format!("{path} > {}", node.label)
+            };
+            if node.children.is_empty() {
+                let mut ui = crate::flight_ui::FlightUi::default();
+                let command = ui.activate(&node.label, &node.shortcut);
+                let notes = ui.take_notes();
+                let missing = notes
+                    .iter()
+                    .any(|(text, _)| text.contains("not implemented yet"));
+                let result = if missing {
+                    "NOT IMPLEMENTED".to_string()
+                } else {
+                    let said = notes
+                        .first()
+                        .map(|(t, _)| format!(", says \"{t}\""))
+                        .unwrap_or_default();
+                    format!("{command:?}{said}")
+                };
+                out.push((here, node.shortcut.clone(), result));
+            } else {
+                walk(&node.children, &here, out);
+            }
+        }
+    }
+    let mut rows = Vec::new();
+    walk(&hornet.flight_menu, "", &mut rows);
+    let missing = rows.iter().filter(|r| r.2 == "NOT IMPLEMENTED").count();
+    for (path, shortcut, result) in &rows {
+        println!("flight menu | {path} | {shortcut} | {result}");
+    }
+    println!(
+        "flight menu: {} items, {missing} not implemented",
+        rows.len()
+    );
+    Ok(())
+}

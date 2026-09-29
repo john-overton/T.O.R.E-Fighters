@@ -722,8 +722,9 @@ impl FlightUi {
                 self.zoom = (self.zoom / 1.2).max(0.5);
                 Command::None
             }
-            "," => Command::Range(-1),
-            "." => Command::Range(1),
+            // Manual pp. 21, 94, 97: comma increases the range, period decreases it.
+            "," => Command::Range(1),
+            "." => Command::Range(-1),
             "Numpad5" => Command::CenterLook,
             "F11" => {
                 self.menu = true;
@@ -1429,6 +1430,23 @@ mod tests {
         }
     }
     #[test]
+    fn time_compression_keys_follow_the_manual() {
+        // Manual p. 80: C cycles the rates, Shift-C is slow motion, C returns
+        // from slow motion to normal speed.
+        let tree = tree();
+        let mut u = FlightUi::default();
+        let mut rates = vec![];
+        for _ in 0..5 {
+            u.key("c", false, false, false, &tree);
+            rates.push(u.time_scale);
+        }
+        assert_eq!(rates, [2., 4., 8., 1., 2.]);
+        u.activate("Slow-motion", "Shift-C");
+        assert_eq!(u.time_scale, 0.5);
+        u.key("c", false, false, false, &tree);
+        assert_eq!(u.time_scale, 1.);
+    }
+    #[test]
     fn nested_menu_keyboard_navigation_and_shortcuts() {
         let mut tree = tree();
         tree[0].children.push(MenuNode {
@@ -1507,6 +1525,9 @@ mod tests {
             ("w", false, Command::Waypoint(true)),
             ("w", true, Command::Waypoint(false)),
             ("m", false, Command::Mode),
+            // The manual (pp. 21, 94, 97): comma raises the range, period lowers it.
+            (",", false, Command::Range(1)),
+            (".", false, Command::Range(-1)),
             ("Numpad5", false, Command::CenterLook),
         ] {
             assert_eq!(ui.key(key, shift, false, false, &tree), command, "{key}");

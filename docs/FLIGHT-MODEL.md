@@ -363,6 +363,37 @@ The control mapping accounts for current flap lift and low-speed G authority.
 The three player adapters stay distinct. Exact input-replay validation is
 recorded in the [AI baseline](baselines/ai-research.md).
 
+## Envelope limits and loading
+
+The aircraft's PT file holds a speed and altitude polygon for each whole G. The
+1 G polygon is the aircraft's absolute limit (manual p. 90): its left edge is the
+stall speed, its top is the ceiling and its right edge is the top speed. The
+hybrid adapter turns them into the highest and lowest G it will deliver:
+
+- The rows that hold the current speed and altitude set the range, from -1 to the
+  largest of their G.
+- **Loading divisor (fitted).** Fuel and stores make the aircraft heavier:
+  `loading = (fuel + carried weight) / empty weight` and the divisor is
+  `1 + loading * loadedElevator / 100`, with `loadedElevator` from the PT. Both
+  limits are divided by it, so a full aircraft pulls fewer G than an empty one.
+- **1 G floor (fitted, 2026-09-29).** Inside a row's polygon the upper limit never
+  falls below 1 G. Without the floor the outermost band, where only the 1 G row
+  holds, gave a loaded aircraft less than 1 G and it sank at full power near its
+  top speed or its ceiling, and an AI wingman flew into the ground. The AI's own
+  G limit (`ai/steering_adapter.rs`) applies the same floor.
+- **Above the ceiling (fitted, 2026-09-29).** Above the top of the 1 G polygon the
+  air is too thin to lift the weight (manual p. 90), so the upper limit is
+  multiplied by the ratio of the air density there to the density at the ceiling
+  (standard atmosphere). A zoom climb can carry an aircraft a little past its
+  ceiling but it cannot stay there.
+- Outside every row at that speed (faster than the polygon's right edge) the limit
+  stays at 1 G divided by the loading divisor: the aircraft cannot hold level
+  flight. There is no structural failure for overspeed; the manual says that below about 36,000 ft, beyond
+  the structural limit, "air resistance begins to weaken the airframe and the
+  wings will eventually tear off", gives no numbers, and that is left as an open decision in the
+  [flight lane page](testing/lane-flight.md#needs-a-decision).
+- The autopilot makes no promise outside the envelope ([autopilot](spec/autopilot.md)).
+
 ## Telemetry record
 
 `State::trace()` returns a `FlightTrace` (`crates/tore-sim/src/flight/trace.rs`): what

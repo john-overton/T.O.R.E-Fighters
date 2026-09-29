@@ -217,6 +217,14 @@ fn rung_project(
         ladder_project(pitch, bank, bearing, elevation, zoom)
     }
 }
+/// `2X`, `4X`, `8X` or `1/2X`: the compression level the HUD shows.
+pub fn time_label(scale: f64) -> String {
+    if scale < 1. {
+        format!("1/{:.0}X", 1. / scale)
+    } else {
+        format!("{scale:.0}X")
+    }
+}
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
     pixels: &mut [u8],
@@ -230,7 +238,8 @@ pub fn draw(
     zoom: f32,
     ils: Option<(&tore_sim::airport::Guidance, &str, &str)>,
     wind: Option<&tore_sim::runway_wind::Assessment>,
-    gyro_bank: f64,
+    // The gyro-smoothed bank for the bank scale, and the time compression rate.
+    (gyro_bank, time_scale): (f64, f64),
 ) {
     let mut p = Paint {
         pixels,
@@ -320,6 +329,8 @@ pub fn draw(
         ("FLAP", s.flaps),
         ("BRAKE", s.brake),
         ("HOOK", s.hook),
+        // Manual p. 79: BAY shows while the weapons bay is open.
+        ("BAY", if s.bay_available() { s.bay } else { 0. }),
     ]
     .iter()
     .enumerate()
@@ -327,6 +338,10 @@ pub fn draw(
         if *value > 0.01 {
             p.text(font, label, 388, 140 + i as i32 * 11);
         }
+    }
+    // Manual p. 80: the time compression rate shows in the upper right corner.
+    if (time_scale - 1.).abs() > 1e-9 {
+        p.text(font, &time_label(time_scale), 388, 129);
     }
     if !weapons && ils.is_some_and(|(guidance, _, _)| guidance.active) {
         p.text(
@@ -430,6 +445,12 @@ fn wind_label(wind: &tore_sim::runway_wind::Assessment) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_time_compression_label_reads_like_the_menu() {
+        assert_eq!(time_label(0.5), "1/2X");
+        assert_eq!(time_label(2.), "2X");
+        assert_eq!(time_label(8.), "8X");
+    }
     #[test]
     fn accented_letters_draw_on_their_code_page_437_cell() {
         // A font whose only marked cells are 'e' (0x65) and CP437 0x89, the
@@ -722,7 +743,7 @@ mod tests {
                 1.,
                 None,
                 None,
-                state.bank,
+                (state.bank, 1.),
             );
             draw(
                 &mut without,
@@ -736,7 +757,7 @@ mod tests {
                 1.,
                 None,
                 None,
-                state.bank,
+                (state.bank, 1.),
             );
             let visible = (297..316).any(|x| {
                 let at = (240 * 640 + x) * 4;
@@ -777,7 +798,7 @@ mod tests {
             1.,
             None,
             None,
-            state.bank,
+            (state.bank, 1.),
         );
         draw(
             &mut without,
@@ -791,7 +812,7 @@ mod tests {
             1.,
             None,
             None,
-            state.bank,
+            (state.bank, 1.),
         );
         let horizon = project(state.pitch, 0., 0., 0., 1.).unwrap().1.round() as usize;
         let compact = ladder_project(state.pitch, 0., 0., 0., 1.)

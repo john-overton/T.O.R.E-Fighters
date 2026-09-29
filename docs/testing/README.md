@@ -51,12 +51,26 @@ at once (default 3).
 A lane is a family of scenarios with one file each under
 `tools/battery_scenarios/`, and one page here.
 
-| Lane | Covers | Scenario file |
-| --- | --- | --- |
-| `menus` | Menu screens, the Quick Mission creator, the loadout page, captured screens | `menus.py` |
-| `flight` | Ground start, takeoff, landing, every aircraft's flight, weapons, countermeasures, damage, ejection | `flight.py` |
-| `ai` | One against one up to fifteen against fifteen, missions, skills, damage, wing orders | `ai.py` |
-| `replay` | Recording, playback, the replay menu, radio and crew comms, audio start-up | `replay.py` |
+| Lane | Covers | Scenario files | Page |
+| --- | --- | --- | --- |
+| `menus` | Menu screens, the Quick Mission creator, the loadout page, captured screens, terrain and weather captures, text decoding, the retail manual audit | `menus.py` | [lane-menus](lane-menus.md) |
+| `flight` | Ground start, takeoff, landing, every aircraft's flight, weapons, jettison, countermeasures, damage, ejection, environment | `flight.py` | [lane-flight](lane-flight.md) |
+| `ai` | One against one up to fifteen against fifteen, every theater, missions, skills, damage, wing orders, invariants on every tick | `ai.py` | [lane-ai](lane-ai.md) |
+| `replay` | Recording, playback, the Replays screen, radio and crew comms, audio start-up, input, hand-flown and mouse scripts, cheats, import errors | `replay.py` and `_replay_*.py` | [lane-replay](lane-replay.md) |
+
+Each lane page lists what the lane covers, how long it takes, every bug found and
+fixed, the known failures, the behaviours that need a decision and the things
+that need a human eye or ear. Run one lane with `python3 tools/battery.py --lane
+NAME --jobs 6`; a full pass of all four takes roughly two hours on a 24-thread
+machine with a debug build.
+
+Some tools the lanes added are worth knowing on their own:
+
+- `--probe-fight FRIENDLY:ENEMY` sizes an AI probe up to 15 against 15.
+- The AI probe checks every tick for impossible states and prints `AI probe anomaly:` lines.
+- `--validate-creator` also sweeps thousands of Quick Mission setups, the loadout pages and the render of the creator; `TORE_CREATOR_STAGE` picks one part. `--validate-text` scans imported text.
+- `--input-script FILE` presses keys and clicks the mouse in a windowed run, through the same handlers as real input (see [development](../DEVELOPMENT.md)).
+- The headless flight probe has scripted pilots (spin recovery, landing, autopilot, eject) and an `extremes:` line.
 
 ## What counts as a problem
 
