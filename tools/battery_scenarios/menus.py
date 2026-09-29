@@ -21,7 +21,8 @@ NORMAL_STATES = [
 QUICK_STATES = [
     "normal", "aircraft", "theaters", "help", "ordnance", "ordnance-empty", "ordnance-drag",
     "ordnance-message", "ordnance-message-long", "debrief", "debrief-2", "debrief-3", "debrief-4",
-    "debrief-5", "debrief-success",
+    "debrief-5", "debrief-success", "objectives", "ground-start", "airports", "ground-targets-unavailable",
+    "objective-1", "objective-2", "objective-3", "objective-4", "objective-5", "objective-6",
 ]
 THEATERS = ["BAL", "CUB", "EGY", "LFA", "FRA", "GRE", "IRA", "KURILE", "TVIET", "SPA", "APA", "PGU", "NSK", "WTA", "UKR", "VLA"]
 VARIANT_THEATERS = [f"~{code}{n}" for code in ("UKR", "VLA") for n in range(1, 9)] + ["~UKRF", "~VLAF", "~WTAF"]
@@ -66,6 +67,83 @@ def picture_problems(output: str, marker: str, size=None, min_colors=24, max_fla
     if max(colors.values()) / total > max_flat:
         problems.append("picture is almost one flat colour")
     return problems
+
+
+def frame_stats(path: Path) -> dict:
+    """Brightness and flatness numbers for a captured frame: mean luminance
+    (0 to 255), the share of near-black pixels, and the share taken by the
+    single most common colour (each channel cut to 4 bits). Sampled, so it is
+    quick on a 1920 by 1080 frame."""
+    ppm = read_ppm(path)
+    if ppm is None:
+        raise ValueError(f"not a P6 picture: {path}")
+    width, height, pixels = ppm
+    count = width * height
+    step = max(1, count // 30000)
+    total = black = n = 0
+    colours: dict = {}
+    for i in range(0, count, step):
+        r, g, b = pixels[i * 3], pixels[i * 3 + 1], pixels[i * 3 + 2]
+        lum = (299 * r + 587 * g + 114 * b) // 1000
+        total += lum
+        black += lum < 8
+        key = (r >> 4, g >> 4, b >> 4)
+        colours[key] = colours.get(key, 0) + 1
+        n += 1
+    # The upper and lower thirds separately, for a missing sky or missing ground.
+    def band(lo, hi):
+        rows = range(int(height * lo), int(height * hi), max(1, height // 60))
+        vals = []
+        for y in rows:
+            for x in range(0, width, max(1, width // 60)):
+                j = (y * width + x) * 3
+                vals.append((299 * pixels[j] + 587 * pixels[j + 1] + 114 * pixels[j + 2]) // 1000)
+        return sum(vals) / len(vals)
+    return {
+        "mean": total / n,
+        "black": black / n,
+        "top_colour": max(colours.values()) / n,
+        "colours": len(colours),
+        "upper": band(0.05, 0.35),
+        "lower": band(0.65, 0.95),
+    }
+
+
+# Weather choices by number: clear, cloudy, foggy, dawn, sunset, night.
+WEATHER_NAMES = ["clear", "cloudy", "foggy", "dawn", "sunset", "night"]
+
+
+def scene_problems(condition: int, path_marker=r"Scene capture:"):
+    """A check for a captured flight scene under weather choice `condition`:
+    not blank, not a single colour, night dark, day bright, ground and sky
+    both drawn (the frame is not black in a whole band)."""
+
+    def check(output: str) -> list[str]:
+        m = re.search(path_marker + r"\s*(\S+)", output)
+        if not m or not Path(m.group(1)).exists():
+            return ["no capture written"]
+        st = frame_stats(Path(m.group(1)))
+        problems = []
+        name = WEATHER_NAMES[condition]
+        if st["black"] > 0.5:
+            problems.append(f"{name}: {st['black']:.0%} of the frame is black")
+        if st["top_colour"] > 0.6 and condition != 2:
+            problems.append(f"{name}: one colour fills {st['top_colour']:.0%} of the frame")
+        if st["top_colour"] > 0.85:
+            problems.append(f"{name}: one colour fills {st['top_colour']:.0%} of the frame")
+        if st["colours"] < 60:
+            problems.append(f"{name}: only {st['colours']} colours")
+        if condition in (0, 1, 2) and st["mean"] < 70:
+            problems.append(f"{name}: day frame is dark (mean {st['mean']:.0f})")
+        if condition == 5 and st["mean"] > 70:
+            problems.append(f"night: frame is bright (mean {st['mean']:.0f})")
+        if condition in (3, 4) and not 15 < st["mean"] < 200:
+            problems.append(f"{name}: mean brightness {st['mean']:.0f} is out of range")
+        if st["upper"] < 3 and st["lower"] < 3:
+            problems.append(f"{name}: upper and lower bands both black")
+        return problems
+
+    return check
 
 
 def menu_picture(size=(640, 480)):
@@ -128,6 +206,17 @@ def scenarios() -> list[Scenario]:
             notes="Loadouts for every aircraft incl. removed stores, then the whole Quick Mission creator matrix.",
         )
     )
+    out.append(
+        Scenario(
+            name="menus-validate-text",
+            lane="menus",
+            args=["--validate-text", "--no-audio"],
+            timeout=300,
+            expect=[r"non-ASCII text: KURILE\.MM: name .?Ber\u00ebzovka", r"0 problems"],
+            forbid=[r"\ufffd", r"PROBLEM"],
+            notes="Every imported string decodes without U+FFFD and is drawable in the original fonts.",
+        )
+    )
     out.append(Scenario(name="menus-validate-maps", lane="menus", args=["--validate-maps", "--no-audio"], timeout=600, expect=[r"Validated 75 retail map layouts"]))
     out.append(Scenario(name="menus-validate-weather", lane="menus", args=["--validate-weather", "--no-audio"], timeout=900, expect=[r"Weather sources validated"]))
     # `--combat-smoke` fails for the other thirteen aircraft (a stale radar-off
@@ -177,7 +266,7 @@ def scenarios() -> list[Scenario]:
             args=["--quick-mission", "--snapshot", "{work}/shot.ppm", "--snapshot-state", "bogus", "--no-audio"],
             timeout=120,
             expect_exit=1,
-            expect=[r"snapshot states: normal, aircraft, theaters, help"],
+            expect=[r"snapshot states: normal, aircraft, objectives"],
         )
     )
     # The creator and the loadout page for every aircraft; the loadout page
@@ -332,6 +421,39 @@ def scenarios() -> list[Scenario]:
             expect=[r"Ground start requires the researched flight model; choose Airborne for this adapter"],
         )
     )
+
+    # Terrain, sky and lighting: real-window captures on every base theater in
+    # clear weather and at night, four theaters in each other weather, and ground
+    # starts. The frame must not be blank, one colour or black, day must be
+    # bright, night dark, and the sky and ground both drawn.
+    def terrain_scenario(theater, condition, ground, aircraft):
+        name = f"menus-window-terrain-{theater.lower()}-{WEATHER_NAMES[condition]}-{'ground' if ground else 'air'}-{aircraft}"
+        args = ["--theater", theater, "--weather-condition", str(condition), "--aircraft", aircraft]
+        if ground:
+            args += ["--ground-start", "1"]
+        return Scenario(
+            name=name,
+            lane="menus",
+            window=True,
+            args=[*args, "--capture-flight", "{work}/flight.ppm", "--window-size", "960x720", "--no-audio"],
+            timeout=180,
+            expect=[r"Smoke test: requested screen presented successfully"],
+            check=lambda output, c=condition: scene_problems(c)(output) + flight_picture((960, 720))(output),
+        )
+
+    n = 0
+    for theater in THEATERS:
+        for condition in (0, 5):
+            out.append(terrain_scenario(theater, condition, False, AIRCRAFT[n % 14]))
+            n += 1
+    for condition in (1, 2, 3, 4):
+        for theater in ("UKR", "KURILE", "PGU", "VLA"):
+            out.append(terrain_scenario(theater, condition, False, AIRCRAFT[n % 14]))
+            n += 1
+    for theater in ("UKR", "TVIET"):
+        for condition in range(6):
+            out.append(terrain_scenario(theater, condition, True, AIRCRAFT[n % 14]))
+            n += 1
 
     # Windowed captures through tools/agent-run.sh: a few per lane, quick ones.
     sizes = {"960x720": (960, 720), "1280x720": (1280, 720), "640x900": (640, 900)}

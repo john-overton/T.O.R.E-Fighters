@@ -5,6 +5,7 @@
 use super::{Raster, SCREEN};
 use crate::{flight::State, hud};
 use tore_formats::font::Font;
+use tore_formats::text::GlyphCodes;
 
 /// Camera picture in screen coordinates: x, y, width, height. It fills the screen.
 const VIEW: (i32, i32, i32, i32) = (0, 0, SCREEN.2, SCREEN.3);
@@ -93,7 +94,7 @@ fn readout(
     color: [u8; 4],
 ) {
     let width = |t: &str| {
-        t.bytes()
+        t.glyph_codes()
             .map(|c| font.glyphs[c as usize].advance as i32)
             .sum::<i32>()
     };

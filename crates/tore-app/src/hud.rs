@@ -1,6 +1,7 @@
 //! Flight display projection. Source fonts; authored layout and symbology.
 use crate::{flight::State, menu::Canvas};
 use tore_formats::font::Font;
+use tore_formats::text::GlyphCodes;
 
 pub struct Paint<'a> {
     pub pixels: &'a mut [u8],
@@ -39,7 +40,7 @@ impl Paint<'_> {
     }
     fn readout_box(&mut self, font: &Font, text: &str, x: i32, y: i32) {
         let width = text
-            .bytes()
+            .glyph_codes()
             .map(|c| font.glyphs[c as usize].advance)
             .sum::<usize>() as i32;
         let (left, top, right, bottom) = (
@@ -56,12 +57,30 @@ impl Paint<'_> {
         self.text(font, text, x, y);
     }
     pub fn text(&mut self, font: &Font, text: &str, mut x: i32, y: i32) {
-        for ch in text.bytes() {
+        for ch in text.glyph_codes() {
             let g = &font.glyphs[ch as usize];
             for &(xx, yy) in &g.pixels {
                 self.rect(x + xx as i32, y + yy as i32, 1, 1);
             }
             x += g.advance as i32;
+        }
+    }
+}
+/// `fitted`, agent decision 2026-09-29: HUD green has almost the same
+/// brightness as fog or cloud (a contrast of 1.04 to 1.1 to one measured on a
+/// foggy capture), so a soft dark edge one layer pixel down and right of every
+/// HUD pixel keeps the symbols readable over bright sky. It is invisible at
+/// night and over dark ground. Applied to the finished HUD layer, only where
+/// nothing is drawn.
+pub fn shadow(pixels: &mut [u8]) {
+    let width = crate::menu::WIDTH;
+    for y in (0..crate::menu::HEIGHT - 1).rev() {
+        for x in (0..width - 1).rev() {
+            let here = (y * width + x) * 4 + 3;
+            let below = ((y + 1) * width + x + 1) * 4;
+            if pixels[here] == 255 && pixels[below + 3] == 0 {
+                pixels[below..below + 4].copy_from_slice(&[0, 0, 0, 150]);
+            }
         }
     }
 }
@@ -89,7 +108,7 @@ fn bank_scale(p: &mut Paint<'_>, font: &Font, bank: f64) {
         if major {
             let text = mark.abs().to_string();
             let width = text
-                .bytes()
+                .glyph_codes()
                 .map(|c| font.glyphs[c as usize].advance)
                 .sum::<usize>() as i32;
             let (x, y) = bank_point(angle, 239.);
@@ -363,12 +382,12 @@ pub fn draw(
     if let Some((guidance, airport, runway)) = ils {
         let airport: String = airport
             .chars()
-            .filter(|c| c.is_ascii_graphic() || *c == ' ')
+            .filter(|c| tore_formats::text::is_drawn(*c))
             .take(24)
             .collect();
         let runway: String = runway
             .chars()
-            .filter(|c| c.is_ascii_graphic() || *c == ' ')
+            .filter(|c| tore_formats::text::is_drawn(*c))
             .take(16)
             .collect();
         p.text(font, &format!("ILS {airport}"), 252, 106);
@@ -429,6 +448,52 @@ fn wind_label(wind: &tore_sim::runway_wind::Assessment) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_shadow_goes_below_and_right_of_hud_pixels_only_over_empty_layer() {
+        let width = crate::menu::WIDTH;
+        let mut pixels = vec![0u8; width * crate::menu::HEIGHT * 4];
+        let put = |pixels: &mut Vec<u8>, x: usize, y: usize, rgba: [u8; 4]| {
+            pixels[(y * width + x) * 4..(y * width + x) * 4 + 4].copy_from_slice(&rgba)
+        };
+        put(&mut pixels, 10, 10, [90, 255, 90, 255]);
+        put(&mut pixels, 11, 11, [90, 255, 90, 255]);
+        shadow(&mut pixels);
+        let at = |x: usize, y: usize| pixels[(y * width + x) * 4..(y * width + x) * 4 + 4].to_vec();
+        assert_eq!(
+            at(11, 11),
+            [90, 255, 90, 255],
+            "a HUD pixel is never covered"
+        );
+        assert_eq!(at(12, 12), [0, 0, 0, 150]);
+        assert_eq!(at(10, 11), [0, 0, 0, 0], "no shadow beside or above");
+        assert_eq!(at(9, 9), [0, 0, 0, 0]);
+    }
+    #[test]
+    fn accented_letters_draw_on_their_code_page_437_cell() {
+        // A font whose only marked cells are 'e' (0x65) and CP437 0x89, the
+        // e with a diaeresis, each a different single pixel.
+        let mut glyphs: Vec<tore_formats::font::Glyph> = (0..256)
+            .map(|_| tore_formats::font::Glyph {
+                advance: 4,
+                pixels: vec![],
+            })
+            .collect();
+        glyphs[0x65].pixels = vec![(0, 0)];
+        glyphs[0x89].pixels = vec![(2, 0)];
+        let font = tore_formats::font::Font { height: 1, glyphs };
+        let mut pixels = vec![0u8; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
+        Paint {
+            pixels: &mut pixels,
+            clip: (0, 0, 640, 480),
+            color: [255, 255, 255, 255],
+        }
+        .text(&font, "e\u{eb}", 0, 0);
+        let lit: Vec<usize> = (0..12)
+            .filter(|x| pixels[x * 4 + 3] != 0 && pixels[x * 4] == 255)
+            .collect();
+        // 'e' at x 0, then the diaeresis cell's pixel two columns into the second glyph.
+        assert_eq!(lit, [0, 4 + 2]);
+    }
     #[test]
     fn wind_readout_distinguishes_crosswind_tailwind_and_ignored_headwind() {
         use tore_sim::runway_wind::{FEET_PER_SECOND_PER_KNOT as K, assessment};

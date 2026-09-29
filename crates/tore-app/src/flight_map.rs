@@ -5,6 +5,7 @@ use crate::{
     menu::{Canvas, Sprite},
     terrain::World,
 };
+use tore_formats::text::GlyphCodes;
 use tore_formats::{font::Font, theater::CELL_FEET};
 use tore_sim::{combat::live, sensors::FEET_PER_NAUTICAL_MILE as NMI};
 
@@ -345,7 +346,7 @@ impl Map {
         if let Some((x, y)) = projection.point(state.position) {
             markers.push((x, y));
             let w = "PLAYER"
-                .bytes()
+                .glyph_codes()
                 .map(|c| font.glyphs[c as usize].advance as i32)
                 .sum::<i32>();
             labels.push((
@@ -677,9 +678,9 @@ fn label(
     color: [u8; 4],
     occupied: &mut Vec<(i32, i32, i32, i32)>,
 ) {
-    let text: String = text.chars().filter(char::is_ascii).take(28).collect();
+    let text: String = text.chars().take(28).collect();
     let w = text
-        .bytes()
+        .glyph_codes()
         .map(|c| font.glyphs[c as usize].advance as i32)
         .sum::<i32>();
     let h = font.height as i32;
