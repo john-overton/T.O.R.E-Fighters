@@ -631,7 +631,7 @@ impl AiWings {
             }
         };
         let (mut accepted, mut rejected, mut no_base, mut bugged_out, mut human) = (0, 0, 0, 0, 0);
-        let (mut busy, mut landed) = (0, 0);
+        let (mut busy, mut landed, mut departing) = (0, 0, 0);
         let mut answers = Vec::new();
         let answer = |id, member, result| Answer {
             recipient: id,
@@ -673,6 +673,16 @@ impl AiWings {
                 answers.push(answer(id, member, Answered::OnAirfield));
                 continue;
             }
+            // Opinionated (requested by John, 2026-09-29): a wingman still on
+            // the ground or in its takeoff cannot land; it answers unable,
+            // stays parked or completes its takeoff and rejoins its leader.
+            if reason == LandingReason::Ordered
+                && (on_ground || actor.airfield().is_some_and(|s| s.is_departure()))
+            {
+                departing += 1;
+                answers.push(answer(id, member, Answered::OnAirfield));
+                continue;
+            }
             let runway = match site {
                 Some(site) if reason == LandingReason::Ordered => Some(site.runway),
                 _ => actor.home_runway().copied(),
@@ -702,7 +712,13 @@ impl AiWings {
                 accepted += 1;
             }
         }
-        if accepted == 0 && rejected == 0 && no_base == 0 && human == 0 && busy == 0 && landed == 0
+        if accepted == 0
+            && rejected == 0
+            && no_base == 0
+            && human == 0
+            && busy == 0
+            && landed == 0
+            && departing == 0
         {
             let report = OrderReport {
                 message: bugged_out_notice(bugged_out, recipient),
@@ -725,6 +741,11 @@ impl AiWings {
         }
         if busy > 0 {
             parts.push(format!("{busy} already taking off or landing"));
+        }
+        if departing > 0 {
+            parts.push(format!(
+                "{departing} unable, still on the ground or taking off"
+            ));
         }
         if landed > 0 {
             parts.push(format!("{landed} already landed"));
@@ -1397,6 +1418,36 @@ mod landing_tests {
         let report = wings.command(PlayerOrder::BugOut, None, Some(2)).unwrap();
         assert_eq!(report.message, "Bug out: 1 returning to base");
         assert!(wings.mission.actor(2).unwrap().bugged_out());
+    }
+
+    #[test]
+    fn a_wingman_waiting_to_take_off_is_unable_to_land() {
+        // John, 2026-09-29: a land order to a wingman still on the ground or
+        // taking off answers unable and leaves it where it is.
+        let mut wings = bridge();
+        wings
+            .mission
+            .actor_mut(2)
+            .unwrap()
+            .start_on_ground(tore_sim::ai::airfield::GroundStart {
+                runway: view(1000, 50_000.),
+                end: tore_sim::airport::ApproachEnd::Near,
+                order: 1,
+            });
+        let site = LandingSite {
+            name: "Field".into(),
+            runway: view(1000, 50_000.),
+        };
+        let report = wings
+            .command_at(PlayerOrder::LandAtSelected, None, Some(2), Some(&site))
+            .unwrap();
+        assert_eq!(
+            report.message,
+            "Land at Field: 0 landing, 1 unable, still on the ground or taking off"
+        );
+        let actor = wings.mission.actor(2).unwrap();
+        assert!(actor.landing_order().is_none());
+        assert_eq!(actor.airfield_phase(), Some(Phase::Waiting));
     }
 
     #[test]

@@ -198,6 +198,11 @@ existing fallback.
   aircraft is still on its route, holding at marshal or flying the gates. From
   final on it is committed. Cancellation raises gear and flaps and closes the
   speedbrake. A cancelled join remains cancelled while the leader is recovering.
+  A wingman still on the ground or in its takeoff (waiting, taxiing, lining
+  up, rolling or climbing out) answers unable ("N unable, still on the ground
+  or taking off"), keeps its place, and after takeoff rejoins its leader;
+  only airborne aircraft count as landing (opinionated, requested by John
+  2026-09-29).
 - **Wing abort** (spec-derived): a joining wingman on its route, at marshal or on
   the gates whose leader is neither landing nor on the ground raises gear and
   flaps and returns to free flight.

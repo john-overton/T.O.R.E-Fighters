@@ -399,7 +399,7 @@ def scenarios() -> list[Scenario]:
                          check=checker(ground=True, need_takeoff=True)))
     for size in [2, 4]:
         out.append(probe(f"ground-land-selected-wing{size}", ["--ground-start", GROUND_AIRPORT, "--probe-wing-size", str(size), "--maneuver", "takeoff",
-                                                              "--probe-wing-order", "9000:land-selected", "--separation", "200", "--probe-wing-only"],
+                                                              "--probe-wing-order", f"{12000 * size // 2}:land-selected", "--separation", "200", "--probe-wing-only"],
                          # A wing's approach over the hills south of Simferopol takes about
                          # 400 s per aircraft (lane doc, "Needs a decision"), so only the
                          # pair is expected to be down inside the run.
@@ -518,7 +518,7 @@ def scenarios() -> list[Scenario]:
                 ticks=24000, timeout=1800, check=checker(ground=True, need_takeoff=True)))
         out.append(probe(f"theater-{theater.lower()}-land-pair", where + [
             "--ground-start", "1", "--probe-wing-size", "2", "--maneuver", "takeoff",
-            "--probe-wing-order", "12000:land-selected", "--separation", "200", "--probe-wing-only"],
+            "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
             ticks=108000, timeout=2400, check=checker(ground=True, need_takeoff=True, need_landing=True)))
     for theater, airport in (("UKR", "1"), ("PGU", "2"), ("FRA", "3"), ("NSK", "5")):
         for aircraft in AIRCRAFT:
