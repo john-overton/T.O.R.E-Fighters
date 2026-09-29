@@ -200,6 +200,9 @@ struct WingLeader {
     side: super::targeting::Side,
     wing: u8,
     leader: u32,
+    /// Lead has passed on at least once, so the followers' slots are ranks in
+    /// member order rather than the numbers they started with.
+    reformed: bool,
 }
 
 /// The mission's airfield decisions for one actor this tick (see
@@ -234,6 +237,21 @@ pub struct ActorSetup {
     pub dispensers: Vec<DispenserStore>,
     pub wing_slot: u8,
     pub home_airport: Option<super::route::Position>,
+}
+
+/// What an AI aircraft leaves behind when it stops being AI-flown: the parts
+/// of it that belong to the aircraft rather than to its pilot. A human
+/// taking the aircraft over builds its cockpit from these; the AI's awareness,
+/// orders and decisions are dropped.
+pub struct ActorParts {
+    pub identity: ActorIdentity,
+    pub flight: flight::State,
+    pub sensors: Option<Sensors>,
+    pub stations: Vec<StationSpec>,
+    pub dispensers: Vec<DispenserStore>,
+    /// Its missile warnings.
+    pub warnings: ThreatService,
+    pub equipment: EquipmentFaults,
 }
 
 /// Perceived attack information shared with assigned escorts. The bearing is
@@ -776,6 +794,26 @@ impl AiActor {
         self.stations = stations;
     }
 
+    /// Hand the aircraft's parts over and drop its pilot: the AI's awareness,
+    /// orders, assignment and decisions go with the actor.
+    pub fn into_parts(self) -> ActorParts {
+        ActorParts {
+            identity: self.identity,
+            flight: self.flight,
+            sensors: self.sensors,
+            stations: self.stations,
+            dispensers: self.dispensers,
+            warnings: self.missile_threats,
+            equipment: self.equipment,
+        }
+    }
+
+    /// Replace the missile warnings, for an aircraft whose warning record
+    /// comes from a cockpit.
+    pub fn set_missile_threats(&mut self, warnings: ThreatService) {
+        self.missile_threats = warnings;
+    }
+
     pub fn set_dispensers(&mut self, dispensers: Vec<DispenserStore>) {
         self.dispensers = dispensers;
     }
@@ -1289,6 +1327,9 @@ pub struct AiMission {
     humans: Vec<HumanMember>,
     /// The current leader of each wing that has one.
     leaders: Vec<WingLeader>,
+    /// The humans that were flying at the last leadership check, for placing
+    /// an aircraft that joins between steps.
+    humans_flying: Vec<u32>,
     missiles: Vec<MissileSnapshot>,
     gun_rounds: Vec<incoming_fire::Round>,
     /// The mission assignment of each human-flown aircraft, by aircraft id.
@@ -1325,6 +1366,7 @@ impl AiMission {
             vertical_spacing_ft: super::wing::PLAYER_STACKING_FT,
             humans: Vec::new(),
             leaders: Vec::new(),
+            humans_flying: Vec::new(),
             missiles: Vec::new(),
             gun_rounds: Vec::new(),
             human_assignments: Default::default(),
@@ -1517,6 +1559,65 @@ impl AiMission {
 
     pub fn push(&mut self, actor: AiActor) {
         self.actors.push(actor);
+    }
+
+    /// Take actor `id` out of the mission, for a human taking its aircraft.
+    /// The others keep their order. Nothing is announced to them: the
+    /// aircraft still exists, and they see it in the world snapshot.
+    pub fn remove_actor(&mut self, id: u32) -> Option<AiActor> {
+        let index = self.actors.iter().position(|a| a.id() == id)?;
+        Some(self.actors.remove(index))
+    }
+
+    /// Add an actor in id order, as it stands at mission start: neutral and
+    /// with fresh awareness. It replaces nothing: the id must not be an actor
+    /// already.
+    pub fn insert_actor(&mut self, mut actor: AiActor) -> Result<()> {
+        if self.actor(actor.id()).is_some() {
+            return Err(super::AiError::InvalidInput("actor id is already flying"));
+        }
+        // What `start_in_formation` does for every actor at the start.
+        actor.return_to_formation(self.tick);
+        actor.formation_order_tick = None;
+        // It joins its wing as it stands: leading if the wing's leader is its
+        // id (a human leader handing its aircraft to the AI), and in the slot
+        // its member number gives, or its rank behind the leader once the
+        // wing has re-formed.
+        let (side, wing, member) = (
+            actor.identity.side,
+            actor.identity.wing,
+            actor.identity.member,
+        );
+        if let Some(entry) = self
+            .leaders
+            .iter()
+            .find(|l| l.side == side && l.wing == wing)
+            .copied()
+        {
+            actor.set_leads(entry.leader == actor.id());
+            if entry.reformed && entry.leader != actor.id() {
+                let earlier = self
+                    .actors
+                    .iter()
+                    .filter(|a| a.identity.side == side && a.identity.wing == wing)
+                    .filter(|a| a.id() != entry.leader && a.alive())
+                    .map(|a| a.identity.member)
+                    .chain(
+                        self.humans
+                            .iter()
+                            .filter(|h| h.side == side && h.wing == wing)
+                            .filter(|h| h.id != entry.leader && h.id != actor.id())
+                            .filter(|h| self.humans_flying.contains(&h.id))
+                            .map(|h| h.member),
+                    )
+                    .filter(|m| *m < member)
+                    .count();
+                actor.wing_slot = earlier as u8 + 1;
+            }
+        }
+        let index = self.actors.partition_point(|a| a.id() < actor.id());
+        self.actors.insert(index, actor);
+        Ok(())
     }
 
     /// The human-flown aircraft in wings, replacing the last set. A human
@@ -1958,6 +2059,12 @@ impl AiMission {
     /// new leader: its followers take formation slots 1, 2 and so on in
     /// member order. A wing with nobody left keeps its last leader.
     fn refresh_leaders(&mut self, world: &[WorldObject], output: &mut MissionOutput) {
+        self.humans_flying = self
+            .humans
+            .iter()
+            .filter(|h| self.member_flying(h.id, world))
+            .map(|h| h.id)
+            .collect();
         let mut wings: Vec<(super::targeting::Side, u8)> = Vec::new();
         for (side, wing) in self
             .actors
@@ -1995,6 +2102,7 @@ impl AiMission {
                     side,
                     wing,
                     leader: first,
+                    reformed: false,
                 });
                 self.crown(side, wing, first, &members, world, false);
                 current = Some(first);
@@ -2025,6 +2133,7 @@ impl AiMission {
                 .find(|l| l.side == side && l.wing == wing)
             {
                 entry.leader = leader;
+                entry.reformed = true;
             }
             self.crown(side, wing, leader, &members, world, true);
             output.leadership.push(LeadershipChange {

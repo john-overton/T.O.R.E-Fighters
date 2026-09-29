@@ -344,6 +344,64 @@ impl<'a> HumanAircraft<'a> {
     }
 }
 
+/// An AI aircraft taken out of the AI, for a human to fly. Its flight state,
+/// stores, dispensers, sensors and warnings are the aircraft's; the AI's
+/// awareness, orders and decisions are gone.
+pub struct RemovedActor {
+    pub slot: Slot,
+    pub parts: tore_sim::ai::mission::ActorParts,
+    /// The AI's skill, kept for putting the aircraft back.
+    pub experience: tore_sim::ai::experience::ResolvedExperience,
+    /// Its combat configuration, when the bridge had one.
+    pub config: Option<live::Configuration>,
+}
+
+/// What an aircraft needs to join the AI: the same as at mission start (its
+/// place in the roster, the seed rule, fresh awareness, neutral) from the
+/// state it is in.
+pub struct ActorInsert {
+    /// The aircraft id, also its combat target row's id.
+    pub id: u32,
+    pub side: launch::Side,
+    pub wing: u8,
+    /// Its member number in the wing, from 0.
+    pub member: u8,
+    pub aircraft: AircraftId,
+    pub experience: tore_sim::ai::experience::ResolvedExperience,
+    pub flight: flight::State,
+    pub sensors: Option<Sensors>,
+    pub stations: Vec<tore_sim::ai::mission::StationSpec>,
+    pub dispensers: Vec<tore_sim::ai::threat::DispenserStore>,
+    /// Missile warnings to keep; `None` starts a fresh record.
+    pub warnings: Option<tore_sim::combat::threats::ThreatService>,
+    pub equipment: EquipmentFaults,
+    /// Its combat configuration: the weapon records its stations release, its
+    /// guns and its countermeasure effectiveness.
+    pub config: Option<live::Configuration>,
+}
+
+impl ActorInsert {
+    /// Put a removed actor back the way it left.
+    pub fn from_removed(removed: RemovedActor) -> Self {
+        let identity = removed.parts.identity;
+        Self {
+            id: removed.slot.id,
+            side: removed.slot.side,
+            wing: identity.wing,
+            member: identity.member,
+            aircraft: removed.slot.aircraft,
+            experience: removed.experience,
+            flight: removed.parts.flight,
+            sensors: removed.parts.sensors,
+            stations: removed.parts.stations,
+            dispensers: removed.parts.dispensers,
+            warnings: Some(removed.parts.warnings),
+            equipment: removed.parts.equipment,
+            config: removed.config,
+        }
+    }
+}
+
 /// The formation trace samples every 12 simulation ticks (10 Hz).
 const FORMATION_TRACE_EVERY: u64 = 12;
 /// The file is flushed on the first sample of each second (every 120 ticks).
@@ -390,6 +448,8 @@ pub struct AiWings {
     /// Formation trace rows waiting for the app; `None` while tracing is off.
     formation_trace: Option<FormationBatch>,
     slots: Vec<Slot>,
+    /// The theater's airfields, kept for aircraft inserted later.
+    airfields: Airfields,
     /// Every human-flown aircraft, in id order. The host refreshes it each
     /// step ([`Self::step`]); a fresh bridge starts with single player's one.
     humans: Vec<HumanSlot>,
@@ -972,6 +1032,7 @@ impl AiWings {
             mission_preset: Preset::Free,
             formation_trace: None,
             slots,
+            airfields: airfields.clone(),
             humans,
             weapons: BTreeMap::new(),
             device_random: tore_sim::ai::DecisionRandom::seeded(0xdec0),
@@ -1007,6 +1068,142 @@ impl AiWings {
             last_output: tore_sim::ai::mission::MissionOutput::default(),
             decoy_rolls: Vec::new(),
         })
+    }
+
+    /// Take AI aircraft `id` out of the AI, for a human to fly. The others
+    /// keep their order. The combat target row stays where it is: the caller
+    /// turns it into the human's own record.
+    pub fn remove_actor(&mut self, id: u32) -> Option<RemovedActor> {
+        let slot = *self.slot(id)?;
+        let actor = self.mission.remove_actor(id)?;
+        let experience = actor.experience();
+        let parts = actor.into_parts();
+        self.slots.retain(|s| s.id != id);
+        self.weapons.retain(|(actor, _), _| *actor != id);
+        self.device_effectiveness.remove(&id);
+        let config = self.configs.remove(&id);
+        self.damaged_stations.retain(|(actor, _)| *actor != id);
+        self.pending_guns.retain(|(actor, _), _| *actor != id);
+        self.gun_ordinals.retain(|(actor, _), _| *actor != id);
+        self.last_hp.remove(&id);
+        self.last_activity.remove(&id);
+        self.mission_skill.remove(&id);
+        self.watch.forget(id);
+        Some(RemovedActor {
+            slot,
+            parts,
+            experience,
+            config,
+        })
+    }
+
+    /// Put an aircraft into the AI, in id order, as at mission start: its
+    /// place in the roster, the seed rule (its rank among the wing's members
+    /// no human holds), fresh awareness and neutral. Its home is the nearest
+    /// runway its side may use.
+    pub fn insert_actor(&mut self, insert: ActorInsert) -> WorldResult<()> {
+        if self.mission.actor(insert.id).is_some() {
+            return Err(format!("aircraft {} is already flown by the AI", insert.id).into());
+        }
+        let side = side_of(insert.side);
+        // The AI members' launch numbering: the rank of this member number
+        // among the ones no other human holds.
+        let seed_member = (0..insert.member)
+            .filter(|number| {
+                !self.humans.iter().any(|h| {
+                    h.id != insert.id
+                        && h.side == insert.side
+                        && h.wing == insert.wing
+                        && h.member == *number
+                })
+            })
+            .count() as u8;
+        let home = self.airfields.home(insert.flight.position, insert.side);
+        let position = insert.flight.position;
+        let setup = ActorSetup {
+            identity: ActorIdentity {
+                actor: ActorId(insert.id),
+                side,
+                wing: insert.wing,
+                member: insert.member,
+                leads: insert.member == 0,
+                aircraft: insert.aircraft,
+                human_controlled: false,
+            },
+            profile: BehaviorProfile {
+                family: BehaviorFamily::FighterStrike,
+                role: MissionRole::AirToAir,
+            },
+            experience: insert.experience,
+            seed: actor_seed(insert.side, insert.wing, seed_member),
+            flight: insert.flight,
+            sensors: insert.sensors,
+            stations: insert.stations,
+            dispensers: insert.dispensers,
+            wing_slot: insert.member.max(1),
+            home_airport: Some(match home {
+                Some(runway) => route::Position {
+                    x: runway.center[0],
+                    z: runway.center[2],
+                },
+                None => route::Position {
+                    x: position[0],
+                    z: position[2],
+                },
+            }),
+        };
+        let mut actor = AiActor::new(setup).map_err(|e| e.to_string())?;
+        actor.set_home_runway(home);
+        if let Some(warnings) = insert.warnings {
+            actor.set_missile_threats(warnings);
+        }
+        actor.fail_equipment(insert.equipment);
+        if let Some(config) = insert.config {
+            for (index, station) in config.stations.iter().enumerate() {
+                self.weapons
+                    .insert((insert.id, index as u8), station.weapon.clone());
+            }
+            actor.set_guns(
+                config
+                    .stations
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| live::is_gun(&s.weapon))
+                    .map(|(i, s)| (i as u8, s.weapon.clone()))
+                    .collect(),
+            );
+            self.device_effectiveness
+                .insert(insert.id, (config.ecm.flare[1], config.ecm.chaff[1]));
+            self.configs.insert(insert.id, config);
+        }
+        // Air combat guns only reaches every AI aircraft in the mission.
+        if self.guns_only {
+            let gun = |station: u8| {
+                self.weapons
+                    .get(&(insert.id, station))
+                    .is_some_and(|w| w.source == insert.aircraft.gun())
+            };
+            for spec in actor.stations_mut() {
+                if !gun(spec.station.0) {
+                    spec.store.inhibited = true;
+                }
+            }
+        }
+        self.mission
+            .insert_actor(actor)
+            .map_err(|e| e.to_string())?;
+        let at = self.slots.partition_point(|s| s.id < insert.id);
+        self.slots.insert(
+            at,
+            Slot {
+                id: insert.id,
+                side: insert.side,
+                wing_number: insert.wing + 1,
+                member_number: insert.member + 1,
+                aircraft: insert.aircraft,
+            },
+        );
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -3706,6 +3903,138 @@ mod tests {
                 .message
                 .contains("not leading")
         );
+    }
+
+    /// A new aircraft of Friendly wing 2 with no stores.
+    fn new_aircraft(wings: &AiWings, id: u32, member: u8) -> ActorInsert {
+        ActorInsert {
+            id,
+            side: launch::Side::Friendly,
+            wing: 1,
+            member,
+            aircraft: AircraftId::F18,
+            experience: wings.mission.actor(1).unwrap().experience(),
+            flight: flight::State::new(&aircraft(), [3000., 20000., 0.]).unwrap(),
+            sensors: None,
+            stations: Vec::new(),
+            dispensers: Vec::new(),
+            warnings: None,
+            equipment: EquipmentFaults::default(),
+            config: None,
+        }
+    }
+
+    fn ids(wings: &AiWings) -> Vec<u32> {
+        wings.mission.actors().iter().map(AiActor::id).collect()
+    }
+
+    #[test]
+    fn a_removed_actor_goes_back_as_it_was_and_the_others_keep_their_order() {
+        let (mut wings, mut targets) = led_wing(4, &[]);
+        // What the roster gives an aircraft: an AI aircraft as built, before
+        // it has flown and with no assignment yet.
+        wings
+            .mission
+            .actor_mut(3)
+            .unwrap()
+            .set_assignment(Default::default());
+        let before = wings.mission.actor(3).unwrap().controller().clone();
+        fly_one_tick(&mut wings, &mut targets, vec![]);
+        // Actor 3 leaves the AI; nothing else moves.
+        let stations = wings.mission.actor(3).unwrap().stations().to_vec();
+        let flight = wings.mission.actor(3).unwrap().flight().clone();
+        let removed = wings.remove_actor(3).expect("a flying actor");
+        assert_eq!(ids(&wings), [1, 2, 4, 5]);
+        assert_eq!(wings.len(), 4);
+        assert!(wings.slot(3).is_none() && wings.mission.actor(3).is_none());
+        assert_eq!(removed.slot.id, 3);
+        assert_eq!(removed.parts.flight, flight);
+        assert_eq!(removed.parts.stations, stations);
+        assert!(wings.remove_actor(3).is_none(), "only once");
+        // The AI keeps flying without it.
+        fly_one_tick(&mut wings, &mut targets, vec![]);
+
+        // Putting it back places it in id order, as at mission start:
+        // neutral, the same seed, fresh awareness.
+        wings
+            .insert_actor(ActorInsert::from_removed(removed))
+            .unwrap();
+        assert_eq!(ids(&wings), [1, 2, 3, 4, 5]);
+        assert_eq!(
+            wings.slots().iter().map(|s| s.id).collect::<Vec<_>>(),
+            [1, 2, 3, 4, 5]
+        );
+        let back = wings.mission.actor(3).unwrap();
+        assert!(back.is_neutral());
+        assert_eq!(back.controller(), &before);
+        assert_eq!(back.wing_slot(), 2);
+        assert_eq!(wings.slot(3).unwrap().label(), "Friendly 2-3");
+        assert!(
+            wings.insert_actor(new_aircraft(&wings, 3, 2)).is_err(),
+            "an aircraft the AI already flies cannot join twice"
+        );
+    }
+
+    #[test]
+    fn an_aircraft_joins_the_ai_with_the_seed_and_slot_the_roster_gives_it() {
+        let slot = |id, member| HumanSlot {
+            id,
+            side: launch::Side::Friendly,
+            wing: 1,
+            member,
+        };
+        // A human leads (member 0) and two AI aircraft fly members 1 and 2.
+        let (mut wings, mut targets) = led_wing(2, &[slot(20, 0)]);
+        wings
+            .mission
+            .actor_mut(1)
+            .unwrap()
+            .set_assignment(Default::default());
+        let original = wings.mission.actor(1).unwrap().controller().clone();
+        // Its aircraft goes to a human and back: registered as human while
+        // away, then handed back to the AI.
+        let removed = wings.remove_actor(1).unwrap();
+        wings.humans.push(slot(1, 1));
+        wings.humans.retain(|h| h.id != 1);
+        wings
+            .insert_actor(ActorInsert::from_removed(removed))
+            .unwrap();
+        assert_eq!(wings.mission.actor(1).unwrap().controller(), &original);
+
+        // A brand new aircraft as member 4 of the wing, after the flight has
+        // lost its human leader and re-formed: it takes the rank behind it.
+        let object = |alive| WorldObject {
+            id: 20,
+            alive,
+            destroyed: !alive,
+            ..player_object([0., 20000., -600.])
+        };
+        fly_one_tick(&mut wings, &mut targets, vec![object(true)]);
+        fly_one_tick(&mut wings, &mut targets, vec![object(false)]);
+        assert_eq!(wings.mission.wing_leader(FRIENDLY_SIDE, 1), Some(1));
+        wings.insert_actor(new_aircraft(&wings, 30, 4)).unwrap();
+        assert_eq!(ids(&wings), [1, 2, 3, 30]);
+        let joined = wings.mission.actor(30).unwrap();
+        assert!(!joined.identity().is_leader());
+        assert_eq!(joined.wing_slot(), 2, "behind the leader and member 2");
+        assert_eq!(wings.mission.actor(2).unwrap().wing_slot(), 1);
+    }
+
+    #[test]
+    fn a_leader_handed_back_to_the_ai_leads_again() {
+        let (mut wings, mut targets) = led_wing(3, &[]);
+        fly_one_tick(&mut wings, &mut targets, vec![]);
+        assert_eq!(wings.mission.wing_leader(FRIENDLY_SIDE, 1), Some(1));
+        let removed = wings.remove_actor(1).unwrap();
+        assert_eq!(
+            wings.mission.wing_leader(FRIENDLY_SIDE, 1),
+            Some(1),
+            "the aircraft still leads while a human flies it"
+        );
+        wings
+            .insert_actor(ActorInsert::from_removed(removed))
+            .unwrap();
+        assert_eq!(leads(&wings), [1]);
     }
 
     pub(super) fn player_object(position: Vector) -> WorldObject {

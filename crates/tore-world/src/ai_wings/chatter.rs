@@ -227,6 +227,15 @@ pub(super) struct Watch {
     pub(super) journal: Journal,
 }
 impl Watch {
+    /// Forget everything kept for one aircraft, when it leaves the AI.
+    pub(super) fn forget(&mut self, id: u32) {
+        self.alive.remove(&id);
+        self.targets.remove(&id);
+        self.contacts.remove(&id);
+        self.fuel.remove(&id);
+        self.engage_until.remove(&id);
+    }
+
     /// Remember a type's short name and ejection seat (PLANE flags 0x10).
     pub(super) fn learn(&mut self, id: AircraftId, aircraft: &Aircraft) {
         let flags = aircraft
