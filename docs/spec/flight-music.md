@@ -193,13 +193,15 @@ and HOME once per flight, LAUNCH restarting, the 30 second hit hold and the
 distances are **spec-derived**. The selector is
 `crates/tore-world/src/situation.rs`, its inputs come from
 `crates/tore-app/src/flight_music.rs`, and the mission result cadence from
-`crates/tore-world/src/ai_wings/outcome.rs`. Audio only reads simulation state;
-headless and `--no-audio` runs do not compute any of it.
+`crates/tore-world/src/ai_wings/outcome.rs`. The music reads simulation state
+only, and the result and home checks run in the mission core (and send the two
+radio calls) whether or not audio exists, since 2026-09-29; the music inputs
+run only with audio.
 
 | Condition | What feeds it in TORE | Provenance |
 | --- | --- | --- |
 | VALK | Ctrl+V while flying an aircraft (not ejected, not crashed, not paused). The toggle lasts for the session and is not saved. It stops the current score. The message "Valkyries music on" or "off" is an agent addition (2026-09-23). The recording is absent, so the result is silence. | spec-derived; message opinionated |
-| SUCC | The in-flight mission result below reaching success. "Mission accomplished!" (`^MISSACC`) is sent on the radio channel about 2 seconds later, the first time. Retail does not establish its label; TORE uses the crew label in a multi-crew aircraft, otherwise `YOU`. | spec-derived; label fitted |
+| SUCC | The in-flight mission result below reaching success. "Mission accomplished!" (`^MISSACC`) is sent by the mission core on the radio channel about 2 seconds later, the first time, with or without audio. Retail does not establish its label; TORE uses the crew label in a multi-crew aircraft, otherwise `YOU`. | spec-derived; label fitted |
 | EJECT | The player has ejected. | spec-derived |
 | LAUNCH | Takeoff roll: on a runway surface at 7 ft/s or more, having not just landed. Climb-out: after lifting off, within 25,000 ft of the liftoff point, under 4,000 ft above the ground, gear down and at 954 ft/s or less. Leaving the window ends it for good. | fitted state tracking, spec-derived numbers |
 | AIR | The player's designated target (T, Enter or a scope click) is an aircraft with hit points left, on the enemy side, and within 40,000 ft; or a projectile damaged the player in the last 30 game seconds. Enemy side is the AI wing side; without AI wings (range and fixture aircraft) any target not marked friendly counts. | spec-derived; fixture side rule fitted |

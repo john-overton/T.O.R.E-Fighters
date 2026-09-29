@@ -64,6 +64,9 @@ pub struct Cockpit {
     /// The plane's crew voice, built from its aircraft type and spoken to its
     /// seat; see docs/spec/cockpit-voice.md.
     pub crew_voice: crew_voice::CrewVoice,
+    /// The plane's mission result and home checks, which send its seat the
+    /// "mission accomplished" and "almost home" calls.
+    pub result: ai_wings::outcome::Tracker,
     /// Simulation second of the last OVERSPEED message, so it repeats at an interval.
     pub overspeed_message_at: Option<f64>,
     /// Simulation second of the last turn-back warning past the map edge.
@@ -266,6 +269,10 @@ impl World {
             }),
             None => None,
         };
+        cockpit.result = ai_wings::outcome::Tracker::new(ai_wings::outcome::home_base(
+            &self.terrain,
+            ground_airport,
+        ));
         cockpit
             .airport_service
             .reset(&self.terrain.airport_scene)
@@ -758,6 +765,58 @@ impl World {
                 seat: delivery.seat,
                 call: delivery.call,
             });
+        }
+        self.step_results(now);
+    }
+
+    /// Each human-flown plane's mission result and home checks, every 4
+    /// seconds, and the calls they send to its seat: "mission accomplished"
+    /// two seconds after the result is decided and "almost home". These used
+    /// to be the app's situation music's, which exists only with an audio
+    /// device (docs/ARCHITECTURE.md, "Radio, orders and debrief for each
+    /// seat"). They are sent after this tick's due calls, so they are
+    /// delivered on the next tick, as they were.
+    fn step_results(&mut self, now: f64) {
+        let mission = self.setup.mission.is_some() && self.ai_wings.is_some();
+        let ticks = self.combat.state.tick();
+        // The checks' clock counts ticks from the flight's first one.
+        let clock = ticks.saturating_sub(1) as f64 * flight::DT;
+        for index in 0..self.cockpits.len() {
+            let Some(seat) = self
+                .roster
+                .seat_of(self.cockpits[index].plane)
+                .and_then(|seat| self.roster.seat(seat))
+            else {
+                continue;
+            };
+            let (seat, crew) = (seat.id, seat.crew);
+            let plane = self.cockpits[index].plane.0;
+            let pilot = &self.cockpits[index].flight.systems.pilot;
+            let alive = self.cockpit_alive(index) && !pilot.dead && !pilot.ejected;
+            let cockpit = &mut self.cockpits[index];
+            let flight = &cockpit.flight;
+            let [x, y, z] = flight.position;
+            let on_runway = self
+                .terrain
+                .airport_scene
+                .runway_surface(x, z)
+                .is_some_and(|(_, height)| flight.supported_at(height));
+            let airborne = !on_runway && !flight.research.as_ref().is_some_and(|r| r.on_ground);
+            let state = &self.combat.state;
+            let wings = self.ai_wings.as_ref();
+            let succeeded = || ai_wings::outcome::succeeded(state, wings, plane, alive);
+            let results =
+                cockpit
+                    .result
+                    .results(clock, mission.then_some(succeeded), [x, y, z], airborne);
+            let label = crew.map_or("YOU", comms::Crew::label);
+            for result in results {
+                self.comms.send(
+                    now,
+                    result.call(plane, label, &self.phrases),
+                    &[comms::Hearer::seat(seat)],
+                );
+            }
         }
     }
 

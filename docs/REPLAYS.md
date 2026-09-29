@@ -1569,7 +1569,7 @@ newest and counts the rest as lost.
   for tower replies, `Entry::clearance_cancelled` where a destroyed runway
   under the landing clearance cuts tower speech, `Entry::order_refused` for
   orders refused before delivery (no AI wing, no landing site, an error),
-  and `Step::radio_calls` for the mission result calls with their trigger.
+  and `Comms::send` from the mission core's result tracker for the mission result calls with their trigger.
   Every order the wing received is journaled with the `radio` route: the
   host plays its voice, even an empty one.
 - The recorder drains it with `Recorder::drain_comms` after the tick's

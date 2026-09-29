@@ -749,7 +749,7 @@ from its vertex building.
 | `snapshot` | The tick's picture as data (`RenderSnapshot`, poses, `interpolate`) |
 | `ai_wings` | `AiWings`, its orders, reports, chatter and engagement |
 | `comms`, `radio_calls`, `crew_voice`, `airfield_radio` | The radio channel and every call generator |
-| `situation` | The in-flight mission result check that drives music |
+| `situation` | The situation music's selector; the mission result check it reads is `ai_wings::outcome` |
 | `mission_layout`, `target_window` | The Quick Mission layout and the target window's data |
 | `test_support` | Synthetic fixtures for tests here and, through the `test-support` feature, in the app |
 
@@ -1335,10 +1335,28 @@ flight re-forms on the new leader.
 - **Debrief.** Built for each seat, with that seat's aircraft as the pilot column
   and the first other member of its wing as the wingman column. The full
   multiplayer results screen is stage E.
-- **Mission result call.** The "mission accomplished" and "mission failure"
-  calls become `World` output for every seat. Today they are sent only when an
-  audio device exists, so with `--no-audio` their HUD lines and recording entries
-  now appear (John, 2026-09-28).
+- **Mission result call.** The "mission accomplished" and "almost home" calls
+  become `World` output for every seat (John, 2026-09-28). They used to be sent
+  only when an audio device existed, so with `--no-audio` their HUD lines and
+  recording entries now appear. The retail "mission failure" call is not part of
+  this: TORE has never sent it, the in-flight trigger for a lost mission is
+  unknown (see the [radio chatter spec](spec/radio-chatter.md#not-implemented-and-why)),
+  and nothing here invents one.
+
+  *Built (B4 step 3).* Each `Cockpit` holds an `outcome::Tracker`
+  (`ai_wings/outcome.rs`): the 4 second result check, the rule that a result
+  already decided at the first check disables the calls and the music's SUCC and
+  HOME, and the home check. `World::step_results` runs it for every human-flown
+  plane at the end of the tick's radio phase, with `outcome::succeeded`, which
+  follows the debrief's success rule for that plane (no friendly aircraft shot
+  down by it, every aircraft to destroy gone, every aircraft to protect flying;
+  the mission's assignment is still the one for plane 0 until B3). It sends the
+  call to the plane's seat after the tick's due calls, so it is delivered on the
+  next tick, as the music's host did. The situation music keeps choosing music
+  and reads the tracker's status (`Tracker::status`) instead of running its
+  own. Agent decisions: every seat shares the mission's home base (the
+  ground-start airport); the AI probe declares a mission start
+  (`Setup::mission`) so its recordings carry the calls the live game sends.
 
 #### Flight model in multiplayer
 
@@ -1360,7 +1378,8 @@ baselines:
 1. The AI probe's output, when it switches to the full tick.
 2. The missile hit rule.
 3. Lead succession.
-4. The mission result call without an audio device.
+4. The mission result calls ("mission accomplished" and "almost home", the two
+   that exist) without an audio device.
 
 Presentation only, with no change to simulation or recordings: per-camera
 weather, wing vapor, blackout and redout, the view rig and control-surface

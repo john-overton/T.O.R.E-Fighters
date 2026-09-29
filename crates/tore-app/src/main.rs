@@ -520,26 +520,15 @@ impl TickPresenter<'_> {
             );
         }
         if let Some(audio) = self.audio {
-            // The debrief's own evaluator, so the success music and the
-            // debrief always agree.
-            let succeeded = || {
-                debrief::capture(
-                    &self.world.combat,
-                    &self.world.cockpits[OWN].flight,
-                    self.world.ai_wings.as_ref(),
-                )
-                .outcome
-                    == debrief::Outcome::Success
-            };
-            let mission = (self.world.setup.mission.is_some() && self.world.ai_wings.is_some())
-                .then_some(&succeeded as &dyn Fn() -> bool);
             let music = self.flight_music.step(
                 &self.world.cockpits[OWN].flight,
                 &self.world.combat.state,
                 &out.events,
                 self.world.ai_wings.as_ref(),
                 &self.world.terrain,
-                mission,
+                // The mission core's result and home checks, which also send
+                // the result calls whatever the audio.
+                &self.world.cockpits[OWN].result.status(),
             );
             audio.situation(&music.inputs, music.now);
             let locks = self
@@ -557,17 +546,6 @@ impl TickPresenter<'_> {
                 self.world.cockpits[OWN].flight.escape.is_some()
                     || self.world.cockpits[OWN].flight.systems.pilot.dead,
             ));
-            // Addressed to the player's flight; the label (crew or YOU) is
-            // unresolved in retail, so this choice is fitted. The mission
-            // result comes about 2 seconds after it is decided (native).
-            let label = comms::crew(&self.hornet.profile).map_or("YOU", comms::Crew::label);
-            for call in music.radio_calls(label, &self.world.phrases) {
-                self.world.comms.send(
-                    self.world.combat.state.tick() as f64 / 120.,
-                    call,
-                    &[comms::Hearer::seat(input.seat)],
-                );
-            }
             // What the music's inputs asked for, and why.
             if let Some(recording) = &mut self.recorder {
                 recording.comms(music.journal);
@@ -2304,7 +2282,6 @@ impl App {
                         .message(format!("AI wings: {count} aircraft")),
                     None => {}
                 }
-                let ground_airport = restarted_flight.ground_airport;
                 let layout = restarted_flight.layout;
                 // Every flight records itself from this picture on.
                 self.start_replay_recording();
@@ -2313,10 +2290,7 @@ impl App {
                         tore_replay::vocab::kind::SYSTEM_RESTART,
                     ));
                 }
-                self.flight_music = flight_music::Observer::new(flight_music::home_base(
-                    &self.world.terrain,
-                    ground_airport,
-                ));
+                self.flight_music = flight_music::Observer::new();
                 self.rwr_warnings = Default::default();
                 self.reset_vapor();
                 self.g_effects = Default::default();
@@ -6003,6 +5977,13 @@ fn ai_probe_run(
     // The probe runs the live game's whole tick; only the presentation is its
     // own, below. It has no audio, HUD or rumble, so those cues are ignored.
     let flight_researched = flight.research.is_some();
+    // The probe flies an accepted Quick Mission's start, so its mission result
+    // and home checks run and send their calls as in the live game.
+    let mission_start = (flight.position[1], flight.fuel);
+    let result = ai_wings::outcome::Tracker::new(ai_wings::outcome::home_base(
+        &terrain,
+        parked.as_ref().map(|ground| ground.airport),
+    ));
     let mut mission = world::World {
         terrain,
         roster: seats::Roster::single_player(
@@ -6019,6 +6000,7 @@ fn ai_probe_run(
             turbulence_rng,
             airfield_radio,
             crew_voice: crew_voice::CrewVoice::new(&hornet.profile),
+            result,
             overspeed_message_at: None,
             edge_message_at: None,
         }],
@@ -6028,9 +6010,10 @@ fn ai_probe_run(
         wing_status: Default::default(),
         radio,
         phrases,
-        // The probe builds its own mission; only a restart reads the setup.
+        // The probe builds its own mission; only a restart reads the setup,
+        // and the tick reads whether there is a mission for its result calls.
         setup: world::Setup {
-            mission: None,
+            mission: Some(mission_start),
             ground_start: parked.as_ref().map(|ground| ground.object),
             researched_flight: flight_researched,
             native_tables: None,
@@ -10330,6 +10313,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             turbulence_rng: probe_turbulence_rng,
             airfield_radio,
             crew_voice: crew_voice::CrewVoice::new(&hornet.profile),
+            result: Default::default(),
             overspeed_message_at: None,
             edge_message_at: None,
         }],

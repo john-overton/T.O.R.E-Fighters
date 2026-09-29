@@ -385,7 +385,9 @@ ownship for every human-flown plane, a plane after the first sees no
 designation, weapon selection or incoming missile.
 
 Not implemented here: the radar link report (no supplemental radar key), the
-mission result and "almost home" lines (music and debrief work), airport and
+mission failure line (its trigger is unknown; "mission accomplished" and
+"almost home" are the mission core's, from `ai_wings/outcome.rs`, sent to every
+human-flown plane's seat with or without audio since 2026-09-29), airport and
 carrier calls, the `#` second voice set (no Vietnamese speakers fly with the
 player) and the takeoff and landing states of AI targets (TORE's AI targets
 are always airborne; only "going down" silences the coaching).

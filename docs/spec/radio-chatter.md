@@ -585,8 +585,11 @@ Every other seat hears the speaker by flight colour and position. Design:
 - **AWACS report.** Its trigger is unknown.
 - **Vietnam voice set.** No Quick Mission speaker is North or South
   Vietnamese yet, and the per-event `#` mapping is only partly read.
-- **Mission accomplished, mission failure and "almost home".** They need the
-  mission result evaluator, which another pass is building.
+- **Mission failure.** Its in-flight trigger is unknown: the mission result
+  evaluator only reports success or failure at the end, so no in-flight failure
+  is detected. "Mission accomplished" and "almost home" are implemented (the
+  mission core sends them to every human-flown plane's seat, two seconds after
+  the result and at once, important calls, with or without audio).
 - **Crew calls to the player** (missile-inbound warnings, coaching, G sounds,
   crew fuel calls): the [cockpit voice](cockpit-voice.md) pass.
 - **"Clear my six" or "Watch my tail".** Protect me still always says "Clear

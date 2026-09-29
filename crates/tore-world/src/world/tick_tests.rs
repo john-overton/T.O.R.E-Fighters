@@ -282,6 +282,7 @@ fn mission() -> World {
             turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng::seeded(1).unwrap(),
             airfield_radio: Default::default(),
             crew_voice: crew_voice::CrewVoice::new(&profile),
+            result: Default::default(),
             overspeed_message_at: None,
             edge_message_at: None,
         }],
@@ -741,6 +742,7 @@ fn two_seat_mission() -> World {
         airport_nav_mode: false,
         airfield_radio: airfield_radio::AirfieldRadio::for_seat(SeatId(1), second.0),
         crew_voice: crew_voice::CrewVoice::new(&profile).for_seat(SeatId(1), second.0),
+        result: Default::default(),
         overspeed_message_at: None,
         edge_message_at: None,
     });
@@ -843,4 +845,95 @@ fn radio_members_from_the_roster_match_the_ai_wings() {
         ),
         (0, false, 0, 0, true)
     );
+}
+
+/// The mission result call comes from the core for every seat, whatever the
+/// audio: once, two seconds after the result is decided, to a seat that holds
+/// it under its own label.
+#[test]
+fn the_core_sends_the_mission_result_to_every_seat() {
+    let mut world = two_seat_mission();
+    world.setup.mission = Some((5000., 3000.));
+    // The fixture's enemies are already down at the first check, which would
+    // disable the calls as a result decided at the start; begin each seat's
+    // checks as they would with the enemies flying and then shot down.
+    for cockpit in &mut world.cockpits {
+        cockpit.result = ai_wings::outcome::Tracker::default();
+        cockpit.result.step(0., Some(|| false), [0.; 3], true);
+    }
+    let mut out = TickOutput::default();
+    let mut calls: Vec<(usize, SeatId, comms::Call)> = Vec::new();
+    let mut journal = Vec::new();
+    for tick in 0..1500 {
+        let inputs = [
+            SeatInput {
+                seat: SeatId(0),
+                tick: world.tick(),
+                ..SeatInput::default()
+            },
+            SeatInput {
+                seat: SeatId(1),
+                tick: world.tick(),
+                ..SeatInput::default()
+            },
+        ];
+        world.step(&inputs, &mut out).unwrap();
+        for cue in &out.cues {
+            if let Cue::Radio { seat, call } = cue
+                && call.stems.first().is_some_and(|stem| stem == "^MISSACC")
+            {
+                calls.push((tick, *seat, call.clone()));
+            }
+        }
+        journal.extend(world.comms.take_journal());
+    }
+    assert_eq!(calls.len(), 2, "one call for each seat, once: {calls:?}");
+    let (tick0, seat0, first) = &calls[0];
+    let (tick1, seat1, second) = &calls[1];
+    assert_eq!((*seat0, *seat1), (SeatId(0), SeatId(1)));
+    assert_eq!(tick0, tick1);
+    assert_eq!(
+        (first.label.as_str(), second.label.as_str()),
+        ("RIO", "YOU")
+    );
+    assert_eq!(first.kind, comms::Kind::Important);
+    // Decided on the first 4 s check after the enemies fell, then 2 s later.
+    let decided = (480 + 240) as usize;
+    assert!(
+        (decided..decided + 3).contains(tick0),
+        "delivered at tick {tick0}"
+    );
+    assert!(
+        journal.iter().any(
+            |e| e.origin.cause == comms::journal::Cause::MissionAccomplished
+                && e.heard_by == [SeatId(1)]
+        ),
+        "the call is journaled for each seat"
+    );
+}
+
+/// A mission whose result is decided before the flight starts (the fixture's
+/// enemies are down at the first check), or a flight with no mission, never
+/// sends the calls.
+#[test]
+fn no_result_call_without_a_mission_or_when_decided_at_the_start() {
+    for setup in [None, Some((5000., 3000.))] {
+        let mut world = mission();
+        world.setup.mission = setup;
+        let mut out = TickOutput::default();
+        for _ in 0..1500 {
+            let input = SeatInput {
+                tick: world.tick(),
+                ..SeatInput::default()
+            };
+            world.step(&[input], &mut out).unwrap();
+            assert!(
+                !out.cues
+                    .iter()
+                    .any(|cue| matches!(cue, Cue::Radio { call, .. }
+                    if call.stems.first().is_some_and(|s| s == "^MISSACC"))),
+                "{setup:?}"
+            );
+        }
+    }
 }
