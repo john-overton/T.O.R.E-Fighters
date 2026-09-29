@@ -16,8 +16,8 @@ scenarios of the flight lane read the ILS along a flown approach (`ils_probe:`).
 
 ## What was measured
 
-For all 578 runway ends of the 16 base theaters (and 28 to 68 more in each of four
-sampled `~` layouts): the ILS datum height at the threshold against the runway
+For all 578 runway ends of the 16 base theaters (and 28 to 68 more in each of the sampled `~` layouts
+~UKR1, ~BAL3 and ~EGY5; ~FRAF has no runway): the ILS datum height at the threshold against the runway
 support plane (the plane the wheels touch), the terrain there, the plane at the
 touchdown zone, the runway's pitch and bank, and where the ideal path crosses the
 threshold. Then an aircraft was placed on the ideal path at six ranges from 28,000
