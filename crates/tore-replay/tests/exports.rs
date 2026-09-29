@@ -633,6 +633,29 @@ fn golden_jsonl() {
 }
 
 #[test]
+fn the_summary_counts_airborne_time_only_off_the_ground() {
+    let dir = temp_dir("summary-airborne");
+    let frames: Vec<Frame> = golden_frames()
+        .into_iter()
+        .map(|mut frame| {
+            // The player is on the ground for the first 240 ticks.
+            if frame.tick < 240 {
+                frame.aircraft[0].flags.on_ground = true;
+            }
+            frame
+        })
+        .collect();
+    let recording =
+        Recording::open(write(&dir, "ground.tore-replay", &frames, &golden_footer())).unwrap();
+    let mut out = Vec::new();
+    write_summary(&recording, &SummaryOptions::default(), &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    // 481 frames at 120 a second: 241 on the ground leaves 2.0 s airborne.
+    assert!(text.contains("  airborne 0:02.0 |"), "{text}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn golden_summary() {
     let dir = temp_dir("golden-summary");
     let recording = golden_recording(&dir);
