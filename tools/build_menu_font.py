@@ -4,8 +4,11 @@ Two atlases are produced, both in the same simple format: 256 one-byte glyph
 advances, then a row-major 8-bit alpha plane of `256 * CELL_W` by `CELL_H`
 pixels. Glyph `code` occupies the column range `code * CELL_W` for `CELL_W`
 pixels on every row; its byte in the advance table says how far the pen moves
-after drawing it. ASCII 32 through 126 is populated and everything else is
-blank with a zero advance. There is no colour in the file: the application
+after drawing it. ASCII 32 through 126 is populated, and so are the CP437 letters the
+original fonts draw above 0x7F (the accented vowels and consonants, the inverted
+marks, sharp s, micro and degree signs; see `tore_formats::text`), so imported
+names such as the Kurile airport Berezovka show their accents. Everything else
+is blank with a zero advance. There is no colour in the file: the application
 supplies a flat text colour and uses the stored alpha for coverage.
 
 - `menu-font.bin`, 16 by 11 cells rendered at 10 px from Noto Sans Bold. This
@@ -37,6 +40,11 @@ SMALL = ('menu-font.bin', 16, 11, 10, 11, 3)
 LARGE = ('menu-font-large.bin', 24, 17, 14, 18, 5)
 
 
+# ASCII, then the CP437 text characters above 0x7F: 0x80 to 0xA8 (not the
+# peseta sign at 0x9E), the inverted exclamation mark, sharp s, micro and degree.
+GLYPH_CODES = list(range(33, 127)) + [c for c in range(0x80, 0xA9) if c != 0x9E] + [0xAD, 0xE1, 0xE6, 0xF8]
+
+
 def build(font, spec):
     name, cell_w, cell_h, points, baseline, crop = spec
     canvas = max(cell_w, baseline + cell_h)
@@ -44,8 +52,8 @@ def build(font, spec):
     stride = 256 * cell_w
     pixels = bytearray(stride * cell_h)
     advances[32] = max(3, round(points * 0.28))
-    for code in range(33, 127):
-        char = chr(code)
+    for code in GLYPH_CODES:
+        char = bytes([code]).decode('cp437')
         if char == chr(92):
             char *= 2
         cmd = ['magick', '-debug', 'annotate', '-size', f'{canvas}x{canvas}', 'xc:black',

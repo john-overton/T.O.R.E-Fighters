@@ -156,7 +156,9 @@ pub fn write_summary(
         let tick = frame.tick;
         for s in &frame.aircraft {
             let st = stats.entry(s.id).or_default();
-            if s.flags.airborne {
+            // The airborne flag says the aircraft is in play, and it stays set
+            // while the aircraft is parked or rolling on the ground.
+            if s.flags.airborne && !s.flags.on_ground {
                 st.airborne += 1;
             }
             if s.flags.alive {

@@ -3,6 +3,7 @@ use crate::hud::Paint;
 use crate::menu::Canvas;
 use crate::pause_menu::{self, Event, Look, PauseMenu};
 use std::time::{Duration, Instant};
+use tore_formats::text::GlyphCodes;
 use tore_formats::{font::Font, ui::MenuNode};
 use tore_input::Switch;
 use tore_sim::cheats::Damage;
@@ -854,7 +855,7 @@ pub fn draw_messages<'a>(
     for (i, line) in lines.iter().enumerate() {
         let mut x = ((w - text_width(font, line) as f64 * scale) / 2.).round();
         let y = i as f64 * line_height;
-        for ch in line.bytes() {
+        for ch in line.glyph_codes() {
             let glyph = &font.glyphs[ch as usize];
             for &(gx, gy) in &glyph.pixels {
                 let (left, up) = (x + gx as f64 * scale, y + gy as f64 * scale);
@@ -885,7 +886,7 @@ pub fn draw_messages<'a>(
     }
 }
 fn text_width(font: &Font, text: &str) -> usize {
-    text.bytes()
+    text.glyph_codes()
         .map(|ch| font.glyphs[ch as usize].advance)
         .sum()
 }

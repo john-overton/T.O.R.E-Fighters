@@ -99,6 +99,15 @@ use winit::{
     window::{CursorIcon, Fullscreen, Window, WindowId},
 };
 type AppResult<T> = Result<T, Box<dyn Error>>;
+
+/// A number given to a command-line option, or an error that names the
+/// option and what was typed rather than the parser's bare message.
+fn option_number<T: std::str::FromStr>(option: &str, value: &str) -> AppResult<T> {
+    value
+        .trim()
+        .parse()
+        .map_err(|_| format!("{option} needs a number, not '{value}'").into())
+}
 /// How an interactive start opens its window. Requested by John on 2026-09-22:
 /// the game runs native borderless fullscreen by default on every platform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2130,7 +2139,7 @@ impl App {
                 saved.apply(&mut self.flight_ui, &mut self.instruments);
                 if self.ground_start.is_some() {
                     self.flight_ui
-                        .message("Ground start: B releases brakes; PageUp adds throttle.");
+                        .message("Ground start: B releases brakes; 5 sets full throttle.");
                 }
                 if let Some(notice) = layout.as_ref().and_then(|l| l.notice()) {
                     self.flight_ui.message(notice);
@@ -2375,6 +2384,11 @@ impl ApplicationHandler for App {
                             self.combat.readout(&self.flight, 1.).weapons,
                         );
                     }
+                } else if self.screen == Screen::Flight {
+                    // A flight started straight from the command line records
+                    // itself like one started from the menu; captures, smoke
+                    // tests and timing runs have no recording library.
+                    self.start_replay_recording();
                 }
             }
             Err(error) => {
@@ -2794,6 +2808,18 @@ impl ApplicationHandler for App {
                     if !event.repeat {
                         self.toggle_fullscreen();
                     }
+                    return;
+                }
+                // Exit to desktop keeps its meaning over every screen, the
+                // controls, sound and graphics screens included.
+                if event.state == ElementState::Pressed
+                    && ((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
+                        || (self.modifiers.alt_key() && name == "F4"))
+                    && (self.controls.is_some()
+                        || self.sound_screen.is_some()
+                        || self.graphics_screen.is_some())
+                {
+                    self.action(event_loop, Action::Exit);
                     return;
                 }
                 // The controls screen takes every key press while it is open,
@@ -6636,6 +6662,18 @@ impl ApplicationHandler for LocateShell {
                 self.redraw();
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                // The game's quit shortcuts work here too, so the screen can
+                // be left from the keyboard where the desktop has no binding.
+                let quit_key = match &event.logical_key {
+                    Key::Named(winit::keyboard::NamedKey::F4) => self.modifiers.alt_key(),
+                    Key::Character(c) => self.modifiers.super_key() && c.eq_ignore_ascii_case("q"),
+                    _ => false,
+                };
+                if quit_key {
+                    self.outcome = ShellOutcome::Quit;
+                    event_loop.exit();
+                    return;
+                }
                 // Same window-mode toggle the game uses, before the field sees
                 // the key, so Alt-Enter never submits the locate form.
                 if self.modifiers.alt_key()
@@ -7016,6 +7054,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut sensor_summary = false;
     let mut validate_weather = false;
     let mut validate_maps = false;
+    let mut validate_text = false;
     let mut weather_condition: Option<usize> = None;
     let mut airport_probe: Option<(u32, tore_sim::airport::Aircraft, Option<[f64; 2]>)> = None;
     let mut ground_start_airport: Option<u32> = None;
@@ -7037,7 +7076,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--no-controllers" => native_input = false,
             "--launch-quick-mission" => { launch_creator=true; initial_screen=Screen::Flight; },
             "--ground-start" => {
-                ground_start_airport=Some(args.next().ok_or("--ground-start needs an airport number")?.parse()?);
+                ground_start_airport=Some(option_number("--ground-start", &args.next().ok_or("--ground-start needs an airport number")?)?);
             }
             "--separation" => {
                 let nm: f64 = args.next().ok_or("--separation needs a distance in nautical miles")?.parse()?;
@@ -7249,20 +7288,22 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--ai-probe-ticks" | "--ai-roster-probe-ticks" => {
                 ai_roster_probe = arg == "--ai-roster-probe-ticks";
-                let ticks: usize = args
-                    .next()
-                    .ok_or("--ai-probe-ticks requires 1..216000")?
-                    .parse()?;
+                let ticks: usize = option_number(
+                    &arg,
+                    &args.next().ok_or("--ai-probe-ticks requires 1..216000")?,
+                )?;
                 if !(1..=216_000).contains(&ticks) {
-                    return Err("AI probe tick limit exceeded".into());
+                    return Err(format!("{arg} needs 1 to 216000 ticks, not {ticks}").into());
                 }
                 ai_probe = Some(ticks);
                 ai_wings_enabled = true;
             }
             "--record-mission" => {
-                record_mission = Some(PathBuf::from(
-                    args.next().ok_or("--record-mission needs a new path")?,
-                ));
+                let path = args.next().ok_or("--record-mission needs a new path")?;
+                if path.is_empty() {
+                    return Err("--record-mission needs a new path, not an empty one".into());
+                }
+                record_mission = Some(PathBuf::from(path));
             }
             "--verify-render" => verify_render = true,
             "--recording-info" => {
@@ -7292,10 +7333,12 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 ));
             }
             "--from" | "--to" => {
-                let seconds: f64 = args
-                    .next()
-                    .ok_or(format!("{arg} needs seconds of mission time"))?
-                    .parse()?;
+                let seconds: f64 = option_number(
+                    &arg,
+                    &args
+                        .next()
+                        .ok_or(format!("{arg} needs seconds of mission time"))?,
+                )?;
                 if !(seconds.is_finite() && seconds >= 0.) {
                     return Err(format!("{arg} needs seconds of mission time, 0 or more").into());
                 }
@@ -7310,15 +7353,15 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     args.next()
                         .ok_or("--ids needs aircraft ids such as 0,7")?
                         .split(',')
-                        .map(str::parse)
+                        .map(|id| option_number("--ids", id))
                         .collect::<Result<_, _>>()?,
                 );
             }
             "--rate" => {
-                let hz: f64 = args
-                    .next()
-                    .ok_or("--rate needs samples per second")?
-                    .parse()?;
+                let hz: f64 = option_number(
+                    "--rate",
+                    &args.next().ok_or("--rate needs samples per second")?,
+                )?;
                 if !(hz.is_finite() && hz > 0. && hz <= 120.) {
                     return Err("--rate needs samples per second above 0 and at most 120".into());
                 }
@@ -7363,11 +7406,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--list-inputs" => input_seconds = Some(2),
             "--monitor-inputs" => {
-                input_seconds = Some(
-                    args.next()
-                        .ok_or("--monitor-inputs needs seconds")?
-                        .parse::<u64>()?,
-                )
+                input_seconds = Some(option_number::<u64>(
+                    "--monitor-inputs",
+                    &args.next().ok_or("--monitor-inputs needs seconds")?,
+                )?)
             }
             "--write-input-profile" => {
                 write_input_profile = Some(PathBuf::from(
@@ -7661,23 +7703,25 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 smoke_test = true;
             }
             "--replay-tick" => {
-                replay_options.tick =
-                    Some(args.next().ok_or("--replay-tick needs a tick")?.parse()?);
+                replay_options.tick = Some(option_number(
+                    "--replay-tick",
+                    &args.next().ok_or("--replay-tick needs a tick")?,
+                )?);
             }
             "--replay-aircraft" => {
-                replay_options.aircraft = Some(
-                    args.next()
-                        .ok_or("--replay-aircraft needs an aircraft id")?
-                        .parse()?,
-                );
+                replay_options.aircraft = Some(option_number(
+                    "--replay-aircraft",
+                    &args.next().ok_or("--replay-aircraft needs an aircraft id")?,
+                )?);
             }
             "--replay-drone" => replay_options.drone = true,
             "--replay-speed" => {
-                replay_options.speed = Some(
-                    args.next()
-                        .ok_or("--replay-speed needs a speed such as 16 or -2")?
-                        .parse()?,
-                );
+                replay_options.speed = Some(option_number(
+                    "--replay-speed",
+                    &args
+                        .next()
+                        .ok_or("--replay-speed needs a speed such as 16 or -2")?,
+                )?);
             }
             "--replay-ui" => {
                 replay_options.ui = replay::viewer::Ui::parse(
@@ -7764,6 +7808,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--scope-history" => scope_history = true,
             "--validate-weather" => validate_weather = true,
             "--validate-maps" => validate_maps = true,
+            "--validate-text" => validate_text = true,
             "--weather-condition" => {
                 let value: usize = args
                     .next()
@@ -7789,7 +7834,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display.
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, airports, ground-targets-unavailable, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -8094,6 +8139,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && !validate_creator
         && !validate_weather
         && !validate_maps
+        && !validate_text
         && !(airport_probe.is_some() && !(smoke_test && initial_screen == Screen::Flight))
         && std::env::var_os("TORE_ENVIRONMENT_PROBE").is_none();
     // Borderless fullscreen on the monitor the window would have opened on is
@@ -8196,6 +8242,77 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     };
     diagnostics::stage_done();
     if import_only {
+        return Ok(Outcome::Done);
+    }
+    if validate_text {
+        // Every imported string must decode without loss and be drawable in the
+        // original fonts. Retail text is CP437 (tore_formats::text); the only
+        // byte above 0x7F in any text is the Kurile airport's e with a diaeresis.
+        let mut problems: Vec<String> = Vec::new();
+        let mut accented = Vec::new();
+        for (name, bytes) in &assets.theater_resources {
+            if !(bytes.starts_with(b"textFormat")
+                || name.ends_with(".MT")
+                || name.ends_with(".BRF"))
+            {
+                continue;
+            }
+            for line in bytes.split(|b| *b == b'\n' || *b == 0) {
+                if line.iter().any(|b| *b >= 0x80) {
+                    let text = tore_formats::text::decode_cp437(line);
+                    accented.push(format!("{name}: {}", text.trim()));
+                    if let Some(c) = text.chars().find(|c| {
+                        *c != '\r' && !tore_formats::text::is_drawn(*c) && !c.is_control()
+                    }) {
+                        problems.push(format!(
+                            "{name}: {c:?} cannot be drawn in the original fonts: {text}"
+                        ));
+                    }
+                }
+            }
+        }
+        let quick = quick_mission::QuickMission::new(
+            aircraft_id,
+            assets.creator_options.clone(),
+            &assets.theater_resources,
+        );
+        let mut strings = quick.imported_strings();
+        for (name, bytes) in &assets.theater_resources {
+            if name.ends_with(".JT")
+                && let Ok(weapon) = tore_formats::weapons::Weapon::parse(name, bytes)
+            {
+                strings.push((format!("weapon {name}"), weapon.name));
+                strings.push((format!("weapon {name} HUD name"), weapon.hud_name));
+            }
+            if name.ends_with(".PT")
+                && let Ok(aircraft) = tore_formats::aircraft::Aircraft::parse(bytes)
+            {
+                strings.push((format!("aircraft {name}"), aircraft.name));
+            }
+        }
+        for (what, text) in &strings {
+            if text.contains('\u{fffd}') {
+                problems.push(format!("{what}: replacement character in {text:?}"));
+            }
+            if let Some(c) = text.chars().find(|c| !tore_formats::text::is_drawn(*c)) {
+                problems.push(format!("{what}: {c:?} cannot be drawn in {text:?}"));
+            }
+        }
+        for line in &accented {
+            println!("non-ASCII text: {line}");
+        }
+        println!(
+            "Scanned {} imported strings, {} lines with non-ASCII bytes, {} problems",
+            strings.len(),
+            accented.len(),
+            problems.len()
+        );
+        for problem in &problems {
+            println!("  PROBLEM {problem}");
+        }
+        if !problems.is_empty() {
+            return Err("imported text problems".into());
+        }
         return Ok(Outcome::Done);
     }
     if validate_maps {
@@ -10117,6 +10234,15 @@ mod startup_tests {
 
     fn path(text: &str) -> Option<PathBuf> {
         Some(PathBuf::from(text))
+    }
+
+    #[test]
+    fn a_bad_option_number_names_the_option_and_the_text() {
+        assert_eq!(option_number::<u64>("--replay-tick", " 12 ").unwrap(), 12);
+        assert_eq!(option_number::<f64>("--rate", "2.5").unwrap(), 2.5);
+        let error = option_number::<u64>("--replay-tick", "-5").unwrap_err();
+        assert_eq!(error.to_string(), "--replay-tick needs a number, not '-5'");
+        assert!(option_number::<f64>("--rate", "abc").is_err());
     }
 
     #[test]

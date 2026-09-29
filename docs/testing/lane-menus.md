@@ -18,11 +18,12 @@ cargo build --locked -p tore-app
 python3 tools/battery.py --lane menus --jobs 6 --windows 2 --tag menus
 ```
 
-It takes about eight minutes on the dev machine with six jobs and two windows
-(566 scenarios): the headless ones (CPU snapshots, instrument windows and headless
-mission starts, about 450) take a few minutes, the windowed ones (about 110, each a
-real window through `tools/agent-run.sh`) about six, and the creator probe
-`menus-validate-creator` about eight on its own, in parallel with the rest. The
+It takes about ten minutes on the dev machine with six jobs and two windows
+(637 scenarios, 608 seconds at the last run): the headless ones (CPU snapshots,
+instrument windows and headless mission starts, about 480) take a few minutes, the
+windowed ones (about 170, each a real window through `tools/agent-run.sh`) about
+eight, and the creator probe `menus-validate-creator` about eight on its own, in
+parallel with the rest. The
 scenarios count as the pass or fail; pictures the scenarios write are checked
 for size and blankness, and were also looked at by the agent that wrote them.
 
@@ -31,6 +32,8 @@ for size and blankness, and were also looked at by the agent that wrote them.
 | Scenarios | What they do |
 | --- | --- |
 | `menus-validate-creator` | `--validate-creator`: loadouts for all 14 aircraft including every removed-store case, then the creator matrix, the render sweep and the input fuzz (below) |
+| `menus-validate-text` | `--validate-text`: every imported string decodes without U+FFFD and is drawable in the original fonts |
+| `menus-window-terrain-*` | Real-window captures on every base theater (clear, night), four theaters in each other weather, and ground starts in all six weathers, checked for blank, black, one-colour, dark-day and bright-night frames |
 | `menus-validate-maps`, `menus-validate-weather` | Every imported map layout and every weather module and choice |
 | `menus-snap-*` | A CPU snapshot of every `--snapshot-state` value (main menu, Pref, controls tabs, graphics, sound, replays, locate), each checked for the right size and not being blank |
 | `menus-snap-quick-*` | The same for the creator, the aircraft and theater popups, the Load Ordnance page (normal, empty, drag, messages), the five debrief pages and both outcomes, for every aircraft and for every one of the 75 theater layouts |
@@ -86,6 +89,73 @@ New tests: `combat::tests::an_emptied_station_stays_empty_and_is_not_listed` and
 `live::tests::the_selection_ring_skips_stations_that_carry_nothing`,
 `ordnance::tests::taking_every_store_off_by_any_route_leaves_zeros_that_still_validate`.
 
+## Round two (2026-09-29)
+
+**Garbled text.** Retail text is DOS code page 437, not UTF-8. The evidence is the
+original fonts: `WIN11`, `HUD11` and the other FNT files draw exactly the CP437
+text characters above 0x7F (accented letters at 0x80 to 0xA5, 0xA8, 0xAD, sharp s,
+micro, degree) and no box-drawing cells. Across every imported text resource the only
+byte above 0x7F is 0x89 in `KURILE.MM`, the airport `Ber\x89zovka`, an e with a
+diaeresis (Berezovka with the diaeresis, "Berëzovka"). It was read lossily and printed
+as U+FFFD; the map label dropped the letter; the bundled menu font had no cell for it.
+Now mission layout text decodes as CP437 (`tore_formats::text`), every drawing path
+(menus, creator, HUD, instruments, flight map, messages, replay and controls text, the
+debrief) puts each character on its CP437 font cell, the two bundled menu font atlases
+gain the CP437 letters (their ASCII columns are byte for byte unchanged), and theater
+names may carry CP437 letters. Checked in the creator's airport popup ("Berëzovka") and
+on the flight map ("BERËZOVKA"). `--validate-text` (scenario `menus-validate-text`)
+scans 2,175 imported strings (creator lists, airports, aircraft, weapons) and every
+text resource for U+FFFD and for characters the original fonts cannot draw; it found
+one line and no problems. With `TORE_CREATOR_DUMP` the render sweep also draws a sample
+with accented letters in every bitmap font: all the original menu fonts have real
+letters at the CP437 cells, which confirms the character set. Commits `d0209f3`,
+`b08cae4` and the theater-name commit between them.
+
+**Terrain, sky and weather sweep.** 192 real-window captures at 960 by 720 (all 16
+base theaters and eight variants, all six weather choices airborne, clear, dawn and
+night ground starts, aircraft rotated through all 14) plus 60 in the lane
+(`menus-window-terrain-*`) with an image check (`frame_stats`, `scene_problems` in
+`menus.py`, tested in `tools/test_battery_menus.py`): not black, not one colour, day
+bright, night dark, sky and ground both present. No blank, black or missing terrain,
+no missing sky, no bright night or dark day. What the images show, all from the
+imported haze tables and consistent with them:
+- Cloudy and foggy weather at the default 5,000 ft start hide the ground completely (the
+  tables put 256 of 256 haze at 6,000 ft cloudy and 500 ft foggy). Cloudy is visible at
+  300 and 1,500 ft above ground, dim and washed out; fog is visible only on a ground
+  start, and fades within a runway length.
+- Athens (Greece) and Stanley (Falklands) airport pavement is pure white in daylight
+  (grey at night); every other airport paving is grey or brown.
+One finding for John to decide: **the HUD is hard to read over fog and cloud.** HUD
+green has a luminance contrast of 1.04 to 1.08 to one against fog and cloud (1.3 over
+clear sky), so it is told apart by hue alone. The lane tried a soft dark shadow one
+pixel down and right of each HUD pixel (commit 78e62e1, fitted). That is a visual
+design change, so the parent reverted it on the `bug-bash` branch; cherry-pick 78e62e1
+to get it back.
+
+**Feature claim audit.** 44 claims from the menu, creator, briefing, preference,
+ordnance and HUD rows of `docs/features.md` and their specs were checked against the
+app (capture, snapshot, headless probe or code and test): the separation list, wings up
+to 29 plus the player, right-click cycling and the player wing never reaching zero,
+ground-target popup text and geometry, the objective and survival selectors, Replays
+after Multi, the Sound/Music Prefs sliders, defaults and file name, graphics defaults
+and file name, five debrief pages and the rocker, loadout outlines, drag, sounds and
+Cheat, NAV/LCOS/ARM status text, the WEAPONS window, the 162 by 160 instrument frames,
+seven message lines and five seconds with a 5 pixel margin, the W waypoint key, the pack
+limits (32,768 resources, 1 GiB), `--version`, fullscreen and window-size rules,
+diagnostics self-test, ground start on NAV and airborne start with the gun armed,
+1,000 ft pipper and damage regions for every aircraft (`--validate-creator`), AGL and
+VS only on an active ILS, and the greyed Replay Last Mission and Continue Old Campaign.
+Stale and fixed: the window-mode row said preferences were format version 6 (it is 7,
+reading 1 to 6); the damage row said twelve aircraft (fourteen are selectable);
+`--help` listed four of the creator's thirty-odd snapshot states; the graphics spec said
+an unreadable settings file was silent.
+
+**Corrupt controls file.** `docs/INPUT.md` says a bad profile "fails with a line
+number", and no document says the automatic `input-v1.conf` must fall back. The
+behaviour is documented as failing, so it stays as it is; the round one change made the
+error name the file. It is no longer an open decision, only a note that an empty or
+binary file has no line number to report.
+
 ## Found and not fixed
 
 - **`--combat-smoke` fails for 13 of the 14 aircraft** (only the MiG-29 passes). Its
@@ -118,18 +188,19 @@ New tests: `combat::tests::an_emptied_station_stays_empty_and_is_not_listed` and
 - **Creator rows that change nothing yet.** The situation row (neutral, friendly,
   hostile) and both nationality rows are presentation only; the mission does not use
   them ([creator spec](../spec/quick-mission-menu.md)).
-- **A broken controls file stops the game starting.** `input-v1.conf` that is empty,
-  binary or the wrong version makes start-up fail with an error, while every other
-  settings file falls back to defaults. The controls guide says a bad profile "fails with
-  a line number"; that holds for a bad line but an empty or binary file has no line. The
-  message now names the file. Whether it should instead fall back to the default
-  bindings, as the other files do, is a decision.
 - **HUD line for a dry station.** After the last round is fired, the station stays
   selected and the HUD reads `0 M61`, the weapons window still lists it, until the next
   `[` or `]`. Retail behaviour here is not recorded.
 
 ## Needs a human eye or ear
 
+- Night ground starts in desert theaters (Egypt, Iraq, Persian Gulf and others) show a
+  brown ground clearly lighter than the sky; the image check passes it, but whether
+  retail night ground was that lit is unknown.
+- The HUD's new dark edge (round two) looks subtle in captures; a human should judge it
+  against fog, cloud and a bright sky.
+- Athens and Stanley airport pavement is pure white in daylight; fog and cloud hide the
+  ground at the default 5,000 ft start (see round two).
 - Portrait windows (640 by 900): the flight view fills the window while the paused menu
   and its bottom buttons sit in a centred 4 by 3 box in the middle. It looks
   deliberate but odd.

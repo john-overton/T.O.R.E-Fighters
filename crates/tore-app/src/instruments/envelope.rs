@@ -1,6 +1,7 @@
 //! Filled clean-aircraft chart. See docs/spec/envelope.md for fitted presentation.
 use super::{CombatReadout, Raster, SCREEN};
 use crate::flight::State;
+use tore_formats::text::GlyphCodes;
 use tore_formats::{aircraft::Envelope, font::Font};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -227,7 +228,7 @@ pub(super) fn draw(
     let (x, y) = scale.marker(state.speed, state.position[1]);
     r.rect(x, y, 4, 4, marker_color(state.ticks));
     let width = |s: &str| {
-        s.bytes()
+        s.glyph_codes()
             .map(|ch| font.glyphs[ch as usize].advance as i32)
             .sum::<i32>()
     };

@@ -16,6 +16,7 @@ pub mod radio;
 pub mod shape;
 pub mod static_object;
 pub mod strip;
+pub mod text;
 pub mod theater;
 pub mod ui;
 pub mod weapons;

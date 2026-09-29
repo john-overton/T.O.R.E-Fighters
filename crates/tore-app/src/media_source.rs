@@ -251,9 +251,12 @@ impl MediaSource {
                 let path = named(&files(&self.path)?, name)
                     .cloned()
                     .ok_or_else(|| format!("{}: missing {name}", self.path.display()))?;
-                Ok(Archive::open(path)?)
+                Archive::open(&path).map_err(|error| unreadable_archive(&path, name, &error))
             }
-            Kind::Disc => Ok(self.container()?.archive(name)?),
+            Kind::Disc => self
+                .container()?
+                .archive(name)
+                .map_err(|error| unreadable_archive(&self.path, name, &error)),
         }
     }
 
@@ -263,7 +266,9 @@ impl MediaSource {
     pub(crate) fn optional_archive(&self, name: &str) -> AppResult<Option<Archive>> {
         match self.kind {
             Kind::Installed => match named(&files(&self.path)?, name).cloned() {
-                Some(path) => Ok(Some(Archive::open(path)?)),
+                Some(path) => Archive::open(&path)
+                    .map(Some)
+                    .map_err(|error| unreadable_archive(&path, name, &error)),
                 None => Ok(None),
             },
             Kind::Disc => {
@@ -271,7 +276,10 @@ impl MediaSource {
                 if container.entry(name).is_none() {
                     return Ok(None);
                 }
-                Ok(Some(container.archive(name)?))
+                container
+                    .archive(name)
+                    .map(Some)
+                    .map_err(|error| unreadable_archive(&self.path, name, &error))
             }
         }
     }
@@ -300,6 +308,20 @@ impl MediaSource {
             Kind::Disc => Ok(self.container()?.read("FA.EXE", EXECUTABLE_LIMIT)?),
         }
     }
+}
+
+/// The importer's message for an archive that is present but cannot be read,
+/// naming the file and what to do, instead of the bare reader error.
+fn unreadable_archive(
+    path: &Path,
+    name: &str,
+    error: &dyn std::fmt::Display,
+) -> Box<dyn std::error::Error> {
+    format!(
+        "{name} could not be read ({error}) at {}. The file looks damaged or incomplete. Copy it again from your disc or reinstall the game, then import again.",
+        path.display()
+    )
+    .into()
 }
 
 /// Check one root and its immediate subdirectories, appending every hit.
@@ -642,6 +664,37 @@ mod tests {
             MediaSource::detect(&directory.0).unwrap_err(),
             DetectError::NotASource(_)
         ));
+    }
+
+    #[test]
+    fn a_damaged_archive_is_named_with_what_to_do() {
+        let directory = TempDir::new();
+        installed(&directory);
+        let mut damaged = ealib("TWO.DLG", b"two");
+        damaged.truncate(damaged.len() - 1);
+        directory.file("FA_2.LIB", &damaged);
+        directory.file("FA_4B.LIB", b"");
+        let source = MediaSource::detect(&directory.0).unwrap();
+        for message in [
+            source.archive("FA_2.LIB").err().unwrap().to_string(),
+            source
+                .optional_archive("FA_4B.LIB")
+                .err()
+                .unwrap()
+                .to_string(),
+        ] {
+            assert!(message.contains("could not be read"), "{message}");
+            assert!(message.contains("Copy it again"), "{message}");
+            assert!(message.contains(directory.0.to_str().unwrap()), "{message}");
+        }
+        assert!(
+            source
+                .archive("FA_2.LIB")
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("FA_2.LIB")
+        );
     }
 
     #[test]
