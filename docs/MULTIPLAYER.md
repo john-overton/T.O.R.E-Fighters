@@ -552,6 +552,15 @@ Made by John on 2026-09-28 at the review of the stage A and B design
 | Collisions | Always on, whatever the friendly-fire setting |
 | Refactor window | Stages A and B may change the AI whenever it makes sense; no other work is going in |
 
+Made by John on 2026-09-29 at the stage B review
+([architecture](ARCHITECTURE.md#mission-core-and-seats)):
+
+| Question | Decision |
+| --- | --- |
+| Wing order call | The call cuts off the wing lines still playing and holds the sender's radio channel for its length, for every seat and whether or not a sound device plays it. Single player too |
+| Kill credit | Every shooter is credited: an AI that shoots down a human-flown aircraft gets the kill in the debrief and the mission recording, as a human does. Single player too |
+| Merge from main | When the bug bash lands on main, merging it into the multiplayer work is planned as its own stage, a new C, and the later stages move down one letter; John says when it has landed |
+
 ## Open questions
 
 From the feature spec. Mission start, PvP scoring and collisions were settled by
