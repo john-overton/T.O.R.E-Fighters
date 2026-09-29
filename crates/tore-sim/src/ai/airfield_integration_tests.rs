@@ -1086,10 +1086,11 @@ fn a_steep_sinking_final_over_the_runway_goes_around_instead_of_ejecting() {
 }
 
 /// Normal landing geometry over the runway, low and sinking, is neither an
-/// ejection nor a go-around: the aircraft flares and lands.
+/// ejection nor a go-around: the aircraft flares and lands. Normal is the
+/// 3 degree path plus some correction since 2026-09-29 (6 degrees before).
 #[test]
 fn a_low_sinking_final_over_the_runway_lands_without_ejecting() {
-    let mut mission = steep_final(400., 60., 6., -3_600., 0.);
+    let mut mission = steep_final(400., 60., 4.5, -3_600., 0.);
     assert_eq!(fly_without_ejecting(&mut mission, 120), 0);
     assert_eq!(
         mission.actor(1).unwrap().airfield_phase(),

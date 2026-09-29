@@ -234,6 +234,12 @@ between aircraft: spacing comes only from these two gates, re-tested every 5 s.
 | Airport lost | `0x4bd170..0x4bd194`; takeoff `0x4badf4..0x4bae23` | Airport object dead: an aircraft in landing states 0x13..0x15 takes the takeoff-finish tail and flies on; one in 0x16..0x1e or in takeoff states 1..8 is removed (`_Kill`) |
 | Vertical and carrier landings | 0x16 `0x4bc780`, 0x18 `0x4bc999`, 0x19 `0x4bca19`, `_APEndArrestorCatch` `0x4bc240` | Arrest at +0x107 deceleration then state 0x1a; vertical types descend to the anchor at 50 ft/s with nozzles -80, then hold 5 s |
 
+The shipped AI approach and final fly 3 degrees instead of the recovered
+6 degree path (+0x10d), to the player's ILS aim point 1,000 ft past the
+threshold instead of the landing anchor, matching the player's ILS (opinionated, requested by
+John on 2026-09-29; [AI airfield sequences](../spec/ai-airfield.md)). The
+recovered value in the table stays the retail evidence.
+
 The player takes the landing states from `_ServicePlayer` `0x417420..0x4174ca`: gear down,
 below 4000 ft AGL, no faster than 953 ft/s and within 25000 ft of the nearest friendly
 airport puts the player in 0x14 (0x12 just after a takeoff, changing to 0x14 when

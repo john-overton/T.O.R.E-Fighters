@@ -261,10 +261,12 @@ pub const MARSHAL_INNER_FT: f64 = 26_400.0;
 pub const MARSHAL_ALTITUDE_FT: f64 = 6_000.0;
 pub const MARSHAL_STEP_FT: f64 = 1_000.0;
 pub const MARSHAL_FLOOR_FT: f64 = 1_000.0;
-/// Spec-derived approach: three gates on a 6 degree path back from the
-/// landing point, at 4/6, 2/6 and 1/6 of the marshal distance, each done
-/// within 250 ft horizontally.
-pub const APPROACH_PATH_DEG: f64 = 6.0;
+/// Approach: three gates back from the landing point, at 4/6, 2/6 and 1/6
+/// of the marshal distance (spec-derived), each done within 250 ft
+/// horizontally, on the player's 3 degree ILS glide path angle
+/// (opinionated, requested by John on 2026-09-29; retail used 6 degrees,
+/// recorded in docs/formats/ai.md).
+pub const APPROACH_PATH_DEG: f64 = crate::airport::GLIDE_SLOPE_DEGREES;
 pub const APPROACH_GATES_FT: [f64; 3] = [35_200.0, 17_600.0, 8_800.0];
 pub const GATE_CAPTURE_FT: f64 = 250.0;
 /// Fitted: a gate also counts as flown once it is abeam or behind and
@@ -284,7 +286,9 @@ pub const APPROACH_SPEED_FACTOR: f64 = 1.1;
 pub const GLIDE_CORRECTION_DEG_PER_FT: f64 = 0.02;
 pub const GLIDE_CORRECTION_LIMIT_DEG: f64 = 3.0;
 /// Fitted flare. Retail has no flare state; the hybrid touchdown check
-/// would reject the 6 degree sink rate at the wheels.
+/// would reject the full-path sink rate at the wheels (6 degrees in retail,
+/// 3 degrees since 2026-09-29, about 12 ft/s at 137 kt, eased to the 1.5
+/// degree minimum, about 6 ft/s).
 pub const FLARE_HEIGHT_FT: f64 = 60.0;
 pub const FLARE_PITCH_DEG: f64 = -1.5;
 /// Fitted height-to-sink horizon. A fast descent must start easing before
@@ -695,16 +699,40 @@ impl Sequence {
         }
     }
 
-    /// Landing point: the airport's landing anchor, or a quarter of the way
-    /// down the chosen end.
+    /// Landing point: the player's ILS aim point on the landing end,
+    /// [`crate::airport::AIM_PAST_THRESHOLD_FT`] past its threshold on the
+    /// runway plane (opinionated, requested by John on 2026-09-29, so AI and
+    /// player fly one glide path). With anchors the end is the one facing the
+    /// airport's landing heading. Retail aimed at the landing anchor (box
+    /// 0x12), or without anchors a quarter of the way down the runway.
     pub fn landing_point(&self) -> [f64; 3] {
+        let end = self.landing_end();
+        let threshold = self.runway.threshold(end);
+        let heading = self.runway.heading_from(end);
+        let aim = crate::airport::AIM_PAST_THRESHOLD_FT;
+        [
+            threshold[0] + heading.sin() * aim,
+            self.runway.elevation_ft,
+            threshold[2] + heading.cos() * aim,
+        ]
+    }
+
+    /// The runway end landed on: with anchors, the end whose approach
+    /// heading is nearest the airport's landing heading.
+    fn landing_end(&self) -> ApproachEnd {
         match self.runway.anchors {
-            Some(anchors) => anchors.landing_point,
-            None => self.point(
-                self.runway.threshold(self.end),
-                self.runway.length_ft * AIM_POINT_FRACTION,
-                0.0,
-            ),
+            Some(anchors) => {
+                let off = |end| {
+                    wrap_deg((self.runway.heading_from(end) - anchors.landing_heading).to_degrees())
+                        .abs()
+                };
+                if off(ApproachEnd::Near) <= off(ApproachEnd::Far) {
+                    ApproachEnd::Near
+                } else {
+                    ApproachEnd::Far
+                }
+            }
+            None => self.end,
         }
     }
 
@@ -728,11 +756,14 @@ impl Sequence {
         }
     }
 
-    /// Approach gate `k` (0..3): on the 6 degree path back from the landing point.
+    /// Approach gate `k` (0..3): on the approach path back from the landing point.
     pub fn gate(&self, k: usize) -> [f64; 3] {
         let distance = APPROACH_GATES_FT[k.min(2)];
         let mut p = self.point(self.landing_point(), -distance, 0.0);
-        p[1] = self.landing_point()[1] + distance * APPROACH_PATH_DEG.to_radians().tan();
+        p[1] = self.landing_point()[1]
+            + crate::airport::glide_path_height_ft(
+                distance - crate::airport::AIM_PAST_THRESHOLD_FT,
+            );
         p
     }
 
@@ -1001,7 +1032,7 @@ impl Sequence {
         let (along, _) = self.frame(s.position, self.landing_point());
         let height = s.position[1] - self.runway.elevation_ft - s.ground_clearance_ft;
         (
-            (-along).max(0.0) * APPROACH_PATH_DEG.to_radians().tan(),
+            crate::airport::glide_path_height_ft(-along - crate::airport::AIM_PAST_THRESHOLD_FT),
             height,
         )
     }
@@ -1206,7 +1237,10 @@ impl Sequence {
             Phase::Final => {
                 let (along, cross) = self.frame(s.position, self.landing_point());
                 let to_aim = -along;
-                let path = to_aim.max(0.0) * APPROACH_PATH_DEG.to_radians().tan();
+                // The player's ILS path, in wheel height above the runway.
+                let path = crate::airport::glide_path_height_ft(
+                    to_aim - crate::airport::AIM_PAST_THRESHOLD_FT,
+                );
                 let mut pitch = -APPROACH_PATH_DEG
                     + ((path - height) * GLIDE_CORRECTION_DEG_PER_FT)
                         .clamp(-GLIDE_CORRECTION_LIMIT_DEG, GLIDE_CORRECTION_LIMIT_DEG);
@@ -1554,18 +1588,18 @@ mod tests {
         let final_step = |height: f64, speed: f64| {
             let mut seq = landing();
             seq.phase = Phase::Final;
-            let step = seq.step(&on_final(&seq, 5000., height, speed));
+            let step = seq.step(&on_final(&seq, 8000., height, speed));
             (step, seq.phase())
         };
         // Fast and above the path: the speedbrake opens and the final goes on.
-        let (step, phase) = final_step(path(5000.) + 100., 400.);
+        let (step, phase) = final_step(path(8000.) + 100., 400.);
         assert!(step.command.brakes && !step.go_around);
         assert_eq!(phase, Phase::Final);
         // Fast but below the path: no speedbrake.
-        let (step, _) = final_step(path(5000.) - 50., 400.);
+        let (step, _) = final_step(path(8000.) - 50., 400.);
         assert!(!step.command.brakes && !step.go_around);
         // More than PATH_LOST_FT below it: go around while there is height.
-        let (step, phase) = final_step(path(5000.) - PATH_LOST_FT - 20., 240.);
+        let (step, phase) = final_step(path(8000.) - PATH_LOST_FT - 20., 240.);
         assert!(step.go_around);
         assert_eq!(phase, Phase::Marshal);
         // Under the floor the ordinary flare and landing rules apply instead.
@@ -1628,11 +1662,14 @@ mod tests {
     }
 
     #[test]
-    fn approach_gates_sit_on_the_retail_six_degree_path() {
+    fn approach_gates_sit_on_the_player_ils_path() {
+        // John, 2026-09-29: the AI flies the player's 3 degree ILS path to
+        // its aim point 1,000 ft past the threshold (retail: 6 degrees to a
+        // quarter of the way down, gates about 3,700, 1,850 and 925 ft up).
         let s = landing();
         let aim = s.landing_point();
-        assert_eq!(aim, [0., 0., -2000.]);
-        for (k, (distance, height)) in [(35_200., 3_700.), (17_600., 1_850.), (8_800., 925.)]
+        assert_eq!(aim, [0., 0., -3000.]);
+        for (k, (distance, height)) in [(35_200., 1_845.), (17_600., 922.), (8_800., 461.)]
             .into_iter()
             .enumerate()
         {

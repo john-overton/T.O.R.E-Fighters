@@ -5123,6 +5123,9 @@ struct ProbeWatch {
     /// Ticks between trace lines for the player's wing, 0 for none.
     trace: u64,
     go_arounds: std::collections::BTreeMap<u32, u32>,
+    /// Distance past each final's aim point last tick, to catch the
+    /// threshold crossing.
+    final_past: std::collections::BTreeMap<u32, f64>,
 }
 
 /// Aircraft on the ground closer than this are reported as touching.
@@ -5242,6 +5245,36 @@ impl ProbeWatch {
                     );
                 }
                 self.go_arounds.insert(slot.id, count);
+                // The wheel height over the threshold on final: the ILS
+                // path crosses it about 52 ft up.
+                if sequence.phase() == tore_sim::ai::airfield::Phase::Final {
+                    let point = sequence.landing_point();
+                    let [x, y, z] = f.position;
+                    let [vx, _, vz] = f.velocity;
+                    let past = ((x - point[0]) * vx + (z - point[2]) * vz) / vx.hypot(vz).max(1.);
+                    let at = -tore_sim::airport::AIM_PAST_THRESHOLD_FT;
+                    if let Some(&before) = self.final_past.get(&slot.id)
+                        && before < at
+                        && past >= at
+                    {
+                        let clearance = actor
+                            .flight()
+                            .model()
+                            .configuration()
+                            .equipment
+                            .ground_clearance_ft;
+                        println!(
+                            "t={tick} ({seconds:.1}s) THRESHOLD {} wheels={:.0} ft (path {:.0}) kt={:.0}",
+                            slot.label(),
+                            y - clearance - point[1],
+                            tore_sim::airport::threshold_crossing_height_ft(),
+                            f.speed * 3600. / 6076.12
+                        );
+                    }
+                    self.final_past.insert(slot.id, past);
+                } else {
+                    self.final_past.remove(&slot.id);
+                }
             }
             if !actor.alive() || f.crashed {
                 continue;

@@ -124,6 +124,22 @@ def probe_problems(
                 problems.append(f"{label} never landed: {phases[:160]}")
     problems.extend(radio_problems(output))
     problems.extend(objective_problems(output))
+    problems.extend(threshold_problems(output))
+    return problems
+
+
+THRESHOLD = re.compile(r"^t=\d+ \(([\d.]+)s\) THRESHOLD (\S+ \d-\d+) wheels=(-?\d+) ft", re.M)
+# An AI final crossing the threshold this low is landing short, this high
+# is landing long (the ILS path crosses it about 52 ft up).
+THRESHOLD_LOW_FT = 10
+THRESHOLD_HIGH_FT = 300
+
+
+def threshold_problems(output: str) -> list[str]:
+    problems = []
+    for seconds, label, wheels in THRESHOLD.findall(output):
+        if not THRESHOLD_LOW_FT <= int(wheels) <= THRESHOLD_HIGH_FT:
+            problems.append(f"{label} crossed the threshold with its wheels {wheels} ft up at {seconds}s")
     return problems
 
 
@@ -283,7 +299,6 @@ def fight(f: int, e: int, *extra: str) -> list[str]:
     return ["--probe-fight", f"{f}:{e}", *extra]
 
 
-_SHORT = "returning to base, the winners land short of Simferopol heading north after a slow final (docs/testing/lane-ai.md, Known failures)"
 _STRIP = "1,074 ft strip, the roll runs off the end (docs/testing/lane-ai.md, decision 11)"
 
 # Failures that are understood and documented in docs/testing/lane-ai.md. Each
@@ -292,8 +307,6 @@ KNOWN_FAILURES = {
     "ai-fuzz-0028": "F-22 wingmen follow the test harness leader at 1,070 kt to the map edge (docs/testing/lane-ai.md, decision 5)",
     "ai-theater-apa-takeoff-a3": _STRIP,
     "ai-theater-lfa-takeoff-a3": _STRIP,
-    "ai-long-1v1": _SHORT,
-    "ai-long-5v5": _SHORT,
     "ai-theater-cub-takeoff-a1": "friendly wing with no route leaves the map on a Key West ground start (docs/testing/lane-ai.md, decision 5)",
 }
 
@@ -508,6 +521,15 @@ def scenarios() -> list[Scenario]:
                                             "--separation", "10", *attack),
                      ticks=72000, timeout=1800, check=winners_go_home,
                      notes="the winning wing lands at its home runway once no hostile aircraft remains (added 2026-09-29)"))
+    # A 15-aircraft winning side returning to base on a 3 degree path in
+    # several theaters: every one must land or still be in the sequence.
+    for theater in ("UKR", "PGU", "FRA", "VLA"):
+        out.append(probe(f"rtb-after-win-2v15-{theater.lower()}",
+                         ["--theater", theater, *fight(2, 15, "--aircraft", "mig21", "--probe-friendly-aircraft", "mig21",
+                                                       "--probe-enemy-aircraft", "f18", "--probe-enemy-skill", "ace",
+                                                       "--separation", "10", *attack)],
+                         ticks=144000, timeout=3600, check=winners_go_home,
+                         notes="fifteen winners land on the 3 degree path (added 2026-09-29)"))
     out.append(probe("regress-decoy-over-100", fight(2, 2, "--aircraft", "su25", "--probe-friendly-aircraft", "su25",
                                                      "--probe-enemy-aircraft", "mig21", "--separation", "5", *attack),
                      ticks=6000, notes="mission aborted: decoy percentages exceed 100 (fixed 2026-09-28)"))
@@ -549,12 +571,16 @@ def scenarios() -> list[Scenario]:
     # or flying free, never still on its way down after 20 minutes.
     def damaged_outcome(output: str) -> list[str]:
         problems = probe_problems(output, allow_anomalies=("outside the world",))
-        final = re.search(r"^actor=\d+ Enemy 1-1 \S+ activity=(.*?) alive=(true|false)", output, re.M)
+        final = re.search(r"^actor=(\d+) Enemy 1-1 \S+ activity=(.*?) alive=(true|false)", output, re.M)
         # Still flying its approach counts as flying: over the hills south of
         # Simferopol a slow damaged approach can take more than 20 minutes
-        # (lane doc, "Needs a decision", item 6). Stuck on the ground does not.
-        if final and final.group(2) == "true" and final.group(1) in ("Taxiing", "Waiting to take off"):
-            problems.append(f"damaged Enemy 1-1 still {final.group(1)} after 20 minutes")
+        # (lane doc, "Needs a decision", item 6). Stuck on the ground does not,
+        # but taxiing in after landing (its sequence clearing the runway) is
+        # the recovery finishing.
+        if final and final.group(3) == "true" and final.group(2) in ("Taxiing", "Waiting to take off"):
+            taxiing_in = re.search(rf"^AI damage: actor={final.group(1)} .*landing=Some\(TaxiClear\)", output, re.M)
+            if not (final.group(2) == "Taxiing" and taxiing_in):
+                problems.append(f"damaged Enemy 1-1 still {final.group(2)} after 20 minutes")
         return problems
 
     for index in [1, 4, 7, 11, 12, 14, 19, 21, 25, 29, 30, 34]:
