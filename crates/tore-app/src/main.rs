@@ -96,6 +96,15 @@ use winit::{
     window::{CursorIcon, Fullscreen, Window, WindowId},
 };
 type AppResult<T> = Result<T, Box<dyn Error>>;
+
+/// A number given to a command-line option, or an error that names the
+/// option and what was typed rather than the parser's bare message.
+fn option_number<T: std::str::FromStr>(option: &str, value: &str) -> AppResult<T> {
+    value
+        .trim()
+        .parse()
+        .map_err(|_| format!("{option} needs a number, not '{value}'").into())
+}
 /// How an interactive start opens its window. Requested by John on 2026-09-22:
 /// the game runs native borderless fullscreen by default on every platform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -7236,10 +7245,12 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 ));
             }
             "--from" | "--to" => {
-                let seconds: f64 = args
-                    .next()
-                    .ok_or(format!("{arg} needs seconds of mission time"))?
-                    .parse()?;
+                let seconds: f64 = option_number(
+                    &arg,
+                    &args
+                        .next()
+                        .ok_or(format!("{arg} needs seconds of mission time"))?,
+                )?;
                 if !(seconds.is_finite() && seconds >= 0.) {
                     return Err(format!("{arg} needs seconds of mission time, 0 or more").into());
                 }
@@ -7254,15 +7265,15 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     args.next()
                         .ok_or("--ids needs aircraft ids such as 0,7")?
                         .split(',')
-                        .map(str::parse)
+                        .map(|id| option_number("--ids", id))
                         .collect::<Result<_, _>>()?,
                 );
             }
             "--rate" => {
-                let hz: f64 = args
-                    .next()
-                    .ok_or("--rate needs samples per second")?
-                    .parse()?;
+                let hz: f64 = option_number(
+                    "--rate",
+                    &args.next().ok_or("--rate needs samples per second")?,
+                )?;
                 if !(hz.is_finite() && hz > 0. && hz <= 120.) {
                     return Err("--rate needs samples per second above 0 and at most 120".into());
                 }
@@ -7541,23 +7552,25 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 smoke_test = true;
             }
             "--replay-tick" => {
-                replay_options.tick =
-                    Some(args.next().ok_or("--replay-tick needs a tick")?.parse()?);
+                replay_options.tick = Some(option_number(
+                    "--replay-tick",
+                    &args.next().ok_or("--replay-tick needs a tick")?,
+                )?);
             }
             "--replay-aircraft" => {
-                replay_options.aircraft = Some(
-                    args.next()
-                        .ok_or("--replay-aircraft needs an aircraft id")?
-                        .parse()?,
-                );
+                replay_options.aircraft = Some(option_number(
+                    "--replay-aircraft",
+                    &args.next().ok_or("--replay-aircraft needs an aircraft id")?,
+                )?);
             }
             "--replay-drone" => replay_options.drone = true,
             "--replay-speed" => {
-                replay_options.speed = Some(
-                    args.next()
-                        .ok_or("--replay-speed needs a speed such as 16 or -2")?
-                        .parse()?,
-                );
+                replay_options.speed = Some(option_number(
+                    "--replay-speed",
+                    &args
+                        .next()
+                        .ok_or("--replay-speed needs a speed such as 16 or -2")?,
+                )?);
             }
             "--replay-ui" => {
                 replay_options.ui = replay::viewer::Ui::parse(
@@ -9721,6 +9734,15 @@ mod startup_tests {
 
     fn path(text: &str) -> Option<PathBuf> {
         Some(PathBuf::from(text))
+    }
+
+    #[test]
+    fn a_bad_option_number_names_the_option_and_the_text() {
+        assert_eq!(option_number::<u64>("--replay-tick", " 12 ").unwrap(), 12);
+        assert_eq!(option_number::<f64>("--rate", "2.5").unwrap(), 2.5);
+        let error = option_number::<u64>("--replay-tick", "-5").unwrap_err();
+        assert_eq!(error.to_string(), "--replay-tick needs a number, not '-5'");
+        assert!(option_number::<f64>("--rate", "abc").is_err());
     }
 
     #[test]
