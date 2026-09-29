@@ -539,8 +539,8 @@ adjustable.
 | G excess | A live aircraft pulls more than 9.5 G or less than -4.5 G |
 | Control oscillation | A stick axis reverses 8 times within 2 seconds, each swing at least 0.5 |
 | AI stuck | An AI aircraft stays in one activity longer than 5 minutes |
-| AI flipping | An AI aircraft changes activity, or target, 6 times within 10 seconds |
-| Track lost early | A guided weapon loses its target within 2 seconds of launch |
+| AI flipping | An AI aircraft changes activity, or target, 6 times within 2 seconds (decisions flipping every few ticks; an ordinary dogfight makes 6 changes in 5 to 10 seconds) |
+| Track lost early | A guided weapon loses its target within 2 seconds of launch, other than to chaff or a flare (a decoy is the shot's outcome) |
 | Fuel exhausted | An aircraft runs out of fuel |
 | Order rejected | A recipient rejects an order, request or report |
 | Call dropped, call suppressed | A call is dropped, or a spoken call (radio, crew, tower) is suppressed by a cooldown, limit or radio silence. The HUD's rate limit for AI lines, a cockpit message pushed off the screen by newer lines, and the AI's rules for which radio events become calls are routine and not flagged |
