@@ -1078,7 +1078,7 @@ impl Recorder {
             .events
             .iter()
             .filter_map(|e| match e {
-                live::Event::SubsystemDamaged(index) => {
+                live::Event::SubsystemDamaged { index, .. } => {
                     Some(tore_sim::aircraft_systems::label(*index))
                 }
                 _ => None,
@@ -1136,7 +1136,7 @@ impl Recorder {
             // Destroyed in combat.
             let destroyed = tick.events.iter().any(|e| match e {
                 live::Event::Destroyed(victim) => *victim == id,
-                live::Event::PlayerDestroyed => id == 0,
+                live::Event::OwnshipDestroyed { aircraft } => *aircraft == id,
                 _ => false,
             });
             if destroyed {

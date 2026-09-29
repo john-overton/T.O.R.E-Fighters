@@ -5285,7 +5285,7 @@ impl ProbeAttacker {
         let seconds = tick as f64 / 120.;
         for event in events {
             match event {
-                Event::Fired(station) => {
+                Event::Fired { station, .. } => {
                     let weapon = &combat.state.own().configuration().stations[*station].weapon;
                     if tore_sim::combat::live::is_gun(weapon) {
                         self.rounds += 1;
@@ -5311,8 +5311,8 @@ impl ProbeAttacker {
                         probe_label(bridge, *id)
                     );
                 }
-                Event::PlayerDamaged(_) => self.player_damaged += 1,
-                Event::PlayerDestroyed => {
+                Event::OwnshipDamaged { .. } => self.player_damaged += 1,
+                Event::OwnshipDestroyed { .. } => {
                     println!("t={tick} ({seconds:.1}s) destroyed: player");
                 }
                 _ => {}
@@ -9990,7 +9990,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 f64::from(world.height(x as f32, z as f32))
             });
             for event in combat.step(&mut flight, &world)? {
-                if let Some(cue) = combat::feedback(&event, combat.state.own().configuration()) {
+                if let Some(cue) =
+                    combat::feedback(&event, combat.own_id(), combat.state.own().configuration())
+                {
                     *cues.entry(format!("{cue:?}")).or_default() += 1;
                     feedback.event(cue);
                 }

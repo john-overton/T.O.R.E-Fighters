@@ -84,7 +84,7 @@ pub fn inbound(combat: &live::State, player: [f64; 3]) -> [bool; 2] {
         combat.projectiles.iter().any(|p| {
             let weapon = p.weapon(combat.own().configuration());
             p.incoming.is_some()
-                && p.target == Some(live::PLAYER_OWNER)
+                && p.target == Some(combat.own().aircraft)
                 && weapon.seeker.signature == class
                 && !(weapon.source.eq_ignore_ascii_case("AIM120.JT")
                     && distance(p.position, player) > AIM120_IGNORE_FT)

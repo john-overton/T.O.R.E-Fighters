@@ -589,32 +589,32 @@ impl World {
         }
         for event in &events {
             use tore_sim::combat::live::Event;
-            if let Some(cue) = combat::feedback(event, self.combat.own().configuration()) {
+            let own_id = self.combat.own_id();
+            if let Some(cue) = combat::feedback(event, own_id, self.combat.own().configuration()) {
                 out.cues.push(Cue::Feedback(cue));
             }
             match event {
-                Event::Jolt(jolt) => match jolt.target {
-                    None => own.flight.jolt_from(jolt.from, jolt.strength),
-                    Some(id) => {
-                        if let Some(wings) = &mut self.ai_wings {
-                            wings.jolt(id, jolt.from, jolt.strength);
-                        }
+                Event::Jolt(jolt) => {
+                    if jolt.target == own_id {
+                        own.flight.jolt_from(jolt.from, jolt.strength);
+                    } else if let Some(wings) = &mut self.ai_wings {
+                        wings.jolt(jolt.target, jolt.from, jolt.strength);
                     }
-                },
-                Event::PlayerDamaged(_)
+                }
+                Event::OwnshipDamaged { .. }
                 | Event::Hit(_)
                 | Event::Ground
                 | Event::Destroyed(_)
-                | Event::PilotKilled
-                | Event::SubsystemDamaged(_)
+                | Event::PilotKilled { .. }
+                | Event::SubsystemDamaged { .. }
                 | Event::Defeated(_)
                 | Event::TrackLost(_)
                 | Event::SeekerActivated(_)
                 | Event::Pitbull(_) => {}
-                Event::PlayerDestroyed => {
+                Event::OwnshipDestroyed { .. } => {
                     own.flight.crashed = true;
                 }
-                Event::Fired(i) => {
+                Event::Fired { station: i, .. } => {
                     if let Some(name) = self.combat.own().configuration().stations[*i]
                         .weapon
                         .fire_sound
@@ -623,13 +623,13 @@ impl World {
                         out.releases.push((name.to_string(), *i));
                     }
                 }
-                Event::PlayerGroundImpact => {
+                Event::OwnshipGroundImpact { .. } => {
                     out.cues
                         .push(Cue::Message("Your aircraft exploded on impact".into()));
                 }
                 Event::Airburst(id) => {
                     out.cues.push(Cue::Message(
-                        if *id == 0 {
+                        if *id == own_id {
                             "Your aircraft exploded"
                         } else {
                             "Destroyed aircraft exploded"

@@ -393,7 +393,7 @@ fn script(tick: usize) -> SeatInput {
 
 fn record_event(fp: &mut Fingerprint, event: &Event) {
     match event {
-        Event::Fired(station) => {
+        Event::Fired { station, .. } => {
             fp.u64(1);
             fp.count(*station);
         }
@@ -422,24 +422,27 @@ fn record_event(fp: &mut Fingerprint, event: &Event) {
             fp.u64(8);
             fp.int(*id);
         }
-        Event::PlayerDamaged(amount) => {
+        Event::OwnshipDamaged { amount, .. } => {
             fp.u64(9);
             fp.int(*amount);
         }
-        Event::SubsystemDamaged(station) => {
+        Event::SubsystemDamaged { index, .. } => {
             fp.u64(10);
-            fp.count(*station);
+            fp.count(*index);
         }
-        Event::PlayerDestroyed => fp.u64(11),
-        Event::PilotKilled => fp.u64(12),
-        Event::PlayerGroundImpact => fp.u64(13),
+        Event::OwnshipDestroyed { .. } => fp.u64(11),
+        Event::PilotKilled { .. } => fp.u64(12),
+        Event::OwnshipGroundImpact { .. } => fp.u64(13),
         Event::Defeated(id) => {
             fp.u64(14);
             fp.int(*id);
         }
         Event::Jolt(jolt) => {
             fp.u64(15);
-            fp.option(jolt.target, |fp, id| fp.int(id));
+            // The fingerprint keeps the earlier encoding: none for the ownship.
+            fp.option((jolt.target != 0).then_some(jolt.target), |fp, id| {
+                fp.int(id)
+            });
             fp.vector(jolt.from);
             fp.f64(jolt.strength);
         }
@@ -562,9 +565,9 @@ fn record_tick(fp: &mut Fingerprint, world: &World, out: &TickOutput, seen: &mut
     for event in &out.events {
         record_event(fp, event);
         match event {
-            Event::Fired(_) => seen.fired += 1,
+            Event::Fired { .. } => seen.fired += 1,
             Event::Hit(_) => seen.hits += 1,
-            Event::PlayerDamaged(_) => seen.player_damaged += 1,
+            Event::OwnshipDamaged { .. } => seen.player_damaged += 1,
             _ => {}
         }
     }

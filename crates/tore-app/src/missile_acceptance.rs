@@ -106,12 +106,14 @@ pub fn run(config: Configuration) -> AppResult<()> {
                                 |_, _| 0.,
                             );
                             state.release(0);
-                            let mut outcome =
-                                if events.iter().any(|e| matches!(e, live::Event::Fired(_))) {
-                                    "expiry".to_owned()
-                                } else {
-                                    format!("inhibit:{}", state.own().release_readiness.label())
-                                };
+                            let mut outcome = if events
+                                .iter()
+                                .any(|e| matches!(e, live::Event::Fired { .. }))
+                            {
+                                "expiry".to_owned()
+                            } else {
+                                format!("inhibit:{}", state.own().release_readiness.label())
+                            };
                             let mut travel = 0.;
                             let mut seconds = 0.;
                             let mut previous = l.position;

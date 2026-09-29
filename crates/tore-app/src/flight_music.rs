@@ -83,7 +83,7 @@ impl Observer {
 
         if events
             .iter()
-            .any(|e| matches!(e, live::Event::PlayerDamaged(_)))
+            .any(|e| matches!(e, live::Event::OwnshipDamaged { .. }))
         {
             self.hit.refresh(now, HIT_HOLD_S);
             self.hit_at = Some(now);
@@ -140,7 +140,7 @@ impl Observer {
             .iter()
             .filter(|p| {
                 p.incoming.is_some()
-                    && p.target == Some(live::PLAYER_OWNER)
+                    && p.target == Some(combat.own().aircraft)
                     && !(p
                         .weapon(combat.own().configuration())
                         .source
@@ -248,7 +248,14 @@ mod tests {
                 &outcome::Status::default(),
             )
         };
-        let first = step(&mut observer, &combat, &[live::Event::PlayerDamaged(3)]);
+        let first = step(
+            &mut observer,
+            &combat,
+            &[live::Event::OwnshipDamaged {
+                aircraft: 0,
+                amount: 3,
+            }],
+        );
         assert_eq!(first.now, 0.);
         assert!(first.inputs.hit_recently && !first.inputs.danger);
         for _ in 1..(30 * 120) {
@@ -264,7 +271,7 @@ mod tests {
 
         // A guided round aimed at the player selects DANGER.
         combat.command(0, live::Command::Incoming, crate::combat::launcher(&flight));
-        assert_eq!(combat.projectiles[0].target, Some(live::PLAYER_OWNER));
+        assert_eq!(combat.projectiles[0].target, Some(0));
         assert!(step(&mut observer, &combat, &[]).inputs.danger);
         // An AIM-120 beyond 30,380 ft is not counted; inside, it is.
         let mut aim120 = combat.own().configuration().stations[0].weapon.clone();
@@ -309,7 +316,10 @@ mod tests {
         let hit = music(&step(
             &mut observer,
             &combat,
-            &[live::Event::PlayerDamaged(3)],
+            &[live::Event::OwnshipDamaged {
+                aircraft: 0,
+                amount: 3,
+            }],
         ));
         assert_eq!(
             (hit.from, hit.to),

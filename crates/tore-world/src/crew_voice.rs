@@ -2016,7 +2016,7 @@ mod tests {
                     let owner = if tick % 100 == 0 { 1 } else { 0 };
                     let strike = Strike {
                         owner,
-                        victim: Some(3),
+                        victim: 3,
                         weapon_flags: 0x80,
                         destroyed: tick == 6_000,
                     };

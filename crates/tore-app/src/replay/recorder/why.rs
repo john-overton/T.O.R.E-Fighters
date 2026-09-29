@@ -1277,7 +1277,7 @@ fn failure(
             && tick
                 .events
                 .iter()
-                .any(|e| matches!(e, live::Event::SubsystemDamaged(26)));
+                .any(|e| matches!(e, live::Event::SubsystemDamaged { index: 26, .. }));
         let reason = if hit {
             "a hit destroyed the structure"
         } else if f.systems.structure.burning() {

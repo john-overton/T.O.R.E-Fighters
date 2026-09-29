@@ -20,13 +20,15 @@ use crate::combat::countermeasures::Devices;
 use crate::combat::ledger::Resolution;
 use crate::combat::live::{
     ActorSupport, Command, Configuration, Event, Launcher, LocalizedDamage, OwnshipInput,
-    PLAYER_OWNER, Projectile, State, Station, Target,
+    Projectile, State, Station, Target,
 };
 use crate::combat::missiles::{self, Flight, LaunchMode, Motion, TargetRole, seeker};
 use crate::sensors;
 
 // Recorded on macOS aarch64. See the module comment in golden_tests.rs before
 // changing any of these.
+/// The ownship's aircraft in these scenarios.
+const OWN: u32 = 0;
 const GUNS_AND_DAMAGE: u64 = 0xf991_b9ae_63b6_6d4b;
 const GUIDED_MISSILES: u64 = 0x1f24_4435_41d0_af2e;
 const PLAYER_COUNTERMEASURES: u64 = 0xda70_2332_e33b_0c5a;
@@ -120,7 +122,7 @@ fn require(scenario: &str, seen: &BTreeMap<&'static str, u32>, wanted: &[&str]) 
 
 fn event_name(event: &Event) -> &'static str {
     match event {
-        Event::Fired(_) => "Fired",
+        Event::Fired { .. } => "Fired",
         Event::SeekerActivated(_) => "SeekerActivated",
         Event::Pitbull(_) => "Pitbull",
         Event::Hit(_) => "Hit",
@@ -128,11 +130,11 @@ fn event_name(event: &Event) -> &'static str {
         Event::Airburst(_) => "Airburst",
         Event::Ground => "Ground",
         Event::TrackLost(_) => "TrackLost",
-        Event::PlayerDamaged(_) => "PlayerDamaged",
-        Event::SubsystemDamaged(_) => "SubsystemDamaged",
-        Event::PlayerDestroyed => "PlayerDestroyed",
-        Event::PilotKilled => "PilotKilled",
-        Event::PlayerGroundImpact => "PlayerGroundImpact",
+        Event::OwnshipDamaged { .. } => "PlayerDamaged",
+        Event::SubsystemDamaged { .. } => "SubsystemDamaged",
+        Event::OwnshipDestroyed { .. } => "PlayerDestroyed",
+        Event::PilotKilled { .. } => "PilotKilled",
+        Event::OwnshipGroundImpact { .. } => "PlayerGroundImpact",
         Event::Defeated(_) => "Defeated",
         Event::Jolt(_) => "Jolt",
     }
@@ -141,7 +143,8 @@ fn event_name(event: &Event) -> &'static str {
 fn record_event(fp: &mut Fingerprint, event: &Event) {
     fp.text(event_name(event));
     match event {
-        Event::Fired(station) | Event::SubsystemDamaged(station) => fp.count(*station),
+        Event::Fired { station, .. } => fp.count(*station),
+        Event::SubsystemDamaged { index, .. } => fp.count(*index),
         Event::SeekerActivated(id)
         | Event::Pitbull(id)
         | Event::Hit(id)
@@ -149,14 +152,19 @@ fn record_event(fp: &mut Fingerprint, event: &Event) {
         | Event::Airburst(id)
         | Event::TrackLost(id)
         | Event::Defeated(id) => fp.int(*id),
-        Event::PlayerDamaged(amount) => fp.int(*amount),
+        Event::OwnshipDamaged { amount, .. } => fp.int(*amount),
         Event::Jolt(jolt) => {
-            fp.option(jolt.target, |fp, id| fp.int(id));
+            // The fingerprint keeps the earlier encoding: none for the ownship.
+            fp.option((jolt.target != OWN).then_some(jolt.target), |fp, id| {
+                fp.int(id)
+            });
             fp.vector(jolt.from);
             fp.f64(jolt.strength);
         }
-        Event::Ground | Event::PlayerDestroyed | Event::PilotKilled | Event::PlayerGroundImpact => {
-        }
+        Event::Ground
+        | Event::OwnshipDestroyed { .. }
+        | Event::PilotKilled { .. }
+        | Event::OwnshipGroundImpact { .. } => {}
     }
 }
 
@@ -251,7 +259,9 @@ fn record_target(fp: &mut Fingerprint, t: &Target) {
 fn record_state(fp: &mut Fingerprint, s: &mut State, launcher: Launcher) {
     for strike in s.take_strikes() {
         fp.int(strike.owner);
-        fp.option(strike.victim, |fp, id| fp.int(id));
+        fp.option((strike.victim != OWN).then_some(strike.victim), |fp, id| {
+            fp.int(id)
+        });
         fp.int(strike.weapon_flags);
         fp.bool(strike.destroyed);
     }
@@ -370,7 +380,7 @@ fn record_state(fp: &mut Fingerprint, s: &mut State, launcher: Launcher) {
         fp.int(kill.category);
         fp.bool(kill.aircraft);
     }
-    let victims: Vec<u32> = std::iter::once(PLAYER_OWNER)
+    let victims: Vec<u32> = std::iter::once(OWN)
         .chain(s.targets.iter().map(|t| t.id))
         .collect();
     for victim in victims {
@@ -759,7 +769,7 @@ fn owned_missile(
         motion: Some(Motion::launch(weapon, velocity, origin[1])),
         guidance_ticks: Some(profile.guidance_ticks),
         age: 0,
-        incoming: (target == PLAYER_OWNER).then_some(PLAYER_OWNER),
+        incoming: (target == OWN).then_some(OWN),
         station: 0,
         position: origin,
         previous: origin,
@@ -978,7 +988,7 @@ fn guided_missiles(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
                     7,
                     &active,
                     [2_000., 20_000., 15_000.],
-                    PLAYER_OWNER,
+                    OWN,
                     aim,
                     tick,
                 ));
@@ -1005,7 +1015,7 @@ fn guided_missiles(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
         s.set_actor_supports([ActorSupport {
             owner: 7,
             observation: Some(seeker::Observation {
-                id: PLAYER_OWNER,
+                id: OWN,
                 position: l.position,
                 velocity: l.velocity,
                 quality: 1.,
@@ -1031,7 +1041,7 @@ fn guided_missiles(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
             release_decoy(
                 &mut s,
                 SeekerClass::Radar,
-                PLAYER_OWNER,
+                OWN,
                 &mut decoys,
                 &mut fp,
                 &mut seen,
@@ -1093,7 +1103,7 @@ fn press(
         .projectiles
         .iter()
         .filter(|p| {
-            p.target == Some(PLAYER_OWNER)
+            p.target == Some(OWN)
                 && p.guidance.as_ref().is_none_or(|flight| {
                     flight.enabled && flight.seeker.acquired && flight.seeker.observation.is_some()
                 })
@@ -1130,7 +1140,7 @@ fn press(
         let still = s
             .projectiles
             .iter()
-            .any(|p| p.id == id && p.target == Some(PLAYER_OWNER));
+            .any(|p| p.id == id && p.target == Some(OWN));
         fp.int(id);
         fp.bool(still);
         if added {
@@ -1177,7 +1187,7 @@ fn player_countermeasures(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
             *owner,
             weapon,
             [*offset, 1_300., 16_000.],
-            PLAYER_OWNER,
+            OWN,
             aim,
             0,
         ));
@@ -1188,7 +1198,7 @@ fn player_countermeasures(probe: &Probe) -> (u64, BTreeMap<&'static str, u32>) {
         s.set_actor_supports([7, 8, 9].map(|owner| ActorSupport {
             owner,
             observation: Some(seeker::Observation {
-                id: PLAYER_OWNER,
+                id: OWN,
                 position: l.position,
                 velocity: l.velocity,
                 quality: 1.,

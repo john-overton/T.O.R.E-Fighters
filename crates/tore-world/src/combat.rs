@@ -984,7 +984,10 @@ impl Combat {
             - f64::from(self.state.own().hp)
                 / f64::from(self.state.own().configuration().damage_capacity))
         .clamp(0., 1.);
-        if events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))) {
+        if events
+            .iter()
+            .any(|e| matches!(e, Event::OwnshipDamaged { .. }))
+        {
             s.systems.report_impact(s.ticks, s.damage_fraction);
         }
         s.damage_variant = self
@@ -1002,7 +1005,7 @@ impl Combat {
                 s.systems.kill_pilot("Pilot killed: nose or cockpit lost");
             }
         }
-        if events.contains(&Event::PilotKilled) {
+        if events.contains(&Event::PilotKilled { aircraft }) {
             s.systems.kill_pilot("Pilot killed by cockpit hit");
         }
         // A station that ran dry hands the selection on, but never while the
@@ -1049,16 +1052,23 @@ pub(crate) fn apply_startup_weapon_state(
 
 /// Haptics follow confirmed ownship events. A distant target explosion is not
 /// player damage; incoming fixture launches must not feel like own launches.
-pub fn feedback(event: &Event, config: &live::Configuration) -> Option<tore_input::FeedbackEvent> {
+pub fn feedback(
+    event: &Event,
+    aircraft: u32,
+    config: &live::Configuration,
+) -> Option<tore_input::FeedbackEvent> {
     use tore_input::FeedbackEvent as F;
     match event {
-        Event::Fired(i) => Some(if config.stations[*i].internal {
+        Event::Fired {
+            aircraft: who,
+            station,
+        } if *who == aircraft => Some(if config.stations[*station].internal {
             F::GunFired
         } else {
             F::MissileLaunched
         }),
-        Event::PlayerDamaged(_) => Some(F::Damage),
-        Event::PlayerDestroyed => Some(F::Crash),
+        Event::OwnshipDamaged { aircraft: who, .. } if *who == aircraft => Some(F::Damage),
+        Event::OwnshipDestroyed { aircraft: who } if *who == aircraft => Some(F::Crash),
         _ => None,
     }
 }

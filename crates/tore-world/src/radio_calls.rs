@@ -223,15 +223,6 @@ impl Scene<'_> {
             Attacker::Other
         }
     }
-    /// The plane a strike hit. A strike names none when it hit the player,
-    /// which is the first human-flown plane until combat names its ownships
-    /// (stage B1).
-    fn victim(&self, strike: &Strike) -> u32 {
-        strike
-            .victim
-            .or_else(|| self.listeners.first().map(|l| l.plane))
-            .unwrap_or(PLAYER_ID)
-    }
     /// Whether the plane that flies `listener` leads its flight.
     fn leads(&self, listener: &Listener) -> bool {
         self.leaders
@@ -607,7 +598,7 @@ impl Radio {
     /// friendly-fire calls.
     pub fn strike(&mut self, comms: &mut Comms, scene: &Scene, strike: &Strike) {
         let shooter = strike.owner;
-        let victim = scene.victim(strike);
+        let victim = strike.victim;
         let same_side = scene.enemy(shooter) == scene.enemy(victim);
         if strike.destroyed {
             if !same_side {
@@ -671,7 +662,7 @@ impl Radio {
         let now = scene.now;
         let unguided = strike.weapon_flags & 1 == 0;
         let cause = Cause::Hit {
-            victim: scene.victim(strike),
+            victim: strike.victim,
             guided: !unguided,
         };
         if unguided && scene.aircraft(shooter) {
@@ -1093,14 +1084,14 @@ pub fn step(
     // ownships name their planes (stage B1).
     let shooter = listeners.first().map_or(PLAYER_ID, |l| l.plane);
     for event in events {
-        if let live::Event::Fired(station) = event {
+        if let live::Event::Fired { station, .. } = event {
             let weapon = &state.own().configuration().stations[*station].weapon;
             // The round's own target, else the designation.
             let target = state
                 .projectiles
                 .iter()
                 .rev()
-                .find(|p| p.owner == live::PLAYER_OWNER && p.station == *station)
+                .find(|p| p.owner == PLAYER_ID && p.station == *station)
                 .and_then(|p| p.target)
                 .or(state.own().designated());
             radio.release(comms, &scene, shooter, Release::of(weapon, target));
@@ -1212,7 +1203,7 @@ mod tests {
             }
         }
     }
-    fn strike(owner: u32, victim: Option<u32>, flags: u32, destroyed: bool) -> Strike {
+    fn strike(owner: u32, victim: u32, flags: u32, destroyed: bool) -> Strike {
         Strike {
             owner,
             victim,
@@ -1369,23 +1360,19 @@ mod tests {
         let mut radio = Radio::default();
         // Guided hits: no cooldown.
         for t in 0..3 {
-            radio.strike(
-                &mut comms,
-                &w.scene(f64::from(t)),
-                &strike(1, Some(3), 1, false),
-            );
+            radio.strike(&mut comms, &w.scene(f64::from(t)), &strike(1, 3, 1, false));
         }
         let guided: Vec<_> = lines(&mut comms, 10.);
         assert!(guided.iter().filter(|l| l.starts_with("Red two")).count() == 3);
         // Unguided: Red two at 20 s, then its own 8 s limit; the player at
         // 21 s is inside the 4 s global cooldown and says nothing.
         let mut radio = Radio::default();
-        let gun = strike(1, Some(3), 0x80, false);
+        let gun = strike(1, 3, 0x80, false);
         radio.strike(&mut comms, &w.scene(20.), &gun);
         radio.strike(
             &mut comms,
             &w.scene(21.),
-            &strike(PLAYER_ID, Some(3), 0x80, false),
+            &strike(PLAYER_ID, 3, 0x80, false),
         );
         radio.strike(&mut comms, &w.scene(25.), &gun);
         radio.strike(&mut comms, &w.scene(28.), &gun);
@@ -1411,7 +1398,7 @@ mod tests {
         w.friendlies.extend([1, 2]);
         let mut comms = Comms::new(1);
         let mut radio = Radio::default();
-        let kill = |flags| strike(PLAYER_ID, Some(3), flags, true);
+        let kill = |flags| strike(PLAYER_ID, 3, flags, true);
         radio.strike(&mut comms, &w.scene(0.), &kill(1));
         radio.strike(&mut comms, &w.scene(0.1), &kill(0x10));
         radio.strike(&mut comms, &w.scene(3.9), &kill(1));
@@ -1424,10 +1411,10 @@ mod tests {
         let w = World::new();
         let mut comms = Comms::new(1);
         let mut radio = Radio::default();
-        let gun = strike(3, None, 0x80, false);
+        let gun = strike(3, PLAYER_ID, 0x80, false);
         radio.strike(&mut comms, &w.scene(0.), &gun);
         radio.strike(&mut comms, &w.scene(7.9), &gun);
-        radio.strike(&mut comms, &w.scene(8.), &strike(3, None, 1, false));
+        radio.strike(&mut comms, &w.scene(8.), &strike(3, PLAYER_ID, 1, false));
         let calls = lines(&mut comms, 9.);
         let hit: Vec<_> = calls.iter().filter(|l| l.starts_with("YOU")).collect();
         assert_eq!(hit.len(), 2, "{calls:?}");
@@ -1439,15 +1426,11 @@ mod tests {
         let mut w = World::new();
         let mut comms = Comms::new(1);
         let mut radio = Radio::default();
-        radio.strike(
-            &mut comms,
-            &w.scene(0.),
-            &strike(PLAYER_ID, Some(2), 0x80, false),
-        );
+        radio.strike(&mut comms, &w.scene(0.), &strike(PLAYER_ID, 2, 0x80, false));
         radio.strike(
             &mut comms,
             &w.scene(5.9),
-            &strike(PLAYER_ID, Some(1), 0x80, false),
+            &strike(PLAYER_ID, 1, 0x80, false),
         );
         assert!(lines(&mut comms, 1.9).is_empty(), "two seconds later");
         let complaint = lines(&mut comms, 2.);
@@ -1458,11 +1441,11 @@ mod tests {
         radio.strike(
             &mut comms,
             &w.scene(20.),
-            &strike(PLAYER_ID, Some(2), 0x80, false),
+            &strike(PLAYER_ID, 2, 0x80, false),
         );
         assert!(lines(&mut comms, 30.).is_empty(), "beyond 52,800 ft");
         // AI-on-AI friendly fire is never complained about.
-        radio.strike(&mut comms, &w.scene(40.), &strike(1, Some(2), 0x80, false));
+        radio.strike(&mut comms, &w.scene(40.), &strike(1, 2, 0x80, false));
         assert!(lines(&mut comms, 50.).is_empty());
     }
 
@@ -1651,12 +1634,12 @@ mod tests {
         let w = World::new();
         let mut comms = Comms::new(1);
         let mut radio = Radio::default();
-        let gun = strike(1, Some(3), 0x80, false);
+        let gun = strike(1, 3, 0x80, false);
         radio.strike(&mut comms, &w.scene(20.), &gun);
         radio.strike(
             &mut comms,
             &w.scene(21.),
-            &strike(PLAYER_ID, Some(3), 0x80, false),
+            &strike(PLAYER_ID, 3, 0x80, false),
         );
         radio.strike(&mut comms, &w.scene(22.), &gun);
         radio.strike(&mut comms, &w.scene(23.), &gun);
@@ -1710,11 +1693,7 @@ mod tests {
         for seed in 0..60 {
             let mut comms = Comms::new(seed);
             let mut radio = Radio::default();
-            radio.strike(
-                &mut comms,
-                &w.scene(0.),
-                &strike(PLAYER_ID, Some(3), 1, true),
-            );
+            radio.strike(&mut comms, &w.scene(0.), &strike(PLAYER_ID, 3, 1, true));
             let entry = comms.take_journal().remove(0);
             let rolls = &entry.origin.rolls;
             assert_eq!(rolls.len(), 2, "a named type draws a second roll");
@@ -1778,7 +1757,7 @@ mod tests {
         );
         assert_eq!((radio.made, radio.heard), (2, 2));
         // A friendly-fire complaint is addressed to the shooter's plane.
-        radio.strike(&mut comms, &s, &strike(5, Some(3), 0x80, false));
+        radio.strike(&mut comms, &s, &strike(5, 3, 0x80, false));
         let complaints = comms.due(9.);
         assert_eq!(complaints.len(), 1);
         assert_eq!(complaints[0].seat, SeatId(1));

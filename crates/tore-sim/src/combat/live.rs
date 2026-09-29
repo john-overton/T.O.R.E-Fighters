@@ -27,8 +27,6 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
 }
 
 pub const MAX_PROJECTILES: usize = 256;
-/// Owner id of the player's own rounds. Every other owner is an AI actor.
-pub const PLAYER_OWNER: u32 = 0;
 pub const MAX_EFFECTS: usize = 64;
 pub const MAX_HIT_RECORDS: usize = 128;
 /// Fitted: a trigger press waits this long, 3 seconds, for the bay to open.
@@ -150,10 +148,10 @@ pub struct HitRecord {
 /// the list each tick with [`State::take_strikes`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Strike {
-    /// Who fired it: [`PLAYER_OWNER`] or an AI actor id.
+    /// Who fired it: an ownship's aircraft or an AI actor.
     pub owner: u32,
-    /// The damaged target, or `None` for the player.
-    pub victim: Option<u32>,
+    /// The damaged aircraft or ground object.
+    pub victim: u32,
     /// The weapon's type flags: 0x1 guided, 0x10 bomb, 0x80 bullet.
     pub weapon_flags: u32,
     /// The damage left the victim with no hit points.
@@ -175,7 +173,7 @@ pub enum DeviceNote {
 /// One chaff cartridge or flare leaving an aircraft.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DeviceRelease {
-    /// The releasing aircraft: [`PLAYER_OWNER`] or an AI actor id.
+    /// The releasing aircraft: an ownship's or an AI actor's.
     pub owner: u32,
     /// [`EffectKind::Chaff`] or [`EffectKind::Flare`].
     pub kind: EffectKind,
@@ -195,6 +193,8 @@ pub struct DeviceRelease {
 /// list with [`State::take_decoy_rolls`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DecoyRoll {
+    /// The ownship whose chaff or flare the missile rolled against.
+    pub aircraft: u32,
     pub projectile: u32,
     /// [`EffectKind::Chaff`] or [`EffectKind::Flare`].
     pub kind: EffectKind,
@@ -800,7 +800,11 @@ pub struct Effect {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    Fired(usize),
+    /// An ownship fired a round from one of its stations.
+    Fired {
+        aircraft: u32,
+        station: usize,
+    },
     SeekerActivated(u32),
     Pitbull(u32),
     Hit(u32),
@@ -808,20 +812,35 @@ pub enum Event {
     Airburst(u32),
     Ground,
     TrackLost(u32),
-    PlayerDamaged(i32),
-    SubsystemDamaged(usize),
-    PlayerDestroyed,
-    PilotKilled,
-    PlayerGroundImpact,
+    /// A hit took hit points from an ownship.
+    OwnshipDamaged {
+        aircraft: u32,
+        amount: i32,
+    },
+    /// A hit or accumulated damage faulted one of an ownship's subsystems.
+    SubsystemDamaged {
+        aircraft: u32,
+        index: usize,
+    },
+    OwnshipDestroyed {
+        aircraft: u32,
+    },
+    PilotKilled {
+        aircraft: u32,
+    },
+    OwnshipGroundImpact {
+        aircraft: u32,
+    },
+    /// A jammer defeated a missile or bomb aimed at this aircraft.
     Defeated(u32),
     /// A missile or bomb burst on an aircraft; the host knocks it around.
     Jolt(Jolt),
 }
-/// Blast on an aircraft: `target` None is the player. `strength` is the
-/// warhead's damage against that aircraft over 100.
+/// Blast on an aircraft, ownship or not. `strength` is the warhead's damage
+/// against that aircraft over 100.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Jolt {
-    pub target: Option<u32>,
+    pub target: u32,
     pub from: Vector,
     pub strength: f64,
 }
@@ -2260,6 +2279,7 @@ impl State {
                 self.decoy_log.pop_front();
             }
             self.decoy_log.push_back(DecoyRoll {
+                aircraft: own.aircraft,
                 projectile: projectile.id,
                 kind,
                 susceptibility,
@@ -2282,14 +2302,19 @@ impl State {
         }
         own.hp -= applied;
         own.damage = own.damage.saturating_add(amount);
-        events.push(Event::PlayerDamaged(applied));
+        events.push(Event::OwnshipDamaged {
+            aircraft: own.aircraft,
+            amount: applied,
+        });
         // Normal damage takes hit points only; system faults are Realistic.
         if self.cheats.system_damage() {
             self.damage_systems(own, amount, events);
         }
         if own.hp == 0 {
             own.release();
-            events.push(Event::PlayerDestroyed);
+            events.push(Event::OwnshipDestroyed {
+                aircraft: own.aircraft,
+            });
         }
     }
     /// Belly scrape wear from sliding on the ground with the gear not down:
@@ -2326,7 +2351,10 @@ impl State {
         ) {
             own.subsystem_counts[index] += 1;
             own.last_subsystem = Some(index);
-            events.push(Event::SubsystemDamaged(index));
+            events.push(Event::SubsystemDamaged {
+                aircraft: own.aircraft,
+                index,
+            });
             let Some(h) = index.checked_sub(36) else {
                 continue;
             };
@@ -2367,7 +2395,7 @@ impl State {
         own.hp = 0;
         own.damage = own.damage.max(own.config.damage_capacity);
         own.release();
-        Some(Event::PlayerDestroyed)
+        Some(Event::OwnshipDestroyed { aircraft })
     }
     /// An ownship's aircraft blew up in the air.
     pub fn ownship_airburst(&mut self, aircraft: u32, position: Vector) -> Option<Event> {
@@ -2388,7 +2416,7 @@ impl State {
             return None;
         }
         self.aircraft_crashed(aircraft, position, water);
-        Some(Event::PlayerGroundImpact)
+        Some(Event::OwnshipGroundImpact { aircraft })
     }
     fn ownship_explosion(&mut self, aircraft: u32) -> bool {
         let Some(own) = self.ownship_mut(aircraft) else {
@@ -3220,7 +3248,10 @@ impl State {
                     own.shots += 1;
                     self.next_shot += 1;
                     fired = true;
-                    events.push(Event::Fired(index));
+                    events.push(Event::Fired {
+                        aircraft: own.aircraft,
+                        station: index,
+                    });
                     if gun {
                         let cadence = &mut own.gun_cadence[index];
                         cadence.pending -= 1;
@@ -3580,7 +3611,7 @@ impl State {
                         impacts.push((position, EffectKind::Hit, w.effects.object_explosion, 0));
                         if !is_gun(w) {
                             events.push(Event::Jolt(Jolt {
-                                target: None,
+                                target: r.target.id,
                                 from: position,
                                 strength: f64::from(
                                     w.damage.by_class[damage_class(own.config.target_category)],
@@ -3616,7 +3647,7 @@ impl State {
                     let scaled = projectile_damage(p, w, nominal);
                     if t.role == TargetRole::Aircraft && !is_gun(w) {
                         events.push(Event::Jolt(Jolt {
-                            target: Some(t.id),
+                            target: t.id,
                             from: position,
                             strength: f64::from(nominal) / 100.,
                         }));
@@ -3662,7 +3693,7 @@ impl State {
                     events.push(Event::Hit(t.id));
                     strikes.push(Strike {
                         owner: p.owner,
-                        victim: Some(t.id),
+                        victim: t.id,
                         weapon_flags: w.flags,
                         destroyed: t.hp == 0,
                     });
@@ -3728,7 +3759,9 @@ impl State {
             // heavy core hits belong to Realistic.
             let lethal = direct_gun && self.cheats.system_damage();
             if lethal && section == DamageSection::Cockpit && own.hp > 0 {
-                events.push(Event::PilotKilled);
+                events.push(Event::PilotKilled {
+                    aircraft: own.aircraft,
+                });
             }
             let amount = if lethal
                 && (section == DamageSection::Cockpit
@@ -3743,7 +3776,7 @@ impl State {
             if alive && amount > 0 {
                 self.strike(Strike {
                     owner,
-                    victim: None,
+                    victim: own.aircraft,
                     weapon_flags,
                     destroyed: own.hp == 0,
                 });
@@ -3948,7 +3981,9 @@ impl State {
                     own.hp = 0;
                     own.damage = own.damage.max(own.config.damage_capacity);
                     own.release();
-                    events.push(Event::PlayerDestroyed);
+                    events.push(Event::OwnshipDestroyed {
+                        aircraft: own.aircraft,
+                    });
                 }
                 Body::Target(index) => {
                     let t = &mut self.targets[index];
@@ -4149,6 +4184,7 @@ pub(crate) fn terrain_hit(a: Vector, b: Vector, ground: &impl Fn(f64, f64) -> f6
 #[cfg(test)]
 mod tests {
     use super::*;
+    const OWN: u32 = 0;
     use tore_formats::weapons::*;
     use tore_formats::weapons::{Guidance, Seeker};
     pub(super) fn fixture(guided: bool) -> State {
@@ -4607,16 +4643,23 @@ mod tests {
     #[test]
     fn incoming_cockpit_hit_reports_pilot_death_without_needing_nose_breakup() {
         let (s, events) = cockpit_gun_hit(crate::cheats::Damage::Realistic);
-        assert!(events.contains(&Event::PilotKilled));
-        assert!(events.contains(&Event::PlayerDestroyed));
+        assert!(events.contains(&Event::PilotKilled { aircraft: 0 }));
+        assert!(events.contains(&Event::OwnshipDestroyed { aircraft: 0 }));
         assert_eq!(s.own().damage_section(), None);
     }
     #[test]
     fn normal_damage_cockpit_hit_takes_hit_points_without_killing_the_pilot() {
         let (s, events) = cockpit_gun_hit(crate::cheats::Damage::Normal);
-        assert!(!events.contains(&Event::PilotKilled));
-        assert!(!events.contains(&Event::SubsystemDamaged(26)));
-        assert!(events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))));
+        assert!(!events.contains(&Event::PilotKilled { aircraft: 0 }));
+        assert!(!events.contains(&Event::SubsystemDamaged {
+            aircraft: 0,
+            index: 26
+        }));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::OwnshipDamaged { .. }))
+        );
         assert!(s.own().hp < s.own().config.damage_capacity);
     }
     #[test]
@@ -4632,7 +4675,7 @@ mod tests {
         ));
         assert_eq!(
             s.ownship_ground_impact(0, [0., 0., 0.], false),
-            Some(Event::PlayerGroundImpact)
+            Some(Event::OwnshipGroundImpact { aircraft: 0 })
         );
         assert!(s.debris.is_empty());
         assert_eq!(
@@ -4740,7 +4783,7 @@ mod tests {
         assert_eq!(s.own().hp, 8);
         let mut components = crate::aircraft_systems::Systems::default();
         for event in events {
-            if let Event::SubsystemDamaged(index) = event {
+            if let Event::SubsystemDamaged { index, .. } = event {
                 components.hit(index, 1.);
             }
         }
@@ -4834,7 +4877,10 @@ mod tests {
         assert!(!s.own().radar_failed);
         let reset = State::new(s.own().config.clone(), true).unwrap();
         assert!(!reset.own().rwr_failed);
-        assert_eq!(s.systems_destroyed(0), Some(Event::PlayerDestroyed));
+        assert_eq!(
+            s.systems_destroyed(0),
+            Some(Event::OwnshipDestroyed { aircraft: 0 })
+        );
         assert_eq!(s.systems_destroyed(0), None);
         assert_eq!(s.own().hp, 0);
     }
@@ -4858,7 +4904,7 @@ mod tests {
                     |_, _| 0.
                 )
                 .iter()
-                .any(|e| matches!(e, Event::Fired(_)))
+                .any(|e| matches!(e, Event::Fired { .. }))
         );
         for (command, selected, armed) in [
             (Command::NextSelection, 0, true),
@@ -5200,7 +5246,15 @@ mod tests {
             );
             let fired = events
                 .iter()
-                .filter(|event| matches!(event, Event::Fired(0)))
+                .filter(|event| {
+                    matches!(
+                        event,
+                        Event::Fired {
+                            aircraft: 0,
+                            station: 0
+                        }
+                    )
+                })
                 .count();
             assert!(fired <= 1, "gun emitted simultaneous rounds at tick {tick}");
             if fired == 1 {
@@ -5240,7 +5294,15 @@ mod tests {
             );
             let count = events
                 .iter()
-                .filter(|event| matches!(event, Event::Fired(0)))
+                .filter(|event| {
+                    matches!(
+                        event,
+                        Event::Fired {
+                            aircraft: 0,
+                            station: 0
+                        }
+                    )
+                })
                 .count();
             assert!(count <= 1);
             fired += count;
@@ -5262,7 +5324,13 @@ mod tests {
                     |_, _| -10000.
                 )
                 .iter()
-                .any(|event| matches!(event, Event::Fired(0)))
+                .any(|event| matches!(
+                    event,
+                    Event::Fired {
+                        aircraft: 0,
+                        station: 0
+                    }
+                ))
             );
         }
         let first = (0..120)
@@ -5276,7 +5344,15 @@ mod tests {
                     |_, _| -10000.,
                 )
                 .iter()
-                .any(|event| matches!(event, Event::Fired(0)))
+                .any(|event| {
+                    matches!(
+                        event,
+                        Event::Fired {
+                            aircraft: 0,
+                            station: 0
+                        }
+                    )
+                })
             })
             .unwrap();
         assert!(first < 4);
@@ -5298,7 +5374,10 @@ mod tests {
                 }],
                 |_, _| -10000.
             )
-            .contains(&Event::Fired(0))
+            .contains(&Event::Fired {
+                aircraft: 0,
+                station: 0
+            })
         );
         s.release(0);
         s.step(
@@ -5319,7 +5398,10 @@ mod tests {
                     }],
                     |_, _| -10000.
                 )
-                .contains(&Event::Fired(0))
+                .contains(&Event::Fired {
+                    aircraft: 0,
+                    station: 0
+                })
             );
         }
         assert!(
@@ -5331,7 +5413,10 @@ mod tests {
                 }],
                 |_, _| -10000.
             )
-            .contains(&Event::Fired(0))
+            .contains(&Event::Fired {
+                aircraft: 0,
+                station: 0
+            })
         );
     }
 
@@ -5343,7 +5428,7 @@ mod tests {
         w.burst.actual_rounds_per_game = 2;
         let mut p = Projectile {
             id: 0,
-            owner: PLAYER_OWNER,
+            owner: OWN,
             weapon: None,
             guidance: None,
             motion: None,
@@ -5403,22 +5488,11 @@ mod tests {
             let gun = &state.own().config.stations[0].weapon;
             assert!(is_gun(gun), "{} gun was not recognized", id.label());
             assert_eq!(scaled_weapon_damage(gun, 11), 3, "{} damage", id.label());
-            let expected = projectile_launch_direction(
-                gun,
-                launcher.basis.forward,
-                number as u32,
-                PLAYER_OWNER,
-                0,
-            );
+            let expected =
+                projectile_launch_direction(gun, launcher.basis.forward, number as u32, OWN, 0);
             assert_eq!(
                 expected,
-                projectile_launch_direction(
-                    gun,
-                    launcher.basis.forward,
-                    number as u32,
-                    PLAYER_OWNER,
-                    0,
-                ),
+                projectile_launch_direction(gun, launcher.basis.forward, number as u32, OWN, 0,),
                 "{} deterministic direction",
                 id.label()
             );
@@ -5466,7 +5540,7 @@ mod tests {
         let position = [10., target_position[1] + 6., target_position[2] + 7.];
         s.projectiles.push(Projectile {
             id: 99,
-            owner: PLAYER_OWNER,
+            owner: OWN,
             weapon: None,
             guidance: None,
             motion: None,
@@ -5829,7 +5903,7 @@ mod tests {
             notes,
             [
                 DeviceNote::Released(DeviceRelease {
-                    owner: PLAYER_OWNER,
+                    owner: OWN,
                     kind: EffectKind::Chaff,
                     release: player,
                     number: 1,
@@ -5837,7 +5911,7 @@ mod tests {
                     left: Some(1),
                 }),
                 DeviceNote::Released(DeviceRelease {
-                    owner: PLAYER_OWNER,
+                    owner: OWN,
                     kind: EffectKind::Flare,
                     release: player,
                     number: 2,
@@ -5922,13 +5996,7 @@ mod tests {
                     _ => None,
                 })
                 .collect();
-            assert_eq!(
-                strikes
-                    .iter()
-                    .map(|s| s.victim.unwrap())
-                    .collect::<Vec<_>>(),
-                hits
-            );
+            assert_eq!(strikes.iter().map(|s| s.victim).collect::<Vec<_>>(), hits);
             assert!(strikes.iter().all(|s| s.owner == owner));
             assert_eq!(
                 strikes.iter().filter(|s| s.destroyed).count(),
@@ -5941,7 +6009,7 @@ mod tests {
             (s.own().hits, s.own().kills, collected)
         }
 
-        let (player_hits, player_kills, player_events) = run(PLAYER_OWNER);
+        let (player_hits, player_kills, player_events) = run(OWN);
         assert!(
             player_hits > 0,
             "the fixture never scored a hit, so the test proves nothing"
@@ -6213,7 +6281,9 @@ mod tests {
         assert_eq!(s.own().hp, hp);
         assert!(!events.iter().any(|e| matches!(
             e,
-            Event::PilotKilled | Event::PlayerDestroyed | Event::PlayerDamaged(_)
+            Event::PilotKilled { aircraft: 0 }
+                | Event::OwnshipDestroyed { aircraft: 0 }
+                | Event::OwnshipDamaged { .. }
         )));
     }
     #[test]
@@ -6227,10 +6297,16 @@ mod tests {
         assert_eq!(s.own().hp, full);
         s.scrape_damage(0, 0.5 / capacity, &mut events);
         assert_eq!(s.own().hp, full - 1);
-        assert!(matches!(events.as_slice(), [Event::PlayerDamaged(1)]));
+        assert!(matches!(
+            events.as_slice(),
+            [Event::OwnshipDamaged {
+                aircraft: 0,
+                amount: 1
+            }]
+        ));
         s.scrape_damage(0, 1., &mut events);
         assert_eq!(s.own().hp, 0);
-        assert!(events.contains(&Event::PlayerDestroyed));
+        assert!(events.contains(&Event::OwnshipDestroyed { aircraft: 0 }));
         let mut spared = fixture(false);
         spared.cheats.damage = crate::cheats::Damage::Invulnerable;
         spared.scrape_damage(0, 1., &mut Vec::new());
@@ -6322,13 +6398,13 @@ mod tests {
         );
         assert!(exploded);
         // The debrief ledger saw the same rounds, hits, damage and kill.
-        let fired = s.ledger.total(|k| k.owner == PLAYER_OWNER);
+        let fired = s.ledger.total(|k| k.owner == OWN);
         assert_eq!(fired.launched, s.own().shots);
         assert_eq!((fired.hit, fired.damage), (2, 20));
         assert_eq!(
             s.ledger.kills(),
             [Kill {
-                owner: PLAYER_OWNER,
+                owner: OWN,
                 victim: 7,
                 category: 0x80,
                 aircraft: s.targets[0].role == TargetRole::Aircraft,
@@ -6360,7 +6436,7 @@ mod tests {
         assert!(hits > 0);
         assert!(events.iter().any(|e| matches!(
             e,
-            Event::Jolt(Jolt { target: Some(7), strength, .. }) if (*strength - 0.1).abs() < 1e-9
+            Event::Jolt(Jolt { target: 7, strength, .. }) if (*strength - 0.1).abs() < 1e-9
         )));
     }
     #[test]
@@ -6428,9 +6504,13 @@ mod tests {
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e, Event::Jolt(Jolt { target: None, .. })))
+                .any(|e| matches!(e, Event::Jolt(Jolt { target: 0, .. })))
         );
-        assert!(!events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))));
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::OwnshipDamaged { .. }))
+        );
     }
     #[test]
     fn the_selection_ring_skips_stations_that_carry_nothing() {
@@ -6518,12 +6598,12 @@ mod tests {
         let hp: Vec<_> = s.targets.iter().map(|t| t.hp).collect();
         assert_eq!(hp, [0, 0, 20, 0]);
         assert_eq!(s.own().hp, 0);
-        assert!(events.contains(&Event::PlayerDestroyed));
+        assert!(events.contains(&Event::OwnshipDestroyed { aircraft: 0 }));
         assert!(events.contains(&Event::Destroyed(7)) && events.contains(&Event::Destroyed(8)));
         assert_eq!(s.own().kills, 0);
         // Invulnerable spares only the player.
         let (s, events) = run(false, true);
-        assert!(s.own().hp > 0 && !events.contains(&Event::PlayerDestroyed));
+        assert!(s.own().hp > 0 && !events.contains(&Event::OwnshipDestroyed { aircraft: 0 }));
         assert_eq!(s.targets[3].hp, 0);
         let (s, events) = run(true, false);
         assert!(s.targets.iter().all(|t| t.hp == 20) && s.own().hp > 0);
@@ -6625,7 +6705,13 @@ mod tests {
                     |_, _| -10000.
                 )
                 .iter()
-                .any(|event| matches!(event, Event::Fired(0)))
+                .any(|event| matches!(
+                    event,
+                    Event::Fired {
+                        aircraft: 0,
+                        station: 0
+                    }
+                ))
             );
         }
         assert!(
@@ -6638,7 +6724,13 @@ mod tests {
                 |_, _| -10000.
             )
             .iter()
-            .any(|event| matches!(event, Event::Fired(0)))
+            .any(|event| matches!(
+                event,
+                Event::Fired {
+                    aircraft: 0,
+                    station: 0
+                }
+            ))
         );
         assert_eq!(s.own().rounds(0), ammo[0] - 1);
     }
@@ -7100,7 +7192,11 @@ mod tests {
             }],
             |_, _| 0.,
         );
-        assert!(events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::OwnshipDamaged { .. }))
+        );
         assert!(s.own().hp < s.own().config.damage_capacity);
     }
     #[test]
@@ -7156,7 +7252,10 @@ mod tests {
                 }],
                 |_, _| 0.
             )
-            .contains(&Event::Fired(0))
+            .contains(&Event::Fired {
+                aircraft: 0,
+                station: 0
+            })
         );
         s.release(0);
         // Selecting the second target releases the first illumination at once.
@@ -7174,7 +7273,10 @@ mod tests {
                 }],
                 |_, _| 0.
             )
-            .contains(&Event::Fired(0))
+            .contains(&Event::Fired {
+                aircraft: 0,
+                station: 0
+            })
         );
         let targets: Vec<_> = s.projectiles.iter().map(|p| p.target).collect();
         assert_eq!(targets, [Some(1), Some(2)]);
@@ -7200,7 +7302,10 @@ mod tests {
                 }],
                 |_, _| 0.
             )
-            .contains(&Event::Fired(0))
+            .contains(&Event::Fired {
+                aircraft: 0,
+                station: 0
+            })
         );
         assert_eq!(s.projectiles[0].target, Some(1));
         s.release(0);
@@ -7297,7 +7402,10 @@ mod tests {
                 }],
                 |_, _| 0.
             )
-            .contains(&Event::Fired(0))
+            .contains(&Event::Fired {
+                aircraft: 0,
+                station: 0
+            })
         );
         s.own_mut().config.system_damage = [0; 45];
         s.own_mut().config.system_damage[37] = 0x1f;
@@ -7360,7 +7468,7 @@ mod tests {
             motion: Some(Motion::new(&weapon.movement, [0., 0., 600.], position[1])),
             guidance_ticks: Some(profile.guidance_ticks),
             age: 0,
-            incoming: (target == PLAYER_OWNER).then_some(PLAYER_OWNER),
+            incoming: (target == OWN).then_some(OWN),
             station: 0,
             position,
             previous: position,
@@ -7380,7 +7488,7 @@ mod tests {
         let weapon = guided_weapon(&state, "AIM120.JT", 3);
         let player = launcher();
         let observation = seeker::Observation {
-            id: PLAYER_OWNER,
+            id: OWN,
             position: player.position,
             velocity: player.velocity,
             quality: 1.,
@@ -7390,7 +7498,7 @@ mod tests {
         state.projectiles.push(owned_shot(
             weapon,
             7,
-            PLAYER_OWNER,
+            OWN,
             [0., player.position[1], 3_000.],
             observation,
         ));
@@ -7412,7 +7520,7 @@ mod tests {
             );
         }
         let flight = state.projectiles[0].guidance.as_ref().unwrap();
-        assert_eq!(flight.seeker.target, Some(PLAYER_OWNER));
+        assert_eq!(flight.seeker.target, Some(OWN));
         assert_eq!(flight.seeker.status, Status::Pitbull);
         assert!(state.missile_snapshots(&[(0, player)])[0].radar_acquired);
     }
@@ -7571,7 +7679,7 @@ mod tests {
         };
         state.projectiles.push(owned_shot(
             state.own().config.stations[0].weapon.clone(),
-            PLAYER_OWNER,
+            OWN,
             id,
             player.position,
             observation,

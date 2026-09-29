@@ -100,11 +100,11 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
         }
         systems += events
             .iter()
-            .filter(|e| matches!(e, Event::SubsystemDamaged(_)))
+            .filter(|e| matches!(e, Event::SubsystemDamaged { .. }))
             .count();
         destroyed += events
             .iter()
-            .filter(|e| matches!(e, Event::PlayerDestroyed))
+            .filter(|e| matches!(e, Event::OwnshipDestroyed { .. }))
             .count();
         if damaged.projectiles.is_empty() {
             break;
@@ -141,11 +141,11 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
         }
         systems += events
             .iter()
-            .filter(|e| matches!(e, Event::SubsystemDamaged(_)))
+            .filter(|e| matches!(e, Event::SubsystemDamaged { .. }))
             .count();
         destroyed += events
             .iter()
-            .filter(|e| matches!(e, Event::PlayerDestroyed))
+            .filter(|e| matches!(e, Event::OwnshipDestroyed { .. }))
             .count();
     }
     // Different source weapons produce different damage histories. A fatal
@@ -190,7 +190,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
             }
             systems += events
                 .iter()
-                .filter(|e| matches!(e, Event::SubsystemDamaged(_)))
+                .filter(|e| matches!(e, Event::SubsystemDamaged { .. }))
                 .count();
         }
     }
@@ -251,10 +251,12 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                     return Err("incoming replay diverged".into());
                 }
                 for event in &events {
-                    if let Some(cue) = feedback(event, state.own().configuration()) {
+                    if let Some(cue) =
+                        feedback(event, state.own().aircraft, state.own().configuration())
+                    {
                         mixer.event(cue);
                     }
-                    outcome |= matches!(event, Event::PlayerDamaged(_) | Event::Defeated(0));
+                    outcome |= matches!(event, Event::OwnshipDamaged { .. } | Event::Defeated(0));
                 }
                 if matches!(mixer.tick(), Some(tore_input::FeedbackUpdate::Pulse { .. })) {
                     pulses += 1;
@@ -677,12 +679,12 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 }
                 for event in events {
                     match event {
-                        Event::Fired(_) => fired += 1,
+                        Event::Fired { .. } => fired += 1,
                         Event::Hit(_) => impacts += 1,
                         // The fixture flies at the player, so a slow gun can
                         // lose the race and the two aircraft collide; the
                         // collision then zeroes what the rounds had not.
-                        Event::PlayerDestroyed => collided = true,
+                        Event::OwnshipDestroyed { .. } => collided = true,
                         Event::Destroyed(_) => destroyed += 1,
                         _ => {}
                     }
@@ -941,7 +943,7 @@ fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> 
         {
             return Err("unguided release replay diverged".into());
         }
-        fired |= events.iter().any(|e| matches!(e, Event::Fired(_)));
+        fired |= events.iter().any(|e| matches!(e, Event::Fired { .. }));
         ground |= events.contains(&Event::Ground);
         if ground {
             break;

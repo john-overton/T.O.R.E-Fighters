@@ -149,7 +149,7 @@ fn radar_seeker_uses_shared_aspect_signature_range() {
 fn shot(w: &Weapon, mode: LaunchMode, target: Option<u32>) -> Projectile {
     let profile = Profile::for_weapon(w).unwrap();
     Projectile {
-        owner: crate::combat::live::PLAYER_OWNER,
+        owner: 0,
         weapon: None,
         id: 0,
         guidance: Some(Flight::new(profile, mode, target, [0., 1000., 0.])),
@@ -273,7 +273,10 @@ fn boresight_live_release_without_sensor_equipment_and_next_round_reset() {
             }],
             |_, _| 0.
         )
-        .contains(&Event::Fired(0))
+        .contains(&Event::Fired {
+            aircraft: 0,
+            station: 0
+        })
     );
     assert_eq!(s.projectiles[0].target, None);
     assert_eq!(
@@ -306,7 +309,10 @@ fn boresight_live_release_without_sensor_equipment_and_next_round_reset() {
             }],
             |_, _| 0.
         )
-        .contains(&Event::Fired(0))
+        .contains(&Event::Fired {
+            aircraft: 0,
+            station: 0
+        })
     );
     assert!(!s.own().mounted.acquired);
     assert_eq!(s.own().mounted.dwell, 0);
@@ -394,7 +400,13 @@ fn bay_safe_empty_and_failed_gates_survive_uncued_mode() {
         }],
         |_, _| 0.,
     );
-    assert!(events.iter().any(|e| matches!(e, Event::Fired(0))));
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Event::Fired {
+            aircraft: 0,
+            station: 0
+        }
+    )));
     assert!(s.own().rounds(0) < ammo[0] & 0x7fff);
     assert!(s.bay_demand(0));
     let mut held_open = 0;
@@ -616,7 +628,10 @@ fn supported_update_freezes_on_radar_shutdown_and_cockpit_switch() {
             }],
             |_, _| 0.
         )
-        .contains(&Event::Fired(0))
+        .contains(&Event::Fired {
+            aircraft: 0,
+            station: 0
+        })
     );
     s.release(0);
     let known = s.projectiles[0]
@@ -762,7 +777,10 @@ fn automatic_bore_release_and_radar_search_start_without_designation() {
             }],
             |_, _| 0.
         )
-        .contains(&Event::Fired(0))
+        .contains(&Event::Fired {
+            aircraft: 0,
+            station: 0
+        })
     );
     assert!(s.projectiles[0].guidance.as_ref().unwrap().enabled);
     assert_eq!(s.projectiles[0].target, None);
@@ -1218,7 +1236,10 @@ fn radar_power_off_disables_bore_and_latches_unguided_release() {
                 }],
                 |_, _| 0.
             )
-            .contains(&Event::Fired(0))
+            .contains(&Event::Fired {
+                aircraft: 0,
+                station: 0
+            })
         );
         let mut p = s.projectiles[0].clone();
         let direction = p.direction;
@@ -1410,7 +1431,10 @@ fn ir_bore_audio_uses_candidate_percentage_and_same_target_lock_without_designat
                 }],
                 |_, _| 0.
             )
-            .contains(&Event::Fired(0))
+            .contains(&Event::Fired {
+                aircraft: 0,
+                station: 0
+            })
     );
     assert!(released.own_view().seeker_tone(l).is_none());
     let mut masked = s.clone();
@@ -1483,7 +1507,10 @@ fn armed_ir_bore_ignores_radar_power_without_designation() {
             }],
             |_, _| 0.
         )
-        .contains(&Event::Fired(0))
+        .contains(&Event::Fired {
+            aircraft: 0,
+            station: 0
+        })
     );
     assert!(!s.projectiles[0].guidance.as_ref().unwrap().unguided);
     assert_eq!(s.projectiles[0].target, Some(7));
@@ -1619,7 +1646,10 @@ fn selected_track_overrides_ir_bore_and_release_restores_search() {
             }],
             |_, _| 0.
         )
-        .contains(&Event::Fired(0))
+        .contains(&Event::Fired {
+            aircraft: 0,
+            station: 0
+        })
     );
     assert_eq!(s.projectiles[0].target, Some(8));
     s.command(0, Command::ClearDesignation, l);
@@ -1990,7 +2020,10 @@ fn cued_radar_release_uses_predicted_reach_not_nominal_launch_max() {
             }],
             |_, _| 0.
         )
-        .contains(&Event::Fired(0))
+        .contains(&Event::Fired {
+            aircraft: 0,
+            station: 0
+        })
     );
     s.release(0);
     s.targets[0].velocity = [0., 0., 10000.];
