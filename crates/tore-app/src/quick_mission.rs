@@ -13,6 +13,7 @@ use tore_sim::ai::{
     launch::{Side, WingId, WingLaunch, WingSelection, legacy_pairs, resolve_wings},
 };
 pub mod layout;
+pub mod matrix;
 pub use layout::{EnemyAim, FEET_PER_NM, MapBounds, SEPARATION_NM};
 type Rect = (i32, i32, i32, i32);
 const POPUP: Rect = (185, 100, 270, 370);

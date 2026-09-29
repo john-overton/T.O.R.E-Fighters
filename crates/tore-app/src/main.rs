@@ -205,6 +205,9 @@ struct App {
     /// Accepted player runway start, retained independently of editor changes.
     ground_start: Option<u32>,
     launch_creator: bool,
+    /// `--loadout none|guns`: the stores the Load Ordnance page would leave, applied
+    /// to the Quick Mission's loadout before launch.
+    quick_loadout: Option<String>,
     /// Quick Mission uses AI by default. `--fixture-wings` retains the
     /// straight-flight compatibility setup.
     ai_wings_enabled: bool,
@@ -1755,6 +1758,15 @@ impl App {
                         self.quick.ordnance =
                             Some(ordnance::Ordnance::new(load, &self.theater_resources)?);
                     }
+                    if let Some(choice) = self.quick_loadout.clone()
+                        && let Some(o) = self.quick.ordnance.as_mut()
+                    {
+                        if choice == "none" {
+                            o.loadout.quantities.fill(0);
+                        } else {
+                            o.loadout.restrict_to_guns();
+                        }
+                    }
                     let guns_only = self.quick.guns_only();
                     let o = self.quick.ordnance.as_mut().unwrap();
                     if guns_only {
@@ -2018,7 +2030,10 @@ impl App {
                     event_loop.exit();
                     return;
                 }
-                self.airport_nav_mode = ground_airport.is_some();
+                // A ground start begins on NAV, and so does an aircraft with nothing
+                // loaded in the selected station: an empty station is never armed.
+                self.airport_nav_mode = ground_airport.is_some()
+                    || !self.combat.state.carries(self.combat.state.selected);
                 self.combat.state.armed = !self.airport_nav_mode;
                 self.airport_commands.clear();
                 self.instruments.navigation = navigation::Navigation::default();
@@ -2329,7 +2344,7 @@ impl ApplicationHandler for App {
                         event_loop.exit();
                     } else if self.error.is_none() {
                         println!(
-                            "Quick Mission launch: ground={:?} player_position={:?} supported={} airborne_targets={} parked_targets={} enemy_nm={:.1}",
+                            "Quick Mission launch: ground={:?} player_position={:?} supported={} airborne_targets={} parked_targets={} enemy_nm={:.1} ammo={:?} listed={:?}",
                             self.ground_start,
                             self.flight.position,
                             self.flight.supported_at(
@@ -2352,7 +2367,9 @@ impl ApplicationHandler for App {
                             self.combat
                                 .mission_layout
                                 .as_ref()
-                                .map_or(0., |l| l.enemy.distance_ft / quick_mission::FEET_PER_NM)
+                                .map_or(0., |l| l.enemy.distance_ft / quick_mission::FEET_PER_NM),
+                            self.combat.state.ammo,
+                            self.combat.readout(&self.flight, 1.).weapons,
                         );
                     }
                 }
@@ -6890,6 +6907,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut ai_mission = ai_wings::Preset::Free;
     let mut combat_commands = Vec::new();
     let mut weapon_slot: Option<usize> = None;
+    let mut stripped_loadout: Option<String> = None;
     let mut input_profile = None;
     let mut native_input = true;
     let mut record_input = None;
@@ -7256,6 +7274,13 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--compatibility-weapons" => combat_commands.push(tore_sim::combat::live::Command::CompatibilityWeapons),
             "--combat-smoke" => {
                 combat_smoke = true;
+            }
+            "--loadout" => {
+                let choice = args.next().ok_or("--loadout needs none or guns")?;
+                if !["none", "guns"].contains(&choice.as_str()) {
+                    return Err("--loadout needs none (every store off) or guns (everything but the gun off)".into());
+                }
+                stripped_loadout = Some(choice);
             }
             "--weapon-slot" => {
                 weapon_slot = Some(
@@ -7639,7 +7664,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Replays: --watch-replay FILE plays a mission recording (docs/REPLAYS.md). With it, --capture-replay OUT.ppm writes one GPU frame and exits (OUT.png saves the clean view as P does); --replay-tick N pauses at a tick; --flight-view 0..11 and --replay-aircraft ID choose the view; --replay-drone starts in the follow drone; --replay-speed 0.125..16 starts playing at that speed, negative for reverse; --replay-ui labels,timer,trails,comms,subtitles chooses the interface parts; --replay-panels thought,telemetry,guidance,comms,menu opens debug panels, or the right-click menu, on the selected aircraft; --replay-clean starts with the interface hidden, as H hides it; --replay-menu ?|pref|time|help|graphics|sound|controls opens the Escape menu at that page, or that screen over it; --replay-look-at aircraft:ID, ground:ID or weapon:ID starts in the object view looking at it."
@@ -8419,7 +8444,31 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         );
     }
     if validate_creator {
-        ordnance::validate_sources(&assets.theater_resources, &world)?;
+        // TORE_CREATOR_STAGE=loadouts|matrix|render (render includes the input fuzz) runs one part of the probe.
+        let stage = std::env::var("TORE_CREATOR_STAGE").unwrap_or_default();
+        let wanted = |name: &str| stage.is_empty() || stage == name;
+        if wanted("loadouts") {
+            ordnance::validate_sources(&assets.theater_resources, &world)?;
+        }
+        if wanted("matrix") {
+            quick_mission::matrix::validate(
+                &assets.theater_resources,
+                assets.creator_options.clone(),
+            )?;
+        }
+        if wanted("render") {
+            let resources = assets.theater_resources.clone();
+            let options = assets.creator_options.clone();
+            let mut menu = Menu::new(assets, Some("CHOOSEV"))?;
+            quick_mission::matrix::render(
+                &resources,
+                options.clone(),
+                &menu.quick_sprites,
+                &world,
+            )?;
+            quick_mission::matrix::fuzz(&resources, options, &menu.quick_sprites, &world)?;
+            quick_mission::matrix::fuzz_screens(&resources, &mut menu)?;
+        }
         return Ok(Outcome::Done);
     }
     if validate_weather {
@@ -8948,7 +8997,30 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     // Headless probes and captures have no instrument panel to read, so the
     // command line supplies the same sensor controls a player would set.
     flight.sensors = sensor_controls(sensor_channel, scope_range, scope_history);
-    let mut combat = combat::Combat::new(&hornet, &theater_resources, live_fire)?;
+    if stripped_loadout.is_some() && live_fire {
+        return Err(
+            "--loadout cannot be combined with --live-fire, which starts the PT-default range"
+                .into(),
+        );
+    }
+    let mut combat = match &stripped_loadout {
+        // The Load Ordnance page's edits without the page: every store off, or
+        // every external store off with the internal gun kept.
+        Some(choice) => {
+            let mut load = tore_sim::combat::loadout::Loadout::new(&hornet.profile, |name| {
+                theater_resources.get(name).cloned().ok_or_else(|| {
+                    std::io::Error::other(format!("missing loadout resource {name}"))
+                })
+            })?;
+            if choice == "none" {
+                load.quantities.fill(0);
+            } else {
+                load.restrict_to_guns();
+            }
+            combat::Combat::with_loadout(&hornet, &theater_resources, &load)?
+        }
+        None => combat::Combat::new(&hornet, &theater_resources, live_fire)?,
+    };
     combat.add_airport_targets(&world.airport_scene)?;
     if let Some(ref path) = record_combat {
         combat.recorder = Some(combat_tape::Recorder::new(
@@ -9309,7 +9381,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     let mut airport_service =
         tore_sim::airport::Service::new(&world.airport_scene).map_err(std::io::Error::other)?;
     let airport_nav_mode = airport_probe.map_or_else(
-        || ground_start.is_some() && weapon_slot.is_none() && !live_fire,
+        || {
+            (ground_start.is_some() && weapon_slot.is_none() && !live_fire)
+                || (stripped_loadout.is_some() && !combat.state.carries(combat.state.selected))
+        },
         |(_, aircraft, _)| aircraft.nav_mode,
     );
     if airport_nav_mode {
@@ -9365,6 +9440,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         mission: None,
         ground_start,
         launch_creator,
+        quick_loadout: stripped_loadout.clone(),
         ai_wings_enabled: !fixture_wings,
         enemy_skill,
         ai_wings: None,

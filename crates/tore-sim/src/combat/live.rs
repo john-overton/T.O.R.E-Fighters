@@ -1188,7 +1188,10 @@ impl State {
             } else {
                 (next + count) % (count + 1)
             };
-            if next == 0 || next == current || self.station_allowed(next - 1) {
+            if next == 0
+                || next == current
+                || (self.station_allowed(next - 1) && self.carries(next - 1))
+            {
                 break;
             }
         }
@@ -1204,6 +1207,12 @@ impl State {
     }
     fn station_allowed(&self, station: usize) -> bool {
         !self.cheats.guns_only || is_gun(&self.config.stations[station].weapon)
+    }
+    /// A station the selection ring may stop on: one that carries something
+    /// (an empty station is not on the aircraft), or any station under
+    /// unlimited ammunition.
+    pub fn carries(&self, station: usize) -> bool {
+        self.cheats.unlimited_ammo || self.ammo[station] & 0x7fff != 0
     }
     /// Guns only turned on with a missile selected moves to the gun, or to
     /// NAV when the aircraft has none.
@@ -5505,6 +5514,30 @@ mod tests {
                 .any(|e| matches!(e, Event::Jolt(Jolt { target: None, .. })))
         );
         assert!(!events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))));
+    }
+    #[test]
+    fn the_selection_ring_skips_stations_that_carry_nothing() {
+        let mut s = fixture(false);
+        let mut gun = s.config.stations[0].clone();
+        gun.weapon.source = AircraftId::F18.gun().into();
+        s.config.stations.push(gun.clone());
+        s.config.stations.push(gun);
+        s.ammo = vec![0, 100, 0];
+        s.armed = false;
+        s.cycle_selection(true);
+        assert_eq!(
+            (s.armed, s.selected),
+            (true, 1),
+            "the empty station 0 is skipped"
+        );
+        s.cycle_selection(true);
+        assert!(!s.armed, "station 2 is empty too, so NAV follows");
+        s.cycle_selection(false);
+        assert_eq!((s.armed, s.selected), (true, 1));
+        // Unlimited ammunition fires past an empty station, so it stays reachable.
+        s.cheats.unlimited_ammo = true;
+        s.cycle_selection(false);
+        assert_eq!((s.armed, s.selected), (true, 0));
     }
     #[test]
     fn guns_only_leaves_the_player_the_gun_and_nav() {

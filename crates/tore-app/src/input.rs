@@ -101,8 +101,9 @@ impl Input {
                 .map_err(|e| format!("{}: {e}", path.display()))?
                 .take(256 * 1024 + 1)
                 .read_to_string(&mut text)
-                .map_err(|e| e.to_string())?;
-            custom = Profile::parse(&text)?;
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            // Name the file, so a broken input-v1.conf is easy to find and fix.
+            custom = Profile::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         }
         let profile = complete(&custom)?;
         let head = match profile.head_port {
@@ -924,6 +925,31 @@ mod tests {
             tore_input::Action::parse("eject").unwrap(),
             tore_input::Action::Pilot(tore_input::PilotCommand::Eject)
         );
+    }
+    #[test]
+    fn a_broken_profile_names_its_file_in_the_error() {
+        let dir = std::env::temp_dir().join(format!("tore-broken-profile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, body) in [
+            ("empty.conf", ""),
+            ("version.conf", "tore-input 99\n"),
+            (
+                "action.conf",
+                "tore-input 1\nbind keyboard g no-such-action press\n",
+            ),
+        ] {
+            let path = dir.join(name);
+            std::fs::write(&path, body).unwrap();
+            let error = Input::new(Some(&path), false).err().unwrap();
+            assert!(error.contains(name), "{error}");
+        }
+        assert!(
+            Input::new(Some(&dir.join("missing.conf")), false)
+                .err()
+                .unwrap()
+                .contains("missing.conf")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn settings_save_reload_and_invalid_edit_preserve_previous_file() {
