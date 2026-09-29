@@ -74,6 +74,9 @@ pub struct Renderer {
     config: wgpu::SurfaceConfiguration,
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
+    /// Redout and blackout levels the canvas shader veils in flight.
+    veil: wgpu::Buffer,
+    veil_levels: [f32; 2],
     pipeline: wgpu::RenderPipeline,
     sim: crate::sim_renderer::SimRenderer,
     cockpit: crate::cockpit_renderer::CockpitRenderer,
@@ -363,6 +366,12 @@ impl Renderer {
             multiview: None,
             cache: None,
         });
+        let veil = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("G-effect veil"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let view = texture.create_view(&Default::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Menu image"),
@@ -375,6 +384,10 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: veil.as_entire_binding(),
                 },
             ],
         });
@@ -406,6 +419,8 @@ impl Renderer {
             config,
             texture,
             bind_group,
+            veil,
+            veil_levels: [0.; 2],
             pipeline,
         })
     }
@@ -545,6 +560,7 @@ impl Renderer {
             camera,
             world,
         );
+        self.write_veil(overlay);
         if overlay {
             self.cockpit.draw(&mut encoder, &view);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -609,6 +625,19 @@ impl Renderer {
             ),
         })
     }
+    /// Levels for the flight canvas veil (redout, blackout); the next flight
+    /// draw applies them on the GPU.
+    pub fn set_veil(&mut self, levels: [f32; 2]) {
+        self.veil_levels = levels;
+    }
+    fn write_veil(&self, flight: bool) {
+        let [redout, blackout] = if flight { self.veil_levels } else { [0.; 2] };
+        let bytes: Vec<u8> = [redout, blackout, 0., 0.]
+            .into_iter()
+            .flat_map(f32::to_le_bytes)
+            .collect();
+        self.queue.write_buffer(&self.veil, 0, &bytes);
+    }
     pub fn flight_size(&self) -> [u32; 2] {
         let s = self.window.inner_size();
         let scale = (1920. / s.width.max(1) as f64)
@@ -655,6 +684,10 @@ impl Renderer {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.veil.as_entire_binding(),
+                },
             ],
         });
     }
@@ -696,6 +729,7 @@ impl Renderer {
         };
         let size = flight_size.unwrap_or([WIDTH as u32, HEIGHT as u32]);
         self.canvas_texture(size);
+        self.write_veil(flight_size.is_some());
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.texture,

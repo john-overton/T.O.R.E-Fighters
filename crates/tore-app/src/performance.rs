@@ -9,6 +9,9 @@ pub struct Performance {
     frames: usize,
     previous: Option<Instant>,
     samples: Vec<[f64; 4]>,
+    /// Whether the G vignette was forced on for each sample (`TORE_PERF_VEIL`).
+    veiled: Vec<bool>,
+    veil: bool,
     pub completed_previews: usize,
     paused_frames: usize,
 }
@@ -25,6 +28,7 @@ impl Performance {
             limit,
             cycle: std::env::var_os("TORE_PERF_VIEWS").is_some(),
             active: std::env::var_os("TORE_PERF_ACTIVE").is_some(),
+            veil: std::env::var_os("TORE_PERF_VEIL").is_some(),
             ..Default::default()
         })
     }
@@ -33,6 +37,11 @@ impl Performance {
     }
     pub fn view(&self) -> Option<u8> {
         (self.limit > 0 && self.cycle).then(|| [0, 3, 4, 1, 2][(self.frames / 30) % 5])
+    }
+    /// Blackout level to force on this frame: 30-frame blocks alternate off
+    /// and on, so the report can compare the same run with and without the veil.
+    pub fn veil_level(&self) -> Option<f64> {
+        (self.limit > 0 && self.veil).then_some(if (self.frames / 30) % 2 == 1 { 0.6 } else { 0. })
     }
     pub fn record(
         &mut self,
@@ -54,6 +63,7 @@ impl Performance {
                 compose,
                 present,
             ]);
+            self.veiled.push(self.veil_level().is_some_and(|l| l > 0.));
         }
         self.paused_frames += usize::from(paused);
         self.previous = Some(start);
@@ -69,24 +79,42 @@ impl Performance {
             "  paused frames: {}; completed camera readbacks: {}",
             self.paused_frames, self.completed_previews
         );
-        for (column, name) in [
-            "frame interval",
-            "simulation/cameras",
-            "UI composition",
-            "submit/present",
-        ]
-        .iter()
-        .enumerate()
-        {
-            let mut values: Vec<_> = self.samples.iter().map(|s| s[column]).collect();
-            values.sort_by(f64::total_cmp);
-            let mean = values.iter().sum::<f64>() / values.len() as f64;
-            println!(
-                "  {name}: mean {mean:.2} ms, p50 {:.2}, p95 {:.2}, max {:.2}",
-                values[values.len() / 2],
-                values[(values.len() - 1) * 95 / 100],
-                values[values.len() - 1]
-            );
+        let groups: &[(&str, Option<bool>)] = if self.veil {
+            &[("veil off", Some(false)), ("veil on", Some(true))]
+        } else {
+            &[("", None)]
+        };
+        for (group, want) in groups {
+            let rows: Vec<&[f64; 4]> = self
+                .samples
+                .iter()
+                .zip(&self.veiled)
+                .filter(|(_, v)| want.is_none_or(|w| **v == w))
+                .map(|(s, _)| s)
+                .collect();
+            if rows.is_empty() {
+                continue;
+            }
+            println!("  [{group}] {} samples", rows.len());
+            for (column, name) in [
+                "frame interval",
+                "simulation/cameras",
+                "UI composition",
+                "submit/present",
+            ]
+            .iter()
+            .enumerate()
+            {
+                let mut values: Vec<_> = rows.iter().map(|s| s[column]).collect();
+                values.sort_by(f64::total_cmp);
+                let mean = values.iter().sum::<f64>() / values.len() as f64;
+                println!(
+                    "  {name}: mean {mean:.2} ms, p50 {:.2}, p95 {:.2}, max {:.2}",
+                    values[values.len() / 2],
+                    values[(values.len() - 1) * 95 / 100],
+                    values[values.len() - 1]
+                );
+            }
         }
         true
     }

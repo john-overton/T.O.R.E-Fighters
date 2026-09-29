@@ -3260,6 +3260,9 @@ impl ApplicationHandler for App {
                                     && !self.flight.crashed
                                     && self.flight.native.is_none(),
                             );
+                            if let Some(level) = self.performance.veil_level() {
+                                self.g_effects.blackout = level;
+                            }
                             if let Some(points) = self.hornet.streamer_points(&self.flight) {
                                 self.vapor.step(self.world.weather.ticks(), points);
                             }
@@ -4123,13 +4126,23 @@ impl ApplicationHandler for App {
                             );
                         }
                         use tore_sim::g_effects::GEffects;
-                        for (color, level) in [
-                            ([150, 0, 0], self.g_effects.redout),
-                            ([0, 0, 0], self.g_effects.blackout),
-                        ] {
-                            if level > 0. {
-                                self.flight_canvas
-                                    .veil(color, |radius| GEffects::coverage(level, radius));
+                        // The canvas shader veils the finished frame on the GPU.
+                        // The map, menus and panels are drawn after this point,
+                        // so while they show the veil goes on the canvas instead,
+                        // under them (the pause freezes the levels).
+                        let veil = [self.g_effects.redout, self.g_effects.blackout];
+                        let under_overlay = self.flight_ui.frozen() || self.flight_ui.map.open;
+                        renderer.set_veil(if under_overlay {
+                            [0.; 2]
+                        } else {
+                            veil.map(|level| level as f32)
+                        });
+                        if under_overlay {
+                            for (color, level) in [([150, 0, 0], veil[0]), ([0, 0, 0], veil[1])] {
+                                if level > 0. {
+                                    self.flight_canvas
+                                        .veil(color, |radius| GEffects::coverage(level, radius));
+                                }
                             }
                         }
                         if self.flight_ui.map.open {
