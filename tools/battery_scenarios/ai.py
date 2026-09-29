@@ -457,6 +457,14 @@ def scenarios() -> list[Scenario]:
     out.append(probe("regress-envelope-edge-flap", fight(8, 8, "--separation", "5", *attack), ticks=7200,
                      check=checker(strict=True, allow_anomalies=("mid-air collision",)),
                      notes="Friendly 2-3 swapped between its missile tactic and gun tracking every few ticks (fixed 2026-09-29)"))
+    # Known failure (lane doc): an F-22 test-harness leader outruns its
+    # wingman, whose intercept closes altitude only in proportion to its
+    # 35,000 ft gap, so it chases at 800 kt, 900 ft above hills that rise
+    # faster than the 1,000 ft terrain look-ahead can see.
+    out.append(probe("known-f22-leader-wingman-ukr3", [
+        "--theater", "UKR", "--aircraft", "f22", "--ground-start", "3",
+        "--maneuver", "takeoff", "--probe-wing-size", "2", "--probe-wing-only"],
+        ticks=9000, check=checker(ground=True, need_takeoff=True)))
     out.append(probe("regress-decoy-over-100", fight(2, 2, "--aircraft", "su25", "--probe-friendly-aircraft", "su25",
                                                      "--probe-enemy-aircraft", "mig21", "--separation", "5", *attack),
                      ticks=6000, notes="mission aborted: decoy percentages exceed 100 (fixed 2026-09-28)"))

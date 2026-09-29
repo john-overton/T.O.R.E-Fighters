@@ -207,6 +207,24 @@ them (see `KNOWN_ANOMALIES` in the scenario file).
 - `ai-theater-cub-takeoff-a1` (Key West, near the north edge): the airborne
   friendly wing starts on the runway heading, north, has no route and leaves
   the map after 163 s (item 5 below).
+- `ai-known-f22-leader-wingman-ukr3` (reported by the flight lane): after a
+  ground start at Krasnodar (UKR 3) behind the test harness's F-22, the
+  wingman (the player's wing flies the player's type; `--probe-friendly-aircraft`
+  sets wings 2 and 3 only, so an F-18 there gives the same run) flies into
+  rising ground at about 800 kt after 71 s. The formation trace shows why: the harness cruises
+  the F-22 at about 890 kt, 3,000 ft above the ground, so the wingman is in
+  Intercept 25,000 to 35,000 ft behind and 2,500 to 3,100 ft below its gate.
+  The fitted intercept rule ([physical departure and
+  rejoin](../spec/ai.md#physical-departure-and-rejoin)) asks for leader
+  velocity plus a closing vector toward the gate, so the altitude closes in
+  proportion to the distance: about 20 ft/s of climb, while the ground ahead
+  rises at over 100 ft/s at that speed. The wingman at full afterburner,
+  lower and in denser air, still loses ground (closure -100 to -700 ft/s), and
+  the 1,000 ft terrain look-ahead (item 7) warns 0.7 s before the hill. This
+  follows the formation spec as written, so it was not changed; closing the
+  altitude error first when far behind, or a speed-scaled look-ahead, would be
+  new rules (item 14). The same happens with an F-22 in human hands only if
+  the player cruises that fast that low.
 - Default fuzz seeds `ai-fuzz-0014`, `-0028`, `-0032` and `-0053`: the
   supersonic low-level class above (see "Fourth round").
 - Activity flapping and pitch-stick oscillation at a weapon's envelope edge,
@@ -284,6 +302,9 @@ Behaviour the specs do not define, with the evidence. None of these were changed
     12 minutes flying the approach over the hills south of Simferopol, went
     around once and was still approaching after 20 minutes (`ai-damaged-*`,
     fuel leak and control faults); same cause as item 6.
+14. **A wingman far behind and below its leader.** Should Intercept close a
+    large altitude error before the distance (see Known failures, F-22
+    leader at Krasnodar)?
 
 ## Needs a human eye or ear
 
@@ -319,7 +340,11 @@ order answered, refusals with the documented messages (no airport selected,
 no hostile designated, wingmen bugged out). Damaged aircraft: no impossible
 states; every damaged aircraft either died, ejected, landed or was still
 flying its approach; the only other failures were the known supersonic class
-and aircraft with no route leaving the map (now allowed there). After the
+and aircraft with no route leaving the map (now allowed there). The replay lane's list of 29 flagged scenarios
+(`.local/battery/ai-churn-flags.txt`, recorded before the third-round fixes)
+was re-run: of its 26 probe commands, 24 now carry no churn flag, and the two
+left are the furball and the G-limited pursuit described in the third round.
+After the
 player dies the player's wingmen keep "In formation" with no leader, which
 only matters if a flight continued without the player. No friendly-fire kill
 by a wingman was seen in any run, so that counter was not exercised.
