@@ -1148,6 +1148,14 @@ the model's current roll authority and clamp stick roll to [-1, 1].
 Pitch feedback requests (cos(flight-path pitch) + speed times pitch error /
 (3 seconds times 32.174)) / max(cos(bank), 0.25) G, clamped to the loaded
 negative limit and AI positive G limit. Pitch error includes the terrain floor.
+When an airborne aircraft's flight path is below the terrain floor, the
+requested bank is zero while it stays below, so a steep turn cannot use the
+lift needed to climb away from the ground, and the pitch error is closed over
+1 second instead of 3, in the spirit of B44's extra pitch authority while the
+floor is active (fitted, agent decision 2026-09-28, after the bug battery saw
+undamaged AI aircraft fly into hills at full G while still turning toward a
+target, or ease into a rising hillside at 2 G; the airfield terrain correction
+already levels the wings the same way).
 Invert the model's loaded stick-to-G mapping, with low-speed authority floored
 at 0.01 only for division, and clamp pitch input to [-1, 1]. Rudder stays zero.
 For the researched model, this includes its flap-adjusted minimum speed,
