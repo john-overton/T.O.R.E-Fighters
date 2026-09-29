@@ -4134,9 +4134,6 @@ impl ApplicationHandler for App {
                                 easy_square.is_none(),
                             );
                         }
-                        if self.flight_ui.hud && self.view_rig.cockpit(self.flight_view) {
-                            hud::shadow(&mut self.menu.pixels);
-                        }
                         renderer.cockpit(
                             &presented,
                             &self.camera,

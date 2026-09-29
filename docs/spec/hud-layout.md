@@ -117,18 +117,6 @@ reviewed cockpit dimensions are accepted. An unreviewed source uses no cockpit
 HUD aperture until its glass is reviewed, rather than leaking across the frame.
 No imported picture or generated mask is committed.
 
-## Legibility over bright sky
-
-`fitted`, agent decision 2026-09-29 (from the menus lane's terrain sweep, not a
-requirement from the original). HUD green is about as bright as fog or cloud: on
-the foggy and cloudy captures the measured luminance contrast was 1.04 to 1.08 to
-one (1.3 to one over clear sky), so the symbols were told apart by hue alone. Every
-HUD pixel now gets a soft dark shadow (black at 150 of 255) one HUD-layer pixel down
-and right, drawn on the finished layer only where nothing else is drawn, so it
-reads as a dark edge over bright backgrounds and vanishes over night and dark
-ground. `hud::shadow` does it; revert it by removing its one call before the cockpit
-layer is uploaded.
-
 ## Startup and navigation mode
 
 Normal ground starts select NAV, with weapons disarmed. Normal airborne starts

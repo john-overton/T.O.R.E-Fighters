@@ -66,24 +66,6 @@ impl Paint<'_> {
         }
     }
 }
-/// `fitted`, agent decision 2026-09-29: HUD green has almost the same
-/// brightness as fog or cloud (a contrast of 1.04 to 1.1 to one measured on a
-/// foggy capture), so a soft dark edge one layer pixel down and right of every
-/// HUD pixel keeps the symbols readable over bright sky. It is invisible at
-/// night and over dark ground. Applied to the finished HUD layer, only where
-/// nothing is drawn.
-pub fn shadow(pixels: &mut [u8]) {
-    let width = crate::menu::WIDTH;
-    for y in (0..crate::menu::HEIGHT - 1).rev() {
-        for x in (0..width - 1).rev() {
-            let here = (y * width + x) * 4 + 3;
-            let below = ((y + 1) * width + x + 1) * 4;
-            if pixels[here] == 255 && pixels[below + 3] == 0 {
-                pixels[below..below + 4].copy_from_slice(&[0, 0, 0, 150]);
-            }
-        }
-    }
-}
 // Authored F-16-style bank scale requested by the user. The graduated arc
 // rotates past a fixed index, keeping full rolls readable through +/-180.
 pub const HUD_CLIP: (i32, i32, i32, i32) = (174, 96, 292, 354);
@@ -448,26 +430,6 @@ fn wind_label(wind: &tore_sim::runway_wind::Assessment) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn the_shadow_goes_below_and_right_of_hud_pixels_only_over_empty_layer() {
-        let width = crate::menu::WIDTH;
-        let mut pixels = vec![0u8; width * crate::menu::HEIGHT * 4];
-        let put = |pixels: &mut Vec<u8>, x: usize, y: usize, rgba: [u8; 4]| {
-            pixels[(y * width + x) * 4..(y * width + x) * 4 + 4].copy_from_slice(&rgba)
-        };
-        put(&mut pixels, 10, 10, [90, 255, 90, 255]);
-        put(&mut pixels, 11, 11, [90, 255, 90, 255]);
-        shadow(&mut pixels);
-        let at = |x: usize, y: usize| pixels[(y * width + x) * 4..(y * width + x) * 4 + 4].to_vec();
-        assert_eq!(
-            at(11, 11),
-            [90, 255, 90, 255],
-            "a HUD pixel is never covered"
-        );
-        assert_eq!(at(12, 12), [0, 0, 0, 150]);
-        assert_eq!(at(10, 11), [0, 0, 0, 0], "no shadow beside or above");
-        assert_eq!(at(9, 9), [0, 0, 0, 0]);
-    }
     #[test]
     fn accented_letters_draw_on_their_code_page_437_cell() {
         // A font whose only marked cells are 'e' (0x65) and CP437 0x89, the
