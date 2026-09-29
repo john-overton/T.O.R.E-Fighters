@@ -8028,6 +8028,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "climb",
                     "dive",
                     "overspeed",
+                    "gcurve",
                     "sprint",
                     "devices",
                     "autopilot",
@@ -9132,6 +9133,67 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             );
         }
         let keys = setup_maneuver(&mut state);
+        if maneuver == "gcurve" {
+            // The loaded positive G limit at each speed at 5,000 feet and the
+            // aircraft's own weight: what a full back stick can pull.
+            state.position[1] = 5_000.;
+            state.update_stall_scale();
+            let raw_top = state
+                .retail_envelopes()
+                .iter()
+                .map(|e| e.g)
+                .max()
+                .unwrap_or(1);
+            let corner = state
+                .retail_envelopes()
+                .iter()
+                .find(|e| e.g == raw_top)
+                .and_then(|e| e.speeds(5_000.))
+                .map_or(0., |(low, _)| low / 1.68781);
+            println!(
+                "gcurve_header: stall_scale={:.3} top_g={raw_top} corner_kt={corner:.1}",
+                state.stall_scale()
+            );
+            for kt in (100..=750).step_by(25) {
+                let mut probe = state.clone();
+                probe.speed = f64::from(kt) * 1.68781;
+                probe.velocity = [0., 0., probe.speed];
+                probe.yaw = 0.;
+                probe.pitch = 0.;
+                probe.bank = 0.;
+                probe.throttle = 1.;
+                let pull = flight::PilotInput {
+                    pitch: 1.,
+                    ..Default::default()
+                };
+                probe.step(&pull, |_, _| 0.);
+                let limit = probe
+                    .trace()
+                    .adapter
+                    .as_ref()
+                    .map_or(0., |a| a.envelope.limits_g[1]);
+                println!("gcurve: kt={kt} limit_g={limit:.2}");
+            }
+            let mut probe = state.clone();
+            probe.speed = corner * 1.68781;
+            probe.velocity = [0., 0., probe.speed];
+            probe.step(
+                &flight::PilotInput {
+                    pitch: 1.,
+                    ..Default::default()
+                },
+                |_, _| 0.,
+            );
+            println!(
+                "gcurve_corner: limit_g={:.2}",
+                probe
+                    .trace()
+                    .adapter
+                    .as_ref()
+                    .map_or(0., |a| a.envelope.limits_g[1])
+            );
+            return Ok(Outcome::Done);
+        }
         if let Some(tables) = &native_tables {
             state.enable_native(tables.clone(), 1)?;
         }

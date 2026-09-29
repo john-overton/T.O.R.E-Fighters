@@ -79,14 +79,19 @@ fn marker_color(tick: u64) -> [u8; 4] {
 }
 /// One row's speed range with its slow edge multiplied by the weight scale, held
 /// to the fast edge (the same rule as `State::envelope_speeds`).
-fn scaled_speeds(e: &Envelope, altitude: f64, scale: f64) -> Option<(f64, f64)> {
+fn scaled_speeds(e: &Envelope, altitude: f64, scale: f64, top_g: i32) -> Option<(f64, f64)> {
+    let scale = tore_sim::flight::row_scale(e.g, top_g, scale);
     e.speeds(altitude)
         .map(|(low, high)| ((low * scale).min(high), high))
 }
+fn top_g(rows: &[Envelope]) -> i32 {
+    rows.iter().map(|e| e.g).max().unwrap_or(1)
+}
 fn spans(rows: &[Envelope], altitude: f64, scale: f64) -> Vec<(i32, f64, f64)> {
+    let top = top_g(rows);
     rows.iter()
         .filter(|e| e.g > 0)
-        .filter_map(|e| scaled_speeds(e, altitude, scale).map(|(low, high)| (e.g, low, high)))
+        .filter_map(|e| scaled_speeds(e, altitude, scale, top).map(|(low, high)| (e.g, low, high)))
         .collect()
 }
 fn available(spans: &[(i32, f64, f64)], speed: f64) -> i32 {
@@ -117,9 +122,10 @@ struct Outline<'a> {
     summit: [f64; 2],
     fastest: [f64; 2],
     scale: f64,
+    top_g: i32,
 }
 impl<'a> Outline<'a> {
-    fn new(rows: Vec<&'a Envelope>, scale: f64) -> Self {
+    fn new(rows: Vec<&'a Envelope>, scale: f64, top_g: i32) -> Self {
         let points = || {
             rows.iter()
                 .flat_map(|e| &e.points)
@@ -140,6 +146,7 @@ impl<'a> Outline<'a> {
             summit,
             fastest,
             scale,
+            top_g,
         }
     }
     /// Slowest edge of the outline at this altitude.
@@ -149,7 +156,7 @@ impl<'a> Outline<'a> {
         }
         self.rows
             .iter()
-            .filter_map(|e| scaled_speeds(e, altitude, self.scale))
+            .filter_map(|e| scaled_speeds(e, altitude, self.scale, self.top_g))
             .map(|(low, _)| low)
             .reduce(f64::min)
             .unwrap_or(self.summit[0])
@@ -173,6 +180,7 @@ fn chart(
     weight_scale: f64,
 ) -> Scale {
     let scale = Scale::new(rows, target);
+    let top = top_g(rows);
     let current = current(rows, g);
     // U mode shades around the selected row, so the space it gives up as
     // G rises takes the stall, high or fast shade it now lies in.
@@ -182,13 +190,14 @@ fn chart(
             _ => rows.iter().filter(|e| e.g > 0).collect(),
         },
         weight_scale,
+        top,
     );
     for y in 0..=BOTTOM {
         let altitude = f64::from(BOTTOM - y) / f64::from(BOTTOM) * scale.altitude;
         let own = spans(rows, altitude, weight_scale);
         let other = spans(target, altitude, 1.);
         let stall_edge = outline.stall_edge(altitude);
-        let selected = current.and_then(|e| scaled_speeds(e, altitude, weight_scale));
+        let selected = current.and_then(|e| scaled_speeds(e, altitude, weight_scale, top));
         for x in 0..=RIGHT {
             let speed = f64::from(x) / f64::from(RIGHT) * scale.speed;
             let own_g = available(&own, speed);
@@ -290,13 +299,16 @@ mod tests {
         let plain = spans(&rows, 5000., 1.);
         let heavy = spans(&rows, 5000., 1.4);
         assert_eq!(plain.len(), heavy.len());
-        for ((_, low, high), (_, heavy_low, heavy_high)) in plain.iter().zip(&heavy) {
-            assert!((heavy_low - (low * 1.4).min(*high)).abs() < 1e-9);
+        for ((g, low, high), (_, heavy_low, heavy_high)) in plain.iter().zip(&heavy) {
+            let scale = tore_sim::flight::row_scale(*g, 4, 1.4);
+            assert!((heavy_low - (low * scale).min(*high)).abs() < 1e-9);
             assert_eq!(high, heavy_high);
         }
+        // The 4 G row and above keep their imported slow edge.
+        assert_eq!(plain[1].1, heavy[1].1);
         let all: Vec<&Envelope> = rows.iter().collect();
-        let edge = Outline::new(all.clone(), 1.).stall_edge(2000.);
-        assert!((Outline::new(all, 1.4).stall_edge(2000.) - edge * 1.4).abs() < 1e-9);
+        let edge = Outline::new(all.clone(), 1., 4).stall_edge(2000.);
+        assert!((Outline::new(all, 1.4, 4).stall_edge(2000.) - edge * 1.4).abs() < 1e-9);
     }
     /// Synthetic nested rows 1..=6 G: each shrinks towards a corner-speed core.
     fn nested() -> Vec<Envelope> {

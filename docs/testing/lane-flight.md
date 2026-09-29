@@ -244,6 +244,55 @@ would put the F/A-18D, Rafale and A-4E 20 percent or more too high. The rule and
 are for John to change; `STALL_REFERENCE_WEIGHT_FRACTION` in `flight.rs` is the single
 constant.
 
+**Combat-speed G (correction, 2026-09-29).** The first version scaled every row of the
+polygon, which counted the weight twice (the edges, then the loaded-elevator divisor) and left a
+fuelled F/A-18D pulling 5.1 G in the held pull at 450 kt and 5,000 ft (7.64 with the imported
+speeds; the replay lane's scripted pull peaked at 3.8 G). Now the scale applies to the 0 G, 1 G and
+2 G rows, fades linearly to nothing at the 4 G row and leaves the rows from 4 G up as imported
+(`row_scale`, `STALL_SCALE_FADE_G`). The stall, liftoff and approach speeds are unchanged (they
+come from the 1 G edge and the ramp to the 2 G edge), and above roughly twice the stall speed the G limit is the
+imported one; below it the weight still costs G. The divisor stays: removing it would put the
+F-22's liftoff back near 80 knots (97 kt for 1 G instead of 74).
+
+Held pull at 450 kt and 5,000 ft (default loadout, `--maneuver pull`, max G reached), and the
+G limit at the top row's own speed (corner speed) at 5,000 ft with the same weight
+(`--maneuver gcurve`), the first (double counted) version, now, and with `--retail-stall-speeds`:
+
+| Aircraft | Pull before | Pull now | Pull retail | Corner G before | Corner G now | Corner G retail |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| F/A-18D | 5.10 | 7.64 | 7.64 | 5.02 | 7.53 | 7.53 |
+| Rafale C | 6.57 | 7.39 | 7.39 | 4.87 | 7.31 | 7.31 |
+| F-14D | 6.18 | 6.18 | 6.18 | 4.40 | 6.15 | 6.15 |
+| A-4E | 6.10 | 6.13 | 6.13 | 4.29 | 6.01 | 6.01 |
+| X-31 | 5.64 | 7.25 | 7.25 | 4.82 | 7.22 | 7.22 |
+| MiG-29 | 4.78 | 7.15 | 7.15 | 4.71 | 7.06 | 7.06 |
+| Su-27 | 5.25 | 7.54 | 7.54 | 5.18 | 7.77 | 7.77 |
+| MiG-21 | 6.16 | 6.47 | 6.47 | n/a | n/a | n/a |
+| Su-25 | 4.99 | 4.99 | 4.99 | 4.11 | 4.93 | 4.93 |
+| MiG-23 | 5.92 | 6.77 | 6.77 | 4.21 | 6.73 | 6.73 |
+| Su-35 | 5.22 | 6.96 | 6.96 | n/a | n/a | n/a |
+| F-22 family | 6.14 | 6.91 | 6.91 | 4.56 | 6.84 | 6.84 |
+
+(The MiG-21 and Su-35 have no top row at 5,000 ft, so they have no corner figure there.) The
+pull now equals the imported value for every aircraft and the corner G is within 2 percent
+of it (the F/A-18D's small difference is the divisor at the moment of measuring); the liftoff and
+approach speeds in the tables above are unchanged. The G limit against speed at gross weight
+(default loadout, UKR airport 1, calm, 5,000 ft, full back stick), imported speeds / now:
+
+| Speed (kt) | F/A-18D | F-22 | Su-27 |
+| ---: | :---: | :---: | :---: |
+| 100 | 0.81 / 0.75 | 1.20 / 0.82 | 1.00 / 0.85 |
+| 150 | 1.33 / 0.93 | 2.22 / 1.31 | 1.60 / 1.22 |
+| 200 | 1.51 / 1.31 | 2.96 / 2.96 | 1.69 / 1.69 |
+| 250 | 2.26 / 1.51 | 4.44 / 4.44 | 3.38 / 3.38 |
+| 300 | 3.02 / 3.02 | 5.92 / 5.92 | 4.23 / 4.23 |
+| 350 | 4.52 / 4.52 | 6.66 / 6.66 | 5.07 / 5.07 |
+| 400 | 6.03 / 6.03 | 6.66 / 6.66 | 6.76 / 6.76 |
+| 450 and up | 6.79 / 6.79 | 6.66 / 6.66 | 7.61 / 7.61 |
+
+So the weight now costs G only at the slow speeds where the F/A-18D's 2 G and 3 G edges lie (up to
+about 250 kt), where a heavy aircraft really is lift-limited, and nothing at combat speed.
+
 **Short strips.** The roll to liftoff at full afterburner is longer for every aircraft, most
 for the heavy loadouts. From the Santa Fe start (`--theater APA --ground-start 3`, a strip
 of about 1,074 ft; San Carlos is the same length) the liftoff runs are, before and after: F/A-18D

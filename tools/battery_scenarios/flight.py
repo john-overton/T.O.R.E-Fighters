@@ -258,6 +258,40 @@ def check_approach_speed(output: str, ac: str) -> list[str]:
     return problems
 
 
+# The G a held pull reaches at 450 knots and 5,000 ft with the imported speeds
+# (`--retail-stall-speeds`, 2026-09-29). The weight-scaled stall speed keeps the
+# combat-speed G: the scaling fades out by the 4 G row (docs/spec/takeoff-ground-contact.md).
+PULL_G_RETAIL = {
+    "f18": 7.64, "rafale": 7.39, "f14": 6.18, "a4e": 6.13, "x31": 7.25, "mig29": 7.15, "su27": 7.54,
+    "mig21": 6.47, "su25": 4.99, "mig23": 6.77, "su35": 6.96, "f22": 6.91, "f22n": 6.91, "faxx": 6.91,
+}
+
+
+def check_combat_g(output: str, ac: str) -> list[str]:
+    problems = extremes_problems(output)
+    e = _numbers(output, "extremes:")
+    try:
+        got = float(e["max_g"])
+    except (KeyError, ValueError):
+        return problems + ["no extremes: line"]
+    want = PULL_G_RETAIL[ac]
+    if not 0.97 * want <= got <= 1.03 * want:
+        problems.append(f"the held pull at 450 kt reached {got} G, the imported speeds give {want} G")
+    return problems
+
+
+def combat_g_scenarios() -> list[Scenario]:
+    return [
+        Scenario(
+            name=f"flight-combatg-{ac}",
+            lane="flight",
+            args=["--headless-flight", "600", "--maneuver", "pull", "--aircraft", ac, "--no-audio"],
+            check=lambda output, ac=ac: check_combat_g(output, ac),
+        )
+        for ac in AIRCRAFT
+    ]
+
+
 def check_retail_liftoff(output: str) -> list[str]:
     """`--retail-stall-speeds`: the imported polygon speeds at every weight."""
     problems = check_takeoff(output)
@@ -1934,6 +1968,7 @@ def scenarios() -> list[Scenario]:
         + edge_scenarios()
         + overspeed_scenarios()
         + liftoff_scenarios()
+        + combat_g_scenarios()
         + belly_scenarios()
         + terrain_scenarios()
         + fight_scenarios()
