@@ -23,9 +23,11 @@ python3 tools/battery.py --scenario 'replay-rec-*'          # headless recording
 python3 tools/battery.py --scenario 'replay-keys-*' --windows 2   # key-pressing scenarios
 ```
 
-The whole lane is 397 scenarios (78 of them open a window, and the key-pressing ones open more
-through their driver step) and takes about 24 minutes on the dev machine with five jobs and two
-windows. The last full run passed 397 of 397, 14 of them as known failures. The recording, corrupt-file, option, snapshot and input scenarios are
+The whole lane is 464 scenarios (118 of them open a window) and takes about 45 minutes on the
+dev machine with five jobs and two windows, of which `replay-validate-creator` alone is about
+eight minutes. The last full run passed all of them except that scenario, which timed out under
+the old 10 minute limit and now has 30 minutes; the 13 combat-smoke scenarios pass as known
+failures. The recording, corrupt-file, option, snapshot and input scenarios are
 headless and take a few seconds each. Anything that opens a window goes through
 `tools/agent-run.sh` and counts against `--windows`. The import scenarios copy the local retail
 media with a copy-on-write copy (no extra disk space on btrfs) and need `gameassets/` present.

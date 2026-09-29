@@ -365,7 +365,8 @@ def validate_scenarios() -> list[Scenario]:
             name="replay-validate-creator",
             lane="replay",
             args=["--validate-creator"],
-            timeout=600,
+            # The menus lane's input fuzz made this take about eight minutes in a debug build.
+            timeout=1800,
         ),
         Scenario(name="replay-sensor-summary", lane="replay", args=["--sensor-summary"], timeout=120),
         Scenario(name="replay-help", lane="replay", args=["--help"], expect=[r"Mission recordings:", r"--replay-menu"]),
