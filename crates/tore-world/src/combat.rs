@@ -1,6 +1,7 @@
 //! Live range host, original geometry and sampled original effect art.
 use crate::{
     WorldResult,
+    ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE},
     aircraft_type::AircraftType,
     snapshot::{
         AircraftPose, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
@@ -752,13 +753,16 @@ impl Combat {
         self.record_tape(if self.range { "reset" } else { "reset-scene" }, l);
         self.last_launcher = Some(l);
         let weapon_rules = self.state.weapon_rules;
+        let friendly_fire = self.state.friendly_fire;
         let aircraft = self.own_id();
         self.state = live::State::for_ownship(
             aircraft,
+            self.state.own().side,
             self.state.own().configuration().clone(),
             s.native.is_none() && !self.clean_recording,
         )?;
         self.state.weapon_rules = weapon_rules;
+        self.state.friendly_fire = friendly_fire;
         if weapon_rules == tore_sim::combat::missiles::Rules::Compatibility {
             self.record_tape("compatibility-weapons", l);
         }
@@ -792,8 +796,17 @@ impl Combat {
                 .as_ref()
                 .map(|spawns| spawns[index].pose(l.position, l.basis))
                 .unwrap_or((fixture_position, l.basis));
+            // A mission's aircraft fly for their wing's side; straight-flight
+            // fixtures are the player's opponents.
+            let side = self.mission_spawns.as_ref().map_or(ENEMY_SIDE, |spawns| {
+                if spawns[index].opposing {
+                    ENEMY_SIDE
+                } else {
+                    FRIENDLY_SIDE
+                }
+            });
             self.state
-                .add_dummy(&self.dummy_configs[*model], position, basis);
+                .add_dummy(&self.dummy_configs[*model], position, basis, side);
             debug_assert_eq!(self.state.targets.last().unwrap().id as usize, index + 1);
         }
         // Aircraft are spawned first, preserving their roster ordering.
@@ -1133,6 +1146,7 @@ mod ai_pose_tests {
             localized_damage: live::LocalizedDamage::default(),
             faults: Default::default(),
             category: 0,
+            side: tore_sim::combat::live::NO_SIDE,
         }
     }
 
@@ -1355,6 +1369,7 @@ pub mod fixtures {
             localized_damage: LocalizedDamage::default(),
             faults: Default::default(),
             category: 0,
+            side: tore_sim::combat::live::NO_SIDE,
         }
     }
     fn damaged(amounts: [i32; 6], section: Option<DamageSection>) -> LocalizedDamage {

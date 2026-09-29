@@ -27,6 +27,24 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
 }
 
 pub const MAX_PROJECTILES: usize = 256;
+pub use crate::ai::targeting::Side;
+/// The side of nothing: ground objects, fixtures and rounds nobody owns. It is
+/// never friendly to anything, so friendly fire never spares it.
+pub const NO_SIDE: Side = Side(0);
+/// The side an ownship takes when the host names none, as single player's
+/// friendly side.
+pub const DEFAULT_OWNSHIP_SIDE: Side = Side(1);
+/// Whether rounds hurt aircraft of their shooter's own side.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FriendlyFire {
+    /// Every round can hit any aircraft its shooter's rules allow, whatever
+    /// side: single player's behaviour.
+    #[default]
+    On,
+    /// No round damages an aircraft of its shooter's side, the shooter
+    /// included. Collisions still destroy whoever is in them.
+    Off,
+}
 /// The owner of the diagnostic incoming round ([`Command::Incoming`]): no
 /// aircraft, so it can hit any ownship. It carries the selected station's
 /// weapon record.
@@ -544,6 +562,9 @@ pub struct Target {
     /// player's Damage cheat says.
     pub faults: SystemFaults,
     pub category: u16,
+    /// The side of an aircraft, set by the host when the row is added;
+    /// [`NO_SIDE`] for anything else.
+    pub side: Side,
 }
 
 /// An aircraft target's system faults, rolled on each hit by the same rules
@@ -883,6 +904,8 @@ struct RangeEstimate {
 pub struct Ownship {
     /// The aircraft this is: its id in projectile owners, ledger keys and events.
     pub aircraft: u32,
+    /// The side the aircraft flies for. Set by the host.
+    pub side: Side,
     config: Configuration,
     /// External stores are fitted.
     external: bool,
@@ -994,6 +1017,8 @@ pub struct State {
     service_remainder: u16,
     /// Mission settings from the host, including the Damage setting.
     pub cheats: crate::cheats::Cheats,
+    /// The mission's friendly-fire setting.
+    pub friendly_fire: FriendlyFire,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct GunCadence {
@@ -1114,11 +1139,12 @@ fn ownship_target(own: &Ownship, launcher: Launcher) -> Target {
         localized_damage: own.localized_damage.clone(),
         faults: Default::default(),
         category: own.config.target_category,
+        side: own.side,
     }
 }
 impl Ownship {
     /// The combat state of `aircraft`, fresh from its stores and hit points.
-    pub fn new(aircraft: u32, config: Configuration, external: bool) -> Result<Self> {
+    pub fn new(aircraft: u32, side: Side, config: Configuration, external: bool) -> Result<Self> {
         config.validate()?;
         let ammo: Vec<u16> = config
             .stations
@@ -1131,6 +1157,7 @@ impl Ownship {
         let sensors = Sensors::new(config.sensors.clone());
         Ok(Self {
             aircraft,
+            side,
             release_readiness: Readiness::Safe,
             launch_mode: LaunchMode::Cued,
             mounted: Seeker::default(),
@@ -1783,18 +1810,24 @@ impl State {
             tick: 0,
             service_remainder: 0,
             cheats: Default::default(),
+            friendly_fire: FriendlyFire::default(),
         }
     }
     /// A state with one ownship, on aircraft 0: single player's arrangement,
     /// and the one most tests use.
     pub fn new(config: Configuration, external: bool) -> Result<Self> {
-        Self::for_ownship(0, config, external)
+        Self::for_ownship(0, DEFAULT_OWNSHIP_SIDE, config, external)
     }
     /// A state with one ownship, on `aircraft`.
-    pub fn for_ownship(aircraft: u32, config: Configuration, external: bool) -> Result<Self> {
+    pub fn for_ownship(
+        aircraft: u32,
+        side: Side,
+        config: Configuration,
+        external: bool,
+    ) -> Result<Self> {
         let mut state = Self::without_ownships();
         state.range_category = config.target_category;
-        state.add_ownship(Ownship::new(aircraft, config, external)?)?;
+        state.add_ownship(Ownship::new(aircraft, side, config, external)?)?;
         Ok(state)
     }
     /// Adds a human-flown aircraft, keeping the ownships in aircraft id
@@ -1898,6 +1931,19 @@ impl State {
             target
                 .localized_damage
                 .record(section, amount, target.initial_hp);
+        }
+    }
+    /// Sets the side of an aircraft: an ownship or an aircraft row. `false`
+    /// for an id that is neither.
+    pub fn set_side(&mut self, aircraft: u32, side: Side) -> bool {
+        if let Some(own) = self.ownship_mut(aircraft) {
+            own.side = side;
+            true
+        } else if let Some(row) = self.targets.iter_mut().find(|t| t.id == aircraft) {
+            row.side = side;
+            true
+        } else {
+            false
         }
     }
     /// The bay request of one ownship.
@@ -2515,7 +2561,13 @@ impl State {
     /// An explicit, non-AI range target of the selected ported aircraft. No
     /// targets are inserted into ordinary free flight or fabricated on scopes.
     /// Straight-flight mission fixture. No steering, sensors transmitting or AI.
-    pub fn add_dummy(&mut self, config: &Configuration, position: Vector, basis: Basis) {
+    pub fn add_dummy(
+        &mut self,
+        config: &Configuration,
+        position: Vector,
+        basis: Basis,
+        side: Side,
+    ) {
         let id = self.next_target_id;
         self.next_target_id = id.checked_add(1).expect("target ID exhaustion");
         self.targets.push(Target {
@@ -2547,6 +2599,7 @@ impl State {
             localized_damage: LocalizedDamage::default(),
             faults: SystemFaults::new(config),
             category: config.target_category,
+            side,
         });
     }
     /// Replace imported scene objects without changing aircraft or fixture IDs.
@@ -2610,6 +2663,7 @@ impl State {
             localized_damage: LocalizedDamage::default(),
             faults: Default::default(),
             category,
+            side: NO_SIDE,
         });
         self.ground_bounds.insert(id, bounds);
         Ok(())
@@ -2672,6 +2726,7 @@ impl State {
             fragment_released: false,
             localized_damage: LocalizedDamage::default(),
             faults: Default::default(),
+            side: NO_SIDE,
         });
         own.sensors.clear_selection();
         own.hud_selection = None;
@@ -3360,6 +3415,7 @@ impl State {
         let mut scored: Vec<(u32, bool)> = Vec::new();
         // Jammer deception on target hits takes the first ownship's ECM record.
         let fixture_ecm = ships.first().map(|own| own.config.ecm);
+        let friendly_fire_off = self.friendly_fire == FriendlyFire::Off;
         self.projectiles.retain_mut(|p| {
             let owned = p.weapon.clone();
             let w = owned.as_ref().unwrap_or_else(|| {
@@ -3535,6 +3591,21 @@ impl State {
             };
             p.age += 1;
             let mut first: Option<(f64, Option<Hit>)> = None;
+            // With friendly fire off, no round damages an aircraft of its
+            // shooter's own side, the shooter included.
+            let shooter_side = ships
+                .iter()
+                .find(|o| o.aircraft == p.owner)
+                .map(|o| o.side)
+                .or_else(|| {
+                    self.targets
+                        .iter()
+                        .find(|t| t.id == p.owner)
+                        .map(|t| t.side)
+                })
+                .unwrap_or(NO_SIDE);
+            let spares =
+                |side: Side| friendly_fire_off && shooter_side != NO_SIDE && side == shooter_side;
             // One search over every aircraft row and every ownship. A gun round
             // can hit any aircraft but the one that fired it; a missile or bomb
             // can hit any aircraft once its fuze has armed, even its launcher.
@@ -3545,6 +3616,7 @@ impl State {
                     // never the shooter's own.
                     let hitbox = if p.owner == t.id { 1. } else { hitbox };
                     if (!is_gun(w) || p.owner != t.id)
+                        && !spares(t.side)
                         && p.guidance.as_ref().is_none_or(|f| f.eligible(w, t))
                         && t.hp > 0
                         && let Some(at) = if is_gun(w) {
@@ -3569,12 +3641,11 @@ impl State {
                 }
             }
             if armed {
-                for (i, t) in self
-                    .targets
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, t)| t.hp > 0 && (!is_gun(w) || t.id != p.owner))
-                {
+                for (i, t) in self.targets.iter().enumerate().filter(|(_, t)| {
+                    t.hp > 0
+                        && (!is_gun(w) || t.id != p.owner)
+                        && !(t.role == TargetRole::Aircraft && spares(t.side))
+                }) {
                     if p.guidance.as_ref().is_some_and(|f| !f.eligible(w, t)) {
                         continue;
                     }
@@ -6086,7 +6157,7 @@ mod tests {
         config.hit_points = 37;
         let basis = Basis::new(0.3, 0., 0.);
         for n in 0..29 {
-            s.add_dummy(&config, [n as f64 * 500., 5000., 6000.], basis);
+            s.add_dummy(&config, [n as f64 * 500., 5000., 6000.], basis, Side(2));
         }
         let before = s.targets.clone();
         observe(&mut s, launcher(), 120);
@@ -6144,6 +6215,7 @@ mod tests {
             localized_damage: LocalizedDamage::default(),
             faults: Default::default(),
             category,
+            side: NO_SIDE,
         }
     }
     #[test]
@@ -7935,9 +8007,13 @@ mod pair_tests {
 
     /// Ownship 0 faces north at the origin; ownship 1 faces it, `gap` feet north.
     fn pair(gap: f64) -> (State, [Launcher; 2]) {
+        pair_of_sides(gap, Side(2))
+    }
+    /// The same scene, with ownship 1 flying for `side` (ownship 0 is on side 1).
+    fn pair_of_sides(gap: f64, side: Side) -> (State, [Launcher; 2]) {
         let mut s = fixture(false);
         let config = s.own().configuration().clone();
-        s.add_ownship(Ownship::new(1, config, true).unwrap())
+        s.add_ownship(Ownship::new(1, side, config, true).unwrap())
             .unwrap();
         let facing = |position: Vector, yaw: f64| Launcher {
             position,
@@ -8022,6 +8098,27 @@ mod pair_tests {
         assert!(strikes.iter().all(|k| k.owner == 0 && k.victim == 1));
         assert!(!strikes.is_empty());
         assert!(s.ownship(0).unwrap().shots > 0);
+    }
+
+    #[test]
+    fn with_friendly_fire_off_ownships_of_one_side_spare_each_other() {
+        for (setting, side, hurt) in [
+            (FriendlyFire::On, Side(1), true),
+            (FriendlyFire::Off, Side(1), false),
+            (FriendlyFire::Off, Side(2), true),
+        ] {
+            let (mut s, l) = pair_of_sides(600., side);
+            s.friendly_fire = setting;
+            s.own_mut().config.stations[0].weapon.source = "M61.JT".into();
+            let mut events = Vec::new();
+            for _ in 0..300 {
+                events.extend(step(&mut s, &l, [true, false]));
+            }
+            let hit = events
+                .iter()
+                .any(|e| matches!(e, Event::OwnshipDamaged { aircraft: 1, .. }));
+            assert_eq!(hit, hurt, "{setting:?} {side:?}");
+        }
     }
 
     #[test]
@@ -8273,5 +8370,148 @@ mod hit_rule_tests {
         let events = run(&mut s, 30);
         assert!(!damaged(&events));
         assert_eq!(s.own().hp, capacity);
+    }
+}
+
+/// The friendly-fire setting: with it off no round damages an aircraft of its
+/// shooter's side, the shooter included; collisions stay as they are.
+#[cfg(test)]
+mod friendly_fire_tests {
+    use super::tests::{fixture, target};
+    use super::*;
+
+    fn launcher() -> Launcher {
+        Launcher {
+            position: [0., 1000., 0.],
+            basis: Basis::new(0., 0., 0.),
+            speed_fps: 300.,
+            velocity: [0., 0., 300.],
+            bay_ready: true,
+            radar_power: true,
+            radar: true,
+            jammer: false,
+            alive: true,
+            controls: sensors::Controls::default(),
+        }
+    }
+    /// A missile record round from `owner`, armed, flying from `from` to `toward`.
+    fn shell(state: &State, owner: u32, from: Vector, toward: Vector) -> Projectile {
+        let mut weapon = state.own().config.stations[0].weapon.clone();
+        weapon.seeker.signature = 0;
+        weapon.flags = 0x14;
+        Projectile {
+            id: 900 + owner,
+            owner,
+            weapon: Some(weapon),
+            guidance: None,
+            motion: None,
+            guidance_ticks: None,
+            age: 0,
+            incoming: None,
+            station: 0,
+            position: from,
+            previous: from,
+            direction: unit(sub(toward, from)),
+            speed_f8: 1200 * 256,
+            launched_t: 0,
+            target: None,
+            fall: FallState::default(),
+            gun_round: None,
+            tracer: false,
+        }
+    }
+    fn run(s: &mut State, ticks: usize) -> Vec<Event> {
+        let mut events = Vec::new();
+        for _ in 0..ticks {
+            events.extend(s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: launcher(),
+                }],
+                |_, _| 0.,
+            ));
+        }
+        events
+    }
+    /// The ownship (side 1) and AI aircraft 5 on `side` ahead of it; a round
+    /// from 5 heads back toward the ownship, and one from the ownship toward 5.
+    fn scene(setting: FriendlyFire, side: Side) -> State {
+        let mut s = fixture(true);
+        s.targets.clear();
+        let mut ai = target(5, [0., 1000., 900.], 100, 0x80);
+        ai.side = side;
+        s.targets.push(ai);
+        s.friendly_fire = setting;
+        let toward_ai = shell(&s, 0, [0., 1000., 300.], [0., 1000., 900.]);
+        let toward_own = shell(&s, 5, [0., 1000., 600.], [0., 1000., 0.]);
+        s.projectiles.extend([toward_ai, toward_own]);
+        s
+    }
+    fn hurt_ownship(events: &[Event]) -> bool {
+        events
+            .iter()
+            .any(|e| matches!(e, Event::OwnshipDamaged { .. }))
+    }
+
+    #[test]
+    fn with_it_on_rounds_hurt_aircraft_of_their_shooters_side() {
+        assert_eq!(FriendlyFire::default(), FriendlyFire::On);
+        let mut s = scene(FriendlyFire::On, Side(1));
+        let events = run(&mut s, 100);
+        assert!(
+            hurt_ownship(&events) && events.contains(&Event::Hit(5)),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn with_it_off_a_round_spares_its_shooters_side_and_hurts_the_others() {
+        let mut s = scene(FriendlyFire::Off, Side(1));
+        let events = run(&mut s, 100);
+        assert!(
+            !hurt_ownship(&events) && !events.contains(&Event::Hit(5)),
+            "{events:?}"
+        );
+        assert_eq!(s.own().hp, s.own().config.damage_capacity);
+        // The same scene with 5 on the other side: both hits stand.
+        let mut s = scene(FriendlyFire::Off, Side(2));
+        let events = run(&mut s, 100);
+        assert!(
+            hurt_ownship(&events) && events.contains(&Event::Hit(5)),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn with_it_off_a_missile_spares_its_own_launcher() {
+        for (setting, hits) in [(FriendlyFire::On, true), (FriendlyFire::Off, false)] {
+            let mut s = fixture(true);
+            s.targets.clear();
+            s.friendly_fire = setting;
+            // The ownship's own armed missile doubles back over it.
+            let round = shell(&s, 0, [0., 1000., 200.], [0., 1000., 0.]);
+            s.projectiles.push(round);
+            let events = run(&mut s, 100);
+            assert_eq!(hurt_ownship(&events), hits, "{setting:?}: {events:?}");
+        }
+    }
+
+    #[test]
+    fn collisions_ignore_the_setting() {
+        for setting in [FriendlyFire::On, FriendlyFire::Off] {
+            let mut s = fixture(true);
+            s.targets.clear();
+            s.friendly_fire = setting;
+            let mut ai = target(5, [0., 1000., 20.], 100, 0x80);
+            ai.side = Side(1);
+            s.targets.push(ai);
+            let events = run(&mut s, 2);
+            assert!(
+                events.contains(&Event::Destroyed(5)),
+                "{setting:?}: {events:?}"
+            );
+            assert!(events.contains(&Event::OwnshipDestroyed { aircraft: 0 }));
+        }
     }
 }

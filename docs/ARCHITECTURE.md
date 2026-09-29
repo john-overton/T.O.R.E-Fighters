@@ -226,8 +226,9 @@ impulse; context loss cancels both, without changing authoritative flight state.
 
 `tore-sim::combat::live` owns the deterministic manual range at 120 Hz. Typed
 configuration resolves each supported PT’s loadout, SEE/ECM equipment and damage
-table once; mutable ammo, projectiles, player HP, subsystem counts and
-adapter RNG remain in state. Contacts are no longer its own: it holds a
+table once; mutable ammo, projectiles, hit points, subsystem counts and
+adapter RNG remain in state (per ownship for the aircraft's own fields, see
+[Combat: one ownship per human-flown aircraft](#combat-one-ownship-per-human-flown-aircraft)). Contacts are no longer its own: it holds a
 `tore-sim::sensors` live state, feeds it ownship pose, equipment state and the
 observable targets each tick, and asks it whether a specific target is supported
 before a radar weapon launches. Physical airborne presence is separate from
@@ -1135,7 +1136,7 @@ pilot at a time, nothing lost at a handoff) at much lower risk.
 **Ids.** Aircraft keep today's numbers: the lead of Friendly Wing 1 is 0, the
 other aircraft are numbered from 1 in the Quick Mission's roster order, and
 ground objects stay at `0x4000_0000` upward. No code may assume that id 0 is a
-human, since in multiplayer an AI may fly it: `PLAYER_OWNER` and `PLAYER_ID` go,
+human, since in multiplayer an AI may fly it: `PLAYER_OWNER` is gone (B1) and `PLAYER_ID` goes,
 and code asks the aircraft's pilot instead. In single player, seat 0 flies
 aircraft 0, exactly as today.
 
@@ -1237,22 +1238,38 @@ beside it, unread, until the AI routes an order to its sender's own wing
 
 #### Combat: one ownship per human-flown aircraft
 
-`live::State` keeps what every aircraft shares: projectiles, the target rows of
-AI aircraft and ground objects, effects, smoke, debris, countermeasure devices,
-the ledger and combat's random stream. The player-only fields (stations and
-rounds, selection and arming, the mounted seeker, sensors, trigger and gun
-cadence, bay requests, hit points, hit sections, fault counts and failure flags,
-chaff and flares, missile warnings) move into an `Ownship`, one per human-flown
-aircraft, keyed by aircraft id, with its own `Launcher` each tick. Every
-player-only path loops over the ownships in id order: firing, sensors and
-seeker, readiness, the hit test and damage pipeline, the fault hand-off, smoke,
-fragments, threat observation and the midair pool. Player-only events carry the
-aircraft id. With one ownship this is today's code and today's order of random
-draws.
+Built in B1 (`tore-sim/src/combat/live.rs`). `live::State` keeps what every
+aircraft shares: projectiles, the target rows of AI aircraft and ground objects,
+effects, smoke, debris, countermeasure devices, the ledger, the mission settings
+(cheats, weapon rules, friendly fire) and combat's one random stream. The
+player-only fields (stations and rounds, selection and arming, the mounted
+seeker, sensors, trigger and gun cadence, bay requests, hit points, hit
+sections, fault counts and failure flags, chaff and flares, missile warnings,
+score) live in an `Ownship`, one per human-flown aircraft, held in aircraft id
+order (`State::ownships`, `ownship(id)`, `own()` for hosts with one). The host
+adds and removes them with `add_ownship(Ownship::new(id, side, config,
+external))` and `remove_ownship(id)`, which gives back the stores, damage and
+countermeasures as the ownship left them.
 
-A human-flown aircraft appears in every other ownship's sensor picture and in
-the AI's world snapshot. With one human there is no other ownship, so single
-player sees no difference.
+`State::step_surface` takes one `OwnshipInput { aircraft, held, launcher }` per
+ownship. Every player-only stage loops over the ownships in id order: guns-only
+and pending damage, sensors, the mounted seeker and readiness, firing, the hit
+test and damage pipeline, smoke, fragments, threat observation and the midair
+pool. An ownship without an input is not stepped that tick. Cockpit questions
+(readiness, seeker tone, the display target, the weapon estimate) go through
+`State::view(id)` / `OwnshipView`, and commands through `State::command(id, ..)`.
+Player-only events carry the aircraft id (`Fired`, `OwnshipDamaged`,
+`SubsystemDamaged`, `OwnshipDestroyed`, `PilotKilled`, `OwnshipGroundImpact`,
+`Jolt`, `Strike::victim`), and an ownship's projectiles are owned by its aircraft
+id. With one ownship this is the earlier code in the earlier order of random
+draws: the baseline compare was SAME on every behaviour item after B1's first
+three steps.
+
+Every ownship is an aircraft to the others. Each step builds a target row for it
+from its own launcher, and that row is what the other ownships' sensors observe
+(radar, passive emitters), what their mounted seeker and guided missiles
+consider, what rounds hit and what the midair pool collides. A second ownship is
+therefore detected, designated, shot at and collided with like any AI aircraft.
 
 **Damage rules follow the pilot.** A human-flown aircraft uses today's player
 rules: twice the aircraft's hit points (native), the damage spread, instant kills
@@ -1261,24 +1278,54 @@ aircraft uses today's AI rules. *Agent proposal, approved by John on
 2026-09-28:* this keeps single player exact and gives every human the toughness
 the player has today.
 
+*Agent decisions in B1 (not settled by the brief):*
+
+- One counter (`State::next_shot`) numbers every ownship's rounds, so two
+  ownships never share a projectile number; with one ownship it counts as the
+  ownship's own `shots` did.
+- `Projectile::incoming` is now `Option<u32>`, the ownship a round was aimed at
+  when released. It is aim metadata (ledger aim, the diagnostic round) and no
+  longer decides who a round can hit.
+- The diagnostic `Incoming` command fires a round owned by no aircraft
+  (`INCOMING_OWNER`) that carries the selected station's weapon record.
+- Jammer deception against hits on AI rows (a dev range flag) uses the first
+  ownship's ECM record, as the only ownship's did.
+- Radar contacts of another ownship and its warnings use the same code as AI
+  targets; the AI's own world snapshot still sees the human through the AI
+  bridge (B3).
+
 #### Hit tests and friendly fire
 
-Today a gun round can hit any aircraft except its owner, on either side, the
-player included. Missiles are split: one aimed at the player can hit only the
-player, and any other can hit any aircraft row, its own launcher included, but
-never the player.
+Before B1 a gun round could hit any aircraft except its owner, on either side,
+the player included. Missiles were split: one aimed at the player could hit only
+the player, and any other could hit any aircraft row, its own launcher included,
+but never the player.
 
-Stage B's rule (John, 2026-09-28, single player included): **a gun round can
-hit any aircraft except the one that fired it, and a missile or bomb can hit any
-aircraft once its fuze has armed**, whether it is an aircraft that gets in the
-way, a new target it shifts to or its own launcher. This ends the missile split:
-an enemy missile aimed at the player can hit a wingman in its path, a missile
-aimed at someone else can hit the player, and a decoyed missile no longer keeps
-aiming its hit at the player alone.
+Built in B1's fourth step (rule from John, 2026-09-28, single player included): **a
+gun round can hit any aircraft except the one that fired it, and a missile or
+bomb can hit any aircraft once its fuze has armed**, whether it is an aircraft
+that gets in the way, a new target it shifts to or its own launcher. One search
+covers every aircraft row and every ownship, and the nearest contact along the
+round's path wins. This ended the missile split: an enemy missile aimed at the
+player can hit a wingman in its path, a missile aimed at someone else can hit the
+player, and a decoyed missile no longer keeps aiming its hit at the player alone.
+Damage follows the pilot: a hit on an ownship goes through the player pipeline, a
+hit on an AI row through the AI pipeline.
 
-Friendly fire becomes a mission setting. On is single player's behaviour. Off,
-a lobby choice, means no round damages an aircraft of its shooter's side, the
-shooter included. Collisions stay on whatever the setting (John, 2026-09-28).
+*Agent decisions:* a round that starts inside its own launcher's hit volume
+(every rocket and bomb with no arming delay does) is not a hit, so it cannot
+explode on its pylon; only a round that comes back into the volume from outside
+counts. Easy aiming widens the volume of other aircraft, never the shooter's own.
+Missile and bomb records in the synthetic test fixtures keep an arming delay of
+zero, so their tests rely on that rule.
+
+Friendly fire is a mission setting, `State::friendly_fire`. `On` is single
+player's behaviour and the default. `Off`, a lobby choice, means no round damages
+an aircraft of its shooter's side, the shooter included; the round passes through
+and flies on. Each aircraft has a side: the host sets it on ownships
+(`Ownship::new(.., side, ..)`) and on AI rows (`add_dummy(.., side)`, from the
+wing's side), and `NO_SIDE` (ground objects, fixtures, rounds nobody owns) is
+never spared. Collisions stay on whatever the setting (John, 2026-09-28).
 
 #### Handoff between the AI and a human
 

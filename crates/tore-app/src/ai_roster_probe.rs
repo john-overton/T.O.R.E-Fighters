@@ -48,11 +48,17 @@ pub fn roster_probe(
                 None,
             )?;
             let mut combat = live::State::new(config.clone(), true)?;
-            combat.add_dummy(&config, [512.0, 30000.0, -512.0], Basis::new(0.0, 0.0, 0.0));
+            combat.add_dummy(
+                &config,
+                [512.0, 30000.0, -512.0],
+                Basis::new(0.0, 0.0, 0.0),
+                live::Side(1),
+            );
             combat.add_dummy(
                 &config,
                 [0.0, 30000.0, 30000.0],
                 Basis::new(std::f64::consts::PI, 0.0, 0.0),
+                live::Side(2),
             );
             let mut bridge = AiWings::build(&wings, &combat.targets, false, resources)?;
             for actor in bridge.mission().actors() {

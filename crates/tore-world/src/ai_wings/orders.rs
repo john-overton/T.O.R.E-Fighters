@@ -1303,6 +1303,7 @@ mod landing_tests {
             localized_damage: live::LocalizedDamage::default(),
             faults: Default::default(),
             category: 0,
+            side: tore_sim::combat::live::NO_SIDE,
         }
     }
 

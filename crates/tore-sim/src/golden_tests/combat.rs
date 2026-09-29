@@ -666,6 +666,7 @@ fn aircraft_target(id: u32, position: [f64; 3], velocity: [f64; 3], hp: i32) -> 
         localized_damage: LocalizedDamage::default(),
         faults: Default::default(),
         category: 0x80,
+        side: crate::combat::live::NO_SIDE,
     }
 }
 

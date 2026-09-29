@@ -472,6 +472,7 @@ mod tests {
                 localized_damage: Default::default(),
                 faults: Default::default(),
                 category: 0,
+                side: tore_sim::combat::live::NO_SIDE,
             };
             t.localized_damage.amounts = amounts;
             t.localized_damage.structural_section = Some(DamageSection::Tail);
