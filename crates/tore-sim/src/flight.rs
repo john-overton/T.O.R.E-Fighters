@@ -1044,16 +1044,15 @@ impl State {
         // weight (manual p. 90): the available lift falls with the air density
         // above the ceiling, so an aircraft carried past it by a zoom climb
         // sinks back instead of flying on. Fitted rule (agent decision,
-        // 2026-09-29): the density ratio is a standard atmosphere estimate.
-        if env_speeds.is_none() {
+        // 2026-09-29), hybrid adapter only: the legacy compatibility model is
+        // unchanged. The density ratio is a standard atmosphere estimate; the
+        // lookup altitude is clamped to the atmosphere model's range so the
+        // thinning holds, finite and small, above 100,000 ft.
+        let hybrid = self.research.is_some();
+        if hybrid && env_speeds.is_none() {
             let top = env.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
-            if self.position[1] > top
-                && let (Ok(here), Ok(there)) = (
-                    crate::telemetry::Atmosphere::standard(self.position[1]),
-                    crate::telemetry::Atmosphere::standard(top),
-                )
-            {
-                hi *= (here.density_kg_m3() / there.density_kg_m3()).min(1.);
+            if self.position[1] > top {
+                hi *= ceiling_lift_ratio(self.position[1], top);
             }
         }
         let envelope_g = [lo, hi];
@@ -1066,8 +1065,9 @@ impl State {
         // 1G") an aircraft always keeps 1 G, however full its tanks. Without
         // this the outermost band, where only the 1 G row holds, gave a loaded
         // aircraft less than 1 G and it sank at full power near its top speed
-        // and its ceiling. Fitted rule (agent decision, 2026-09-29).
-        if rows > 0 && envelope_g[1] >= 1. {
+        // and its ceiling. Fitted rule (agent decision, 2026-09-29), hybrid
+        // adapter only.
+        if hybrid && rows > 0 && envelope_g[1] >= 1. {
             hi = hi.max(1.);
         }
         let loaded_positive_g = hi;
@@ -1608,6 +1608,21 @@ impl Clock {
         n
     }
 }
+/// Lift available above an aircraft's 1 G ceiling, as a share of 1 G: the ratio
+/// of the air density at `altitude_ft` to the density at the ceiling. The
+/// altitudes are clamped to the standard atmosphere's range (up to 100,000 ft),
+/// so the ratio stays finite and below one however high the aircraft goes.
+pub fn ceiling_lift_ratio(altitude_ft: f64, ceiling_ft: f64) -> f64 {
+    use crate::telemetry::Atmosphere;
+    let density = |altitude: f64| {
+        Atmosphere::standard(altitude.clamp(-2_000., 100_000.))
+            .map(|a| a.density_kg_m3())
+            .unwrap_or(f64::NAN)
+    };
+    let ratio = density(altitude_ft) / density(ceiling_ft);
+    if ratio.is_finite() { ratio.clamp(0., 1.) } else { 1. }
+}
+
 #[cfg(test)]
 mod tests {
     use super::integration_tests::profile;
@@ -1637,6 +1652,7 @@ mod tests {
         // ceiling the air is too thin to lift the weight).
         let sink = |altitude: f64| {
             let mut s = State::new(&profile(), [0., altitude, 0.]).unwrap();
+            s.enable_research(1).unwrap();
             for _ in 0..600 {
                 s.step(&PilotInput::default(), |_, _| 0.);
             }
@@ -1659,6 +1675,7 @@ mod tests {
             }
         }
         let mut s = State::new(&aircraft, [0., 10_000., 0.]).unwrap();
+        s.enable_research(1).unwrap();
         s.set_payload(3_500.).unwrap();
         s.speed = 1_750.;
         s.velocity = [0., 0., 1_750.];
@@ -1669,6 +1686,47 @@ mod tests {
         let limits = s.trace().adapter.unwrap().envelope.limits_g;
         assert_eq!(s.trace().adapter.unwrap().envelope.rows, 1);
         assert!(limits[1] >= 1., "the upper G limit is {}", limits[1]);
+    }
+    #[test]
+    fn the_legacy_adapter_keeps_the_old_envelope_limits() {
+        // Both fitted envelope rules are hybrid only: the legacy compatibility
+        // path still divides the limit by the loading and does not thin the lift.
+        let mut aircraft = profile();
+        for envelope in &mut aircraft.envelopes {
+            if envelope.g == 1 {
+                envelope.points = vec![[200., 0.], [250., 50000.], [2000., 50000.], [2100., 0.]];
+            }
+        }
+        let limit = |altitude: f64, speed: f64, research: bool| {
+            let mut s = State::new(&aircraft, [0., altitude, 0.]).unwrap();
+            if research {
+                s.enable_research(1).unwrap();
+            }
+            s.set_payload(3_500.).unwrap();
+            s.speed = speed;
+            s.velocity = [0., 0., speed];
+            s.step(&PilotInput::default(), |_, _| 0.);
+            let envelope = s.trace().adapter.unwrap().envelope;
+            (envelope.limits_g[1], envelope.load_divisor)
+        };
+        // Outer band (only the 1 G row holds): legacy stays at 1 / divisor.
+        let (legacy, divisor) = limit(10_000., 1_750., false);
+        assert!(divisor > 1.);
+        assert!((legacy - 1. / divisor).abs() < 1e-12, "{legacy} {divisor}");
+        assert!(limit(10_000., 1_750., true).0 >= 1.);
+        // Above the ceiling: legacy still gets 1 / divisor, hybrid less.
+        let (legacy, divisor) = limit(65_000., 1_000., false);
+        assert!((legacy - 1. / divisor).abs() < 1e-12, "{legacy} {divisor}");
+        assert!(limit(65_000., 1_000., true).0 < legacy);
+    }
+    #[test]
+    fn the_ceiling_lift_ratio_stays_finite_and_small_above_100000_feet() {
+        let at = |altitude: f64| ceiling_lift_ratio(altitude, 60_000.);
+        assert_eq!(at(50_000.), 1.);
+        let (a, b, c) = (at(70_000.), at(100_000.), at(150_000.));
+        assert!(a < 1. && b < a, "{a} {b}");
+        assert!(c.is_finite() && c > 0. && c <= b, "{c} {b}");
+        assert_eq!(ceiling_lift_ratio(f64::NAN, 60_000.), 1.);
     }
     #[test]
     fn direct_ground_crash_finishes_in_the_same_tick() {
