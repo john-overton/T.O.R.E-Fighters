@@ -108,6 +108,22 @@ never lands; or the same radio line repeats three times in five seconds.
 
 | Shooting down an enemy group whose own side required it to survive failed the player's mission (Destroy 5 of 5, Protect 0 of 5, FAILURE) | The debrief counted every "must survive" group as the player's friendly objective, enemy groups included | `e146788`: only the player's side becomes friendly objectives, as the debrief spec says |
 
+### Sixth round: John's decisions (bb2, 2026-09-29)
+
+John answered the decision list. Each change below is a new behaviour he
+requested on 2026-09-29, recorded as opinionated in the spec; the numbers are
+agent decisions (see "Agent decisions to review" below).
+
+| Decision | Change | Commit |
+| --- | --- | --- |
+| 12, spawns inside terrain | Airborne Quick Mission groups start at the higher of 5,000 ft MSL and 1,000 ft above their own ground ([Quick Mission](../spec/quick-mission-menu.md)). A scan of all 16 base theaters, airborne and ground starts at airports 1 to 3, and separations 5, 20, 50 and 100 nm (256 starts, 15 v 15) found no aircraft starting under the ground | `219f981` |
+| 10, land order on the ground | A wingman still parked or taking off answers unable and stays in its departure; "Land at Simferopol: N landing" counts only airborne aircraft ("M unable, still on the ground or taking off"). After takeoff it joins the formation as usual ([AI airfield](../spec/ai-airfield.md)) | `042662f` |
+| 7 and 14, terrain look-ahead | B44 looks six seconds of travel ahead (never less than 1,000 ft) at up to twelve points and asks for the climb that clears that ground; six seconds is derived in the [AI spec](../spec/ai.md#b44-steering-execution-and-pursuit-lead) from the worst case met. The intercept rule (decision 14) is unchanged: with the longer look-ahead the far-behind wingman at Krasnodar climbs over the hills | `92c6a5a` |
+| 4, leaderless wingmen | The next wingman in order leads and the others close up on it; a wingman following the lost leader in to land stops. No radio call: the retail call needs a living previous leader ([leader succession](../spec/ai.md#leader-succession)) | `7366700` |
+| 9, deconfliction | Aircraft flying on their own (not in a formation procedure, not defending, not in an airfield sequence) predict closest approach against every airborne aircraft and hold a heading 30 degrees away, right when head-on, until 3 s after the conflict ([traffic avoidance](../spec/ai.md#traffic-avoidance)). Mid-air collisions over the 126 fight, mission, big-fight and objective scenarios: 15 before, 2 after; no activity-flapping anomaly; a 15 v 15 probe runs in the same time (26 s either way) | `39e7590` |
+| 5 in part, after the fight | Once a side has seen hostile aircraft and none is alive, its AI wings land at their home runway, or the leader flies back to its launch point and holds there when there is none ([return to base](../spec/ai.md#return-to-base-when-the-mission-is-over)); scenario `ai-rtb-after-win` | `475cafc` |
+| 8, decoyed missile still kills | Unchanged by decision: the kill credit stays as the debrief spec says | none |
+
 Supporting commit: `17144d1` adds the per-tick checks and the lane's scenarios.
 
 ### Golden fingerprints
@@ -154,87 +170,70 @@ suitable station", so a hold here would be a new rule.
 
 ## Found, not fixed
 
-**Aircraft spawned inside mountains (fourth round).** In a ground start at
-Jixian (Vladivostok, airport 2) or Bahawalpur (South Asia, airport 2) with
-the enemy 50 nm away, the enemy group starts at the chosen 5,000 ft over
-ground up to 6,856 ft high and is destroyed at 0.0 s (fuzz seed 100). The
-probe now reports `AI probe UNDERGROUND start`. The spec's check ("the
-altitude must clear the airport ground by at least 100 feet", [Quick
-Mission](../spec/quick-mission-menu.md#player-ground-start)) only covers the
-airport; extending it to every airborne aircraft's own ground, or raising
-those aircraft, would be a new rule, so it is item 12 under decisions. A scan
-of all 16 base theaters, airports 1 to 3 and separations 5 to 100 nm found
-only these two cases.
+**Aircraft spawned inside mountains (fourth round).** Fixed in the sixth
+round (`219f981`, see above). In a ground start at Jixian (Vladivostok,
+airport 2) or Bahawalpur (South Asia, airport 2) with the enemy 50 nm away,
+the enemy group started at the chosen 5,000 ft over ground up to 6,856 ft high
+and was destroyed at 0.0 s (fuzz seed 100). The probe still reports `AI probe
+UNDERGROUND start` should it happen again.
 
-**AI aircraft outside formation collide in the air.** After the formation
-fix, 18 of 86 fight, mission and big-fight scenarios still showed a mid-air
-collision (6 scenarios), all between aircraft that fly no formation:
+**AI aircraft collide in the air.** Before the sixth round, 15 of 126 fight,
+mission, big-fight and objective scenarios showed a mid-air collision, all
+between aircraft that fly no formation (two searching leaders on converging
+courses in `ai-fight-1v15-noattack`, leaderless wingmen meeting at the same
+last-seen point in `ai-fight-1v5-default`). With traffic avoidance two remain:
 
-- Two AI wing leaders (Enemy 2-1 and Enemy 3-1 in `ai-fight-1v15-noattack`),
-  both searching with no target, flew straight on headings 11 degrees apart
-  and closed at 145 ft/s until they hit at 62 s.
-- Leaderless wingmen (`ai-fight-1v5-default`): after their leader died, four
-  wingmen all searched toward the same last-seen point, and two pairs collided
-  there.
-
-Nothing steers an aircraft that is not flying formation away from other
-traffic, and no spec says it should (see "Needs a decision", item 9).
+- `ai-fight-15v15-noattack`: Enemy 2-5 and Enemy 3-4 at 35.7 s (two wings in
+  a furball).
+- `ai-fight-3v3-default`: Enemy 1-1 and its wingman Enemy 1-3 at 22.9 s.
+  Both had been released to engage (neither is in the formation trace) and
+  both had been defending against missiles since 5.7 and 8.0 s (32 decoys
+  used); avoidance never overrides missile defense, which is the likely
+  reason. Not confirmed tick by tick.
 
 The lane reports these as `mid-air collision` anomalies but does not fail on
 them (see `KNOWN_ANOMALIES` in the scenario file).
 
 ## Known failures
 
-- `ai-big-a4e-vs-f22n-researched`: an F-22N searching at 975 kt at 3,000 ft
-  flies into rising ground. At that speed the B44 look-ahead (terrain 1,000 ft
-  ahead) is 0.6 s of warning, and the loaded G limit near the top of its
-  envelope is 2.2 G. See "Needs a decision". Other runs can show the same
-  class; the failing scenario can change with any behaviour change because the
-  fights are chaotic.
-- After the third round's fixes changed the fights' paths, the same terrain
-  class also shows in `ai-big-x31-vs-faxx-researched` (an FA-XX at 958 kt) and
-  `ai-long-15v15` (an F/A-18D searching level at 3,000 ft, 446 kt, into a
-  hillside rising about 14 degrees; the floor gave 1.3 s of warning). Which
-  runs hit this class moves with any behaviour change.
-- `ai-takeoff-nsk-a5-f22`, `-f22n`, `-faxx`: at Nuchon Ni the F-22-family
-  wingman chases its leader (which the test harness cruises at about 890 kt,
-  3,000 ft above the ground) at 1,065 kt, 1,300 ft above rising ground, and
-  flies into a hillside 145 s after takeoff. Same cause as the F-22N above.
+The sixth round's six-second terrain look-ahead ended the supersonic
+low-level class: `ai-big-a4e-vs-f22n-researched`, `ai-big-x31-vs-faxx-researched`,
+`ai-long-15v15`, `ai-takeoff-nsk-a5-f22`, `-f22n` and `-faxx`,
+`ai-known-f22-leader-wingman-ukr3`, fuzz seeds 14, 32 and 53 and
+`ai-damaged-fault04-hit` and `-gun` now pass, and their markers are gone.
+
+- `ai-fuzz-0028`: the test harness cruises an F-22 at about 1,070 kt and its
+  F-22 wingmen follow it off the map edge (item 5). The same run shows a
+  collision between Friendly 2-3 and 2-4, not investigated.
 - `ai-theater-apa-takeoff-a3` (Santa Fe) and `ai-theater-lfa-takeoff-a3` (San
   Carlos): these ground starts use 1,074 ft strips; each wingman's takeoff roll
   runs off the end onto the grass at 70 to 90 kt before it lifts off, leaving
-  the probe's hazard open (item 12 below).
+  the probe's hazard open (item 11 below).
 - `ai-theater-cub-takeoff-a1` (Key West, near the north edge): the airborne
   friendly wing starts on the runway heading, north, has no route and leaves
-  the map after 163 s (item 5 below).
-- `ai-known-f22-leader-wingman-ukr3` (reported by the flight lane): after a
-  ground start at Krasnodar (UKR 3) behind the test harness's F-22, the
-  wingman (the player's wing flies the player's type; `--probe-friendly-aircraft`
-  sets wings 2 and 3 only, so an F-18 there gives the same run) flies into
-  rising ground at about 800 kt after 71 s. The formation trace shows why: the harness cruises
-  the F-22 at about 890 kt, 3,000 ft above the ground, so the wingman is in
-  Intercept 25,000 to 35,000 ft behind and 2,500 to 3,100 ft below its gate.
-  The fitted intercept rule ([physical departure and
-  rejoin](../spec/ai.md#physical-departure-and-rejoin)) asks for leader
-  velocity plus a closing vector toward the gate, so the altitude closes in
-  proportion to the distance: about 20 ft/s of climb, while the ground ahead
-  rises at over 100 ft/s at that speed. The wingman at full afterburner,
-  lower and in denser air, still loses ground (closure -100 to -700 ft/s), and
-  the 1,000 ft terrain look-ahead (item 7) warns 0.7 s before the hill. This
-  follows the formation spec as written, so it was not changed; closing the
-  altitude error first when far behind, or a speed-scaled look-ahead, would be
-  new rules (item 14). The same happens with an F-22 in human hands only if
-  the player cruises that fast that low.
-- Default fuzz seeds `ai-fuzz-0014`, `-0028`, `-0032` and `-0053`, and
-  `ai-damaged-fault04-hit` and `-gun` (an undamaged X-31 wingman at 900 to
-  950 kt): the supersonic low-level class above (see "Fourth round").
+  the map after 163 s while the enemy is still alive (item 5 below).
+- `ai-long-1v1` and `ai-long-5v5` (new with the return to base): after the
+  player's side is destroyed, the enemy F/A-18Ds go home to Simferopol, fly
+  the gates over the hills to the south and land short of the runway, heading
+  north. The final starts 1,130 ft above the field 9,000 ft out, a little
+  above the 6 degree path; with the throttle closed and the speedbrake out
+  the aircraft slows from 217 to 145 kt, and below about 500 ft its sink
+  grows from 40 to 75 ft/s (a 17 degree descent against the 7 degree the
+  final commands). The go-around comes at 199 ft, 3,000 ft short, too late,
+  and it touches the grass about 2,500 ft short of the landing point at
+  165 kt. The final has no terrain floor, so the look-ahead is not involved;
+  this is the landing controller's slow, steep final (item 6), newly
+  exercised because winners now land. Every run that returns to Simferopol
+  from the south is likely to show it.
 - Activity flapping and pitch-stick oscillation at a weapon's envelope edge,
   and mid-air collisions, are reported but allowed (see above and below);
   regression scenarios check strictly.
 
 ## Needs a decision
 
-Behaviour the specs do not define, with the evidence. None of these were changed.
+Behaviour the specs do not define, with the evidence. John answered items 4,
+5 (in part), 7, 8, 9, 10, 12 and 14 on 2026-09-29; they are listed here for the
+record with what changed (see "Sixth round" above).
 
 1. **Dithering between gun and missile.** Fixed in the fifth round from B13
    (timed motions run to their deadline); left here for the record.
@@ -246,19 +245,16 @@ Behaviour the specs do not define, with the evidence. None of these were changed
    aircraft the other way: a wingman asked to turn 90 degrees achieved 2 degrees
    in 3.5 s and was hit. Steep and inverted tracking is a documented
    approximation of the input-only controller.
-4. **Leaderless wingmen after a fight.** When a wing's leader dies, the
-   survivors have no leader succession or route. Once the fight ends they fly
-   straight ("Searching", no target) for as long as the run lasts; in 30
-   minutes they leave the map by up to 100 nm (`ai-long-5v5`). The retail
-   game does pass leadership (the "You're the wingleader now" call in
-   [radio chatter](../spec/radio-chatter.md)), but the situations that pass it
-   are recorded there as unknown.
-5. **Aircraft with no route leave the map.** In a hold mission the enemies hold
-   their heading (B48) and fly off the terrain after about 16 minutes
-   (`ai-long-hold-4v4`). In a ground start near a map edge, the airborne
-   friendly wings start on the runway heading and leave within minutes (Key
-   West, 163 s); the "keep the enemy on the map" rule turns only the enemy
-   there. Nothing defines a map edge for AI.
+4. **Leaderless wingmen after a fight.** Changed (John, 2026-09-29): leader
+   succession (`7366700`), and after the fight the wing returns to base
+   (`475cafc`).
+5. **Aircraft with no route leave the map.** Changed in part (John,
+   2026-09-29): once no hostile aircraft remains, wings go home and land, or
+   fly back to their launch point and hold (`475cafc`). While hostile aircraft
+   remain, an aircraft with no route still holds its heading (B48): the hold
+   mission (`ai-long-hold-4v4`, about 16 minutes) and the friendly wing on a
+   Key West ground start (163 s) still leave the map. A map-edge rule for AI
+   is still open.
 6. **Landing over hills.** A wing ordered to land at Simferopol flies the
    approach gates south of the field over rising ground. The fitted terrain
    correction holds the current heading, so an aircraft that just passed a gate
@@ -266,44 +262,54 @@ Behaviour the specs do not define, with the evidence. None of these were changed
    400 s, taxiing to parking another 330 s, and a wing of four needs more than
    30 minutes. Meanwhile a ground-started wingman still waiting cannot take off,
    because the runway gate stays closed while anyone flies the gates.
-7. **Fast low flight and the terrain look-ahead.** B44 looks 1,000 ft ahead;
-   the [AI source notes](../formats/ai.md) confirm the fixed distance, so it
-   was not changed. At supersonic speed near the ground that is under a second
-   of warning, and it now costs the F-22-family wingmen at Nuchon Ni and an
-   F-22N in a 6 v 6 (see Known failures). A time-based look-ahead, or a speed
-   limit near the ground, would be a new rule.
-8. **A decoyed missile still kills.** A missile decoyed by chaff coasts on and
-   can still hit an aircraft that flies straight into it. The shot table then
-   says "spoofed" while the kill is credited (2 v 2, shot 1 at 10.7 s), and
-   the debrief shows 0 air-to-air hits of 1 launch next to 1 kill. That
-   follows the [debrief spec](../spec/debrief.md) ("a missile resolves once",
-   retail), so it is not a bug by the specs, but a player may read it as one.
-9. **Deconfliction outside formation.** Should AI aircraft that are not in a
-   formation (wing leaders, singletons, leaderless wingmen) avoid other
-   traffic? Today nothing does, and two of them on converging straight courses
-   collide (see "Found, not fixed").
-10. **"Land at selected airport" for an aircraft still on the ground.** A
-    wingman still waiting to take off counts in the reply ("Land at
-    Simferopol: 3 landing"), then takes off once the runway frees (645 s
-    later, behind the others' long approaches) only to fly the marshal and
-    approach and land again at 1,484 s. Bug out is ignored on the ground by
-    spec; the land order's spec ([AI airfield](../spec/ai-airfield.md),
-    [airports](../spec/airports.md), opinionated, John 2026-09-23) and the
-    [ground-start baseline](../baselines/ground-start.md) do not say what the
-    reply or the aircraft should do.
+7. **Fast low flight and the terrain look-ahead.** Changed (John,
+   2026-09-29): a six-second speed-scaled look-ahead (`92c6a5a`).
+8. **A decoyed missile still kills.** Unchanged by decision (John,
+   2026-09-29): the kill credit follows the [debrief spec](../spec/debrief.md).
+9. **Deconfliction outside formation.** Changed (John, 2026-09-29): traffic
+   avoidance (`39e7590`).
+10. **"Land at selected airport" for an aircraft still on the ground.**
+    Changed (John, 2026-09-29): it answers unable and stays in its departure
+    (`042662f`).
 11. **Short strips.** Quick Mission ground starts accept 1,074 ft strips
     (Santa Fe, San Carlos), and fighters then roll off the end onto grass
     before lifting off. No spec sets a minimum runway for an aircraft.
-12. **Airborne starts inside the terrain.** See "Found, not fixed": should
-    the creator refuse, or raise, an airborne aircraft that would start below
-    its own ground?
+12. **Airborne starts inside the terrain.** Changed (John, 2026-09-29): raised
+    to at least 5,000 ft MSL and 1,000 ft above the ground (`219f981`).
 13. **Slow damaged approaches.** A damaged Rafale recovering at 158 kt spent
     12 minutes flying the approach over the hills south of Simferopol, went
     around once and was still approaching after 20 minutes (`ai-damaged-*`,
     fuel leak and control faults); same cause as item 6.
-14. **A wingman far behind and below its leader.** Should Intercept close a
-    large altitude error before the distance (see Known failures, F-22
-    leader at Krasnodar)?
+14. **A wingman far behind and below its leader.** Answered by item 7 (John,
+    2026-09-29): the intercept rule is unchanged; the longer look-ahead keeps
+    the wingman over the hills.
+
+### Agent decisions to review (sixth round)
+
+The numbers and edges of John's new behaviours are agent decisions, recorded
+as such in the specs:
+
+- **Look-ahead:** six seconds of travel, twelve samples at most, 1,000 ft
+  apart at least; the derivation is in the AI spec.
+- **Traffic avoidance:** 6 s horizon, 300 ft plus half a second of closing
+  speed, 150 ft against the aircraft it is attacking, a fixed 30 degree
+  heading change, head-on within 20 degrees, held 3 s after the conflict.
+  Formation wingmen are left to their slots, and missile defense always wins,
+  so two aircraft defending at once can still collide (likely the 3 v 3 case
+  above).
+- **Return to base:** triggered by hostile aircraft only, because the AI's
+  objectives (patrol, intercept, escort) are air objectives and the AI mission
+  sees no ground targets. A wing led by the player never goes home on its own,
+  since the player's ground objectives may still be open. A mission with no
+  hostile aircraft at all never ends this way. Without a home runway the
+  leader "holds" by flying the return-to-base heading back over its launch
+  point every few miles (a figure-of-eight rather than a racetrack); no
+  scenario in the lane has a wing without a home runway, so this is covered
+  by a unit test only.
+- **Leader succession:** a wingman following the lost leader in to land in
+  the early approach stops, as the wing abort does.
+- **Land order on the ground:** "taking off" counts as on the ground until the
+  departure sequence ends.
 
 ## Needs a human eye or ear
 
@@ -323,6 +329,20 @@ Behaviour the specs do not define, with the evidence. None of these were changed
 Windowed captures (this lane is headless only), theater layout variants
 (the `~` maps; only the 16 base theaters), Windows and macOS, and a retail
 comparison.
+
+### Sixth round (2026-09-29, John's decisions)
+
+Whole lane on the sixth-round build before the last fix: 713 of 716 passed in
+58 minutes at `--jobs 6` (alongside two other lanes). Besides the known
+failures listed above it failed `ai-ground-fight-wing4`: once the enemy was
+gone the airborne second wing went home to the same runway, and its landing
+traffic kept the player's fourth wingman from ever taking off. `51dd2c1` holds
+a side's return to base while any of its aircraft still departs; the ground
+scenarios and `ai-rtb-after-win` then passed (13 of 13). The remaining two new
+failures, `ai-long-1v1` and `ai-long-5v5`, are the landing-short class under
+Known failures. The mid-air collision comparison is in the sixth-round table
+above; over the whole lane 27 collisions were reported (allowed, not
+failing). The spawn scan used `--probe-fight 15:15` for 2 ticks per start.
 
 ### Fifth round (2026-09-29, review follow-ups)
 

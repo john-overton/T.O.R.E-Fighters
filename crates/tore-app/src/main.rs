@@ -2021,6 +2021,7 @@ impl App {
                     event_loop.exit();
                     return;
                 }
+                self.combat.raise_airborne_spawns(&self.world);
                 if self.combat.uses_normal_startup_defaults() {
                     self.combat.apply_startup_weapons();
                 }
@@ -5983,6 +5984,7 @@ fn ai_probe_run(
             std::array::from_fn(|i| basis.forward[i] * flight.speed + world.wind()[i]);
     }
     combat.reset(&mut flight)?;
+    combat.raise_airborne_spawns(world);
     if script.attack.is_some() {
         // A flown mission's weapon startup: the gun selected and armed in the
         // air, navigation mode on a ground start.

@@ -174,6 +174,7 @@ impl Matrix<'_> {
         if let Err(e) = combat.reset(&mut flight) {
             return Outcome::Fatal(format!("combat reset: {e}"));
         }
+        combat.raise_airborne_spawns(world);
         combat.apply_startup_weapons();
         if let Some(ground) = &parked_layout
             && let Err(e) = place_on_runway(world, &mut flight, ground, 0)

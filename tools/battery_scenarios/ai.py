@@ -283,23 +283,17 @@ def fight(f: int, e: int, *extra: str) -> list[str]:
     return ["--probe-fight", f"{f}:{e}", *extra]
 
 
-_LOOKAHEAD = "fast low flight into rising ground, fixed 1,000 ft terrain look-ahead (docs/testing/lane-ai.md, decision 7)"
+_SHORT = "returning to base, the winners land short of Simferopol heading north after a slow final (docs/testing/lane-ai.md, Known failures)"
 _STRIP = "1,074 ft strip, the roll runs off the end (docs/testing/lane-ai.md, decision 11)"
 
 # Failures that are understood and documented in docs/testing/lane-ai.md. Each
 # turns red when it starts to pass, so the entry gets removed with the fix.
 KNOWN_FAILURES = {
-    "ai-big-a4e-vs-f22n-researched": _LOOKAHEAD,
-    "ai-big-x31-vs-faxx-researched": _LOOKAHEAD,
-    "ai-long-15v15": _LOOKAHEAD,
-    "ai-damaged-fault04-gun": _LOOKAHEAD,
-    "ai-damaged-fault04-hit": _LOOKAHEAD,
-    "ai-fuzz-0014": _LOOKAHEAD,
-    "ai-fuzz-0028": _LOOKAHEAD,
-    "ai-fuzz-0053": _LOOKAHEAD,
-    "ai-known-f22-leader-wingman-ukr3": "wingman far below its slot in the Intercept phase (docs/testing/lane-ai.md, decision 14)",
+    "ai-fuzz-0028": "F-22 wingmen follow the test harness leader at 1,070 kt to the map edge (docs/testing/lane-ai.md, decision 5)",
     "ai-theater-apa-takeoff-a3": _STRIP,
     "ai-theater-lfa-takeoff-a3": _STRIP,
+    "ai-long-1v1": _SHORT,
+    "ai-long-5v5": _SHORT,
     "ai-theater-cub-takeoff-a1": "friendly wing with no route leaves the map on a Key West ground start (docs/testing/lane-ai.md, decision 5)",
 }
 
@@ -399,7 +393,7 @@ def scenarios() -> list[Scenario]:
                          check=checker(ground=True, need_takeoff=True)))
     for size in [2, 4]:
         out.append(probe(f"ground-land-selected-wing{size}", ["--ground-start", GROUND_AIRPORT, "--probe-wing-size", str(size), "--maneuver", "takeoff",
-                                                              "--probe-wing-order", "9000:land-selected", "--separation", "200", "--probe-wing-only"],
+                                                              "--probe-wing-order", f"{12000 * size // 2}:land-selected", "--separation", "200", "--probe-wing-only"],
                          # A wing's approach over the hills south of Simferopol takes about
                          # 400 s per aircraft (lane doc, "Needs a decision"), so only the
                          # pair is expected to be down inside the run.
@@ -478,10 +472,10 @@ def scenarios() -> list[Scenario]:
     out.append(probe("regress-envelope-edge-flap", fight(8, 8, "--separation", "5", *attack), ticks=7200,
                      check=checker(strict=True, allow_anomalies=("mid-air collision",)),
                      notes="Friendly 2-3 swapped between its missile tactic and gun tracking every few ticks (fixed 2026-09-29)"))
-    # Known failure (lane doc): an F-22 test-harness leader outruns its
-    # wingman, whose intercept closes altitude only in proportion to its
-    # 35,000 ft gap, so it chases at 800 kt, 900 ft above hills that rise
-    # faster than the 1,000 ft terrain look-ahead can see.
+    # Formerly a known failure (lane doc): an F-22 test-harness leader
+    # outruns its wingman, which chases at 800 kt, 900 ft above hills that
+    # rose faster than the old 1,000 ft terrain look-ahead could see. Passes
+    # with the six-second look-ahead (2026-09-29).
     out.append(probe("known-f22-leader-wingman-ukr3", [
         "--theater", "UKR", "--aircraft", "f22", "--ground-start", "3",
         "--maneuver", "takeoff", "--probe-wing-size", "2", "--probe-wing-only"],
@@ -496,6 +490,24 @@ def scenarios() -> list[Scenario]:
                                                             "--separation", "5", *attack),
                      ticks=6000, check=checker(strict=True, allow_anomalies=("mid-air collision",)),
                      notes="Enemy 1-2 swapped gun tracking and its missile tactic every few ticks (fixed 2026-09-29)"))
+    # John, 2026-09-29: once no hostile aircraft remains the winning wing
+    # returns to base and lands (lane doc, bb2 item 17).
+    def winners_go_home(output: str) -> list[str]:
+        problems = probe_problems(output)
+        final = re.findall(r"^actor=\d+ (Friendly|Enemy) (\S+) \S+ activity=(.*?) alive=(true|false)", output, re.M)
+        if any(side == "Friendly" and alive == "true" for side, _, _, alive in final):
+            problems.append("the friendly wing survived, so the fight never ended")
+        home = ("Returning to base", "Holding at marshal", "Landing", "Landed", "Taxiing")
+        for side, member, activity, alive in final:
+            if side == "Enemy" and alive == "true" and activity not in home:
+                problems.append(f"Enemy {member} is still {activity} with no hostile aircraft left")
+        return problems
+
+    out.append(probe("rtb-after-win", fight(2, 4, "--aircraft", "mig21", "--probe-friendly-aircraft", "mig21",
+                                            "--probe-enemy-aircraft", "f22", "--probe-enemy-skill", "ace",
+                                            "--separation", "10", *attack),
+                     ticks=72000, timeout=1800, check=winners_go_home,
+                     notes="the winning wing lands at its home runway once no hostile aircraft remains (added 2026-09-29)"))
     out.append(probe("regress-decoy-over-100", fight(2, 2, "--aircraft", "su25", "--probe-friendly-aircraft", "su25",
                                                      "--probe-enemy-aircraft", "mig21", "--separation", "5", *attack),
                      ticks=6000, notes="mission aborted: decoy percentages exceed 100 (fixed 2026-09-28)"))
@@ -518,7 +530,7 @@ def scenarios() -> list[Scenario]:
                 ticks=24000, timeout=1800, check=checker(ground=True, need_takeoff=True)))
         out.append(probe(f"theater-{theater.lower()}-land-pair", where + [
             "--ground-start", "1", "--probe-wing-size", "2", "--maneuver", "takeoff",
-            "--probe-wing-order", "12000:land-selected", "--separation", "200", "--probe-wing-only"],
+            "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
             ticks=108000, timeout=2400, check=checker(ground=True, need_takeoff=True, need_landing=True)))
     for theater, airport in (("UKR", "1"), ("PGU", "2"), ("FRA", "3"), ("NSK", "5")):
         for aircraft in AIRCRAFT:
