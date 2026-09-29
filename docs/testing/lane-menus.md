@@ -233,6 +233,12 @@ prints every in-flight menu item with what it does), a unit test, or the code pa
 | In-flight map (Shift-M) with show toggles | 102, 201 | OK | `menus-window-preview-map`: aircraft, airfields, buildings, surface, emitters |
 | View keys F1 to F12, pan with Shift and arrows, +/- zoom, Alt and Ctrl references | 103, 104 | OK | CONTROLS, `menus-window-view-*` |
 | Cockpit toggle (Backspace) | 77 | OK | probe ("BS", `Show cockpit?`) |
+| Wingman orders Alt-1 to Alt-9, E, R, P, D, B, T, C, H, V | 159 | OK | `docs/INPUT.md` table, `flight_ui` order key test |
+| Wingman Alt-W (engage every target of the target's class) and Alt-F (attack on contact, IR targeting) | 159 | DIFFERS | Alt-W is attack on contact here and Alt-F reports "unavailable" ([INPUT.md](../INPUT.md), documented) |
+| Pre-flight ? menu labelled Exit to Windows | 12 | DIFFERS | main menu and creator say Exit to Desktop; the in-flight menu keeps Exit to Windows |
+| In-flight map: Shift-M toggles, +/- zoom, scroll with A, S, W, Z | 102, 202 | FIXED | the map took only the arrow keys and A toggled the autopilot; now both scroll (`aswz_scroll_the_map_like_the_arrows`) |
+| In-flight map: Show menu classes (planes, SAM, AAA, ships, airports, vehicles, other), SAM ranges, 5 nmi grid | 201, 328 | DIFFERS | category toggles are Aircraft, Airfields, Buildings, Surface, Emitters; no SAM ranges or grid yet ([map spec](../spec/flight-map.md)) |
+| In-flight map pauses the flight | 334 | DIFFERS | the flight keeps running under the map (`map_shortcut_pan_and_escape_do_not_pause_or_switch_sensors`) |
 | Keys: 1 to 8 throttle, A autopilot, B brakes, F flaps, G gear, H hook, O bay, [ ] weapons, R radar, I IR, T targets, Enter visual target, W and Shift-W waypoints, Insert and Delete countermeasures, Shift-1 to 0 windows, Ctrl-P pause, Shift-E twice | 60 to 104 | OK | `docs/CONTROLS.md` row by row, `flight_ui` key test |
 
 **CONTROLS.md against the catalog and the manual.** The document is generated from
