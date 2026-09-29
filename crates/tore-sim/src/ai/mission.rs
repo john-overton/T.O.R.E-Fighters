@@ -1242,11 +1242,14 @@ pub struct AiMission {
     external_leaders: Vec<(super::targeting::Side, u8, u32)>,
     missiles: Vec<MissileSnapshot>,
     gun_rounds: Vec<incoming_fire::Round>,
-    player_assignment: engagement::Assignment,
-    must_survive: Vec<u32>,
+    /// The mission assignment of each human-flown aircraft, by aircraft id.
+    human_assignments: std::collections::BTreeMap<u32, engagement::Assignment>,
+    /// The aircraft each human-flown aircraft must keep alive, by aircraft id.
+    must_survive: std::collections::BTreeMap<u32, Vec<u32>>,
     pending_attack_reports: Vec<(u32, ObservedAttack)>,
-    /// Airport where the human player holds landing clearance.
-    priority_landing: Option<u32>,
+    /// Airport where each human-flown aircraft holds landing priority, by
+    /// aircraft id.
+    priority_landing: std::collections::BTreeMap<u32, u32>,
     /// Sides that have seen a living hostile aircraft (mission RTB).
     hostiles_seen: Vec<super::targeting::Side>,
     /// External leaders seen airborne, so a later touchdown reads as landing.
@@ -1274,10 +1277,10 @@ impl AiMission {
             external_leaders: Vec::new(),
             missiles: Vec::new(),
             gun_rounds: Vec::new(),
-            player_assignment: engagement::Assignment::default(),
-            must_survive: Vec::new(),
+            human_assignments: Default::default(),
+            must_survive: Default::default(),
             pending_attack_reports: Vec::new(),
-            priority_landing: None,
+            priority_landing: Default::default(),
             hostiles_seen: Vec::new(),
             airborne_seen: Vec::new(),
             journal: thought::Journal::default(),
@@ -1297,37 +1300,57 @@ impl AiMission {
         &self.journal
     }
 
-    /// The human player is landing at this airport (retail: gear down, below
-    /// 4000 ft above ground, at most 953 ft/s, within 25000 ft of a friendly
-    /// airport). It keeps that runway busy: AI aircraft landing there hold at
-    /// marshal and none start a takeoff until it is cleared with `None`
-    /// (manual p.65: "your aircraft always receives first landing
-    /// clearance"). A plain store, cheap and idempotent to call every tick.
-    pub fn set_priority_landing(&mut self, airport: Option<u32>) {
-        self.priority_landing = airport;
+    /// The human-flown aircraft `human` is landing at this airport (retail:
+    /// gear down, below 4000 ft above ground, at most 953 ft/s, within 25000
+    /// ft of a friendly airport). It keeps that runway busy: AI aircraft
+    /// landing there hold at marshal and none start a takeoff until it is
+    /// cleared with `None` (manual p.65: "your aircraft always receives first
+    /// landing clearance"). Every human keeps its own claim. A plain store,
+    /// cheap and idempotent to call every tick.
+    pub fn set_priority_landing(&mut self, human: u32, airport: Option<u32>) {
+        match airport {
+            Some(airport) => {
+                self.priority_landing.insert(human, airport);
+            }
+            None => {
+                self.priority_landing.remove(&human);
+            }
+        }
     }
 
-    pub fn priority_landing(&self) -> Option<u32> {
-        self.priority_landing
+    /// The airport where `human` holds landing priority, if it does.
+    pub fn priority_landing(&self, human: u32) -> Option<u32> {
+        self.priority_landing.get(&human).copied()
     }
 
-    pub fn must_survive(&self) -> &[u32] {
-        &self.must_survive
+    /// Every landing priority as (human aircraft id, airport), in id order.
+    pub fn priority_landings(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
+        self.priority_landing.iter().map(|(h, a)| (*h, *a))
+    }
+
+    /// What `human` must keep alive; empty for an aircraft with no list.
+    pub fn must_survive(&self, human: u32) -> &[u32] {
+        self.must_survive.get(&human).map_or(&[], Vec::as_slice)
     }
 
     /// Mission requirements do not silently replace aircraft combat orders.
-    pub fn set_must_survive(&mut self, mut ids: Vec<u32>) {
+    pub fn set_must_survive(&mut self, human: u32, mut ids: Vec<u32>) {
         ids.sort_unstable();
         ids.dedup();
-        self.must_survive = ids;
+        self.must_survive.insert(human, ids);
     }
 
-    pub fn player_assignment(&self) -> &engagement::Assignment {
-        &self.player_assignment
+    /// The mission assignment of human-flown aircraft `human`; the default
+    /// (free fire, nothing assigned) for one with none.
+    pub fn human_assignment(&self, human: u32) -> engagement::Assignment {
+        self.human_assignments
+            .get(&human)
+            .cloned()
+            .unwrap_or_default()
     }
 
-    pub fn set_player_assignment(&mut self, assignment: engagement::Assignment) {
-        self.player_assignment = assignment;
+    pub fn set_human_assignment(&mut self, human: u32, assignment: engagement::Assignment) {
+        self.human_assignments.insert(human, assignment);
     }
 
     /// Quick Mission startup permission is independent of its group objectives.
@@ -1444,6 +1467,12 @@ impl AiMission {
 
     pub fn push(&mut self, actor: AiActor) {
         self.actors.push(actor);
+    }
+
+    /// Replace every external leader at once: the human-flown aircraft that
+    /// lead their wings, as (side, wing, aircraft id).
+    pub fn set_external_leaders(&mut self, leaders: Vec<(super::targeting::Side, u8, u32)>) {
+        self.external_leaders = leaders;
     }
 
     /// A human leader remains a world object, never an AI-controlled actor.
@@ -2770,7 +2799,7 @@ impl AiMission {
         let leader_landing = if member == 0 {
             true
         } else if let Some(leader) = external_leader {
-            leader.on_ground || self.priority_landing.is_some()
+            leader.on_ground || self.priority_landing.contains_key(&leader.id)
         } else {
             wingmates()
                 .find(|a| a.identity.is_leader())
@@ -2831,7 +2860,9 @@ impl AiMission {
                             .hypot(o.position[2] - runway.center[2])
                             <= super::airfield::LINEUP_RESET_FT))
         });
-        let runway_free = !busy_actor && !busy_human && self.priority_landing != Some(airport);
+        let runway_free = !busy_actor
+            && !busy_human
+            && !self.priority_landing.values().any(|held| *held == airport);
 
         // Earlier wing members landing here must be down first.
         let wing_landed = wingmates().all(|a| {

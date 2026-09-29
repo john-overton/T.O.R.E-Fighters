@@ -305,8 +305,8 @@ fn an_airborne_wingman_ordered_to_land_flies_the_approach_and_parks() {
 fn player_landing_priority_holds_ai_at_marshal_until_cleared() {
     let mut mission = AiMission::new();
     mission.push(hornet(1, 1, [0., 4_000., -100_000.], 0.));
-    mission.set_priority_landing(Some(AIRPORT));
-    mission.set_priority_landing(Some(AIRPORT));
+    mission.set_priority_landing(HUMAN, Some(AIRPORT));
+    mission.set_priority_landing(HUMAN, Some(AIRPORT));
     mission
         .order(1, land(LandingReason::Ordered))
         .unwrap()
@@ -339,9 +339,43 @@ fn player_landing_priority_holds_ai_at_marshal_until_cleared() {
         }
     }
     assert!(marshal_since.is_some(), "never reached marshal");
-    mission.set_priority_landing(None);
+    mission.set_priority_landing(HUMAN, None);
     fly_until_parked(&mut mission, 1, 1500);
     assert_parked_on_runway(mission.actor(1).unwrap());
+}
+
+#[test]
+fn every_human_holds_its_own_landing_priority() {
+    const OTHER: u32 = HUMAN + 1;
+    let mut mission = AiMission::new();
+    mission.push(hornet(1, 1, [0., 4_000., -100_000.], 0.));
+    mission
+        .order(1, land(LandingReason::Ordered))
+        .unwrap()
+        .unwrap();
+    let free = |mission: &mut AiMission| {
+        step(mission, None);
+        mission.actor(1).unwrap().trace().clearance.runway_free
+    };
+    // The sequence, and with it the runway gate, starts once the landing
+    // order is running.
+    for _ in 0..600 {
+        if mission.actor(1).unwrap().airfield().is_some() {
+            break;
+        }
+        step(&mut mission, None);
+    }
+    assert!(mission.actor(1).unwrap().airfield().is_some());
+    assert!(free(&mut mission), "nobody holds priority");
+    mission.set_priority_landing(HUMAN, Some(AIRPORT));
+    mission.set_priority_landing(OTHER, Some(AIRPORT));
+    assert!(!free(&mut mission), "two humans hold it");
+    mission.set_priority_landing(HUMAN, None);
+    assert!(!free(&mut mission), "the other human still holds it");
+    assert_eq!(mission.priority_landing(HUMAN), None);
+    assert_eq!(mission.priority_landing(OTHER), Some(AIRPORT));
+    mission.set_priority_landing(OTHER, None);
+    assert!(free(&mut mission), "both released");
 }
 
 #[test]
@@ -940,7 +974,7 @@ fn warnings_are_ignored_on_the_ground_and_abandon_an_early_approach() {
     // B47: abandoned in the first approach states, resumed afterwards.
     let mut mission = AiMission::new();
     mission.push(hornet(1, 1, [0., 6_000., -50_000.], 0.));
-    mission.set_priority_landing(Some(AIRPORT));
+    mission.set_priority_landing(HUMAN, Some(AIRPORT));
     mission
         .order(1, land(LandingReason::Ordered))
         .unwrap()

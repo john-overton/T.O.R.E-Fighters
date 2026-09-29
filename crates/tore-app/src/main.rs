@@ -3791,7 +3791,7 @@ impl ApplicationHandler for App {
                             .and_then(|c| c.target.as_mut())
                             && let Some(wings) = &self.world.ai_wings
                         {
-                            target.with_activity(wings);
+                            target.with_activity(wings, ai_wings::PLAYER_ID);
                         }
                         if let (Some(readout), Some(wings)) = (
                             self.instruments.combat.as_mut(),
@@ -4834,7 +4834,7 @@ impl ProbeWatch {
             println!("t={tick} ({seconds:.1}s) player: {key} {}", line(player));
             self.player = Some(key);
         }
-        let priority = bridge.mission().priority_landing();
+        let priority = bridge.mission().priority_landing(ai_wings::PLAYER_ID);
         if priority != self.priority {
             println!("t={tick} ({seconds:.1}s) player landing priority: {priority:?}");
             self.priority = priority;

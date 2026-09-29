@@ -152,16 +152,13 @@ pub struct Requirements {
 }
 
 impl Requirements {
-    /// The requirements of `plane`, which flies for `side`. Retail Quick
-    /// Missions make every aircraft of the other side a target when the plane has no assigned target group, and the
-    /// aircraft the mission says must survive are protected by everyone.
-    ///
-    /// The AI mission holds one human assignment today, so every human plane
-    /// reads it; slice B3 gives each plane its own and this is the one place
-    /// that changes.
+    /// The requirements of `plane`, which flies for `side`, from its own
+    /// assignment. Retail Quick Missions make every aircraft of the other side
+    /// a target when the plane has no assigned target group, and the aircraft
+    /// the mission says must survive are protected.
     pub fn of(wings: &AiWings, plane: u32, side: Side) -> Self {
         let mission = wings.mission();
-        let assignment = mission.player_assignment();
+        let assignment = mission.human_assignment(plane);
         let mut destroy = assignment.destroy_ids.clone();
         if destroy.is_empty() {
             destroy = wings
@@ -175,7 +172,7 @@ impl Requirements {
         // Only the plane's own side is its objective: an enemy group whose
         // survival its own side requires is not (docs/spec/debrief.md,
         // "Friendly objectives"; bug bash finding 2026-09-29).
-        for id in mission.must_survive() {
+        for id in mission.must_survive(plane) {
             let own_side = *id == plane
                 || wings
                     .slots()
@@ -568,7 +565,7 @@ mod tests {
         assert!(
             wings
                 .mission()
-                .must_survive()
+                .must_survive(0)
                 .iter()
                 .any(|id| enemies.contains(id))
         );

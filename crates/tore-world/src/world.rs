@@ -592,7 +592,8 @@ impl World {
         // or restart release it.
         if let Some(wings) = &mut self.ai_wings {
             let [x, _, z] = own.flight.position;
-            wings.update_player_landing(
+            wings.update_landing_priority(
+                ai_wings::PLAYER_ID,
                 &self.terrain.airport_scene,
                 &own.airport_service,
                 &own.flight,

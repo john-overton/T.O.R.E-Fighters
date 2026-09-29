@@ -627,7 +627,7 @@ fn old_order(world: &mut World, order: PlayerOrder, recipient: Option<u8>) -> St
         .ai_wings
         .as_mut()
         .unwrap()
-        .command_at(order, selected, recipient, None)
+        .command_at(crate::ai_wings::PLAYER_ID, order, selected, recipient, None)
         .unwrap();
     if !report.radio.is_empty() {
         world.comms.spoken(crate::seats::SeatId(0), now);
@@ -685,7 +685,11 @@ fn the_wing_recipient_is_the_seats_and_addresses_its_orders() {
 #[test]
 fn a_formation_cycle_orders_the_formation_after_the_wings_current_one() {
     let (_, _, out) = same_as_old(vec![SeatCommand::WingFormationCycle], |world| {
-        let next = world.ai_wings.as_ref().unwrap().next_formation(None);
+        let next = world
+            .ai_wings
+            .as_ref()
+            .unwrap()
+            .next_formation(crate::ai_wings::PLAYER_ID, None);
         old_order(world, PlayerOrder::Formation(next), None);
     });
     assert!(matches!(

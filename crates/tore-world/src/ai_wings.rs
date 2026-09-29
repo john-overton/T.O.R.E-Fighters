@@ -444,9 +444,9 @@ pub struct AiWings {
     mission_skill: BTreeMap<u32, tore_sim::ai::experience::ResolvedExperience>,
     /// Air combat guns only cheat in force.
     guns_only: bool,
-    /// The player took off and has not yet lined up on an approach, so its
-    /// gear-down climb-out does not claim landing priority.
-    player_departing: bool,
+    /// The human-flown aircraft that took off and have not yet lined up on an
+    /// approach, so their gear-down climb-out does not claim landing priority.
+    departing: std::collections::BTreeSet<u32>,
     /// What the latest [`Self::step`] produced, kept for the replay recorder
     /// and debug panels. Nothing reads it back into a decision.
     last_output: tore_sim::ai::mission::MissionOutput,
@@ -992,7 +992,7 @@ impl AiWings {
             enemy_skill: None,
             mission_skill: BTreeMap::new(),
             guns_only: false,
-            player_departing: false,
+            departing: Default::default(),
             last_output: tore_sim::ai::mission::MissionOutput::default(),
             decoy_rolls: Vec::new(),
         })
@@ -1190,6 +1190,15 @@ impl AiWings {
         let mut humans: Vec<&HumanAircraft> = humans.iter().collect();
         humans.sort_by_key(|h| h.slot.id);
         self.humans = humans.iter().map(|h| h.slot).collect();
+        // Every wing whose leader is human-flown has that human as its
+        // external leader; a human that left no longer leads anything.
+        self.mission.set_external_leaders(
+            self.humans
+                .iter()
+                .filter(|h| h.member == 0)
+                .map(|h| (side_of(h.side), h.wing, h.id))
+                .collect(),
+        );
         let ground = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32));
         // The decoy draws and rolls describe this step only. Clearing the
         // log never touches the generator's state.
@@ -2928,7 +2937,10 @@ mod tests {
         objectives[1] = GroupObjective::Intercept(enemy_one);
         wings.apply_group_objectives(&objectives, [0., 20000., 0.]);
 
-        assert_eq!(wings.mission.player_assignment().destroy_ids, [3, 4]);
+        assert_eq!(
+            wings.mission.human_assignment(PLAYER_ID).destroy_ids,
+            [3, 4]
+        );
         for id in [1, 2] {
             assert_eq!(
                 wings.mission.actor(id).unwrap().assignment().destroy_ids,
@@ -2946,13 +2958,13 @@ mod tests {
             wings.mission.actor(3).unwrap().flight(),
             "TEST".into(),
         );
-        group_one.with_activity(&wings);
+        group_one.with_activity(&wings, PLAYER_ID);
         let mut group_two = crate::target_window::Readout::new(
             &targets[4],
             wings.mission.actor(5).unwrap().flight(),
             "TEST".into(),
         );
-        group_two.with_activity(&wings);
+        group_two.with_activity(&wings, PLAYER_ID);
         assert_eq!(
             group_one.objective,
             Some(crate::target_window::TargetObjective::Destroy)
@@ -2961,7 +2973,13 @@ mod tests {
 
         objectives[0] = GroupObjective::Free;
         wings.apply_group_objectives(&objectives, [0., 20000., 0.]);
-        assert!(wings.mission.player_assignment().destroy_ids.is_empty());
+        assert!(
+            wings
+                .mission
+                .human_assignment(PLAYER_ID)
+                .destroy_ids
+                .is_empty()
+        );
         assert!(
             [3, 4, 5, 6]
                 .into_iter()
@@ -2994,7 +3012,7 @@ mod tests {
                     PLAYER_ID,
                     FRIENDLY_SIDE,
                     [0., 20000., 0.],
-                    wings.mission.player_assignment(),
+                    &wings.mission.human_assignment(PLAYER_ID),
                     &[candidate],
                     &[],
                     &[],
@@ -3178,6 +3196,196 @@ mod tests {
         assert_eq!(objects[1].position, [500., 21000., -1000.]);
         // Every human is a world object on its own side.
         assert!(objects[..2].iter().all(|o| o.side == FRIENDLY_SIDE));
+    }
+
+    /// Friendly wings 1 and 2 each led by a human (ids 0 and 9) with one AI
+    /// wingman (ids 1 and 2), and one enemy (id 3).
+    fn two_led_wings() -> (AiWings, Vec<live::Target>, [HumanSlot; 2]) {
+        let selections = [
+            (launch::Side::Friendly, 0u8, 1usize),
+            (launch::Side::Friendly, 1, 1),
+            (launch::Side::Enemy, 0, 1),
+        ]
+        .map(|(side, index, count)| WingSelection {
+            wing: WingId::new(side, index).unwrap(),
+            aircraft: AircraftId::F18,
+            count,
+            skill_level: 1,
+        });
+        let payload = resolve_wings(&selections, None).unwrap();
+        let targets = vec![
+            target(1, [512., 20000., -512.], 0.),
+            target(2, [-4096., 20000., -4096.], 0.),
+            target(3, [0., 20000., 80000.], std::f64::consts::PI),
+        ];
+        let humans = [
+            HumanSlot::SINGLE_PLAYER,
+            HumanSlot {
+                id: 9,
+                side: launch::Side::Friendly,
+                wing: 1,
+                member: 0,
+            },
+        ];
+        let wings = AiWings::build_for(&payload, &targets, &Airfields::default(), &humans, |_| {
+            Ok((aircraft(), None))
+        })
+        .unwrap();
+        (wings, targets, humans)
+    }
+
+    #[test]
+    fn a_wing_led_by_any_human_follows_that_human() {
+        let (mut wings, mut targets, _) = two_led_wings();
+        let led = |position: Vector, id: u32| WorldObject {
+            id,
+            ..player_object(position)
+        };
+        // Both leaders are registered, and only wing members follow.
+        for _ in 0..30 {
+            wings
+                .advance_on_surface(
+                    vec![led([0., 20000., 0.], 0), led([-4096., 20000., -4096.], 9)],
+                    &mut targets,
+                    &flat,
+                    &|x, z| tore_sim::research::Surface::terrain(flat(x, z)),
+                )
+                .unwrap();
+        }
+        let formating = |wings: &AiWings, id: u32| {
+            wings
+                .mission
+                .actor(id)
+                .unwrap()
+                .controller()
+                .formation_trace()
+                .is_some()
+        };
+        for id in [1, 2] {
+            assert!(formating(&wings, id), "actor {id} has a leader to fly on");
+        }
+        // Wing 2's leader disappears from the world: its wingman has none,
+        // wing 1's still does.
+        for _ in 0..30 {
+            wings
+                .advance_on_surface(
+                    vec![led([0., 20000., 0.], 0)],
+                    &mut targets,
+                    &flat,
+                    &|x, z| tore_sim::research::Surface::terrain(flat(x, z)),
+                )
+                .unwrap();
+        }
+        assert!(formating(&wings, 1));
+        assert!(!formating(&wings, 2));
+    }
+
+    #[test]
+    fn orders_go_to_the_senders_own_wing_and_humans_only_record_them() {
+        use tore_sim::ai::wing::{Formation, PlayerOrder};
+        let (mut wings, _, _) = two_led_wings();
+        wings
+            .command(9, PlayerOrder::Formation(Formation::LineAstern), None, None)
+            .unwrap();
+        assert_eq!(
+            wings
+                .mission
+                .actor(2)
+                .unwrap()
+                .controller()
+                .ordered_formation(),
+            Some(Formation::LineAstern)
+        );
+        assert_eq!(
+            wings
+                .mission
+                .actor(1)
+                .unwrap()
+                .controller()
+                .ordered_formation(),
+            None,
+            "the other wing's wingman is not ordered"
+        );
+        assert_eq!(wings.next_formation(9, None), Formation::Echelon);
+        assert_eq!(
+            wings.next_formation(PLAYER_ID, None),
+            Formation::LineAbreast
+        );
+        // A second human in wing 1 (member 1) is addressed too, and answers
+        // that it is flown by a human.
+        wings.humans.push(HumanSlot {
+            id: 12,
+            side: launch::Side::Friendly,
+            wing: 1,
+            member: 1,
+        });
+        let report = wings
+            .command(9, PlayerOrder::Formation(Formation::Echelon), None, None)
+            .unwrap();
+        assert!(
+            report.message.ends_with("1 flown by a human"),
+            "{}",
+            report.message
+        );
+        // An aircraft that is not a human-flown member has no wing to order.
+        let report = wings
+            .command(77, PlayerOrder::Formation(Formation::Echelon), None, None)
+            .unwrap();
+        assert!(report.message.contains("no addressed wingmen"));
+    }
+
+    #[test]
+    fn assignments_and_survival_are_kept_for_each_human() {
+        let (mut wings, _, _) = two_led_wings();
+        wings.apply_mission_preset(Preset::Escort, [0., 20000., 0.]);
+        // Every friendly AI aircraft protects every friendly human; the
+        // enemy primary intercepts them all.
+        assert_eq!(
+            wings.mission.actor(1).unwrap().assignment().protected_ids,
+            [0, 9]
+        );
+        assert_eq!(
+            wings.mission.actor(3).unwrap().assignment().destroy_ids,
+            [0, 9]
+        );
+        // A group stamp reaches only the humans in that group.
+        let mut objectives = [GroupObjective::Inherit; 6];
+        objectives[1] = GroupObjective::Hold;
+        wings.apply_group_objectives(&objectives, [0.; 3]);
+        assert_eq!(
+            wings.mission.human_assignment(9).stance,
+            tore_sim::ai::engagement::Stance::WeaponsHold
+        );
+        assert_ne!(
+            wings.mission.human_assignment(PLAYER_ID).stance,
+            tore_sim::ai::engagement::Stance::WeaponsHold
+        );
+        // Survival lists are per human, and name the humans of the group.
+        let mut survival = [false; 6];
+        survival[1] = true;
+        wings.apply_group_survival(&survival);
+        assert_eq!(wings.mission.must_survive(0), [2, 9]);
+        assert_eq!(wings.mission.must_survive(9), [2, 9]);
+        wings.mission.set_must_survive(9, vec![3]);
+        assert_eq!(wings.mission.must_survive(0), [2, 9]);
+        assert_eq!(wings.mission.must_survive(9), [3]);
+        assert_eq!(wings.mission.must_survive(55), [] as [u32; 0]);
+    }
+
+    #[test]
+    fn landing_priority_is_updated_for_each_human() {
+        let (mut wings, _, _) = two_led_wings();
+        wings.set_priority_landing(0, Some(7));
+        wings.set_priority_landing(9, Some(8));
+        assert_eq!(
+            wings.mission.priority_landings().collect::<Vec<_>>(),
+            [(0, 7), (9, 8)]
+        );
+        wings.set_priority_landing(0, None);
+        assert_eq!(
+            wings.mission.priority_landings().collect::<Vec<_>>(),
+            [(9, 8)]
+        );
     }
 
     pub(super) fn player_object(position: Vector) -> WorldObject {
@@ -4164,7 +4372,7 @@ mod tests {
             assert_eq!(combat.projectiles.len(), 1, "{order:?}");
             let rounds = wings.mission.actor(1).unwrap().rounds_remaining();
             let dropped = wings.dropped_launches;
-            let report = wings.command(order, None, Some(1)).unwrap();
+            let report = wings.command(PLAYER_ID, order, None, Some(1)).unwrap();
             assert!(report.message.contains("1 applied"), "{order:?}");
             assert!(!wings.pending_guns.contains_key(&(1, 0)));
             for _ in 0..20 {
@@ -4458,7 +4666,7 @@ mod tests {
         let mut wings =
             AiWings::build_with(&selections, &spawned(), 0, |_| Ok((aircraft(), None))).unwrap();
         let report = wings
-            .command(PlayerOrder::ProtectMe, None, Some(1))
+            .command(PLAYER_ID, PlayerOrder::ProtectMe, None, Some(1))
             .unwrap();
         assert!(report.message.contains("1 applied"));
         assert!(!wings.mission.actor(1).unwrap().is_neutral());
@@ -4479,12 +4687,12 @@ mod tests {
         let mut wings =
             AiWings::build_with(&selections, &spawned(), 0, |_| Ok((aircraft(), None))).unwrap();
         let rejected = wings
-            .command(PlayerOrder::EngageMyTarget, Some(999), Some(1))
+            .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(999), Some(1))
             .unwrap();
         assert!(rejected.message.contains("no valid hostile target"));
         assert!(wings.mission.actor(1).unwrap().is_neutral());
         wings
-            .command(PlayerOrder::AttackOnContact, None, Some(1))
+            .command(PLAYER_ID, PlayerOrder::AttackOnContact, None, Some(1))
             .unwrap();
         assert!(!wings.mission.actor(1).unwrap().is_neutral());
         assert_eq!(
@@ -4492,11 +4700,16 @@ mod tests {
             &Assignment::default()
         );
         wings
-            .command(PlayerOrder::Formation(Formation::Echelon), None, Some(1))
+            .command(
+                PLAYER_ID,
+                PlayerOrder::Formation(Formation::Echelon),
+                None,
+                Some(1),
+            )
             .unwrap();
         assert!(wings.mission.actor(1).unwrap().is_neutral());
         wings
-            .command(PlayerOrder::AttackOnContact, None, Some(1))
+            .command(PLAYER_ID, PlayerOrder::AttackOnContact, None, Some(1))
             .unwrap();
         assert!(!wings.mission.actor(1).unwrap().is_neutral());
         assert!(wings.mission.actor(2).unwrap().is_neutral());
@@ -4511,16 +4724,19 @@ mod tests {
         let mut wings =
             AiWings::build_with(&selections, &spawned(), 0, |_| Ok((aircraft(), None))).unwrap();
         // Wings start in the mission's echelon.
-        assert_eq!(wings.next_formation(None), Formation::LineAbreast);
+        assert_eq!(
+            wings.next_formation(PLAYER_ID, None),
+            Formation::LineAbreast
+        );
         for (ordered, next) in [
             (Formation::LineAbreast, Formation::LineAstern),
             (Formation::LineAstern, Formation::Echelon),
             (Formation::Echelon, Formation::LineAbreast),
         ] {
             wings
-                .command(PlayerOrder::Formation(ordered), None, None)
+                .command(PLAYER_ID, PlayerOrder::Formation(ordered), None, None)
                 .unwrap();
-            assert_eq!(wings.next_formation(None), next);
+            assert_eq!(wings.next_formation(PLAYER_ID, None), next);
         }
     }
 
@@ -4532,7 +4748,9 @@ mod tests {
         let mut bridge =
             AiWings::build_with(&selections, &spawned(), 0, |_| Ok((aircraft(), None))).unwrap();
         let before = bridge.mission.actor(1).unwrap().flight().clone();
-        let report = bridge.command(O::EngageMyTarget, Some(3), Some(1)).unwrap();
+        let report = bridge
+            .command(PLAYER_ID, O::EngageMyTarget, Some(3), Some(1))
+            .unwrap();
         assert!(report.message.contains("1 applied"));
         // The player's call is immediate; the reply is a delayed radio event.
         assert_eq!(report.radio, ["^ATTACK"]);
@@ -4553,27 +4771,34 @@ mod tests {
         );
         assert!(
             bridge
-                .command(O::EngageMyTarget, Some(2), None)
+                .command(PLAYER_ID, O::EngageMyTarget, Some(2), None)
                 .unwrap()
                 .radio
                 .is_empty()
         );
-        let report = bridge.command(O::EngageMyTarget, Some(3), Some(2)).unwrap();
+        let report = bridge
+            .command(PLAYER_ID, O::EngageMyTarget, Some(3), Some(2))
+            .unwrap();
         assert_eq!(report.radio, ["^ATTACK"]);
         assert!(
             bridge.chatter.is_empty(),
             "only the first living wingman replies"
         );
         let report = bridge
-            .command(O::Approach(PlayerApproach::Left), Some(3), Some(1))
+            .command(
+                PLAYER_ID,
+                O::Approach(PlayerApproach::Left),
+                Some(3),
+                Some(1),
+            )
             .unwrap();
         assert_eq!(report.radio, ["^APPRCLF"]);
         let report = bridge
-            .command(O::Break(PlayerBreak::Right), None, Some(1))
+            .command(PLAYER_ID, O::Break(PlayerBreak::Right), None, Some(1))
             .unwrap();
         assert_eq!(report.radio, ["^BREAKRT"]);
         assert!(report.message.contains("1 applied"));
-        bridge.command(O::Spacing, None, None).unwrap();
+        bridge.command(PLAYER_ID, O::Spacing, None, None).unwrap();
         for id in [1, 2] {
             assert_eq!(
                 bridge
@@ -4586,7 +4811,9 @@ mod tests {
                 Some(2048)
             );
         }
-        bridge.command(O::Stacking, None, Some(2)).unwrap();
+        bridge
+            .command(PLAYER_ID, O::Stacking, None, Some(2))
+            .unwrap();
         assert_eq!(
             bridge
                 .mission
@@ -4607,7 +4834,7 @@ mod tests {
                 .2,
             None
         );
-        let report = bridge.command(O::Disengage, None, None).unwrap();
+        let report = bridge.command(PLAYER_ID, O::Disengage, None, None).unwrap();
         assert_eq!(report.radio, ["^DISENG"]);
         assert_eq!(bridge.mission.actor(1).unwrap().controller().target(), None);
         assert_eq!(bridge.mission.actor(2).unwrap().controller().target(), None);
@@ -4630,7 +4857,7 @@ mod tests {
             .unwrap()
             .unwrap();
         bridge.chatter.clear();
-        let protected = bridge.command(O::ProtectMe, None, None).unwrap();
+        let protected = bridge.command(PLAYER_ID, O::ProtectMe, None, None).unwrap();
         assert_eq!(protected.radio, ["^CLRMY6"]);
         assert_eq!(
             std::mem::take(&mut bridge.chatter),
@@ -4643,7 +4870,7 @@ mod tests {
         bridge.mission.actor_mut(1).unwrap().set_alive(false);
         assert_eq!(
             bridge
-                .command(O::EngageMyTarget, Some(3), None)
+                .command(PLAYER_ID, O::EngageMyTarget, Some(3), None)
                 .unwrap()
                 .radio,
             ["^ATTACK"]
@@ -4674,7 +4901,7 @@ mod tests {
         })
         .unwrap();
         let report = bridge
-            .command(PlayerOrder::EngageMyTarget, Some(3), None)
+            .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), None)
             .unwrap();
         assert!(report.message.contains("0 applied, 2 rejected"));
         assert_eq!(report.radio, ["^ATTACK"]);

@@ -117,7 +117,8 @@ impl World {
                     let recipient = self.roster.seat(seat).and_then(|s| s.wing_recipient);
                     match &self.ai_wings {
                         Some(wings) => {
-                            let order = PlayerOrder::Formation(wings.next_formation(recipient));
+                            let order =
+                                PlayerOrder::Formation(wings.next_formation(plane.0, recipient));
                             self.wing_order(plane, seat, cockpit, order, out);
                         }
                         None => out
@@ -238,15 +239,12 @@ impl World {
     }
 
     /// An Alt-key order from the seat `seat`, flying `plane` from `cockpit`.
-    /// It goes to the AI wings as the player's order, addressed as the seat's
-    /// recipient says, with the aircraft the seat has designated.
-    ///
-    /// The AI still takes orders from the lead of Friendly Wing 1 whoever
-    /// sends them, so `plane` is not read yet; B3 routes an order to the
-    /// sender's own wing by it.
+    /// It goes to the AI wings as that plane's order, to its own wing,
+    /// addressed as the seat's recipient says, with the aircraft the seat has
+    /// designated. Only a plane leading its wing may order it.
     fn wing_order(
         &mut self,
-        _plane: PlaneId,
+        plane: PlaneId,
         seat: SeatId,
         cockpit: usize,
         order: PlayerOrder,
@@ -290,7 +288,7 @@ impl World {
         let result = self
             .ai_wings
             .as_mut()
-            .map(|wings| wings.command_at(order, selected, recipient, site.as_ref()));
+            .map(|wings| wings.command_at(plane.0, order, selected, recipient, site.as_ref()));
         let outcome = match result {
             Some(Ok(report)) => {
                 // The order voice is played at once, and cuts off the wing

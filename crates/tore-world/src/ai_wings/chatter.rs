@@ -519,7 +519,7 @@ mod tests {
         use tore_sim::ai::wing::PlayerOrder;
         let mut wings = wings();
         let report = wings
-            .command(PlayerOrder::EngageMyTarget, Some(3), None)
+            .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), None)
             .unwrap();
         assert_eq!(report.radio, ["^ATTACK"], "the reply is delayed, not here");
         assert_eq!(
@@ -531,11 +531,13 @@ mod tests {
         );
         assert_eq!(wings.watch.contacts[&1], (ENGAGE_BLOCK_TICKS, Some(3)));
         wings.chatter.clear();
-        wings.command(PlayerOrder::ProtectMe, None, None).unwrap();
+        wings
+            .command(PLAYER_ID, PlayerOrder::ProtectMe, None, None)
+            .unwrap();
         assert_eq!(wings.chatter, [Chatter::Showtime { speaker: 1 }]);
         wings.chatter.clear();
         wings
-            .command(PlayerOrder::AttackOnContact, None, None)
+            .command(PLAYER_ID, PlayerOrder::AttackOnContact, None, None)
             .unwrap();
         assert!(matches!(
             wings.chatter[..],
@@ -771,7 +773,7 @@ mod tests {
             for tick in 0..600 {
                 if tick == 300 {
                     wings
-                        .command(PlayerOrder::EngageMyTarget, Some(3), None)
+                        .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), None)
                         .unwrap();
                 }
                 let output = wings

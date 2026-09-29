@@ -101,6 +101,7 @@ fn fly(ticks: u64, record: bool) -> (Fingerprint, Vec<tore_replay::Frame>) {
         if tick == 120 {
             wings
                 .command_at(
+                    crate::ai_wings::PLAYER_ID,
                     tore_sim::ai::wing::PlayerOrder::AttackOnContact,
                     None,
                     None,

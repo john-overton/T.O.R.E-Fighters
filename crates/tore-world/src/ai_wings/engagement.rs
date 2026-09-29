@@ -73,8 +73,20 @@ impl AiWings {
             .iter()
             .find(|slot| slot.side == launch::Side::Enemy)
             .map(|slot| slot.id);
-        let player = player_assignment(preset, player_position, primary_enemy);
-        self.mission.set_player_assignment(player);
+        // Every human-flown aircraft gets the preset's player assignment, and
+        // the presets that name "the player" name every friendly human.
+        for human in &self.humans {
+            self.mission.set_human_assignment(
+                human.id,
+                preset_for_human(preset, player_position, primary_enemy),
+            );
+        }
+        let friendly_humans: Vec<u32> = self
+            .humans
+            .iter()
+            .filter(|h| h.side == launch::Side::Friendly)
+            .map(|h| h.id)
+            .collect();
 
         let mut assignments: Vec<_> = self
             .slots
@@ -82,7 +94,13 @@ impl AiWings {
             .map(|slot| {
                 (
                     slot.id,
-                    actor_assignment(preset, player_position, primary_enemy, slot),
+                    actor_assignment(
+                        preset,
+                        player_position,
+                        primary_enemy,
+                        slot,
+                        &friendly_humans,
+                    ),
                 )
             })
             .collect();
@@ -181,8 +199,14 @@ impl AiWings {
                     actor.set_assignment(assignment.clone());
                 }
             }
-            if side == launch::Side::Friendly && wing == 0 {
-                self.mission.set_player_assignment(assignment);
+            let humans: Vec<u32> = self
+                .humans
+                .iter()
+                .filter(|h| h.side == side && h.wing == wing)
+                .map(|h| h.id)
+                .collect();
+            for human in humans {
+                self.mission.set_human_assignment(human, assignment.clone());
             }
         }
         let relationships: Vec<_> = self
@@ -217,7 +241,7 @@ impl AiWings {
     }
 
     pub fn apply_group_survival(&mut self, groups: &[bool; 6]) {
-        let ids = groups
+        let ids: Vec<u32> = groups
             .iter()
             .copied()
             .enumerate()
@@ -233,37 +257,46 @@ impl AiWings {
                 )
             })
             .collect();
-        self.mission.set_must_survive(ids);
+        for human in self.humans.iter().map(|h| h.id).collect::<Vec<_>>() {
+            self.mission.set_must_survive(human, ids.clone());
+        }
     }
 
     fn group_members(&self, group: launch::WingId) -> Vec<u32> {
-        let mut ids: Vec<_> = self
-            .slots
+        // The humans in the group come first, in id order.
+        self.humans
             .iter()
-            .filter(|slot| slot.side == group.side && slot.wing_number == group.index + 1)
-            .map(|slot| slot.id)
-            .collect();
-        if group.side == launch::Side::Friendly && group.index == 0 {
-            ids.insert(0, PLAYER_ID);
-        }
-        ids
+            .filter(|h| h.side == group.side && h.wing == group.index)
+            .map(|h| h.id)
+            .chain(
+                self.slots
+                    .iter()
+                    .filter(|slot| slot.side == group.side && slot.wing_number == group.index + 1)
+                    .map(|slot| slot.id),
+            )
+            .collect()
     }
 
-    /// Player-relative mission requirement for an aircraft target. Allegiance
-    /// is checked before assignment lists so invalid cross-side metadata cannot
-    /// manufacture a destroy or survival requirement.
-    pub fn target_objective(&self, id: u32) -> Option<crate::target_window::TargetObjective> {
+    /// Mission requirement for an aircraft target as human-flown aircraft
+    /// `viewer` sees it, from that aircraft's own assignment and survival
+    /// list. Allegiance is checked before assignment lists so invalid
+    /// cross-side metadata cannot manufacture a destroy or survival
+    /// requirement.
+    pub fn target_objective(
+        &self,
+        viewer: u32,
+        id: u32,
+    ) -> Option<crate::target_window::TargetObjective> {
         use crate::target_window::TargetObjective;
-        let side = if id == PLAYER_ID {
-            launch::Side::Friendly
-        } else {
-            self.slot(id)?.side
+        let side = match self.humans.iter().find(|h| h.id == id) {
+            Some(human) => human.side,
+            None => self.slot(id)?.side,
         };
-        let assignment = self.mission.player_assignment();
+        let assignment = self.mission.human_assignment(viewer);
         match side {
             launch::Side::Friendly
                 if assignment.protected_ids.contains(&id)
-                    || self.mission.must_survive().contains(&id) =>
+                    || self.mission.must_survive(viewer).contains(&id) =>
             {
                 Some(TargetObjective::Survive)
             }
@@ -276,11 +309,11 @@ impl AiWings {
 
     #[cfg(test)]
     pub fn objective_for_player(&self, id: u32) -> bool {
-        self.target_objective(id).is_some()
+        self.target_objective(PLAYER_ID, id).is_some()
     }
 }
 
-fn player_assignment(
+fn preset_for_human(
     preset: Preset,
     player_position: [f64; 3],
     primary_enemy: Option<u32>,
@@ -301,6 +334,7 @@ fn actor_assignment(
     player_position: [f64; 3],
     primary_enemy: Option<u32>,
     slot: &Slot,
+    friendly_humans: &[u32],
 ) -> Assignment {
     match preset {
         Preset::Free => Assignment::default(),
@@ -310,14 +344,14 @@ fn actor_assignment(
         Preset::Intercept => match slot.side {
             launch::Side::Friendly => assigned(Role::Intercept, primary_enemy),
             launch::Side::Enemy if Some(slot.id) == primary_enemy => {
-                assigned(Role::Intercept, Some(PLAYER_ID))
+                assigned_to(Role::Intercept, friendly_humans)
             }
             launch::Side::Enemy => protect(primary_enemy),
         },
         Preset::Escort => match slot.side {
-            launch::Side::Friendly => protect(Some(PLAYER_ID)),
+            launch::Side::Friendly => protect_all(friendly_humans),
             launch::Side::Enemy if Some(slot.id) == primary_enemy => {
-                assigned(Role::Intercept, Some(PLAYER_ID))
+                assigned_to(Role::Intercept, friendly_humans)
             }
             launch::Side::Enemy => protect(primary_enemy),
         },
@@ -341,6 +375,24 @@ fn assigned(role: Role, target: Option<u32>) -> Assignment {
         role,
         stance: Stance::EngageAssigned,
         destroy_ids: target.into_iter().collect(),
+        ..Assignment::default()
+    }
+}
+
+fn assigned_to(role: Role, targets: &[u32]) -> Assignment {
+    Assignment {
+        role,
+        stance: Stance::EngageAssigned,
+        destroy_ids: targets.to_vec(),
+        ..Assignment::default()
+    }
+}
+
+fn protect_all(targets: &[u32]) -> Assignment {
+    Assignment {
+        role: Role::Escort,
+        stance: Stance::ProtectAssigned,
+        protected_ids: targets.to_vec(),
         ..Assignment::default()
     }
 }
@@ -408,7 +460,7 @@ mod tests {
         let actor = wings.mission.actor(3).unwrap();
         let mut readout =
             crate::target_window::Readout::new(&targets[2], actor.flight(), "TEST".into());
-        readout.with_activity(&wings);
+        readout.with_activity(&wings, PLAYER_ID);
         assert_eq!(
             readout.objective,
             Some(crate::target_window::TargetObjective::Destroy)
@@ -424,9 +476,12 @@ mod tests {
         survival[1] = true;
         survival[3] = true;
         wings.apply_group_survival(&survival);
-        assert_eq!(wings.mission.must_survive(), [1, 2, 3, 4]);
-        assert_eq!(wings.target_objective(1), Some(TargetObjective::Survive));
-        assert_eq!(wings.target_objective(3), None);
+        assert_eq!(wings.mission.must_survive(PLAYER_ID), [1, 2, 3, 4]);
+        assert_eq!(
+            wings.target_objective(PLAYER_ID, 1),
+            Some(TargetObjective::Survive)
+        );
+        assert_eq!(wings.target_objective(PLAYER_ID, 3), None);
 
         survival[1] = false;
         wings.apply_group_survival(&survival);
@@ -435,16 +490,28 @@ mod tests {
             GroupObjective::Escort(launch::WingId::new(launch::Side::Friendly, 1).unwrap());
         objectives[1] = GroupObjective::Free;
         wings.apply_group_objectives(&objectives, [0.; 3]);
-        assert_eq!(wings.target_objective(1), Some(TargetObjective::Survive));
-        assert_eq!(wings.target_objective(2), Some(TargetObjective::Survive));
+        assert_eq!(
+            wings.target_objective(PLAYER_ID, 1),
+            Some(TargetObjective::Survive)
+        );
+        assert_eq!(
+            wings.target_objective(PLAYER_ID, 2),
+            Some(TargetObjective::Survive)
+        );
 
         objectives[0] =
             GroupObjective::Intercept(launch::WingId::new(launch::Side::Enemy, 0).unwrap());
         wings.apply_group_objectives(&objectives, [0.; 3]);
-        assert_eq!(wings.target_objective(3), Some(TargetObjective::Destroy));
-        assert_eq!(wings.target_objective(4), Some(TargetObjective::Destroy));
-        assert_eq!(wings.target_objective(1), None);
-        assert_eq!(wings.target_objective(99), None);
+        assert_eq!(
+            wings.target_objective(PLAYER_ID, 3),
+            Some(TargetObjective::Destroy)
+        );
+        assert_eq!(
+            wings.target_objective(PLAYER_ID, 4),
+            Some(TargetObjective::Destroy)
+        );
+        assert_eq!(wings.target_objective(PLAYER_ID, 1), None);
+        assert_eq!(wings.target_objective(PLAYER_ID, 99), None);
     }
 
     #[test]
@@ -502,6 +569,7 @@ mod tests {
             position,
             Some(3),
             &slot(1, launch::Side::Friendly),
+            &[PLAYER_ID],
         );
         assert_eq!(assignment.role, Role::CombatAirPatrol);
         assert_eq!(assignment.stance, Stance::EngageAssigned);
@@ -516,6 +584,7 @@ mod tests {
             [0.; 3],
             Some(3),
             &slot(1, launch::Side::Friendly),
+            &[PLAYER_ID],
         );
         assert_eq!(friendly.destroy_ids, [3]);
         let primary = actor_assignment(
@@ -523,6 +592,7 @@ mod tests {
             [0.; 3],
             Some(3),
             &slot(3, launch::Side::Enemy),
+            &[PLAYER_ID],
         );
         assert_eq!(primary.destroy_ids, [PLAYER_ID]);
         let escort = actor_assignment(
@@ -530,6 +600,7 @@ mod tests {
             [0.; 3],
             Some(3),
             &slot(4, launch::Side::Enemy),
+            &[PLAYER_ID],
         );
         assert_eq!(escort.role, Role::Escort);
         assert_eq!(escort.protected_ids, [3]);
@@ -542,6 +613,7 @@ mod tests {
             [0.; 3],
             Some(3),
             &slot(1, launch::Side::Friendly),
+            &[PLAYER_ID],
         );
         assert_eq!(friendly.protected_ids, [PLAYER_ID]);
         let primary = actor_assignment(
@@ -549,6 +621,7 @@ mod tests {
             [0.; 3],
             Some(3),
             &slot(3, launch::Side::Enemy),
+            &[PLAYER_ID],
         );
         assert_eq!(primary.destroy_ids, [PLAYER_ID]);
         let antagonist = actor_assignment(
@@ -556,6 +629,7 @@ mod tests {
             [0.; 3],
             Some(3),
             &slot(4, launch::Side::Enemy),
+            &[PLAYER_ID],
         );
         assert_eq!(antagonist.protected_ids, [3]);
     }
@@ -567,10 +641,11 @@ mod tests {
             [0.; 3],
             None,
             &slot(1, launch::Side::Friendly),
+            &[PLAYER_ID],
         );
         assert!(intercept.destroy_ids.is_empty());
         assert!(
-            player_assignment(Preset::Intercept, [0.; 3], None)
+            preset_for_human(Preset::Intercept, [0.; 3], None)
                 .destroy_ids
                 .is_empty()
         );

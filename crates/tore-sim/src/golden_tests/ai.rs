@@ -2416,10 +2416,10 @@ fn airfield_observed(probe: &Probe, observe: &mut dyn FnMut(&mut AiMission)) -> 
         }),
     );
     record_order_result(&mut fp, outcome);
-    mission.set_priority_landing(Some(AIRPORT));
+    mission.set_priority_landing(HUMAN_LEADER, Some(AIRPORT));
     for tick in 0..(400 * 120u64) {
         if tick == 20 * 120 {
-            mission.set_priority_landing(None);
+            mission.set_priority_landing(HUMAN_LEADER, None);
         }
         let world = world_objects(&mission);
         let output = mission

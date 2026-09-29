@@ -43,8 +43,8 @@ impl Readout {
             skill: None,
         }
     }
-    pub fn with_activity(&mut self, wings: &AiWings) {
-        self.objective = wings.target_objective(self.id);
+    pub fn with_activity(&mut self, wings: &AiWings, viewer: u32) {
+        self.objective = wings.target_objective(viewer, self.id);
         let Some(actor) = wings.mission().actor(self.id) else {
             return;
         };

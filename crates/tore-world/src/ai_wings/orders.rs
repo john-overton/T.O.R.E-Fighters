@@ -130,8 +130,9 @@ impl AiWings {
         })
     }
 
-    /// Re-evaluate the player's landing priority for this tick and pass it
-    /// to the AI ([`Self::set_priority_landing`]). Friendly means the
+    /// Re-evaluate human-flown aircraft `id`'s landing priority for this tick
+    /// and pass it to the AI ([`Self::set_priority_landing`]). Every human is
+    /// evaluated on its own, in id order, by the host. Friendly means the
     /// tower's own rule: a friendly airport or a neutral one that grants
     /// permission.
     ///
@@ -146,8 +147,9 @@ impl AiWings {
     /// horizontal distance to its nearest usable runway centre, because the
     /// scene has no single airport position, and an airport with no usable
     /// runway is skipped.
-    pub fn update_player_landing(
+    pub fn update_landing_priority(
         &mut self,
+        id: u32,
         scene: &Scene,
         service: &Service,
         flight: &flight::State,
@@ -163,9 +165,13 @@ impl AiWings {
             track: [flight.velocity[0], flight.velocity[2]],
         };
         let (airport, departing) =
-            Self::landing_priority(scene, service, player, self.player_departing);
-        self.player_departing = departing;
-        self.set_priority_landing(airport);
+            Self::landing_priority(scene, service, player, self.departing.contains(&id));
+        if departing {
+            self.departing.insert(id);
+        } else {
+            self.departing.remove(&id);
+        }
+        self.set_priority_landing(id, airport);
     }
 
     /// The priority airport and whether the player is still climbing out
@@ -241,20 +247,29 @@ impl AiWings {
             })
     }
 
-    /// The player is landing at this airport: AI aircraft landing there hold
-    /// at marshal until it clears (manual p.65).
-    pub fn set_priority_landing(&mut self, airport: Option<u32>) {
-        self.mission.set_priority_landing(airport);
+    /// Human-flown aircraft `id` is landing at this airport: AI aircraft
+    /// landing there hold at marshal until it clears (manual p.65).
+    pub fn set_priority_landing(&mut self, id: u32, airport: Option<u32>) {
+        self.mission.set_priority_landing(id, airport);
     }
 
-    /// FA Alt+T: the formation after the one the first addressed wingman
-    /// flies, cycling echelon, line abreast, line astern.
-    pub fn next_formation(&self, recipient: Option<u8>) -> wing::Formation {
+    /// The wing (side and index) a human-flown aircraft belongs to.
+    fn wing_of(&self, human: u32) -> Option<(Side, u8)> {
+        self.humans
+            .iter()
+            .find(|h| h.id == human)
+            .map(|h| (side_of(h.side), h.wing))
+    }
+
+    /// FA Alt+T: the formation after the one the first addressed wingman of
+    /// `sender`'s wing flies, cycling echelon, line abreast, line astern.
+    pub fn next_formation(&self, sender: u32, recipient: Option<u8>) -> wing::Formation {
+        let wing = self.wing_of(sender);
         let current = self
             .mission
             .actors()
             .iter()
-            .filter(|a| a.alive() && a.identity().side == FRIENDLY_SIDE && a.identity().wing == 0)
+            .filter(|a| a.alive() && Some((a.identity().side, a.identity().wing)) == wing)
             .filter(|a| recipient.is_none_or(|wanted| a.identity().member == wanted))
             .min_by_key(|a| a.identity().member)
             .and_then(|a| a.controller().ordered_formation())
@@ -265,33 +280,41 @@ impl AiWings {
     }
 
     /// [`Self::command_at`] without a landing site, as the tests use it.
-    #[cfg(test)]
     pub fn command(
         &mut self,
+        sender: u32,
         order: PlayerOrder,
         selected: Option<u32>,
         recipient: Option<u8>,
     ) -> WorldResult<OrderReport> {
-        self.command_at(order, selected, recipient, None)
+        self.command_at(sender, order, selected, recipient, None)
     }
 
     /// [`Self::command`] with the resolved [`LandingSite`] that "land at
     /// selected airport" needs. Other orders ignore `site`.
+    ///
+    /// `sender` is the human-flown aircraft giving the order. It goes to the
+    /// sender's own wing: AI members act on it, and a human member only
+    /// records that it was ordered.
     pub fn command_at(
         &mut self,
+        sender: u32,
         order: PlayerOrder,
         selected: Option<u32>,
         recipient: Option<u8>,
         site: Option<&LandingSite>,
     ) -> WorldResult<OrderReport> {
         if matches!(order, PlayerOrder::BugOut | PlayerOrder::LandAtSelected) {
-            return self.command_landing(order, recipient, site);
+            return self.command_landing(sender, order, recipient, site);
         }
+        let wing = self.wing_of(sender);
+        let sender_side = wing.map_or(FRIENDLY_SIDE, |(side, _)| side);
+        let humans = self.other_humans(sender, recipient);
         let mut members: Vec<_> = self
             .mission
             .actors()
             .iter()
-            .filter(|a| a.alive() && a.identity().side == FRIENDLY_SIDE && a.identity().wing == 0)
+            .filter(|a| a.alive() && Some((a.identity().side, a.identity().wing)) == wing)
             .map(|a| (a.identity().member, a.id()))
             .collect();
         members.sort_unstable();
@@ -302,9 +325,10 @@ impl AiWings {
             selected,
             target: None,
         };
-        if members.is_empty() {
+        if members.is_empty() && humans.is_empty() {
             let report = unavailable_no_wingmen();
             self.journal_order(
+                sender,
                 cause,
                 recipient,
                 &report,
@@ -328,13 +352,13 @@ impl AiWings {
             !gone
         });
         let bugged_out = before - members.len();
-        if members.is_empty() {
+        if members.is_empty() && humans.is_empty() {
             let report = OrderReport {
                 message: bugged_out_notice(bugged_out, recipient),
                 radio: vec![],
             };
             let outcome = Outcome::Refused(Reason::AllBuggedOut { count: bugged_out });
-            self.journal_order(cause, recipient, &report, outcome);
+            self.journal_order(sender, cause, recipient, &report, outcome);
             return Ok(report);
         }
         let needs_target = matches!(
@@ -346,7 +370,7 @@ impl AiWings {
         let target = selected.filter(|id| {
             self.mission
                 .actor(*id)
-                .is_some_and(|a| a.alive() && a.identity().side != FRIENDLY_SIDE)
+                .is_some_and(|a| a.alive() && a.identity().side != sender_side)
         });
         if needs_target && target.is_none() {
             let report = OrderReport {
@@ -354,7 +378,7 @@ impl AiWings {
                 radio: vec![],
             };
             let outcome = Outcome::Refused(Reason::NoHostileTarget);
-            self.journal_order(cause, recipient, &report, outcome);
+            self.journal_order(sender, cause, recipient, &report, outcome);
             return Ok(report);
         }
         let cause = Cause::Order {
@@ -365,7 +389,7 @@ impl AiWings {
         let mut applied = 0;
         let mut rejected = 0;
         let mut no_motion = 0;
-        let mut sender = None;
+        let mut wing_sender = None;
         let mut replied = None;
         for (member, id) in &members {
             let actor = self.mission.actor(*id).unwrap();
@@ -421,8 +445,8 @@ impl AiWings {
                     )
                 }
             };
-            if sender.is_none() {
-                sender = Some(sender_stem(order, horizontal, vertical, control));
+            if wing_sender.is_none() {
+                wing_sender = Some(sender_stem(order, horizontal, vertical, control));
             }
             if needs_target
                 && actor.sensors().is_some_and(|s| {
@@ -485,7 +509,7 @@ impl AiWings {
             }
             match outcome {
                 ReceiverOutcome::Applied(_) | ReceiverOutcome::MotionInstalled(_) => {
-                    if let Some(assignment) = mission_assignment(order, target) {
+                    if let Some(assignment) = mission_assignment(sender, order, target) {
                         self.mission
                             .actor_mut(*id)
                             .unwrap()
@@ -526,7 +550,7 @@ impl AiWings {
                 }
                 ReceiverOutcome::Rejected(_) => rejected += 1,
                 ReceiverOutcome::AppliedNoMotion => {
-                    if let Some(assignment) = mission_assignment(order, target) {
+                    if let Some(assignment) = mission_assignment(sender, order, target) {
                         self.mission
                             .actor_mut(*id)
                             .unwrap()
@@ -536,8 +560,18 @@ impl AiWings {
                 }
             }
         }
+        // A human member cannot be flown by an order: it only records that it
+        // was given one.
+        for (member, id) in &humans {
+            answers.push(Answer {
+                recipient: *id,
+                member: *member,
+                result: Answered::Human,
+                side: Vec::new(),
+            });
+        }
         let mut radio = Vec::new();
-        if let Some(stem) = sender.flatten() {
+        if let Some(stem) = wing_sender.flatten() {
             radio.push(stem);
         }
         let mut message = format!(
@@ -547,9 +581,13 @@ impl AiWings {
         if bugged_out > 0 {
             message.push_str(&format!(", {bugged_out} bugged out"));
         }
+        if !humans.is_empty() {
+            message.push_str(&format!(", {} flown by a human", humans.len()));
+        }
         let report = OrderReport { message, radio };
         let reply = replied.unwrap_or_else(|| no_reply(order, first, &answers));
         self.journal_order(
+            sender,
             cause,
             recipient,
             &report,
@@ -564,6 +602,7 @@ impl AiWings {
     /// route. A refusal the host makes itself has none.
     fn journal_order(
         &mut self,
+        sender: u32,
         cause: Cause,
         recipient: Option<u8>,
         report: &OrderReport,
@@ -573,7 +612,7 @@ impl AiWings {
             self.journal_clock(),
             "YOU",
             Origin::of(Source::Order, cause)
-                .by(PLAYER_ID)
+                .by(sender)
                 .to(Audience::Wing { member: recipient }),
             outcome,
         )
@@ -588,15 +627,18 @@ impl AiWings {
     /// out and the player's chosen airport for an ordered landing.
     fn command_landing(
         &mut self,
+        sender: u32,
         order: PlayerOrder,
         recipient: Option<u8>,
         site: Option<&LandingSite>,
     ) -> WorldResult<OrderReport> {
+        let wing = self.wing_of(sender);
+        let humans = self.other_humans(sender, recipient);
         let mut members: Vec<_> = self
             .mission
             .actors()
             .iter()
-            .filter(|a| a.alive() && a.identity().side == FRIENDLY_SIDE && a.identity().wing == 0)
+            .filter(|a| a.alive() && Some((a.identity().side, a.identity().wing)) == wing)
             .filter(|a| recipient.is_none_or(|wanted| a.identity().member == wanted))
             .map(|a| (a.identity().member, a.id()))
             .collect();
@@ -606,9 +648,10 @@ impl AiWings {
             selected: None,
             target: None,
         };
-        if members.is_empty() {
+        if members.is_empty() && humans.is_empty() {
             let report = unavailable_no_wingmen();
             self.journal_order(
+                sender,
                 cause,
                 recipient,
                 &report,
@@ -626,7 +669,7 @@ impl AiWings {
                     radio: vec![],
                 };
                 let outcome = Outcome::Refused(Reason::NoAirportSelected);
-                self.journal_order(cause, recipient, &report, outcome);
+                self.journal_order(sender, cause, recipient, &report, outcome);
                 return Ok(report);
             }
         };
@@ -639,13 +682,12 @@ impl AiWings {
             result,
             side: Vec::new(),
         };
+        for (member, id) in humans {
+            human += 1;
+            answers.push(answer(id, member, Answered::Human));
+        }
         for (member, id) in members {
             let actor = self.mission.actor(id).unwrap();
-            if actor.identity().human_controlled {
-                human += 1;
-                answers.push(answer(id, member, Answered::Human));
-                continue;
-            }
             if actor.bugged_out() {
                 bugged_out += 1;
                 answers.push(answer(id, member, Answered::BuggedOut));
@@ -725,7 +767,7 @@ impl AiWings {
                 radio: vec![],
             };
             let outcome = Outcome::Refused(Reason::AllBuggedOut { count: bugged_out });
-            self.journal_order(cause, recipient, &report, outcome);
+            self.journal_order(sender, cause, recipient, &report, outcome);
             return Ok(report);
         }
         let mut parts = vec![format!(
@@ -767,8 +809,25 @@ impl AiWings {
             answers,
             reply: Reply::NotExpected,
         };
-        self.journal_order(cause, recipient, &report, outcome);
+        self.journal_order(sender, cause, recipient, &report, outcome);
         Ok(report)
+    }
+
+    /// The human-flown members of `sender`'s wing other than `sender`, as
+    /// (member, aircraft id), lowest member first, narrowed to `recipient`.
+    fn other_humans(&self, sender: u32, recipient: Option<u8>) -> Vec<(u8, u32)> {
+        let Some(wing) = self.wing_of(sender) else {
+            return Vec::new();
+        };
+        let mut humans: Vec<_> = self
+            .humans
+            .iter()
+            .filter(|h| h.id != sender && (side_of(h.side), h.wing) == wing)
+            .filter(|h| recipient.is_none_or(|wanted| h.member == wanted))
+            .map(|h| (h.member, h.id))
+            .collect();
+        humans.sort_unstable();
+        humans
     }
 }
 
@@ -818,12 +877,12 @@ fn bugged_out_notice(count: usize, recipient: Option<u8>) -> String {
     }
 }
 
-fn mission_assignment(order: PlayerOrder, target: Option<u32>) -> Option<Assignment> {
+fn mission_assignment(sender: u32, order: PlayerOrder, target: Option<u32>) -> Option<Assignment> {
     match order {
         PlayerOrder::ProtectMe => Some(Assignment {
             role: Role::Escort,
             stance: Stance::ProtectAssigned,
-            protected_ids: vec![PLAYER_ID],
+            protected_ids: vec![sender],
             ..Assignment::default()
         }),
         PlayerOrder::EngageMyTarget => Some(Assignment {
@@ -946,21 +1005,24 @@ mod engagement_tests {
 
     #[test]
     fn accepted_policy_orders_map_to_persistent_assignments() {
-        let protect = mission_assignment(PlayerOrder::ProtectMe, Some(9)).unwrap();
+        let protect = mission_assignment(PLAYER_ID, PlayerOrder::ProtectMe, Some(9)).unwrap();
         assert_eq!(protect.role, Role::Escort);
         assert_eq!(protect.stance, Stance::ProtectAssigned);
         assert_eq!(protect.protected_ids, [PLAYER_ID]);
         assert!(protect.destroy_ids.is_empty());
 
-        let engage = mission_assignment(PlayerOrder::EngageMyTarget, Some(9)).unwrap();
+        let engage = mission_assignment(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(9)).unwrap();
         assert_eq!(engage.role, Role::Intercept);
         assert_eq!(engage.destroy_ids, [9]);
 
         assert_eq!(
-            mission_assignment(PlayerOrder::AttackOnContact, None),
+            mission_assignment(PLAYER_ID, PlayerOrder::AttackOnContact, None),
             Some(Assignment::default())
         );
-        assert_eq!(mission_assignment(PlayerOrder::Disengage, None), None);
+        assert_eq!(
+            mission_assignment(PLAYER_ID, PlayerOrder::Disengage, None),
+            None
+        );
     }
 
     #[test]
@@ -973,7 +1035,7 @@ mod engagement_tests {
             PlayerOrder::Stacking,
             PlayerOrder::ControlToggle,
         ] {
-            assert_eq!(mission_assignment(order, Some(9)), None);
+            assert_eq!(mission_assignment(PLAYER_ID, order, Some(9)), None);
         }
     }
 }
@@ -1353,7 +1415,9 @@ mod landing_tests {
             .unwrap()
             .set_home_runway(Some(home));
         wings.mission.actor_mut(2).unwrap().set_home_runway(None);
-        let report = wings.command(PlayerOrder::BugOut, None, None).unwrap();
+        let report = wings
+            .command(PLAYER_ID, PlayerOrder::BugOut, None, None)
+            .unwrap();
         assert_eq!(
             report.message,
             "Bug out: 1 returning to base, 1 with no base"
@@ -1371,12 +1435,16 @@ mod landing_tests {
         assert!(!wings.mission.actor(2).unwrap().bugged_out());
 
         // The bugged-out wingman no longer answers: it is skipped and named.
-        let report = wings.command(PlayerOrder::BugOut, None, Some(1)).unwrap();
+        let report = wings
+            .command(PLAYER_ID, PlayerOrder::BugOut, None, Some(1))
+            .unwrap();
         assert_eq!(
             report.message,
             "Wing order unavailable: wingman 1 bugged out and no longer answers"
         );
-        let report = wings.command(PlayerOrder::Disengage, None, None).unwrap();
+        let report = wings
+            .command(PLAYER_ID, PlayerOrder::Disengage, None, None)
+            .unwrap();
         assert!(
             report.message.ends_with(", 1 bugged out"),
             "{}",
@@ -1384,6 +1452,7 @@ mod landing_tests {
         );
         let report = wings
             .command(
+                PLAYER_ID,
                 PlayerOrder::Formation(wing::Formation::Echelon),
                 None,
                 Some(1),
@@ -1402,7 +1471,13 @@ mod landing_tests {
             runway: view(1000, 500_000.),
         };
         wings
-            .command_at(PlayerOrder::LandAtSelected, None, Some(2), Some(&site))
+            .command_at(
+                PLAYER_ID,
+                PlayerOrder::LandAtSelected,
+                None,
+                Some(2),
+                Some(&site),
+            )
             .unwrap();
         wings
             .mission
@@ -1417,7 +1492,9 @@ mod landing_tests {
             .actor_mut(2)
             .unwrap()
             .set_home_runway(Some(view(500, 10_000.)));
-        let report = wings.command(PlayerOrder::BugOut, None, Some(2)).unwrap();
+        let report = wings
+            .command(PLAYER_ID, PlayerOrder::BugOut, None, Some(2))
+            .unwrap();
         assert_eq!(report.message, "Bug out: 1 returning to base");
         assert!(wings.mission.actor(2).unwrap().bugged_out());
     }
@@ -1441,7 +1518,13 @@ mod landing_tests {
             runway: view(1000, 50_000.),
         };
         let report = wings
-            .command_at(PlayerOrder::LandAtSelected, None, Some(2), Some(&site))
+            .command_at(
+                PLAYER_ID,
+                PlayerOrder::LandAtSelected,
+                None,
+                Some(2),
+                Some(&site),
+            )
             .unwrap();
         assert_eq!(
             report.message,
@@ -1456,7 +1539,7 @@ mod landing_tests {
     fn land_at_selected_uses_the_player_chosen_runway() {
         let mut wings = bridge();
         let report = wings
-            .command(PlayerOrder::LandAtSelected, None, Some(2))
+            .command(PLAYER_ID, PlayerOrder::LandAtSelected, None, Some(2))
             .unwrap();
         assert!(report.message.contains("Shift-A"), "{}", report.message);
         assert!(wings.mission.actor(2).unwrap().landing_order().is_none());
@@ -1466,7 +1549,13 @@ mod landing_tests {
             runway: view(1000, 50_000.),
         };
         let report = wings
-            .command_at(PlayerOrder::LandAtSelected, None, Some(2), Some(&site))
+            .command_at(
+                PLAYER_ID,
+                PlayerOrder::LandAtSelected,
+                None,
+                Some(2),
+                Some(&site),
+            )
             .unwrap();
         assert_eq!(report.message, "Land at Field: 1 landing");
         assert_eq!(
@@ -1507,7 +1596,7 @@ mod landing_tests {
     fn every_answer_and_the_wingman_who_replied_are_journaled() {
         let mut wings = bridge();
         let report = wings
-            .command(PlayerOrder::EngageMyTarget, Some(3), None)
+            .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), None)
             .unwrap();
         let entry = order_entry(&mut wings);
         assert_eq!(entry.text, report.message);
@@ -1536,7 +1625,7 @@ mod landing_tests {
         );
         // Only the first wingman replies.
         wings
-            .command(PlayerOrder::EngageMyTarget, Some(3), Some(2))
+            .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), Some(2))
             .unwrap();
         let entry = order_entry(&mut wings);
         assert_eq!(entry.origin.audience, Audience::Wing { member: Some(2) });
@@ -1548,7 +1637,12 @@ mod landing_tests {
             )
         );
         wings
-            .command(PlayerOrder::Formation(wing::Formation::Echelon), None, None)
+            .command(
+                PLAYER_ID,
+                PlayerOrder::Formation(wing::Formation::Echelon),
+                None,
+                None,
+            )
             .unwrap();
         assert_eq!(answered(&order_entry(&mut wings)).1, Reply::NotExpected);
     }
@@ -1571,7 +1665,7 @@ mod landing_tests {
             })
             .unwrap();
         wings
-            .command(PlayerOrder::EngageMyTarget, Some(3), None)
+            .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), None)
             .unwrap();
         let entry = order_entry(&mut wings);
         let Outcome::Answered { answers, reply } = &entry.outcome else {
@@ -1603,19 +1697,23 @@ mod landing_tests {
             .unwrap()
             .set_home_runway(Some(home));
         wings.mission.actor_mut(2).unwrap().set_home_runway(None);
-        wings.command(PlayerOrder::BugOut, None, None).unwrap();
+        wings
+            .command(PLAYER_ID, PlayerOrder::BugOut, None, None)
+            .unwrap();
         let entry = order_entry(&mut wings);
         let Outcome::Answered { answers, .. } = &entry.outcome else {
             panic!("{:?}", entry.outcome);
         };
         assert_eq!(answers[0].result.name(), "applied");
         assert_eq!(answers[1].result, Answered::NoBase);
-        wings.command(PlayerOrder::Disengage, None, None).unwrap();
+        wings
+            .command(PLAYER_ID, PlayerOrder::Disengage, None, None)
+            .unwrap();
         let (answers, _) = answered(&order_entry(&mut wings));
         assert_eq!(answers[0], (1, 1, "skipped"), "bugged out before delivery");
         assert_eq!(answers[1].0, 2);
         let refused = |wings: &mut AiWings, order, recipient| {
-            wings.command(order, None, recipient).unwrap();
+            wings.command(PLAYER_ID, order, None, recipient).unwrap();
             order_entry(wings).outcome
         };
         assert_eq!(
