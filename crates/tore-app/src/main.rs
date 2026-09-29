@@ -69,6 +69,7 @@ mod replay;
 mod rocker;
 mod roster_animation;
 mod rwr_tone;
+mod scenery;
 mod scope;
 mod sim_renderer;
 mod situation;
@@ -194,6 +195,9 @@ struct App {
     performance: performance::Performance,
     /// Every piece of mutable mission state; see world.rs.
     world: world::World,
+    /// What the renderer draws of the world's terrain: art, palettes, camera
+    /// weather and the render origin. Rebuilt wherever the terrain is.
+    scenery: scenery::Scenery,
     hornet: aircraft::Airframe,
     researched_flight: bool,
     native_tables: Option<std::sync::Arc<tore_sim::native::Tables>>,
@@ -371,6 +375,7 @@ fn airport_wind(
 /// renderer, which the redraw handler holds while the ticks run.
 struct TickPresenter<'a> {
     world: &'a mut world::World,
+    scenery: &'a mut scenery::Scenery,
     flight_ui: &'a mut flight_ui::FlightUi,
     input: &'a mut input::Input,
     audio: Option<&'a audio::Audio>,
@@ -665,13 +670,18 @@ impl TickPresenter<'_> {
                 self.hornet
                     .camera(&self.world.flight, 0, Default::default())
             });
-        self.world.terrain.step_view_weather(&weather_view, speed);
-        self.world
-            .terrain
-            .step_view_weather(&mirrors::camera(&self.world.flight), speed);
-        self.world
-            .terrain
-            .step_view_weather(&self.hornet.panel_camera(&self.world.flight, 2), speed);
+        self.scenery
+            .step_view_weather(&self.world.terrain, &weather_view, speed);
+        self.scenery.step_view_weather(
+            &self.world.terrain,
+            &mirrors::camera(&self.world.flight),
+            speed,
+        );
+        self.scenery.step_view_weather(
+            &self.world.terrain,
+            &self.hornet.panel_camera(&self.world.flight, 2),
+            speed,
+        );
         let scene = flight_views::Scene::new(
             &self.world.flight,
             &self.world.combat,
@@ -687,10 +697,12 @@ impl TickPresenter<'_> {
                 Default::default(),
             ),
         ) {
-            self.world.terrain.step_view_weather(&camera, speed);
+            self.scenery
+                .step_view_weather(&self.world.terrain, &camera, speed);
         }
         if let Some(camera) = self.world.combat.target_camera(&self.world.flight) {
-            self.world.terrain.step_view_weather(&camera, speed);
+            self.scenery
+                .step_view_weather(&self.world.terrain, &camera, speed);
         }
         self.g_effects.step(
             self.world.flight.g,
@@ -720,10 +732,10 @@ impl App {
             .layout
             .trim_end_matches(".MM")
             .to_string();
-        self.world.terrain =
-            terrain::Terrain::for_mission(&self.theater_resources, &code, Some(index))?;
+        self.world.terrain = scenery::launch_terrain(&self.theater_resources, &code, Some(index))?;
+        self.scenery = scenery::Scenery::build(&self.theater_resources, &self.world.terrain)?;
         if let Some(renderer) = &mut self.renderer {
-            renderer.set_world(&self.world.terrain);
+            renderer.set_scenery(&self.scenery);
             renderer.prepare_aircraft(&self.hornet);
         }
         Ok(())
@@ -1861,8 +1873,13 @@ impl App {
                     return;
                 }
                 if let Some((code, _)) = self.world.terrain.catalog.get(index) {
-                    match terrain::Terrain::for_theater(&self.theater_resources, code) {
-                        Ok(world) => {
+                    let built = scenery::launch_terrain(&self.theater_resources, code, None)
+                        .and_then(|world| {
+                            let scenery = scenery::Scenery::build(&self.theater_resources, &world)?;
+                            Ok((world, scenery))
+                        });
+                    match built {
+                        Ok((world, scenery)) => {
                             self.world.setup.ground_start = None;
                             let service =
                                 match tore_sim::airport::Service::new(&world.airport_scene) {
@@ -1874,13 +1891,14 @@ impl App {
                                     }
                                 };
                             if let Some(renderer) = &mut self.renderer {
-                                renderer.set_world(&world);
+                                renderer.set_scenery(&scenery);
                                 diagnostics::stage("aircraft graphics preparation");
                                 renderer.prepare_aircraft(&self.hornet);
                                 diagnostics::stage_done();
                             }
                             self.camera = terrain::Camera::for_world(&world);
                             self.world.terrain = world;
+                            self.scenery = scenery;
                             self.world.airport_service = service;
                         }
                         Err(error) => {
@@ -1904,6 +1922,7 @@ impl App {
                             }
                             self.hornet = aircraft;
                             self.world.reset_weather();
+                            self.scenery.reset_presentations();
                             self.world.flight = self.hornet.start(&self.world.terrain);
                             self.reset_vapor();
                             match combat::Combat::new(
@@ -2180,6 +2199,8 @@ impl App {
                             return;
                         }
                     };
+                // A flight starts on fresh camera weather, as on a fresh clock.
+                self.scenery.reset_presentations();
                 if let Some(wings) = &mut self.world.ai_wings {
                     match formation_trace::start(wings) {
                         Ok(trace) => self.formation_trace = trace,
@@ -2749,7 +2770,7 @@ impl ApplicationHandler for App {
                 )?,
             );
             diagnostics::stage_done();
-            pollster::block_on(Renderer::new(window, &self.world.terrain, self.graphics))
+            pollster::block_on(Renderer::new(window, &self.scenery, self.graphics))
         })();
         match result {
             Ok(mut renderer) => {
@@ -3325,7 +3346,7 @@ impl ApplicationHandler for App {
                         &self.world.terrain,
                     ),
                     Screen::Flight => {
-                        self.world.terrain.no_sun_whiteout = self.flight_ui.cheats.no_sun_whiteout;
+                        self.scenery.no_sun_whiteout = self.flight_ui.cheats.no_sun_whiteout;
                         let now = Instant::now();
                         let elapsed = (now - self.frame_time).as_secs_f64().min(0.25);
                         let steps = self.flight_ui.steps(&mut self.flight_clock, elapsed);
@@ -3423,6 +3444,7 @@ impl ApplicationHandler for App {
                             }
                             let presented = TickPresenter {
                                 world: &mut self.world,
+                                scenery: &mut self.scenery,
                                 flight_ui: &mut self.flight_ui,
                                 input: &mut self.input,
                                 audio: self.audio.as_ref(),
@@ -3533,8 +3555,9 @@ impl ApplicationHandler for App {
                         self.camera.zoom = self.flight_ui.zoom;
                         // One resolved instant per frame, shared by the main view,
                         // the mirrors and the camera panels.
-                        self.world.terrain.resolve_palette(self.camera.position[1]);
-                        self.world.terrain.set_origin(self.camera.position);
+                        self.scenery
+                            .resolve_palette(&self.world.terrain, self.camera.position[1]);
+                        self.scenery.set_origin(self.camera.position);
                         let vapor = vapor_vertices(
                             &self.vapor,
                             &self.world.terrain,
@@ -3595,12 +3618,10 @@ impl ApplicationHandler for App {
                         }
                         renderer.airports(
                             &self
-                                .world
-                                .terrain
+                                .scenery
                                 .visible_static_vertices(&self.world.combat.state.targets),
                             &self
-                                .world
-                                .terrain
+                                .scenery
                                 .visible_static_lines(&self.world.combat.state.targets),
                         );
                         let target_due = self.target_refresh.due(now) || self.smoke_test;
@@ -3619,6 +3640,7 @@ impl ApplicationHandler for App {
                                             &presented,
                                             &self.hornet,
                                             &self.world.terrain,
+                                            &self.scenery,
                                         ) else {
                                             self.instruments.cameras.remove(&4);
                                             self.instruments.camera_target = None;
@@ -3651,6 +3673,7 @@ impl ApplicationHandler for App {
                                         self.world.combat.models(),
                                         &camera,
                                         &self.world.terrain,
+                                        &self.scenery,
                                     ));
                                     renderer.combat(&render_snapshot::combat_geometry(
                                         &frame,
@@ -3659,6 +3682,7 @@ impl ApplicationHandler for App {
                                         &presented,
                                         &camera,
                                         &self.world.terrain,
+                                        &self.scenery,
                                     ));
                                     renderer.aircraft(
                                         &self.hornet,
@@ -3666,12 +3690,14 @@ impl ApplicationHandler for App {
                                         page == 3 && self.view_rig.other_shows_player(),
                                         &camera,
                                         &self.world.terrain,
+                                        &self.scenery,
                                     );
                                     let result = if self.smoke_test {
                                         renderer
                                             .scene_pixels(
                                                 &camera,
                                                 &self.world.terrain,
+                                                &self.scenery,
                                                 138,
                                                 114,
                                                 false,
@@ -3693,7 +3719,12 @@ impl ApplicationHandler for App {
                                             })
                                     } else {
                                         renderer
-                                            .request_preview(page, &camera, &self.world.terrain)
+                                            .request_preview(
+                                                page,
+                                                &camera,
+                                                &self.world.terrain,
+                                                &self.scenery,
+                                            )
                                             .inspect(|submitted| {
                                                 if page == 3 && *submitted {
                                                     self.view_rig.other_pending = true;
@@ -3729,7 +3760,7 @@ impl ApplicationHandler for App {
                                         .map(|p| (p.position, p.heading, p.phase)),
                                     &self.hornet.palette,
                                     self.camera.position,
-                                    self.world.terrain.origin,
+                                    self.scenery.origin,
                                 ),
                             );
                         }
@@ -3738,6 +3769,7 @@ impl ApplicationHandler for App {
                             self.world.combat.models(),
                             &self.camera,
                             &self.world.terrain,
+                            &self.scenery,
                         ));
                         renderer.combat(&render_snapshot::combat_geometry(
                             &frame,
@@ -3746,6 +3778,7 @@ impl ApplicationHandler for App {
                             &presented,
                             &self.camera,
                             &self.world.terrain,
+                            &self.scenery,
                         ));
                         renderer.aircraft(
                             &self.hornet,
@@ -3753,6 +3786,7 @@ impl ApplicationHandler for App {
                             self.view_rig.shows_player(self.flight_view),
                             &self.camera,
                             &self.world.terrain,
+                            &self.scenery,
                         );
                         simulation_ms = frame_start.elapsed().as_secs_f64() * 1000.;
                         self.instruments.combat = Some(
@@ -3802,6 +3836,7 @@ impl ApplicationHandler for App {
                         );
                         let cockpit_palette = self.hornet.cockpit_palette(
                             &self.world.terrain,
+                            &self.scenery,
                             self.camera.position[1],
                             self.flight_ui.brightness,
                         );
@@ -3959,6 +3994,7 @@ impl ApplicationHandler for App {
                             self.flight_ui.map.draw(
                                 &mut self.menu.pixels,
                                 &self.world.terrain,
+                                &self.scenery,
                                 &presented,
                                 &self.world.combat.state,
                                 &self.hornet.font,
@@ -4069,10 +4105,13 @@ impl ApplicationHandler for App {
                             &self.world.terrain,
                         );
                         for _ in 0..self.flight_clock.steps(elapsed) {
-                            self.world.terrain.step_weather(0., &self.camera);
+                            self.world.terrain.weather.step();
+                            self.scenery
+                                .step_view_weather(&self.world.terrain, &self.camera, 0.);
                         }
-                        self.world.terrain.resolve_palette(self.camera.position[1]);
-                        self.world.terrain.set_origin(self.camera.position);
+                        self.scenery
+                            .resolve_palette(&self.world.terrain, self.camera.position[1]);
+                        self.scenery.set_origin(self.camera.position);
                         self.frame_time = now;
                         quick_mission::hud(
                             &mut self.menu.pixels,
@@ -4093,6 +4132,7 @@ impl ApplicationHandler for App {
                         false,
                         &self.camera,
                         &self.world.terrain,
+                        &self.scenery,
                     );
                     if let Some(audio) = &self.audio {
                         audio.pause_flight(false);
@@ -4102,12 +4142,10 @@ impl ApplicationHandler for App {
                 if matches!(self.screen, Screen::Viewer | Screen::Flight) {
                     renderer.airports(
                         &self
-                            .world
-                            .terrain
+                            .scenery
                             .visible_static_vertices(&self.world.combat.state.targets),
                         &self
-                            .world
-                            .terrain
+                            .scenery
                             .visible_static_lines(&self.world.combat.state.targets),
                     );
                 }
@@ -4119,8 +4157,11 @@ impl ApplicationHandler for App {
                     } else {
                         &self.menu.pixels
                     },
-                    (matches!(self.screen, Screen::Viewer | Screen::Flight))
-                        .then_some((&self.camera, &self.world.terrain)),
+                    (matches!(self.screen, Screen::Viewer | Screen::Flight)).then_some((
+                        &self.camera,
+                        &self.world.terrain,
+                        &self.scenery,
+                    )),
                     (self.screen == Screen::Flight).then_some(self.flight_canvas.size),
                 ) {
                     Ok(true) if self.smoke_test => {
@@ -4129,6 +4170,7 @@ impl ApplicationHandler for App {
                                 path,
                                 &self.camera,
                                 &self.world.terrain,
+                                &self.scenery,
                                 self.screen == Screen::Flight,
                             )
                         {
@@ -8346,8 +8388,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     if validate_maps {
         let catalog = tore_formats::theater::map_catalog(&assets.theater_resources)?;
         for (code, _) in &catalog {
-            let world = terrain::Terrain::for_theater(&assets.theater_resources, code)?;
-            let bytes = world.texture_indices.len() + world.sky_indices.len();
+            let world = scenery::launch_terrain(&assets.theater_resources, code, None)?;
+            let scenery = scenery::Scenery::build(&assets.theater_resources, &world)?;
+            let bytes = scenery.texture_indices.len() + scenery.sky_indices.len();
             if bytes / 65536 > 4096 {
                 return Err("map artwork exceeds GPU page budget".into());
             }
@@ -8359,8 +8402,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 world.environment.textures.len(),
                 world.static_manifest.len(),
                 world.airport_scene.objects.len(),
-                world.vertices.len() / 10,
-                world
+                scenery.vertices.len() / 10,
+                scenery
                     .static_vertices
                     .values()
                     .map(|v| v.len() / 10)
@@ -8379,7 +8422,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             return Err("combat record and replay are mutually exclusive".into());
         }
         let c = combat::Combat::new(&hornet, &assets.theater_resources, true)?;
-        let w = terrain::Terrain::for_theater(&assets.theater_resources, &theater_code)?;
+        let w = scenery::launch_terrain(&assets.theater_resources, &theater_code, None)?;
         combat_tape::replay(
             &path,
             &assets.theater_resources,
@@ -8585,9 +8628,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             || ground_start_airport.is_some()
             || flight_start.is_some()
         {
-            Some(terrain::Terrain::for_theater(
+            Some(scenery::launch_terrain(
                 &assets.theater_resources,
                 &theater_code,
+                None,
             )?)
         } else {
             None
@@ -9125,7 +9169,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     diagnostics::stage("terrain construction");
     let mut world =
-        terrain::Terrain::for_mission(&assets.theater_resources, &theater_code, weather_condition)?;
+        scenery::launch_terrain(&assets.theater_resources, &theater_code, weather_condition)?;
+    let mut scenery = scenery::Scenery::build(&assets.theater_resources, &world)?;
     diagnostics::stage_done();
     let ground_start = ground_object(&world)?;
     if std::env::var_os("TORE_AIRPORT_PROBE").is_some() {
@@ -9143,7 +9188,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let stage = std::env::var("TORE_CREATOR_STAGE").unwrap_or_default();
         let wanted = |name: &str| stage.is_empty() || stage == name;
         if wanted("loadouts") {
-            ordnance::validate_sources(&assets.theater_resources, &world)?;
+            ordnance::validate_sources(&assets.theater_resources, &world, &scenery)?;
         }
         if wanted("matrix") {
             quick_mission::matrix::validate(
@@ -9197,7 +9242,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             .iter()
             .filter(|target| target.role == tore_sim::combat::missiles::TargetRole::Surface)
             .count();
-        let visible_vertices = world.visible_static_vertices(&combat.state.targets).len() / 10;
+        let visible_vertices = scenery.visible_static_vertices(&combat.state.targets).len() / 10;
         let mut service =
             tore_sim::airport::Service::new(&world.airport_scene).map_err(std::io::Error::other)?;
         service.command(
@@ -9565,10 +9610,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 flight_look.map(f32::to_radians),
                 matches!(flight_view, 1 | 2),
             );
-            world.step_weather(flight.speed, &weather_view);
-            world.step_view_weather(&mirrors::camera(&flight), flight.speed);
+            world.weather.step();
+            scenery.step_view_weather(&world, &weather_view, flight.speed);
+            scenery.step_view_weather(&world, &mirrors::camera(&flight), flight.speed);
             for page in [2, 3] {
-                world.step_view_weather(&hornet.panel_camera(&flight, page), flight.speed);
+                scenery.step_view_weather(
+                    &world,
+                    &hornet.panel_camera(&flight, page),
+                    flight.speed,
+                );
             }
             step_turbulence(
                 &mut probe_turbulence,
@@ -9744,10 +9794,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     flight_look.map(f32::to_radians),
                     matches!(flight_view, 1 | 2),
                 );
-                world.step_weather(flight.speed, &weather_view);
-                world.step_view_weather(&mirrors::camera(&flight), flight.speed);
+                world.weather.step();
+                scenery.step_view_weather(&world, &weather_view, flight.speed);
+                scenery.step_view_weather(&world, &mirrors::camera(&flight), flight.speed);
                 for page in [2, 3] {
-                    world.step_view_weather(&hornet.panel_camera(&flight, page), flight.speed);
+                    scenery.step_view_weather(
+                        &world,
+                        &hornet.panel_camera(&flight, page),
+                        flight.speed,
+                    );
                 }
                 step_turbulence(
                     &mut probe_turbulence,
@@ -10174,6 +10229,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         enemy_skill,
         ai_mission,
         world,
+        scenery,
         preference_path: if preferences_enabled {
             Some(assets::data_directory()?.join("preferences-v1.conf"))
         } else {

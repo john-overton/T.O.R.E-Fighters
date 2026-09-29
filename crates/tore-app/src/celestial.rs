@@ -1,6 +1,7 @@
 //! Original weather primitives, projected independently of camera translation.
 use crate::{
     AppResult,
+    scenery::Scenery,
     terrain::{Camera, Terrain},
 };
 use std::collections::BTreeMap;
@@ -160,11 +161,11 @@ impl Celestial {
             .filter(|r| *r > 0.)
             .max_by(f32::total_cmp)
     }
-    pub fn sun_uniform(&self, world: &Terrain, altitude: f64) -> Vec<f32> {
+    pub fn sun_uniform(&self, world: &Terrain, scenery: &Scenery, altitude: f64) -> Vec<f32> {
         let layer = world.weather.sample(altitude);
         let seconds = world.weather.seconds_of_day();
         let direction = layer.as_ref().and_then(|layer| {
-            if world.smooth_weather {
+            if scenery.smooth_weather {
                 visual_sun_direction(layer, &world.weather)
             } else {
                 tore_sim::environment::sun_angles(layer, seconds)
@@ -243,8 +244,13 @@ impl Celestial {
         vertices
     }
 }
-pub(crate) fn glare_strength(world: &Terrain, altitude: f64, sun: [f32; 3]) -> f32 {
-    if !world.smooth_weather {
+pub(crate) fn glare_strength(
+    world: &Terrain,
+    scenery: &Scenery,
+    altitude: f64,
+    sun: [f32; 3],
+) -> f32 {
+    if !scenery.smooth_weather {
         return 1.;
     }
     let smooth = |lo: f32, hi: f32, value: f32| {
@@ -353,12 +359,14 @@ mod tests {
     use super::*;
     #[test]
     fn sunset_glare_is_soft_then_drops_below_the_horizon() {
-        let mut world = crate::terrain::tests::world();
-        world.smooth_weather = true;
+        let world = crate::terrain::tests::world();
+        let mut scenery = crate::scenery::tests::scenery();
+        scenery.smooth_weather = true;
         // Above all finite dense fixture bands, so this checks the solar envelope.
         let at = |degrees: f32| {
             glare_strength(
                 &world,
+                &scenery,
                 400000.,
                 [degrees.to_radians().cos(), degrees.to_radians().sin(), 0.],
             )

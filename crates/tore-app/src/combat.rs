@@ -7,6 +7,7 @@ use crate::{
         AircraftPose, CombatArt, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
         ProjectilePose, RenderSnapshot,
     },
+    scenery::Scenery,
     sim_renderer::Contact,
     terrain::{Camera, Terrain},
 };
@@ -643,12 +644,14 @@ impl Combat {
         &self,
         camera: &Camera,
         world: &Terrain,
+        scenery: &Scenery,
     ) -> Vec<(&Airframe, Vec<f32>, Vec<Contact>)> {
         crate::render_snapshot::aircraft_batches(
             &self.presented(),
             &self.dummy_models,
             camera,
             world,
+            scenery,
         )
     }
     /// Combat geometry drawn with the ownship airframe over its presented state.
@@ -658,8 +661,17 @@ impl Combat {
         s: &flight::State,
         camera: &Camera,
         world: &Terrain,
+        scenery: &Scenery,
     ) -> crate::sim_renderer::CombatGeometry {
-        crate::render_snapshot::combat_geometry(&self.presented(), &self.art, h, s, camera, world)
+        crate::render_snapshot::combat_geometry(
+            &self.presented(),
+            &self.art,
+            h,
+            s,
+            camera,
+            world,
+            scenery,
+        )
     }
     /// Populate all six creator wings, retaining their sides for placement.
     pub fn mission_aircraft(
@@ -1054,6 +1066,7 @@ impl Combat {
         player: &flight::State,
         aircraft: &Airframe,
         world: &Terrain,
+        scenery: &Scenery,
     ) -> Option<Camera> {
         let target = self.state.display_target()?;
         let mut camera = self.target_camera(player)?;
@@ -1107,7 +1120,7 @@ impl Combat {
             if let Some(devices) = presented.and_then(|p| p.devices) {
                 crate::render_snapshot::set_devices(&mut pose, devices);
             }
-            let vertices = model.vertices(&pose, &camera, world);
+            let vertices = model.vertices(&pose, &camera, world, scenery);
             crate::target_window::fit(
                 &mut camera,
                 vertices
@@ -3171,9 +3184,15 @@ pub(crate) mod render_hash_tests {
     fn drawn_combat_scene_is_unchanged() {
         let ownship = hornet_airframe(true);
         let player = player();
-        let mut stepped = crate::terrain::tests::world();
+        let mut stepped = crate::scenery::tests::scenery();
         stepped.smooth_weather = false;
-        let worlds = [crate::terrain::tests::world(), stepped];
+        let worlds = [
+            (
+                crate::terrain::tests::world(),
+                crate::scenery::tests::scenery(),
+            ),
+            (crate::terrain::tests::world(), stepped),
+        ];
         let mut with_models = combat(models(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
         let mut fixture = combat(Vec::new(), Vec::new());
         let scene = scene(with_models.state.configuration());
@@ -3189,10 +3208,10 @@ pub(crate) mod render_hash_tests {
                     hashes[3].doubles(&angles);
                 }
                 let [modelled, fixtures] = [&with_models, &fixture].map(Combat::presented);
-                for world in &worlds {
+                for (world, scenery) in &worlds {
                     for camera in cameras() {
                         for (model, vertices, contacts) in
-                            with_models.dummy_geometry(&camera, world)
+                            with_models.dummy_geometry(&camera, world, scenery)
                         {
                             hashes[0].bytes(format!("{:?}", model.profile.id).as_bytes());
                             hashes[0].floats(&vertices);
@@ -3206,6 +3225,7 @@ pub(crate) mod render_hash_tests {
                             &player,
                             &camera,
                             world,
+                            scenery,
                         );
                         hashes[1].floats(&geometry.vertices);
                         hashes[1].contacts(&geometry.contacts);
@@ -3217,6 +3237,7 @@ pub(crate) mod render_hash_tests {
                             &player,
                             &camera,
                             world,
+                            scenery,
                         );
                         hashes[2].floats(&geometry.vertices);
                         hashes[2].contacts(&geometry.contacts);
@@ -3295,37 +3316,39 @@ pub(crate) mod render_hash_tests {
     #[test]
     fn aircraft_keep_their_shape_far_from_the_map_origin() {
         let ownship = hornet_airframe(true);
-        let mut world = crate::terrain::tests::world();
+        let world = crate::terrain::tests::world();
+        let mut scenery = crate::scenery::tests::scenery();
         let near = player();
         let camera = cameras().remove(0);
-        let reference = ownship.vertices(&near, &camera, &world);
+        let reference = ownship.vertices(&near, &camera, &world, &scenery);
         let shift = [1_070_000.37, 0., 590_000.61];
         let mut far = near.clone();
         far.position = std::array::from_fn(|i| near.position[i] + shift[i]);
         let mut far_camera = cameras().remove(0);
         far_camera.position = std::array::from_fn(|i| camera.position[i] + shift[i]);
-        let error = |world: &crate::terrain::Terrain| {
-            let vertices = ownship.vertices(&far, &far_camera, world);
+        let error = |scenery: &crate::scenery::Scenery| {
+            let vertices = ownship.vertices(&far, &far_camera, &world, scenery);
             assert_eq!(vertices.len(), reference.len());
             vertices
                 .chunks_exact(10)
                 .zip(reference.chunks_exact(10))
                 .flat_map(|(a, b)| {
                     (0..3).map(move |i| {
-                        (f64::from(a[i]) + world.origin[i] - f64::from(b[i]) - shift[i]).abs()
+                        (f64::from(a[i]) + scenery.origin[i] - f64::from(b[i]) - shift[i]).abs()
                     })
                 })
                 .fold(0., f64::max)
         };
-        assert!(error(&world) > 0.03, "world coordinates snap");
-        world.set_origin(far_camera.position);
-        assert_eq!(world.origin, [1_070_080., 5120., 590_848.]);
-        assert!(error(&world) < 0.002, "{}", error(&world));
+        assert!(error(&scenery) > 0.03, "world coordinates snap");
+        scenery.set_origin(far_camera.position);
+        assert_eq!(scenery.origin, [1_070_080., 5120., 590_848.]);
+        assert!(error(&scenery) < 0.002, "{}", error(&scenery));
     }
     #[test]
     fn fixture_targets_keep_the_player_copy_rule() {
         let ownship = hornet_airframe(true);
         let world = crate::terrain::tests::world();
+        let scenery = crate::scenery::tests::scenery();
         let mut fixture = combat(Vec::new(), Vec::new());
         let scene = scene(fixture.state.configuration());
         fixture.state.targets.clone_from(&scene.current);
@@ -3373,10 +3396,18 @@ pub(crate) mod render_hash_tests {
                     pose.rudder = 0.;
                     pose.brake = 0.;
                     pose.hook = 0.;
-                    expected.extend(ownship.vertices(&pose, &camera, &world));
+                    expected.extend(ownship.vertices(&pose, &camera, &world, &scenery));
                 }
-                let drawn =
-                    combat_geometry(&snapshot, &fixture.art, &ownship, s, &camera, &world).vertices;
+                let drawn = combat_geometry(
+                    &snapshot,
+                    &fixture.art,
+                    &ownship,
+                    s,
+                    &camera,
+                    &world,
+                    &scenery,
+                )
+                .vertices;
                 assert!(!expected.is_empty());
                 assert_eq!(drawn, expected);
             }
@@ -3482,6 +3513,7 @@ pub(crate) mod render_hash_tests {
         use crate::render_snapshot::{interpolate, pose_state};
         let ownship = hornet_airframe(true);
         let world = crate::terrain::tests::world();
+        let scenery = crate::scenery::tests::scenery();
         let template =
             flight::State::new(&flight::animation_tests::profile(), [0., 5000., 0.]).unwrap();
         let mut combat = combat(Vec::new(), Vec::new());
@@ -3545,13 +3577,14 @@ pub(crate) mod render_hash_tests {
                 let rebuilt = pose_state(&template, &frame.player);
                 for camera in cameras() {
                     assert_eq!(
-                        ownship.vertices(&rebuilt, &camera, &world),
-                        ownship.vertices(&presented, &camera, &world),
+                        ownship.vertices(&rebuilt, &camera, &world, &scenery),
+                        ownship.vertices(&presented, &camera, &world, &scenery),
                         "case {case} at {alpha}"
                     );
                     // Fixtures and the player's debris copy the player state.
                     let [replayed, live] = [&rebuilt, &presented].map(|s| {
-                        combat_geometry(&frame, &combat.art, &ownship, s, &camera, &world).vertices
+                        combat_geometry(&frame, &combat.art, &ownship, s, &camera, &world, &scenery)
+                            .vertices
                     });
                     assert_eq!(replayed, live, "fixtures, case {case} at {alpha}");
                 }

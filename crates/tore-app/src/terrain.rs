@@ -1,25 +1,15 @@
-//! Renderer-independent world data and free-camera controls (feet, X east/Y up/Z north).
-mod runway_cutout;
-
+//! Simulation half of the mission's world: the T2 grid and its height, surface
+//! and water queries, the airport scene and its runway anchors, and the weather
+//! clock. It holds no art, palette, render origin or per-frame state (those are
+//! [`crate::scenery::Scenery`]) and reads no environment variable. Also the
+//! free camera (feet, X east/Y up/Z north).
 use crate::AppResult;
 use std::collections::{BTreeMap, BTreeSet};
-use tore_formats::{
-    Pic,
-    theater::{CELL_FEET, Environment, HEIGHT_FEET, Theater},
-};
+use tore_formats::theater::{CELL_FEET, Environment, HEIGHT_FEET, Theater};
 
-/// A pure camera query; contains no clock, random generator or trail history.
-pub struct ViewWeather {
-    pub palette: [[u8; 3]; 256],
-    pub fog_palette: Vec<[[u8; 3]; 256]>,
-    pub decks: [[f32; 4]; 2],
-    pub fog: [f32; 4],
-    pub haze: [u8; 3],
-    pub visual_bands: Vec<tore_formats::weather::Layer>,
-}
-
+/// What the simulation queries about the mission's ground and sky. Built from
+/// the imported resources alone, so a server can build it without any art.
 pub struct Terrain {
-    pub ocean_motion: crate::ocean::Motion,
     pub theater: Theater,
     /// Exact selected MM identity, distinct from its referenced base grid.
     pub layout: String,
@@ -27,7 +17,6 @@ pub struct Terrain {
     /// keeps the mission's own `layer` line and time.
     #[allow(dead_code)] // Read by the mission recorder.
     pub condition: Option<usize>,
-    pub land_texture: Option<usize>,
     pub environment: Environment,
     /// Immutable imported placement/airport geometry. Mutable health belongs to combat.
     pub airport_scene: tore_sim::airport::Scene,
@@ -38,39 +27,26 @@ pub struct Terrain {
     /// Every source placement, including definitions the bounded SH projector cannot draw.
     pub static_manifest: Vec<(u32, tore_formats::mission::SourceKey, String, bool)>,
     pub catalog: Vec<(String, String)>,
-    /// Source palette indices, one byte per texel. Retail terrain and sky art is
-    /// entirely weather-palette indexed, so the artwork is uploaded unresolved
-    /// and the live palette is applied on the GPU. 255 is the water cutout.
-    pub sky_indices: Vec<u8>,
-    pub celestial: Option<crate::celestial::Celestial>,
-    pub clouds: Option<crate::clouds::Clouds>,
-    pub deck_textures: BTreeMap<String, usize>,
-    pub decks: [[f32; 4]; 2],
-    pub vertices: Vec<f32>,
-    /// Per-placement geometry, rebuilt into the dynamic scene from combat HP.
-    pub static_vertices: BTreeMap<u32, Vec<f32>>,
-    pub static_lines: BTreeMap<u32, Vec<f32>>,
-    pub texture_indices: Vec<u8>,
     /// Authoritative environment. One instance per world, so every camera,
     /// mirror and panel resolves the same instant.
     pub weather: tore_sim::environment::Environment,
-    pub smooth_weather: bool,
-    pub visual_bands: Vec<tore_formats::weather::Layer>,
-    pub no_sun_whiteout: bool,
-    pub auxiliary_presentations: [tore_sim::environment::Presentation; 4],
-    pub weather_presentation: tore_sim::environment::Presentation,
-    /// The palette resolved for the presented camera altitude this frame.
-    pub palette: [[u8; 3]; 256],
-    pub fog_palette: Vec<[[u8; 3]; 256]>,
-    /// The resolved visibility ramp: near feet, far feet, and the 0..1 haze
-    /// fractions at each, plus the haze color those distances blend toward.
-    pub fog: [f32; 4],
-    pub haze: [u8; 3],
-    /// This frame's render origin: moving objects' vertices are relative to it
-    /// so they keep sub-inch precision where 32-bit world coordinates step
-    /// 1/8 foot. Zero places them in world coordinates.
-    pub origin: [f64; 3],
 }
+
+/// Launch settings that replace the mission's own weather start time, wind
+/// and cloud deck. The app resolves them from `TORE_WEATHER_TIME`,
+/// `TORE_WIND` and `TORE_CLOUD_ALTITUDE` (see
+/// [`crate::scenery::launch_overrides`]) and passes them in, so the terrain
+/// itself reads no environment variable.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Overrides {
+    /// Start time: hour and minute.
+    pub time: Option<[i32; 2]>,
+    /// Wind heading in degrees and speed in feet per second.
+    pub wind: Option<[i32; 2]>,
+    /// Scattered cloud deck in feet, 0 for none.
+    pub cloud_altitude: Option<i32>,
+}
+
 /// Fitted grounding: align the largest aggregate horizontal pavement layer,
 /// not a terminal roof or the whole mesh's midpoint, with airport ground.
 fn pavement_height(shape: &tore_formats::shape::Shape) -> f64 {
@@ -102,21 +78,6 @@ fn pavement_height(shape: &tore_formats::shape::Shape) -> f64 {
                 .then_with(|| f32::from_bits(b.0).total_cmp(&f32::from_bits(a.0)))
         })
         .map_or(0., |(height, _)| f64::from(f32::from_bits(height)))
-}
-
-/// Preserve every source index. Doubling 128-square images is exact nearest
-/// replication; all retail terrain images retain the same four-cell footprint.
-fn append_ground_texture(out: &mut Vec<u8>, pic: &Pic) -> AppResult<()> {
-    if pic.width != pic.height || !matches!(pic.width, 128 | 256) || !pic.palette.is_empty() {
-        return Err("unsupported indexed ground image".into());
-    }
-    for y in 0..256 {
-        for x in 0..256 {
-            let at = (y * pic.height / 256) * pic.width + x * pic.width / 256;
-            out.push(if pic.mask[at] { pic.pixels[at] } else { 255 });
-        }
-    }
-    Ok(())
 }
 
 /// Spec-derived: the STRIP template roles in `docs/formats/native-strip.md`
@@ -164,38 +125,6 @@ fn airfield_anchors(
     })
 }
 
-/// Placements without a standing combat target: destroyed, or never registered.
-fn fallen(
-    geometry: &BTreeMap<u32, Vec<f32>>,
-    targets: &[tore_sim::combat::live::Target],
-) -> BTreeSet<u32> {
-    let alive: BTreeSet<u32> = targets
-        .iter()
-        .filter(|target| target.hp > 0)
-        .map(|target| target.id)
-        .collect();
-    geometry
-        .keys()
-        .filter(|id| !alive.contains(id))
-        .copied()
-        .collect()
-}
-/// Every placement's geometry except the destroyed ones, in placement order.
-fn standing(geometry: &BTreeMap<u32, Vec<f32>>, destroyed: &BTreeSet<u32>) -> Vec<f32> {
-    let total = geometry
-        .iter()
-        .filter(|(id, _)| !destroyed.contains(id))
-        .map(|(_, vertices)| vertices.len())
-        .sum();
-    let mut out = Vec::with_capacity(total);
-    for (id, vertices) in geometry {
-        if !destroyed.contains(id) {
-            out.extend_from_slice(vertices);
-        }
-    }
-    out
-}
-
 fn anchor_points(
     anchors: &tore_sim::ai::airfield::AirfieldAnchors,
 ) -> impl Iterator<Item = [f64; 3]> + '_ {
@@ -214,7 +143,7 @@ fn anchor_points(
 pub const CONDITION_NAMES: [&str; 6] = ["clear", "cloudy", "foggy", "dawn", "sunset", "night"];
 
 /// The launch settings a mission recording keeps for its world, resolved
-/// once when it was flown. [`Terrain::for_identity`] builds from these instead
+/// once when it was flown. [`Terrain::for_recorded`] builds from these instead
 /// of the environment variables and mission defaults.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Recorded {
@@ -234,174 +163,223 @@ pub struct Recorded {
     pub weather_seed: i32,
 }
 
-impl Recorded {
-    /// Reads a recorded identity back into launch settings, refusing values
-    /// a launch could not have produced.
-    pub fn from_identity(identity: &tore_replay::World) -> AppResult<Self> {
-        let code = identity.layout.trim_end_matches(".MM").to_owned();
-        if code.is_empty() || tore_formats::theater::base_theater(&identity.layout).is_none() {
-            return Err(format!(
-                "the recording names an unknown map layout {:?}",
-                identity.layout
-            )
-            .into());
-        }
-        let condition = identity
-            .weather
-            .map(|index| {
-                usize::try_from(index)
-                    .ok()
-                    .filter(|index| *index < tore_sim::environment::CONDITIONS.len())
-                    .ok_or_else(|| {
-                        format!("the recording names weather choice {index}, which does not exist")
-                    })
-            })
-            .transpose()?;
-        let seconds = identity.time_of_day_s;
-        if !(seconds.is_finite() && seconds.fract() == 0. && (0. ..86_400.).contains(&seconds)) {
-            return Err(
-                format!("the recording's start time {seconds} s is not a time of day").into(),
-            );
-        }
-        let seconds = seconds as i32;
-        if seconds % 60 != 0 {
-            return Err("the recording's start time is not a whole minute".into());
-        }
-        let cloud_altitude = match identity.clouds.deck_ft {
-            None => 0,
-            Some(feet) if feet.fract() == 0. && (0. ..=400_000.).contains(&feet) => feet as i32,
-            Some(feet) => {
-                return Err(
-                    format!("the recording's cloud deck at {feet} ft is out of range").into(),
-                );
+/// The imported layout of one theater with the definitions and shapes its
+/// placements name. Both halves of the airport scene build from it: the
+/// terrain's objects and runways, and the scenery's static geometry.
+pub(crate) struct Placements {
+    pub layout: tore_formats::mission::Layout,
+    pub definitions: BTreeMap<String, tore_formats::static_object::Definition>,
+    pub shapes: BTreeMap<String, tore_formats::shape::Shape>,
+    shape_scales: BTreeMap<String, f64>,
+    /// STRIP anchor 0x11 midpoint by object type, in the shape's frame.
+    runway_anchors: BTreeMap<String, [f64; 3]>,
+    strip_boxes: BTreeMap<String, Vec<tore_formats::shape::ContactBox>>,
+    /// Main shapes the bounded projector could not read, with the reason. Such
+    /// a placement stays in the manifest without geometry.
+    pub unreadable: Vec<(String, String)>,
+}
+
+/// Where one placed shape stands in the world.
+pub(crate) struct Stance {
+    pub scale: f64,
+    pub min: [f64; 3],
+    pub max: [f64; 3],
+    pub half: [f64; 3],
+    pub heading: f64,
+    pub pitch: f64,
+    pub bank: f64,
+    pub basis: tore_sim::attitude::Basis,
+    pub support_origin: [f64; 3],
+    /// The shape's origin, after a runway is grounded on its pavement.
+    pub origin: [f64; 3],
+    pub center: [f64; 3],
+    pub runway: bool,
+}
+
+impl Placements {
+    pub(crate) fn load(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> AppResult<Self> {
+        let layout_name = format!("{code}.MM");
+        let layout = tore_formats::mission::Layout::parse(
+            &layout_name,
+            resources
+                .get(&layout_name)
+                .ok_or_else(|| format!("missing airport layout {layout_name}"))?,
+        )?;
+        let mut definitions = BTreeMap::new();
+        let mut shapes = BTreeMap::new();
+        let mut shape_scales = BTreeMap::new();
+        let mut runway_anchors = BTreeMap::new();
+        let mut strip_boxes = BTreeMap::new();
+        let mut unreadable = Vec::new();
+        for placement in &layout.placements {
+            if definitions.contains_key(&placement.object_type) {
+                continue;
             }
-        };
-        let weather_seed = match identity.weather_seed {
-            None => 1,
-            Some(seed) => i32::try_from(seed)
-                .map_err(|_| format!("the recording's weather seed {seed} is out of range"))?,
-        };
+            let definition = tore_formats::static_object::Definition::parse(
+                resources.get(&placement.object_type).ok_or_else(|| {
+                    format!(
+                        "{}: missing placed definition {}; re-import media",
+                        layout_name, placement.object_type
+                    )
+                })?,
+            )?;
+            if let Some(main_shape) = &definition.main_shape {
+                let shape_bytes = resources.get(main_shape).ok_or_else(|| {
+                    format!(
+                        "{}: missing shape {} referred by {}; re-import media",
+                        layout_name, main_shape, placement.object_type
+                    )
+                })?;
+                let parsed = tore_formats::shape::Shape::scenery(shape_bytes);
+                match parsed {
+                    Ok(shape) => {
+                        if definition.callbacks.iter().any(|name| name == "_STRIPProc")
+                            && let Some(boxes) = tore_formats::shape::contact_boxes(shape_bytes)?
+                            && let Some(anchor) = boxes.iter().find(|b| b.id == 0x11)
+                        {
+                            runway_anchors.insert(
+                                placement.object_type.clone(),
+                                anchor.midpoint().map(f64::from),
+                            );
+                            strip_boxes.insert(placement.object_type.clone(), boxes.clone());
+                        }
+                        shape_scales.insert(
+                            placement.object_type.clone(),
+                            tore_formats::shape::object_scale(shape_bytes)?,
+                        );
+                        shapes.insert(placement.object_type.clone(), shape);
+                    }
+                    Err(error) => unreadable.push((main_shape.clone(), error.to_string())),
+                }
+            }
+            definitions.insert(placement.object_type.clone(), definition);
+        }
         Ok(Self {
-            code,
-            condition,
-            layer: Some(identity.clouds.module.clone()).filter(|layer| !layer.is_empty()),
-            time: [seconds / 3600, seconds / 60 % 60],
-            wind: wind_setting(identity.wind_fps)?,
-            cloud_altitude,
-            weather_seed,
+            layout,
+            definitions,
+            shapes,
+            shape_scales,
+            runway_anchors,
+            strip_boxes,
+            unreadable,
+        })
+    }
+
+    /// Where `placement` stands on ground `ground` feet high, or `None` when it
+    /// has no drawable shape or the shape has no finite extent.
+    pub(crate) fn stance(
+        &self,
+        placement: &tore_formats::mission::Placement,
+        ground: f64,
+    ) -> Option<Stance> {
+        let definition = self.definitions.get(&placement.object_type)?;
+        let shape = self.shapes.get(&placement.object_type)?;
+        let heading = f64::from(placement.angles[0]).to_radians();
+        let runway = definition.callbacks.iter().any(|name| name == "_STRIPProc");
+        // The source runway plane stays at authored ground. The renderer
+        // applies a bounded static-surface depth bias without changing contact.
+        let support_height = ground;
+        let mut min = [f64::INFINITY; 3];
+        let mut max = [f64::NEG_INFINITY; 3];
+        for point in shape.faces.iter().flat_map(|face| &face.positions) {
+            let mapped = [
+                f64::from(point[0]),
+                f64::from(point[2]),
+                f64::from(point[1]),
+            ];
+            for axis in 0..3 {
+                min[axis] = min[axis].min(mapped[axis]);
+                max[axis] = max[axis].max(mapped[axis]);
+            }
+        }
+        if min.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        // The reviewed SH header exponent drives both visual and contact scale.
+        let scale = self
+            .shape_scales
+            .get(&placement.object_type)
+            .copied()
+            .unwrap_or(1.0);
+        for axis in 0..3 {
+            min[axis] *= scale;
+            max[axis] *= scale;
+        }
+        let half = std::array::from_fn(|axis| ((max[axis] - min[axis]) * 0.5).max(1.0));
+        let pitch = f64::from(placement.angles[1]).to_radians();
+        let bank = f64::from(placement.angles[2]).to_radians();
+        let basis = tore_sim::attitude::Basis::new(heading, pitch, bank);
+        let local_center = std::array::from_fn::<_, 3, _>(|axis| (min[axis] + max[axis]) * 0.5);
+        let support_origin = [
+            f64::from(placement.position[0]),
+            support_height + f64::from(placement.position[1]),
+            f64::from(placement.position[2]),
+        ];
+        let grounding_offset = if runway {
+            -pavement_height(shape) * scale
+        } else {
+            0.
+        };
+        let origin = std::array::from_fn::<_, 3, _>(|axis| {
+            support_origin[axis] + basis.up[axis] * grounding_offset
+        });
+        let center = std::array::from_fn(|axis| {
+            origin[axis]
+                + basis.right[axis] * local_center[0]
+                + basis.up[axis] * local_center[1]
+                + basis.forward[axis] * local_center[2]
+        });
+        Some(Stance {
+            scale,
+            min,
+            max,
+            half,
+            heading,
+            pitch,
+            bank,
+            basis,
+            support_origin,
+            origin,
+            center,
+            runway,
         })
     }
 }
 
-/// The wind setting that resolves to exactly `fps`, bit for bit: `None` when
-/// it is the generated default, otherwise the explicit heading and speed.
-/// Every heading that resolves to the same vector behaves the same, because
-/// the simulation reads only the vector.
-fn wind_setting(fps: [f64; 3]) -> AppResult<Option<[i32; 2]>> {
-    use tore_formats::flight_model::clock_rng::NativeRng;
-    use tore_sim::environment::wind::Wind;
-    let same = |wind: Wind| wind.world_fps().map(f64::to_bits) == fps.map(f64::to_bits);
-    if same(Wind::resolve(None, &mut NativeRng::seeded(1)?)?) {
-        return Ok(None);
-    }
-    let speed = fps[0].hypot(fps[2]).round();
-    if (0. ..=200.).contains(&speed) {
-        for heading in -360..=360 {
-            let setting = [heading, speed as i32];
-            if same(Wind::resolve(Some(setting), &mut NativeRng::seeded(1)?)?) {
-                return Ok(Some(setting));
-            }
-        }
-    }
-    Err(format!("the recorded wind {fps:?} matches no wind setting").into())
-}
-
 impl Terrain {
-    /// Grid the render origin snaps to, in feet, so it is exact in 32 bits
-    /// and moves only when the camera crosses a cell.
-    pub const ORIGIN_CELL: f64 = 1024.;
-    /// Place this frame's render origin near `eye`, before any moving
-    /// object's vertices are built. Every camera drawn this frame shares it.
-    pub fn set_origin(&mut self, eye: [f64; 3]) {
-        self.origin = eye.map(|v| (v / Self::ORIGIN_CELL).round() * Self::ORIGIN_CELL);
-    }
-    /// A world position relative to the render origin.
-    pub fn relative(&self, position: [f64; 3]) -> [f64; 3] {
-        std::array::from_fn(|i| position[i] - self.origin[i])
-    }
-    /// A world position relative to the render origin, for vertices.
-    pub fn local(&self, position: [f64; 3]) -> [f32; 3] {
-        self.relative(position).map(|v| v as f32)
-    }
+    /// The terrain with the mission's own weather and no launch overrides.
     pub fn for_theater(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> AppResult<Self> {
-        Self::for_mission(resources, code, None)
+        Self::for_mission(resources, code, None, &Overrides::default())
     }
 
     /// `condition` selects one of the six recovered weather choices; without it
-    /// the mission's own `layer` line and time are used unchanged.
-    /// `TORE_WEATHER_TIME`, `TORE_WIND` and `TORE_CLOUD_ALTITUDE` override the
-    /// start time, wind and cloud deck.
+    /// the mission's own `layer` line and time are used unchanged. `overrides`
+    /// replace the start time, wind and cloud deck.
     pub fn for_mission(
         resources: &BTreeMap<String, Vec<u8>>,
         code: &str,
         condition: Option<usize>,
+        overrides: &Overrides,
     ) -> AppResult<Self> {
-        Self::build(resources, code, condition, None)
+        Self::build(resources, code, condition, None, overrides)
     }
 
-    /// Rebuilds the world a mission recording was flown in from its
-    /// recorded, resolved identity: layout, weather choice and layer, start
-    /// time, wind and cloud deck. It reads none of the environment variables
-    /// [`Terrain::for_mission`] honours, so a replay looks the same whatever
-    /// the viewer's settings are.
+    /// Rebuilds the world a mission recording was flown in from its recorded,
+    /// resolved launch settings: layout, weather choice and layer, start time,
+    /// wind and cloud deck. No override applies, so a replay looks the same
+    /// whatever the viewer's settings are.
     #[allow(dead_code)] // Used by the mission replay viewer.
-    pub fn for_identity(
+    pub fn for_recorded(
         resources: &BTreeMap<String, Vec<u8>>,
-        identity: &tore_replay::World,
+        recorded: &Recorded,
     ) -> AppResult<Self> {
-        let recorded = Recorded::from_identity(identity)?;
         Self::build(
             resources,
             &recorded.code,
             recorded.condition,
-            Some(&recorded),
+            Some(recorded),
+            &Overrides::default(),
         )
-    }
-
-    /// This world's resolved identity, as a recording's header keeps it.
-    #[allow(dead_code)] // Read by the mission recorder.
-    pub fn identity(&self) -> tore_replay::World {
-        let configuration = self.weather.configuration();
-        let cell = f64::from(CELL_FEET);
-        tore_replay::World {
-            theater: tore_formats::theater::base_theater(&self.layout)
-                .unwrap_or_default()
-                .to_owned(),
-            theater_name: self.theater.name.clone(),
-            layout: self.layout.clone(),
-            weather: self.condition.and_then(|c| u32::try_from(c).ok()),
-            weather_name: self
-                .condition
-                .and_then(|c| CONDITION_NAMES.get(c))
-                .map_or("map default", |name| name)
-                .to_owned(),
-            // Weather presentation is always seeded with 1 at launch.
-            weather_seed: Some(1),
-            time_of_day_s: f64::from(configuration.start_seconds()),
-            wind_fps: configuration.wind_world_fps(),
-            clouds: tore_replay::Clouds {
-                module: self.environment.layer.clone(),
-                deck_ft: self
-                    .environment
-                    .clouds
-                    .filter(|feet| *feet != 0)
-                    .map(f64::from),
-            },
-            extent_ft: Some([
-                self.theater.cols.saturating_sub(1) as f64 * cell,
-                self.theater.rows.saturating_sub(1) as f64 * cell,
-            ]),
-        }
     }
 
     fn build(
@@ -409,6 +387,7 @@ impl Terrain {
         code: &str,
         condition: Option<usize>,
         recorded: Option<&Recorded>,
+        overrides: &Overrides,
     ) -> AppResult<Self> {
         let required = |n: &str| {
             resources
@@ -458,28 +437,11 @@ impl Terrain {
         let module = tore_formats::weather::Module::parse(required(&layer)?)?;
         let [hour, minute] = match recorded {
             Some(recorded) => recorded.time,
-            None => match std::env::var("TORE_WEATHER_TIME") {
-                Ok(text) => {
-                    let (h, m) = text
-                        .split_once(':')
-                        .ok_or("TORE_WEATHER_TIME needs HH:MM")?;
-                    [h.parse::<i32>()?, m.parse::<i32>()?]
-                }
-                Err(_) => launch.unwrap_or([12, 0]),
-            },
+            None => overrides.time.or(launch).unwrap_or([12, 0]),
         };
         let wind = match recorded {
             Some(recorded) => recorded.wind,
-            None => match std::env::var("TORE_WIND") {
-                Ok(value) => {
-                    let (heading, speed) = value
-                        .split_once(',')
-                        .ok_or("TORE_WIND needs heading,speed in degrees/feet per second")?;
-                    Some([heading.parse::<i32>()?, speed.parse::<i32>()?])
-                }
-                Err(std::env::VarError::NotPresent) => environment.wind,
-                Err(e) => return Err(e.into()),
-            },
+            None => overrides.wind.or(environment.wind),
         };
         let mut configuration = tore_sim::environment::Configuration::new(
             module,
@@ -501,8 +463,7 @@ impl Terrain {
         environment.time = Some([hour, minute]);
         let cloud_altitude = if let Some(recorded) = recorded {
             recorded.cloud_altitude
-        } else if let Ok(value) = std::env::var("TORE_CLOUD_ALTITUDE") {
-            let value = value.parse::<i32>()?;
+        } else if let Some(value) = overrides.cloud_altitude {
             if !(0..=400_000).contains(&value) {
                 return Err("cloud altitude outside 0..400000 feet".into());
             }
@@ -519,114 +480,24 @@ impl Terrain {
             return Err("mission cloud altitude outside supported range".into());
         }
         environment.clouds = Some(cloud_altitude);
-        let mut texture_indices = Vec::new();
-        let mut terrain_layers = BTreeMap::new();
-        for placement in environment.textures.values_mut() {
-            let name = placement.resource_name(base);
-            let layer = if let Some(layer) = terrain_layers.get(&name) {
-                *layer
-            } else {
-                let pic = Pic::parse(required(&name)?)?;
-                let layer = texture_indices.len() / 65536;
-                append_ground_texture(&mut texture_indices, &pic)?;
-                terrain_layers.insert(name, layer);
-                layer
-            };
-            // This world-local layer is not written back to the imported data.
-            placement.texture = layer;
-        }
-        let land_name = format!("{}LAND.PIC", &base[..1]);
-        let land = resources
-            .get(&land_name)
-            .or_else(|| resources.get("LAND.PIC"));
-        let land_texture = if let Some(bytes) = land {
-            let layer = texture_indices.len() / 65536;
-            append_ground_texture(&mut texture_indices, &Pic::parse(bytes)?)?;
-            Some(layer)
-        } else {
-            None
-        };
-        let mut sky_indices = Vec::new();
-        let mut deck_textures = BTreeMap::new();
-        for layer in weather.configuration().layers() {
-            for deck in &layer.decks {
-                if deck.name.is_empty() || deck_textures.contains_key(&deck.name) {
-                    continue;
-                }
-                let pic = Pic::parse(required(&deck.name)?)?;
-                if pic.width != 256 || pic.height != 256 || !pic.palette.is_empty() {
-                    return Err(format!("{}: unsupported indexed deck image", deck.name).into());
-                }
-                deck_textures.insert(
-                    deck.name.clone(),
-                    (texture_indices.len() + sky_indices.len()) / (256 * 256),
-                );
-                sky_indices.extend_from_slice(&pic.pixels);
-            }
-        }
-        // Keep a valid texture array even for LAY families with no named decks.
-        if sky_indices.is_empty() {
-            sky_indices.resize(256 * 256, 255);
-        }
-        let celestial = Some(crate::celestial::Celestial::load(
-            resources,
-            &mut sky_indices,
-            texture_indices.len() / 65536,
-            weather.configuration().sun_fill(),
-            weather.configuration().shades(),
-            weather.configuration().lighting(),
-        )?);
-        let clouds = Some(crate::clouds::Clouds::load(
-            resources,
-            &mut sky_indices,
-            texture_indices.len() / 65536,
-            cloud_altitude,
-        )?);
         let mut out = Self {
-            ocean_motion: crate::ocean::Motion::from_environment()?,
             theater,
             layout,
             condition,
-            land_texture,
             environment,
             airport_scene: tore_sim::airport::Scene::default(),
             airfield_anchors: BTreeMap::new(),
             static_manifest: Vec::new(),
             catalog,
-            sky_indices,
-            celestial,
-            clouds,
-            deck_textures,
-            decks: [[0., 1., -1., 0.]; 2],
-            vertices: Vec::new(),
-            static_vertices: BTreeMap::new(),
-            static_lines: BTreeMap::new(),
-            texture_indices,
             weather,
-            visual_bands: Vec::new(),
-            smooth_weather: match std::env::var("TORE_WEATHER_SMOOTH").as_deref() {
-                Err(std::env::VarError::NotPresent) | Ok("1") => true,
-                Ok("0") => false,
-                _ => return Err("TORE_WEATHER_SMOOTH must be 0 or 1".into()),
-            },
-            no_sun_whiteout: false,
-            auxiliary_presentations: std::array::from_fn(|_| {
-                tore_sim::environment::Presentation::seeded(1).unwrap()
-            }),
-            weather_presentation: tore_sim::environment::Presentation::seeded(1)?,
-            palette: [[0; 3]; 256],
-            fog_palette: Vec::new(),
-            fog: [0.; 4],
-            haze: [0; 3],
-            origin: [0.; 3],
         };
-        out.resolve_palette(0.);
-        out.build_mesh();
         out.build_airport_scene(resources, code.trim_end_matches(".MM"))?;
-        out.recess_airport_terrain();
         Ok(out)
     }
 
+    /// The airport scene: every placement's contact volume, and each runway's
+    /// surface, approach line and airfield anchors. The scenery builds the
+    /// matching geometry from the same [`Placements`].
     fn build_airport_scene(
         &mut self,
         resources: &BTreeMap<String, Vec<u8>>,
@@ -635,72 +506,13 @@ impl Terrain {
         use tore_sim::airport::{
             Airport, Allegiance, OrientedBox, Runway, SourceKey, StaticObject,
         };
-        let layout_name = format!("{code}.MM");
-        let layout = tore_formats::mission::Layout::parse(
-            &layout_name,
-            resources
-                .get(&layout_name)
-                .ok_or_else(|| format!("missing airport layout {layout_name}"))?,
-        )?;
-        let mut definitions = BTreeMap::new();
-        let mut shapes = BTreeMap::new();
-        let mut shape_scales = BTreeMap::new();
-        let mut runway_anchors = BTreeMap::new();
-        let mut strip_boxes = BTreeMap::new();
-        for placement in &layout.placements {
-            if definitions.contains_key(&placement.object_type) {
-                continue;
-            }
-            let definition = tore_formats::static_object::Definition::parse(
-                resources.get(&placement.object_type).ok_or_else(|| {
-                    format!(
-                        "{}: missing placed definition {}; re-import media",
-                        layout_name, placement.object_type
-                    )
-                })?,
-            )?;
-            if let Some(main_shape) = &definition.main_shape {
-                let shape_bytes = resources.get(main_shape).ok_or_else(|| {
-                    format!(
-                        "{}: missing shape {} referred by {}; re-import media",
-                        layout_name, main_shape, placement.object_type
-                    )
-                })?;
-                let parsed = tore_formats::shape::Shape::scenery(shape_bytes);
-                match parsed {
-                    Ok(shape) => {
-                        if definition.callbacks.iter().any(|name| name == "_STRIPProc")
-                            && let Some(boxes) = tore_formats::shape::contact_boxes(shape_bytes)?
-                            && let Some(anchor) = boxes.iter().find(|b| b.id == 0x11)
-                        {
-                            runway_anchors.insert(
-                                placement.object_type.clone(),
-                                anchor.midpoint().map(f64::from),
-                            );
-                            strip_boxes.insert(placement.object_type.clone(), boxes.clone());
-                        }
-                        shape_scales.insert(
-                            placement.object_type.clone(),
-                            tore_formats::shape::object_scale(shape_bytes)?,
-                        );
-                        shapes.insert(placement.object_type.clone(), shape);
-                    }
-                    Err(error) => log::warn!(
-                        "Airport scene: {main_shape} retained without visual geometry: {error}"
-                    ),
-                }
-            }
-            definitions.insert(placement.object_type.clone(), definition);
-        }
+        let sources = Placements::load(resources, code)?;
         let mut objects = Vec::new();
         let mut runways = Vec::new();
         let mut airports = Vec::new();
         let mut anchors = BTreeMap::new();
-        let mut static_layers = BTreeMap::<String, crate::static_art::Image>::new();
-        let mut static_float_count = 0usize;
-        for placement in &layout.placements {
-            let definition = &definitions[&placement.object_type];
-            let shape = shapes.get(&placement.object_type);
+        for placement in &sources.layout.placements {
+            let definition = &sources.definitions[&placement.object_type];
             let id = 0x4000_0000u32
                 .checked_add(placement.key.ordinal)
                 .ok_or("airport object ID overflow")?;
@@ -708,67 +520,29 @@ impl Terrain {
                 id,
                 placement.key.clone(),
                 placement.object_type.clone(),
-                shape.is_some(),
+                sources.shapes.contains_key(&placement.object_type),
             ));
-            let Some(shape) = shape else {
+            if !sources.shapes.contains_key(&placement.object_type) {
                 continue;
-            };
+            }
             let ground =
                 f64::from(self.height(placement.position[0] as f32, placement.position[2] as f32));
-            let heading = f64::from(placement.angles[0]).to_radians();
-            let runway = definition.callbacks.iter().any(|name| name == "_STRIPProc");
-            // The source runway plane stays at authored ground. The renderer
-            // applies a bounded static-surface depth bias without changing contact.
-            let support_height = ground;
-            let mut min = [f64::INFINITY; 3];
-            let mut max = [f64::NEG_INFINITY; 3];
-            for point in shape.faces.iter().flat_map(|face| &face.positions) {
-                let mapped = [
-                    f64::from(point[0]),
-                    f64::from(point[2]),
-                    f64::from(point[1]),
-                ];
-                for axis in 0..3 {
-                    min[axis] = min[axis].min(mapped[axis]);
-                    max[axis] = max[axis].max(mapped[axis]);
-                }
-            }
-            if min.iter().any(|value| !value.is_finite()) {
+            let Some(stance) = sources.stance(placement, ground) else {
                 continue;
-            }
-            // The reviewed SH header exponent drives both visual and contact scale.
-            let scale = shape_scales
-                .get(&placement.object_type)
-                .copied()
-                .unwrap_or(1.0);
-            for axis in 0..3 {
-                min[axis] *= scale;
-                max[axis] *= scale;
-            }
-            let half = std::array::from_fn(|axis| ((max[axis] - min[axis]) * 0.5).max(1.0));
-            let pitch = f64::from(placement.angles[1]).to_radians();
-            let bank = f64::from(placement.angles[2]).to_radians();
-            let basis = tore_sim::attitude::Basis::new(heading, pitch, bank);
-            let local_center = std::array::from_fn::<_, 3, _>(|axis| (min[axis] + max[axis]) * 0.5);
-            let support_origin = [
-                f64::from(placement.position[0]),
-                support_height + f64::from(placement.position[1]),
-                f64::from(placement.position[2]),
-            ];
-            let grounding_offset = if runway {
-                -pavement_height(shape) * scale
-            } else {
-                0.
             };
-            let origin = std::array::from_fn::<_, 3, _>(|axis| {
-                support_origin[axis] + basis.up[axis] * grounding_offset
-            });
-            let center = std::array::from_fn(|axis| {
-                origin[axis]
-                    + basis.right[axis] * local_center[0]
-                    + basis.up[axis] * local_center[1]
-                    + basis.forward[axis] * local_center[2]
-            });
+            let Stance {
+                min,
+                max,
+                half,
+                heading,
+                pitch,
+                bank,
+                basis,
+                support_origin,
+                center,
+                runway,
+                ..
+            } = stance;
             let bounds = OrientedBox {
                 center,
                 half,
@@ -809,7 +583,7 @@ impl Terrain {
                             / basis.up[1];
                 }
                 let mut length_ft = half[2] * 2.0;
-                if let Some(anchor) = runway_anchors.get(&placement.object_type)
+                if let Some(anchor) = sources.runway_anchors.get(&placement.object_type)
                     && anchor[2] < max[2]
                     && anchor[2] >= min[2]
                 {
@@ -821,15 +595,20 @@ impl Terrain {
                     });
                     length_ft = max[2] - anchor[2];
                 }
-                if let Some(found) = strip_boxes.get(&placement.object_type).and_then(|boxes| {
-                    airfield_anchors(boxes, heading, |local| {
-                        std::array::from_fn(|axis| {
-                            support_origin[axis]
-                                + basis.right[axis] * local[0]
-                                + basis.forward[axis] * local[2]
+                if let Some(found) =
+                    sources
+                        .strip_boxes
+                        .get(&placement.object_type)
+                        .and_then(|boxes| {
+                            airfield_anchors(boxes, heading, |local| {
+                                std::array::from_fn(|axis| {
+                                    support_origin[axis]
+                                        + basis.right[axis] * local[0]
+                                        + basis.forward[axis] * local[2]
+                                })
+                            })
                         })
-                    })
-                }) {
+                {
                     anchors.insert(id, found);
                 }
                 runways.push(Runway {
@@ -859,103 +638,6 @@ impl Terrain {
                     neutral_permission: true,
                 });
             }
-            let mut instance_vertices = Vec::new();
-            for face in &shape.faces {
-                if face.positions.len() < 3 {
-                    continue;
-                }
-                let image = if face.texture.is_empty() || face.uv.is_empty() {
-                    None
-                } else {
-                    let name = face.texture.to_ascii_uppercase();
-                    if !static_layers.contains_key(&name) {
-                        let pic = Pic::parse(
-                            resources
-                                .get(&name)
-                                .ok_or_else(|| format!("missing static texture {name}"))?,
-                        )?;
-                        let first = (self.texture_indices.len() + self.sky_indices.len()) / 65536;
-                        let image =
-                            crate::static_art::Image::append(&pic, &mut self.sky_indices, first)?;
-                        static_layers.insert(name.clone(), image);
-                    }
-                    static_layers.get(&name)
-                };
-                for triangle in 1..face.positions.len() - 1 {
-                    if static_float_count + instance_vertices.len() + 30 > 32 * 1024 * 1024 / 4 {
-                        return Err("static scene exceeds 32 MiB geometry budget".into());
-                    }
-                    let mut points = Vec::with_capacity(3);
-                    for vertex_index in [0, triangle, triangle + 1] {
-                        let point = face.positions[vertex_index];
-                        let right = f64::from(point[0]) * scale;
-                        let up = f64::from(point[2]) * scale;
-                        let forward = f64::from(point[1]) * scale;
-                        let position = std::array::from_fn::<_, 3, _>(|axis| {
-                            origin[axis]
-                                + basis.right[axis] * right
-                                + basis.up[axis] * up
-                                + basis.forward[axis] * forward
-                        });
-                        let uv = face.uv.get(vertex_index).copied().unwrap_or([0.0; 2]);
-                        let uv = image.map_or([0., 0.], |image| {
-                            [uv[0] + 0.5, image.height as f32 - 0.5 - uv[1]]
-                        });
-                        points.push([
-                            position[0] as f32,
-                            position[1] as f32,
-                            position[2] as f32,
-                            uv[0],
-                            uv[1],
-                            -1.0,
-                            0.0,
-                            0.0,
-                            0.0,
-                            f32::from(face.colors[vertex_index]) + f32::from(face.fog as u8) * 256.,
-                        ]);
-                    }
-                    if let Some(image) = image {
-                        image.triangle(
-                            points.try_into().expect("three triangle corners"),
-                            &mut instance_vertices,
-                            32 * 1024 * 1024 / 4 - static_float_count,
-                        )?;
-                    } else {
-                        instance_vertices.extend(points.into_iter().flatten());
-                    }
-                }
-            }
-            let mut line_vertices = Vec::new();
-            for line in &shape.lines {
-                for point in line.positions {
-                    let [right, forward, up] = point.map(|v| f64::from(v) * scale);
-                    let position = std::array::from_fn::<_, 3, _>(|axis| {
-                        origin[axis]
-                            + basis.right[axis] * right
-                            + basis.up[axis] * up
-                            + basis.forward[axis] * forward
-                    });
-                    line_vertices.extend([
-                        position[0] as f32,
-                        position[1] as f32,
-                        position[2] as f32,
-                        0.,
-                        0.,
-                        -1.,
-                        0.,
-                        0.,
-                        0.,
-                        f32::from(line.color) + f32::from(line.fog as u8) * 256.,
-                    ]);
-                }
-            }
-            static_float_count += line_vertices.len();
-            self.static_lines.insert(id, line_vertices);
-            static_float_count += instance_vertices.len();
-            if static_float_count > 32 * 1024 * 1024 / 4 {
-                return Err("static scene exceeds 32 MiB geometry budget".into());
-            }
-            self.static_vertices.insert(id, instance_vertices);
         }
         self.airport_scene = tore_sim::airport::Scene {
             objects,
@@ -978,66 +660,14 @@ impl Terrain {
                 .with_anchors(self.airfield_anchors.get(&object).copied())
         })
     }
-    fn build_mesh(&mut self) {
-        let t = &self.theater;
-        // Same four sample corners as 0x4a9d00. Fixed triangulation and full-resolution
-        // rendering are our first GPU implementation, not the original adaptive tessellator.
-        for y in 0..t.rows - 1 {
-            for x in 0..t.cols - 1 {
-                let c = t.cell(x, y);
-                let placement = self
-                    .environment
-                    .textures
-                    .get(&((x & !3) as i32, (y & !3) as i32));
-                let layer = placement.map_or_else(
-                    || self.land_texture.map_or(-1.0, |l| l as f32),
-                    |p| p.texture as f32,
-                );
-                // Untextured water reveals the shared ocean/horizon pass. A
-                // shoreline texture defines coverage even on a water base cell.
-                if placement.is_none() && c.color == 255 {
-                    continue;
-                }
-                let index = f32::from(c.color);
-                for (dx, dy) in [(0, 0), (0, 1), (1, 0), (1, 0), (0, 1), (1, 1)] {
-                    let sample = t.cell(x + dx, y + dy);
-                    let (mut u, mut v) = (((x % 4 + dx) as f32) / 4.0, ((y % 4 + dy) as f32) / 4.0);
-                    // 0x4aa9ac chooses quarter-turn UV transforms; V follows north-up world.
-                    match placement.map_or(0, |p| p.rotation) {
-                        1 => (u, v) = (1.0 - v, u),
-                        2 => (u, v) = (1.0 - u, 1.0 - v),
-                        3 => (u, v) = (v, 1.0 - u),
-                        _ => {}
-                    }
-                    self.vertices.extend_from_slice(&[
-                        (x + dx) as f32 * CELL_FEET,
-                        sample.elevation as f32 * HEIGHT_FEET,
-                        (y + dy) as f32 * CELL_FEET,
-                        u,
-                        1.0 - v,
-                        layer,
-                        0.0,
-                        0.0,
-                        0.0,
-                        index,
-                    ]);
-                }
-            }
-        }
-    }
-    /// Split at footprint edges before lowering the rendered ground, so
-    /// neighboring terrain and all physics queries retain their original data.
-    pub(crate) fn recess_airport_terrain(&mut self) {
-        self.vertices = runway_cutout::terrain(&self.vertices, &self.airport_scene.runways);
-    }
 
-    /// The mission's steady wind in world feet per second.
     /// How far a point is beyond the edge of the theater's map rectangle, in
     /// nautical miles, measured from the nearest point of the rectangle; zero
     /// inside it. Terrain runs from 0 to `(cells - 1) * cell` on each axis.
     pub fn edge_distance_nm(&self, x: f64, z: f64) -> f64 {
         edge_distance_nm(self.theater.cols, self.theater.rows, x, z)
     }
+    /// The mission's steady wind in world feet per second.
     pub fn wind(&self) -> [f64; 3] {
         self.weather.configuration().wind_world_fps()
     }
@@ -1103,22 +733,6 @@ impl Terrain {
         surface
     }
 
-    /// Placement geometry whose object still has a standing combat target.
-    pub fn visible_static_vertices(&self, targets: &[tore_sim::combat::live::Target]) -> Vec<f32> {
-        self.visible_static_vertices_where(&fallen(&self.static_vertices, targets))
-    }
-    pub fn visible_static_lines(&self, targets: &[tore_sim::combat::live::Target]) -> Vec<f32> {
-        self.visible_static_lines_where(&fallen(&self.static_lines, targets))
-    }
-    /// Placement geometry except the `destroyed` objects, for a mission
-    /// replay that recorded which objects were destroyed.
-    pub fn visible_static_vertices_where(&self, destroyed: &BTreeSet<u32>) -> Vec<f32> {
-        standing(&self.static_vertices, destroyed)
-    }
-    pub fn visible_static_lines_where(&self, destroyed: &BTreeSet<u32>) -> Vec<f32> {
-        standing(&self.static_lines, destroyed)
-    }
-
     /// Earliest solid building contact. Runways remain a separate surface query.
     pub fn solid_contact(
         &self,
@@ -1138,153 +752,6 @@ impl Terrain {
                     .map(|at| (object.id, at))
             })
             .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
-    }
-
-    /// Exactly one 120 Hz tick of environment time. Pausing means not calling it.
-    pub fn step_weather(&mut self, speed_fps: f64, camera: &Camera) {
-        self.weather.step();
-        self.step_view_weather(camera, speed_fps);
-    }
-
-    pub fn glare_enabled(&self) -> bool {
-        !self.no_sun_whiteout && self.celestial.as_ref().is_some_and(|c| c.sun_effects)
-    }
-
-    /// Each fixed camera slot advances once per simulation tick, even if hidden.
-    /// Slots have independent seeded presentation state; queries never consume RNG.
-    pub fn step_view_weather(&mut self, camera: &Camera, speed_fps: f64) {
-        let altitude = camera.position[1];
-        let alignment = if self.glare_enabled() {
-            self.weather
-                .sample(altitude)
-                .and_then(|l| tore_sim::environment::sun_angles(&l, self.weather.seconds_of_day()))
-                .map_or(-1., |a| {
-                    let sun = crate::celestial::rotate([0., 0., 1.], a);
-                    let view = camera.uniform(1., [0.; 4], [0; 3]);
-                    (0..3)
-                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
-                        .sum()
-                })
-        } else {
-            -1.
-        };
-        let visual_target = if self.smooth_weather && self.glare_enabled() {
-            self.weather
-                .sample(altitude)
-                .and_then(|layer| crate::celestial::visual_sun_direction(&layer, &self.weather))
-                .map_or(0., |sun| {
-                    let view = camera.uniform(1., [0.; 4], [0; 3]);
-                    let alignment: f64 = (0..3)
-                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
-                        .sum();
-                    let response = (((alignment.clamp(-1., 1.) * (32767. * 32767. / 65536.))
-                        .floor()
-                        - 15564.)
-                        / 3.)
-                        .clamp(0., 255.);
-                    response * f64::from(crate::celestial::glare_strength(self, altitude, sun))
-                })
-        } else {
-            0.
-        };
-        let presentation = if camera.weather_slot == 0 {
-            &mut self.weather_presentation
-        } else {
-            &mut self.auxiliary_presentations[camera.weather_slot - 1]
-        };
-        let previous_visual = presentation.visual_sun;
-        presentation.step_with_alignment(&self.weather, altitude, speed_fps, alignment);
-        if self.smooth_weather {
-            presentation.visual_sun =
-                previous_visual + (visual_target - previous_visual).clamp(-16. / 7.2, 16. / 7.2);
-        }
-    }
-
-    /// Presentation only: resolves the palette for one camera altitude without
-    /// advancing state, so mirrors and camera panels stay on the same instant.
-    pub fn resolve_palette(&mut self, altitude_ft: f64) {
-        let view = self.sample_view(altitude_ft, 0);
-        self.palette = view.palette;
-        self.fog_palette = view.fog_palette;
-        self.decks = view.decks;
-        self.fog = view.fog;
-        self.haze = view.haze;
-        self.visual_bands = view.visual_bands;
-    }
-
-    pub fn sample_view(&self, altitude_ft: f64, slot: usize) -> ViewWeather {
-        let presentation = if slot == 0 {
-            &self.weather_presentation
-        } else {
-            &self.auxiliary_presentations[slot - 1]
-        };
-        let mut out = ViewWeather {
-            palette: self.palette,
-            fog_palette: self.fog_palette.clone(),
-            decks: self.decks,
-            fog: self.fog,
-            haze: self.haze,
-            visual_bands: Vec::new(),
-        };
-        let visual = self
-            .smooth_weather
-            .then(|| self.weather.visual_sample(altitude_ft))
-            .flatten();
-        let Some(layer) = self.weather.sample(altitude_ft) else {
-            return out;
-        };
-        out.decks = layer.decks.clone().map(|deck| {
-            [
-                deck.altitude_feet as f32,
-                2_f32.powi(deck.tile_exponent),
-                self.deck_textures
-                    .get(&deck.name)
-                    .map_or(-1., |i| *i as f32),
-                0.,
-            ]
-        });
-        // Texture selection and draw flags retain native scheduling. Only the
-        // color/fog parameters below use fractional-time presentation samples.
-        let layer = visual.as_ref().map_or(layer.clone(), |s| s.layer.clone());
-        out.palette = tore_formats::weather::expand_effects(
-            self.weather.configuration().base_palette(),
-            &layer,
-            presentation.tint,
-            if self.glare_enabled() {
-                presentation.sun_whitening
-            } else {
-                0
-            },
-        );
-        if let Some(visual) = visual {
-            out.visual_bands = visual.bands.clone();
-            out.palette = visual.palette(
-                presentation.visual_tint,
-                if self.glare_enabled() {
-                    presentation.visual_sun
-                } else {
-                    0.
-                },
-            );
-        }
-        out.fog_palette = self
-            .weather
-            .configuration()
-            .shade_remap(layer.shade)
-            .levels
-            .iter()
-            .map(|indices| indices.map(|index| out.palette[usize::from(index)]))
-            .collect();
-        let feet = |v: i32| (f64::from(v) * tore_formats::weather::DISTANCE_FEET) as f32;
-        out.fog = [
-            feet(layer.fog_near),
-            feet(layer.fog_far),
-            layer.fog_near_density.clamp(0, 256) as f32 / 256.,
-            layer.fog_far_density.clamp(0, 256) as f32 / 256.,
-        ];
-        // Six-bit source components, the same expansion the palette ramps use.
-        out.haze = layer.shade.map(|c| ((u16::from(c) * 255 + 31) / 63) as u8);
-        out
     }
 
     pub fn height(&self, x: f32, z: f32) -> f32 {
@@ -1461,34 +928,6 @@ pub(crate) mod tests {
         assert_ne!(Camera::for_world(&w).position, base);
     }
     #[test]
-    fn smaller_ground_art_preserves_every_source_texel_and_water() {
-        let mut pic = Pic {
-            width: 128,
-            height: 128,
-            pixels: vec![93; 128 * 128],
-            mask: vec![true; 128 * 128],
-            palette: vec![],
-            glyphs: vec![],
-        };
-        pic.pixels[1] = 255;
-        pic.pixels[128 * 127 + 127] = 17;
-        pic.mask[128] = false;
-        let mut bytes = Vec::new();
-        append_ground_texture(&mut bytes, &pic).unwrap();
-        assert_eq!(bytes.len(), 65536);
-        for y in 0..256 {
-            for x in 0..256 {
-                let at = (y / 2) * 128 + x / 2;
-                assert_eq!(
-                    bytes[y * 256 + x],
-                    if pic.mask[at] { pic.pixels[at] } else { 255 }
-                );
-            }
-        }
-        pic.width = 127;
-        assert!(append_ground_texture(&mut Vec::new(), &pic).is_err());
-    }
-    #[test]
     fn projection_matches_the_renderer_view() {
         let mut camera = Camera::new();
         camera.position = [0., 1000., 0.];
@@ -1509,137 +948,6 @@ pub(crate) mod tests {
         assert_eq!(camera.project(size, [0., 1000., -5000.]), None);
         assert_eq!(camera.project(size, [9000., 1000., 5000.]), None);
     }
-    #[test]
-    fn listed_destroyed_objects_hide_as_their_fallen_targets_do() {
-        let mut w = world();
-        for id in [1, 2, 3] {
-            w.static_vertices.insert(id, vec![id as f32; 10]);
-            w.static_lines.insert(id, vec![-(id as f32); 10]);
-        }
-        // Object 1 stands, 2 was destroyed and 3 never had a target.
-        let mut targets = crate::ai_wings::tests::spawned();
-        targets.truncate(2);
-        targets[1].hp = 0;
-        let expected = |ids: &[u32], sign: f32| -> Vec<f32> {
-            ids.iter()
-                .flat_map(|id| vec![sign * *id as f32; 10])
-                .collect()
-        };
-        assert_eq!(w.visible_static_vertices(&targets), expected(&[1], 1.));
-        assert_eq!(w.visible_static_lines(&targets), expected(&[1], -1.));
-        let destroyed = BTreeSet::from([2]);
-        assert_eq!(
-            w.visible_static_vertices_where(&destroyed),
-            expected(&[1, 3], 1.)
-        );
-        assert_eq!(
-            w.visible_static_lines_where(&destroyed),
-            expected(&[1, 3], -1.)
-        );
-    }
-    /// A world's identity survives a recording header, and rebuilding from it
-    /// restores the launch settings exactly, whatever set the wind.
-    #[test]
-    fn recorded_identity_restores_the_launch_settings() {
-        use tore_sim::environment::{Configuration, Environment as Weather};
-        let module = || {
-            tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(1))
-                .unwrap()
-        };
-        let dir = crate::replay::tests::TempDir::new("identity");
-        let winds = [
-            None,
-            Some([-155, 20]),
-            Some([90, 0]),
-            Some([-360, 7]),
-            Some([360, 200]),
-            Some([13, 13]),
-        ];
-        for (n, wind) in winds.into_iter().enumerate() {
-            let configuration = Configuration::new(module(), 7, 21, 3, wind).unwrap();
-            let mut w = world();
-            w.layout = "~UKR1.MM".into();
-            w.theater.name = "Ukraine (UKR1)".into();
-            w.condition = Some(3);
-            w.environment.layer = "DAY2.LAY".into();
-            w.environment.clouds = Some(12_345);
-            w.weather = tore_sim::environment::Environment::new(configuration.clone());
-            let identity = w.identity();
-            assert_eq!(identity.theater, "UKR");
-            assert_eq!(identity.weather_name, "dawn");
-            assert_eq!(identity.extent_ft, Some([f64::from(CELL_FEET); 2]));
-            // Through a recording's text header and back.
-            let header = tore_replay::Header {
-                world: identity,
-                ..Default::default()
-            };
-            let path = dir.path().join(format!("{n}.tore-replay"));
-            let writer = tore_replay::Writer::create(&path, &header).unwrap();
-            let path = writer.finish(&tore_replay::Footer::default()).unwrap();
-            let identity = tore_replay::Recording::open(path)
-                .unwrap()
-                .header()
-                .world
-                .clone();
-            let recorded = Recorded::from_identity(&identity).unwrap();
-            assert_eq!(
-                recorded,
-                Recorded {
-                    code: "~UKR1".into(),
-                    condition: Some(3),
-                    layer: Some("DAY2.LAY".into()),
-                    time: [7, 21],
-                    wind: recorded.wind,
-                    cloud_altitude: 12_345,
-                    weather_seed: 1,
-                }
-            );
-            let rebuilt = Configuration::new(module(), 7, 21, 3, recorded.wind).unwrap();
-            assert_eq!(
-                rebuilt.wind_world_fps().map(f64::to_bits),
-                configuration.wind_world_fps().map(f64::to_bits),
-                "wind {wind:?} rebuilt as {:?}",
-                recorded.wind
-            );
-            assert_eq!(rebuilt.wind().origin, configuration.wind().origin);
-            let _ = Weather::new(rebuilt);
-        }
-        // No deck and the map's own weather.
-        let mut w = world();
-        w.environment.clouds = Some(0);
-        let identity = w.identity();
-        assert_eq!(identity.clouds.deck_ft, None);
-        assert_eq!(identity.weather, None);
-        assert_eq!(identity.weather_name, "map default");
-    }
-
-    #[test]
-    fn impossible_identities_are_refused() {
-        let good = || {
-            let mut w = world();
-            w.layout = "UKR.MM".into();
-            w.identity()
-        };
-        assert!(Recorded::from_identity(&good()).is_ok());
-        let mut bad = good();
-        bad.layout = "NOWHERE.MM".into();
-        assert!(Recorded::from_identity(&bad).is_err());
-        let mut bad = good();
-        bad.weather = Some(6);
-        assert!(Recorded::from_identity(&bad).is_err());
-        for seconds in [-60., 86_400., 30.5, 90., f64::NAN] {
-            let mut bad = good();
-            bad.time_of_day_s = seconds;
-            assert!(Recorded::from_identity(&bad).is_err(), "{seconds}");
-        }
-        let mut bad = good();
-        bad.clouds.deck_ft = Some(400_001.);
-        assert!(Recorded::from_identity(&bad).is_err());
-        let mut bad = good();
-        bad.wind_fps = [3.3, 0., 4.4];
-        assert!(Recorded::from_identity(&bad).is_err());
-    }
-
     pub(crate) fn world() -> Terrain {
         use tore_formats::theater::TerrainCell;
         let cells = [0, 4, 8, 12]
@@ -1650,7 +958,6 @@ pub(crate) mod tests {
             })
             .to_vec();
         Terrain {
-            ocean_motion: crate::ocean::Motion::default(),
             theater: Theater {
                 name: "Synthetic".into(),
                 map: "T.PIC".into(),
@@ -1666,21 +973,8 @@ pub(crate) mod tests {
             airfield_anchors: BTreeMap::new(),
             static_manifest: Vec::new(),
             catalog: vec![],
-            vertices: vec![],
-            static_vertices: BTreeMap::new(),
-            static_lines: BTreeMap::new(),
             layout: "TEST.MM".into(),
             condition: None,
-            land_texture: None,
-            texture_indices: vec![],
-            sky_indices: vec![],
-            celestial: None,
-            clouds: None,
-            deck_textures: BTreeMap::new(),
-            decks: [[0., 1., -1., 0.]; 2],
-            fog: [0., 1., 0., 0.],
-            haze: [0; 3],
-            origin: [0.; 3],
             weather: tore_sim::environment::Environment::new(
                 tore_sim::environment::Configuration::new(
                     tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(
@@ -1694,15 +988,6 @@ pub(crate) mod tests {
                 )
                 .unwrap(),
             ),
-            visual_bands: Vec::new(),
-            smooth_weather: true,
-            palette: [[100; 3]; 256],
-            no_sun_whiteout: false,
-            auxiliary_presentations: std::array::from_fn(|_| {
-                tore_sim::environment::Presentation::seeded(1).unwrap()
-            }),
-            weather_presentation: tore_sim::environment::Presentation::seeded(1).unwrap(),
-            fog_palette: vec![[[100; 3]; 256]; 10],
         }
     }
     #[test]
@@ -1742,44 +1027,6 @@ pub(crate) mod tests {
             0.
         );
     }
-    #[test]
-    fn water_has_no_opaque_fallback_but_shore_art_keeps_its_geometry() {
-        use tore_formats::theater::TexturePlacement;
-        let mut w = world();
-        w.theater.cells[0].color = 255;
-        let height = w.height(2048., 2048.);
-        w.build_mesh();
-        assert!(
-            w.vertices.is_empty(),
-            "open water must expose the ocean pass"
-        );
-        assert_eq!(w.height(2048., 2048.), height);
-
-        // A water-colored base cell can still contain opaque beach artwork.
-        // All four rotations must retain its geometry and texture identity.
-        for rotation in 0..4 {
-            w.environment.textures.insert(
-                (0, 0),
-                TexturePlacement {
-                    col: 0,
-                    row: 0,
-                    texture: 2,
-                    rotation,
-                    resource: None,
-                },
-            );
-            w.vertices.clear();
-            w.build_mesh();
-            assert_eq!(w.vertices.len(), 6 * 10);
-            assert!(w.vertices.chunks_exact(10).all(|v| v[5] == 2.));
-        }
-        w.environment.textures.clear();
-        w.theater.cells[0].color = 100;
-        w.vertices.clear();
-        w.build_mesh();
-        assert_eq!(w.vertices.len(), 6 * 10, "untextured land stays opaque");
-    }
-
     #[test]
     fn turbulence_surface_uses_class_not_color_or_height() {
         let mut w = world();
@@ -1896,137 +1143,6 @@ pub(crate) mod tests {
                 .is_none()
         );
         assert!(!world.surface(50.0, 50.0).landable);
-    }
-
-    #[test]
-    fn whiteout_cheat_clears_all_views_without_ticks_and_preserves_sun() {
-        use tore_formats::weather::shape::{Primitive, WeatherShape};
-        let mut w = world();
-        let mut module =
-            tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(1))
-                .unwrap();
-        let l = &mut module.layers[0];
-        l.flags = 8;
-        l.start_seconds = 0;
-        l.end_seconds = 86399;
-        l.sunrise_seconds = 0;
-        l.sunset_seconds = 86400;
-        let angles = tore_sim::environment::sun_angles(l, 9 * 3600).unwrap();
-        w.weather = tore_sim::environment::Environment::new(
-            tore_sim::environment::Configuration::new(module, 9, 0, 0, None).unwrap(),
-        );
-        let empty = WeatherShape {
-            primitives: vec![],
-            scale_exponent: 8,
-            publishes_point: false,
-        };
-        w.celestial = Some(crate::celestial::Celestial {
-            sun: WeatherShape {
-                primitives: vec![Primitive::Circle {
-                    center: [0., 0., 160.],
-                    diameter: 4,
-                    fill: 254,
-                }],
-                ..empty.clone()
-            },
-            moon: empty.clone(),
-            stars: empty,
-            sun_effects: true,
-            moon_texture: 0,
-            moon_uv: [0., 0., 1., 1.],
-            sun_remap: 0,
-            shade_rows: BTreeMap::new(),
-            light_rows: [0; 2],
-            flare: tore_formats::weather::flare::Layout {
-                circles: vec![tore_formats::weather::flare::Circle {
-                    offset_percent: 50,
-                    radius: 10,
-                    fill: 265,
-                }],
-            },
-        });
-        let sun = crate::celestial::rotate([0., 0., 1.], angles);
-        let mut forward = Camera::new();
-        forward.position[1] = 5000.;
-        forward.yaw = sun[0].atan2(sun[2]);
-        forward.pitch = sun[1].asin() - 0.1;
-        let mut rear = Camera::new();
-        rear.weather_slot = 1;
-        rear.position = forward.position;
-        rear.yaw = forward.yaw + std::f32::consts::PI;
-        rear.pitch = -forward.pitch;
-        for _ in 0..240 {
-            w.step_weather(700., &forward);
-            w.step_view_weather(&rear, 700.);
-        }
-        assert!(w.weather_presentation.sun_whitening > 0);
-        assert_eq!(w.auxiliary_presentations[0].sun_whitening, 0);
-        assert!(!crate::lens_flare::circles(&w, &forward, [1280, 720]).is_empty());
-        let sun_geometry = w.celestial.as_ref().unwrap().sun_uniform(&w, 5000.);
-        let bright = w.sample_view(5000., 0).palette;
-        let ticks = w.weather.ticks();
-        w.no_sun_whiteout = true;
-        assert!(crate::lens_flare::circles(&w, &forward, [1280, 720]).is_empty());
-        assert_ne!(bright, w.sample_view(5000., 0).palette);
-        assert_eq!(
-            w.sample_view(5000., 0).palette,
-            w.sample_view(5000., 1).palette
-        );
-        assert_eq!(
-            sun_geometry,
-            w.celestial.as_ref().unwrap().sun_uniform(&w, 5000.)
-        );
-        assert_eq!(ticks, w.weather.ticks());
-    }
-
-    #[test]
-    fn camera_weather_is_altitude_local_and_query_order_is_pure() {
-        let mut module =
-            tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(2))
-                .unwrap();
-        for layer in &mut module.layers {
-            layer.start_seconds = 0;
-            layer.end_seconds = 86399;
-        }
-        module.layers[0].high_feet = 8000;
-        module.layers[0].fog_far = 100;
-        module.layers[0].tint_scalar = 200;
-        module.layers[1].low_feet = 7500;
-        module.layers[1].fog_far = 1000;
-        module.layers[1].tint_scalar = 0;
-        let mut w = world();
-        w.weather = tore_sim::environment::Environment::new(
-            tore_sim::environment::Configuration::new(module, 12, 0, 0, None).unwrap(),
-        );
-        let mut low = Camera::new();
-        low.position[1] = 7000.;
-        let mut high = Camera::new();
-        high.weather_slot = 1;
-        high.position[1] = 9000.;
-        for _ in 0..120 {
-            w.step_weather(700., &low);
-            w.step_view_weather(&high, 700.);
-        }
-        assert_ne!(
-            w.weather_presentation.tint,
-            w.auxiliary_presentations[0].tint
-        );
-        let state = (
-            w.weather.clone(),
-            w.weather_presentation.clone(),
-            w.auxiliary_presentations.clone(),
-        );
-        let low_view = w.sample_view(7000., 0);
-        let high_view = w.sample_view(9000., 1);
-        assert_ne!(low_view.fog, high_view.fog);
-        for _ in 0..10 {
-            assert_eq!(high_view.palette, w.sample_view(9000., 1).palette);
-            assert_eq!(low_view.palette, w.sample_view(7000., 0).palette);
-        }
-        assert_eq!(
-            state,
-            (w.weather, w.weather_presentation, w.auxiliary_presentations)
-        );
     }
 
     #[test]

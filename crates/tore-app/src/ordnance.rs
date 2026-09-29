@@ -814,6 +814,7 @@ fn card_outline(c: &mut Canvas, x: i32, y: i32, selected: bool) {
 pub fn validate_sources(
     data: &BTreeMap<String, Vec<u8>>,
     world: &crate::terrain::Terrain,
+    scenery: &crate::scenery::Scenery,
 ) -> AppResult<()> {
     // Run editor/loadout checks for the complete roster before unrelated flight
     // appearance probes, so their failures cannot hide preflight coverage.
@@ -884,11 +885,11 @@ pub fn validate_sources(
             return Err("mission wing count mismatch".into());
         }
         let camera = airframe.panel_camera(&flight, 3);
-        let geometry = normal.dummy_geometry(&camera, world);
+        let geometry = normal.dummy_geometry(&camera, world, scenery);
         if geometry.len() != 1 || geometry[0].0.profile.id != id || geometry[0].1.is_empty() {
             return Err("dummy model identity or geometry mismatch".into());
         }
-        let intact = airframe.vertices(&flight, &camera, world);
+        let intact = airframe.vertices(&flight, &camera, world, scenery);
         // Exercise the shared effects against every imported mesh and gun,
         // including variants, rather than inferring coverage from F/A-18D.
         // A surviving aircraft is drawn intact (damage still drives flight and
@@ -899,7 +900,7 @@ pub fn validate_sources(
                 flight.damage_variant = (fraction >= 1.).then_some(region);
                 flight.damage_regions = [0.; tore_sim::combat::live::DAMAGE_SECTIONS];
                 flight.damage_regions[region] = fraction;
-                let mesh = airframe.vertices(&flight, &camera, world);
+                let mesh = airframe.vertices(&flight, &camera, world, scenery);
                 let distinct = mesh != intact;
                 if mesh.is_empty()
                     || mesh.iter().any(|v| !v.is_finite())
@@ -942,7 +943,7 @@ pub fn validate_sources(
             return Err(format!("{id:?}: invalid imported gun sight/range").into());
         }
         gun.refresh_render(&gun_flight, None);
-        let tracer = gun.vertices(&airframe, &gun_flight, &camera, world);
+        let tracer = gun.vertices(&airframe, &gun_flight, &camera, world, scenery);
         if !tracer.vertices.chunks_exact(10).any(|v| v[5] == -8.) {
             return Err(format!("{id:?}: imported gun has no luminous tracer geometry").into());
         }
@@ -951,8 +952,8 @@ pub fn validate_sources(
         flight.damage_variant = Some(tore_sim::combat::live::DamageSection::LeftWing as usize);
         flight.damage_regions = [0.; tore_sim::combat::live::DAMAGE_SECTIONS];
         flight.damage_regions[tore_sim::combat::live::DamageSection::LeftWing as usize] = 1.;
-        let damaged = airframe.vertices(&flight, &camera, world);
-        let fragment = airframe.fragment_vertices(&flight, &camera, world);
+        let damaged = airframe.vertices(&flight, &camera, world, scenery);
+        let fragment = airframe.fragment_vertices(&flight, &camera, world, scenery);
         if tore_sim::combat::debris::damage_variant(
             id,
             tore_sim::combat::live::DamageSection::LeftWing as usize,
@@ -977,7 +978,10 @@ pub fn validate_sources(
         normal.refresh_render(&flight, None);
         normal.step(&mut flight, world)?;
         normal.advance_render(&flight, None);
-        if normal.dummy_geometry(&camera, world)[0].1.is_empty() {
+        if normal.dummy_geometry(&camera, world, scenery)[0]
+            .1
+            .is_empty()
+        {
             return Err("falling wreck disappeared".into());
         }
         normal.reset(&mut flight)?;

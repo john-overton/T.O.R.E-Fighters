@@ -25,8 +25,11 @@ use crate::replay::sound::{self, ReplaySound};
 use crate::replay::tracks::{Scanner, Tracks};
 use crate::replay::trails;
 use crate::replay::weather::WeatherTrack;
-use crate::terrain::{Camera, Terrain};
 use crate::{AppResult, attitude::Basis};
+use crate::{
+    scenery::Scenery,
+    terrain::{Camera, Terrain},
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -683,6 +686,8 @@ pub struct Viewer {
     pub path: PathBuf,
     recording: Arc<Recording>,
     pub world: Terrain,
+    /// The art and camera weather of `world`.
+    pub scenery: Scenery,
     /// The recorded player's aircraft, drawn in the renderer's ownship slot.
     pub ownship: Airframe,
     /// Models of the other aircraft, in the recording's draw order.
@@ -789,7 +794,8 @@ impl Viewer {
         if recording.first_tick().is_none() {
             return Err(format!("{}: the recording holds no frames", path.display()).into());
         }
-        let world = Terrain::for_identity(resources, &recording.header().world)?;
+        let world = crate::replay::identity::terrain(resources, &recording.header().world)?;
+        let scenery = Scenery::build(resources, &world)?;
         let identities = crate::replay::convert::Identities::of(&recording);
         let presentation = crate::replay::convert::Presentation::from_header(recording.header());
         let player = match identities.aircraft.get(&0) {
@@ -811,14 +817,22 @@ impl Viewer {
             recording.weapons().filter_map(|w| w.shape.as_deref()),
             resources,
         );
-        Self::assemble(path, recording, world, ownship, models, art, options)
+        Self::assemble(
+            path,
+            recording,
+            (world, scenery),
+            ownship,
+            models,
+            art,
+            options,
+        )
     }
 
     /// A viewer from loaded parts.
     fn assemble(
         path: &Path,
         recording: Arc<Recording>,
-        world: Terrain,
+        (world, scenery): (Terrain, Scenery),
         ownship: Airframe,
         models: Vec<Airframe>,
         art: CombatArt,
@@ -873,6 +887,7 @@ impl Viewer {
             // keeps the launch sky throughout.
             weather: WeatherTrack::new(
                 &world,
+                &scenery,
                 if recording.header().mission == tore_replay::MissionKind::Probe {
                     0
                 } else {
@@ -892,6 +907,7 @@ impl Viewer {
             ),
             recording,
             world,
+            scenery,
             scratch: template.clone(),
             template,
             ownship,
@@ -971,7 +987,7 @@ impl Viewer {
     /// slot is prepared after it.
     pub fn enter(&mut self, renderer: &mut Renderer) {
         if !self.entered {
-            renderer.set_world(&self.world);
+            renderer.set_scenery(&self.scenery);
             renderer.prepare_aircraft(&self.ownship);
             self.entered = true;
             self.airports = None;
@@ -2341,15 +2357,20 @@ impl Viewer {
             .map_or(0., |last| (now - last).as_secs_f64().min(0.25));
         self.last_frame = Some(now);
         self.scanner.poll(&mut self.tracks);
-        self.weather
-            .build(&mut self.world, &self.tracks, WEATHER_BUDGET);
+        self.weather.build(
+            &mut self.world,
+            &mut self.scenery,
+            &self.tracks,
+            WEATHER_BUDGET,
+        );
         let from = self.clock.position();
         if !self.bar.scrubbing {
             self.clock.advance(seconds);
         }
         let tick = self.clock.tick();
         let picture = self.playback.picture(tick, self.clock.alpha());
-        self.weather.seek(&mut self.world, &self.tracks, tick);
+        self.weather
+            .seek(&mut self.world, &mut self.scenery, &self.tracks, tick);
         let player = self.player_state(&picture, tick);
         let camera = self.frame_camera(&picture, tick, seconds, shift);
         // The back view from the player's seat draws its airframe but is
@@ -2376,8 +2397,9 @@ impl Viewer {
             selected: self.selected,
         };
         self.sound.frame(audio, &moment);
-        self.world.resolve_palette(camera.position[1]);
-        self.world.set_origin(camera.position);
+        self.scenery
+            .resolve_palette(&self.world, camera.position[1]);
+        self.scenery.set_origin(camera.position);
         let vapor = match self.playback.vapor(tick, &self.ownship, &mut self.scratch) {
             Some(vapor) => crate::vapor_vertices(
                 &vapor,
@@ -2419,8 +2441,8 @@ impl Viewer {
             .as_ref()
             .is_none_or(|(set, ..)| *set != destroyed)
         {
-            let vertices = self.world.visible_static_vertices_where(&destroyed);
-            let lines = self.world.visible_static_lines_where(&destroyed);
+            let vertices = self.scenery.visible_static_vertices_where(&destroyed);
+            let lines = self.scenery.visible_static_lines_where(&destroyed);
             self.airports = Some((destroyed, vertices, lines));
         }
         if let Some((_, vertices, lines)) = &self.airports {
@@ -2436,7 +2458,7 @@ impl Viewer {
                         .map(|p| (p.position, p.heading, p.phase)),
                     &self.ownship.palette,
                     camera.position,
-                    self.world.origin,
+                    self.scenery.origin,
                 ),
             );
         }
@@ -2445,6 +2467,7 @@ impl Viewer {
             &self.models,
             &camera,
             &self.world,
+            &self.scenery,
         ));
         let mut combat = render_snapshot::combat_geometry(
             &picture,
@@ -2453,6 +2476,7 @@ impl Viewer {
             &player,
             &camera,
             &self.world,
+            &self.scenery,
         );
         let size = renderer.flight_size();
         if self.ui.trails {
@@ -2471,10 +2495,11 @@ impl Viewer {
             camera.hidden_target != Some(0),
             &camera,
             &self.world,
+            &self.scenery,
         );
         // No cockpit, HUD or mirrors in a replay; the cockpit pass keeps its
         // switches between frames, so they are turned off every frame.
-        renderer.cockpit(&player, &camera, false, false, &[], &self.world.palette);
+        renderer.cockpit(&player, &camera, false, false, &[], &self.scenery.palette);
         let composed = Instant::now();
         self.overlay(&picture, tick, &camera, size, canvas);
         if let Some(screen) = screen {
@@ -2483,7 +2508,7 @@ impl Viewer {
         let drawn = Instant::now();
         let presented = renderer.draw(
             &canvas.pixels,
-            Some((&camera, &self.world)),
+            Some((&camera, &self.world, &self.scenery)),
             Some(canvas.size),
         )?;
         self.camera = camera;
@@ -2528,10 +2553,10 @@ impl Viewer {
         } else {
             Vec::new()
         };
-        let hud_color = self
-            .ownship
-            .cockpit_palette(&self.world, camera.position[1], 0)
-            [usize::from(self.ownship.hud.primary_color)];
+        let hud_color =
+            self.ownship
+                .cockpit_palette(&self.world, &self.scenery, camera.position[1], 0)
+                [usize::from(self.ownship.hud.primary_color)];
         let mut panel_rects = Vec::new();
         let mut menu_rect = None;
         let model = if self.ui.hidden {
@@ -2616,7 +2641,14 @@ impl Viewer {
     /// a PNG at the view's size (at most 1920x1080).
     pub fn save_png(&self, renderer: &mut Renderer, path: &Path) -> AppResult<()> {
         let [width, height] = renderer.flight_size();
-        let pixels = renderer.scene_pixels(&self.camera, &self.world, width, height, false)?;
+        let pixels = renderer.scene_pixels(
+            &self.camera,
+            &self.world,
+            &self.scenery,
+            width,
+            height,
+            false,
+        )?;
         std::fs::write(
             path,
             crate::replay::png::encode_rgba(width, height, &pixels)?,
@@ -2753,7 +2785,10 @@ mod tests {
         Viewer::assemble(
             Path::new("/x/test.tore-replay"),
             recording,
-            crate::terrain::tests::world(),
+            (
+                crate::terrain::tests::world(),
+                crate::scenery::tests::scenery(),
+            ),
             ownship,
             Vec::new(),
             art,
@@ -3897,7 +3932,10 @@ mod tests {
             Viewer::assemble(
                 Path::new("x"),
                 recording,
-                crate::terrain::tests::world(),
+                (
+                    crate::terrain::tests::world(),
+                    crate::scenery::tests::scenery(),
+                ),
                 crate::combat::render_hash_tests::hornet_airframe(true),
                 Vec::new(),
                 art,

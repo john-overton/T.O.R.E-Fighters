@@ -1,5 +1,8 @@
 //! Extensible 3D pass. World data/camera are independent of wgpu; UI composites afterward.
-use crate::terrain::{Camera, Terrain};
+use crate::{
+    scenery::Scenery,
+    terrain::{Camera, Terrain},
+};
 use wgpu::util::DeviceExt;
 
 /// Material-local packing flag. World and weather art use sixteen independent
@@ -525,7 +528,7 @@ impl SimRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-        world: &Terrain,
+        scenery: &Scenery,
         options: crate::graphics::Options,
         samples: u32,
     ) -> Self {
@@ -637,8 +640,8 @@ impl SimRenderer {
         });
         let indices = pack_world_pages(
             &[
-                world.texture_indices.as_slice(),
-                world.sky_indices.as_slice(),
+                scenery.texture_indices.as_slice(),
+                scenery.sky_indices.as_slice(),
             ]
             .concat(),
         );
@@ -736,12 +739,12 @@ impl SimRenderer {
         });
         let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Retail T2 terrain mesh"),
-            contents: &bytes(&world.vertices),
+            contents: &bytes(&scenery.vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
         let terrain_normals = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Shared terrain lighting normals"),
-            contents: &bytes(&crate::surface_lighting::terrain_normals(&world.vertices)),
+            contents: &bytes(&crate::surface_lighting::terrain_normals(&scenery.vertices)),
             usage: wgpu::BufferUsages::VERTEX,
         });
         Self {
@@ -774,7 +777,7 @@ impl SimRenderer {
             bind,
             uniform,
             vertices,
-            count: (world.vertices.len() / 10) as u32,
+            count: (scenery.vertices.len() / 10) as u32,
             targets: Vec::new(),
             resample: Self::resample_pipeline(device, format),
             options,
@@ -1320,13 +1323,14 @@ impl SimRenderer {
         size: [u32; 2],
         camera: &Camera,
         world: &Terrain,
+        scenery: &Scenery,
     ) {
         // The world renders at the render-scale size; the lens flare and the
         // resample work at the output size.
         let output = size;
         let slot = self.targets(device, output);
         let size = self.targets[slot].size;
-        let weather = world.sample_view(camera.position[1], camera.weather_slot);
+        let weather = scenery.sample_view(world, camera.position[1], camera.weather_slot);
         // The recovered haze color the visibility ramp blends toward.
         let sky = weather.haze;
         let mut uniform = camera.uniform(
@@ -1334,11 +1338,11 @@ impl SimRenderer {
             weather.fog,
             sky,
         );
-        uniform[7] = (world.texture_indices.len() / (256 * 256)) as f32;
+        uniform[7] = (scenery.texture_indices.len() / (256 * 256)) as f32;
         uniform[15] = weather.fog_palette.len() as f32;
         uniform.extend(weather.decks.into_iter().flatten());
         let mut celestial_count = 0;
-        if let Some(celestial) = &world.celestial {
+        if let Some(celestial) = &scenery.celestial {
             let data = celestial.vertices(world, camera, size[1]);
             assert!(data.len() * 4 <= 256 * 1024);
             celestial_count = (data.len() / 10) as u32;
@@ -1350,14 +1354,14 @@ impl SimRenderer {
                 let shade = world.weather.configuration().shade_remap(layer.shade);
                 uniform[31] = celestial.shade_rows[&shade.color] as f32;
             }
-            uniform.extend(celestial.sun_uniform(world, camera.position[1]));
+            uniform.extend(celestial.sun_uniform(world, scenery, camera.position[1]));
         } else {
             uniform.extend([0.; 36]);
         }
         // Band rows refer to the imported remap atlas; absent assets disable them.
         uniform.extend([0.; 4]);
-        if let Some(celestial) = &world.celestial {
-            let bands = if world.smooth_weather {
+        if let Some(celestial) = &scenery.celestial {
+            let bands = if scenery.smooth_weather {
                 weather.visual_bands.as_slice()
             } else {
                 world.weather.active()
@@ -1383,7 +1387,7 @@ impl SimRenderer {
             uniform[70] = horizon.lower_extent as f32;
             uniform[71] = (u16::from(horizon.flags())
                 | ((layer.flags & 0x40) >> 4)
-                | (u16::from(world.smooth_weather) << 3)) as f32;
+                | (u16::from(scenery.smooth_weather) << 3)) as f32;
             let roll = (camera.roll.rem_euclid(std::f32::consts::TAU) * 65536.
                 / std::f32::consts::TAU)
                 .round() as i32 as i16;
@@ -1398,20 +1402,20 @@ impl SimRenderer {
         });
         // Approximate angular width of a pixel, shared by the surface filtering.
         let pixel_angle = 2. / (1.732_050_8 * camera.zoom * size[1].max(1) as f32);
-        uniform.extend(
-            world
-                .ocean_motion
-                .uniform(world.weather.ticks(), ocean_decks, pixel_angle),
-        );
+        uniform.extend(scenery.ocean_motion.uniform(
+            world.weather.ticks(),
+            ocean_decks,
+            pixel_angle,
+        ));
         let dense = weather
             .visual_bands
             .iter()
             .find(|band| band.fog_far_density >= 256 && band.fog_far * 256 <= 8000);
-        let mut reflection = match (&world.clouds, dense) {
-            (Some(clouds), Some(band)) if world.smooth_weather => [
+        let mut reflection = match (&scenery.clouds, dense) {
+            (Some(clouds), Some(band)) if scenery.smooth_weather => [
                 clouds.reflection_texture() as f32,
                 (band.low_feet as f32 + 250.).max(500.),
-                world
+                scenery
                     .ocean_motion
                     .uniform(world.weather.ticks(), [true, false], pixel_angle)[1],
                 0.,
@@ -1419,10 +1423,10 @@ impl SimRenderer {
             _ => [-1., 0., 0., 0.],
         };
         reflection[2] =
-            world
+            scenery
                 .ocean_motion
                 .uniform(world.weather.ticks(), [true, false], pixel_angle)[1];
-        reflection[3] = world.ocean_motion.environment_reflection;
+        reflection[3] = scenery.ocean_motion.environment_reflection;
         uniform.extend(reflection);
         uniform.extend([
             camera.near_clip,
@@ -1443,8 +1447,8 @@ impl SimRenderer {
             self.options.scale(),
         ]);
         // The render origin, and the eye relative to it at full precision.
-        let [x, y, z] = world.origin.map(|v| v as f32);
-        let [ex, ey, ez] = world.local(camera.position);
+        let [x, y, z] = scenery.origin.map(|v| v as f32);
+        let [ex, ey, ez] = scenery.local(camera.position);
         uniform.extend([x, y, z, 0., ex, ey, ez, 0.]);
         debug_assert_eq!(uniform.len() * 4, UNIFORM_BYTES as usize);
         queue.write_buffer(&self.uniform, 0, &bytes(&uniform));
@@ -1484,7 +1488,7 @@ impl SimRenderer {
                 depth_or_array_layers: 1,
             },
         );
-        let cloud_data = world
+        let cloud_data = scenery
             .clouds
             .as_ref()
             .map_or_else(Vec::new, |clouds| clouds.vertices(camera));
@@ -1494,12 +1498,18 @@ impl SimRenderer {
             queue.write_buffer(&self.cloud_vertices, 0, &bytes(&cloud_data));
         }
         let linear = |v: u8| ((v as f64 / 255.0 + 0.055) / 1.055).powf(2.4);
-        let flare_target =
-            self.lens_flare
-                .prepare(device, queue, world, camera, output, &weather.palette);
+        let flare_target = self.lens_flare.prepare(
+            device,
+            queue,
+            world,
+            scenery,
+            camera,
+            output,
+            &weather.palette,
+        );
         if self
             .lighting
-            .prepare(queue, camera, world, &self.countermeasures.lights)
+            .prepare(queue, camera, world, scenery, &self.countermeasures.lights)
         {
             let mut objects = Vec::new();
             if let Some((buffer, count)) = &self.airports {
@@ -1850,16 +1860,17 @@ mod lighting_tests {
                 .await
                 .unwrap();
             let render = |distance: f32, pavement: u8, overhead: bool, height: f32| {
-                let mut world = crate::terrain::tests::world();
-                world.vertices = plane(0., 20_000.);
-                world.texture_indices = vec![100; 65536];
-                world.sky_indices = vec![100; 65536];
-                world.smooth_weather = false;
+                let world = crate::terrain::tests::world();
+                let mut scenery = crate::scenery::tests::scenery();
+                scenery.vertices = plane(0., 20_000.);
+                scenery.texture_indices = vec![100; 65536];
+                scenery.sky_indices = vec![100; 65536];
+                scenery.smooth_weather = false;
                 let mut renderer = SimRenderer::new(
                     &device,
                     &queue,
                     wgpu::TextureFormat::Rgba8Unorm,
-                    &world,
+                    &scenery,
                     crate::graphics::Options::default(),
                     1,
                 );
@@ -1940,6 +1951,7 @@ mod lighting_tests {
                     [256, 256],
                     &camera,
                     &world,
+                    &scenery,
                 );
                 encoder.copy_texture_to_buffer(
                     wgpu::TexelCopyTextureInfo {
@@ -2016,10 +2028,11 @@ mod lighting_tests {
                 .await
                 .unwrap();
             let render = |distance: f32, shift: f32, ground: bool, samples: u32| {
-                let mut world = crate::terrain::tests::world();
-                world.smooth_weather = false;
-                world.texture_indices = vec![100; 65536];
-                world.sky_indices = vec![100; 65536];
+                let world = crate::terrain::tests::world();
+                let mut scenery = crate::scenery::tests::scenery();
+                scenery.smooth_weather = false;
+                scenery.texture_indices = vec![100; 65536];
+                scenery.sky_indices = vec![100; 65536];
                 let origin = [1_107_332., 1024., 587_544.];
                 let transform = |v: &mut Vec<f32>, color: [f32; 3]| {
                     for vertex in v.chunks_exact_mut(10) {
@@ -2029,15 +2042,15 @@ mod lighting_tests {
                         vertex[6..9].copy_from_slice(&color);
                     }
                 };
-                world.vertices = plane(if ground { -1. } else { -1000. }, 80_000.);
-                transform(&mut world.vertices, [0., 0.5, 0.]);
+                scenery.vertices = plane(if ground { -1. } else { -1000. }, 80_000.);
+                transform(&mut scenery.vertices, [0., 0.5, 0.]);
                 let mut runway = plane(0., 2400.);
                 transform(&mut runway, [1., 0., 0.]);
                 let mut renderer = SimRenderer::new(
                     &device,
                     &queue,
                     wgpu::TextureFormat::Rgba8Unorm,
-                    &world,
+                    &scenery,
                     crate::graphics::Options::default(),
                     samples,
                 );
@@ -2087,6 +2100,7 @@ mod lighting_tests {
                     [256, 256],
                     &camera,
                     &world,
+                    &scenery,
                 );
                 encoder.copy_texture_to_buffer(
                     image.as_image_copy(),
@@ -2160,6 +2174,7 @@ mod lighting_tests {
                 .unwrap();
             let render = |flare: bool| {
                 let mut world = crate::terrain::tests::world();
+                let mut scenery = crate::scenery::tests::scenery();
                 let mut module = tore_formats::weather::Module::parse(
                     &tore_formats::weather::synthetic_module(1),
                 )
@@ -2175,16 +2190,16 @@ mod lighting_tests {
                 world.weather = tore_sim::environment::Environment::new(
                     tore_sim::environment::Configuration::new(module, 0, 0, 0, None).unwrap(),
                 );
-                world.smooth_weather = true;
-                world.no_sun_whiteout = true;
-                world.texture_indices = vec![255; 65536];
-                world.sky_indices = vec![100; 65536];
-                world.vertices = plane(0., 400.);
+                scenery.smooth_weather = true;
+                scenery.no_sun_whiteout = true;
+                scenery.texture_indices = vec![255; 65536];
+                scenery.sky_indices = vec![100; 65536];
+                scenery.vertices = plane(0., 400.);
                 let mut renderer = SimRenderer::new(
                     &device,
                     &queue,
                     wgpu::TextureFormat::Rgba8Unorm,
-                    &world,
+                    &scenery,
                     crate::graphics::Options::original(),
                     1,
                 );
@@ -2233,6 +2248,7 @@ mod lighting_tests {
                     [256, 256],
                     &camera,
                     &world,
+                    &scenery,
                 );
                 encoder.copy_texture_to_buffer(
                     texture.as_image_copy(),
@@ -2313,6 +2329,7 @@ mod lighting_tests {
                           caster_height: f32,
                           elapsed_steps: usize| {
                 let mut world = crate::terrain::tests::world();
+                let mut scenery = crate::scenery::tests::scenery();
                 let mut module = tore_formats::weather::Module::parse(
                     &tore_formats::weather::synthetic_module(1),
                 )
@@ -2340,34 +2357,34 @@ mod lighting_tests {
                 for _ in 0..elapsed_steps {
                     world.weather.step();
                 }
-                world.smooth_weather = smooth;
-                world.no_sun_whiteout = true; // Shadows must work with sunglare disabled.
-                world.texture_indices = vec![255; 65536];
-                world.sky_indices = vec![100; 65536];
-                world.vertices = if terrain_caster {
+                scenery.smooth_weather = smooth;
+                scenery.no_sun_whiteout = true; // Shadows must work with sunglare disabled.
+                scenery.texture_indices = vec![255; 65536];
+                scenery.sky_indices = vec![100; 65536];
+                scenery.vertices = if terrain_caster {
                     plane(caster_height, 10.)
                 } else {
                     plane(0., 120.)
                 };
                 if terrain_caster && !caster {
-                    world.vertices.clear();
+                    scenery.vertices.clear();
                 }
                 if tilt {
-                    for vertex in world.vertices.chunks_exact_mut(10) {
+                    for vertex in scenery.vertices.chunks_exact_mut(10) {
                         let x = vertex[0];
                         vertex[0] = x * 0.5;
                         vertex[1] = -x * 3_f32.sqrt() * 0.5;
                     }
                 }
                 // A zero-sized vertex buffer is not portable; supply a degenerate triangle.
-                if world.vertices.is_empty() {
-                    world.vertices = vec![0.; 30];
+                if scenery.vertices.is_empty() {
+                    scenery.vertices = vec![0.; 30];
                 }
                 let mut renderer = SimRenderer::new(
                     &device,
                     &queue,
                     wgpu::TextureFormat::Rgba8Unorm,
-                    &world,
+                    &scenery,
                     crate::graphics::Options::original(),
                     1,
                 );
@@ -2461,6 +2478,7 @@ mod lighting_tests {
                     [256, 256],
                     &camera,
                     &world,
+                    &scenery,
                 );
                 if water {
                     // Fixed clear-white source and coarse footprint isolate the actual

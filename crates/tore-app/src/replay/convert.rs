@@ -1299,6 +1299,7 @@ mod tests {
         let ownship = fixture::hornet_airframe(true);
         let player = fixture::player();
         let world = crate::terrain::tests::world();
+        let scenery = crate::scenery::tests::scenery();
         let art = fixture::escape_art();
         let mut drawn = 0;
         for with_models in [true, false] {
@@ -1374,8 +1375,9 @@ mod tests {
                         [&live, &replayed].map(|pair| interpolate(Some(&pair[0]), &pair[1], alpha));
                     for camera in fixture::cameras() {
                         if with_models {
-                            let batches = [&a, &b]
-                                .map(|s| aircraft_batches(s, combat.models(), &camera, &world));
+                            let batches = [&a, &b].map(|s| {
+                                aircraft_batches(s, combat.models(), &camera, &world, &scenery)
+                            });
                             assert_eq!(batches[0].len(), batches[1].len());
                             for ((ma, va, ca), (mb, vb, cb)) in batches[0].iter().zip(&batches[1]) {
                                 assert_eq!(ma.profile.id, mb.profile.id);
@@ -1385,7 +1387,15 @@ mod tests {
                             }
                         }
                         let [ga, gb] = [&a, &b].map(|s| {
-                            combat_geometry(s, &combat.art, &ownship, &player, &camera, &world)
+                            combat_geometry(
+                                s,
+                                &combat.art,
+                                &ownship,
+                                &player,
+                                &camera,
+                                &world,
+                                &scenery,
+                            )
                         });
                         assert_same_vertices("combat geometry", &ga.vertices, &gb.vertices);
                         assert_eq!(ga.contacts.len(), gb.contacts.len());

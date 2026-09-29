@@ -132,16 +132,17 @@ impl Renderer {
         visible: bool,
         camera: &crate::terrain::Camera,
         world: &crate::terrain::Terrain,
+        scenery: &crate::scenery::Scenery,
     ) {
         self.mirror_camera = crate::mirrors::camera(state);
         if !visible {
-            self.mirror_vertices = hornet.vertices(state, &self.mirror_camera, world);
+            self.mirror_vertices = hornet.vertices(state, &self.mirror_camera, world, scenery);
         }
         self.sim.aircraft(
             &self.device,
             &self.queue,
             hornet,
-            &hornet.vertices(state, camera, world),
+            &hornet.vertices(state, camera, world, scenery),
         );
         if !visible {
             self.sim.hide_aircraft();
@@ -198,12 +199,12 @@ impl Renderer {
     pub fn vapor(&mut self, vertices: &[f32]) {
         self.sim.vapor(&self.device, &self.queue, vertices);
     }
-    pub fn set_world(&mut self, world: &crate::terrain::Terrain) {
+    pub fn set_scenery(&mut self, scenery: &crate::scenery::Scenery) {
         self.sim = crate::sim_renderer::SimRenderer::new(
             &self.device,
             &self.queue,
             self.config.format,
-            world,
+            scenery,
             self.graphics,
             self.samples(self.graphics.anti_aliasing),
         );
@@ -234,7 +235,7 @@ impl Renderer {
 
     pub async fn new(
         window: Arc<Window>,
-        world: &crate::terrain::Terrain,
+        scenery: &crate::scenery::Scenery,
         graphics: crate::graphics::Options,
     ) -> AppResult<Self> {
         crate::diagnostics::stage("game graphics instance and surface");
@@ -395,7 +396,7 @@ impl Renderer {
             &device,
             &queue,
             config.format,
-            world,
+            scenery,
             graphics,
             samples,
         );
@@ -426,7 +427,11 @@ impl Renderer {
     }
     /// Submit before the primary pass writes the shared camera/vertex buffers.
     /// GPU-only render-to-texture, every visible frame, with no rate timer/readback.
-    fn render_mirrors(&mut self, world: &crate::terrain::Terrain) {
+    fn render_mirrors(
+        &mut self,
+        world: &crate::terrain::Terrain,
+        scenery: &crate::scenery::Scenery,
+    ) {
         if !self.mirrors_enabled || !self.cockpit.mirrors_visible {
             return;
         }
@@ -442,6 +447,7 @@ impl Renderer {
             crate::mirrors::SIZE,
             &self.mirror_camera,
             world,
+            scenery,
         );
         self.queue.submit([encoder.finish()]);
         self.sim.hide_aircraft();
@@ -452,6 +458,7 @@ impl Renderer {
         path: &std::path::Path,
         camera: &crate::terrain::Camera,
         world: &crate::terrain::Terrain,
+        scenery: &crate::scenery::Scenery,
         overlay: bool,
     ) -> AppResult<()> {
         use std::io::Write;
@@ -460,7 +467,7 @@ impl Renderer {
         } else {
             [960, 720]
         };
-        let pixels = self.scene_pixels(camera, world, width, height, overlay)?;
+        let pixels = self.scene_pixels(camera, world, scenery, width, height, overlay)?;
         let mut file = std::fs::File::create(path)?;
         write!(file, "P6\n{width} {height}\n255\n")?;
         for p in pixels.chunks_exact(4) {
@@ -473,11 +480,12 @@ impl Renderer {
         &mut self,
         camera: &crate::terrain::Camera,
         world: &crate::terrain::Terrain,
+        scenery: &crate::scenery::Scenery,
         width: u32,
         height: u32,
         overlay: bool,
     ) -> AppResult<Vec<u8>> {
-        let pending = self.submit_readback(camera, world, width, height, overlay)?;
+        let pending = self.submit_readback(camera, world, scenery, width, height, overlay)?;
         self.device.poll(wgpu::PollType::Wait {
             submission_index: None,
             timeout: Some(std::time::Duration::from_secs(30)),
@@ -509,12 +517,13 @@ impl Renderer {
         page: u8,
         camera: &crate::terrain::Camera,
         world: &crate::terrain::Terrain,
+        scenery: &crate::scenery::Scenery,
     ) -> AppResult<bool> {
         if !matches!(page, 2..=4) {
             return Err("invalid camera instrument".into());
         }
         if !self.previews.contains_key(&page) {
-            let pending = self.submit_readback(camera, world, 138, 114, false)?;
+            let pending = self.submit_readback(camera, world, scenery, 138, 114, false)?;
             self.previews.insert(page, pending);
             return Ok(true);
         }
@@ -524,6 +533,7 @@ impl Renderer {
         &mut self,
         camera: &crate::terrain::Camera,
         world: &crate::terrain::Terrain,
+        scenery: &crate::scenery::Scenery,
         width: u32,
         height: u32,
         overlay: bool,
@@ -547,7 +557,7 @@ impl Renderer {
             view_formats: &[],
         });
         if overlay {
-            self.render_mirrors(world);
+            self.render_mirrors(world, scenery);
         }
         let view = texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -559,6 +569,7 @@ impl Renderer {
             [width, height],
             camera,
             world,
+            scenery,
         );
         self.write_veil(overlay);
         if overlay {
@@ -707,7 +718,11 @@ impl Renderer {
     pub fn draw(
         &mut self,
         pixels: &[u8],
-        scene: Option<(&crate::terrain::Camera, &crate::terrain::Terrain)>,
+        scene: Option<(
+            &crate::terrain::Camera,
+            &crate::terrain::Terrain,
+            &crate::scenery::Scenery,
+        )>,
         flight_size: Option<[u32; 2]>,
     ) -> AppResult<bool> {
         self.first_frame.begin("game first frame presentation");
@@ -750,13 +765,13 @@ impl Renderer {
             },
         );
         if flight_size.is_some()
-            && let Some((_, world)) = scene
+            && let Some((_, world, scenery)) = scene
         {
-            self.render_mirrors(world);
+            self.render_mirrors(world, scenery);
         }
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        if let Some((camera, world)) = scene {
+        if let Some((camera, world, scenery)) = scene {
             self.sim.draw(
                 &self.device,
                 &self.queue,
@@ -765,6 +780,7 @@ impl Renderer {
                 [s.width, s.height],
                 camera,
                 world,
+                scenery,
             );
         }
         if flight_size.is_some() {

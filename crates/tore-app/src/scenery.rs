@@ -1,0 +1,919 @@
+//! Presentation half of the mission's world: the land and sky art, the terrain
+//! mesh, the static airport geometry, ocean motion, the resolved palette and
+//! fog, the per-camera weather presentation and the render origin. The
+//! simulation half is [`Terrain`]; code that needs the weather or the airport
+//! scene takes `&Terrain` alongside `&Scenery`.
+mod runway_cutout;
+
+use crate::{
+    AppResult,
+    terrain::{Camera, Overrides, Placements, Stance, Terrain},
+};
+use std::collections::{BTreeMap, BTreeSet};
+use tore_formats::{
+    Pic,
+    theater::{CELL_FEET, HEIGHT_FEET, TexturePlacement, Theater},
+};
+
+/// A pure camera query; contains no clock, random generator or trail history.
+pub struct ViewWeather {
+    pub palette: [[u8; 3]; 256],
+    pub fog_palette: Vec<[[u8; 3]; 256]>,
+    pub decks: [[f32; 4]; 2],
+    pub fog: [f32; 4],
+    pub haze: [u8; 3],
+    pub visual_bands: Vec<tore_formats::weather::Layer>,
+}
+
+pub struct Scenery {
+    pub ocean_motion: crate::ocean::Motion,
+    /// Source palette indices, one byte per texel. Retail terrain and sky art is
+    /// entirely weather-palette indexed, so the artwork is uploaded unresolved
+    /// and the live palette is applied on the GPU. 255 is the water cutout.
+    pub sky_indices: Vec<u8>,
+    pub celestial: Option<crate::celestial::Celestial>,
+    pub clouds: Option<crate::clouds::Clouds>,
+    pub deck_textures: BTreeMap<String, usize>,
+    pub decks: [[f32; 4]; 2],
+    pub vertices: Vec<f32>,
+    /// Per-placement geometry, rebuilt into the dynamic scene from combat HP.
+    pub static_vertices: BTreeMap<u32, Vec<f32>>,
+    pub static_lines: BTreeMap<u32, Vec<f32>>,
+    pub texture_indices: Vec<u8>,
+    pub smooth_weather: bool,
+    pub visual_bands: Vec<tore_formats::weather::Layer>,
+    pub no_sun_whiteout: bool,
+    pub auxiliary_presentations: [tore_sim::environment::Presentation; 4],
+    pub weather_presentation: tore_sim::environment::Presentation,
+    /// The palette resolved for the presented camera altitude this frame.
+    pub palette: [[u8; 3]; 256],
+    pub fog_palette: Vec<[[u8; 3]; 256]>,
+    /// The resolved visibility ramp: near feet, far feet, and the 0..1 haze
+    /// fractions at each, plus the haze color those distances blend toward.
+    pub fog: [f32; 4],
+    pub haze: [u8; 3],
+    /// This frame's render origin: moving objects' vertices are relative to it
+    /// so they keep sub-inch precision where 32-bit world coordinates step
+    /// 1/8 foot. Zero places them in world coordinates.
+    pub origin: [f64; 3],
+}
+
+/// The launch overrides the environment asks for: `TORE_WEATHER_TIME` as
+/// `HH:MM`, `TORE_WIND` as `heading,speed` in degrees and feet per second, and
+/// `TORE_CLOUD_ALTITUDE` in feet. They change the simulation, so the app reads
+/// them here and hands them to the terrain; a recording's identity replaces
+/// them.
+pub fn launch_overrides() -> AppResult<Overrides> {
+    let time = match std::env::var("TORE_WEATHER_TIME") {
+        Ok(text) => {
+            let (h, m) = text
+                .split_once(':')
+                .ok_or("TORE_WEATHER_TIME needs HH:MM")?;
+            Some([h.parse::<i32>()?, m.parse::<i32>()?])
+        }
+        Err(_) => None,
+    };
+    let wind = match std::env::var("TORE_WIND") {
+        Ok(value) => {
+            let (heading, speed) = value
+                .split_once(',')
+                .ok_or("TORE_WIND needs heading,speed in degrees/feet per second")?;
+            Some([heading.parse::<i32>()?, speed.parse::<i32>()?])
+        }
+        Err(std::env::VarError::NotPresent) => None,
+        Err(e) => return Err(e.into()),
+    };
+    let cloud_altitude = match std::env::var("TORE_CLOUD_ALTITUDE") {
+        Ok(value) => Some(value.parse::<i32>()?),
+        Err(_) => None,
+    };
+    Ok(Overrides {
+        time,
+        wind,
+        cloud_altitude,
+    })
+}
+
+/// The terrain a launch builds: `condition` picks one of the six weather
+/// choices (the mission's own weather without it), and the environment's
+/// launch overrides apply.
+pub fn launch_terrain(
+    resources: &BTreeMap<String, Vec<u8>>,
+    code: &str,
+    condition: Option<usize>,
+) -> AppResult<Terrain> {
+    Terrain::for_mission(resources, code, condition, &launch_overrides()?)
+}
+
+/// Preserve every source index. Doubling 128-square images is exact nearest
+/// replication; all retail terrain images retain the same four-cell footprint.
+fn append_ground_texture(out: &mut Vec<u8>, pic: &Pic) -> AppResult<()> {
+    if pic.width != pic.height || !matches!(pic.width, 128 | 256) || !pic.palette.is_empty() {
+        return Err("unsupported indexed ground image".into());
+    }
+    for y in 0..256 {
+        for x in 0..256 {
+            let at = (y * pic.height / 256) * pic.width + x * pic.width / 256;
+            out.push(if pic.mask[at] { pic.pixels[at] } else { 255 });
+        }
+    }
+    Ok(())
+}
+
+/// Placements without a standing combat target: destroyed, or never registered.
+fn fallen(
+    geometry: &BTreeMap<u32, Vec<f32>>,
+    targets: &[tore_sim::combat::live::Target],
+) -> BTreeSet<u32> {
+    let alive: BTreeSet<u32> = targets
+        .iter()
+        .filter(|target| target.hp > 0)
+        .map(|target| target.id)
+        .collect();
+    geometry
+        .keys()
+        .filter(|id| !alive.contains(id))
+        .copied()
+        .collect()
+}
+/// Every placement's geometry except the destroyed ones, in placement order.
+fn standing(geometry: &BTreeMap<u32, Vec<f32>>, destroyed: &BTreeSet<u32>) -> Vec<f32> {
+    let total = geometry
+        .iter()
+        .filter(|(id, _)| !destroyed.contains(id))
+        .map(|(_, vertices)| vertices.len())
+        .sum();
+    let mut out = Vec::with_capacity(total);
+    for (id, vertices) in geometry {
+        if !destroyed.contains(id) {
+            out.extend_from_slice(vertices);
+        }
+    }
+    out
+}
+
+impl Scenery {
+    /// Grid the render origin snaps to, in feet, so it is exact in 32 bits
+    /// and moves only when the camera crosses a cell.
+    pub const ORIGIN_CELL: f64 = 1024.;
+    /// Place this frame's render origin near `eye`, before any moving
+    /// object's vertices are built. Every camera drawn this frame shares it.
+    pub fn set_origin(&mut self, eye: [f64; 3]) {
+        self.origin = eye.map(|v| (v / Self::ORIGIN_CELL).round() * Self::ORIGIN_CELL);
+    }
+    /// A world position relative to the render origin.
+    pub fn relative(&self, position: [f64; 3]) -> [f64; 3] {
+        std::array::from_fn(|i| position[i] - self.origin[i])
+    }
+    /// A world position relative to the render origin, for vertices.
+    pub fn local(&self, position: [f64; 3]) -> [f32; 3] {
+        self.relative(position).map(|v| v as f32)
+    }
+
+    /// Builds the art for a finished `terrain` from the same imported
+    /// resources: ground and sky textures, the terrain mesh and the static
+    /// airport geometry.
+    pub fn build(resources: &BTreeMap<String, Vec<u8>>, terrain: &Terrain) -> AppResult<Self> {
+        let required = |n: &str| {
+            resources
+                .get(n)
+                .ok_or_else(|| format!("Missing {n}; re-import media with --import"))
+        };
+        let code = terrain.layout.trim_end_matches(".MM");
+        let base = tore_formats::theater::base_theater(&terrain.layout)
+            .ok_or("unknown retail map layout")?;
+        let weather = &terrain.weather;
+        let mut texture_indices = Vec::new();
+        let mut terrain_layers = BTreeMap::new();
+        let mut ground_layers = BTreeMap::new();
+        for (key, placement) in &terrain.environment.textures {
+            let name = placement.resource_name(base);
+            let layer = if let Some(layer) = terrain_layers.get(&name) {
+                *layer
+            } else {
+                let pic = Pic::parse(required(&name)?)?;
+                let layer = texture_indices.len() / 65536;
+                append_ground_texture(&mut texture_indices, &pic)?;
+                terrain_layers.insert(name, layer);
+                layer
+            };
+            ground_layers.insert(*key, layer);
+        }
+        let land_name = format!("{}LAND.PIC", &base[..1]);
+        let land = resources
+            .get(&land_name)
+            .or_else(|| resources.get("LAND.PIC"));
+        let land_texture = if let Some(bytes) = land {
+            let layer = texture_indices.len() / 65536;
+            append_ground_texture(&mut texture_indices, &Pic::parse(bytes)?)?;
+            Some(layer)
+        } else {
+            None
+        };
+        let mut sky_indices = Vec::new();
+        let mut deck_textures = BTreeMap::new();
+        for layer in weather.configuration().layers() {
+            for deck in &layer.decks {
+                if deck.name.is_empty() || deck_textures.contains_key(&deck.name) {
+                    continue;
+                }
+                let pic = Pic::parse(required(&deck.name)?)?;
+                if pic.width != 256 || pic.height != 256 || !pic.palette.is_empty() {
+                    return Err(format!("{}: unsupported indexed deck image", deck.name).into());
+                }
+                deck_textures.insert(
+                    deck.name.clone(),
+                    (texture_indices.len() + sky_indices.len()) / (256 * 256),
+                );
+                sky_indices.extend_from_slice(&pic.pixels);
+            }
+        }
+        // Keep a valid texture array even for LAY families with no named decks.
+        if sky_indices.is_empty() {
+            sky_indices.resize(256 * 256, 255);
+        }
+        let celestial = Some(crate::celestial::Celestial::load(
+            resources,
+            &mut sky_indices,
+            texture_indices.len() / 65536,
+            weather.configuration().sun_fill(),
+            weather.configuration().shades(),
+            weather.configuration().lighting(),
+        )?);
+        let clouds = Some(crate::clouds::Clouds::load(
+            resources,
+            &mut sky_indices,
+            texture_indices.len() / 65536,
+            terrain.environment.clouds.unwrap_or(0),
+        )?);
+        let mut out = Self {
+            ocean_motion: crate::ocean::Motion::from_environment()?,
+            sky_indices,
+            celestial,
+            clouds,
+            deck_textures,
+            decks: [[0., 1., -1., 0.]; 2],
+            vertices: Vec::new(),
+            static_vertices: BTreeMap::new(),
+            static_lines: BTreeMap::new(),
+            texture_indices,
+            smooth_weather: match std::env::var("TORE_WEATHER_SMOOTH").as_deref() {
+                Err(std::env::VarError::NotPresent) | Ok("1") => true,
+                Ok("0") => false,
+                _ => return Err("TORE_WEATHER_SMOOTH must be 0 or 1".into()),
+            },
+            visual_bands: Vec::new(),
+            no_sun_whiteout: false,
+            auxiliary_presentations: std::array::from_fn(|_| {
+                tore_sim::environment::Presentation::seeded(1).unwrap()
+            }),
+            weather_presentation: tore_sim::environment::Presentation::seeded(1)?,
+            palette: [[0; 3]; 256],
+            fog_palette: Vec::new(),
+            fog: [0.; 4],
+            haze: [0; 3],
+            origin: [0.; 3],
+        };
+        out.resolve_palette(terrain, 0.);
+        out.vertices = Self::build_mesh(
+            &terrain.theater,
+            &terrain.environment.textures,
+            &ground_layers,
+            land_texture,
+        );
+        out.build_static_geometry(resources, terrain, code)?;
+        out.recess_airport_terrain(terrain);
+        Ok(out)
+    }
+
+    /// Restarts the camera weather from its fixed seeds, as a flight's start
+    /// restarts the weather clock.
+    pub fn reset_presentations(&mut self) {
+        self.weather_presentation = tore_sim::environment::Presentation::seeded(1)
+            .expect("fixed valid weather presentation seed");
+        self.auxiliary_presentations = std::array::from_fn(|_| self.weather_presentation.clone());
+    }
+
+    /// The static airport geometry, one entry per drawable placement, under a
+    /// 32 MiB budget. Its textures are appended to the sky array.
+    fn build_static_geometry(
+        &mut self,
+        resources: &BTreeMap<String, Vec<u8>>,
+        terrain: &Terrain,
+        code: &str,
+    ) -> AppResult<()> {
+        let sources = Placements::load(resources, code)?;
+        for (main_shape, error) in &sources.unreadable {
+            log::warn!("Airport scene: {main_shape} retained without visual geometry: {error}");
+        }
+        let mut static_layers = BTreeMap::<String, crate::static_art::Image>::new();
+        let mut static_float_count = 0usize;
+        for placement in &sources.layout.placements {
+            let id = 0x4000_0000u32
+                .checked_add(placement.key.ordinal)
+                .ok_or("airport object ID overflow")?;
+            let Some(shape) = sources.shapes.get(&placement.object_type) else {
+                continue;
+            };
+            let ground = f64::from(
+                terrain.height(placement.position[0] as f32, placement.position[2] as f32),
+            );
+            let Some(Stance {
+                scale,
+                basis,
+                origin,
+                ..
+            }) = sources.stance(placement, ground)
+            else {
+                continue;
+            };
+            let mut instance_vertices = Vec::new();
+            for face in &shape.faces {
+                if face.positions.len() < 3 {
+                    continue;
+                }
+                let image = if face.texture.is_empty() || face.uv.is_empty() {
+                    None
+                } else {
+                    let name = face.texture.to_ascii_uppercase();
+                    if !static_layers.contains_key(&name) {
+                        let pic = Pic::parse(
+                            resources
+                                .get(&name)
+                                .ok_or_else(|| format!("missing static texture {name}"))?,
+                        )?;
+                        let first = (self.texture_indices.len() + self.sky_indices.len()) / 65536;
+                        let image =
+                            crate::static_art::Image::append(&pic, &mut self.sky_indices, first)?;
+                        static_layers.insert(name.clone(), image);
+                    }
+                    static_layers.get(&name)
+                };
+                for triangle in 1..face.positions.len() - 1 {
+                    if static_float_count + instance_vertices.len() + 30 > 32 * 1024 * 1024 / 4 {
+                        return Err("static scene exceeds 32 MiB geometry budget".into());
+                    }
+                    let mut points = Vec::with_capacity(3);
+                    for vertex_index in [0, triangle, triangle + 1] {
+                        let point = face.positions[vertex_index];
+                        let right = f64::from(point[0]) * scale;
+                        let up = f64::from(point[2]) * scale;
+                        let forward = f64::from(point[1]) * scale;
+                        let position = std::array::from_fn::<_, 3, _>(|axis| {
+                            origin[axis]
+                                + basis.right[axis] * right
+                                + basis.up[axis] * up
+                                + basis.forward[axis] * forward
+                        });
+                        let uv = face.uv.get(vertex_index).copied().unwrap_or([0.0; 2]);
+                        let uv = image.map_or([0., 0.], |image| {
+                            [uv[0] + 0.5, image.height as f32 - 0.5 - uv[1]]
+                        });
+                        points.push([
+                            position[0] as f32,
+                            position[1] as f32,
+                            position[2] as f32,
+                            uv[0],
+                            uv[1],
+                            -1.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            f32::from(face.colors[vertex_index]) + f32::from(face.fog as u8) * 256.,
+                        ]);
+                    }
+                    if let Some(image) = image {
+                        image.triangle(
+                            points.try_into().expect("three triangle corners"),
+                            &mut instance_vertices,
+                            32 * 1024 * 1024 / 4 - static_float_count,
+                        )?;
+                    } else {
+                        instance_vertices.extend(points.into_iter().flatten());
+                    }
+                }
+            }
+            let mut line_vertices = Vec::new();
+            for line in &shape.lines {
+                for point in line.positions {
+                    let [right, forward, up] = point.map(|v| f64::from(v) * scale);
+                    let position = std::array::from_fn::<_, 3, _>(|axis| {
+                        origin[axis]
+                            + basis.right[axis] * right
+                            + basis.up[axis] * up
+                            + basis.forward[axis] * forward
+                    });
+                    line_vertices.extend([
+                        position[0] as f32,
+                        position[1] as f32,
+                        position[2] as f32,
+                        0.,
+                        0.,
+                        -1.,
+                        0.,
+                        0.,
+                        0.,
+                        f32::from(line.color) + f32::from(line.fog as u8) * 256.,
+                    ]);
+                }
+            }
+            static_float_count += line_vertices.len();
+            self.static_lines.insert(id, line_vertices);
+            static_float_count += instance_vertices.len();
+            if static_float_count > 32 * 1024 * 1024 / 4 {
+                return Err("static scene exceeds 32 MiB geometry budget".into());
+            }
+            self.static_vertices.insert(id, instance_vertices);
+        }
+        Ok(())
+    }
+
+    /// The terrain triangles: `textures` are the shoreline and ground art
+    /// placements and `layers` the texture layer each was uploaded to.
+    fn build_mesh(
+        t: &Theater,
+        textures: &BTreeMap<(i32, i32), TexturePlacement>,
+        layers: &BTreeMap<(i32, i32), usize>,
+        land_texture: Option<usize>,
+    ) -> Vec<f32> {
+        let mut vertices = Vec::new();
+        // Same four sample corners as 0x4a9d00. Fixed triangulation and full-resolution
+        // rendering are our first GPU implementation, not the original adaptive tessellator.
+        for y in 0..t.rows - 1 {
+            for x in 0..t.cols - 1 {
+                let c = t.cell(x, y);
+                let key = ((x & !3) as i32, (y & !3) as i32);
+                let placement = textures.get(&key);
+                let layer = placement.map_or_else(
+                    || land_texture.map_or(-1.0, |l| l as f32),
+                    |_| layers[&key] as f32,
+                );
+                // Untextured water reveals the shared ocean/horizon pass. A
+                // shoreline texture defines coverage even on a water base cell.
+                if placement.is_none() && c.color == 255 {
+                    continue;
+                }
+                let index = f32::from(c.color);
+                for (dx, dy) in [(0, 0), (0, 1), (1, 0), (1, 0), (0, 1), (1, 1)] {
+                    let sample = t.cell(x + dx, y + dy);
+                    let (mut u, mut v) = (((x % 4 + dx) as f32) / 4.0, ((y % 4 + dy) as f32) / 4.0);
+                    // 0x4aa9ac chooses quarter-turn UV transforms; V follows north-up world.
+                    match placement.map_or(0, |p| p.rotation) {
+                        1 => (u, v) = (1.0 - v, u),
+                        2 => (u, v) = (1.0 - u, 1.0 - v),
+                        3 => (u, v) = (v, 1.0 - u),
+                        _ => {}
+                    }
+                    vertices.extend_from_slice(&[
+                        (x + dx) as f32 * CELL_FEET,
+                        sample.elevation as f32 * HEIGHT_FEET,
+                        (y + dy) as f32 * CELL_FEET,
+                        u,
+                        1.0 - v,
+                        layer,
+                        0.0,
+                        0.0,
+                        0.0,
+                        index,
+                    ]);
+                }
+            }
+        }
+        vertices
+    }
+    /// Split at footprint edges before lowering the rendered ground, so
+    /// neighboring terrain and all physics queries retain their original data.
+    fn recess_airport_terrain(&mut self, terrain: &Terrain) {
+        self.vertices = runway_cutout::terrain(&self.vertices, &terrain.airport_scene.runways);
+    }
+
+    /// Placement geometry whose object still has a standing combat target.
+    pub fn visible_static_vertices(&self, targets: &[tore_sim::combat::live::Target]) -> Vec<f32> {
+        self.visible_static_vertices_where(&fallen(&self.static_vertices, targets))
+    }
+    pub fn visible_static_lines(&self, targets: &[tore_sim::combat::live::Target]) -> Vec<f32> {
+        self.visible_static_lines_where(&fallen(&self.static_lines, targets))
+    }
+    /// Placement geometry except the `destroyed` objects, for a mission
+    /// replay that recorded which objects were destroyed.
+    pub fn visible_static_vertices_where(&self, destroyed: &BTreeSet<u32>) -> Vec<f32> {
+        standing(&self.static_vertices, destroyed)
+    }
+    pub fn visible_static_lines_where(&self, destroyed: &BTreeSet<u32>) -> Vec<f32> {
+        standing(&self.static_lines, destroyed)
+    }
+
+    pub fn glare_enabled(&self) -> bool {
+        !self.no_sun_whiteout && self.celestial.as_ref().is_some_and(|c| c.sun_effects)
+    }
+
+    /// Each fixed camera slot advances once per simulation tick, even if hidden.
+    /// Slots have independent seeded presentation state; queries never consume RNG.
+    pub fn step_view_weather(&mut self, terrain: &Terrain, camera: &Camera, speed_fps: f64) {
+        let altitude = camera.position[1];
+        let alignment = if self.glare_enabled() {
+            terrain
+                .weather
+                .sample(altitude)
+                .and_then(|l| {
+                    tore_sim::environment::sun_angles(&l, terrain.weather.seconds_of_day())
+                })
+                .map_or(-1., |a| {
+                    let sun = crate::celestial::rotate([0., 0., 1.], a);
+                    let view = camera.uniform(1., [0.; 4], [0; 3]);
+                    (0..3)
+                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
+                        .sum()
+                })
+        } else {
+            -1.
+        };
+        let visual_target = if self.smooth_weather && self.glare_enabled() {
+            terrain
+                .weather
+                .sample(altitude)
+                .and_then(|layer| crate::celestial::visual_sun_direction(&layer, &terrain.weather))
+                .map_or(0., |sun| {
+                    let view = camera.uniform(1., [0.; 4], [0; 3]);
+                    let alignment: f64 = (0..3)
+                        .map(|i| f64::from(sun[i]) * f64::from(view[12 + i]))
+                        .sum();
+                    let response = (((alignment.clamp(-1., 1.) * (32767. * 32767. / 65536.))
+                        .floor()
+                        - 15564.)
+                        / 3.)
+                        .clamp(0., 255.);
+                    response
+                        * f64::from(crate::celestial::glare_strength(
+                            terrain, self, altitude, sun,
+                        ))
+                })
+        } else {
+            0.
+        };
+        let presentation = if camera.weather_slot == 0 {
+            &mut self.weather_presentation
+        } else {
+            &mut self.auxiliary_presentations[camera.weather_slot - 1]
+        };
+        let previous_visual = presentation.visual_sun;
+        presentation.step_with_alignment(&terrain.weather, altitude, speed_fps, alignment);
+        if self.smooth_weather {
+            presentation.visual_sun =
+                previous_visual + (visual_target - previous_visual).clamp(-16. / 7.2, 16. / 7.2);
+        }
+    }
+
+    /// Presentation only: resolves the palette for one camera altitude without
+    /// advancing state, so mirrors and camera panels stay on the same instant.
+    pub fn resolve_palette(&mut self, terrain: &Terrain, altitude_ft: f64) {
+        let view = self.sample_view(terrain, altitude_ft, 0);
+        self.palette = view.palette;
+        self.fog_palette = view.fog_palette;
+        self.decks = view.decks;
+        self.fog = view.fog;
+        self.haze = view.haze;
+        self.visual_bands = view.visual_bands;
+    }
+
+    pub fn sample_view(&self, terrain: &Terrain, altitude_ft: f64, slot: usize) -> ViewWeather {
+        let presentation = if slot == 0 {
+            &self.weather_presentation
+        } else {
+            &self.auxiliary_presentations[slot - 1]
+        };
+        let mut out = ViewWeather {
+            palette: self.palette,
+            fog_palette: self.fog_palette.clone(),
+            decks: self.decks,
+            fog: self.fog,
+            haze: self.haze,
+            visual_bands: Vec::new(),
+        };
+        let visual = self
+            .smooth_weather
+            .then(|| terrain.weather.visual_sample(altitude_ft))
+            .flatten();
+        let Some(layer) = terrain.weather.sample(altitude_ft) else {
+            return out;
+        };
+        out.decks = layer.decks.clone().map(|deck| {
+            [
+                deck.altitude_feet as f32,
+                2_f32.powi(deck.tile_exponent),
+                self.deck_textures
+                    .get(&deck.name)
+                    .map_or(-1., |i| *i as f32),
+                0.,
+            ]
+        });
+        // Texture selection and draw flags retain native scheduling. Only the
+        // color/fog parameters below use fractional-time presentation samples.
+        let layer = visual.as_ref().map_or(layer.clone(), |s| s.layer.clone());
+        out.palette = tore_formats::weather::expand_effects(
+            terrain.weather.configuration().base_palette(),
+            &layer,
+            presentation.tint,
+            if self.glare_enabled() {
+                presentation.sun_whitening
+            } else {
+                0
+            },
+        );
+        if let Some(visual) = visual {
+            out.visual_bands = visual.bands.clone();
+            out.palette = visual.palette(
+                presentation.visual_tint,
+                if self.glare_enabled() {
+                    presentation.visual_sun
+                } else {
+                    0.
+                },
+            );
+        }
+        out.fog_palette = terrain
+            .weather
+            .configuration()
+            .shade_remap(layer.shade)
+            .levels
+            .iter()
+            .map(|indices| indices.map(|index| out.palette[usize::from(index)]))
+            .collect();
+        let feet = |v: i32| (f64::from(v) * tore_formats::weather::DISTANCE_FEET) as f32;
+        out.fog = [
+            feet(layer.fog_near),
+            feet(layer.fog_far),
+            layer.fog_near_density.clamp(0, 256) as f32 / 256.,
+            layer.fog_far_density.clamp(0, 256) as f32 / 256.,
+        ];
+        // Six-bit source components, the same expansion the palette ramps use.
+        out.haze = layer.shade.map(|c| ((u16::from(c) * 255 + 31) / 63) as u8);
+        out
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    /// A scenery with no art: the palette and fog the old synthetic world had.
+    pub(crate) fn scenery() -> Scenery {
+        Scenery {
+            ocean_motion: crate::ocean::Motion::default(),
+            sky_indices: vec![],
+            celestial: None,
+            clouds: None,
+            deck_textures: BTreeMap::new(),
+            decks: [[0., 1., -1., 0.]; 2],
+            vertices: vec![],
+            static_vertices: BTreeMap::new(),
+            static_lines: BTreeMap::new(),
+            texture_indices: vec![],
+            smooth_weather: true,
+            visual_bands: Vec::new(),
+            no_sun_whiteout: false,
+            auxiliary_presentations: std::array::from_fn(|_| {
+                tore_sim::environment::Presentation::seeded(1).unwrap()
+            }),
+            weather_presentation: tore_sim::environment::Presentation::seeded(1).unwrap(),
+            palette: [[100; 3]; 256],
+            fog_palette: vec![[[100; 3]; 256]; 10],
+            fog: [0., 1., 0., 0.],
+            haze: [0; 3],
+            origin: [0.; 3],
+        }
+    }
+    #[test]
+    fn smaller_ground_art_preserves_every_source_texel_and_water() {
+        let mut pic = Pic {
+            width: 128,
+            height: 128,
+            pixels: vec![93; 128 * 128],
+            mask: vec![true; 128 * 128],
+            palette: vec![],
+            glyphs: vec![],
+        };
+        pic.pixels[1] = 255;
+        pic.pixels[128 * 127 + 127] = 17;
+        pic.mask[128] = false;
+        let mut bytes = Vec::new();
+        append_ground_texture(&mut bytes, &pic).unwrap();
+        assert_eq!(bytes.len(), 65536);
+        for y in 0..256 {
+            for x in 0..256 {
+                let at = (y / 2) * 128 + x / 2;
+                assert_eq!(
+                    bytes[y * 256 + x],
+                    if pic.mask[at] { pic.pixels[at] } else { 255 }
+                );
+            }
+        }
+        pic.width = 127;
+        assert!(append_ground_texture(&mut Vec::new(), &pic).is_err());
+    }
+    #[test]
+    fn listed_destroyed_objects_hide_as_their_fallen_targets_do() {
+        let mut w = scenery();
+        for id in [1, 2, 3] {
+            w.static_vertices.insert(id, vec![id as f32; 10]);
+            w.static_lines.insert(id, vec![-(id as f32); 10]);
+        }
+        // Object 1 stands, 2 was destroyed and 3 never had a target.
+        let mut targets = crate::ai_wings::tests::spawned();
+        targets.truncate(2);
+        targets[1].hp = 0;
+        let expected = |ids: &[u32], sign: f32| -> Vec<f32> {
+            ids.iter()
+                .flat_map(|id| vec![sign * *id as f32; 10])
+                .collect()
+        };
+        assert_eq!(w.visible_static_vertices(&targets), expected(&[1], 1.));
+        assert_eq!(w.visible_static_lines(&targets), expected(&[1], -1.));
+        let destroyed = BTreeSet::from([2]);
+        assert_eq!(
+            w.visible_static_vertices_where(&destroyed),
+            expected(&[1, 3], 1.)
+        );
+        assert_eq!(
+            w.visible_static_lines_where(&destroyed),
+            expected(&[1, 3], -1.)
+        );
+    }
+    /// A world's identity survives a recording header, and rebuilding from it
+    /// restores the launch settings exactly, whatever set the wind.
+    #[test]
+    fn water_has_no_opaque_fallback_but_shore_art_keeps_its_geometry() {
+        let mut terrain = crate::terrain::tests::world();
+        terrain.theater.cells[0].color = 255;
+        let height = terrain.height(2048., 2048.);
+        let mut textures = BTreeMap::new();
+        let mesh = |terrain: &Terrain, textures: &_, layers: &_| {
+            Scenery::build_mesh(&terrain.theater, textures, layers, None)
+        };
+        assert!(
+            mesh(&terrain, &textures, &BTreeMap::new()).is_empty(),
+            "open water must expose the ocean pass"
+        );
+        assert_eq!(terrain.height(2048., 2048.), height);
+
+        // A water-colored base cell can still contain opaque beach artwork.
+        // All four rotations must retain its geometry and texture identity.
+        let layers = BTreeMap::from([((0, 0), 2)]);
+        for rotation in 0..4 {
+            textures.insert(
+                (0, 0),
+                TexturePlacement {
+                    col: 0,
+                    row: 0,
+                    texture: 2,
+                    rotation,
+                    resource: None,
+                },
+            );
+            let vertices = mesh(&terrain, &textures, &layers);
+            assert_eq!(vertices.len(), 6 * 10);
+            assert!(vertices.chunks_exact(10).all(|v| v[5] == 2.));
+        }
+        textures.clear();
+        terrain.theater.cells[0].color = 100;
+        assert_eq!(
+            mesh(&terrain, &textures, &BTreeMap::new()).len(),
+            6 * 10,
+            "untextured land stays opaque"
+        );
+    }
+
+    #[test]
+    fn whiteout_cheat_clears_all_views_without_ticks_and_preserves_sun() {
+        use tore_formats::weather::shape::{Primitive, WeatherShape};
+        let mut w = crate::terrain::tests::world();
+        let mut s = scenery();
+        let mut module =
+            tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(1))
+                .unwrap();
+        let l = &mut module.layers[0];
+        l.flags = 8;
+        l.start_seconds = 0;
+        l.end_seconds = 86399;
+        l.sunrise_seconds = 0;
+        l.sunset_seconds = 86400;
+        let angles = tore_sim::environment::sun_angles(l, 9 * 3600).unwrap();
+        w.weather = tore_sim::environment::Environment::new(
+            tore_sim::environment::Configuration::new(module, 9, 0, 0, None).unwrap(),
+        );
+        let empty = WeatherShape {
+            primitives: vec![],
+            scale_exponent: 8,
+            publishes_point: false,
+        };
+        s.celestial = Some(crate::celestial::Celestial {
+            sun: WeatherShape {
+                primitives: vec![Primitive::Circle {
+                    center: [0., 0., 160.],
+                    diameter: 4,
+                    fill: 254,
+                }],
+                ..empty.clone()
+            },
+            moon: empty.clone(),
+            stars: empty,
+            sun_effects: true,
+            moon_texture: 0,
+            moon_uv: [0., 0., 1., 1.],
+            sun_remap: 0,
+            shade_rows: BTreeMap::new(),
+            light_rows: [0; 2],
+            flare: tore_formats::weather::flare::Layout {
+                circles: vec![tore_formats::weather::flare::Circle {
+                    offset_percent: 50,
+                    radius: 10,
+                    fill: 265,
+                }],
+            },
+        });
+        let sun = crate::celestial::rotate([0., 0., 1.], angles);
+        let mut forward = Camera::new();
+        forward.position[1] = 5000.;
+        forward.yaw = sun[0].atan2(sun[2]);
+        forward.pitch = sun[1].asin() - 0.1;
+        let mut rear = Camera::new();
+        rear.weather_slot = 1;
+        rear.position = forward.position;
+        rear.yaw = forward.yaw + std::f32::consts::PI;
+        rear.pitch = -forward.pitch;
+        for _ in 0..240 {
+            w.weather.step();
+            s.step_view_weather(&w, &forward, 700.);
+            s.step_view_weather(&w, &rear, 700.);
+        }
+        assert!(s.weather_presentation.sun_whitening > 0);
+        assert_eq!(s.auxiliary_presentations[0].sun_whitening, 0);
+        assert!(!crate::lens_flare::circles(&w, &s, &forward, [1280, 720]).is_empty());
+        let sun_geometry = s.celestial.as_ref().unwrap().sun_uniform(&w, &s, 5000.);
+        let bright = s.sample_view(&w, 5000., 0).palette;
+        let ticks = w.weather.ticks();
+        s.no_sun_whiteout = true;
+        assert!(crate::lens_flare::circles(&w, &s, &forward, [1280, 720]).is_empty());
+        assert_ne!(bright, s.sample_view(&w, 5000., 0).palette);
+        assert_eq!(
+            s.sample_view(&w, 5000., 0).palette,
+            s.sample_view(&w, 5000., 1).palette
+        );
+        assert_eq!(
+            sun_geometry,
+            s.celestial.as_ref().unwrap().sun_uniform(&w, &s, 5000.)
+        );
+        assert_eq!(ticks, w.weather.ticks());
+    }
+
+    #[test]
+    fn camera_weather_is_altitude_local_and_query_order_is_pure() {
+        let mut module =
+            tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(2))
+                .unwrap();
+        for layer in &mut module.layers {
+            layer.start_seconds = 0;
+            layer.end_seconds = 86399;
+        }
+        module.layers[0].high_feet = 8000;
+        module.layers[0].fog_far = 100;
+        module.layers[0].tint_scalar = 200;
+        module.layers[1].low_feet = 7500;
+        module.layers[1].fog_far = 1000;
+        module.layers[1].tint_scalar = 0;
+        let mut w = crate::terrain::tests::world();
+        let mut s = scenery();
+        w.weather = tore_sim::environment::Environment::new(
+            tore_sim::environment::Configuration::new(module, 12, 0, 0, None).unwrap(),
+        );
+        let mut low = Camera::new();
+        low.position[1] = 7000.;
+        let mut high = Camera::new();
+        high.weather_slot = 1;
+        high.position[1] = 9000.;
+        for _ in 0..120 {
+            w.weather.step();
+            s.step_view_weather(&w, &low, 700.);
+            s.step_view_weather(&w, &high, 700.);
+        }
+        assert_ne!(
+            s.weather_presentation.tint,
+            s.auxiliary_presentations[0].tint
+        );
+        let state = (
+            w.weather.clone(),
+            s.weather_presentation.clone(),
+            s.auxiliary_presentations.clone(),
+        );
+        let low_view = s.sample_view(&w, 7000., 0);
+        let high_view = s.sample_view(&w, 9000., 1);
+        assert_ne!(low_view.fog, high_view.fog);
+        for _ in 0..10 {
+            assert_eq!(high_view.palette, s.sample_view(&w, 9000., 1).palette);
+            assert_eq!(low_view.palette, s.sample_view(&w, 7000., 0).palette);
+        }
+        assert_eq!(
+            state,
+            (w.weather, s.weather_presentation, s.auxiliary_presentations)
+        );
+    }
+}

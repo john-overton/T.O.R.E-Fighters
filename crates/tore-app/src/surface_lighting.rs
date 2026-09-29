@@ -1,6 +1,9 @@
 //! Shared, opinionated surface lighting and geometric shadows.
 //! Player-visible rules: docs/spec/surface-lighting.md.
-use crate::terrain::{Camera, Terrain};
+use crate::{
+    scenery::Scenery,
+    terrain::{Camera, Terrain},
+};
 use wgpu::util::DeviceExt;
 
 pub const MAP_SIZE: u32 = 2048;
@@ -311,6 +314,7 @@ impl SurfaceLighting {
         queue: &wgpu::Queue,
         camera: &Camera,
         world: &Terrain,
+        scenery: &Scenery,
         flares: &[crate::countermeasure_renderer::FlareLight],
     ) -> bool {
         let layer = world.weather.sample(camera.position[1]);
@@ -322,13 +326,13 @@ impl SurfaceLighting {
             .as_ref()
             .map(|l| crate::celestial::rotate([0., 0., 1.], [l.moon_azimuth, l.moon_elevation]))
             .unwrap_or([0., 1., 0.]);
-        let radius = world
+        let radius = scenery
             .celestial
             .as_ref()
             .and_then(|c| c.solid_sun_radius())
             .unwrap_or(0.5_f32.to_radians());
         let (light, strength) = visible_sun(sun, radius);
-        let active = world.smooth_weather && strength > 0.;
+        let active = scenery.smooth_weather && strength > 0.;
         let mut values = Vec::with_capacity(64);
         for extent in EXTENTS {
             values.extend(projection(camera.position.map(|v| v as f32), light, extent));
@@ -343,7 +347,7 @@ impl SurfaceLighting {
             light[0],
             light[1],
             light[2],
-            f32::from(world.smooth_weather),
+            f32::from(scenery.smooth_weather),
         ]);
         values.extend([moon[0], moon[1], moon[2], 0.]);
         let origin = camera.position;

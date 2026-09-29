@@ -3,6 +3,7 @@ use crate::{
     flight,
     hud::Paint,
     menu::{Canvas, Sprite},
+    scenery::Scenery,
     terrain::Terrain,
 };
 use tore_formats::text::GlyphCodes;
@@ -293,10 +294,12 @@ impl Map {
         }
         .text(font, "CLICK TO TOGGLE", 504, 310);
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         pixels: &mut [u8],
         world: &Terrain,
+        scenery: &Scenery,
         state: &flight::State,
         combat: &live::State,
         font: &Font,
@@ -318,7 +321,7 @@ impl Map {
                             if cell.color == 255 {
                                 [65, 119, 137]
                             } else {
-                                world.palette[usize::from(cell.color)]
+                                scenery.palette[usize::from(cell.color)]
                             }
                         },
                         |map| {

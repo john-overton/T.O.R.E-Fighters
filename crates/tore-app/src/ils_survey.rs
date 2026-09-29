@@ -208,7 +208,7 @@ pub fn run(
     let mut problems = Vec::new();
     let mut ends = 0;
     for code in codes {
-        let world = Terrain::for_theater(resources, code)?;
+        let world = crate::scenery::launch_terrain(resources, code, None)?;
         let reports = survey_world(code, &world);
         let mut worst = 0_f64;
         for r in &reports {

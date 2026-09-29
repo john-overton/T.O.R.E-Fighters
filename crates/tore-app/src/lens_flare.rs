@@ -1,7 +1,10 @@
 //! Source lens-flare circles over a completed world view, before cockpit/UI.
 //! Smooth presentation adds continuous optical emission; stepped compatibility
 //! retains the imported palette remaps inside the original circles.
-use crate::terrain::{Camera, Terrain};
+use crate::{
+    scenery::Scenery,
+    terrain::{Camera, Terrain},
+};
 
 pub struct LensFlare {
     pipeline: wgpu::RenderPipeline,
@@ -34,21 +37,26 @@ fn texture(
 }
 /// Source 0x4b4990 gates and offsets, normalized to the host drawable size.
 /// Native x/y shifts and whole-pixel circle rounding are projection adaptations.
-pub fn circles(world: &Terrain, camera: &Camera, size: [u32; 2]) -> Vec<[f32; 4]> {
-    let Some(celestial) = &world.celestial else {
+pub fn circles(
+    world: &Terrain,
+    scenery: &Scenery,
+    camera: &Camera,
+    size: [u32; 2],
+) -> Vec<[f32; 4]> {
+    let Some(celestial) = &scenery.celestial else {
         return vec![];
     };
-    if !world.glare_enabled() {
+    if !scenery.glare_enabled() {
         return vec![];
     }
     let Some(layer) = world.weather.sample(camera.position[1]) else {
         return vec![];
     };
-    let sun = if world.smooth_weather {
+    let sun = if scenery.smooth_weather {
         let Some(sun) = crate::celestial::visual_sun_direction(&layer, &world.weather) else {
             return vec![];
         };
-        if crate::celestial::glare_strength(world, camera.position[1], sun) <= 0. {
+        if crate::celestial::glare_strength(world, scenery, camera.position[1], sun) <= 0. {
             return vec![];
         }
         sun
@@ -153,11 +161,12 @@ impl LensFlare {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         world: &Terrain,
+        scenery: &Scenery,
         camera: &Camera,
         size: [u32; 2],
         palette: &[[u8; 3]; 256],
     ) -> Option<wgpu::TextureView> {
-        let circles = circles(world, camera, size);
+        let circles = circles(world, scenery, camera, size);
         if circles.is_empty() {
             return None;
         }
@@ -202,13 +211,13 @@ impl LensFlare {
             });
             self.backing = Some((source, bind));
         }
-        let strength = if world.smooth_weather {
+        let strength = if scenery.smooth_weather {
             world
                 .weather
                 .sample(camera.position[1])
                 .and_then(|layer| crate::celestial::visual_sun_direction(&layer, &world.weather))
                 .map_or(0., |sun| {
-                    crate::celestial::glare_strength(world, camera.position[1], sun)
+                    crate::celestial::glare_strength(world, scenery, camera.position[1], sun)
                 })
         } else {
             1.
@@ -216,7 +225,7 @@ impl LensFlare {
         let mut values = vec![
             circles.len() as f32,
             strength,
-            f32::from(world.smooth_weather),
+            f32::from(scenery.smooth_weather),
             0.,
         ];
         values.extend(circles.into_iter().flatten());

@@ -2,6 +2,7 @@
 use crate::{
     AppResult, flight,
     menu::Sprite,
+    scenery::Scenery,
     terrain::{Camera, Terrain},
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -264,24 +265,25 @@ impl Airframe {
     pub fn cockpit_palette(
         &self,
         world: &Terrain,
+        scenery: &Scenery,
         altitude: f64,
         brightness: i16,
     ) -> [[u8; 3]; 256] {
-        let mut colors = world.palette;
+        let mut colors = scenery.palette;
         let mut source = [[0; 3]; 256];
         for (out, color) in source.iter_mut().zip(&self.cockpit_pic.palette) {
             *out = color.map(|c| ((u16::from(c) * 63 + 127) / 255) as u8);
         }
         tore_formats::weather::palette::apply_hud_brightness(&mut source, brightness)
             .expect("validated HUD brightness");
-        if world.smooth_weather
+        if scenery.smooth_weather
             && let Some(sample) = world.weather.visual_sample(altitude)
         {
             return sample.palette_with_prefix(
                 Some(source[..64].try_into().expect("fixed cockpit prefix")),
-                world.weather_presentation.visual_tint,
-                if world.glare_enabled() {
-                    world.weather_presentation.visual_sun
+                scenery.weather_presentation.visual_tint,
+                if scenery.glare_enabled() {
+                    scenery.weather_presentation.visual_sun
                 } else {
                     0.
                 },
@@ -289,8 +291,8 @@ impl Airframe {
         }
         tore_formats::weather::palette::apply_sun_whitening(
             &mut source,
-            if world.glare_enabled() {
-                world.weather_presentation.sun_whitening
+            if scenery.glare_enabled() {
+                scenery.weather_presentation.sun_whitening
             } else {
                 0
             },
@@ -300,7 +302,7 @@ impl Airframe {
             tore_formats::weather::palette::apply_tint(
                 &mut source,
                 layer.tint,
-                world.weather_presentation.tint,
+                scenery.weather_presentation.tint,
             )
             .expect("validated cockpit palette");
         }
@@ -474,8 +476,14 @@ impl Airframe {
             .collect()
     }
 
-    pub fn vertices(&self, s: &flight::State, camera: &Camera, world: &Terrain) -> Vec<f32> {
-        self.visual_vertices(s, camera, world, false)
+    pub fn vertices(
+        &self,
+        s: &flight::State,
+        camera: &Camera,
+        world: &Terrain,
+        scenery: &Scenery,
+    ) -> Vec<f32> {
+        self.visual_vertices(s, camera, world, scenery, false)
     }
     /// Largest bounding-box dimension of the clean airframe in feet. The
     /// spotting aid uses it to judge how large the aircraft appears on screen.
@@ -493,14 +501,16 @@ impl Airframe {
         s: &flight::State,
         camera: &Camera,
         world: &Terrain,
+        scenery: &Scenery,
     ) -> Vec<f32> {
-        self.visual_vertices(s, camera, world, true)
+        self.visual_vertices(s, camera, world, scenery, true)
     }
     fn visual_vertices(
         &self,
         s: &flight::State,
         camera: &Camera,
         world: &Terrain,
+        scenery: &Scenery,
         fragment: bool,
     ) -> Vec<f32> {
         if s.wreck_gone() {
@@ -524,7 +534,7 @@ impl Airframe {
             direction.map(|v| (v * 32767.).round().clamp(-32767., 32767.) as i16)
         });
         let model_scale = self.rig.as_ref().map_or(1. / 3., |r| r.scale());
-        let at = world.local(s.position);
+        let at = scenery.local(s.position);
         let hornet_rig = self.profile.id == tore_formats::aircraft::AircraftId::F18;
         let damaged = if fragment {
             crate::damage_art::DamageArt::variant(self.profile.id, s.damage_variant)
@@ -592,7 +602,7 @@ impl Airframe {
         };
         // Smooth mode submits complete geometry for camera-independent shadows,
         // hiding only the rear face of each double-sided panel.
-        let hidden = if world.smooth_weather {
+        let hidden = if scenery.smooth_weather {
             crate::aircraft_animation::hidden_twins(&faces, facing)
         } else {
             vec![false; faces.len()]
@@ -609,7 +619,7 @@ impl Airframe {
                 self.damage_art.surfaces(&f, &s.damage_regions, model_scale)
             };
             for f in surfaces {
-                if !world.smooth_weather && facing(&f) <= 0. {
+                if !scenery.smooth_weather && facing(&f) <= 0. {
                     continue;
                 }
 
@@ -617,10 +627,10 @@ impl Airframe {
                 // Smooth surfaces receive continuous GPU lighting instead.
                 // Animated world normals and light angles use the host float rig;
                 // the following Q15 dot, row selection and remap order are translated.
-                let light_row = if !world.smooth_weather && f.subtype & 0x20 != 0 {
+                let light_row = if !scenery.smooth_weather && f.subtype & 0x20 != 0 {
                     f.normal
                         .zip(lighting)
-                        .zip(world.celestial.as_ref())
+                        .zip(scenery.celestial.as_ref())
                         .map(|((normal, light), celestial)| {
                             let normal =
                                 orient(normal).map(|v| v.round().clamp(-32767., 32767.) as i16);
@@ -696,7 +706,7 @@ impl Airframe {
                             self.palette[f.colors[j] as usize]
                         };
                         let textured = !f.uv.is_empty() && !cold_nozzle;
-                        let layer = if flame && world.smooth_weather {
+                        let layer = if flame && scenery.smooth_weather {
                             if textured { -7. } else { -6. }
                         } else if engine_face {
                             -3. - crate::engine_material::heat(s)

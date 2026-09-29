@@ -96,7 +96,7 @@ impl App {
         }
         if let Some(renderer) = &mut self.renderer {
             if entered {
-                renderer.set_world(&self.world.terrain);
+                renderer.set_scenery(&self.scenery);
                 renderer.prepare_aircraft(&self.hornet);
             }
             renderer.window.set_cursor_visible(true);
@@ -361,7 +361,13 @@ impl App {
                             println!("Replay screenshot: {}", request.path.display());
                         })
                     } else {
-                        renderer.capture_sim(&request.path, viewer.camera(), &viewer.world, true)
+                        renderer.capture_sim(
+                            &request.path,
+                            viewer.camera(),
+                            &viewer.world,
+                            &viewer.scenery,
+                            true,
+                        )
                     };
                     if let Err(error) = written {
                         self.error = Some(error);

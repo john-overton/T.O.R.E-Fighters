@@ -9,6 +9,7 @@ use crate::{
     AppResult,
     aircraft::Airframe,
     flight,
+    scenery::Scenery,
     sim_renderer::{CombatGeometry, Contact},
     terrain::{Camera, Terrain},
 };
@@ -472,6 +473,7 @@ pub fn aircraft_batches<'a>(
     models: &'a [Airframe],
     camera: &Camera,
     world: &Terrain,
+    scenery: &Scenery,
 ) -> Vec<(&'a Airframe, Vec<f32>, Vec<Contact>)> {
     snapshot
         .models
@@ -489,11 +491,11 @@ pub fn aircraft_batches<'a>(
             {
                 let pose = model_pose(model.start(world), target);
                 let first = vertices.len() / 10;
-                vertices.extend(model.vertices(&pose, camera, world));
+                vertices.extend(model.vertices(&pose, camera, world, scenery));
                 contacts.extend(Contact::new(
                     first,
                     vertices.len() / 10,
-                    world.relative(pose.position),
+                    scenery.relative(pose.position),
                     extent,
                 ));
             }
@@ -502,7 +504,7 @@ pub fn aircraft_batches<'a>(
                 pose.position = piece.position;
                 pose.damage_variant = piece.variant;
                 [pose.yaw, pose.pitch, pose.bank] = piece.attitude;
-                vertices.extend(model.fragment_vertices(&pose, camera, world));
+                vertices.extend(model.fragment_vertices(&pose, camera, world, scenery));
             }
             (model, vertices, contacts)
         })
@@ -518,13 +520,14 @@ pub fn combat_geometry(
     ownship_state: &flight::State,
     camera: &Camera,
     world: &Terrain,
+    scenery: &Scenery,
 ) -> CombatGeometry {
     let mut v = Vec::new();
     let mut contacts = Vec::new();
     let extent = ownship.visual_extent();
     // Everything here is built relative to the render origin, in f64 until
     // the vertex is written.
-    let local = |p: Vector| world.relative(p);
+    let local = |p: Vector| scenery.relative(p);
     let mut eye = Camera::new();
     eye.position = local(camera.position);
     [eye.yaw, eye.pitch, eye.roll] = [camera.yaw, camera.pitch, camera.roll];
@@ -535,7 +538,7 @@ pub fn combat_geometry(
     {
         let pose = ownship_pose(ownship_state, target);
         let first = v.len() / 10;
-        v.extend(ownship.vertices(&pose, camera, world));
+        v.extend(ownship.vertices(&pose, camera, world, scenery));
         contacts.extend(Contact::new(
             first,
             v.len() / 10,
@@ -550,7 +553,7 @@ pub fn combat_geometry(
         pose.position = piece.position;
         pose.damage_variant = piece.variant;
         [pose.yaw, pose.pitch, pose.bank] = piece.attitude;
-        v.extend(ownship.fragment_vertices(&pose, camera, world));
+        v.extend(ownship.fragment_vertices(&pose, camera, world, scenery));
     }
     // Attached external stores are hidden until the dedicated ordnance
     // rendering pass. Loadout/flight state and launched projectiles remain

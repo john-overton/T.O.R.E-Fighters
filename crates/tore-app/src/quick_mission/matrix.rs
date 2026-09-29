@@ -394,7 +394,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
     // Loop 1: every theater layout, F/A-18D, airborne at every separation and
     // altitude, then a ground start on every runway with wings of one to five.
     for code in quick.theater_codes.clone() {
-        let world = match Terrain::for_mission(data, &code, None) {
+        let world = match crate::scenery::launch_terrain(data, &code, None) {
             Ok(w) => w,
             Err(e) => {
                 m.problems
@@ -448,7 +448,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
             let Some(condition) = condition(weather) else {
                 continue;
             };
-            let world = match Terrain::for_mission(data, &code, Some(condition)) {
+            let world = match crate::scenery::launch_terrain(data, &code, Some(condition)) {
                 Ok(w) => w,
                 Err(e) => {
                     m.problems.push(format!(
@@ -476,7 +476,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
     // theaters, against each enemy aircraft.
     for code in ["UKR"] {
         let index = quick.theater_codes.iter().position(|c| c == code).unwrap();
-        let world = Terrain::for_mission(data, code, None)?;
+        let world = crate::scenery::launch_terrain(data, code, None)?;
         quick.apply(13, index);
         for player in 0..selectable {
             quick.apply(6, player);
@@ -507,7 +507,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
 
     m.stage("start of wing sweep");
     // Loop 4: every wing's count, skill and aircraft, one wing at a time.
-    let world = Terrain::for_mission(data, "UKR", None)?;
+    let world = crate::scenery::launch_terrain(data, "UKR", None)?;
     let index = quick.theater_codes.iter().position(|c| c == "UKR").unwrap();
     quick.apply(13, index);
     for field in [4, 7, 10, 21, 24, 27] {

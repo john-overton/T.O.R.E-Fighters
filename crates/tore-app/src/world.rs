@@ -22,8 +22,8 @@ mod tick_tests;
 pub struct World {
     /// What the flight is built from; a restart rebuilds it from this.
     pub setup: Setup,
-    /// Terrain queries, the airport scene and the weather clock. Until the
-    /// crate move splits it, it also holds the scenery the renderer draws.
+    /// Terrain queries, the airport scene and the weather clock. What the
+    /// renderer draws of it is the app's `Scenery`.
     pub terrain: terrain::Terrain,
     /// The player's flight state.
     pub flight: flight::State,
@@ -160,13 +160,10 @@ pub struct TickOutput {
 }
 
 impl World {
-    /// Restarts the weather clock, turbulence and the camera weather from the
-    /// launch conditions and their fixed seeds.
+    /// Restarts the weather clock and turbulence from the launch conditions and
+    /// their fixed seeds. The camera weather is the scenery's
+    /// (`Scenery::reset_presentations`); the app restarts it beside this.
     pub fn reset_weather(&mut self) {
-        self.terrain.weather_presentation = tore_sim::environment::Presentation::seeded(1)
-            .expect("fixed valid weather presentation seed");
-        self.terrain.auxiliary_presentations =
-            std::array::from_fn(|_| self.terrain.weather_presentation.clone());
         self.terrain.weather =
             tore_sim::environment::Environment::new(self.terrain.weather.configuration().clone());
         self.turbulence = Default::default();

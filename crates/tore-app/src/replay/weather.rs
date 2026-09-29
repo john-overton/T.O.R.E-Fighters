@@ -1,4 +1,4 @@
-//! The replay's weather: the world's environment re-stepped one tick at a
+//! The replay's weather: the terrain's environment re-stepped one tick at a
 //! time exactly as live flight steps it, with a snapshot every second, so any
 //! moment is at most a second of stepping away and playing backwards shows
 //! the same sky as playing forwards.
@@ -15,7 +15,10 @@
 //! so it is kept every ten seconds; the view presentation, which depends on
 //! the player's path, is kept every second.
 use crate::replay::tracks::{Tracks, View};
-use crate::terrain::{Camera, Terrain};
+use crate::{
+    scenery::Scenery,
+    terrain::{Camera, Terrain},
+};
 use tore_sim::environment::{Environment, Presentation};
 
 /// Ticks between presentation snapshots: one second.
@@ -43,25 +46,38 @@ pub struct WeatherTrack {
     frontier: (u64, Environment, Presentation),
     /// The recording's last tick: nothing is built beyond it.
     end: u64,
-    /// The tick `world.weather` and `world.weather_presentation` hold.
+    /// The tick `world.weather` and `scenery.weather_presentation` hold.
     current: u64,
 }
 
-/// One live weather step, with the world's weather swapped for the given
-/// state around it.
-fn step(world: &mut Terrain, environment: &mut Environment, view: &mut Presentation, input: &View) {
+/// One live weather tick: the environment's clock, then the camera weather
+/// from the recorded player's view.
+fn step_weather(world: &mut Terrain, scenery: &mut Scenery, input: &View) {
+    world.weather.step();
+    scenery.step_view_weather(world, &camera(input), input.airspeed);
+}
+
+/// One live weather step, with the world's weather and the scenery's camera
+/// weather swapped for the given state around it.
+fn step(
+    world: &mut Terrain,
+    scenery: &mut Scenery,
+    environment: &mut Environment,
+    view: &mut Presentation,
+    input: &View,
+) {
     std::mem::swap(&mut world.weather, environment);
-    std::mem::swap(&mut world.weather_presentation, view);
-    world.step_weather(input.airspeed, &camera(input));
+    std::mem::swap(&mut scenery.weather_presentation, view);
+    step_weather(world, scenery, input);
     std::mem::swap(&mut world.weather, environment);
-    std::mem::swap(&mut world.weather_presentation, view);
+    std::mem::swap(&mut scenery.weather_presentation, view);
 }
 
 impl WeatherTrack {
     /// Starts from the world's weather as built, which is the weather at
     /// launch: tick 0. `end` is the recording's last tick.
-    pub fn new(world: &Terrain, end: u64) -> Self {
-        let (environment, view) = (world.weather.clone(), world.weather_presentation.clone());
+    pub fn new(world: &Terrain, scenery: &Scenery, end: u64) -> Self {
+        let (environment, view) = (world.weather.clone(), scenery.weather_presentation.clone());
         Self {
             environments: vec![environment.clone()],
             views: vec![view.clone()],
@@ -79,14 +95,20 @@ impl WeatherTrack {
 
     /// Builds snapshots forwards by up to `budget` ticks, as far as the
     /// track pass has read the player's path.
-    pub fn build(&mut self, world: &mut Terrain, tracks: &Tracks, budget: u64) {
+    pub fn build(
+        &mut self,
+        world: &mut Terrain,
+        scenery: &mut Scenery,
+        tracks: &Tracks,
+        budget: u64,
+    ) {
         let (tick, environment, view) = &mut self.frontier;
         let end = tick.saturating_add(budget).min(self.end);
         while *tick < end {
             let Some(input) = tracks.view(*tick + 1) else {
                 break;
             };
-            step(world, environment, view, &input);
+            step(world, scenery, environment, view, &input);
             *tick += 1;
             if tick.is_multiple_of(VIEW_KEY_TICKS) {
                 self.views.push(view.clone());
@@ -97,12 +119,18 @@ impl WeatherTrack {
         }
     }
 
-    /// Puts the weather at `tick` into `world`. Until the track pass has
-    /// read that far it shows the newest weather it can, and the next call
-    /// catches up; the tick it shows is returned.
-    pub fn seek(&mut self, world: &mut Terrain, tracks: &Tracks, tick: u64) -> u64 {
+    /// Puts the weather at `tick` into `world` and `scenery`. Until the track
+    /// pass has read that far it shows the newest weather it can, and the
+    /// next call catches up; the tick it shows is returned.
+    pub fn seek(
+        &mut self,
+        world: &mut Terrain,
+        scenery: &mut Scenery,
+        tracks: &Tracks,
+        tick: u64,
+    ) -> u64 {
         if tick > self.frontier.0 {
-            self.build(world, tracks, tick - self.frontier.0);
+            self.build(world, scenery, tracks, tick - self.frontier.0);
         }
         let tick = tick.min(self.frontier.0);
         // A short step forwards continues from where the world is.
@@ -114,14 +142,14 @@ impl WeatherTrack {
                 environment.step();
             }
             world.weather = environment;
-            world.weather_presentation = self.views[(key / VIEW_KEY_TICKS) as usize].clone();
+            scenery.weather_presentation = self.views[(key / VIEW_KEY_TICKS) as usize].clone();
             self.current = key;
         }
         while self.current < tick {
             let Some(input) = tracks.view(self.current + 1) else {
                 break;
             };
-            world.step_weather(input.airspeed, &camera(&input));
+            step_weather(world, scenery, &input);
             self.current += 1;
         }
         self.current
@@ -157,20 +185,22 @@ mod tests {
     fn snapshots_equal_stepping_every_tick_from_launch() {
         let tracks = tracks(3_000);
         let mut sequential = crate::terrain::tests::world();
+        let mut sequential_scenery = crate::scenery::tests::scenery();
         let mut states = vec![(
             sequential.weather.clone(),
-            sequential.weather_presentation.clone(),
+            sequential_scenery.weather_presentation.clone(),
         )];
         for tick in 1..=3_000 {
             let input = tracks.view(tick).unwrap();
-            sequential.step_weather(input.airspeed, &camera(&input));
+            step_weather(&mut sequential, &mut sequential_scenery, &input);
             states.push((
                 sequential.weather.clone(),
-                sequential.weather_presentation.clone(),
+                sequential_scenery.weather_presentation.clone(),
             ));
         }
         let mut world = crate::terrain::tests::world();
-        let mut track = WeatherTrack::new(&world, 3_000);
+        let mut scenery = crate::scenery::tests::scenery();
+        let mut track = WeatherTrack::new(&world, &scenery, 3_000);
         // Forwards a tick at a time, far jumps both ways, reverse play and
         // a small step back.
         let visits = (0..=300)
@@ -178,18 +208,18 @@ mod tests {
             .chain((2_700..=2_900).rev())
             .chain([2_899, 2_901, 2_898]);
         for tick in visits {
-            assert_eq!(track.seek(&mut world, &tracks, tick), tick);
+            assert_eq!(track.seek(&mut world, &mut scenery, &tracks, tick), tick);
             let (environment, view) = &states[tick as usize];
             assert!(
-                world.weather == *environment && world.weather_presentation == *view,
+                world.weather == *environment && scenery.weather_presentation == *view,
                 "weather at tick {tick}"
             );
         }
         assert_eq!(track.built(), 3_000);
         // Nothing is built past the end.
-        track.build(&mut world, &tracks, 10_000);
+        track.build(&mut world, &mut scenery, &tracks, 10_000);
         assert_eq!(track.built(), 3_000);
-        assert_eq!(track.seek(&mut world, &tracks, 5_000), 3_000);
+        assert_eq!(track.seek(&mut world, &mut scenery, &tracks, 5_000), 3_000);
         assert_eq!(track.views.len(), 26);
         assert_eq!(track.environments.len(), 3);
     }
@@ -201,11 +231,12 @@ mod tests {
             tracks.push_view(tick, View::default());
         }
         let mut world = crate::terrain::tests::world();
-        let mut track = WeatherTrack::new(&world, 1_000);
-        assert_eq!(track.seek(&mut world, &tracks, 500), 100);
+        let mut scenery = crate::scenery::tests::scenery();
+        let mut track = WeatherTrack::new(&world, &scenery, 1_000);
+        assert_eq!(track.seek(&mut world, &mut scenery, &tracks, 500), 100);
         assert_eq!(world.weather.ticks(), 213);
         // Budgeted building stops at the pass too.
-        track.build(&mut world, &tracks, 1_000);
+        track.build(&mut world, &mut scenery, &tracks, 1_000);
         assert_eq!(track.built(), 100);
     }
 }

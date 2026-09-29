@@ -1840,7 +1840,7 @@ pub fn header(
         game_commit: crate::version::commit().into(),
         recorded_at: super::library::utc_text(recorded_at),
         mission,
-        world: world.identity(),
+        world: crate::replay::identity::of(world),
         extra,
         ..replay::Header::default()
     }

@@ -468,7 +468,8 @@ mod tests {
         let play = |reverse: bool| {
             let mut playback = Playback::new(Arc::clone(&recording));
             let mut world = crate::terrain::tests::world();
-            let mut weather = WeatherTrack::new(&world, fixture::LAST);
+            let mut scenery = crate::scenery::tests::scenery();
+            let mut weather = WeatherTrack::new(&world, &scenery, fixture::LAST);
             let mut scratch = template.clone();
             let mut clock = Clock::new(fixture::FIRST, fixture::LAST);
             if reverse {
@@ -481,13 +482,13 @@ mod tests {
             let mut seen = BTreeMap::new();
             loop {
                 let tick = clock.tick();
-                weather.seek(&mut world, &tracks, tick);
+                weather.seek(&mut world, &mut scenery, &tracks, tick);
                 let moment = Moment {
                     picture: playback.picture(tick, clock.alpha()),
                     smoke: playback.smoke(tick).clone(),
                     vapor: playback.vapor(tick, &ownship, &mut scratch),
                     destroyed: tracks.destroyed(tick),
-                    weather: (world.weather.clone(), world.weather_presentation.clone()),
+                    weather: (world.weather.clone(), scenery.weather_presentation.clone()),
                 };
                 seen.insert((clock.position() * 2.).round() as u64, moment);
                 if !clock.advance(1. / 120.) {

@@ -82,7 +82,7 @@ keeps rectangular aircraft/smoke images and paged world/weather art distinct.
 All sample, palette-remap and shadow paths use the corresponding addressing.
 [Source coverage and static variant composition](spec/terrain-detail.md).
 
-`terrain.rs` constructs a world from the selected retail MM and its resolved T2, named or numbered texture references and DAY2 variant palette. Its camera and surface queries have no GPU/window dependency. `sim_renderer.rs` uploads geometry and a texture array, owns depth targets and draws terrain plus a fullscreen sky pass; `terrain.wgsl` supplies the initial perspective, sampling and fog. `renderer.rs` composes this scene with the transparent CPU HUD, resizing depth and surface together. This separation allows aircraft/object/weather passes and a deterministic simulation to be added without coupling format readers to wgpu.
+`terrain.rs` builds `Terrain` from the selected retail MM and its resolved T2: the grid, the airport scene and the weather clock, with the height, surface and wind queries the simulation uses. It holds no art and reads no environment variable. `scenery.rs` builds `Scenery` from the same resources and the finished `Terrain`: the named or numbered texture references, DAY2 variant palette, terrain mesh, sky art, static airport geometry and per-camera weather. Neither has a GPU or window dependency. `sim_renderer.rs` uploads geometry and a texture array, owns depth targets and draws terrain plus a fullscreen sky pass; `terrain.wgsl` supplies the initial perspective, sampling and fog. `renderer.rs` composes this scene with the transparent CPU HUD, resizing depth and surface together. This separation allows aircraft/object/weather passes and a deterministic simulation to be added without coupling format readers to wgpu.
 
 The initial implementation uses full-resolution fixed triangles and an authored sky/fog projection. It is not the native adaptive renderer. All geometry/colors come from local source data at runtime; no retail derivatives are embedded. See [theater findings](formats/theater.md) for recovered versus authored behavior. The Hornet adapter now advances at 120 fixed ticks/second; the developer free camera still uses elapsed wall time for inspection.
 
@@ -154,10 +154,10 @@ agent-selected host correction for distant surface flicker; see
 Theaters are about a million feet across, where a 32-bit float steps 1/8 foot,
 so aircraft built in world coordinates snapped a little differently every
 frame and shimmered in exterior views. Camera positions are kept in f64, and
-each frame `Terrain::set_origin` picks a render origin: the camera position
+each frame `Scenery::set_origin` picks a render origin: the camera position
 snapped to a 1,024-foot grid, shared by every camera that frame. Aircraft,
 ejected pilots, weapons, debris, tracers and effects are built relative to it
-(`Terrain::local`), and the scene uniform carries the origin and the camera's
+(`Scenery::local`), and the scene uniform carries the origin and the camera's
 exact offset from it. `object_vertex` and `shadow_object_vertex` place those
 vertices through the offset; terrain and airports stay in world coordinates
 and reach the camera through the origin, so only their own storage rounding
@@ -488,8 +488,10 @@ operation. See [glare](spec/sun-glow.md#continuous-lens-flare-composition) and
 
 ## Airport scenes
 
-Airport scenes are immutable imported data owned by `terrain::Terrain`. Static
-GPU geometry is batched by placement and filtered each frame from combat-owned
+Airport scenes are immutable imported data owned by `terrain::Terrain`. Their
+static GPU geometry belongs to `scenery::Scenery`, which builds it from the same
+placements (`terrain::Placements`) under a 32 MiB budget. It is batched by
+placement and filtered each frame from combat-owned
 target HP, so destroyed objects disappear consistently in main and mirror
 views; a replay filters by its recorded destroyed objects instead. The airport
 service derives availability from those combat targets and
@@ -641,8 +643,9 @@ a live debug panel can build the same tree from the current tick.
 `replay/library.rs` owns the `replays/` folder: names, `replays-v1.conf`
 auto-delete settings, listing from each file's header, seek index and footer
 (`Recording::peek`), and a cleanup that deletes only proven, unkept, inactive
-recordings. `terrain::Terrain::identity` captures the resolved world for the
-header and `Terrain::for_identity` rebuilds it without environment variables.
+recordings. `replay::identity::of` captures the resolved terrain for the
+header and `replay::identity::terrain` rebuilds it, without environment
+variables, through `Terrain::for_recorded`.
 `replay/screen.rs` is the Replays screen, a main-menu overlay built from the
 Controls screen's drawing helpers that reads a recording's details and
 writes its exports on background threads the menu's redraw polls, so the
@@ -654,9 +657,9 @@ The mission replay viewer is its own screen, `Screen::Replay`, run by
 `replay/viewer.rs` and wired into the app by `replay/host.rs`, which takes the
 screen's window events before `main`'s own handling and hands back what the
 app still owns: resizing, focus, Alt-Enter and quitting. The viewer owns a
-`Terrain` built from the recording's identity and its own airframes, so the
-Quick Mission screen's world is untouched. Entering the screen points the
-renderer at them (`set_world`, then `prepare_aircraft` for the recorded
+`Terrain` and `Scenery` built from the recording's identity and its own
+airframes, so the Quick Mission screen's world is untouched. Entering the
+screen points the renderer at them (`set_scenery`, then `prepare_aircraft` for the recorded
 player, since a world rebuild discards the aircraft); leaving restores the
 game's world and ownship the same way. Each frame rebuilds the moment under
 the playhead from the recording (`replay/playback.rs`) and makes the same
@@ -715,15 +718,17 @@ In short:
 
 ### Where the code stands
 
-Stage A1 is built inside `tore-app`. `World` (`crates/tore-app/src/world.rs`)
+Stage A1 is built inside `tore-app`, and the A2 terrain split is done. `World` (`crates/tore-app/src/world.rs`)
 holds the mission state that `App` used to keep in separate fields and steps it
 in `World::step`. The redraw loop builds each tick's input, calls the step and
 hands the output to a `TickPresenter` in `main.rs`, which plays the cues in the
 loop's old order. `World::restart` rebuilds a flight from its `Setup`. The AI
 probe runs the same tick, so headless runs now cover the live loop, and a
-fingerprint test (`world/tick_tests.rs`) pins its order. The crate move (A2) is
-still to come: the terrain, combat and aircraft types still mix simulation with
-presentation.
+fingerprint test (`world/tick_tests.rs`) pins its order. The terrain is split:
+`Terrain` (`terrain.rs`) holds what the simulation queries and `Scenery`
+(`scenery.rs`) what the renderer draws, and `App` holds a `Scenery` beside
+`World`. The crate move (A2) is still to come: the combat and aircraft types
+still mix simulation with presentation.
 
 Stage B has not started. The player is `world.flight` plus one ownship's worth
 of player-only fields in `combat::live::State`; every AI aircraft is an
@@ -746,13 +751,32 @@ describe the code before stage A.
 | Radio call generation: the tower, the crew voice, weapon, hit and wing calls, and the radio channel | Input devices, rumble and the input tape |
 | The settings in force: cheats, AI mission preset, enemy skill and flight model | The replay recorder and library, and the debug panels |
 
-Today's terrain type `terrain::World` is renamed `Terrain` first, in a commit of
+Today's terrain type `terrain::World` was renamed `Terrain` first, in a commit of
 its own. `Theater` would read better but already names the parsed T2 grid in
-`tore-formats`. In A1 `World` owns the `Terrain` whole, as `App` does now.
-Before the crate move it splits in two: the terrain the simulation queries
-(the T2 grid, the airport scene and its runway anchors), shared by reference,
-and the scenery the renderer draws (meshes, textures, sky art, palettes and the
-per-camera weather), which stays in the app.
+`tore-formats`. `Terrain` has been split in two, ahead of the crate move:
+
+- `Terrain` (`terrain.rs`, `World` owns it) is what the simulation queries: the
+  T2 grid, the map layout and weather choice, the airport scene and its runway
+  anchors, the weather clock, and `height`, `surface`, `over_water`,
+  `turbulence_reduced_surface`, `solid_contact`, `wind`, `air_data` and
+  `runway_view`. It holds no art, palette or render origin, reads no
+  environment variable and uses no `log`, `tore_replay` or presentation module.
+  The weather time, wind and cloud altitude that `TORE_WEATHER_TIME`,
+  `TORE_WIND` and `TORE_CLOUD_ALTITUDE` set arrive as an explicit `Overrides`
+  that the app reads (`scenery::launch_overrides`); a recording's identity
+  replaces them (`Terrain::for_recorded`). The camera type `Camera` stays in
+  `terrain.rs`, since it is plain geometry and many presentation files name it.
+- `Scenery` (`scenery.rs`, `App` owns it) is what the renderer draws: the land,
+  sky and deck textures, the terrain mesh, the static airport geometry, ocean
+  motion, the weather presentations for the main view and the four auxiliary
+  camera slots, the resolved palette, fog and haze, and the render origin. It
+  builds from the resources and the finished `Terrain`, and code that needs the
+  weather or the airport scene takes `&Terrain` beside `&Scenery`. It is
+  rebuilt wherever the terrain is (theater or weather change), its camera
+  weather restarts where a flight starts (`Scenery::reset_presentations`, next
+  to `World::restart`), and the replay viewer owns its own pair. The scenery
+  and the terrain's airport scene share one loader (`terrain::Placements`), so
+  the object volumes and the drawn shapes always agree.
 
 #### One tick
 
@@ -919,7 +943,7 @@ These splits touch different files and can run in parallel:
   plain types that live in renderer files today (`Contact`, `CombatGeometry`,
   `Afterburner`) move to plain modules. `render_snapshot` splits its pose data
   from its vertex building.
-- `Terrain`: the simulation half apart from the scenery, as above.
+- `Terrain`: the simulation half apart from the scenery, as above. Done.
 - Quick Mission setup apart from the creator's UI: `mission_layout.rs` holds
   the mission layout, ground layout, runway poses and map bounds, and
   `quick_mission.rs` keeps the creator's screen (done in this stage); the debrief evaluator (`capture`, `report`) apart from its
