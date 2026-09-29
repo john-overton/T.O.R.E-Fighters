@@ -128,8 +128,69 @@ def keyed_flight(name: str, game: list[str], *, keys: str = "", random: str = ""
     )
 
 
+SETTINGS_FILES = {
+    "preferences": ("preferences-v1.conf", "Preferences not loaded"),
+    "graphics": ("graphics-v1.conf", "Graphics options not loaded"),
+    "sound": ("sound-v1.conf", "Sound settings not loaded"),
+    "replays": ("replays-v1.conf", "replays-v1.conf unreadable"),
+}
+
+
+def settings_scenarios() -> list[Scenario]:
+    """A damaged settings file must never stop the game: defaults, and a warning in the session log."""
+    out = []
+    for name, (file, warning) in SETTINGS_FILES.items():
+        code = f"import sys; open(sys.argv[1] + '/{file}', 'wb').write(b'\\xff\\xfe garbage \\x00 not a config\\nfoo=bar\\n')"
+        out.append(
+            Scenario(
+                name=f"replay-settings-corrupt-{name}",
+                lane="replay",
+                args=["--version"],
+                then=[
+                    Step([PY, "-c", code, "{work}/data"], app=False),
+                    Step([PY, DRIVER, "--data", "{work}/data", "--keys", "wait 2", "--", "--free-flight", "--no-audio"], app=False, window=True, timeout=180),
+                    Step([PY, "-c", "import glob,sys; t=''.join(open(f,errors='replace').read() for f in sorted(glob.glob(sys.argv[1]+'/logs/*.log'))); print(t)", "{work}/data"], app=False),
+                ],
+                check_work=lambda work, output, warning=warning: check_settings(output, warning),
+                timeout=240,
+            )
+        )
+    code = "import sys; open(sys.argv[1] + '/input-v1.conf', 'wb').write(b'not a profile\\n')"
+    out.append(
+        Scenario(
+            name="replay-settings-corrupt-input",
+            lane="replay",
+            args=["--version"],
+            then=[
+                Step([PY, "-c", code, "{work}/data"], app=False),
+                Step([PY, DRIVER, "--data", "{work}/data", "--keys", "wait 1", "--", "--free-flight", "--no-audio"], app=False, window=True, expect_exit=None, timeout=180),
+            ],
+            check_work=lambda work, output: (
+                []
+                if "input-v1.conf" in sections(output).get(2, "") and "delete it to go back to the default controls" in sections(output).get(2, "") and "panicked" not in output
+                else ["a damaged input-v1.conf did not give a message that names the file and says how to recover"]
+            ),
+            timeout=240,
+        )
+    )
+    return out
+
+
+def check_settings(output: str, warning: str) -> list[str]:
+    s = sections(output)
+    problems = []
+    text = s.get(2, "")
+    if "driver: game pid" not in text or "driver: ok" not in text:
+        problems.append(f"the game did not start and quit cleanly: {text.strip()[-200:]}")
+    if "panicked" in output:
+        problems.append("panic with a damaged settings file")
+    if warning not in s.get(3, ""):
+        problems.append(f"the session log has no warning '{warning}'")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
-    out: list[Scenario] = []
+    out: list[Scenario] = settings_scenarios()
     free = ["--free-flight", "--no-audio"]
     out.append(keyed_flight("replay-keys-bookmarks", free, keys="wait 2;ctrl+B;ctrl+P;wait 1;ctrl+B;ctrl+P;wait 2;ctrl+B;ctrl+P;wait 1;ctrl+P;wait 2;ctrl+B;wait 1", min_bookmarks=4))
     out.append(keyed_flight("replay-keys-end-flight", free, keys="wait 3;ctrl+Q;wait 2", ended="end flight"))

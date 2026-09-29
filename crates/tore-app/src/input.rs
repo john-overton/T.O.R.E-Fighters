@@ -96,13 +96,23 @@ impl Input {
             ..Profile::default()
         };
         if let Some(path) = path {
+            // The saved controls file loads without being asked for, so a damaged
+            // one also says how to get going again.
+            let failed = |e: &dyn std::fmt::Display| {
+                let hint = if path.file_name().is_some_and(|n| n == "input-v1.conf") {
+                    " Fix the file, or delete it to go back to the default controls."
+                } else {
+                    ""
+                };
+                format!("{}: {e}.{hint}", path.display())
+            };
             let mut text = String::new();
             std::fs::File::open(path)
-                .map_err(|e| format!("{}: {e}", path.display()))?
+                .map_err(|e| failed(&e))?
                 .take(256 * 1024 + 1)
                 .read_to_string(&mut text)
-                .map_err(|e| format!("{}: {e}", path.display()))?;
-            custom = Profile::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+                .map_err(|e| failed(&e))?;
+            custom = Profile::parse(&text).map_err(|e| failed(&e))?;
         }
         let profile = complete(&custom)?;
         let head = match profile.head_port {
@@ -966,7 +976,15 @@ mod tests {
             std::fs::write(&path, bytes).unwrap();
             let error = Input::new(Some(&path), false).err().unwrap();
             assert!(error.contains(name), "{error}");
+            assert!(!error.contains("delete it"), "{error}");
         }
+        let saved = dir.join("input-v1.conf");
+        std::fs::write(&saved, b"not a profile\n").unwrap();
+        let error = Input::new(Some(&saved), false).err().unwrap();
+        assert!(
+            error.contains("delete it to go back to the default controls"),
+            "{error}"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
