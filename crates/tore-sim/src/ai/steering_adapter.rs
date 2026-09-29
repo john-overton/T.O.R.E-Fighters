@@ -18,6 +18,10 @@ use tore_input::{PilotCommand, PilotInput, Switch};
 /// Fitted heading-error response horizon; see the input-only control spec.
 pub const BANK_COMMAND_LEAD_SECONDS: f64 = 1.0;
 
+/// Fitted: the pitch-error response horizon while the flight path is below
+/// the terrain floor, in seconds; see the input-only control spec.
+pub const TERRAIN_PITCH_SECONDS: f64 = 1.0;
+
 /// Fitted: the speed error, in ft/s, that moves the throttle from closed to
 /// open in one tick. Rule: the throttle setting is the current setting plus
 /// the speed error divided by this reference, clamped to 0 through 1. A
@@ -138,12 +142,15 @@ impl ControlAdapter {
         // Fitted (agent decision, 2026-09-28, overnight bug battery): an
         // airborne aircraft whose flight path is below the B44 terrain floor
         // levels its wings, so a steep turn cannot use the lift it needs to
-        // climb away from the ground. The airfield terrain correction already
-        // does the same. Without it AI aircraft flew into the ground at full
-        // G while still turning toward a target.
-        let bank_request_deg = if !on_ground
-            && terrain_pitch_floor_deg.is_some_and(|floor| current.flight_path_pitch_deg < floor)
-        {
+        // climb away from the ground, and closes the pitch error over
+        // [`TERRAIN_PITCH_SECONDS`] rather than three seconds (B44: pitch
+        // authority gains 20 degrees per second while the floor is active).
+        // The airfield terrain correction already levels the wings. Without
+        // it AI aircraft flew into the ground at full G while still turning
+        // toward a target, or eased into a rising hillside at 2 G.
+        let below_terrain_floor = !on_ground
+            && terrain_pitch_floor_deg.is_some_and(|floor| current.flight_path_pitch_deg < floor);
+        let bank_request_deg = if below_terrain_floor {
             0.0
         } else {
             bank_request_deg
@@ -272,7 +279,14 @@ impl ControlAdapter {
         let pitch_error = (pitch_goal - current.flight_path_pitch_deg).to_radians();
         let desired_g = ((current.flight_path_pitch_deg.to_radians().cos()
             + state.speed
-                * (pitch_error / if self.gun_aim.is_some() { 0.8 } else { 3.0 }
+                * (pitch_error
+                    / if below_terrain_floor {
+                        TERRAIN_PITCH_SECONDS
+                    } else if self.gun_aim.is_some() {
+                        0.8
+                    } else {
+                        3.0
+                    }
                     + self.gun_aim.map_or(0., |a| a.pitch_rate))
                 / 32.174)
             / state.bank.cos().max(0.25))
@@ -841,6 +855,34 @@ mod tests {
         }
         assert!(!s.crashed, "flew into the ground");
         assert!(lowest > 300.0, "lowest {lowest:.0} ft");
+        // Level at speed with the floor asking for 15 degrees of climb, the
+        // pull uses most of the G limit instead of easing up over 3 s.
+        let level = banked_dive(0.0, 0.0, 1500.0);
+        let pull = ControlAdapter::new()
+            .controls(
+                &level,
+                &intent(0.0, 0.0, level.speed),
+                &limits(),
+                G_LIMIT,
+                ROLL_LIMIT,
+                MAXIMUM_BANK,
+                Some(15.0),
+                SECONDS_PER_TICK,
+            )
+            .unwrap();
+        let ease = ControlAdapter::new()
+            .controls(
+                &level,
+                &intent(0.0, 15.0, level.speed),
+                &limits(),
+                G_LIMIT,
+                ROLL_LIMIT,
+                MAXIMUM_BANK,
+                None,
+                SECONDS_PER_TICK,
+            )
+            .unwrap();
+        assert!(pull.input.pitch > ease.input.pitch * 2.0);
     }
 
     #[test]
