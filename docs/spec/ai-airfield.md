@@ -140,6 +140,13 @@ its home airport at cruise speed.
   heading, so a turn cannot consume the lift needed to clear the terrain.
   Use full military power and close the speedbrake during the climb. Resume
   the route once clear. This is a forward sampling rule, not terrain routing.
+  On the approach gates (fitted, agent decision 2026-09-29) only the ground on
+  the straight line to the gate being flown to counts, and the 1,000 ft rule
+  stops the descent without holding the heading, so the aircraft keeps
+  steering for its gate above the terrain and joins the path once past it;
+  the 500 ft climb still levels the wings. On the lower 3 degree gates the
+  12,000 ft sample reached hills beyond the gate, and holding the heading flew
+  a pair away from its gates for 700 s at NSK 6 (now 284 s).
 - **Final** (opinionated path, fitted speed and flare): down the same 3 degree
   path to the landing point (retail 6 degrees), wings level below 50 ft. Retail flies at most 293 ft/s
   with the nose 17 degrees above the path and has no flare. The AI flies 1.1
@@ -174,8 +181,13 @@ its home airport at cruise speed.
   400 ft before it, 250 ft further back for each higher slot, alternating 40 ft right
   and left of the centerline, never less than 150 ft ahead of where it stopped.
 - **Landing end without anchors** (fitted): the end with at least a knot more
-  headwind, otherwise the end facing the aircraft's arrival. With anchors the
-  airport's landing heading is always used (spec-derived).
+  headwind, otherwise the end facing the aircraft's arrival, unless the
+  ground stands above the 3 degree path to that end within the first gate's
+  35,200 ft and less so to the other end, which is then used (fitted, agent
+  decision 2026-09-29: on the 3 degree path a ridge under the gates can need
+  a descent steeper than the final can fly, and the aircraft went around
+  without end). With anchors the airport's landing heading is always used
+  (spec-derived).
 - **Landing point** (opinionated, requested by John on 2026-09-29): the
   player's ILS aim point, `airport::AIM_PAST_THRESHOLD_FT` (1,000 ft) past the
   landing end's threshold on the runway plane, so the path crosses the

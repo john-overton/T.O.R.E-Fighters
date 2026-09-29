@@ -5267,11 +5267,12 @@ impl ProbeWatch {
                             .equipment
                             .ground_clearance_ft;
                         println!(
-                            "t={tick} ({seconds:.1}s) THRESHOLD {} wheels={:.0} ft (path {:.0}) kt={:.0}",
+                            "t={tick} ({seconds:.1}s) THRESHOLD {} wheels={:.0} ft (path {:.0}) kt={:.0} end={:?}",
                             slot.label(),
                             y - clearance - point[1],
                             tore_sim::airport::threshold_crossing_height_ft(),
-                            f.speed * 3600. / 6076.12
+                            f.speed * 3600. / 6076.12,
+                            sequence.landing_end()
                         );
                     }
                     self.final_past.insert(slot.id, past);

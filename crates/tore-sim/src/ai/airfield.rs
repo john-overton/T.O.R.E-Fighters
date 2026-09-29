@@ -409,6 +409,9 @@ pub struct Situation {
     pub ground_clearance_ft: f64,
     /// Loaded envelope limits at the current altitude.
     pub minimum_speed_fps: f64,
+    /// On the approach, the highest ground on the straight line to the gate
+    /// being flown to, feet above sea level (`f64::MIN` elsewhere).
+    pub terrain_to_gate_ft: f64,
     /// Slowest speed with the fitted approach G margin in hand (0 when the
     /// model has no low-speed lift ramp).
     pub approach_minimum_fps: f64,
@@ -574,6 +577,37 @@ impl Sequence {
         sequence
     }
 
+    /// Fitted (agent decision, 2026-09-29): a runway without anchors, whose
+    /// landing end was chosen by the arrival side because the wind did not
+    /// decide, lands on the other end instead when the ground stands above
+    /// the 3 degree path to the chosen end and less so to the other. An
+    /// anchored airport's landing heading, and a wind choice, stand.
+    pub fn prefer_clear_approach(
+        &mut self,
+        wind: [f64; 3],
+        max_takeoff_lbs: f64,
+        ground: &dyn Fn(f64, f64) -> f64,
+    ) {
+        if self.runway.anchors.is_some() || self.is_departure() {
+            return;
+        }
+        let headwind = |end: ApproachEnd| {
+            crate::runway_wind::assessment(max_takeoff_lbs, wind, self.runway.heading_from(end))
+                .map_or(0.0, |a| a.headwind_knots - a.tailwind_knots)
+        };
+        if (headwind(ApproachEnd::Near) - headwind(ApproachEnd::Far)).abs() >= 1.0 {
+            return;
+        }
+        let other = match self.end {
+            ApproachEnd::Near => ApproachEnd::Far,
+            ApproachEnd::Far => ApproachEnd::Near,
+        };
+        let chosen = path_obstruction_ft(&self.runway, self.end, ground);
+        if chosen > 0.0 && path_obstruction_ft(&self.runway, other, ground) < chosen {
+            self.end = other;
+        }
+    }
+
     fn new(kind: Kind, phase: Phase, runway: RunwayView, end: ApproachEnd) -> Self {
         Self {
             kind,
@@ -722,7 +756,7 @@ impl Sequence {
 
     /// The runway end landed on: with anchors, the end whose approach
     /// heading is nearest the airport's landing heading.
-    fn landing_end(&self) -> ApproachEnd {
+    pub fn landing_end(&self) -> ApproachEnd {
         match self.runway.anchors {
             Some(anchors) => {
                 let off = |end| {
@@ -1299,15 +1333,28 @@ impl Sequence {
                 command.flaps_down = true;
             }
         }
+        // Fitted (agent decision, 2026-09-29): on the approach the ground
+        // that counts is the ground on the way to the gate being flown to,
+        // and a hold stops the descent without holding the heading, so the
+        // aircraft keeps steering for its gate above the terrain and joins
+        // the path once past it. On the 3 degree path the lower gates put
+        // hills beyond them inside the 12,000 ft look-ahead, and holding the
+        // heading flew the aircraft away from its gate for minutes (NSK 6).
+        let approach = self.phase == Phase::Approach;
+        let terrain = if approach {
+            s.terrain_to_gate_ft
+        } else {
+            s.terrain_ahead_ft
+        };
         if let Control::Air(guidance) = &mut command.control
             && matches!(
                 self.phase,
                 Phase::ClimbOut | Phase::Inbound | Phase::Marshal | Phase::Approach
             )
-            && s.terrain_ahead_ft > self.landing_point()[1] + TERRAIN_IGNORED_FT
+            && terrain > self.landing_point()[1] + TERRAIN_IGNORED_FT
         {
-            let clearance = s.position[1] - s.terrain_ahead_ft;
-            if clearance < TERRAIN_HOLD_FT {
+            let clearance = s.position[1] - terrain;
+            if clearance < TERRAIN_CLIMB_FT || (!approach && clearance < TERRAIN_HOLD_FT) {
                 // Preserve lift while clearing a ridge. A steep turn toward
                 // the next marshal corner could otherwise undo the climb.
                 guidance.wings_level = true;
@@ -1429,6 +1476,31 @@ pub fn choose_landing_end(
     } else {
         ApproachEnd::Far
     }
+}
+
+/// How far, in feet, the ground stands above the 3 degree approach path
+/// to `end` anywhere from the aim point out to the first gate (negative
+/// when the path is clear by that much everywhere).
+pub fn path_obstruction_ft(
+    runway: &RunwayView,
+    end: ApproachEnd,
+    ground: &dyn Fn(f64, f64) -> f64,
+) -> f64 {
+    let threshold = runway.threshold(end);
+    let heading = runway.heading_from(end);
+    let (sin, cos) = (heading.sin(), heading.cos());
+    let aim = crate::airport::AIM_PAST_THRESHOLD_FT;
+    let mut worst = f64::MIN;
+    let mut out = 0.0;
+    while out <= APPROACH_GATES_FT[0] {
+        // `out` feet before the aim point, along the approach.
+        let back = out - aim;
+        let (x, z) = (threshold[0] - sin * back, threshold[2] - cos * back);
+        let path = runway.elevation_ft + crate::airport::glide_path_height_ft(back);
+        worst = worst.max(ground(x, z) - path);
+        out += 1_000.0;
+    }
+    worst
 }
 
 /// Fly toward a point: heading straight at it, flight path toward its
@@ -1579,6 +1651,7 @@ mod tests {
             terrain_ahead_ft: 0.,
             ground_clearance_ft: 8.,
             minimum_speed_fps: 150.,
+            terrain_to_gate_ft: f64::MIN,
             approach_minimum_fps: 230.,
             maximum_speed_fps: 1500.,
             corner_speed_fps: 400.,
@@ -1617,6 +1690,42 @@ mod tests {
         // Under the floor the ordinary flare and landing rules apply instead.
         let (step, _) = final_step(PATH_LOST_FLOOR_FT - 20., 240.);
         assert!(!step.go_around);
+    }
+
+    #[test]
+    fn the_approach_minds_only_the_ground_on_the_way_to_its_gate() {
+        // 2026-09-29: holding the heading over hills beyond the gate flew a
+        // pair away from its gates for 700 s at NSK 6.
+        let guide = |to_gate: f64, ahead: f64| {
+            let mut seq = landing();
+            seq.phase = Phase::Approach;
+            seq.leg = 1;
+            let gate = seq.gate(1);
+            // 20,000 ft short of the gate, abeam to the west, heading north.
+            let mut s = on_final(&seq, 40_000., 1_500., 360.);
+            s.position[0] = gate[0] - 20_000.;
+            s.heading_deg = 0.;
+            s.terrain_ahead_ft = ahead;
+            s.terrain_to_gate_ft = to_gate;
+            match seq.step(&s).command.control {
+                Control::Air(g) => (g.heading_deg, g.flight_path_pitch_deg, g.wings_level),
+                other => panic!("{other:?}"),
+            }
+        };
+        let (free_heading, _, _) = guide(0., 0.);
+        assert!(
+            free_heading.abs() > 10.,
+            "steers for the gate: {free_heading}"
+        );
+        // Hills beyond the gate change nothing.
+        assert_eq!(guide(0., 1_400.), guide(0., 0.));
+        // Hills on the way: no descent, but still steering for the gate.
+        let (heading, pitch, level) = guide(1_000., 0.);
+        assert_eq!(heading, free_heading);
+        assert!(pitch >= 0. && !level);
+        // Close above them: climb, wings level.
+        let (_, pitch, level) = guide(1_200., 0.);
+        assert!(pitch >= TERRAIN_CLIMB_DEG && level);
     }
 
     #[test]
@@ -1777,6 +1886,7 @@ mod tests {
             terrain_ahead_ft: 0.,
             ground_clearance_ft: 8.,
             minimum_speed_fps: 170.,
+            terrain_to_gate_ft: f64::MIN,
             approach_minimum_fps: 0.,
             maximum_speed_fps: 1500.,
             corner_speed_fps: 400.,
