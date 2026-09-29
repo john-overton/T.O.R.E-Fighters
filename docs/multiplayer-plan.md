@@ -8,8 +8,8 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, planning pass of 2026-09-28. Nothing is built yet. The
-design of stages A and B (types, tick order, handoff rules) is in the
+Implementation mode, planning pass of 2026-09-28. Stage A1 is built (the
+mission core inside `tore-app`); the rest is not yet. The design of stages A and B (types, tick order, handoff rules) is in the
 [architecture guide](ARCHITECTURE.md#mission-core-and-seats), written and
 approved by John on 2026-09-28. Sequencing is in the [roadmap](ROADMAP.md#milestone-2-multiplayer). What players
 experience is in the [multiplayer guide](MULTIPLAYER.md). What Fighters

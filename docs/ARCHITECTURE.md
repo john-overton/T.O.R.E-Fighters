@@ -693,8 +693,8 @@ only read: the menu's camera changes go through the ordinary view commands.
 ## Mission core and seats
 
 Design for stages A and B of the [multiplayer plan](multiplayer-plan.md#stages),
-written 2026-09-28. **Nothing in this section is built yet.** It is rewritten
-as the stages land. John approved the design on 2026-09-28 with the decisions
+written 2026-09-28. **Stage A1 is built; the A2 crate move and stage B are
+not yet.** The section is rewritten as the stages land. John approved the design on 2026-09-28 with the decisions
 credited to him below; every other choice is an agent decision. His decisions
 are also in the [multiplayer guide](MULTIPLAYER.md#decisions).
 
@@ -714,17 +714,21 @@ In short:
 
 ### Where the code stands
 
-The live tick is written inline in `main.rs`'s `RedrawRequested` handler, the
-`for _ in 0..steps` loop. Its mission state is spread over about twenty `App`
-fields, and the loop interleaves simulation with HUD messages, audio calls,
-rumble cues, camera work and replay recorder calls. No headless path runs this
-loop: `--ai-probe-ticks` repeats a reduced version by hand (no weather,
-turbulence, building contact, airport service or crew voice), and
-`--headless-flight` steps the flight model alone. The player is `App.flight` plus
-one ownship's worth of player-only fields in `combat::live::State`; every AI
-aircraft is an `AiActor` in `tore-sim::ai` plus a `live::Target` row, mirrored
-into each other once per tick. The plan's
-[code findings](multiplayer-plan.md#where-the-code-stands) have the rest.
+Stage A1 is built inside `tore-app`. `World` (`crates/tore-app/src/world.rs`)
+holds the mission state that `App` used to keep in separate fields and steps it
+in `World::step`. The redraw loop builds each tick's input, calls the step and
+hands the output to a `TickPresenter` in `main.rs`, which plays the cues in the
+loop's old order. `World::restart` rebuilds a flight from its `Setup`. The AI
+probe runs the same tick, so headless runs now cover the live loop, and a
+fingerprint test (`world/tick_tests.rs`) pins its order. The crate move (A2) is
+still to come: the terrain, combat and aircraft types still mix simulation with
+presentation.
+
+Stage B has not started. The player is `world.flight` plus one ownship's worth
+of player-only fields in `combat::live::State`; every AI aircraft is an
+`AiActor` in `tore-sim::ai` plus a `live::Target` row, mirrored into each other
+once per tick. The plan's [code findings](multiplayer-plan.md#where-the-code-stands)
+describe the code before stage A.
 
 ### Stage A: one mission core
 
@@ -838,13 +842,13 @@ did before.
 - **Single player:** the render loop keeps its frame clock, pause and time
   compression, builds each tick's input from the input devices and the
   instruments, calls `step` once per tick and presents the output.
-- **AI probe** (`--ai-probe-ticks`, `--probe-matrix`): switches to `World::step`
-  in a commit of its own. It gains weather, turbulence, building contact, the
-  airport service, crew voice, event handling without the attack script and the
-  runway surface with wind. Its output and recordings are re-recorded then; this
-  is the one planned change of probe output. The scripted pilot, the attack
-  script, orders and threat fixtures become tick input and commands before the
-  step.
+- **AI probe** (`--ai-probe-ticks`, `--probe-matrix`): runs `World::step`. It
+  gained weather, turbulence, building contact, the airport service, crew voice,
+  event handling without the attack script and the runway surface with wind; its
+  output and recordings changed once for this, in their own commit, the one
+  planned change of probe output. The scripted pilot, the attack script, orders
+  and threat fixtures act before each step, and the probe presents what it needs
+  from the tick's output in the live order.
 - **Full-tick fingerprint:** `crates/tore-app/src/world/tick_tests.rs` builds a
   `World` from synthetic fixtures (a low-flying player, two friendly and two
   enemy AI aircraft, two drones, a small airport), steps it 1,200 ticks with
@@ -890,8 +894,8 @@ moves into `tore-world` and to all new mission state from stage B on:
 
 #### How stage A lands
 
-A1, inside `tore-app`. Each commit is compared with the single-player baselines
-byte for byte:
+A1, inside `tore-app`, done. Each commit was compared with the single-player
+baselines byte for byte:
 
 1. Rename `terrain::World` to `terrain::Terrain`.
 2. Add `World` (`crates/tore-app/src/world.rs`) and move the mission fields of
