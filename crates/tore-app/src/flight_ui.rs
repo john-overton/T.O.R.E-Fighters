@@ -722,8 +722,9 @@ impl FlightUi {
                 self.zoom = (self.zoom / 1.2).max(0.5);
                 Command::None
             }
-            "," => Command::Range(-1),
-            "." => Command::Range(1),
+            // Manual pp. 21, 94, 97: comma increases the range, period decreases it.
+            "," => Command::Range(1),
+            "." => Command::Range(-1),
             "Numpad5" => Command::CenterLook,
             "F11" => {
                 self.menu = true;
@@ -1507,6 +1508,9 @@ mod tests {
             ("w", false, Command::Waypoint(true)),
             ("w", true, Command::Waypoint(false)),
             ("m", false, Command::Mode),
+            // The manual (pp. 21, 94, 97): comma raises the range, period lowers it.
+            (",", false, Command::Range(1)),
+            (".", false, Command::Range(-1)),
             ("Numpad5", false, Command::CenterLook),
         ] {
             assert_eq!(ui.key(key, shift, false, false, &tree), command, "{key}");
