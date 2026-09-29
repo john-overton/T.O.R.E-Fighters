@@ -5881,11 +5881,18 @@ fn ai_probe_run(
                 world.airport_scene.vertical_pad(home.object)
             );
         }
-        let [x, _, z] = actor.flight().position;
+        let [x, y, z] = actor.flight().position;
         if !(bounds.min[0]..=bounds.max[0]).contains(&x)
             || !(bounds.min[1]..=bounds.max[1]).contains(&z)
         {
             println!("AI probe OFF-MAP start: {} x={x:.0} z={z:.0}", slot.label());
+        }
+        let ground = world.surface(x, z).height;
+        if actor.ground_start().is_none() && y < ground {
+            println!(
+                "AI probe UNDERGROUND start: {} y={y:.0} ground={ground:.0}",
+                slot.label()
+            );
         }
     }
     // The tower service the player's Shift-A would use, with the departure

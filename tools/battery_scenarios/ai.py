@@ -31,6 +31,7 @@ THEATERS = ["APA", "BAL", "CUB", "EGY", "FRA", "GRE", "IRA", "KURILE", "LFA", "N
 # Known-good airport for ground starts in the default theater (Ukraine).
 GROUND_AIRPORT = "2"
 
+ORDER_NAMES = ["attack-on-contact", "engage-my-target", "land-selected", "bug-out"]
 ACTOR = re.compile(r"^actor=(\d+) (\S+ \d-\d) (\S+) activity=(.*?) alive=(true|false) rounds=(\d+) ")
 INVARIANTS = re.compile(r"^AI probe invariants: .*anomalies=(\d+)", re.M)
 ANOMALY = re.compile(r"^AI probe anomaly: (.*)$", re.M)
@@ -87,6 +88,8 @@ def probe_problems(
         if label in actors and actors[label][1]:
             what = "destroyed" if m.group(3) else "ejected"
             problems.append(f"{label} {what} at {m.group(2)}s but alive at the end")
+    for line in re.findall(r"^AI probe (?:UNDERGROUND|OFF-MAP) start: .*$", output, re.M):
+        problems.append(line)
     totals = TOTALS.search(output)
     if totals and int(totals.group(4)) > 0:
         problems.append(f"dropped launches: {totals.group(4)}")
@@ -488,6 +491,49 @@ def scenarios() -> list[Scenario]:
     for theater in ("PGU", "VLA"):
         out.append(probe(f"long-15v15-{theater.lower()}", ["--theater", theater, *fight(15, 15, "--separation", "20", *attack)],
                          ticks=216000, timeout=3600, check=checker(allow_anomalies=("outside the world",))))
+
+    # 19. Damaged aircraft for 20 minutes: faults with threats at the same
+    # time, recovery landings, ejections. Weapons hold keeps the fight from
+    # deciding it. The damaged first enemy must end landed, dead or ejected,
+    # or flying free, never still on its way down after 20 minutes.
+    def damaged_outcome(output: str) -> list[str]:
+        problems = probe_problems(output, allow_anomalies=("outside the world",))
+        final = re.search(r"^actor=\d+ Enemy 1-1 \S+ activity=(.*?) alive=(true|false)", output, re.M)
+        # Still flying its approach counts as flying: over the hills south of
+        # Simferopol a slow damaged approach can take more than 20 minutes
+        # (lane doc, "Needs a decision", item 6). Stuck on the ground does not.
+        if final and final.group(2) == "true" and final.group(1) in ("Taxiing", "Waiting to take off"):
+            problems.append(f"damaged Enemy 1-1 still {final.group(1)} after 20 minutes")
+        return problems
+
+    for index in [1, 4, 7, 11, 12, 14, 19, 21, 25, 29, 30, 34]:
+        for threat in ["hit", "gun"]:
+            out.append(probe(f"damaged-fault{index:02d}-{threat}",
+                             ["--probe-enemy-aircraft", AIRCRAFT[index % len(AIRCRAFT)], "--probe-fault", f"600:{index}",
+                              "--probe-threat", f"600:{threat}", "--probe-threat", f"1800:{threat}",
+                              "--probe-fault", f"2400:{(index + 7) % 45}", "--separation", "10", "--ai-mission", "hold"],
+                             ticks=144000, timeout=3600, check=damaged_outcome))
+
+    # 18. Player-wing orders given again and again in a fight.
+    def orders_answered(expected: int) -> Callable[[str], list[str]]:
+        def check(output: str) -> list[str]:
+            problems = probe_problems(output)
+            answered = len(re.findall(r"^t=\d+ order=\S+ (reply|refused)", output, re.M))
+            if answered != expected:
+                problems.append(f"{answered} of {expected} wing orders answered")
+            return problems
+        return check
+
+    for size, fa, ea, ground in [(5, "f18", "mig29", False), (3, "su27", "f14", False), (4, "f18", "su35", True)]:
+        orders = []
+        start = 12000 if ground else 600
+        for k in range(12):
+            orders += ["--probe-wing-order", f"{start + k * 1200}:{ORDER_NAMES[k % 4]}"]
+        where = ["--ground-start", GROUND_AIRPORT, "--maneuver", "takeoff", "--separation", "20"] if ground else ["--separation", "5"]
+        out.append(probe(f"orders-cycle-{fa}-{ea}{'-ground' if ground else ''}",
+                         ["--probe-wing-size", str(size), "--aircraft", fa, "--probe-friendly-aircraft", fa,
+                          "--probe-enemy-aircraft", ea, *where, "--probe-attack", f"{start}:10", *orders],
+                         ticks=start + 16000, timeout=1800, check=orders_answered(12)))
 
     # 17. Creator objectives and required survival against the debrief.
     group_cases = [
