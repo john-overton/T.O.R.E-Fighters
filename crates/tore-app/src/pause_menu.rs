@@ -173,11 +173,7 @@ impl PauseMenu {
         }
         let rows = self.rows(tree);
         for (i, n) in rows.iter().enumerate() {
-            let label = if n.label == "Exit to Windows" {
-                "Exit to Desktop"
-            } else {
-                &n.label
-            };
+            let label = display_label(&n.label);
             out.push((
                 i,
                 (142, 50 + i as i32 * 19, 356, 19),
@@ -310,11 +306,22 @@ impl PauseMenu {
     }
 }
 
+/// How a row's imported label reads on screen. The retail `Exit to Windows` is
+/// shown as `Exit to Desktop` (John's wording, 2026-09-29); the imported label
+/// stays the row's identity in the tree and in the dispatch.
+pub fn display_label(label: &str) -> &str {
+    if label == "Exit to Windows" {
+        "Exit to Desktop"
+    } else {
+        label
+    }
+}
+
 /// Every row in `tree` with a shortcut, as help lines `shortcut: label`.
 pub fn shortcut_lines(tree: &[MenuNode], lines: &mut Vec<String>) {
     for n in tree {
         if !n.shortcut.is_empty() {
-            lines.push(format!("{}: {}", n.shortcut, n.label));
+            lines.push(format!("{}: {}", n.shortcut, display_label(&n.label)));
         }
         shortcut_lines(&n.children, lines);
     }
@@ -395,6 +402,23 @@ mod tests {
         }
         m.pointer(&t, &LOOK, Some((160., 75.)), true);
         assert_eq!(m.pointer(&t, &LOOK, Some((160., 55.)), false), Event::None);
+    }
+
+    #[test]
+    fn the_retail_exit_row_reads_exit_to_desktop_everywhere_it_is_shown() {
+        let mut t = tree();
+        t[0].children[1].shortcut = "Alt-F4".into();
+        let mut lines = Vec::new();
+        shortcut_lines(&t, &mut lines);
+        assert_eq!(lines, ["Alt-F4: Exit to Desktop"]);
+        let m = PauseMenu::default();
+        let labels: Vec<String> = m
+            .controls(&t, &[], &|_| None)
+            .into_iter()
+            .map(|c| c.2)
+            .collect();
+        assert!(labels.iter().any(|l| l.starts_with("Exit to Desktop")));
+        assert!(labels.iter().all(|l| !l.contains("Windows")));
     }
 
     #[test]
