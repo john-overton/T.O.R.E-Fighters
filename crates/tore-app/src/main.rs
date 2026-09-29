@@ -2121,7 +2121,7 @@ impl App {
                 saved.apply(&mut self.flight_ui, &mut self.instruments);
                 if self.ground_start.is_some() {
                     self.flight_ui
-                        .message("Ground start: B releases brakes; PageUp adds throttle.");
+                        .message("Ground start: B releases brakes; 5 sets full throttle.");
                 }
                 if let Some(notice) = layout.as_ref().and_then(|l| l.notice()) {
                     self.flight_ui.message(notice);
