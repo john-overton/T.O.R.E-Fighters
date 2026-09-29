@@ -155,6 +155,11 @@ pub enum CommandNote {
 /// Command notes kept between drains; the oldest are dropped first.
 const MAX_COMMAND_NOTES: usize = 64;
 
+/// Lowest airborne mission start above sea level, feet (John, 2026-09-29).
+pub const SPAWN_MIN_MSL_FT: f64 = 5000.;
+/// Lowest airborne mission start above the ground under it, feet.
+pub const SPAWN_MIN_AGL_FT: f64 = 1000.;
+
 pub fn launcher(s: &flight::State) -> Launcher {
     Launcher {
         position: s.position,
@@ -812,6 +817,34 @@ impl Combat {
         }
         self.restart_render(s, None);
         Ok(())
+    }
+    /// Opinionated (requested by John, 2026-09-29): an airborne mission
+    /// aircraft never starts inside the terrain. After [`Self::reset`] placed
+    /// the wings, any airborne aircraft lower than [`SPAWN_MIN_MSL_FT`] above
+    /// sea level or [`SPAWN_MIN_AGL_FT`] above the ground under it is raised
+    /// to the higher of the two. Runway starts are untouched. Returns how many
+    /// aircraft were raised.
+    pub fn raise_airborne_spawns(&mut self, world: &World) -> usize {
+        let Some(spawns) = self.mission_spawns.as_ref() else {
+            return 0;
+        };
+        let mut raised = 0;
+        for (index, spawn) in spawns.iter().enumerate() {
+            if spawn.runway_order.is_some() {
+                continue;
+            }
+            let Some(target) = self.state.targets.get_mut(index) else {
+                continue;
+            };
+            let [x, y, z] = target.position;
+            let floor = SPAWN_MIN_MSL_FT
+                .max(f64::from(world.height(x as f32, z as f32)) + SPAWN_MIN_AGL_FT);
+            if y < floor {
+                target.position[1] = floor;
+                raised += 1;
+            }
+        }
+        raised
     }
     pub fn step(&mut self, s: &mut flight::State, world: &World) -> AppResult<Vec<Event>> {
         let l = launcher(s);

@@ -320,7 +320,11 @@ native research modes report that incompatibility without silently changing
 adapters. Missing or obstructed starts are rejected. Choosing ground start
 selects the airport for tower commands but does not grant landing clearance or
 announce that a landing has completed. The straight-flight fixtures
-(`--fixture-wings`) park only the player.
+(`--fixture-wings`) park only the player. Every airborne mission aircraft, friendly or enemy, is
+also raised to at least 5,000 ft above sea level and 1,000 ft above the
+ground under its own start point, whichever is higher, so no group starts
+inside the terrain (opinionated, requested by John 2026-09-29; before this,
+enemies 50 nm from Jixian or Bahawalpur started inside the mountains).
 
 Parked aircraft do not show on radar until they fly; see
 [Radar and aircraft on the ground](#radar-and-aircraft-on-the-ground). The
