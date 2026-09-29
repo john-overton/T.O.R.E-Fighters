@@ -6996,6 +6996,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut flight_faults: Vec<(u64, usize)> = Vec::new();
     let mut flight_cheats: Vec<String> = Vec::new();
     let mut flight_fuel: Option<f64> = None;
+    let mut flight_start: Option<[f64; 4]> = None;
     let mut flight_devices = None;
     let mut flight_controls = None;
     let mut flight_throttle = None;
@@ -7510,6 +7511,23 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 }
                 flight_faults.push((tick, index));
             }
+            "--flight-start" => {
+                let usage = "--flight-start needs X,Z,HEADING_DEGREES,AGL_FEET (feet from the map's south-west corner)";
+                let values: Vec<f64> = args
+                    .next()
+                    .ok_or(usage)?
+                    .split(',')
+                    .map(str::parse)
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| usage)?;
+                if values.len() != 4
+                    || values.iter().any(|v| !v.is_finite())
+                    || !(10. ..=90_000.).contains(&values[3])
+                {
+                    return Err(usage.into());
+                }
+                flight_start = Some([values[0], values[1], values[2], values[3]]);
+            }
             "--flight-fuel" => {
                 let pounds: f64 = args.next().ok_or("--flight-fuel needs internal fuel in pounds")?.parse()?;
                 if !pounds.is_finite() || !(0. ..=100_000.).contains(&pounds) {
@@ -7585,6 +7603,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "spin",
                     "spin-recover",
                     "stall-recover",
+                    "climb",
+                    "sprint",
                     "devices",
                     "autopilot",
                     "waypoint",
@@ -8342,6 +8362,20 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 state.bank = 25f64.to_radians();
                 keys.commands = vec![flight::PilotCommand::Set(flight::Switch::Autopilot, true)];
             }
+            "climb" => {
+                state.throttle = 1.;
+                state.burner = true;
+            }
+            "sprint" => {
+                // Full afterburner in level flight, altitude held by the autopilot.
+                state.throttle = 1.;
+                state.burner = true;
+                keys.commands = vec![
+                    flight::PilotCommand::Set(flight::Switch::Autopilot, true),
+                    flight::PilotCommand::Set(flight::Switch::Burner, true),
+                    flight::PilotCommand::Throttle(1.),
+                ];
+            }
             "stall-recover" => {
                 state.speed = flight_probe::STALL_START_FPS;
                 state.position[1] = flight_probe::STALL_START_FT;
@@ -8372,7 +8406,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         if ticks > 120 * 3600 {
             return Err("headless flight limited to one hour".into());
         }
-        let replay_world = if replay_frames.is_some() || ground_start_airport.is_some() {
+        let replay_world = if replay_frames.is_some()
+            || ground_start_airport.is_some()
+            || flight_start.is_some()
+        {
             Some(terrain::World::for_theater(
                 &assets.theater_resources,
                 &theater_code,
@@ -8388,6 +8425,21 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         };
         if researched_flight {
             state.enable_research(1)?;
+        }
+        if let Some(world) = &replay_world {
+            let cell = f64::from(tore_formats::theater::CELL_FEET);
+            println!(
+                "map_extent_ft: x={:.0} z={:.0}",
+                (world.theater.cols - 1) as f64 * cell,
+                (world.theater.rows - 1) as f64 * cell
+            );
+            if let Some([x, z, heading, agl]) = flight_start {
+                state.position = [x, f64::from(world.height(x as f32, z as f32)) + agl, z];
+                state.yaw = heading.to_radians();
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
+            }
         }
         println!(
             "flight_model={}",
@@ -8472,6 +8524,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let mut watch = flight_watch::FlightWatch::new(flight_trace_ticks, &state);
         let mut spin_recovery =
             (maneuver == "spin-recover").then(|| flight_probe::SpinRecovery::new(&state));
+        let mut climb = (maneuver == "climb").then(|| flight_probe::Climb::new(&state));
         let mut devices = (maneuver == "devices").then(|| flight_watch::DeviceWatch::new(&state));
         let mut stall_recovery =
             (maneuver == "stall-recover").then(|| flight_probe::StallRecovery::new(&state));
@@ -8496,6 +8549,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     commands,
                     ..Default::default()
                 };
+                &scripted
+            } else if let Some(probe) = climb.as_mut() {
+                scripted = probe.keys(&state);
                 &scripted
             } else if let Some(probe) = stall_recovery.as_mut() {
                 scripted = probe.keys(&state);
@@ -8525,6 +8581,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 return Err(error.into());
             }
             watch.observe(&state);
+            if let Some(world) = &replay_world {
+                let ground = world.surface(state.position[0], state.position[2]).height;
+                watch.observe_ground(&state, ground);
+            }
             if let Some(devices) = devices.as_mut() {
                 devices.observe(&state);
             }
@@ -8550,6 +8610,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 || stall_recovery
                     .as_ref()
                     .is_some_and(|probe| probe.finished())
+                || climb.as_ref().is_some_and(|probe| probe.finished(&state))
                 || landing_probe.as_ref().is_some_and(|probe| probe.finished())
             {
                 break;
@@ -8597,6 +8658,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             );
         }
         if let Some(probe) = &spin_recovery {
+            println!("{}", probe.report(&state));
+        }
+        if let Some(probe) = &climb {
             println!("{}", probe.report(&state));
         }
         if let Some(devices) = &devices {

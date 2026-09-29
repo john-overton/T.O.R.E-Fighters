@@ -41,6 +41,10 @@ pub struct FlightWatch {
     max_energy_ratio: f64,
     /// The largest ratio of airspeed to the envelope's top speed at that altitude.
     max_over_top_speed: f64,
+    /// Lowest height above the terrain and ticks spent well below it, when the
+    /// run has terrain.
+    min_agl_ft: Option<f64>,
+    under_ground_ticks: u64,
 }
 
 impl FlightWatch {
@@ -74,6 +78,8 @@ impl FlightWatch {
             max_energy_rate_fps: 0.,
             max_energy_ratio: 0.,
             max_over_top_speed: 0.,
+            min_agl_ft: None,
+            under_ground_ticks: 0,
         }
     }
 
@@ -166,6 +172,16 @@ impl FlightWatch {
         }
     }
 
+    /// Record the height above the terrain under the aircraft after a step.
+    pub fn observe_ground(&mut self, state: &flight::State, ground_height_ft: f64) {
+        let agl = state.position[1] - ground_height_ft;
+        self.min_agl_ft = Some(self.min_agl_ft.map_or(agl, |m| m.min(agl)));
+        // Well below the surface: more than the wheels' clearance and a margin.
+        if agl < -30. {
+            self.under_ground_ticks += 1;
+        }
+    }
+
     /// The `extremes:` summary line.
     pub fn report(&self) -> String {
         if self.samples == 0 || self.max_g == f64::MIN {
@@ -193,7 +209,12 @@ impl FlightWatch {
             self.max_energy_rate_fps,
             self.max_energy_ratio,
             self.max_over_top_speed,
-        )
+        ) + &self.min_agl_ft.map_or(String::new(), |agl| {
+            format!(
+                " min_agl_ft={agl:.1} under_ground_ticks={}",
+                self.under_ground_ticks
+            )
+        })
     }
 }
 

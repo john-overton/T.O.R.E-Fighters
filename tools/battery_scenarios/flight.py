@@ -70,8 +70,11 @@ def _plain_numbers(output: str) -> dict:
     return found
 
 
-def extremes_problems(output: str, engine_off_ok: bool = False) -> list[str]:
-    """Impossible values in the headless flight probe's `extremes:` line."""
+def extremes_problems(output: str, engine_off_ok: bool = False, beyond_envelope_ok: bool = False) -> list[str]:
+    """Impossible values in the headless flight probe's `extremes:` line.
+
+    `beyond_envelope_ok` skips the speed and altitude limits, for the climb
+    scenario that measures how far past its envelope an aircraft can go."""
     e = _numbers(output, "extremes:")
     if not e:
         return ["no extremes: line (the probe did not finish)"]
@@ -85,16 +88,18 @@ def extremes_problems(output: str, engine_off_ok: bool = False) -> list[str]:
             problems.append(f"energy gained with the engine off: {e['dead_stick_gain_ft']} ft")
         if float(e["dead_stick_gain_ft"]) > 200:
             problems.append(f"large energy gain with the engine off: {e['dead_stick_gain_ft']} ft")
-        if float(e["max_speed_kt"]) > 1300:
+        if float(e["max_speed_kt"]) > 1300 and not beyond_envelope_ok:
             problems.append(f"impossible speed {e['max_speed_kt']} kt")
-        if float(e.get("speed_over_envelope_top", 0)) > 1.02:
+        if float(e.get("speed_over_envelope_top", 0)) > 1.02 and not beyond_envelope_ok:
             problems.append(f"flew faster than the aircraft's own top speed: {e['speed_over_envelope_top']} of it")
         if not (-12 <= float(e["min_g"]) and float(e["max_g"]) <= 16):
             problems.append(f"impossible load {e['min_g']}..{e['max_g']} G")
-        if float(e["max_altitude_ft"]) > 70000:
+        if float(e["max_altitude_ft"]) > 70000 and not beyond_envelope_ok:
             problems.append(f"impossible altitude {e['max_altitude_ft']} ft")
         if float(e["min_altitude_ft"]) < -100:
             problems.append(f"under the ground: {e['min_altitude_ft']} ft")
+        if int(e.get("under_ground_ticks", 0)) > 0:
+            problems.append(f"{e['under_ground_ticks']} ticks more than 30 ft below the surface (lowest {e.get('min_agl_ft')} ft)")
         if float(e.get("energy_rate_over_thrust", 0)) > 1.0:
             problems.append(f"energy gained faster than the thrust allows: {e['energy_rate_over_thrust']} of thrust power")
         if float(e["max_pitch_rate_dps"]) > 120 or float(e["max_roll_rate_dps"]) > 720:
@@ -906,6 +911,75 @@ def waypoint_scenarios() -> list[Scenario]:
     ]
 
 
+def check_climb(output: str) -> list[str]:
+    """A full-power climb and the dive after it. Today's aircraft go well past
+    their own 1 G envelope: up to 1.65 times the ceiling and 1.95 times the top
+    speed (see "Needs a decision" in the lane page). These limits are that
+    behaviour with a margin, so a change for the worse is caught; they are not a
+    specification."""
+    problems = extremes_problems(output, engine_off_ok=True, beyond_envelope_ok=True)
+    c = _numbers(output, "climb:")
+    e = _numbers(output, "extremes:")
+    if not c:
+        return problems + ["no climb: line"]
+    try:
+        if float(c["ceiling_ft"]) <= 0:
+            problems.append("the aircraft has no envelope ceiling")
+        if float(c["over_ceiling"]) > 1.7:
+            problems.append(f"climbed to {c['max_altitude_ft']} ft, {c['over_ceiling']} of its {c['ceiling_ft']} ft ceiling")
+        if float(c["max_altitude_ft"]) < 0.6 * float(c["ceiling_ft"]):
+            problems.append(f"could only climb to {c['max_altitude_ft']} ft of a {c['ceiling_ft']} ft ceiling")
+        if float(e["speed_over_envelope_top"]) > 2.0:
+            problems.append(f"reached {e['speed_over_envelope_top']} times the envelope's top speed")
+    except (KeyError, ValueError):
+        problems.append("no result line")
+    return problems
+
+
+def check_sprint(output: str) -> list[str]:
+    """Full afterburner in level flight at 5,000 ft settles near the aircraft's
+    own top speed instead of running away."""
+    problems = extremes_problems(output, engine_off_ok=True, beyond_envelope_ok=True)
+    e = _numbers(output, "extremes:")
+    try:
+        if float(e["speed_over_envelope_top"]) > 1.08:
+            problems.append(f"level afterburner flight reached {e['speed_over_envelope_top']} times the envelope's top speed")
+        # Near the top of its envelope only the 1 G row is left, and a loaded
+        # aircraft cannot hold 1 G there: it sinks (see "Needs a decision"), so
+        # the altitude hold is not checked once the speed is above 90% of it.
+        if float(e["speed_over_envelope_top"]) <= 0.9 and float(e["max_altitude_ft"]) - float(e["min_altitude_ft"]) > 80:
+            problems.append("the autopilot altitude hold wandered more than 80 ft in the sprint")
+    except (KeyError, ValueError):
+        problems.append("no result line")
+    return problems
+
+
+def climb_scenarios() -> list[Scenario]:
+    return [
+        Scenario(
+            name=f"flight-climb-{ac}",
+            lane="flight",
+            args=["--headless-flight", "216000", "--aircraft", ac, "--maneuver", "climb", "--no-audio"],
+            check=check_climb,
+            timeout=240,
+        )
+        for ac in AIRCRAFT
+    ]
+
+
+def sprint_scenarios() -> list[Scenario]:
+    return [
+        Scenario(
+            name=f"flight-sprint-{ac}",
+            lane="flight",
+            args=["--headless-flight", "36000", "--aircraft", ac, "--maneuver", "sprint", "--no-audio"],
+            check=check_sprint,
+            timeout=240,
+        )
+        for ac in AIRCRAFT
+    ]
+
+
 # -------------------------------------------------------------------- fuel
 
 
@@ -1011,6 +1085,88 @@ def capture_scenarios() -> list[Scenario]:
     return out
 
 
+# ------------------------------------------------------------- world edges
+
+# Terrain grid (columns, rows) of each base theater; the map runs 0 to
+# (cells - 1) * 8,192 feet on each axis.
+GRIDS = {
+    "APA": (256, 256), "BAL": (256, 256), "CUB": (256, 256), "EGY": (208, 200), "FRA": (208, 200),
+    "GRE": (256, 256), "IRA": (256, 256), "KURILE": (256, 256), "LFA": (256, 256), "NSK": (256, 256),
+    "PGU": (256, 256), "SPA": (256, 256), "TVIET": (200, 200), "UKR": (208, 200), "VLA": (208, 200),
+    "WTA": (256, 256),
+}
+
+
+def check_edge(output: str) -> list[str]:
+    """Flying straight out over a map edge at 20,000 ft: the aircraft must keep
+    flying with finite numbers. Nothing stops it leaving the map (see "Needs a
+    decision")."""
+    problems = extremes_problems(output)
+    n = _plain_numbers(output)
+    if n.get("crashed") != "false":
+        problems.append("crashed flying out over the map edge at 20,000 ft")
+    if "final_position:" not in output:
+        problems.append("no final position")
+    return problems
+
+
+def edge_scenarios() -> list[Scenario]:
+    out = []
+    for theater, (cols, rows) in GRIDS.items():
+        width, depth = (cols - 1) * 8192, (rows - 1) * 8192
+        for edge, x, z, heading in [
+            ("west", 20000, depth // 2, 270),
+            ("east", width - 20000, depth // 2, 90),
+            ("south", width // 2, 20000, 180),
+            ("north", width // 2, depth - 20000, 0),
+        ]:
+            out.append(
+                Scenario(
+                    name=f"flight-edge-{edge}-{_theater_tag(theater)}",
+                    lane="flight",
+                    args=["--theater", theater, "--headless-flight", "24000", "--flight-start", f"{x},{z},{heading},20000", "--no-audio"],
+                    check=check_edge,
+                    timeout=180,
+                )
+            )
+    return out
+
+
+def check_terrain_crash(output: str) -> list[str]:
+    """A spin or a roll at 90 ft over any theater hits the ground: the aircraft
+    crashes, and never sinks through the surface."""
+    problems = extremes_problems(output, engine_off_ok=True)
+    n = _plain_numbers(output)
+    e = _numbers(output, "extremes:")
+    if n.get("crashed") != "true":
+        problems.append("a spin or roll 90 ft above the ground did not crash")
+    try:
+        if int(e["under_ground_ticks"]) != 0:
+            problems.append(f"{e['under_ground_ticks']} ticks more than 30 ft below the surface")
+        if float(e["min_agl_ft"]) < -30:
+            problems.append(f"went {e['min_agl_ft']} ft below the surface")
+    except (KeyError, ValueError):
+        problems.append("no terrain figures in the extremes line")
+    return problems
+
+
+def terrain_scenarios() -> list[Scenario]:
+    out = []
+    for theater, (cols, rows) in GRIDS.items():
+        x, z = (cols - 1) * 4096, (rows - 1) * 4096
+        for maneuver in ("spin", "roll"):
+            out.append(
+                Scenario(
+                    name=f"flight-terrain-{maneuver}-{_theater_tag(theater)}",
+                    lane="flight",
+                    args=["--theater", theater, "--headless-flight", "24000", "--maneuver", maneuver, "--flight-start", f"{x},{z},300,90", "--no-audio"],
+                    check=check_terrain_crash,
+                    timeout=180,
+                )
+            )
+    return out
+
+
 # -------------------------------------------------------- instrument panels
 
 
@@ -1081,8 +1237,12 @@ def scenarios() -> list[Scenario]:
         + panel_scenarios()
         + cheat_combat_scenarios()
         + device_scenarios()
+        + edge_scenarios()
+        + terrain_scenarios()
         + capture_scenarios()
         + daytime_scenarios()
         + fuel_scenarios()
         + waypoint_scenarios()
+        + climb_scenarios()
+        + sprint_scenarios()
     )

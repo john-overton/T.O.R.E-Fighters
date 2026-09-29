@@ -826,3 +826,71 @@ impl StallRecovery {
         )
     }
 }
+
+/// A full-power climb that holds a speed near the best climb, to find how high
+/// the aircraft can go, for comparison with its own 1 G envelope's ceiling.
+/// `fitted` test harness (agent decision, 2026-09-28).
+#[derive(Debug)]
+pub struct Climb {
+    ceiling_ft: f64,
+    max_altitude_ft: f64,
+    max_altitude_tick: u64,
+    start_tick: u64,
+    climb_kt: f64,
+}
+
+impl Climb {
+    pub fn new(state: &flight::State) -> Self {
+        let c = state.model().configuration();
+        let ceiling = c
+            .aerodynamics
+            .envelopes
+            .iter()
+            .find(|e| e.g == 1)
+            .map_or(0., |e| e.points.iter().map(|p| p[1]).fold(0., f64::max));
+        Self {
+            ceiling_ft: ceiling,
+            max_altitude_ft: state.position[1],
+            max_altitude_tick: state.ticks,
+            start_tick: state.ticks,
+            climb_kt: 350.,
+        }
+    }
+
+    pub fn finished(&self, state: &flight::State) -> bool {
+        // Ten minutes without a new altitude record: it has topped out.
+        state.ticks > self.max_altitude_tick + 120 * 600 || state.crashed
+    }
+
+    pub fn keys(&mut self, state: &flight::State) -> PilotInput {
+        if state.position[1] > self.max_altitude_ft + 1. {
+            self.max_altitude_ft = state.position[1];
+            self.max_altitude_tick = state.ticks;
+        }
+        let mut keys = PilotInput::default();
+        // Hold speed with pitch: nose up when fast, down when slow.
+        let speed_kt = state.speed / 1.687_81;
+        let target_pitch = (15. + (speed_kt - self.climb_kt) * 0.15).clamp(-5., 45.);
+        let error = target_pitch - state.pitch.to_degrees();
+        keys.pitch = (0.06 * error - 0.3 * state.pitch_rate.to_degrees() / 10.).clamp(-1., 1.);
+        keys.roll = (-state.bank * 2.).clamp(-1., 1.);
+        keys.commands = vec![
+            PilotCommand::Throttle(1.),
+            PilotCommand::Set(Switch::Burner, true),
+        ];
+        keys
+    }
+
+    pub fn report(&self, state: &flight::State) -> String {
+        format!(
+            "climb: max_altitude_ft={:.0} ceiling_ft={:.0} over_ceiling={:.3} seconds_to_top={:.0} final_altitude_ft={:.0} final_speed_kt={:.1} crashed={}",
+            self.max_altitude_ft,
+            self.ceiling_ft,
+            self.max_altitude_ft / self.ceiling_ft.max(1.),
+            (self.max_altitude_tick - self.start_tick) as f64 / 120.,
+            state.position[1],
+            state.speed / 1.687_81,
+            state.crashed,
+        )
+    }
+}
