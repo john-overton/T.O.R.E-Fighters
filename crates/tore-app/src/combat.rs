@@ -1088,8 +1088,11 @@ impl Combat {
             }
         }
         crate::instruments::CombatReadout {
+            // The window lists what the aircraft carries: a weapon with no
+            // rounds left, or never loaded, is not listed unless selected.
             weapons: groups
                 .into_iter()
+                .filter(|(_, _, count, selected)| *count > 0 || *selected)
                 .map(|(_, name, count, selected)| (name, count, selected))
                 .collect(),
             chaff: self.state.chaff,
@@ -1304,15 +1307,22 @@ impl Combat {
 }
 
 pub(crate) fn apply_startup_weapon_state(state: &mut live::State) {
-    if let Some(index) = state
-        .configuration()
-        .stations
+    // The gun is the startup weapon. A gun station that carries nothing falls
+    // back to the first station that does, and an aircraft with nothing
+    // loaded starts on NAV, so an empty station never shows up armed.
+    let stations = &state.configuration().stations;
+    let gun = stations
         .iter()
         .position(|station| live::is_gun(&station.weapon))
-    {
-        state.selected = index;
+        .filter(|index| state.carries(*index));
+    let choice = gun.or_else(|| (0..stations.len()).find(|index| state.carries(*index)));
+    match choice {
+        Some(index) => {
+            state.selected = index;
+            state.armed = true;
+        }
+        None => state.armed = false,
     }
-    state.armed = true;
 }
 
 /// Uses the same imported configuration, flight state, trigger host, movement and
@@ -1943,6 +1953,72 @@ fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tore_formats::aircraft::AircraftId;
+    /// A player combat state with a gun and a missile, loaded as given.
+    fn loaded(ammo: [u16; 2]) -> (Combat, flight::State) {
+        let mut c = render_hash_tests::combat(vec![], vec![]);
+        let mut config = c.state.configuration().clone();
+        config.stations[0].weapon.source = AircraftId::F18.gun().into();
+        c.state = live::State::new(config, true).unwrap();
+        c.initial_ammo = Some(ammo.to_vec());
+        let mut f =
+            flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        c.reset(&mut f).unwrap();
+        c.apply_startup_weapons();
+        (c, f)
+    }
+    fn listed(c: &Combat, f: &flight::State) -> Vec<(String, u32, bool)> {
+        c.readout(f, 1.)
+            .weapons
+            .into_iter()
+            .map(|(name, count, selected)| (name, count, selected))
+            .collect()
+    }
+    #[test]
+    fn an_emptied_station_stays_empty_and_is_not_listed() {
+        let (c, f) = loaded([500, 0]);
+        assert_eq!(
+            c.state.ammo,
+            [500, 0],
+            "a zero quantity is not the default load"
+        );
+        let list = listed(&c, &f);
+        assert_eq!(list.len(), 1, "the empty missile is not carried: {list:?}");
+        assert_eq!(list[0].1, 500);
+    }
+    #[test]
+    fn a_fully_empty_aircraft_starts_on_nav_with_nothing_listed() {
+        let (mut c, f) = loaded([0, 0]);
+        assert_eq!(c.state.ammo, [0, 0]);
+        assert!(!c.state.armed, "nothing to arm");
+        assert!(listed(&c, &f).is_empty());
+        // Cycling the selection has nowhere to go.
+        c.state.cycle_selection(true);
+        assert!(!c.state.armed);
+        c.state.cycle_selection(false);
+        assert!(!c.state.armed);
+    }
+    #[test]
+    fn the_selection_ring_skips_empty_stations_and_startup_falls_back() {
+        let (mut c, _) = loaded([0, 3]);
+        assert!(c.state.armed);
+        assert_eq!(
+            c.state.selected, 1,
+            "the empty gun is not selected at startup"
+        );
+        c.state.cycle_selection(true);
+        assert!(!c.state.armed, "NAV");
+        c.state.cycle_selection(true);
+        assert_eq!((c.state.armed, c.state.selected), (true, 1));
+    }
+    #[test]
+    fn a_restart_reloads_exactly_the_edited_quantities() {
+        let (mut c, mut f) = loaded([500, 0]);
+        c.state.ammo.fill(7);
+        c.reset(&mut f).unwrap();
+        assert_eq!(c.state.ammo, [500, 0]);
+    }
+
     #[test]
     fn fire_requires_unmodified_press_and_release_after_interruption() {
         let mut f = FireInput::default();
