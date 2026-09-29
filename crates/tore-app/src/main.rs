@@ -2030,11 +2030,11 @@ impl App {
                     event_loop.exit();
                     return;
                 }
-                self.airport_nav_mode = ground_airport.is_some();
                 // A ground start begins on NAV, and so does an aircraft with nothing
                 // loaded in the selected station: an empty station is never armed.
-                self.combat.state.armed =
-                    !self.airport_nav_mode && self.combat.state.carries(self.combat.state.selected);
+                self.airport_nav_mode = ground_airport.is_some()
+                    || !self.combat.state.carries(self.combat.state.selected);
+                self.combat.state.armed = !self.airport_nav_mode;
                 self.airport_commands.clear();
                 self.instruments.navigation = navigation::Navigation::default();
                 if let Some(airport) = ground_airport {
@@ -9381,7 +9381,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     let mut airport_service =
         tore_sim::airport::Service::new(&world.airport_scene).map_err(std::io::Error::other)?;
     let airport_nav_mode = airport_probe.map_or_else(
-        || ground_start.is_some() && weapon_slot.is_none() && !live_fire,
+        || {
+            (ground_start.is_some() && weapon_slot.is_none() && !live_fire)
+                || (stripped_loadout.is_some() && !combat.state.carries(combat.state.selected))
+        },
         |(_, aircraft, _)| aircraft.nav_mode,
     );
     if airport_nav_mode {
