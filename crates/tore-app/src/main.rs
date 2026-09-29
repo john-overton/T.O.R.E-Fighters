@@ -4516,8 +4516,9 @@ fn device_schedule(tick: u64) -> Option<Vec<flight::PilotCommand>> {
 }
 
 /// The `--flight-cheat` names, for headless probes and live-fire captures.
-const PROBE_CHEATS: [&str; 7] = [
+const PROBE_CHEATS: [&str; 8] = [
     "extra-g",
+    "no-g-effects",
     "no-spins",
     "no-crashes",
     "unlimited-fuel",
@@ -4530,6 +4531,7 @@ fn apply_probe_cheat(cheats: &mut tore_sim::cheats::Cheats, name: &str) {
     use tore_sim::cheats::Damage;
     match name {
         "extra-g" => cheats.extra_g = true,
+        "no-g-effects" => cheats.no_g_effects = true,
         "no-spins" => cheats.no_spins = true,
         "no-crashes" => cheats.no_crashes = true,
         "unlimited-fuel" => cheats.unlimited_fuel = true,
@@ -7536,9 +7538,9 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 flight_fuel = Some(pounds);
             }
             "--flight-cheat" => {
-                let name = args.next().ok_or("--flight-cheat needs extra-g, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage")?;
+                let name = args.next().ok_or("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage")?;
                 if !PROBE_CHEATS.contains(&name.as_str()) {
-                    return Err("--flight-cheat needs extra-g, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage".into());
+                    return Err("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage".into());
                 }
                 flight_cheats.push(name);
             }

@@ -45,6 +45,10 @@ pub struct FlightWatch {
     /// run has terrain.
     min_agl_ft: Option<f64>,
     under_ground_ticks: u64,
+    /// The pilot's G effects, stepped as the flight does, for the veil's peaks.
+    veil: tore_sim::g_effects::GEffects,
+    max_blackout: f64,
+    max_redout: f64,
 }
 
 impl FlightWatch {
@@ -80,6 +84,9 @@ impl FlightWatch {
             max_over_top_speed: 0.,
             min_agl_ft: None,
             under_ground_ticks: 0,
+            veil: Default::default(),
+            max_blackout: 0.,
+            max_redout: 0.,
         }
     }
 
@@ -105,6 +112,9 @@ impl FlightWatch {
             self.non_finite += 1;
             return;
         }
+        self.veil.step(state.g, !state.cheats.no_g_effects);
+        self.max_blackout = self.max_blackout.max(self.veil.blackout);
+        self.max_redout = self.max_redout.max(self.veil.redout);
         self.max_speed_kt = self.max_speed_kt.max(state.speed / FEET_PER_KNOT);
         self.max_g = self.max_g.max(state.g);
         self.min_g = self.min_g.min(state.g);
@@ -191,7 +201,7 @@ impl FlightWatch {
             );
         }
         format!(
-            "extremes: samples={} non_finite={} max_speed_kt={:.1} max_g={:.2} min_g={:.2} min_altitude_ft={:.1} max_altitude_ft={:.1} max_pitch_rate_dps={:.1} max_roll_rate_dps={:.1} fuel_start_lb={:.1} fuel_end_lb={:.1} fuel_rise_lb={:.3} dead_stick_gain_ft={:.3} max_dead_stick_step_ft={:.4} max_energy_rate_fps={:.1} energy_rate_over_thrust={:.3} speed_over_envelope_top={:.3}",
+            "extremes: samples={} non_finite={} max_speed_kt={:.1} max_g={:.2} min_g={:.2} min_altitude_ft={:.1} max_altitude_ft={:.1} max_pitch_rate_dps={:.1} max_roll_rate_dps={:.1} fuel_start_lb={:.1} fuel_end_lb={:.1} fuel_rise_lb={:.3} dead_stick_gain_ft={:.3} max_dead_stick_step_ft={:.4} max_energy_rate_fps={:.1} energy_rate_over_thrust={:.3} speed_over_envelope_top={:.3} max_blackout={:.3} max_redout={:.3}",
             self.samples,
             self.non_finite,
             self.max_speed_kt,
@@ -209,6 +219,8 @@ impl FlightWatch {
             self.max_energy_rate_fps,
             self.max_energy_ratio,
             self.max_over_top_speed,
+            self.max_blackout,
+            self.max_redout,
         ) + &self.min_agl_ft.map_or(String::new(), |agl| {
             format!(
                 " min_agl_ft={agl:.1} under_ground_ticks={}",

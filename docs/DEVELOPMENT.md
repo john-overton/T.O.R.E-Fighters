@@ -626,15 +626,21 @@ lowest load, lowest and highest altitude, peak pitch and roll rates, fuel at the
 end, `fuel_rise_lb` (fuel that went up, which it never should), `dead_stick_gain_ft` (energy
 height gained above 60 feet with the engine off, which should stay at zero) and
 `energy_rate_over_thrust` (the largest one-second energy gain as a share of what full thrust
-could give, which should stay well under 1). `--flight-trace TICKS` also prints a `trace:` line
+could give, which should stay well under 1), `speed_over_envelope_top` (airspeed against the
+aircraft's own envelope top speed at that altitude) and `max_blackout` / `max_redout` (the
+pilot's G-effect veil, 0 to 1). `--flight-trace TICKS` also prints a `trace:` line
 every that many ticks. These are development harness options, not game behaviour:
 
 - `--flight-fault TICK:INDEX` (repeatable, index 0..44) applies a system fault to the player's
   aircraft at that tick through the normal fault path and adds a `systems:` line.
-- `--flight-cheat NAME` (repeatable) turns on `extra-g`, `no-spins`, `no-crashes`,
+- `--flight-cheat NAME` (repeatable) turns on `extra-g`, `no-g-effects`, `no-spins`, `no-crashes`,
   `unlimited-fuel`, `unlimited-ammo`, `invulnerable` or `realistic-damage`. It also applies to
   `--live-fire` captures.
 - `--flight-fuel POUNDS` sets the internal fuel, to run dry on purpose.
+- `--flight-start X,Z,HEADING,AGL` starts the probe over a real theater (`--theater`), at that
+  world position in feet, heading in degrees and height above the ground. With terrain the
+  `extremes:` line adds `min_agl_ft` and `under_ground_ticks`, and a `map_extent_ft:` line gives
+  the map's size.
 - `--countermeasure-preview` also prints the chaff and flare counts carried against capacity.
 
 Scripted pilots fly the same manoeuvre in every aircraft. Each is a `fitted` test harness (agent
@@ -646,6 +652,8 @@ decision, 2026-09-28):
 | `stall-recover` | Starts slow at 15,000 feet, pulls until the departure alert sounds, holds it three seconds, then afterburner, nose down and wings level until the alert clears. | `stall_recovery:` |
 | `land` | With `--ground-start N`: starts four miles out on a three degree slope with gear, flaps and hook down at a speed taken from the aircraft's own stall speed and landing limits, flares, closes the throttle, brakes to a stop. | `landing_start:` and `landing:` |
 | `land-gear-up`, `land-hard`, `land-off-runway` | The same approach with the gear left up, no flare, or lined up 1,500 feet beside the runway's footprint, to check that unsafe touchdowns crash for the reason the aircraft's landing limits give. | `landing:` |
+| `climb` | Full afterburner climb holding a climb speed, then whatever the aircraft does at the top; reports the highest altitude against the 1 G envelope's ceiling. | `climb:` |
+| `sprint` | Full afterburner in level flight at 5,000 feet, altitude held by the autopilot. | `extremes:` |
 | `autopilot` | Starts in a 25 degree bank with heading and altitude hold engaged. | `extremes:` |
 | `waypoint` | Waypoint autopilot toward a waypoint 60,000 feet out, 60 degrees right of north. | `final_position:` |
 | `devices` | Gear, flaps, airbrake and hook down one after another, then up again. | `devices:` |

@@ -100,6 +100,13 @@ def extremes_problems(output: str, engine_off_ok: bool = False, beyond_envelope_
             problems.append(f"under the ground: {e['min_altitude_ft']} ft")
         if int(e.get("under_ground_ticks", 0)) > 0:
             problems.append(f"{e['under_ground_ticks']} ticks more than 30 ft below the surface (lowest {e.get('min_agl_ft')} ft)")
+        for veil in ("max_blackout", "max_redout"):
+            if not 0 <= float(e.get(veil, 0)) <= 1:
+                problems.append(f"{veil} {e[veil]} outside 0..1")
+        if float(e.get("max_blackout", 0)) > 0 and float(e["max_g"]) < 5:
+            problems.append(f"the view greyed out at {e['max_g']} G")
+        if float(e.get("max_redout", 0)) > 0 and float(e["min_g"]) > -2:
+            problems.append(f"the view reddened at {e['min_g']} G")
         if float(e.get("energy_rate_over_thrust", 0)) > 1.0:
             problems.append(f"energy gained faster than the thrust allows: {e['energy_rate_over_thrust']} of thrust power")
         if float(e["max_pitch_rate_dps"]) > 120 or float(e["max_roll_rate_dps"]) > 720:
@@ -770,6 +777,9 @@ def make_check_cheat(cheat: str):
             if cheat == "extra-g":
                 if not 8.5 <= float(e["max_g"]) <= 9.5:
                     problems.append(f"Pull extra G reached {e['max_g']} G, expected about 9")
+            elif cheat == "no-g-effects":
+                if float(e["max_blackout"]) != 0 or float(e["max_redout"]) != 0:
+                    problems.append("No redout or blackout on but the view still greyed or reddened")
             elif cheat == "no-spins":
                 if n.get("spin_direction") != "0" or "Spinning" in n.get("departure_alert", ""):
                     problems.append("No spins on but the aircraft spun")
@@ -788,7 +798,7 @@ def make_check_cheat(cheat: str):
 
 def cheat_scenarios() -> list[Scenario]:
     out = []
-    plan = [("extra-g", "pull"), ("no-spins", "spin"), ("no-crashes", "roll"), ("unlimited-fuel", "loop")]
+    plan = [("extra-g", "pull"), ("no-g-effects", "pull"), ("no-spins", "spin"), ("no-crashes", "roll"), ("unlimited-fuel", "loop")]
     for ac in AIRCRAFT:
         for cheat, maneuver in plan:
             out.append(
@@ -1080,6 +1090,8 @@ def capture_scenarios() -> list[Scenario]:
     for section in ("nose", "cockpit", "core", "left-wing", "right-wing", "tail"):
         for fraction in ("0.3", "0.7", "1"):
             add(f"damage-f18-{section}-{fraction}", ["--free-flight", "--aircraft", "f18", "--flight-view", "1", "--damage-preview", fraction, "--damage-preview-section", section])
+    for ac in AIRCRAFT:
+        add(f"groundstart-{ac}", ["--free-flight", "--aircraft", ac, "--theater", "UKR", "--ground-start", "1", "--flight-view", "1", "--flight-look", "150,-15", "--flight-zoom", "1.5"])
     for bay in ("0", "0.5", "1"):
         add(f"bay-f22-{bay}", ["--free-flight", "--aircraft", "f22", "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
     return out
