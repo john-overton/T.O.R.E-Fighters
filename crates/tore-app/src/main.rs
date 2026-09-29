@@ -17,6 +17,7 @@ mod celestial;
 mod clouds;
 mod cockpit_renderer;
 mod combat;
+mod combat_smoke;
 mod combat_tape;
 mod combat_view;
 mod comms;
@@ -8515,7 +8516,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 })
             })?;
         combat_view::CombatView::for_configuration(&config, &assets.theater_resources)?;
-        combat::smoke(&hornet, &assets.theater_resources)?;
+        combat_smoke::smoke(&hornet, &assets.theater_resources)?;
         return Ok(Outcome::Done);
     }
     if live_fire && record_input.is_some() {

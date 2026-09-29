@@ -1,0 +1,788 @@
+//! The `--combat-smoke` command-line check: scripted ranges, source damage
+//! replay and ballistic release, run through `Combat` and the live combat
+//! state. It reads `TORE_COMBAT_EVIDENCE` and writes tape files, so it belongs
+//! to the app and not to mission state.
+use crate::{
+    AppResult,
+    aircraft_type::AircraftType,
+    combat::{Combat, feedback, launcher},
+    flight,
+    terrain::Terrain,
+};
+use std::collections::BTreeMap;
+use tore_sim::{
+    attitude::Basis,
+    combat::live::{self, EffectKind, Event, Launcher},
+};
+
+/// Where two Debug dumps first differ, with a little context from each, so a
+/// failed replay comparison says which field moved.
+fn first_difference(a: &str, b: &str) -> String {
+    let at = a
+        .bytes()
+        .zip(b.bytes())
+        .position(|(x, y)| x != y)
+        .unwrap_or(a.len().min(b.len()));
+    let window = |s: &str| {
+        let from = s.floor_char_boundary(at.saturating_sub(120));
+        let to = s.floor_char_boundary((at + 120).min(s.len()));
+        s[from..to].to_owned()
+    };
+    format!(
+        "at byte {at}: replay ...{}... live ...{}...",
+        window(a),
+        window(b)
+    )
+}
+
+pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
+    let world = Terrain::for_theater(data, "UKR")?;
+    let mut combat = Combat::new(h, data, true)?;
+    println!(
+        "systems source {:?}: player capacity={} ECM={:?} weights={} repeat-limited=45",
+        h.profile.id,
+        combat.state.configuration().damage_capacity,
+        combat.state.configuration().ecm,
+        combat
+            .state
+            .configuration()
+            .system_damage
+            .iter()
+            .map(|v| u32::from(v & 15))
+            .sum::<u32>()
+    );
+    let mut damaged = live::State::new(combat.state.configuration().clone(), true)?;
+    // System faults are part of the check, so exercise Realistic damage.
+    damaged.cheats.damage = tore_sim::cheats::Damage::Realistic;
+    let l = launcher(&h.start(&world));
+    // A source missile followed by gun hits exercises selection on a varied
+    // damage history; a particular all-gun seed can legitimately select no fault.
+    damaged.selected = damaged
+        .configuration()
+        .stations
+        .iter()
+        .position(|s| s.weapon.source == "AGM65G.JT")
+        .or_else(|| {
+            damaged
+                .configuration()
+                .stations
+                .iter()
+                .position(|s| s.weapon.seeker.signature != 0)
+        })
+        .unwrap_or(0);
+    damaged.command(live::Command::Incoming, l);
+    let mut replica = damaged.clone();
+    let mut systems = 0;
+    let mut destroyed = 0;
+    for _ in 0..1200 {
+        let events = damaged.step(false, l, |_, _| 0.);
+        if events != replica.step(false, l, |_, _| 0.) {
+            return Err("source incoming damage replay diverged".into());
+        }
+        systems += events
+            .iter()
+            .filter(|e| matches!(e, Event::SubsystemDamaged(_)))
+            .count();
+        destroyed += events
+            .iter()
+            .filter(|e| matches!(e, Event::PlayerDestroyed))
+            .count();
+        if damaged.projectiles.is_empty() {
+            break;
+        }
+    }
+    // Forty gun-sized hits kill most aircraft; the A-4E's guns are weaker, so
+    // keep hitting until the aircraft is destroyed.
+    for _ in 0..2000 {
+        if damaged.player_hp == 0 {
+            break;
+        }
+        damaged.command(live::Command::DamagePlayer, l);
+        replica.command(live::Command::DamagePlayer, l);
+        let events = damaged.step(false, l, |_, _| 0.);
+        if events != replica.step(false, l, |_, _| 0.)
+            || format!("{damaged:?}") != format!("{replica:?}")
+        {
+            return Err("source damage replay diverged".into());
+        }
+        systems += events
+            .iter()
+            .filter(|e| matches!(e, Event::SubsystemDamaged(_)))
+            .count();
+        destroyed += events
+            .iter()
+            .filter(|e| matches!(e, Event::PlayerDestroyed))
+            .count();
+    }
+    // Different source weapons produce different damage histories. A fatal
+    // missile can legitimately select no subsystem. Cover each source station
+    // plus gradual gun damage without changing aircraft damage values or RNG.
+    for source in 0..combat.state.configuration().stations.len() {
+        if systems > 0 {
+            break;
+        }
+        let mut gradual = live::State::new(combat.state.configuration().clone(), true)?;
+        gradual.cheats.damage = tore_sim::cheats::Damage::Realistic;
+        gradual.selected = source;
+        if source > 0 {
+            gradual.command(live::Command::Incoming, l);
+        }
+        let mut replay = gradual.clone();
+        for tick in 0..1240 {
+            if tick >= 1200 {
+                gradual.command(live::Command::DamagePlayer, l);
+                replay.command(live::Command::DamagePlayer, l);
+            }
+            let events = gradual.step(false, l, |_, _| 0.);
+            if events != replay.step(false, l, |_, _| 0.)
+                || format!("{gradual:?}") != format!("{replay:?}")
+            {
+                return Err("gradual source damage replay diverged".into());
+            }
+            systems += events
+                .iter()
+                .filter(|e| matches!(e, Event::SubsystemDamaged(_)))
+                .count();
+        }
+    }
+    if (systems == 0
+        && damaged
+            .configuration()
+            .stations
+            .iter()
+            .any(|s| s.weapon.seeker.signature != 0))
+        || destroyed != 1
+        || damaged.player_hp != 0
+    {
+        return Err(format!("source automatic damage/destruction failed faults={systems} kills={destroyed} HP={} damage={} counts={:?} source={:?}",damaged.player_hp,damaged.player_damage,damaged.subsystem_counts,damaged.configuration().system_damage).into());
+    }
+    println!(
+        "systems automatic {:?}: faults={systems} destruction={destroyed} indices={:?} PASS",
+        h.profile.id, damaged.subsystem_counts
+    );
+    for index in 0..combat.state.ammo.len() {
+        let station = &combat.state.configuration().stations[index];
+        if !station.internal && station.weapon.seeker.signature == 0 {
+            continue;
+        }
+        for jammer in [false, true] {
+            let mut state = live::State::new(combat.state.configuration().clone(), true)?;
+            state.selected = index;
+            let mut l = launcher(&h.start(&world));
+            l.jammer = jammer;
+            state.command(live::Command::Incoming, l);
+            let mut replay = state.clone();
+            let initial = state.player_hp;
+            let ammo = state.ammo.clone();
+            let mut outcome = false;
+            let mut mixer = tore_input::FeedbackMixer::default();
+            let mut pulses = 0;
+            for _ in 0..1200 {
+                let events = state.step(false, l, |_, _| 0.);
+                if events != replay.step(false, l, |_, _| 0.)
+                    || format!("{state:?}") != format!("{replay:?}")
+                {
+                    return Err("incoming replay diverged".into());
+                }
+                for event in &events {
+                    if let Some(cue) = feedback(event, state.configuration()) {
+                        mixer.event(cue);
+                    }
+                    outcome |= matches!(event, Event::PlayerDamaged(_) | Event::Defeated(0));
+                }
+                if matches!(mixer.tick(), Some(tore_input::FeedbackUpdate::Pulse { .. })) {
+                    pulses += 1;
+                }
+                if outcome {
+                    break;
+                }
+            }
+            if !outcome || state.ammo != ammo || (state.player_hp < initial && pulses == 0) {
+                return Err(format!(
+                    "incoming lifecycle failed slot {} jammer={jammer}",
+                    index + 1
+                )
+                .into());
+            }
+            for _ in 0..120 {
+                mixer.tick();
+            }
+            if mixer.tick().is_some() {
+                return Err("feedback failed to settle".into());
+            }
+            println!(
+                "systems incoming {:?} slot={} jammer={jammer} HP={initial}->{} haptic-pulses={pulses} PASS",
+                h.profile.id,
+                index + 1,
+                state.player_hp
+            );
+        }
+    }
+    // The tape file of the last slot that recorded one. A slot that stops early
+    // (a surface weapon refused against the aircraft target) leaves its tape
+    // open, and the records that follow go to that file until the next slot's
+    // tape replaces it, as they did when combat held the file.
+    let mut recorder: Option<crate::combat_tape::Recorder> = None;
+    for index in 0..combat.state.ammo.len() {
+        let station = &combat.state.configuration().stations[index];
+        if !station.internal && station.weapon.seeker.signature == 0 {
+            ballistic_smoke(combat.state.configuration(), index)?;
+            continue;
+        }
+        for (class, category) in [
+            combat.state.configuration().target_category,
+            0x2000,
+            0x100,
+            0x400,
+            0x40,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut flight = h.start(&world);
+            let tape = std::env::var_os("TORE_COMBAT_EVIDENCE")
+                .filter(|_| class == 0)
+                .map(|root| {
+                    std::path::PathBuf::from(root).join(format!(
+                        "{:?}-slot-{}.tape",
+                        h.profile.id,
+                        index + 1
+                    ))
+                });
+            if let Some(path) = &tape {
+                std::fs::create_dir_all(path.parent().ok_or("tape directory missing")?)?;
+                if combat.recording_tape() && recorder.is_some() {
+                    write_tape(&mut combat, recorder.as_mut())?;
+                }
+                recorder = Some(crate::combat_tape::Recorder::new(
+                    path,
+                    data,
+                    combat.state.configuration(),
+                    "UKR",
+                )?);
+                combat.start_tape();
+            }
+            combat.reset(&mut flight)?;
+            // This stationary range fixture starts with an open available bay.
+            // Live actuator delay and closed-bay release have separate tests.
+            if flight.bay_available() {
+                flight.bay = 1.;
+                flight.bay_open = true;
+            }
+            for _ in 0..index {
+                combat.command(live::Command::NextWeapon, launcher(&flight));
+            }
+            combat.state.range_category = category;
+            combat.command(live::Command::ReplaceTarget, launcher(&flight));
+            // Selection needs a current observation, and a radar weapon track
+            // needs half a second of it, so observe before designating.
+            observe(&mut combat, &mut flight, &world, 1)?;
+            combat.command(live::Command::Designate, launcher(&flight));
+            observe(&mut combat, &mut flight, &world, ACQUISITION)?;
+            let initial = combat.state.ammo[index];
+            let mut negative = combat.state.clone();
+            let l = launcher(&flight);
+            negative.command(live::Command::ToggleArm, l);
+            negative.step(true, l, |_, _| 0.);
+            if negative.ammo[index] != initial || negative.readiness(l) != live::Readiness::Safe {
+                return Err("safe inhibited shot consumed ammunition".into());
+            }
+            negative.command(live::Command::ToggleArm, l);
+            negative.command(live::Command::FailStation, l);
+            let mass = negative.payload_lbs();
+            negative.step(true, l, |_, _| 0.);
+            if negative.rounds(index) != initial || negative.payload_lbs() != mass {
+                return Err("station failure changed ammunition/mass".into());
+            }
+            // A surface weapon cannot engage the practice aircraft
+            // (docs/spec/missiles.md, target-role rules): the shot is refused,
+            // not spent, and there is no surface target to fire it at yet.
+            if tore_sim::combat::missiles::Profile::for_weapon(
+                &combat.state.configuration().stations[index].weapon,
+            )
+            .is_some_and(|p| p.role == tore_sim::combat::missiles::TargetRole::Surface)
+            {
+                let mut refused = combat.state.clone();
+                refused.step(true, l, |_, _| 0.);
+                if refused.readiness(l) != live::Readiness::WrongTarget
+                    || refused.ammo[index] != initial
+                    || !refused.projectiles.is_empty()
+                {
+                    return Err(format!(
+                        "surface weapon was not refused against the aircraft target: slot={} weapon={} readiness={:?}",
+                        index + 1,
+                        combat.state.configuration().stations[index].weapon.source,
+                        refused.readiness(l)
+                    )
+                    .into());
+                }
+                println!(
+                    "combat smoke {} slot={} {} class={class}: refused against aircraft target PASS",
+                    h.profile.name,
+                    index + 1,
+                    combat.state.configuration().stations[index].weapon.source,
+                );
+                combat.cancel();
+                continue;
+            }
+            if index != 0 {
+                let mut no_target = combat.state.clone();
+                // Remove the fixture contact as well as its designation. A
+                // bare ClearDesignation may reacquire the same aircraft in
+                // boresight during this step, which is a valid launch rather
+                // than an undesignated negative case.
+                no_target.command(live::Command::ClearRange, l);
+                no_target.step(true, l, |_, _| 0.);
+                // Seeker service may validly switch a supported weapon into
+                // boresight during the step. The captured release gate, not the
+                // stale pre-service readiness, decides whether any debit was legal.
+                if no_target.release_readiness != live::Readiness::Ready
+                    && no_target.ammo[index] != initial
+                {
+                    return Err("inhibited targetless launch consumed ammo".into());
+                }
+                let weapon = &combat.state.configuration().stations[index].weapon;
+                let mut too_close = combat.state.clone();
+                too_close.launch_mode = tore_sim::combat::missiles::LaunchMode::Cued;
+                if weapon.seeker.zones[1].minimum_range > 0
+                    && combat.state.readiness(l) == live::Readiness::Ready
+                {
+                    // Leave enough margin for the 300 ft/s range target to
+                    // advance during the observation refresh below.
+                    let distance = f64::from(weapon.seeker.zones[1].minimum_range) - 100.;
+                    too_close.targets[0].position =
+                        std::array::from_fn(|k| l.position[k] + l.basis.forward[k] * distance);
+                    too_close.step(false, l, |_, _| 0.);
+                    let close_reason = too_close.readiness(l);
+                    if close_reason != live::Readiness::MinimumRange {
+                        return Err(format!(
+                            "source minimum-range launch was not inhibited: slot={} minimum={} reason={close_reason:?} mode={:?} designated={:?}",
+                            index + 1,
+                            weapon.seeker.zones[1].minimum_range,
+                            too_close.launch_mode,
+                            too_close.designated()
+                        ).into());
+                    }
+                    too_close.step(true, l, |_, _| 0.);
+                    if too_close.rounds(index) != initial {
+                        return Err("minimum-range inhibited shot consumed ammunition".into());
+                    }
+                }
+                let mut tracking = combat.state.clone();
+                tracking.step(true, l, |_, _| 0.);
+                if tracking.projectiles.is_empty() {
+                    return Err(format!(
+                        "source guidance probe did not launch: slot={} weapon={} readiness={:?} ammo={} initial={initial} mode={:?}",
+                        index + 1,
+                        weapon.source,
+                        combat.state.readiness(l),
+                        tracking.ammo[index],
+                        tracking.launch_mode
+                    )
+                    .into());
+                }
+                tracking.step(false, Launcher { radar: false, ..l }, |_, _| 0.);
+                let loses_track = weapon.seeker.signature == 3 && weapon.flags & 0x200 != 0;
+                if tracking.projectiles.iter().any(|p| {
+                    if let Some(guidance) = &p.guidance {
+                        p.target.is_none()
+                            || (loses_track
+                                && !matches!(
+                                    guidance.seeker.status,
+                                    tore_sim::combat::missiles::seeker::Status::Memory
+                                        | tore_sim::combat::missiles::seeker::Status::Lost
+                                ))
+                    } else {
+                        p.target.is_none() != loses_track
+                    }
+                }) {
+                    return Err("radar-off support and retained-identity contract failed".into());
+                }
+                let mut jettison = combat.state.clone();
+                let internal = jettison.configuration().stations[index].internal;
+                let expected_rounds = if internal { initial } else { 0 };
+                let expected_mass = jettison.payload_lbs()
+                    - if internal {
+                        0.
+                    } else {
+                        f64::from(weapon.weight.max(0)) * f64::from(initial)
+                    };
+                jettison.command(live::Command::Jettison, l);
+                if jettison.rounds(index) != expected_rounds
+                    || jettison.payload_lbs() != expected_mass
+                {
+                    return Err("source jettison mass/ammunition contract failed".into());
+                }
+                if combat.state.configuration().stations[index]
+                    .weapon
+                    .seeker
+                    .signature
+                    == 3
+                {
+                    // Passive channel: the switch stays on but nothing is
+                    // transmitting, so a radar weapon that needs the aircraft's
+                    // lock is inhibited.
+                    let mut radar_off = combat.state.clone();
+                    let off = Launcher { radar: false, ..l };
+                    radar_off.step(true, off, |_, _| 0.);
+                    let profile = tore_sim::combat::missiles::Profile::for_weapon(
+                        &combat.state.configuration().stations[index].weapon,
+                    );
+                    let guided_by_radar = profile.is_none_or(|p| {
+                        p.guidance == tore_sim::combat::missiles::Guidance::Supported
+                    });
+                    if guided_by_radar
+                        // Losing the radar track may also drop the designation,
+                        // so any reason but Ready is a valid inhibit.
+                        && (radar_off.ammo[index] != initial
+                            || radar_off.readiness(off) == live::Readiness::Ready)
+                    {
+                        return Err(format!(
+                            "radar-off launch was not inhibited: slot={} weapon={} ammo={} initial={initial} readiness={:?} mode={:?}",
+                            index + 1,
+                            combat.state.configuration().stations[index].weapon.source,
+                            radar_off.ammo[index],
+                            radar_off.readiness(off),
+                            radar_off.launch_mode
+                        )
+                        .into());
+                    }
+                    // Power switch off: a reviewed radar missile may still be
+                    // released, permanently unguided (docs/features.md, "Uncued
+                    // launch with the onboard seeker enabled").
+                    if profile.is_some() {
+                        let mut dumb = combat.state.clone();
+                        let off = Launcher {
+                            radar: false,
+                            radar_power: false,
+                            ..l
+                        };
+                        dumb.step(true, off, |_, _| 0.);
+                        if dumb.ammo[index] != initial - 1
+                            || dumb.projectiles.iter().any(|p| p.target.is_some())
+                        {
+                            return Err(format!(
+                                "radar-power-off release was not an unguided shot: slot={} ammo={} initial={initial}",
+                                index + 1,
+                                dumb.ammo[index]
+                            )
+                            .into());
+                        }
+                    }
+                }
+            }
+            // Replay the same authoritative host tick inputs in a second state.
+            // Presentation/pause never calls this path and cannot advance either copy.
+            let mut replay = combat.state.clone();
+            if let Some(name) = combat.state.configuration().stations[index]
+                .weapon
+                .fire_sound
+                .as_deref()
+            {
+                let pcm = tore_formats::pcm::Pcm::parse(
+                    name,
+                    data.get(name).ok_or("missing firing PCM")?,
+                )?;
+                if !pcm.samples.windows(2).any(|s| s[0] != s[1]) {
+                    return Err("firing PCM contains no signal".into());
+                }
+            }
+            for name in ["&EXPL3.5K", "&EXPL12.5K"] {
+                tore_formats::pcm::Pcm::parse(name, data.get(name).ok_or("missing impact PCM")?)?;
+            }
+
+            let mut fired = 0;
+            let mut impacts = 0;
+            let mut destroyed = 0;
+            let mut collided = false;
+            // Pulse for missiles, hold for gun. Two shots are available in the
+            // smallest source station; damage remains source class-0 per hit.
+            for tick in 0..6000 {
+                if tick % 240 == 0 {
+                    combat.input.space(true, false, false);
+                }
+                if index != 0 && tick % 240 == 1 {
+                    combat.input.space(false, false, false);
+                }
+                flight.step(&flight::PilotInput::default(), |x, z| {
+                    f64::from(world.height(x as f32, z as f32))
+                });
+                let replay_events = replay.step(combat.input.held, launcher(&flight), |x, z| {
+                    f64::from(world.height(x as f32, z as f32))
+                });
+                let events = combat.step(&mut flight, &world)?;
+                // The host hands a dry station's selection on (see `step`);
+                // the second state applies the same rule from the tape.
+                if !combat.input.held && replay.armed && !replay.carries(replay.selected) {
+                    replay.command(live::Command::AdvanceFromEmpty, launcher(&flight));
+                }
+                if events != replay_events
+                    || combat.state.ammo != replay.ammo
+                    || combat.state.projectiles != replay.projectiles
+                    || combat.state.targets != replay.targets
+                    || combat.state.history != replay.history
+                    || combat.state.effects != replay.effects
+                {
+                    return Err("combat host replay diverged".into());
+                }
+                for event in events {
+                    match event {
+                        Event::Fired(_) => fired += 1,
+                        Event::Hit(_) => impacts += 1,
+                        // The fixture flies at the player, so a slow gun can
+                        // lose the race and the two aircraft collide; the
+                        // collision then zeroes what the rounds had not.
+                        Event::PlayerDestroyed => collided = true,
+                        Event::Destroyed(_) => destroyed += 1,
+                        _ => {}
+                    }
+                }
+                if destroyed > 0 || (class != 0 && impacts > 0) {
+                    break;
+                }
+            }
+            if fired == 0
+                || impacts == 0
+                || (class == 0 && destroyed != 1)
+                || combat.state.ammo[index] >= initial
+                || combat.state.history.iter().any(|hit| {
+                    hit.class != class
+                        || hit.nominal
+                            != i32::from(
+                                combat.state.configuration().stations[index]
+                                    .weapon
+                                    .damage
+                                    .by_class[class],
+                            )
+                            .max(0)
+                })
+                || (!collided
+                    && combat
+                        .state
+                        .history
+                        .iter()
+                        .map(|hit| hit.applied)
+                        .sum::<i32>()
+                        != combat.state.configuration().hit_points - combat.state.targets[0].hp)
+                || (class == 0
+                    && !combat
+                        .state
+                        .effects
+                        .iter()
+                        .any(|e| e.kind == EffectKind::Destroyed))
+            {
+                let applied: i32 = combat.state.history.iter().map(|hit| hit.applied).sum();
+                let wrong_class = combat.state.history.iter().find(|hit| hit.class != class);
+                return Err(format!(
+                    "combat smoke {} {} failed: fired={fired} hits={impacts} destroyed={destroyed} class={class} ammo={}->{} applied={applied} lost_hp={} wrong_class={:?}",
+                    h.profile.name,
+                    combat.state.configuration().stations[index].weapon.source,
+                    initial,
+                    combat.state.ammo[index],
+                    combat.state.configuration().hit_points - combat.state.targets[0].hp,
+                    wrong_class.map(|hit| (hit.class, hit.nominal, hit.applied))
+                )
+                .into());
+            }
+            println!(
+                "combat smoke {} slot={} {} class={class}: shots={fired} hits={impacts} destroyed={destroyed} ammo={}->{} effects={} PASS",
+                h.profile.name,
+                index + 1,
+                combat.state.configuration().stations[index].weapon.source,
+                initial,
+                combat.state.ammo[index],
+                combat.state.effects.len()
+            );
+            combat.cancel();
+            let ammo = combat.state.ammo.clone();
+            for _ in 0..120 {
+                combat.step(&mut flight, &world)?;
+            }
+            if combat.state.ammo != ammo {
+                return Err("firing continued after release".into());
+            }
+            if let Some(path) = &tape {
+                write_tape(&mut combat, recorder.as_mut())?;
+                let decoded = crate::combat_tape::replay_without_airports(
+                    path,
+                    data,
+                    combat.state.configuration().clone(),
+                    "UKR",
+                    &world,
+                )?;
+                let (replayed, live_state) =
+                    (format!("{decoded:?}"), format!("{:?}", combat.state));
+                if replayed != live_state {
+                    return Err(format!(
+                        "serialized live-fire replay diverged before reset: {}",
+                        first_difference(&replayed, &live_state)
+                    )
+                    .into());
+                }
+                // Also replay manual state transitions, including a full reset.
+                // A slow gun can lose the race with the fixture and collide, and
+                // a tape does not record the host turning a crashed flight into
+                // a dead player, so the manual commands start from a fresh
+                // flight and a fresh combat state.
+                flight = h.start(&world);
+                combat.reset(&mut flight)?;
+                for command in [
+                    live::Command::ToggleArm,
+                    live::Command::ClearDesignation,
+                    live::Command::FailStation,
+                    live::Command::Jettison,
+                    live::Command::NextWeapon,
+                    live::Command::CycleClass,
+                    live::Command::DamagePlayer,
+                    live::Command::ToggleTargetJammer,
+                    live::Command::Incoming,
+                    live::Command::ReleaseChaff,
+                    live::Command::ReleaseFlare,
+                ] {
+                    combat.cancel();
+                    combat.command(command, launcher(&flight));
+                    combat.step(&mut flight, &world)?;
+                }
+                write_tape(&mut combat, recorder.as_mut())?;
+                let decoded = crate::combat_tape::replay_without_airports(
+                    path,
+                    data,
+                    combat.state.configuration().clone(),
+                    "UKR",
+                    &world,
+                )?;
+                let (replayed, live_state) =
+                    (format!("{decoded:?}"), format!("{:?}", combat.state));
+                if replayed != live_state {
+                    return Err(format!(
+                        "serialized manual-command replay diverged before reset: {}",
+                        first_difference(&replayed, &live_state)
+                    )
+                    .into());
+                }
+                combat.reset(&mut flight)?;
+                combat.step(&mut flight, &world)?;
+                write_tape(&mut combat, recorder.as_mut())?;
+                combat.stop_tape();
+                let decoded = crate::combat_tape::replay_without_airports(
+                    path,
+                    data,
+                    combat.state.configuration().clone(),
+                    "UKR",
+                    &world,
+                )?;
+                let (replayed, live_state) =
+                    (format!("{decoded:?}"), format!("{:?}", combat.state));
+                if replayed != live_state {
+                    return Err(format!(
+                        "serialized combat replay diverged after commands/reset: {}",
+                        first_difference(&replayed, &live_state)
+                    )
+                    .into());
+                }
+                println!("serialized combat replay {} PASS", path.display());
+            }
+        }
+    }
+    if combat.recording_tape() && recorder.is_some() {
+        write_tape(&mut combat, recorder.as_mut())?;
+        combat.stop_tape();
+    }
+    Ok(())
+}
+
+/// Writes the records combat has collected to the smoke harness's tape file
+/// and flushes it.
+fn write_tape(
+    combat: &mut Combat,
+    recorder: Option<&mut crate::combat_tape::Recorder>,
+) -> AppResult<()> {
+    let recorder = recorder.ok_or("missing smoke recorder")?;
+    recorder.write_all(combat.take_tape());
+    recorder.flush()
+}
+
+const ACQUISITION: usize = tore_sim::sensors::track::ACQUISITION_STEPS as usize;
+
+/// Advance the shared sensors without firing, so a scripted probe designates
+/// and tracks the same way a player does. It uses the recorded host step, so a
+/// tape replays the same observations.
+fn observe(
+    combat: &mut Combat,
+    flight: &mut flight::State,
+    world: &Terrain,
+    steps: usize,
+) -> AppResult<()> {
+    for _ in 0..steps {
+        combat.step(flight, world)?;
+    }
+    Ok(())
+}
+
+/// Unguided external stores have release/contact checks, not a missile lock or
+/// same-altitude interception requirement. Does not claim blast-radius parity.
+fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> {
+    let mut state = live::State::new(config.clone(), true)?;
+    state.selected = index;
+    let l = Launcher {
+        position: [0., 500., 0.],
+        basis: Basis::new(0., -0.3, 0.),
+        speed_fps: 500.,
+        velocity: Basis::new(0., -0.3, 0.).forward.map(|v| v * 500.),
+        bay_ready: true,
+        radar_power: false,
+        radar: false,
+        jammer: false,
+        alive: true,
+        controls: Default::default(),
+    };
+    let initial = state.ammo[index];
+    let mut safe = state.clone();
+    safe.command(live::Command::ToggleArm, l);
+    safe.step(true, l, |_, _| 0.);
+    if safe.ammo[index] != initial {
+        return Err("safe unguided store released".into());
+    }
+    let mut failed = state.clone();
+    failed.command(live::Command::FailStation, l);
+    failed.step(true, l, |_, _| 0.);
+    if failed.rounds(index) != initial {
+        return Err("failed unguided station released".into());
+    }
+    let mut replay = state.clone();
+    let mut ground = false;
+    let mut fired = false;
+    for tick in 0..7200 {
+        let events = state.step(tick == 0, l, |_, _| 0.);
+        if events != replay.step(tick == 0, l, |_, _| 0.)
+            || format!("{state:?}") != format!("{replay:?}")
+        {
+            return Err("unguided release replay diverged".into());
+        }
+        fired |= events.iter().any(|e| matches!(e, Event::Fired(_)));
+        ground |= events.contains(&Event::Ground);
+        if ground {
+            break;
+        }
+    }
+    if !fired
+        || !ground
+        || state.ammo[index] >= initial
+        || state.projectiles.iter().any(|p| p.target.is_some())
+    {
+        return Err(format!(
+            "unguided release/contact failed {}",
+            config.stations[index].weapon.source
+        )
+        .into());
+    }
+    state.command(live::Command::Jettison, l);
+    if state.rounds(index) != 0 {
+        return Err("unguided jettison failed".into());
+    }
+    println!(
+        "ballistic smoke {:?} {}: safe/failure inhibition, no-lock release, deterministic ground contact and jettison PASS",
+        config.aircraft, config.stations[index].weapon.source
+    );
+    Ok(())
+}
