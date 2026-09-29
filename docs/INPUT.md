@@ -324,7 +324,9 @@ Settings load at startup and can be edited in the [controls screen](#the-control
 Profiles use UTF-8 text, `#` comments and whitespace-separated tokens. The first
 non-comment line must be `tore-input 1`. Limits: 256 KiB, 1,024 bindings and 64
 aliases. Unknown actions, incompatible modes, invalid calibration and duplicate
-aliases fail with a line number. Identity/control tokens contain no whitespace.
+aliases fail with the file's path and a line number. A damaged `input-v1.conf`, which
+loads without being asked for, stops the start with that message and says to fix or
+delete the file. Identity/control tokens contain no whitespace.
 
 Example (replace the identity with the monitor's exact device ID):
 
