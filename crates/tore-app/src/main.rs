@@ -30,8 +30,10 @@ mod flight;
 mod flight_canvas;
 mod flight_map;
 mod flight_music;
+mod flight_probe;
 mod flight_ui;
 mod flight_views;
+mod flight_watch;
 mod graphics;
 mod graphics_screen;
 mod hud;
@@ -6926,6 +6928,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut native_flight_trig = None;
     let mut headless_ticks = None;
     let mut flight_probe_ticks = None;
+    let mut flight_trace_ticks = 0u64;
+    let mut flight_faults: Vec<(u64, usize)> = Vec::new();
     let mut flight_devices = None;
     let mut flight_controls = None;
     let mut flight_throttle = None;
@@ -7423,6 +7427,19 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 initial_screen = Screen::Flight;
             }
             "--free-flight" => initial_screen = Screen::Flight,
+            "--flight-fault" => {
+                let usage = "--flight-fault needs TICK:INDEX with a system fault index 0..44";
+                let value = args.next().ok_or(usage)?;
+                let (tick, index) = value.split_once(':').ok_or(usage)?;
+                let (tick, index): (u64, usize) = (tick.parse().map_err(|_| usage)?, index.parse().map_err(|_| usage)?);
+                if index > 44 || flight_faults.len() >= 64 {
+                    return Err(usage.into());
+                }
+                flight_faults.push((tick, index));
+            }
+            "--flight-trace" => {
+                flight_trace_ticks = args.next().ok_or("--flight-trace needs a tick count")?.parse()?;
+            }
             "--flight-probe-ticks" => {
                 let ticks = args
                     .next()
@@ -7479,6 +7496,11 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "roll",
                     "stall",
                     "spin",
+                    "spin-recover",
+                    "land",
+                    "land-gear-up",
+                    "land-hard",
+                    "land-off-runway",
                     "bank-left",
                     "bank-right",
                 ]
@@ -8207,6 +8229,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 keys.pitch = 1.;
                 keys.yaw = 1.;
             }
+            "spin-recover" => {
+                state.speed = 180.;
+                state.position[1] = flight_probe::SPIN_START_FT;
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
+            }
             "stall" => {
                 state.engine = false;
                 state.pitch = 0.2;
@@ -8230,6 +8259,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         } else {
             None
         };
+        let mut landing_probe: Option<flight_probe::Landing> = None;
         let mut state = if let Some(world) = &replay_world {
             hornet.start(world)
         } else {
@@ -8267,6 +8297,40 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 state.gear,
                 state.brake_out
             );
+            if let Some(variant) = flight_probe::LandingVariant::from_maneuver(&maneuver) {
+                let layout = quick_mission::ground_layout(world, object, 1)?;
+                let length = world
+                    .airport_scene
+                    .runway(object)
+                    .map_or(layout.runway.length_ft, |runway| runway.length_ft);
+                let probe = flight_probe::Landing::new(
+                    &state,
+                    layout.slots[0],
+                    layout.heading,
+                    length,
+                    |x, z| world.surface(x, z).height,
+                    variant,
+                );
+                probe.place(&mut state, layout.heading);
+                landing_probe = Some(probe);
+                println!(
+                    "landing_start: position={:?} heading={:.1} runway_length_ft={length:.0} anchored={} slot={:?} runway_center={:?} runway_heading={:.1}",
+                    state.position,
+                    layout.heading.to_degrees(),
+                    layout.anchored,
+                    layout.slots[0],
+                    layout.runway.center,
+                    layout.runway.heading.to_degrees()
+                );
+            }
+        }
+        if flight_probe::LandingVariant::from_maneuver(&maneuver).is_some()
+            && landing_probe.is_none()
+        {
+            return Err(
+                "--maneuver land needs --ground-start AIRPORT and the researched flight model"
+                    .into(),
+            );
         }
         let keys = setup_maneuver(&mut state);
         if let Some(tables) = &native_tables {
@@ -8274,8 +8338,25 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         let initial_forward = attitude::Basis::new(state.yaw, state.pitch, state.bank).forward;
         let (mut vertical, mut inverted, mut completed) = (false, false, false);
+        let mut watch = flight_watch::FlightWatch::new(flight_trace_ticks, &state);
+        let mut spin_recovery =
+            (maneuver == "spin-recover").then(|| flight_probe::SpinRecovery::new(&state));
         for tick in 0..ticks {
-            let keys = replay_frames.as_ref().map_or(&keys, |frames| &frames[tick]);
+            let scripted;
+            let keys = if let Some(probe) = spin_recovery.as_mut() {
+                scripted = probe.keys(&state);
+                &scripted
+            } else if let Some(probe) = landing_probe.as_mut() {
+                let world = replay_world.as_ref().unwrap();
+                let ground = world.surface(state.position[0], state.position[2]).height;
+                scripted = probe.keys(&state, ground);
+                &scripted
+            } else {
+                replay_frames.as_ref().map_or(&keys, |frames| &frames[tick])
+            };
+            for (_, index) in flight_faults.iter().filter(|(at, _)| *at == tick as u64) {
+                state.systems.hit(*index, state.throttle);
+            }
             if ground_start_airport.is_some() {
                 let world = replay_world.as_ref().unwrap();
                 state.step_surface(keys, |x, z| world.surface(x, z));
@@ -8289,6 +8370,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             if let Some(error) = state.native_fault() {
                 return Err(error.into());
             }
+            watch.observe(&state);
             let basis = attitude::Basis::new(state.yaw, state.pitch, state.bank);
             vertical |= basis.forward[1] > 0.999;
             inverted |= basis.up[1] < -0.9;
@@ -8305,6 +8387,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 }
             }
             if maneuver == "loop" && completed {
+                break;
+            }
+            if spin_recovery.as_ref().is_some_and(|probe| probe.finished())
+                || landing_probe.as_ref().is_some_and(|probe| probe.finished())
+            {
                 break;
             }
         }
@@ -8333,6 +8420,22 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.fuel,
             state.crashed
         );
+        println!("{}", watch.report());
+        if !flight_faults.is_empty() {
+            println!(
+                "systems: fatal={} pilot_dead={} engine={} {}",
+                state.systems.fatal(),
+                state.systems.pilot.dead,
+                state.engine,
+                state.systems.summary(state.damage_fraction)
+            );
+        }
+        if let Some(probe) = &spin_recovery {
+            println!("{}", probe.report(&state));
+        }
+        if let Some(probe) = &landing_probe {
+            println!("{}", probe.report(&state));
+        }
         if let Some(pilot) = &state.escape {
             println!(
                 "ejection={:?} pilot_alive={} pilot_position={:?}",

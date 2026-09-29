@@ -618,6 +618,31 @@ Shift + arrows look around in the cockpit or orbit around the aircraft externall
 
 `cargo run --locked -p tore-app -- --headless-flight 10800 --maneuver loop` starts the F/A-18D at 450 KTAS / 5,000 feet with full throttle and afterburner, then holds pull until it completes a loop or reaches the tick budget. It reports vertical/inverted/completed flags and the final state. This is an authored-adapter regression probe, not native flight-model acceptance. Use `--flight-look 0,90 --capture-flight .local/zenith.ppm` to inspect the sky directly overhead; the forward cockpit plane moves out of view naturally. [Baseline](baselines/flight-response-sky.md).
 
+### Headless flight checks
+
+Every `--headless-flight` run ends with an `extremes:` line: sample count, `non_finite`
+(any NaN or infinite pose, speed, load or fuel), top speed, highest and lowest load,
+lowest and highest altitude, peak pitch and roll rates, fuel at the start and end, `fuel_rise_lb`
+(fuel that went up, which it never should) and `dead_stick_gain_ft` (energy height gained above
+60 feet with the engine off, which should stay at zero). `--flight-trace TICKS` also prints a
+`trace:` line every that many ticks. `--flight-fault TICK:INDEX` (repeatable, index 0..44) applies
+a system fault to the player's aircraft at that tick through the normal fault path and adds a
+`systems:` line with the outcome. These are development harness options, not game behaviour.
+
+Three scripted pilots share the run, so a script can fly the same manoeuvre in every aircraft:
+
+| `--maneuver` | What it flies | Result line |
+| --- | --- | --- |
+| `spin-recover` | Starts at 15,000 feet, holds pro-spin controls until the aircraft spins, holds the spin for four seconds, then follows the manual's recovery (stick centred then slightly forward, full opposite rudder, full throttle). Aircraft whose PT disables spins report `entered_tick=never`. | `spin_recovery:` |
+| `land` | With `--ground-start N`: starts four miles out on a three degree slope with gear, flaps and hook down at a speed taken from the aircraft's own stall speed and landing limits, flares, closes the throttle, brakes to a stop. | `landing_start:` and `landing:` |
+| `land-gear-up`, `land-hard`, `land-off-runway` | The same approach with the gear left up, no flare, or lined up 1,500 feet beside the runway, to check that unsafe touchdowns crash for the reason the aircraft's landing limits give. | `landing:` |
+
+The scripted landing is a `fitted` test harness (agent decision, 2026-09-28): it floats about
+1,500 feet past the aim point, so on runways under about 5,500 feet it can overrun, and on the
+small airstrips (about 1,000 feet) it lands off the end. Only long runways are expected to end
+with `stopped=true` and `crashed=false`. `TORE_WIND=heading,speed` applies to these runs.
+See [the flight lane](testing/lane-flight.md).
+
 ## Directional cockpit checks
 
 The original forward cockpit and HUD now share a flat GPU overlay that translates opposite head-look around the aircraft-forward datum, with a side/up fade. Inspect with `--free-flight --flight-look 8,4`, `--flight-look 40,5`, and `--flight-look 0,35`; add `--capture-flight .local/directional.ppm` for a repeatable GPU capture. Check both `--window-size 1280x720` and `--window-size 640x900`. F1 restores the centered frame; F2 should not repeat forward art behind the pilot. Instrument windows and the Escape menu remain screen-anchored. See [asset limits and measurements](baselines/directional-cockpit.md).
