@@ -7325,11 +7325,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--list-inputs" => input_seconds = Some(2),
             "--monitor-inputs" => {
-                input_seconds = Some(
-                    args.next()
-                        .ok_or("--monitor-inputs needs seconds")?
-                        .parse::<u64>()?,
-                )
+                input_seconds = Some(option_number::<u64>(
+                    "--monitor-inputs",
+                    &args.next().ok_or("--monitor-inputs needs seconds")?,
+                )?)
             }
             "--write-input-profile" => {
                 write_input_profile = Some(PathBuf::from(
