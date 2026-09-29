@@ -96,7 +96,7 @@ impl App {
         }
         if let Some(renderer) = &mut self.renderer {
             if entered {
-                renderer.set_world(&self.world);
+                renderer.set_world(&self.world.terrain);
                 renderer.prepare_aircraft(&self.hornet);
             }
             renderer.window.set_cursor_visible(true);
