@@ -339,8 +339,18 @@ two seconds. Not silenced. Executable-confirmed, consistent with B46.
 
 Sent when flight leadership passes to another aircraft, five seconds later, to
 the new leader. It is voiced only when the previous leader is still alive to
-send it. The exact situations that pass leadership are **unknown**. A player
-who becomes leader hears it. Not silenced. Executable-confirmed.
+send it. The exact situations that pass leadership in the original are
+**unknown**. A player who becomes leader hears it. Not silenced.
+Executable-confirmed.
+
+*Implementation in TORE:* the AI passes the lead when the leader's aircraft is
+destroyed or its pilot ejects (John, 2026-09-28: to the lowest-numbered living
+human in the flight, else the lowest-numbered living AI member; see
+[lead succession](../ARCHITECTURE.md#lead-succession)) and raises a leadership
+event with the wing, the new leader, the previous leader and whether the
+previous leader's pilot is alive. The event is journaled. The call itself, five
+seconds later to the new leader, is not voiced yet (*agent decision*, stage B4
+wires it).
 
 ### Friendly-fire complaints
 
@@ -580,8 +590,9 @@ Every other seat hears the speaker by flight colour and position. Design:
 ### Not implemented, and why
 
 - **Waypoint calls.** Quick Mission flights have no waypoint routes yet.
-- **"You're the Wingleader now".** The situations that pass leadership are
-  unknown, and the player always leads their flight.
+- **"You're the Wingleader now".** The AI raises the leadership event and the
+  journal records it, but no call is voiced yet. The situations that pass
+  leadership in the original are unknown.
 - **AWACS report.** Its trigger is unknown.
 - **Vietnam voice set.** No Quick Mission speaker is North or South
   Vietnamese yet, and the per-event `#` mapping is only partly read.

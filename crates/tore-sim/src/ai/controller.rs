@@ -117,8 +117,12 @@ pub struct ActorIdentity {
     pub side: targeting::Side,
     /// Wing index on the setup screen, 0..=2 per side.
     pub wing: u8,
-    /// Member index inside the wing; 0 is the leader.
+    /// Member index inside the wing, from 0. It is the aircraft's place in the
+    /// roster and never changes; who leads is [`Self::leads`].
     pub member: u8,
+    /// This aircraft currently leads its wing. At the start it is the wing's
+    /// first member (member 0); lead succession moves it.
+    pub leads: bool,
     /// The exact aircraft record. `F18` is the F/A-18D, `RafaleC` the Rafale C.
     pub aircraft: AircraftId,
     /// Human control. No AI path may set this true; it gates the experience G
@@ -128,7 +132,7 @@ pub struct ActorIdentity {
 
 impl ActorIdentity {
     pub fn is_leader(&self) -> bool {
-        self.member == 0
+        self.leads
     }
 }
 
@@ -973,9 +977,9 @@ impl Controller {
         self.mission_complete
     }
 
-    /// Leader succession renumbers a wing (see `AiMission`).
-    pub fn set_member(&mut self, member: u8) {
-        self.identity.member = member;
+    /// Lead succession: this aircraft now leads its wing, or no longer does.
+    pub fn set_leads(&mut self, leads: bool) {
+        self.identity.leads = leads;
     }
 
     pub fn profile(&self) -> &BehaviorProfile {
@@ -3398,6 +3402,7 @@ mod tests {
             side: targeting::Side(1),
             wing: 0,
             member: 0,
+            leads: true,
             aircraft: AircraftId::F18,
             human_controlled: false,
         }
@@ -3589,6 +3594,7 @@ mod tests {
     fn formation_motion_tracks_its_leader_and_preserves_repeated_tick_determinism() {
         let mut identity = identity();
         identity.member = 1;
+        identity.leads = false;
         let mut c = Controller::new(identity, profile(), resolved(Experience::Ace), 1234).unwrap();
         let mut scene = Scene::new();
         scene.targets.clear();
@@ -3924,6 +3930,7 @@ mod tests {
 
         let mut wingman_identity = identity();
         wingman_identity.member = 1;
+        wingman_identity.leads = false;
         let mut wingman =
             Controller::new(wingman_identity, profile(), resolved(Experience::Ace), 5).unwrap();
         let mut view = wing_view();
@@ -4531,6 +4538,7 @@ mod tests {
     fn live_formation_variation_is_smooth_and_vertical_target_stays_within_five_feet() {
         let mut id = identity();
         id.member = 1;
+        id.leads = false;
         let mut c = Controller::new(id, profile(), resolved(Experience::Average), 5).unwrap();
         let scene = Scene::new();
         let mut frame = scene.frame(0, own());

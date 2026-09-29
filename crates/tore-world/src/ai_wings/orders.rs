@@ -261,6 +261,40 @@ impl AiWings {
             .map(|h| (side_of(h.side), h.wing))
     }
 
+    /// Whether human-flown aircraft `sender` leads its wing now, which is what
+    /// lets it order the wing. Before the mission has stepped, the wing's
+    /// first member leads.
+    fn leads_wing(&self, sender: u32) -> bool {
+        let Some(human) = self.humans.iter().find(|h| h.id == sender) else {
+            return false;
+        };
+        match self.mission.wing_leader(side_of(human.side), human.wing) {
+            Some(leader) => leader == sender,
+            None => human.member == 0,
+        }
+    }
+
+    /// The refusal for an order from an aircraft that does not lead its wing.
+    fn refuse_not_leading(
+        &mut self,
+        sender: u32,
+        cause: Cause,
+        recipient: Option<u8>,
+    ) -> OrderReport {
+        let report = OrderReport {
+            message: "Wing order unavailable: you are not leading your wing".into(),
+            radio: vec![],
+        };
+        self.journal_order(
+            sender,
+            cause,
+            recipient,
+            &report,
+            Outcome::Refused(Reason::NotLeading),
+        );
+        report
+    }
+
     /// FA Alt+T: the formation after the one the first addressed wingman of
     /// `sender`'s wing flies, cycling echelon, line abreast, line astern.
     pub fn next_formation(&self, sender: u32, recipient: Option<u8>) -> wing::Formation {
@@ -309,6 +343,14 @@ impl AiWings {
         }
         let wing = self.wing_of(sender);
         let sender_side = wing.map_or(FRIENDLY_SIDE, |(side, _)| side);
+        if wing.is_some() && !self.leads_wing(sender) {
+            let cause = Cause::Order {
+                order,
+                selected,
+                target: None,
+            };
+            return Ok(self.refuse_not_leading(sender, cause, recipient));
+        }
         let humans = self.other_humans(sender, recipient);
         let mut members: Vec<_> = self
             .mission
@@ -633,6 +675,14 @@ impl AiWings {
         site: Option<&LandingSite>,
     ) -> WorldResult<OrderReport> {
         let wing = self.wing_of(sender);
+        if wing.is_some() && !self.leads_wing(sender) {
+            let cause = Cause::Order {
+                order,
+                selected: None,
+                target: None,
+            };
+            return Ok(self.refuse_not_leading(sender, cause, recipient));
+        }
         let humans = self.other_humans(sender, recipient);
         let mut members: Vec<_> = self
             .mission
@@ -1479,9 +1529,10 @@ mod landing_tests {
                 Some(&site),
             )
             .unwrap();
+        let leader = crate::ai_wings::tests::player_object([0., 20000., 0.]);
         wings
             .mission
-            .step(&[], &|_, _| 0., tore_sim::ai::threat::TimeOfDay(0))
+            .step(&[leader], &|_, _| 0., tore_sim::ai::threat::TimeOfDay(0))
             .unwrap();
         assert_eq!(
             wings.mission.actor(2).unwrap().airfield_phase(),

@@ -652,6 +652,13 @@ pub enum Cause {
     },
     /// An AI aircraft's activity changed.
     Activity { activity: Activity },
+    /// Lead of a wing passed to another aircraft: `new` leads now, and the
+    /// previous leader's pilot is or is not alive to say so.
+    Leadership {
+        new: u32,
+        previous: u32,
+        previous_pilot_alive: bool,
+    },
     /// The situation music's inputs changed.
     Music(Box<Music>),
 }
@@ -858,6 +865,21 @@ impl fmt::Display for Cause {
             Cause::Activity { activity } => {
                 write!(f, "activity changed to {}", activity.label())
             }
+            Cause::Leadership {
+                new,
+                previous,
+                previous_pilot_alive,
+            } => write!(
+                f,
+                "{} now leads the wing after {}, whose pilot is {}",
+                who(*new),
+                who(*previous),
+                if *previous_pilot_alive {
+                    "alive"
+                } else {
+                    "not alive"
+                }
+            ),
             Cause::Music(music) => {
                 write!(f, "inputs ask for {:?}", music.to)?;
                 if let Some(from) = music.from {
@@ -991,6 +1013,8 @@ pub enum Reason {
     AllBuggedOut { count: usize },
     /// The order needs a living hostile target.
     NoHostileTarget,
+    /// Only the aircraft that leads a wing can order it.
+    NotLeading,
     /// Land at selected airport needs an airport selected with Shift-A.
     NoAirportSelected,
     /// The player's wing order voice cancels wing speech still queued or
@@ -1069,6 +1093,7 @@ impl fmt::Display for Reason {
             } => write!(f, "one line per {interval_s:.0} s, {remaining:.1} s left"),
             Reason::Unread => write!(f, "replaced before it was shown"),
             Reason::NoWingmen => write!(f, "no addressed wingmen"),
+            Reason::NotLeading => write!(f, "the sender does not lead its wing"),
             Reason::AllBuggedOut { count } => {
                 write!(
                     f,

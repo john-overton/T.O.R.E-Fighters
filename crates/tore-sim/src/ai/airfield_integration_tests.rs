@@ -542,6 +542,10 @@ fn a_wingman_stops_following_a_destroyed_leader_down() {
     mission.actor_mut(1).unwrap().set_alive(false);
     step(&mut mission, None);
     let wingman = mission.actor(2).unwrap();
+    // It now leads the wing (lead succession), and a leader counts as
+    // landing for itself, so the succession itself stops the join (the bug
+    // bash's rule of 2026-09-29, kept under multiplayer's succession).
+    assert!(wingman.identity().is_leader());
     assert!(
         wingman.landing_order().is_none(),
         "still joining a dead leader"
@@ -551,26 +555,43 @@ fn a_wingman_stops_following_a_destroyed_leader_down() {
 
 #[test]
 fn the_next_wingman_leads_when_the_leader_is_lost() {
-    // John, 2026-09-29: leader succession inside an AI-led wing.
+    // Lead succession (John, 2026-09-28; it replaces the bug bash's
+    // renumbering at his decision of 2026-09-29): every aircraft keeps its
+    // member number, the lowest-numbered living member takes the lead, and
+    // the flight re-forms behind it in member order.
     let mut mission = AiMission::new();
     mission.push(hornet(1, 0, [0., 6_000., 0.], 0.));
     mission.push(hornet(2, 1, [-600., 6_000., -600.], 0.));
     mission.push(hornet(3, 2, [600., 6_000., -600.], 0.));
     mission.start_in_formation();
     step(&mut mission, None);
+    let side = mission.actor(1).unwrap().identity().side;
+    let wing = mission.actor(1).unwrap().identity().wing;
+    assert_eq!(mission.wing_leader(side, wing), Some(1));
     mission.actor_mut(1).unwrap().set_alive(false);
     step(&mut mission, None);
     let member = |mission: &AiMission, id| mission.actor(id).unwrap().identity().member;
-    assert_eq!((member(&mission, 2), member(&mission, 3)), (0, 1));
-    assert!(
-        member(&mission, 1) >= 100,
-        "the lost leader leaves the numbering"
+    assert_eq!(
+        (
+            member(&mission, 1),
+            member(&mission, 2),
+            member(&mission, 3)
+        ),
+        (0, 1, 2),
+        "numbers never change"
     );
+    assert_eq!(mission.wing_leader(side, wing), Some(2));
     assert!(mission.actor(2).unwrap().identity().is_leader());
+    assert!(!mission.actor(3).unwrap().identity().is_leader());
+    assert_eq!(
+        mission.actor(3).unwrap().wing_slot(),
+        1,
+        "the flight re-forms"
+    );
     // The survivor keeps leading when a later wingman is lost.
     mission.actor_mut(3).unwrap().set_alive(false);
     step(&mut mission, None);
-    assert_eq!(member(&mission, 2), 0);
+    assert_eq!(mission.wing_leader(side, wing), Some(2));
 }
 
 #[test]

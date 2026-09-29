@@ -159,6 +159,47 @@ pub struct MissionOutput {
     /// Accepted opposite-side launch warnings as (actor, launcher), for the
     /// radio's "SAM launch" and "AAM launch" calls.
     pub launch_calls: Vec<(u32, u32)>,
+    /// Wings whose lead passed to another aircraft this tick, in the order
+    /// it happened.
+    pub leadership: Vec<LeadershipChange>,
+}
+
+/// A human-flown aircraft in a wing, which the leadership rule needs beside
+/// the AI's own actors. The host hands the current set to
+/// [`AiMission::set_humans`] every step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HumanMember {
+    /// The aircraft id, also its id in the world snapshot.
+    pub id: u32,
+    pub side: super::targeting::Side,
+    pub wing: u8,
+    /// Roster place inside the wing, from 0; the first member leads at the
+    /// start.
+    pub member: u8,
+    /// The pilot survives the loss of the aircraft (ejected and not hurt);
+    /// read when this aircraft stops leading.
+    pub pilot_alive: bool,
+}
+
+/// Lead of one wing passed on: the aircraft that was destroyed or whose pilot
+/// ejected, and the one that leads now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeadershipChange {
+    pub tick: u64,
+    pub side: super::targeting::Side,
+    pub wing: u8,
+    pub leader: u32,
+    pub previous: u32,
+    /// The previous leader's pilot is alive, for example after ejecting.
+    pub previous_pilot_alive: bool,
+}
+
+/// The aircraft that currently leads one wing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WingLeader {
+    side: super::targeting::Side,
+    wing: u8,
+    leader: u32,
 }
 
 /// The mission's airfield decisions for one actor this tick (see
@@ -541,12 +582,6 @@ impl AiActor {
         self.avoiding.map(|(_, heading)| heading)
     }
 
-    /// Leader succession renumbers a wing (see [`AiMission`]).
-    fn set_member(&mut self, member: u8) {
-        self.identity.member = member;
-        self.controller.set_member(member);
-    }
-
     pub fn flight(&self) -> &flight::State {
         &self.flight
     }
@@ -589,6 +624,17 @@ impl AiActor {
 
     pub fn is_neutral(&self) -> bool {
         self.neutral
+    }
+
+    /// Lead succession: this aircraft now leads its wing, or no longer does.
+    pub fn set_leads(&mut self, leads: bool) {
+        self.identity.leads = leads;
+        self.controller.set_leads(leads);
+    }
+
+    /// The place in the wing's formation this aircraft flies.
+    pub fn wing_slot(&self) -> u8 {
+        self.wing_slot
     }
 
     pub fn return_to_formation(&mut self, tick: u64) {
@@ -1239,7 +1285,10 @@ pub struct AiMission {
     formation: Formation,
     horizontal_spacing_ft: i32,
     vertical_spacing_ft: i32,
-    external_leaders: Vec<(super::targeting::Side, u8, u32)>,
+    /// Every human-flown aircraft that belongs to a wing.
+    humans: Vec<HumanMember>,
+    /// The current leader of each wing that has one.
+    leaders: Vec<WingLeader>,
     missiles: Vec<MissileSnapshot>,
     gun_rounds: Vec<incoming_fire::Round>,
     /// The mission assignment of each human-flown aircraft, by aircraft id.
@@ -1274,7 +1323,8 @@ impl AiMission {
             formation: Formation::Echelon,
             horizontal_spacing_ft: super::wing::PLAYER_SPACING_SPREAD_FT,
             vertical_spacing_ft: super::wing::PLAYER_STACKING_FT,
-            external_leaders: Vec::new(),
+            humans: Vec::new(),
+            leaders: Vec::new(),
             missiles: Vec::new(),
             gun_rounds: Vec::new(),
             human_assignments: Default::default(),
@@ -1408,10 +1458,10 @@ impl AiMission {
             .actor(receiver)
             .map(|a| (a.identity.side, a.identity.wing))
             .or_else(|| {
-                self.external_leaders
+                self.humans
                     .iter()
-                    .find(|(_, _, id)| *id == receiver)
-                    .map(|(side, wing, _)| (*side, *wing))
+                    .find(|h| h.id == receiver)
+                    .map(|h| (h.side, h.wing))
             });
         let Some((side, wing)) = identity else {
             self.journal.push(ignored(IgnoreReason::UnknownReporter));
@@ -1469,17 +1519,43 @@ impl AiMission {
         self.actors.push(actor);
     }
 
-    /// Replace every external leader at once: the human-flown aircraft that
-    /// lead their wings, as (side, wing, aircraft id).
-    pub fn set_external_leaders(&mut self, leaders: Vec<(super::targeting::Side, u8, u32)>) {
-        self.external_leaders = leaders;
+    /// The human-flown aircraft in wings, replacing the last set. A human
+    /// leader remains a world object, never an AI-controlled actor; the
+    /// wing's current leader is worked out from these and the actors.
+    pub fn set_humans(&mut self, humans: Vec<HumanMember>) {
+        self.humans = humans;
     }
 
-    /// A human leader remains a world object, never an AI-controlled actor.
+    /// One human as a wing's first member, the way single player and the
+    /// mission fixtures name a human leader.
     pub fn set_external_leader(&mut self, side: super::targeting::Side, wing: u8, id: u32) {
-        self.external_leaders
-            .retain(|(s, w, _)| *s != side || *w != wing);
-        self.external_leaders.push((side, wing, id));
+        self.humans
+            .retain(|h| h.id != id && (h.side != side || h.wing != wing || h.member != 0));
+        self.humans.push(HumanMember {
+            id,
+            side,
+            wing,
+            member: 0,
+            pilot_alive: false,
+        });
+    }
+
+    pub fn humans(&self) -> &[HumanMember] {
+        &self.humans
+    }
+
+    /// The aircraft that leads a wing now: an actor or a human.
+    pub fn wing_leader(&self, side: super::targeting::Side, wing: u8) -> Option<u32> {
+        self.leaders
+            .iter()
+            .find(|l| l.side == side && l.wing == wing)
+            .map(|l| l.leader)
+    }
+
+    /// The human-flown aircraft that leads a wing now, if a human does.
+    fn external_leader(&self, side: super::targeting::Side, wing: u8) -> Option<u32> {
+        self.wing_leader(side, wing)
+            .filter(|id| self.actor(*id).is_none())
     }
 
     /// Opinionated (requested by John, 2026-09-29): once a side has seen
@@ -1524,7 +1600,15 @@ impl AiMission {
             if !self.hostiles_seen.contains(&side) || !alive_on(side) || departing {
                 continue;
             }
-            let external = &self.external_leaders;
+            // A wing led by a human stays with its human; an AI-led wing goes
+            // home whoever flies in it (a human wingman is never ordered).
+            let human_led: Vec<u8> = self
+                .actors
+                .iter()
+                .filter(|a| a.identity.side == side)
+                .map(|a| a.identity.wing)
+                .filter(|wing| self.external_leader(side, *wing).is_some())
+                .collect();
             let mut ids: Vec<u32> = Vec::new();
             for a in self.actors.iter_mut().filter(|a| {
                 a.identity.side == side
@@ -1534,13 +1618,11 @@ impl AiMission {
                     && a.landing_order.is_none()
                     && !a.bugged_out
                     && !a.flight.research.as_ref().is_some_and(|r| r.on_ground)
-                    && !external
-                        .iter()
-                        .any(|(s, w, _)| *s == a.identity.side && *w == a.identity.wing)
+                    && !human_led.contains(&a.identity.wing)
             }) {
                 if a.home_runway.is_some() {
                     ids.push(a.id());
-                } else if a.identity.member == 0 && !a.controller.mission_complete() {
+                } else if a.identity.is_leader() && !a.controller.mission_complete() {
                     // No runway: the leader flies home and holds; its
                     // wingmen stay in formation on it.
                     a.controller.set_mission_complete(true);
@@ -1557,85 +1639,6 @@ impl AiMission {
                         reason: super::airfield::LandingReason::Ordered,
                     }),
                 );
-            }
-        }
-    }
-
-    /// Opinionated (requested by John, 2026-09-29): when an AI-led wing's
-    /// leader is lost (destroyed, ejected, crashed or removed), the surviving
-    /// member next in the wing's order becomes its leader and the others
-    /// close up behind it: members are renumbered from 0 in their old order,
-    /// so formation slots follow. Lost members move out of the numbering. A
-    /// wing led by a human is left alone. No radio call: the retail
-    /// "You're the wingleader now" call is voiced only by a living previous
-    /// leader (docs/spec/radio-chatter.md).
-    fn pass_leadership(&mut self) {
-        let mut wings: Vec<(super::targeting::Side, u8)> = Vec::new();
-        for actor in &self.actors {
-            let key = (actor.identity.side, actor.identity.wing);
-            if !wings.contains(&key) {
-                wings.push(key);
-            }
-        }
-        for (side, wing) in wings {
-            if self
-                .external_leaders
-                .iter()
-                .any(|(s, w, _)| *s == side && *w == wing)
-            {
-                continue;
-            }
-            let in_wing = |a: &AiActor| a.identity.side == side && a.identity.wing == wing;
-            // Only a wing whose leader was there and is now lost; a wing
-            // that never had a leader keeps its numbering.
-            if !self
-                .actors
-                .iter()
-                .any(|a| in_wing(a) && !a.alive() && a.identity.member == 0)
-                || self
-                    .actors
-                    .iter()
-                    .any(|a| in_wing(a) && a.alive() && a.identity.member == 0)
-            {
-                continue;
-            }
-            let mut alive: Vec<(u8, usize)> = self
-                .actors
-                .iter()
-                .enumerate()
-                .filter(|(_, a)| in_wing(a) && a.alive())
-                .map(|(i, a)| (a.identity.member, i))
-                .collect();
-            if alive.is_empty() {
-                continue;
-            }
-            alive.sort_unstable();
-            for actor in self.actors.iter_mut().filter(|a| in_wing(a) && !a.alive()) {
-                if actor.identity.member < LOST_MEMBER_BASE {
-                    let member = actor.identity.member.saturating_add(LOST_MEMBER_BASE);
-                    actor.set_member(member);
-                }
-            }
-            for (rank, (_, index)) in alive.into_iter().enumerate() {
-                let actor = &mut self.actors[index];
-                actor.set_member(rank as u8);
-                // A wingman that was following the lost leader in to land
-                // stops, as the wing abort does.
-                if actor
-                    .landing_order
-                    .is_some_and(|o| o.reason == super::airfield::LandingReason::JoinLeader)
-                    && matches!(
-                        actor.airfield_phase(),
-                        Some(
-                            super::airfield::Phase::Inbound
-                                | super::airfield::Phase::Marshal
-                                | super::airfield::Phase::Approach
-                        )
-                    )
-                {
-                    actor.landing_order = None;
-                    actor.leave_airfield();
-                }
             }
         }
     }
@@ -1696,7 +1699,6 @@ impl AiMission {
         now: TimeOfDay,
     ) -> Result<MissionOutput> {
         let mut output = MissionOutput::default();
-        self.pass_leadership();
         self.return_when_done(world);
         let mut delivered = Vec::new();
         for (receiver, report) in std::mem::take(&mut self.pending_attack_reports) {
@@ -1730,6 +1732,8 @@ impl AiMission {
         }
         let tick = self.tick;
         self.track_airborne(world);
+        // Lead passes on this tick, before anyone decides who to follow.
+        self.refresh_leaders(world, &mut output);
 
         let traffic: Vec<_> = world
             .iter()
@@ -1801,9 +1805,9 @@ impl AiMission {
                     && leader.identity.is_leader()
                     && leader.neutral
                     && leader.assignment.stance != engagement::Stance::WeaponsHold
-                    && !self.external_leaders.iter().any(|(side, wing, _)| {
-                        *side == leader.identity.side && *wing == leader.identity.wing
-                    })
+                    && self
+                        .external_leader(leader.identity.side, leader.identity.wing)
+                        .is_none()
             })
             .filter_map(|leader| {
                 leader
@@ -1927,8 +1931,159 @@ impl AiMission {
                 }
             }
         }
+        // An aircraft lost or abandoned during the tick hands over lead on
+        // the same tick.
+        self.refresh_leaders(world, &mut output);
         self.tick += 1;
         Ok(output)
+    }
+
+    /// Whether wing member `id` is still flying: an actor is alive, and a
+    /// human-flown aircraft is alive in the world snapshot. An aircraft that
+    /// crashed, was destroyed or whose pilot ejected is not.
+    fn member_flying(&self, id: u32, world: &[WorldObject]) -> bool {
+        match self.actor(id) {
+            Some(actor) => actor.alive(),
+            None => world.iter().any(|o| o.id == id && o.alive && !o.destroyed),
+        }
+    }
+
+    /// Give every wing its current leader and pass the lead on when it has
+    /// been lost.
+    ///
+    /// At the start a wing's leader is its member 0. When the leader's
+    /// aircraft is destroyed or its pilot ejects, lead passes to the
+    /// lowest-numbered living human member of the wing, or, if there is none,
+    /// to the lowest-numbered living AI member, and the flight re-forms on the
+    /// new leader: its followers take formation slots 1, 2 and so on in
+    /// member order. A wing with nobody left keeps its last leader.
+    fn refresh_leaders(&mut self, world: &[WorldObject], output: &mut MissionOutput) {
+        let mut wings: Vec<(super::targeting::Side, u8)> = Vec::new();
+        for (side, wing) in self
+            .actors
+            .iter()
+            .map(|a| (a.identity.side, a.identity.wing))
+            .chain(self.humans.iter().map(|h| (h.side, h.wing)))
+        {
+            if !wings.contains(&(side, wing)) {
+                wings.push((side, wing));
+            }
+        }
+        for (side, wing) in wings {
+            // Every member of the wing as (member, id, human).
+            let mut members: Vec<(u8, u32, bool)> = self
+                .actors
+                .iter()
+                .filter(|a| a.identity.side == side && a.identity.wing == wing)
+                .map(|a| (a.identity.member, a.id(), false))
+                .chain(
+                    self.humans
+                        .iter()
+                        .filter(|h| h.side == side && h.wing == wing)
+                        .map(|h| (h.member, h.id, true)),
+                )
+                .collect();
+            members.sort_unstable();
+            let mut current = self.wing_leader(side, wing);
+            if current.is_none() {
+                // A wing starts under its first member. One without a member
+                // 0 has no leader, as before.
+                let Some(&(_, first, _)) = members.iter().find(|m| m.0 == 0) else {
+                    continue;
+                };
+                self.leaders.push(WingLeader {
+                    side,
+                    wing,
+                    leader: first,
+                });
+                self.crown(side, wing, first, &members, world, false);
+                current = Some(first);
+            }
+            let Some(previous) = current else { continue };
+            if self.member_flying(previous, world) {
+                continue;
+            }
+            let flying = |&&(_, id, _): &&(u8, u32, bool)| self.member_flying(id, world);
+            let successor = members
+                .iter()
+                .filter(flying)
+                .find(|m| m.2)
+                .or_else(|| members.iter().filter(flying).find(|m| !m.2))
+                .map(|m| m.1);
+            let Some(leader) = successor else { continue };
+            let previous_pilot_alive = match self.actor(previous) {
+                Some(actor) => actor.flight.escape.is_some() && !actor.flight.systems.pilot.dead,
+                None => self
+                    .humans
+                    .iter()
+                    .find(|h| h.id == previous)
+                    .is_some_and(|h| h.pilot_alive),
+            };
+            if let Some(entry) = self
+                .leaders
+                .iter_mut()
+                .find(|l| l.side == side && l.wing == wing)
+            {
+                entry.leader = leader;
+            }
+            self.crown(side, wing, leader, &members, world, true);
+            output.leadership.push(LeadershipChange {
+                tick: self.tick,
+                side,
+                wing,
+                leader,
+                previous,
+                previous_pilot_alive,
+            });
+        }
+    }
+
+    /// Mark `leader` as its wing's leader on every actor, and, when the wing
+    /// re-forms, hand each flying follower its slot in member order.
+    fn crown(
+        &mut self,
+        side: super::targeting::Side,
+        wing: u8,
+        leader: u32,
+        members: &[(u8, u32, bool)],
+        world: &[WorldObject],
+        reform: bool,
+    ) {
+        let followers: Vec<u32> = members
+            .iter()
+            .filter(|m| m.1 != leader && self.member_flying(m.1, world))
+            .map(|m| m.1)
+            .collect();
+        for actor in self
+            .actors
+            .iter_mut()
+            .filter(|a| a.identity.side == side && a.identity.wing == wing)
+        {
+            actor.set_leads(actor.id() == leader);
+            if reform && let Some(index) = followers.iter().position(|id| *id == actor.id()) {
+                actor.wing_slot = index as u8 + 1;
+            }
+            // A member that was following the lost leader in to land stops
+            // (the bug bash's rule of 2026-09-29), as the wing abort does: the
+            // new leader does not keep landing on the old one's order.
+            if reform
+                && actor.alive()
+                && actor
+                    .landing_order
+                    .is_some_and(|o| o.reason == super::airfield::LandingReason::JoinLeader)
+                && matches!(
+                    actor.airfield_phase(),
+                    Some(
+                        super::airfield::Phase::Inbound
+                            | super::airfield::Phase::Marshal
+                            | super::airfield::Phase::Approach
+                    )
+                )
+            {
+                actor.landing_order = None;
+                actor.leave_airfield();
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2711,14 +2866,10 @@ impl AiMission {
         if actor.identity.is_leader() {
             return None;
         }
-        if let Some((_, _, id)) = self
-            .external_leaders
-            .iter()
-            .find(|(side, wing, _)| *side == actor.identity.side && *wing == actor.identity.wing)
-        {
+        if let Some(id) = self.external_leader(actor.identity.side, actor.identity.wing) {
             let leader = world
                 .iter()
-                .find(|o| o.id == *id && o.alive && !o.destroyed)?;
+                .find(|o| o.id == id && o.alive && !o.destroyed)?;
             // A human leader that touches down after flying is landing.
             return Some(LeaderView {
                 position: leader.position,
@@ -2785,18 +2936,12 @@ impl AiMission {
             })
         };
         let external_leader = self
-            .external_leaders
-            .iter()
-            .find(|(s, w, _)| *s == side && *w == wing)
-            .and_then(|(_, _, id)| {
-                world
-                    .iter()
-                    .find(|o| o.id == *id && o.alive && !o.destroyed)
-            });
+            .external_leader(side, wing)
+            .and_then(|id| world.iter().find(|o| o.id == id && o.alive && !o.destroyed));
         // Wing abort (retail 0x4bc2a4): a joining wingman whose leader is
         // neither landing nor on the ground stops landing. A leader that has
         // been destroyed is neither, so its wingmen stop following it down.
-        let leader_landing = if member == 0 {
+        let leader_landing = if actor.identity.is_leader() {
             true
         } else if let Some(leader) = external_leader {
             leader.on_ground || self.priority_landing.contains_key(&leader.id)
@@ -2832,7 +2977,8 @@ impl AiMission {
         // a human leader must be airborne.
         let turn = wingmates().all(|a| {
             a.identity.member >= member || a.airfield.as_ref().is_none_or(|s| !s.holds_followers())
-        }) && external_leader.is_none_or(|leader| member == 0 || !leader.on_ground);
+        }) && external_leader
+            .is_none_or(|leader| actor.identity.is_leader() || !leader.on_ground);
 
         // Runway-free gate.
         let spot = sequence.takeoff_spot();
@@ -4010,9 +4156,6 @@ const AVOID_HEAD_ON_DEG: f64 = 20.0;
 /// An avoidance holds its side at least this long, ticks (3 s).
 const AVOID_HOLD_TICKS: u64 = 360;
 
-/// Lost wing members are renumbered from here, out of the living order.
-const LOST_MEMBER_BASE: u8 = 100;
-
 /// B44's retail terrain look-ahead, feet; the floor of the speed-scaled one.
 /// Fitted (agent decision, 2026-09-29): the loaded lift, in G, the AI keeps
 /// in hand at its planned top speed.
@@ -4330,6 +4473,7 @@ mod tests {
                 side: Side(side),
                 wing: 0,
                 member,
+                leads: member == 0,
                 aircraft: AircraftId::F18,
                 human_controlled: false,
             },
@@ -5574,6 +5718,7 @@ mod tests {
         player.position = [90000., 20000., 0.];
         player.human_controlled = true;
         world.push(player);
+        mission.refresh_leaders(&world, &mut MissionOutput::default());
         assert_eq!(mission.leader_view(0, &world).unwrap().position[0], 90000.);
         assert!(mission.leader_view(1, &world).is_none());
         assert_eq!(mission.leader_view(2, &world).unwrap().position[0], 2000.);

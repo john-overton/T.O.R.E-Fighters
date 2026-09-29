@@ -45,7 +45,7 @@ use tore_sim::{
         },
         launch::{self, WingLaunch},
         mission::{
-            ActorSetup, AiActor, AiMission, EquipmentFaults, LaunchEvent, WorldObject,
+            ActorSetup, AiActor, AiMission, EquipmentFaults, HumanMember, LaunchEvent, WorldObject,
             simple_dispensers, simple_stations,
         },
         route,
@@ -804,9 +804,18 @@ impl AiWings {
         // Opinionated host setup: level delta formations using B43's
         // alternating trailing slots, 512 ft spacing, independently per wing.
         mission.set_spacing(512, 0);
-        for human in humans.iter().filter(|h| h.member == 0) {
-            mission.set_external_leader(side_of(human.side), human.wing, human.id);
-        }
+        mission.set_humans(
+            humans
+                .iter()
+                .map(|h| HumanMember {
+                    id: h.id,
+                    side: side_of(h.side),
+                    wing: h.wing,
+                    member: h.member,
+                    pilot_alive: false,
+                })
+                .collect(),
+        );
         let mut slots = Vec::new();
         let mut watch = chatter::Watch::default();
         let mut profiles: Vec<(AircraftId, Aircraft, Option<sensors::SensorProfiles>)> = Vec::new();
@@ -904,6 +913,8 @@ impl AiWings {
                         side: side_of(wing.wing.side),
                         wing: wing.wing.index,
                         member: member_index,
+                        // The wing's first member leads at the start.
+                        leads: member_index == 0,
                         aircraft: wing.aircraft,
                         human_controlled: false,
                     },
@@ -1190,13 +1201,20 @@ impl AiWings {
         let mut humans: Vec<&HumanAircraft> = humans.iter().collect();
         humans.sort_by_key(|h| h.slot.id);
         self.humans = humans.iter().map(|h| h.slot).collect();
-        // Every wing whose leader is human-flown has that human as its
-        // external leader; a human that left no longer leads anything.
-        self.mission.set_external_leaders(
-            self.humans
+        // The mission works out each wing's leader from these and its actors:
+        // a wing led by a human has that human as its external leader, and
+        // one that loses it passes the lead on.
+        self.mission.set_humans(
+            humans
                 .iter()
-                .filter(|h| h.member == 0)
-                .map(|h| (side_of(h.side), h.wing, h.id))
+                .map(|h| HumanMember {
+                    id: h.slot.id,
+                    side: side_of(h.slot.side),
+                    wing: h.slot.wing,
+                    member: h.slot.member,
+                    // Ejected and unhurt: the pilot is alive to say so.
+                    pilot_alive: h.flight.escape.is_some() && !h.flight.systems.pilot.dead,
+                })
                 .collect(),
         );
         let ground = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32));
@@ -3385,6 +3403,308 @@ mod tests {
         assert_eq!(
             wings.mission.priority_landings().collect::<Vec<_>>(),
             [(9, 8)]
+        );
+    }
+
+    /// Friendly wing 2 (index 1) of `count` AI aircraft, ids 1 upward, led by
+    /// its member 0, against one distant enemy. `humans` are flown by people
+    /// and take the member numbers they name.
+    fn led_wing(count: usize, humans: &[HumanSlot]) -> (AiWings, Vec<live::Target>) {
+        let selections = [
+            (launch::Side::Friendly, 1u8, count),
+            (launch::Side::Enemy, 0, 1),
+        ]
+        .map(|(side, index, count)| WingSelection {
+            wing: WingId::new(side, index).unwrap(),
+            aircraft: AircraftId::F18,
+            count,
+            skill_level: 1,
+        });
+        let payload = resolve_wings(&selections, None).unwrap();
+        let mut targets: Vec<_> = (1..=count as u32)
+            .map(|id| target(id, [f64::from(id) * 600., 20000., 0.], 0.))
+            .collect();
+        targets.push(target(
+            count as u32 + 1,
+            [0., 20000., 900_000.],
+            std::f64::consts::PI,
+        ));
+        let mut wings =
+            AiWings::build_for(&payload, &targets, &Airfields::default(), humans, |_| {
+                Ok((aircraft(), None))
+            })
+            .unwrap();
+        // Weapons hold: the flights keep formation instead of chasing the
+        // enemy the fixture's sensorless aircraft can see at any range.
+        wings.apply_mission_preset(Preset::Hold, [0., 20000., 0.]);
+        (wings, targets)
+    }
+
+    fn fly_one_tick(
+        wings: &mut AiWings,
+        targets: &mut [live::Target],
+        humans: Vec<WorldObject>,
+    ) -> tore_sim::ai::mission::MissionOutput {
+        wings
+            .advance_on_surface(humans, targets, &flat, &|x, z| {
+                tore_sim::research::Surface::terrain(flat(x, z))
+            })
+            .unwrap()
+    }
+
+    fn leads(wings: &AiWings) -> Vec<u32> {
+        wings
+            .mission
+            .actors()
+            .iter()
+            .filter(|a| a.identity().is_leader() && a.identity().side == FRIENDLY_SIDE)
+            .map(AiActor::id)
+            .collect()
+    }
+
+    #[test]
+    fn an_ai_leader_dies_and_the_next_member_leads_the_re_formed_flight() {
+        let (mut wings, mut targets) = led_wing(4, &[]);
+        assert_eq!(leads(&wings), [1]);
+        let output = fly_one_tick(&mut wings, &mut targets, vec![]);
+        assert!(
+            output.leadership.is_empty(),
+            "nothing changes while it lives"
+        );
+        // Formation slots follow member order behind the leader.
+        let slots = |wings: &AiWings| -> Vec<(u32, u8)> {
+            wings
+                .mission
+                .actors()
+                .iter()
+                .filter(|a| a.alive() && a.identity().side == FRIENDLY_SIDE)
+                .map(|a| (a.id(), a.wing_slot()))
+                .collect()
+        };
+        assert_eq!(slots(&wings), [(1, 1), (2, 1), (3, 2), (4, 3)]);
+
+        for _ in 0..10 {
+            fly_one_tick(&mut wings, &mut targets, vec![]);
+        }
+        targets[0].hp = 0;
+        let output = fly_one_tick(&mut wings, &mut targets, vec![]);
+        assert_eq!(output.leadership.len(), 1, "lead passes on that tick");
+        let change = output.leadership[0];
+        assert_eq!((change.leader, change.previous), (2, 1));
+        assert_eq!((change.side, change.wing), (FRIENDLY_SIDE, 1));
+        assert!(!change.previous_pilot_alive);
+        assert_eq!(leads(&wings), [2]);
+        assert_eq!(wings.mission.wing_leader(FRIENDLY_SIDE, 1), Some(2));
+        // The flight re-forms: the followers close up behind the new leader.
+        assert_eq!(slots(&wings), [(2, 1), (3, 1), (4, 2)]);
+        // The wingmen fly on the new leader, not free.
+        for _ in 0..10 {
+            fly_one_tick(&mut wings, &mut targets, vec![]);
+        }
+        for id in [3, 4] {
+            assert!(
+                wings
+                    .mission
+                    .actor(id)
+                    .unwrap()
+                    .controller()
+                    .formation_trace()
+                    .is_some(),
+                "actor {id} formates on its new leader"
+            );
+        }
+        // And again when the new leader goes.
+        targets[1].hp = 0;
+        let output = fly_one_tick(&mut wings, &mut targets, vec![]);
+        assert_eq!(output.leadership.len(), 1);
+        assert_eq!(leads(&wings), [3]);
+        assert_eq!(slots(&wings), [(3, 1), (4, 1)]);
+        // A wing with no other member left keeps what it had.
+        targets[2].hp = 0;
+        targets[3].hp = 0;
+        fly_one_tick(&mut wings, &mut targets, vec![]);
+        let output = fly_one_tick(&mut wings, &mut targets, vec![]);
+        assert!(output.leadership.is_empty());
+    }
+
+    #[test]
+    fn a_human_leader_dies_and_an_ai_wingman_leads() {
+        let (mut wings, mut targets) = led_wing(
+            2,
+            &[HumanSlot {
+                wing: 1,
+                ..HumanSlot::SINGLE_PLAYER
+            }],
+        );
+        let members: Vec<_> = wings
+            .mission
+            .actors()
+            .iter()
+            .filter(|a| a.identity().side == FRIENDLY_SIDE)
+            .map(|a| (a.id(), a.identity().member, a.identity().is_leader()))
+            .collect();
+        // The human of wing 1 is member 0; the AI aircraft fly its wing.
+        assert_eq!(members, [(1, 1, false), (2, 2, false)]);
+        let mut player = player_object([0., 20000., -600.]);
+        player.id = 0;
+        for _ in 0..5 {
+            fly_one_tick(&mut wings, &mut targets, vec![player.clone()]);
+        }
+        assert_eq!(wings.mission.wing_leader(FRIENDLY_SIDE, 1), Some(0));
+        // The player is shot down.
+        player.alive = false;
+        player.destroyed = true;
+        let output = fly_one_tick(&mut wings, &mut targets, vec![player.clone()]);
+        assert_eq!(output.leadership.len(), 1);
+        assert_eq!(output.leadership[0].leader, 1);
+        assert_eq!(output.leadership[0].previous, 0);
+        assert!(!output.leadership[0].previous_pilot_alive);
+        assert_eq!(leads(&wings), [1]);
+        assert_eq!(wings.mission.actor(2).unwrap().wing_slot(), 1);
+    }
+
+    #[test]
+    fn a_human_wingman_is_preferred_to_a_lower_numbered_ai_wingman() {
+        let slot = |id, member| HumanSlot {
+            id,
+            side: launch::Side::Friendly,
+            wing: 1,
+            member,
+        };
+        // Humans lead (member 0) and fly member 2; the AI aircraft take
+        // members 1 and 3.
+        let humans = [slot(20, 0), slot(21, 2)];
+        let (mut wings, mut targets) = led_wing(2, &humans);
+        let members: Vec<_> = wings
+            .mission
+            .actors()
+            .iter()
+            .filter(|a| a.identity().side == FRIENDLY_SIDE)
+            .map(|a| (a.id(), a.identity().member))
+            .collect();
+        assert_eq!(members, [(1, 1), (2, 3)]);
+        let object = |id, alive| WorldObject {
+            id,
+            alive,
+            destroyed: !alive,
+            ..player_object([id as f64 * 300., 20000., -600.])
+        };
+        fly_one_tick(
+            &mut wings,
+            &mut targets,
+            vec![object(20, true), object(21, true)],
+        );
+        assert_eq!(wings.mission.wing_leader(FRIENDLY_SIDE, 1), Some(20));
+        let output = fly_one_tick(
+            &mut wings,
+            &mut targets,
+            vec![object(20, false), object(21, true)],
+        );
+        assert_eq!(
+            output.leadership[0].leader, 21,
+            "the human, not AI member 1"
+        );
+        // The AI members follow in member order behind it: 1 then 3.
+        assert_eq!(wings.mission.actor(1).unwrap().wing_slot(), 1);
+        assert_eq!(wings.mission.actor(2).unwrap().wing_slot(), 2);
+        let output = fly_one_tick(
+            &mut wings,
+            &mut targets,
+            vec![object(20, false), object(21, false)],
+        );
+        assert_eq!(output.leadership[0].leader, 1, "then the lowest AI member");
+        assert_eq!(wings.mission.actor(2).unwrap().wing_slot(), 1);
+    }
+
+    #[test]
+    fn a_leader_that_ejects_hands_over_and_its_living_pilot_is_reported() {
+        let (mut wings, mut targets) = led_wing(3, &[]);
+        fly_one_tick(&mut wings, &mut targets, vec![]);
+        {
+            // The synthetic profile has no ejection seat, so the pilot's
+            // escape is set up by hand, as `eject` would.
+            let flight = wings.mission.actor_mut(1).unwrap().flight_mut();
+            flight.escape = Some(tore_sim::ejection::Escape::new(
+                flight.position,
+                flight.velocity,
+                Basis::new(flight.yaw, flight.pitch, flight.bank),
+            ));
+            flight.systems.pilot.ejected = true;
+            flight.crashed = true;
+        }
+        let output = fly_one_tick(&mut wings, &mut targets, vec![]);
+        assert_eq!(output.leadership.len(), 1);
+        assert_eq!(output.leadership[0].leader, 2);
+        assert!(output.leadership[0].previous_pilot_alive);
+        assert_eq!(leads(&wings), [2]);
+        // The event reaches the radio with the living previous leader as the
+        // speaker, and is journaled there.
+        wings.observe_chatter(&output, &[]);
+        assert!(wings.chatter.iter().any(|c| matches!(
+            c,
+            Chatter::Leadership {
+                speaker: 1,
+                leader: 2,
+                previous_pilot_alive: true,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn only_the_leading_aircraft_can_order_the_wing() {
+        use tore_sim::ai::wing::{Formation, PlayerOrder};
+        let slot = |id, member| HumanSlot {
+            id,
+            side: launch::Side::Friendly,
+            wing: 1,
+            member,
+        };
+        let (mut wings, mut targets) = led_wing(2, &[slot(20, 0), slot(21, 1)]);
+        let object = |id, alive| WorldObject {
+            id,
+            alive,
+            destroyed: !alive,
+            ..player_object([id as f64 * 300., 20000., -600.])
+        };
+        fly_one_tick(
+            &mut wings,
+            &mut targets,
+            vec![object(20, true), object(21, true)],
+        );
+        let order = PlayerOrder::Formation(Formation::LineAstern);
+        let refused = wings.command(21, order, None, None).unwrap();
+        assert!(
+            refused.message.contains("not leading"),
+            "{}",
+            refused.message
+        );
+        assert!(
+            wings
+                .command(20, order, None, None)
+                .unwrap()
+                .message
+                .contains("applied")
+        );
+        // Once the first human is down, the second leads and may order.
+        fly_one_tick(
+            &mut wings,
+            &mut targets,
+            vec![object(20, false), object(21, true)],
+        );
+        assert!(
+            wings
+                .command(21, order, None, None)
+                .unwrap()
+                .message
+                .contains("applied")
+        );
+        assert!(
+            wings
+                .command(20, order, None, None)
+                .unwrap()
+                .message
+                .contains("not leading")
         );
     }
 

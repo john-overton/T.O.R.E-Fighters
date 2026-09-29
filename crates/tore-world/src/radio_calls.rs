@@ -948,6 +948,22 @@ impl Radio {
                     .rolls(rolls),
                 );
             }
+            // Journal only until the radio speaks it (B4).
+            Chatter::Leadership {
+                speaker,
+                leader,
+                previous_pilot_alive,
+                ..
+            } => comms.record(Entry::note(
+                scene.now,
+                scene.name(*speaker),
+                radio(Cause::Leadership {
+                    new: *leader,
+                    previous: *speaker,
+                    previous_pilot_alive: *previous_pilot_alive,
+                }),
+                Outcome::Noted,
+            )),
             Chatter::Fuel { speaker, level } => {
                 let stem = match level {
                     FuelLevel::Joker => "^JOKER",

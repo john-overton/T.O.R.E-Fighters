@@ -450,15 +450,17 @@ through a lead-projection branch whose entry condition is open.
 
 ### Leader succession
 
-**Opinionated, requested by John on 2026-09-29:** when an AI-led wing's leader
-is lost (destroyed, ejected, crashed or removed), the surviving member next in
-the wing's order becomes its leader and the others close up behind it: the
-survivors are renumbered from 0 in their old order, so their formation slots
-follow, and a wingman that was following the lost leader in to land stops as
-the wing abort does. A wing led by a human is left alone (multiplayer handles
-the general case separately). No radio call is made: the retail "You're the
-wingleader now" call is voiced only by a living previous leader
-([radio chatter](radio-chatter.md)).
+**Opinionated: the rule is John's of 2026-09-28, and at his decision of
+2026-09-29 it replaces the bug bash's renumbering.** Each wing has a current
+leader, its member 0 at the start of the mission. When the leader's aircraft is
+destroyed or its pilot ejects, the lead passes on that tick to the
+lowest-numbered living human in the wing, or, if there is none, to the
+lowest-numbered living AI member. Every aircraft keeps its member number and
+callsign; the followers re-form behind the new leader in member order, taking
+formation slots 1, 2 and so on. A member that was following the lost leader in
+to land stops, as the wing abort does. When the AI takes the lead nothing is
+said; the radio call a human who takes the lead hears is in the
+[architecture guide](../ARCHITECTURE.md#lead-succession).
 
 ### Traffic avoidance
 

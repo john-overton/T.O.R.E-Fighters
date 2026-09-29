@@ -1410,6 +1410,11 @@ their fraction to within one point.
 - Mission assignments and must-survive lists are kept per aircraft, not for "the
   player".
 - The friendly list that T and Enter skip is built per side.
+- Return to base (the bug bash's rule of 2026-09-29): a wing led by a human
+  stays with its human. *Agent decision:* an AI-led wing with a human wingman
+  goes home like any AI-led wing, and the human is never ordered. An ejected
+  human counts as lost in return to base, traffic avoidance and succession, as
+  an ejected AI pilot does: ejecting ends the aircraft's flight (`crashed`).
 
 #### Lead succession
 
@@ -1420,7 +1425,10 @@ flight re-forms on the new leader.
 - Each wing has a current leader. At the start of the mission it is the wing's
   first member. When the leader's aircraft is destroyed or its pilot ejects,
   lead passes on that tick to the lowest-numbered living human member, or, if
-  there is none, to the lowest-numbered living AI member.
+  there is none, to the lowest-numbered living AI member. Every aircraft keeps
+  its member number and callsign. A member that was following the lost leader
+  in to land stops, as the bug bash's succession did; this rule replaced the
+  bug bash's renumbering at John's decision of 2026-09-29.
 - Everything in the AI that keys on "the leader" reads the current leader
   instead of the first member: formation, airfield clearance, escorts,
   automatic release, contact reports and orders.

@@ -104,6 +104,7 @@ fn identity(id: u32, member: u8) -> ActorIdentity {
         side: Side(1),
         wing: 0,
         member,
+        leads: member == 0,
         aircraft: AircraftId::F18,
         human_controlled: false,
     }

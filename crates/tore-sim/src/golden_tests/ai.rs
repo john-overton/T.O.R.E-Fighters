@@ -605,6 +605,7 @@ fn identity(id: u32, side: u32, wing: u8, member: u8, aircraft: AircraftId) -> A
         side: Side(side),
         wing,
         member,
+        leads: member == 0,
         aircraft,
         human_controlled: false,
     }

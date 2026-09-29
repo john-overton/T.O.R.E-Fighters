@@ -69,6 +69,17 @@ pub enum Chatter {
         speaker: u32,
         level: FuelLevel,
     },
+    /// Lead of a wing passed on. The radio makes the new leader's "You're
+    /// the Wingleader now" from it; `speaker` is the previous leader, who
+    /// sends it when its pilot is alive.
+    Leadership {
+        speaker: u32,
+        /// The wing, as the setup screen numbers it (1 through 3).
+        side: launch::Side,
+        wing_number: u8,
+        leader: u32,
+        previous_pilot_alive: bool,
+    },
 }
 impl Chatter {
     /// Who raised the event and why, for the journal.
@@ -127,6 +138,19 @@ impl Chatter {
                 *speaker,
                 Cause::AiFuel {
                     level: *level as u8,
+                },
+            ),
+            Chatter::Leadership {
+                speaker,
+                leader,
+                previous_pilot_alive,
+                ..
+            } => (
+                *speaker,
+                Cause::Leadership {
+                    new: *leader,
+                    previous: *speaker,
+                    previous_pilot_alive: *previous_pilot_alive,
                 },
             ),
         };
@@ -321,6 +345,19 @@ impl AiWings {
                     || self.slot(*launcher).is_some(),
             });
         }
+        for change in &output.leadership {
+            events.push(Chatter::Leadership {
+                speaker: change.previous,
+                side: if change.side == ENEMY_SIDE {
+                    launch::Side::Enemy
+                } else {
+                    launch::Side::Friendly
+                },
+                wing_number: change.wing + 1,
+                leader: change.leader,
+                previous_pilot_alive: change.previous_pilot_alive,
+            });
+        }
         for slot in &self.slots {
             let Some(actor) = self.mission.actor(slot.id) else {
                 continue;
@@ -362,8 +399,9 @@ impl AiWings {
                     Outcome::Suppressed(reason),
                 ));
             };
-            // Only the first two aircraft of a flight report.
-            if actor.identity().member > 1 {
+            // Only the first two aircraft of a flight report: the leader and
+            // the first wingman behind it.
+            if !actor.identity().is_leader() && actor.wing_slot() > 1 {
                 held(Reason::OnlyFirstTwo {
                     member: actor.identity().member,
                 });
@@ -387,7 +425,7 @@ impl AiWings {
                 continue;
             }
             let control = actor.controller().wing_settings().0;
-            let advise = actor.identity().member != 0
+            let advise = !actor.identity().is_leader()
                 && control.is_some_and(|c| c as u8 >= WingControl::Medium as u8);
             let Some(contact) = self.contact(target, humans, advise) else {
                 self.watch.journal.push(Entry::note(
@@ -632,12 +670,22 @@ mod tests {
             .unwrap();
         wings.observe_chatter(&output, &[&human(&player)]);
         // The synthetic profile has no ejection seat flag (PLANE flags 0x10).
+        // The lead of the wing passes to its other member on the same tick.
         assert_eq!(
             wings.chatter,
-            [Chatter::Death {
-                speaker: 3,
-                ejection_seat: false
-            }]
+            [
+                Chatter::Leadership {
+                    speaker: 3,
+                    side: launch::Side::Enemy,
+                    wing_number: 1,
+                    leader: 4,
+                    previous_pilot_alive: false,
+                },
+                Chatter::Death {
+                    speaker: 3,
+                    ejection_seat: false
+                }
+            ]
         );
     }
 
