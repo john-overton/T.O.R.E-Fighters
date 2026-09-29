@@ -1552,7 +1552,9 @@ where the bug bash renumbered them.
   the shooter's seat; a human-flown plane's own calls are voiced at once; radio
   silence is each seat's own setting; the crew's missile-warning limit is
   kept for each seat, since two crews warn separately; a call no seat hears is
-  one `Unheard` journal entry.
+  one `Unheard` journal entry; a wingman's contact report is one call whose
+  clock position, height, range and type naming are each seat's own, from B3's
+  `Contact::views` (`Hearer::saying` gives a seat its own words).
 
   *Built (B4 step 2).* Each `Cockpit` holds a `CrewVoice` and an
   `AirfieldRadio`, both made for its seat and plane. `World::step_radio` runs

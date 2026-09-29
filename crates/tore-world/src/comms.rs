@@ -268,18 +268,31 @@ pub struct Hearer {
     pub seat: SeatId,
     /// The label this seat hears; `None` keeps the call's own.
     pub label: Option<String>,
+    /// The words this seat hears, when they depend on where it is (a contact
+    /// report's clock position); `None` keeps the call's own.
+    pub words: Option<Phrase>,
 }
 impl Hearer {
     /// A seat that hears the call under the call's own label.
     pub fn seat(seat: SeatId) -> Self {
-        Self { seat, label: None }
+        Self {
+            seat,
+            label: None,
+            words: None,
+        }
     }
     /// A seat that hears the call under `label`.
     pub fn named(seat: SeatId, label: impl Into<String>) -> Self {
         Self {
             seat,
             label: Some(label.into()),
+            words: None,
         }
+    }
+    /// The same seat hearing `words` instead of the call's own.
+    pub fn saying(mut self, words: Phrase) -> Self {
+        self.words = Some(words);
+        self
     }
 }
 
@@ -486,6 +499,10 @@ impl Comms {
             let mut heard = call.clone();
             if let Some(label) = &hearer.label {
                 heard.label.clone_from(label);
+            }
+            if let Some(words) = &hearer.words {
+                heard.text.clone_from(&words.text);
+                heard.stems.clone_from(&words.stems);
             }
             if channel.radio_silence && call.kind == Kind::Chatter {
                 silenced.push((hearer.seat, heard));

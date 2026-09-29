@@ -157,6 +157,9 @@ pub fn label(member: &Member) -> String {
     }
 }
 
+/// How a call is worded for one listener, when that depends on where it is.
+type SeatWords<'a> = dyn Fn(&Listener) -> Option<Phrase> + 'a;
+
 /// One human-flown plane as the radio's listener rule sees it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Listener {
@@ -514,9 +517,38 @@ impl Radio {
         delay: f64,
         origin: Origin,
     ) {
+        self.say_to(
+            comms, scene, speaker, audience, phrase, kind, delay, origin, None,
+        );
+    }
+
+    /// [`Self::say`], where `words` may give a seat its own wording of the
+    /// call, from where its plane is.
+    #[allow(clippy::too_many_arguments)]
+    fn say_to(
+        &mut self,
+        comms: &mut Comms,
+        scene: &Scene,
+        speaker: u32,
+        audience: Audience,
+        phrase: Phrase,
+        kind: Kind,
+        delay: f64,
+        origin: Origin,
+        words: Option<&SeatWords>,
+    ) {
         self.made += 1;
         let origin = origin.by(speaker).to(audience.into());
-        let hearers = scene.hearers(speaker, audience);
+        let mut hearers = scene.hearers(speaker, audience);
+        if let Some(words) = words {
+            for hearer in &mut hearers {
+                hearer.words = scene
+                    .listeners
+                    .iter()
+                    .find(|l| l.seat == hearer.seat)
+                    .and_then(words);
+            }
+        }
         let Some(first) = hearers.first() else {
             comms.record(
                 Entry::note(
@@ -979,7 +1011,21 @@ impl Radio {
                 let roll = comms.roll();
                 let phrase = contact_phrase(scene.phrases, roll, contact);
                 let rolls = vec![contact_roll(roll, contact)];
-                self.say(
+                // Every seat hears the same variant, worded from where its
+                // own plane is: its own clock position, height, range and
+                // whether the type can be named.
+                let own_view = |listener: &Listener| {
+                    let view = contact.views.iter().find(|v| v.plane == listener.plane)?;
+                    let seen = Contact {
+                        named: view.named.clone(),
+                        hour: view.hour,
+                        elevation: view.elevation,
+                        miles: view.miles,
+                        ..contact.clone()
+                    };
+                    Some(contact_phrase(scene.phrases, roll, &seen))
+                };
+                self.say_to(
                     comms,
                     scene,
                     *speaker,
@@ -994,6 +1040,7 @@ impl Radio {
                         advise: contact.advise,
                     })
                     .rolls(rolls),
+                    Some(&own_view),
                 );
             }
             Chatter::Leadership {
@@ -1897,5 +1944,56 @@ mod tests {
         let journal = comms.take_journal();
         assert_eq!(journal.len(), 1, "{journal:?}");
         assert_eq!(journal[0].outcome, Outcome::Noted);
+    }
+
+    #[test]
+    fn each_seat_hears_a_contact_report_from_its_own_position() {
+        use crate::ai_wings::ContactView;
+        let mut w = World::new();
+        w.members.push(member(5, false, 0, 2));
+        w.listeners.push(listener(1, 5, 0));
+        let view = |plane, hour, miles| ContactView {
+            plane,
+            named: None,
+            hour,
+            elevation: Elevation::Level,
+            miles,
+        };
+        let contact = Contact {
+            views: vec![view(0, 12, 20), view(5, 3, 8)],
+            count: 1,
+            named: None,
+            hour: 12,
+            elevation: Elevation::Level,
+            miles: 20,
+            advise: false,
+        };
+        let mut comms = Comms::with_seats(1, [SeatId(0), SeatId(1)]);
+        let mut radio = Radio::default();
+        radio.chatter(
+            &mut comms,
+            &w.scene(0.),
+            &Chatter::Contact {
+                speaker: 1,
+                target: 3,
+                contact,
+            },
+        );
+        let due = comms.due(1.);
+        assert_eq!(due.len(), 2);
+        assert_eq!(due[0].call.text, "Contact, your twelve o'clock, 20 miles");
+        assert_eq!(
+            due[1].call.text, "Contact, bandit, your three o'clock, 8 miles",
+            "inside 15 miles the size words are said"
+        );
+        assert_eq!(due[0].call.stems[0], due[1].call.stems[0], "one call");
+        assert_eq!(
+            comms
+                .take_journal()
+                .iter()
+                .filter(|e| e.call == Some(1))
+                .count(),
+            2
+        );
     }
 }
