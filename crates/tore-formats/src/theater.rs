@@ -23,13 +23,12 @@ pub struct Theater {
 }
 fn name(bytes: &[u8]) -> Result<String> {
     let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
-    if !bytes[..end]
-        .iter()
-        .all(|b| b.is_ascii_graphic() || *b == b' ')
-    {
-        return Err(invalid("non-ASCII theater name"));
+    // Retail text is DOS code page 437; a name may carry its letters.
+    let text = crate::text::decode_cp437(&bytes[..end]);
+    if !text.chars().all(crate::text::is_drawn) {
+        return Err(invalid("undrawable character in theater name"));
     }
-    Ok(String::from_utf8_lossy(&bytes[..end]).into_owned())
+    Ok(text)
 }
 impl Theater {
     pub fn parse(data: &[u8]) -> Result<Self> {
@@ -593,5 +592,12 @@ mod tests {
         assert_eq!(e.textures[&(4, 8)].rotation, 3);
         assert!(Environment::parse(b"textFormat\ntmap 0 0 -1 0").is_err());
         assert!(Environment::parse(b"textFormat\ntime 25 0").is_err());
+    }
+    #[test]
+    fn theater_names_accept_cp437_letters_and_refuse_undrawable_bytes() {
+        assert_eq!(name(b"Kurile\0junk").unwrap(), "Kurile");
+        assert_eq!(name(b"Ber\x89zovka").unwrap(), "Ber\u{eb}zovka");
+        assert!(name(b"Bad\xc4Name").is_err(), "box drawing is not text");
+        assert!(name(b"tab\tname").is_err());
     }
 }
