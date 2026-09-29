@@ -205,6 +205,14 @@ impl Map {
         100. * 2f64.powi(self.zoom)
     }
     pub fn key(&mut self, key: &str) {
+        // Manual p. 202: A, S, W and Z scroll the map left, right, up and down.
+        let key = match key {
+            "a" => "ArrowLeft",
+            "s" => "ArrowRight",
+            "w" => "ArrowUp",
+            "z" => "ArrowDown",
+            other => other,
+        };
         let step = self.width_nmi() * NMI * 0.25;
         if key.starts_with("Arrow") && self.anchor.is_none() {
             self.anchor = Some(self.last_player);
@@ -534,7 +542,7 @@ impl Map {
         );
         p.text(
             font,
-            "SHIFT-M / ESC: CLOSE   +/-: ZOOM   ARROWS: PAN   HOME: FOLLOW",
+            "SHIFT-M / ESC: CLOSE   +/-: ZOOM   ARROWS OR ASWZ: PAN   HOME: FOLLOW",
             12,
             463,
         );
@@ -707,6 +715,21 @@ fn label(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn aswz_scroll_the_map_like_the_arrows() {
+        for (letter, arrow) in [
+            ("a", "ArrowLeft"),
+            ("s", "ArrowRight"),
+            ("w", "ArrowUp"),
+            ("z", "ArrowDown"),
+        ] {
+            let (mut by_letter, mut by_arrow) = (Map::default(), Map::default());
+            by_letter.key(letter);
+            by_arrow.key(arrow);
+            assert_eq!(by_letter.offset, by_arrow.offset, "{letter}");
+            assert_ne!(by_letter.offset, [0.; 2], "{letter}");
+        }
+    }
     use super::*;
     #[test]
     fn buildings_default_off_and_defenses_are_not_buildings() {

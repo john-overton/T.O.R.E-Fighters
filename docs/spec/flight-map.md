@@ -20,7 +20,7 @@ contacts use placeholders. Original map art and fonts are reused where available
 Agent decisions: a north-up map follows the player, initially showing 100 nautical
 miles across its 476-pixel-wide plotting area on a 640 by 480 reference canvas.
 Plus/minus zoom between 25 and 800 nautical miles across in powers of two.
-Arrow keys pan by one quarter of the displayed width. Home resumes following.
+Arrow keys, and A, S, W and Z as the manual (p. 202) has it for left, right, up and down, pan by one quarter of the displayed width. Home resumes following.
 Shift+M or Escape closes the map. Flight continues at the existing 120 Hz rate;
 opening the map does not pause, steer, designate or fire. Ordinary flight
 controls remain available. Map clicks never operate the instruments underneath.
