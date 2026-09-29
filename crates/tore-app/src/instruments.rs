@@ -839,7 +839,7 @@ impl Instruments {
                     }
                     text(&mut r, &format!("SIG {:.0}", c.rcs.signature), 3, 103);
                 } else {
-                    text(&mut r, "NO EXPOSURE DATA", 19, 52);
+                    text(&mut r, "NO EXPOSURE DATA", 19, 64);
                 }
             }
             7 => {
