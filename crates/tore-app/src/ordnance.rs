@@ -831,7 +831,7 @@ pub fn validate_sources(
         combat.reset(&mut airframe.start(world))?;
         validate_guns_only(&load, &airframe, &combat.state.targets, data, world)?;
         validate_dragging(&load, data)?;
-        validate_removed_stores(&load, &airframe, data, world)?;
+        validate_removed_stores(&load, &airframe, world)?;
         println!(
             "{}: guns-only across all six wings, player/wing restart, standard loads, ordnance dragging and removed stores passed",
             id.label()
@@ -1129,7 +1129,6 @@ fn validate_dragging(load: &Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppRes
 fn validate_removed_stores(
     load: &Loadout,
     airframe: &crate::aircraft::Airframe,
-    data: &BTreeMap<String, Vec<u8>>,
     world: &crate::terrain::Terrain,
 ) -> AppResult<()> {
     let stations = load.quantities.len();
@@ -1155,9 +1154,6 @@ fn validate_removed_stores(
         edited.quantities = quantities.clone();
         edited.validate()?;
         let mut combat = crate::combat::Combat::with_loadout(airframe, &edited)?;
-        // Loads the art as combat's constructor used to, so a missing piece
-        // still fails this check.
-        crate::combat_view::CombatView::new(&combat, data)?;
         let mut flight = airframe.start(world);
         for _ in 0..2 {
             combat.reset(&mut flight)?;

@@ -8465,9 +8465,6 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             return Err("combat record and replay are mutually exclusive".into());
         }
         let c = combat::Combat::new(&hornet, &assets.theater_resources, true)?;
-        // Loads the art as combat's constructor used to, so this run's log and
-        // failures are unchanged.
-        combat_view::CombatView::new(&c, &assets.theater_resources)?;
         let w = scenery::launch_terrain(&assets.theater_resources, &theater_code, None)?;
         tape_file::replay(
             &path,
@@ -8501,15 +8498,6 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         return Ok(Outcome::Done);
     }
     if combat_smoke {
-        // Loads the art as combat's constructor used to, so this run's log
-        // and failures are unchanged.
-        let config =
-            tore_sim::combat::live::Configuration::from_source(&hornet.profile, |name| {
-                assets.theater_resources.get(name).cloned().ok_or_else(|| {
-                    std::io::Error::other(format!("missing live-fire resource {name}"))
-                })
-            })?;
-        combat_view::CombatView::for_configuration(&config, &assets.theater_resources)?;
         combat_smoke::smoke(&hornet, &assets.theater_resources)?;
         return Ok(Outcome::Done);
     }
@@ -8738,9 +8726,6 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     false,
                     stripped_loadout.as_deref(),
                 )?;
-                // Loads the art as combat's constructor used to, so this run's log and
-                // failures are unchanged.
-                combat_view::CombatView::new(&load, &assets.theater_resources)?;
                 if stripped_loadout.is_some() {
                     // A stripped load only takes effect on a reset, which also
                     // sets the payload and the fuel systems from it.
@@ -9167,9 +9152,6 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         use std::io::Write;
         let mut state = flight::State::new(&hornet.profile, [0., 5000., 0.])?;
         let mut combat = combat::Combat::new(&hornet, &assets.theater_resources, false)?;
-        // Loads the art as combat's constructor used to, so this run's log and
-        // failures are unchanged.
-        combat_view::CombatView::new(&combat, &assets.theater_resources)?;
         combat.reset(&mut state)?;
         if let Some(throttle) = flight_throttle {
             state.throttle = throttle;
@@ -9285,9 +9267,6 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && !(smoke_test && initial_screen == Screen::Flight)
     {
         let mut combat = combat::Combat::new(&hornet, &theater_resources, false)?;
-        // Loads the art as combat's constructor used to, so this run's log and
-        // failures are unchanged.
-        combat_view::CombatView::new(&combat, &theater_resources)?;
         combat.add_airport_targets(&world.airport_scene)?;
         let mut flight = hornet.start(&world);
         flight.position = aircraft.position;

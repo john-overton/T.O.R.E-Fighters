@@ -51,25 +51,15 @@ impl CombatView {
     /// The art for `combat`: the effect sheets and every weapon shape the
     /// player's stations name.
     pub fn new(combat: &Combat, data: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
-        let mut view = Self::for_configuration(combat.state.configuration(), data)?;
-        view.restarts = combat.render_restarts();
-        Ok(view)
-    }
-
-    /// The art for a player with this configuration's stations.
-    pub fn for_configuration(
-        config: &live::Configuration,
-        data: &BTreeMap<String, Vec<u8>>,
-    ) -> AppResult<Self> {
         let mut art = CombatArt::load(data)?;
-        art.add_weapon_shapes(config, data);
+        art.add_weapon_shapes(combat.state.configuration(), data);
         Ok(Self {
             art,
             models: Vec::new(),
             outlets: Vec::new(),
             shaped: 0,
             alpha: 1.,
-            restarts: 0,
+            restarts: combat.render_restarts(),
         })
     }
 
