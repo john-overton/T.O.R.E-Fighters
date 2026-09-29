@@ -1072,6 +1072,7 @@ impl AiActor {
                     .fold(f64::MIN, f64::max)
             },
             minimum_speed_fps: own.limits.minimum.0,
+            approach_minimum_fps: self.approach_minimum_fps(),
             maximum_speed_fps: own.limits.maximum.0,
             corner_speed_fps: own.limits.corner.0,
             cruise_speed_fps: super::route::cruise_speed(&own.limits).0,
@@ -3485,6 +3486,62 @@ impl AiActor {
         }
     }
 
+    /// The hybrid model's loaded low-speed positive G ceiling at `speed` with
+    /// the current flaps, as the control adapter computes it; `None` above
+    /// the ramp or for an aircraft without a 1 G envelope here.
+    fn hybrid_ramp_g(&self, speed: f64) -> Option<f64> {
+        let config = self.flight.model().configuration();
+        let altitude = self.flight.position[1];
+        let (clean_stall, _) = config
+            .aerodynamics
+            .envelopes
+            .iter()
+            .find(|e| e.g == 1)?
+            .speeds(altitude)?;
+        let stall = clean_stall * (1.0 - 0.25 * self.flight.flaps);
+        let loading = 1.0
+            + (self.flight.fuel + self.flight.carried_lbs()) / config.mass.empty_lbs
+                * config.aerodynamics.loaded_elevator_percent
+                / 100.0;
+        crate::flight::low_speed_positive_g_ceiling(config, altitude, speed, stall, false)
+            .map(|g| g / loading)
+    }
+
+    /// Fitted (agent decision, 2026-09-29): the slowest speed at which the
+    /// loaded aircraft, flaps down, still has [`APPROACH_G_MARGIN`] of lift,
+    /// so a final can arrest a sink and follow its path. Zero for an
+    /// aircraft without the hybrid model's low-speed ramp.
+    fn approach_minimum_fps(&self) -> f64 {
+        if self.flight.research.is_none() {
+            return 0.0;
+        }
+        let config = self.flight.model().configuration();
+        let altitude = self.flight.position[1];
+        let Some((clean_stall, maximum)) = config
+            .aerodynamics
+            .envelopes
+            .iter()
+            .find(|e| e.g == 1)
+            .and_then(|e| e.speeds(altitude))
+        else {
+            return 0.0;
+        };
+        let stall = clean_stall * 0.75;
+        let loading = 1.0
+            + (self.flight.fuel + self.flight.carried_lbs()) / config.mass.empty_lbs
+                * config.aerodynamics.loaded_elevator_percent
+                / 100.0;
+        let mut speed = stall;
+        while speed < maximum {
+            match crate::flight::low_speed_positive_g_ceiling(config, altitude, speed, stall, false)
+            {
+                Some(g) if g / loading < APPROACH_G_MARGIN => speed += 5.0,
+                _ => return speed,
+            }
+        }
+        maximum
+    }
+
     /// The loaded G limits, already carrying the AI-only experience
     /// adjustment. A human-flown aircraft is exempt and never reaches here.
     fn g_limits(&self) -> (f64, f64) {
@@ -3503,8 +3560,26 @@ impl AiActor {
         }
         let config = self.flight.model().configuration();
         let loading = (self.flight.fuel + self.flight.payload_lbs) / config.mass.empty_lbs;
-        let loaded = f64::from(available.max(1))
+        let mut loaded = f64::from(available.max(1))
             / (1.0 + loading * config.aerodynamics.loaded_elevator_percent / 100.0);
+        // The hybrid flight model keeps 1 G anywhere inside the 1 G envelope
+        // and ramps from 1 G at the stall to the next envelope row
+        // (docs/FLIGHT-MODEL.md, "Envelope limits and loading"), so the AI
+        // may ask for what the model gives there, as its control adapter
+        // already assumes. Before this a loaded aircraft slowing on final was
+        // held below 1 G, could not hold its path and sank into the ground.
+        if self.flight.research.is_some() {
+            if let Some(ramp) = self.hybrid_ramp_g(speed) {
+                loaded = loaded.max(ramp);
+            }
+            if envelopes.iter().any(|e| {
+                e.g == 1
+                    && e.speeds(altitude)
+                        .is_some_and(|(low, high)| speed >= low && speed <= high)
+            }) {
+                loaded = loaded.max(1.0);
+            }
+        }
         let (positive, negative) = ai_g_limits(
             self.controller.experience().level,
             loaded,
@@ -3859,6 +3934,9 @@ const AVOID_HOLD_TICKS: u64 = 360;
 const LOST_MEMBER_BASE: u8 = 100;
 
 /// B44's retail terrain look-ahead, feet; the floor of the speed-scaled one.
+/// Fitted (agent decision, 2026-09-29): the loaded lift, in G, a final
+/// approach keeps in hand to arrest a sink and follow its path.
+pub const APPROACH_G_MARGIN: f64 = 1.3;
 pub const TERRAIN_LOOKAHEAD_MIN_FT: f64 = 1000.0;
 /// Opinionated (requested by John, 2026-09-29; number an agent decision):
 /// the terrain floor looks this many seconds of travel ahead, never less than

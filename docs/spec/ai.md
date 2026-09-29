@@ -1229,7 +1229,13 @@ the model's current roll authority and clamp stick roll to [-1, 1].
 
 Pitch feedback requests (cos(flight-path pitch) + speed times pitch error /
 (3 seconds times 32.174)) / max(cos(bank), 0.25) G, clamped to the loaded
-negative limit and AI positive G limit. Pitch error includes the terrain floor.
+negative limit and AI positive G limit. On the researched model the AI positive
+limit is never below what that model itself gives: 1 G anywhere inside the
+1 G envelope, and its loaded low-speed ceiling (the ramp from 1 G at the
+flap-adjusted stall to the next envelope row) where that is higher (fitted,
+agent decision 2026-09-29; before this a loaded aircraft slowing on final was
+held to 1 G divided by its loading, 0.77 G for a fuelled F/A-18D, and sank
+into the ground short of the runway). Pitch error includes the terrain floor.
 When an airborne aircraft's flight path is below the terrain floor, the
 requested bank is zero while it stays below, so a steep turn cannot use the
 lift needed to climb away from the ground, and the pitch error is closed over

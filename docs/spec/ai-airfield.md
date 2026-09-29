@@ -117,9 +117,15 @@ its home airport at cruise speed.
   corner are re-planned every 5 seconds. The human player's landing blocks the
   runway: the host reports it through `AiMission::set_priority_landing`
   ([player priority](airports.md#wing-landing-orders-and-player-priority)).
-- **Approach** (spec-derived): gear down; three gates on a 6 degree path back
-  along the landing heading from the landing point, 35,200, 17,600 and 8,800 ft
-  out and about 3,700, 1,850 and 925 ft above it. Speed (maximum + corner) / 2
+- **Approach** (spec-derived gates, opinionated path): gear down; three gates
+  back along the landing heading from the landing point, 35,200, 17,600 and
+  8,800 ft out. They lie on the player's ILS glide path
+  (`airport::glide_path_height_ft`, 3 degrees, shared), about 1,845, 922 and
+  461 ft above the landing point (opinionated, requested by John on 2026-09-29 to match a
+  typical ILS; retail used a 6 degree path, +0x10d, about 3,700, 1,850 and
+  925 ft, recorded in [the AI format notes](../formats/ai.md)). An aircraft
+  arriving high descends toward each gate at no more than 10 degrees over at
+  least 5,000 ft. Speed (maximum + corner) / 2
   to the first gate, then at most 366 ft/s (217 kt). A gate is done within
   250 ft horizontally; fitted addition: or once it is abeam or behind within
   5,000 ft, because the hybrid model's turn radius at these speeds is far wider
@@ -134,12 +140,24 @@ its home airport at cruise speed.
   heading, so a turn cannot consume the lift needed to clear the terrain.
   Use full military power and close the speedbrake during the climb. Resume
   the route once clear. This is a forward sampling rule, not terrain routing.
-- **Final** (spec-derived path, fitted speed and flare): down the 6 degree path
-  to the landing point, wings level below 50 ft. Retail flies at most 293 ft/s
+- **Final** (opinionated path, fitted speed and flare): down the same 3 degree
+  path to the landing point (retail 6 degrees), wings level below 50 ft. Retail flies at most 293 ft/s
   with the nose 17 degrees above the path and has no flare. The AI flies 1.1
-  times its clean minimum speed under that 293 ft/s cap, lets the hybrid model
+  times its clean minimum speed, but never slower than the speed at which the
+  loaded aircraft with flaps down still has 1.3 G of lift in hand (fitted,
+  agent decision 2026-09-29: 232 ft/s, 137 kt, for a fuelled F/A-18D, where
+  1.1 times the minimum gave 94 kt and a final that could not hold its path),
+  under that 293 ft/s cap. The speedbrake stays closed while the aircraft is
+  below the final path (fitted, same date). Short of the threshold, with the
+  wheels less than 40 ft above the ground below, it holds level instead of
+  descending (fitted, same date: at KURILE 3 and NSK 6 the ground before the
+  threshold stands 65 to 71 ft above the runway, higher than the 3 degree
+  path; see [ILS checks](../testing/ils.md)). It lets the hybrid model
   set its own angle of attack, and eases its descent toward height above the wheels divided by 6 seconds,
   with a minimum 1.5 degree downward path, so a fast final has time to flare.
+  On the 3 degree path at 137 kt that is a 12 ft/s sink eased to about 6 ft/s
+  at the wheels, and the flare begins about 70 ft up (re-derived 2026-09-29;
+  on the retail 6 degree path it began about 150 ft up).
   Below 60 ft it reduces the speed target to the clean minimum. The speedbrake
   stays closed during the flare. These flare constants are fitted.
 - **Rollout** (spec-derived end, fitted method): brakes on, idle, flaps down,
@@ -156,20 +174,30 @@ its home airport at cruise speed.
   400 ft before it, 250 ft further back for each higher slot, alternating 40 ft right
   and left of the centerline, never less than 150 ft ahead of where it stopped.
 - **Landing end without anchors** (fitted): the end with at least a knot more
-  headwind, otherwise the end facing the aircraft's arrival. The aim point is a
-  quarter of the way down (manual p.65-68). With anchors the airport's landing
-  heading is always used (spec-derived).
+  headwind, otherwise the end facing the aircraft's arrival. With anchors the
+  airport's landing heading is always used (spec-derived).
+- **Landing point** (opinionated, requested by John on 2026-09-29): the
+  player's ILS aim point, `airport::AIM_PAST_THRESHOLD_FT` (1,000 ft) past the
+  landing end's threshold on the runway plane, so the path crosses the
+  threshold about 52 ft above the wheels, exactly as the player's ILS.
+  Retail aimed at the airport's landing anchor (box 0x12), or without anchors
+  a quarter of the way down (manual p.65-68). The marshal square and the
+  go-around rules measure from this point. Heights on the path are wheel
+  heights: the aircraft origin sits its ground clearance (about 8 ft for the
+  Hornet) above them.
 - **Parking slots** (spec-derived): nine per airport. A ground-started aircraft
   sitting on a slot holds it until its climb-out ends; a lander takes the lowest free slot
   when it leaves the marshal and keeps it.
 - **Go-around** (fitted safety; retail has none): within 6,000 ft of the landing
   point a final more than 300 ft off the centerline or 30 degrees off the
   landing heading, an aircraft still airborne 35% of the runway length past the
-  landing point, or a bounce above 15 ft during the rollout goes back to the
-  marshal and flies the gates again.
+  landing point, a final more than 150 ft below its path while still more than
+  100 ft above the runway (fitted, agent decision 2026-09-29, so a sinking
+  final climbs away with height in hand), or a bounce above 15 ft during the
+  rollout goes back to the marshal and flies the gates again.
   The ejection assessment also requests a go-around for a hazardous final
-  steeper than 9 degrees down, including one over the runway. This fitted
-  threshold is the steepest commanded final (6 degrees plus 3 degrees of
+  steeper than 6 degrees down, including one over the runway. This fitted
+  threshold is the steepest commanded final (3 degrees plus 3 degrees of
   glide correction). The aircraft uses full military power on the landing
   heading, level below minimum speed and at an 8 degree climb above it.
   Gear rises at 200 ft above the runway and flaps above 200 kt. The climb
@@ -235,7 +263,8 @@ landing limit. This remains an estimate, not proof of physical inevitability.
 
 Other assessed hazards on the approach gates request a go-around. On final
 that happens if the projected touchdown is off the runway, gear is below 99%,
-or the descent path is steeper than 9 degrees. An ordinary low, sinking final
+or the descent path is steeper than 6 degrees (9 degrees before the 3 degree
+path, 2026-09-29). An ordinary low, sinking final
 over the runway continues to flare and land. Takeoff continues at full power.
 The existing healthy-aircraft guard above 200 ft and the once-per-second
 70% ejection chance remain in effect; a catastrophic judgement does not

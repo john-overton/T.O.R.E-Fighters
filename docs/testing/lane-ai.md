@@ -124,6 +124,10 @@ agent decisions (see "Agent decisions to review" below).
 | 5 in part, after the fight | Once a side has seen hostile aircraft and none is alive, its AI wings land at their home runway, or the leader flies back to its launch point and holds there when there is none ([return to base](../spec/ai.md#return-to-base-when-the-mission-is-over)); scenario `ai-rtb-after-win` | `475cafc` |
 | 8, decoyed missile still kills | Unchanged by decision: the kill credit stays as the debrief spec says | none |
 
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| Returning to base, fuelled F/A-18Ds sank at 75 ft/s at idle with the speedbrake out (a 17 degree descent against the 7 degrees commanded) and touched down on grass 2,500 ft short of Simferopol (`ai-long-1v1`, `ai-long-5v5`) | Inside the 1 G envelope the AI's positive G limit was 1 G divided by the loading, 0.77 G, although the hybrid model keeps 1 G there and ramps higher, so no pitch request could hold the path; and the final speed, 1.1 times the minimum (94 kt), left no lift in hand. The go-around came at 199 ft, too late | `06b8017`: the AI G limit is never below the model's own; the final flies no slower than the speed with 1.3 G of loaded lift (137 kt here), the speedbrake stays closed below the path, and a final 150 ft below its path above 100 ft goes around (all fitted, in the airfield spec). The same F/A-18D now tracks the path within 30 ft and lands. A damaged MiG-21 (`ai-damaged-fault21-*`) that used to go around 16 times in 20 minutes now lands at 1,000 s and is taxiing in at the end, which the scenario check now accepts |
+
 Supporting commit: `17144d1` adds the per-tick checks and the lane's scenarios.
 
 ### Golden fingerprints
@@ -212,19 +216,6 @@ low-level class: `ai-big-a4e-vs-f22n-researched`, `ai-big-x31-vs-faxx-researched
 - `ai-theater-cub-takeoff-a1` (Key West, near the north edge): the airborne
   friendly wing starts on the runway heading, north, has no route and leaves
   the map after 163 s while the enemy is still alive (item 5 below).
-- `ai-long-1v1` and `ai-long-5v5` (new with the return to base): after the
-  player's side is destroyed, the enemy F/A-18Ds go home to Simferopol, fly
-  the gates over the hills to the south and land short of the runway, heading
-  north. The final starts 1,130 ft above the field 9,000 ft out, a little
-  above the 6 degree path; with the throttle closed and the speedbrake out
-  the aircraft slows from 217 to 145 kt, and below about 500 ft its sink
-  grows from 40 to 75 ft/s (a 17 degree descent against the 7 degree the
-  final commands). The go-around comes at 199 ft, 3,000 ft short, too late,
-  and it touches the grass about 2,500 ft short of the landing point at
-  165 kt. The final has no terrain floor, so the look-ahead is not involved;
-  this is the landing controller's slow, steep final (item 6), newly
-  exercised because winners now land. Every run that returns to Simferopol
-  from the south is likely to show it.
 - Activity flapping and pitch-stick oscillation at a weapon's envelope edge,
   and mid-air collisions, are reported but allowed (see above and below);
   regression scenarios check strictly.
@@ -262,6 +253,10 @@ record with what changed (see "Sixth round" above).
    400 s, taxiing to parking another 330 s, and a wing of four needs more than
    30 minutes. Meanwhile a ground-started wingman still waiting cannot take off,
    because the runway gate stays closed while anyone flies the gates.
+   Since 2026-09-29 AI approaches fly the player's 3 degree ILS path (John's
+   decision): over the 16 theaters' landing pairs the time from approach to
+   touchdown barely moved (median 300 s before, 296 s after), because the
+   gates keep their distances and the track length dominates.
 7. **Fast low flight and the terrain look-ahead.** Changed (John,
    2026-09-29): a six-second speed-scaled look-ahead (`92c6a5a`).
 8. **A decoyed missile still kills.** Unchanged by decision (John,
@@ -339,10 +334,43 @@ gone the airborne second wing went home to the same runway, and its landing
 traffic kept the player's fourth wingman from ever taking off. `51dd2c1` holds
 a side's return to base while any of its aircraft still departs; the ground
 scenarios and `ai-rtb-after-win` then passed (13 of 13). The remaining two new
-failures, `ai-long-1v1` and `ai-long-5v5`, are the landing-short class under
-Known failures. The mid-air collision comparison is in the sixth-round table
+failures, `ai-long-1v1` and `ai-long-5v5`, were winners landing short of
+Simferopol; `06b8017` fixed the final approach (see the second table under
+"Sixth round"), and both now pass. After that fix: the landing, ground-start,
+return-to-base, damaged-aircraft and regression scenarios passed 62 of 66 on
+the first run; the other four were those two runs, now passing (markers
+removed), and the damaged MiG-21 that now lands and taxis in (check
+corrected). John then asked for the AI to fly the player's 3 degree ILS
+path (`2eb77ba`, see "3 degree approach" below). The mid-air collision comparison is in the sixth-round table
 above; over the whole lane 27 collisions were reported (allowed, not
 failing). The spawn scan used `--probe-fight 15:15` for 2 ticks per start.
+
+### 3 degree approach (2026-09-29)
+
+John asked for AI approaches to follow the player's 3 degree ILS angle.
+`2eb77ba` flies the gates and final on the shared `airport::glide_path_height_ft`
+path to the ILS aim point 1,000 ft past the threshold (the path crosses it
+about 52 ft above the wheels; retail flew 6 degrees to the landing anchor).
+The probe now prints each final's wheel height over the threshold and the
+lane fails one below 10 ft (short) or above 300 ft (long). New scenarios
+`ai-rtb-after-win-2v15-ukr`, `-pgu`, `-fra` and `-vla` land fifteen winners
+each. A follow-up holds a final level short of the threshold when the wheels
+come within 40 ft of the ground (KURILE 3 skimmed 15 ft over the ground
+before the threshold, which stands higher than the path there).
+
+Results with the 3 degree path: the landing, ground-start, return-to-base,
+damaged, regression, takeoff and theater scenarios passed 190 of 190 (the
+three known failures caught as expected). Threshold crossings over the
+landing scenarios: 42, with the wheels 57 to 77 ft up (median 65; the
+path is 52 ft), none short or long. After the terrain hold (`65afc67`) the 62 landing, ground-start,
+return-to-base and damaged scenarios passed 62 of 62, and KURILE 3 crosses
+its threshold 119 ft up and lands. In each 2 v 15 return to base, 20 minutes
+after the start 2 to 5 of the 15 winners have landed and the rest hold at
+marshal: one runway, one approach at a time, about five minutes each.
+Open, not in the lane: a pair landing at NSK 6 (Hyon Ni) flew its approach
+gates for 700 s before reaching final (the ground around the lower 3 degree
+gates keeps triggering the approach terrain hold); it was not compared with
+the 6 degree path.
 
 ### Fifth round (2026-09-29, review follow-ups)
 

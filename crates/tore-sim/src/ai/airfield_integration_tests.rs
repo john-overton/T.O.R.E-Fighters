@@ -540,6 +540,38 @@ fn the_next_wingman_leads_when_the_leader_is_lost() {
 }
 
 #[test]
+fn a_hybrid_aircraft_may_always_ask_for_1_g_inside_its_1_g_envelope() {
+    // Before 2026-09-29 a loaded aircraft slowing on final was held to
+    // 1 G divided by its loading and sank into the ground short of the runway.
+    let mut actor = hornet(1, 0, [0., 1_000., 0.], 0.);
+    actor.flight_mut().enable_research(1).unwrap();
+    let config = actor.flight().model().configuration().clone();
+    let one_g = config
+        .aerodynamics
+        .envelopes
+        .iter()
+        .find(|e| e.g == 1)
+        .and_then(|e| e.speeds(1_000.))
+        .unwrap();
+    let mut checked = 0;
+    let mut speed = one_g.0;
+    while speed <= one_g.1 {
+        actor.flight_mut().speed = speed;
+        let (positive, _) = actor.g_limits();
+        assert!(positive >= 1.0, "{positive:.2} G at {speed:.0} ft/s");
+        checked += 1;
+        speed += 10.;
+    }
+    assert!(checked > 5);
+    // The approach floor keeps the fitted lift margin in hand, flaps down.
+    let floor = actor.approach_minimum_fps();
+    assert!(floor > one_g.0 * 0.75, "{floor:.0}");
+    actor.flight_mut().flaps = 1.0;
+    actor.flight_mut().speed = floor;
+    assert!(actor.g_limits().0 >= APPROACH_G_MARGIN - 1e-9);
+}
+
+#[test]
 fn a_wing_returns_to_base_once_no_hostile_aircraft_remains() {
     // John, 2026-09-29: mission return to base.
     let mut mission = AiMission::new();
@@ -1054,10 +1086,11 @@ fn a_steep_sinking_final_over_the_runway_goes_around_instead_of_ejecting() {
 }
 
 /// Normal landing geometry over the runway, low and sinking, is neither an
-/// ejection nor a go-around: the aircraft flares and lands.
+/// ejection nor a go-around: the aircraft flares and lands. Normal is the
+/// 3 degree path plus some correction since 2026-09-29 (6 degrees before).
 #[test]
 fn a_low_sinking_final_over_the_runway_lands_without_ejecting() {
-    let mut mission = steep_final(400., 60., 6., -3_600., 0.);
+    let mut mission = steep_final(400., 60., 4.5, -3_600., 0.);
     assert_eq!(fly_without_ejecting(&mut mission, 120), 0);
     assert_eq!(
         mission.actor(1).unwrap().airfield_phase(),
