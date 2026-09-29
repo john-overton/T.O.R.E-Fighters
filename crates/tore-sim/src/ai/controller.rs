@@ -959,6 +959,11 @@ impl Controller {
         &self.identity
     }
 
+    /// Leader succession renumbers a wing (see `AiMission`).
+    pub fn set_member(&mut self, member: u8) {
+        self.identity.member = member;
+    }
+
     pub fn profile(&self) -> &BehaviorProfile {
         &self.profile
     }

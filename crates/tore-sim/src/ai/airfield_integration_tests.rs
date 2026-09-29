@@ -516,6 +516,30 @@ fn a_wingman_stops_following_a_destroyed_leader_down() {
 }
 
 #[test]
+fn the_next_wingman_leads_when_the_leader_is_lost() {
+    // John, 2026-09-29: leader succession inside an AI-led wing.
+    let mut mission = AiMission::new();
+    mission.push(hornet(1, 0, [0., 6_000., 0.], 0.));
+    mission.push(hornet(2, 1, [-600., 6_000., -600.], 0.));
+    mission.push(hornet(3, 2, [600., 6_000., -600.], 0.));
+    mission.start_in_formation();
+    step(&mut mission, None);
+    mission.actor_mut(1).unwrap().set_alive(false);
+    step(&mut mission, None);
+    let member = |mission: &AiMission, id| mission.actor(id).unwrap().identity().member;
+    assert_eq!((member(&mission, 2), member(&mission, 3)), (0, 1));
+    assert!(
+        member(&mission, 1) >= 100,
+        "the lost leader leaves the numbering"
+    );
+    assert!(mission.actor(2).unwrap().identity().is_leader());
+    // The survivor keeps leading when a later wingman is lost.
+    mission.actor_mut(3).unwrap().set_alive(false);
+    step(&mut mission, None);
+    assert_eq!(member(&mission, 2), 0);
+}
+
+#[test]
 fn a_formation_order_cancels_an_ordered_landing_in_the_early_approach() {
     let mut mission = AiMission::new();
     mission.push(hornet(1, 1, [0., 6_000., -110_000.], 0.));

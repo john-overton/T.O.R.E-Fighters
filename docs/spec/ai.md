@@ -448,6 +448,18 @@ slot point: beyond 5000 ft own maximum; 1000 to 5000 ft leader speed plus
 clamped to own minimum and maximum. The negative bands are reachable only
 through a lead-projection branch whose entry condition is open.
 
+### Leader succession
+
+**Opinionated, requested by John on 2026-09-29:** when an AI-led wing's leader
+is lost (destroyed, ejected, crashed or removed), the surviving member next in
+the wing's order becomes its leader and the others close up behind it: the
+survivors are renumbered from 0 in their old order, so their formation slots
+follow, and a wingman that was following the lost leader in to land stops as
+the wing abort does. A wing led by a human is left alone (multiplayer handles
+the general case separately). No radio call is made: the retail "You're the
+wingleader now" call is voiced only by a living previous leader
+([radio chatter](radio-chatter.md)).
+
 ### Normal formation variation and transitions
 
 **Opinionated, requested by John on 2026-09-18:** tighten normal vertical

@@ -450,6 +450,12 @@ impl AiActor {
         &self.identity
     }
 
+    /// Leader succession renumbers a wing (see [`AiMission`]).
+    fn set_member(&mut self, member: u8) {
+        self.identity.member = member;
+        self.controller.set_member(member);
+    }
+
     pub fn flight(&self) -> &flight::State {
         &self.flight
     }
@@ -1334,6 +1340,85 @@ impl AiMission {
         self.external_leaders.push((side, wing, id));
     }
 
+    /// Opinionated (requested by John, 2026-09-29): when an AI-led wing's
+    /// leader is lost (destroyed, ejected, crashed or removed), the surviving
+    /// member next in the wing's order becomes its leader and the others
+    /// close up behind it: members are renumbered from 0 in their old order,
+    /// so formation slots follow. Lost members move out of the numbering. A
+    /// wing led by a human is left alone. No radio call: the retail
+    /// "You're the wingleader now" call is voiced only by a living previous
+    /// leader (docs/spec/radio-chatter.md).
+    fn pass_leadership(&mut self) {
+        let mut wings: Vec<(super::targeting::Side, u8)> = Vec::new();
+        for actor in &self.actors {
+            let key = (actor.identity.side, actor.identity.wing);
+            if !wings.contains(&key) {
+                wings.push(key);
+            }
+        }
+        for (side, wing) in wings {
+            if self
+                .external_leaders
+                .iter()
+                .any(|(s, w, _)| *s == side && *w == wing)
+            {
+                continue;
+            }
+            let in_wing = |a: &AiActor| a.identity.side == side && a.identity.wing == wing;
+            // Only a wing whose leader was there and is now lost; a wing
+            // that never had a leader keeps its numbering.
+            if !self
+                .actors
+                .iter()
+                .any(|a| in_wing(a) && !a.alive() && a.identity.member == 0)
+                || self
+                    .actors
+                    .iter()
+                    .any(|a| in_wing(a) && a.alive() && a.identity.member == 0)
+            {
+                continue;
+            }
+            let mut alive: Vec<(u8, usize)> = self
+                .actors
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| in_wing(a) && a.alive())
+                .map(|(i, a)| (a.identity.member, i))
+                .collect();
+            if alive.is_empty() {
+                continue;
+            }
+            alive.sort_unstable();
+            for actor in self.actors.iter_mut().filter(|a| in_wing(a) && !a.alive()) {
+                if actor.identity.member < LOST_MEMBER_BASE {
+                    let member = actor.identity.member.saturating_add(LOST_MEMBER_BASE);
+                    actor.set_member(member);
+                }
+            }
+            for (rank, (_, index)) in alive.into_iter().enumerate() {
+                let actor = &mut self.actors[index];
+                actor.set_member(rank as u8);
+                // A wingman that was following the lost leader in to land
+                // stops, as the wing abort does.
+                if actor
+                    .landing_order
+                    .is_some_and(|o| o.reason == super::airfield::LandingReason::JoinLeader)
+                    && matches!(
+                        actor.airfield_phase(),
+                        Some(
+                            super::airfield::Phase::Inbound
+                                | super::airfield::Phase::Marshal
+                                | super::airfield::Phase::Approach
+                        )
+                    )
+                {
+                    actor.landing_order = None;
+                    actor.leave_airfield();
+                }
+            }
+        }
+    }
+
     pub fn actors(&self) -> &[AiActor] {
         &self.actors
     }
@@ -1390,6 +1475,7 @@ impl AiMission {
         now: TimeOfDay,
     ) -> Result<MissionOutput> {
         let mut output = MissionOutput::default();
+        self.pass_leadership();
         let mut delivered = Vec::new();
         for (receiver, report) in std::mem::take(&mut self.pending_attack_reports) {
             if let Some(actor) = self.actor_mut(receiver) {
@@ -3576,6 +3662,9 @@ fn dummy_frame(own: &OwnState) -> DecisionFrame<'static> {
 }
 
 /// The record's minimum-altitude value; 300 in every inspected record (B44).
+/// Lost wing members are renumbered from here, out of the living order.
+const LOST_MEMBER_BASE: u8 = 100;
+
 /// B44's retail terrain look-ahead, feet; the floor of the speed-scaled one.
 pub const TERRAIN_LOOKAHEAD_MIN_FT: f64 = 1000.0;
 /// Opinionated (requested by John, 2026-09-29; number an agent decision):
