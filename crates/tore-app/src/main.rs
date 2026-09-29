@@ -2514,19 +2514,19 @@ impl App {
                         | "ArrowDown"
                         | "Home"
                 ))
-            && (!event.pressed
-                || (!(self.flight_ui.menu
-                    && matches!(
-                        name.as_str(),
-                        "Escape"
-                            | "Tab"
-                            | "ArrowUp"
-                            | "ArrowDown"
-                            | "ArrowLeft"
-                            | "ArrowRight"
-                            | "Enter"
-                            | "Space"
-                    ))))
+            && !(event.pressed
+                && self.flight_ui.menu
+                && matches!(
+                    name.as_str(),
+                    "Escape"
+                        | "Tab"
+                        | "ArrowUp"
+                        | "ArrowDown"
+                        | "ArrowLeft"
+                        | "ArrowRight"
+                        | "Enter"
+                        | "Space"
+                ))
             && (if event.repeat {
                 self.input.claimed(&name)
             } else {
