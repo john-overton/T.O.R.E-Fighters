@@ -1620,7 +1620,11 @@ pub fn ceiling_lift_ratio(altitude_ft: f64, ceiling_ft: f64) -> f64 {
             .unwrap_or(f64::NAN)
     };
     let ratio = density(altitude_ft) / density(ceiling_ft);
-    if ratio.is_finite() { ratio.clamp(0., 1.) } else { 1. }
+    if ratio.is_finite() {
+        ratio.clamp(0., 1.)
+    } else {
+        1.
+    }
 }
 
 #[cfg(test)]
