@@ -313,6 +313,7 @@ fn demo() {
     let presentation = Presentation {
         models: vec![AircraftId::Mig29],
         slots: count - 1,
+        player: 0,
     };
     let header = replay::Header {
         game_version: crate::version::version().into(),

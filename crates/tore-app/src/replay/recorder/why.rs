@@ -626,6 +626,7 @@ impl Recorder {
     /// failure, and its telemetry tree.
     fn bodies(&mut self, tick: &Tick<'_>, frame: &mut Frame, events: &mut Vec<Event>) {
         let number = frame.tick;
+        let player = self.player;
         let infos = &self.infos;
         let why = &mut self.why;
         let Frame {
@@ -635,18 +636,15 @@ impl Recorder {
         } = frame;
         for state in aircraft.iter() {
             let id = state.id;
-            let actor = tick.wings.and_then(|w| w.mission().actor(id));
-            let f = match (id, actor) {
-                (0, _) => tick.flight,
-                (_, Some(actor)) => actor.flight(),
-                _ => continue,
+            let Some(f) = super::flight_of(player, tick, id) else {
+                continue;
             };
             let mut body = why.bodies.remove(&id).unwrap_or_default();
             let changed = effects(&mut body, id, number, f, events);
             limits(&mut body, id, number, f, events);
-            failure(&mut body, id, state, f, tick, events);
+            failure(&mut body, id, player, state, f, tick, events);
             body.seen = true;
-            let period = if id == 0 {
+            let period = if id == player {
                 PLAYER_TELEMETRY_TICKS
             } else {
                 AI_TELEMETRY_TICKS
@@ -682,7 +680,7 @@ impl Recorder {
     /// after a decoy roll; and its closest approach so far.
     fn guidance(&mut self, tick: &Tick<'_>, frame: &mut Frame) {
         let number = frame.tick;
-        let config = tick.combat.state.own().configuration();
+        let player = self.player;
         let infos = &self.infos;
         let named = |id: u32| who(infos, id);
         let position = |id: u32| -> Option<[f64; 3]> {
@@ -725,7 +723,7 @@ impl Recorder {
                 continue;
             }
             guide.force = false;
-            let weapon = p.weapon(config);
+            let weapon = p.weapon(super::stores_of(tick, player, p.owner));
             use tore_sim::combat::missiles::Guidance as Kind;
             let kind_name = match g.profile.guidance {
                 Kind::Supported => "semi-active radar",
@@ -1266,6 +1264,7 @@ fn limits(body: &mut Body, id: u32, number: u64, f: &flight::State, events: &mut
 fn failure(
     body: &mut Body,
     id: u32,
+    player: u32,
     state: &AircraftState,
     f: &flight::State,
     tick: &Tick<'_>,
@@ -1273,11 +1272,10 @@ fn failure(
 ) {
     let failed = f.systems.structure.failed;
     if failed && !body.failed && body.seen {
-        let hit = id == 0
-            && tick
-                .events
-                .iter()
-                .any(|e| matches!(e, live::Event::SubsystemDamaged { index: 26, .. }));
+        let hit = id == player
+            && tick.events.iter().any(|e| {
+                matches!(e, live::Event::SubsystemDamaged { aircraft, index: 26 } if *aircraft == id)
+            });
         let reason = if hit {
             "a hit destroyed the structure"
         } else if f.systems.structure.burning() {

@@ -127,6 +127,7 @@ fn fly(ticks: u64, record: bool) -> (Fingerprint, Vec<tore_replay::Frame>) {
                 flight: &player,
                 previous: &player,
                 pilot: &flight::PilotInput::default(),
+                others: &[],
                 wings: Some(&wings),
                 world: &world,
                 events: &events,

@@ -346,7 +346,7 @@ impl Recorder {
         };
         let trigger = match entry.sender {
             None => "the mission".to_owned(),
-            Some(0) => "your order".to_owned(),
+            Some(sender) if sender == self.player => "your order".to_owned(),
             Some(sender) => format!("an order from {}", named(sender)),
         };
         let message = self.why.message();
@@ -487,6 +487,10 @@ impl Recorder {
     /// Journal entries drained elsewhere, such as the situation music's.
     pub fn comms(&mut self, entries: Vec<talk::Entry>) {
         for entry in &entries {
+            // A line about other seats only belongs to their recordings.
+            if !entry.heard_by.is_empty() && !entry.heard_by.contains(&self.seat) {
+                continue;
+            }
             for event in self.comms_events(entry) {
                 self.note(event);
             }

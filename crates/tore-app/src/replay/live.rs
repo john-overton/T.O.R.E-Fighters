@@ -34,6 +34,8 @@ pub struct Roster {
     pub info: BTreeMap<u32, AircraftInfo>,
     /// The aircraft the AI flies.
     pub ai: BTreeSet<u32>,
+    /// The plane whose seat the panels belong to, the recording's player.
+    pub player: u32,
     /// Each weapon in flight: its shooter and name.
     pub missiles: BTreeMap<u32, (u32, String)>,
 }
@@ -54,13 +56,13 @@ impl Roster {
             label: self.name(id),
             name: info.map(|a| a.name.clone()).unwrap_or_default(),
             side: info.map_or(
-                if id == 0 {
+                if id == self.player {
                     Side::Friendly
                 } else {
                     Side::Unknown
                 },
                 |a| match a.side {
-                    Side::Unknown if id == 0 => Side::Friendly,
+                    Side::Unknown if id == self.player => Side::Friendly,
                     side => side,
                 },
             ),
@@ -77,6 +79,8 @@ pub struct Flight<'a> {
     pub frame: &'a RenderSnapshot,
     /// The player's aircraft, for its name and the interface font.
     pub airframe: &'a crate::aircraft::Airframe,
+    /// The plane the player flies.
+    pub player: u32,
     /// A Quick Mission rather than free flight.
     pub mission: bool,
     pub wings: Option<&'a crate::ai_wings::AiWings>,
@@ -553,7 +557,7 @@ impl Live {
     pub fn picture(&mut self, picture: &RenderSnapshot, labels: &[Label]) {
         let labels: Vec<(u32, [f64; 4])> = labels.iter().map(|l| (l.id, l.rect())).collect();
         self.pickables = context_menu::pickables(picture, &labels, |pose| {
-            pose.id == 0 || pose.aircraft.is_some()
+            pose.id == self.roster.player || pose.aircraft.is_some()
         });
     }
 
@@ -566,10 +570,12 @@ impl Live {
         for request in std::mem::take(&mut self.requests) {
             match request {
                 Request::Thought => {
-                    let _ = self.panels.open(Kind::Thought, first_ai.unwrap_or(0));
+                    let _ = self
+                        .panels
+                        .open(Kind::Thought, first_ai.unwrap_or(self.roster.player));
                 }
                 Request::Telemetry => {
-                    let _ = self.panels.open(Kind::Telemetry, 0);
+                    let _ = self.panels.open(Kind::Telemetry, self.roster.player);
                 }
                 Request::Guidance => {
                     if let Some(id) = self.roster.missiles.keys().next_back() {
@@ -593,17 +599,27 @@ impl Live {
             panels::HEIGHT,
             crate::flight_ui::message_band(&flight.airframe.hud_font),
         );
+        let player = crate::replay::recorder::Human {
+            id: flight.player,
+            ..crate::replay::recorder::Human::single_player(
+                &flight.airframe.profile.name,
+                flight.mission,
+            )
+        };
         let roster = crate::replay::recorder::roster(
             frame,
-            &flight.airframe.profile.name,
-            flight.mission,
+            &player,
+            &[],
             flight.wings,
             flight.combat.dummy_types(),
         );
         self.roster = Roster {
+            player: flight.player,
             ai: roster
                 .iter()
-                .filter(|a| a.id != 0 && flight.wings.is_some_and(|w| w.slot(a.id).is_some()))
+                .filter(|a| {
+                    a.id != flight.player && flight.wings.is_some_and(|w| w.slot(a.id).is_some())
+                })
                 .map(|a| a.id)
                 .collect(),
             info: roster.into_iter().map(|a| (a.id, a)).collect(),
@@ -620,9 +636,14 @@ impl Live {
         // Unpinned panels follow the aircraft the camera is on.
         use crate::flight_views::Reference;
         let selected = match flight.reference {
-            Reference::Player => Some(0),
+            Reference::Player => Some(flight.player),
             Reference::Aircraft(id) => Some(id),
-            Reference::Target => flight.combat.state.own_view().view_target().map(|t| t.id),
+            Reference::Target => flight
+                .combat
+                .state
+                .view(flight.player)
+                .and_then(|view| view.view_target())
+                .map(|t| t.id),
             Reference::Missile => None,
         }
         .filter(|id| self.roster.info.contains_key(id));
@@ -726,6 +747,7 @@ mod tests {
             .map(|a| (a.id, a))
             .collect(),
             ai: [1, 2].into_iter().collect(),
+            player: 0,
             missiles: [(77, (1, "AA-10".to_owned()))].into_iter().collect(),
         }
     }

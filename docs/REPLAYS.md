@@ -118,6 +118,38 @@ lost 57 ticks to a `system.gap`. Probe recordings now wait for the writer
 instead, so that cannot recur there; live flight keeps dropping rather than
 stalling, which only a machine far busier than the game itself would cause.
 
+### Whose flight it is
+
+A recording is made for one seat, and the plane that seat flies is the
+recording's player. Single player is seat 0 flying plane 0, the lead of
+Friendly Wing 1, and its recordings are unchanged. For any other seat the
+recorder does the same things with that plane's id:
+
+- The player's pose, flight state and controls are the seat's plane's, and the
+  roster registers it as `You`, a human pilot.
+- The pilot's commands, the view target, the seeker tone, the stall warning,
+  the device sounds, the ejection sounds and the weapon release sounds are that
+  plane's, and so is the telemetry sampled 30 times a second and the reasons
+  that only the player has (the G-limit hit that broke the structure, the
+  engine switched off by the pilot, the ejection handle).
+- Every other aircraft, including every other human-flown plane, is recorded
+  the way an AI aircraft is: registered by the roster (a human's entry says so,
+  and is labelled `Seat 2` and so on), with its state, hits, departures and
+  telemetry sampled 5 times a second. Its controls read as idle, because only
+  the app's own seat sends input until the network stages.
+- A radio or tower line that was addressed only to other seats is left out. A
+  line queued for several seats stays, and each seat's own delivery is
+  recorded once. Which seats heard a line is not stored: the recording is one
+  seat's, so the field would say the same thing on every entry.
+- The header names the player with `draw.player` when it is not plane 0, so
+  the viewer's reconstruction shows the recorded seat's plane as the player.
+  A recording of plane 0 has no such entry and is byte for byte what it was.
+
+The viewer, the sound, the tracks and the panels still look for the player
+under id 0 when they read a decoded recording: the picture and the roster
+follow `draw.player`, and the rest is a later slice. This is an *agent
+decision*, 2026-09-29.
+
 ### What is recorded now
 
 | Family | Events |
@@ -1468,7 +1500,7 @@ recorded never drains it, and it simply stays within its bound.
 | Time | Simulation seconds on the producer's clock; the recorder stamps its own tick |
 | Call number | Shared by every entry about one line: queued, then delivered, dropped, cancelled or cut off |
 | Source | `RADIO`, `REPLY` (a wingman answering the player's order), `CREW`, `TOWER`, `HUD` (the AI's text lines), `ORDER`, `CHATTER` (an AI radio event before it becomes a call) or `MUSIC` |
-| Speaker and audience | The aircraft id (0 is the player), the name as printed (`Red two`, `RIO`, `YOU`), and who it was addressed to: the cockpit, the flight leader, the flight, the player, the airport frequency, or the wingmen an order addressed |
+| Speaker and audience | The aircraft id (the recording's player, plane 0 in single player), the name as printed (`Red two`, `RIO`, `YOU`), and who it was addressed to: the cockpit, the flight leader, the flight, the player, the airport frequency, or the wingmen an order addressed |
 | Words | The text, the recording stems, the route (radio, airport or direct) and whether radio silence may drop it |
 | Trigger | A typed cause with its numbers, for example "infrared missile release at aircraft 3", "hit by aircraft 5 (aircraft, gun rounds)", "fuel state bingo", "situation Defensive, target 5000 ft: break" |
 | Rolls | Each draw in the order made: "roll 37 < 50: Fox call", "roll 12 < 40: Splash one with the type name", "roll 13 mod 8 = 5: hit call", including draws a held call still used up |

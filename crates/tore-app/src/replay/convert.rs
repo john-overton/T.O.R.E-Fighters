@@ -41,8 +41,11 @@ pub fn identity(key: &str) -> Option<AircraftId> {
 
 /// Header extra listing the loaded aircraft models in draw order.
 pub const MODELS_KEY: &str = "draw.models";
-/// Header extra: aircraft 1 to this id draw with their own model.
+/// Header extra: aircraft up to this id draw with their own model.
 pub const SLOTS_KEY: &str = "draw.slots";
+/// Header extra: the recording's player is this plane. Absent when it is
+/// plane 0, single player's, so those recordings are as they always were.
+pub const PLAYER_KEY: &str = "draw.player";
 
 /// How a recording draws the aircraft other than the player, kept in the
 /// header's extras because it holds for the whole flight.
@@ -51,9 +54,13 @@ pub struct Presentation {
     /// Loaded aircraft models in draw order. With none loaded every other
     /// aircraft draws with the player's airframe, as the range's fixtures do.
     pub models: Vec<AircraftId>,
-    /// Aircraft ids 1 to `slots` draw with their own model; any other id has
-    /// no model slot and is hidden.
+    /// Aircraft ids up to `slots` (the player's aside) draw with their own
+    /// model; any other id has no model slot and is hidden.
     pub slots: u32,
+    /// The plane the recording is for, drawn with the player's airframe and
+    /// shown as the snapshot's player. Plane 0 unless the recorded seat flies
+    /// another.
+    pub player: u32,
 }
 
 impl Presentation {
@@ -68,16 +75,29 @@ impl Presentation {
                 .map(|pose| pose.id)
                 .max()
                 .unwrap_or(0),
+            player: 0,
+        }
+    }
+
+    /// The same rules for a recording whose player is `plane`.
+    pub fn with_player(self, plane: u32) -> Self {
+        Self {
+            player: plane,
+            ..self
         }
     }
 
     /// Header extras holding these rules.
     pub fn extras(&self) -> Vec<(String, String)> {
         let models: Vec<&str> = self.models.iter().map(|id| identity_key(*id)).collect();
-        vec![
+        let mut extras = vec![
             (MODELS_KEY.into(), models.join(",")),
             (SLOTS_KEY.into(), self.slots.to_string()),
-        ]
+        ];
+        if self.player != 0 {
+            extras.push((PLAYER_KEY.into(), self.player.to_string()));
+        }
+        extras
     }
 
     /// The rules a recording's header holds. A header without them reads as
@@ -92,14 +112,18 @@ impl Presentation {
                 .extra(SLOTS_KEY)
                 .and_then(|text| text.parse().ok())
                 .unwrap_or(0),
+            player: header
+                .extra(PLAYER_KEY)
+                .and_then(|text| text.parse().ok())
+                .unwrap_or(0),
         }
     }
 
     /// How aircraft `id`, of type `aircraft`, draws.
     pub fn draw(&self, id: u32, aircraft: Option<AircraftId>) -> Draw {
-        if id == 0 || self.models.is_empty() {
+        if id == self.player || self.models.is_empty() {
             Draw::Ownship
-        } else if (1..=self.slots).contains(&id) {
+        } else if id <= self.slots {
             aircraft
                 .filter(|kind| self.models.contains(kind))
                 .map_or(Draw::Hidden, Draw::Model)
@@ -742,13 +766,13 @@ pub fn snapshot(
         player: frame
             .aircraft
             .iter()
-            .find(|state| state.id == 0)
+            .find(|state| state.id == presentation.player)
             .map(pose)
             .unwrap_or_default(),
         targets: frame
             .aircraft
             .iter()
-            .filter(|state| state.id != 0)
+            .filter(|state| state.id != presentation.player)
             .map(pose)
             .collect(),
         projectiles: frame
@@ -1058,6 +1082,7 @@ mod tests {
         let rules = Presentation {
             models: vec![AircraftId::Mig29, AircraftId::F18, AircraftId::Faxx],
             slots: 5,
+            player: 0,
         };
         let header = replay::Header {
             extra: rules.extras(),

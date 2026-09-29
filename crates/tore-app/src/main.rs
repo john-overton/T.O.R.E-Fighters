@@ -467,12 +467,15 @@ impl TickPresenter<'_> {
                 world::Cue::Picture => {
                     // The mission recording reads the tick's picture.
                     if let Some(recording) = &mut self.recorder {
+                        let idle = flight::PilotInput::default();
+                        let others = other_crews(&self.world.cockpits, OWN, &idle);
                         recording.begin(replay::recorder::Tick {
                             snapshot: self.world.combat.render_snapshot(),
                             combat: &self.world.combat,
                             flight: &self.world.cockpits[OWN].flight,
                             previous: &self.world.cockpits[OWN].previous_flight,
                             pilot: &input.pilot,
+                            others: &others,
                             wings: self.world.ai_wings.as_ref(),
                             world: &self.world.terrain,
                             events: &out.events,
@@ -916,7 +919,8 @@ impl App {
         let _ = self.world.combat.take_notes();
         let started = std::time::SystemTime::now();
         let snapshot = self.world.combat.render_snapshot();
-        let presentation = convert::Presentation::of(snapshot);
+        let presentation =
+            convert::Presentation::of(snapshot).with_player(self.world.cockpits[OWN].plane.0);
         let aircraft = convert::identity_key(self.hornet.profile.id);
         let path = match library.new_path(
             started,
@@ -980,27 +984,31 @@ impl App {
             tore_replay::MissionKind::FreeFlight
         };
         let header = recorder::header(mission, &self.world.terrain, &presentation, extra, started);
+        let (player, others) = recorded_humans(&self.world, SEAT, &self.hornet.profile.name);
         let roster = recorder::roster(
             snapshot,
-            &self.hornet.profile.name,
-            self.world.setup.mission.is_some(),
+            &player,
+            &others,
             self.world.ai_wings.as_ref(),
             self.world.combat.dummy_types(),
         );
         let mut recording = match recorder::Recorder::start(path, &header, &roster) {
-            Ok(recording) => recording,
+            Ok(recording) => recording.for_seat(SEAT, player.id),
             Err(error) => {
                 log::info!("Recording unavailable: {error}");
                 return;
             }
         };
         // The flight as it starts, before the first tick.
+        let idle = flight::PilotInput::default();
+        let crews = other_crews(&self.world.cockpits, OWN, &idle);
         recording.begin(recorder::Tick {
             snapshot: self.world.combat.render_snapshot(),
             combat: &self.world.combat,
             flight: &self.world.cockpits[OWN].flight,
             previous: &self.world.cockpits[OWN].flight,
-            pilot: &flight::PilotInput::default(),
+            pilot: &idle,
+            others: &crews,
             wings: self.world.ai_wings.as_ref(),
             world: &self.world.terrain,
             events: &[],
@@ -1028,7 +1036,12 @@ impl App {
             .is_some()
             .then(|| debrief::capture(&self.world, SEAT))
             .flatten();
-        let footer = replay_footer(&self.world.combat, report.as_ref(), reason);
+        let footer = replay_footer(
+            &self.world.combat,
+            recording.player(),
+            report.as_ref(),
+            reason,
+        );
         if recording.finish(&footer).is_some()
             && let Some(library) = &self.replay_library
         {
@@ -4016,6 +4029,7 @@ impl ApplicationHandler for App {
                                 &replay::live::Flight {
                                     frame: &frame,
                                     airframe: &self.hornet,
+                                    player: self.world.cockpits[OWN].plane.0,
                                     mission: self.world.setup.mission.is_some(),
                                     wings: self.world.ai_wings.as_ref(),
                                     combat: &self.world.combat,
@@ -4485,10 +4499,75 @@ struct ProbeRecord {
     verify: bool,
 }
 
+/// The mission's human pilots as a recording's roster registers them: the
+/// plane `seat` flies, `You`, and then every other human-flown plane.
+fn recorded_humans(
+    world: &world::World,
+    seat: seats::SeatId,
+    aircraft_name: &str,
+) -> (replay::recorder::Human, Vec<replay::recorder::Human>) {
+    let numbered = world.setup.mission.is_some();
+    let human = |plane: &seats::Plane, label: String| replay::recorder::Human {
+        id: plane.id.0,
+        label,
+        name: aircraft_name.to_owned(),
+        side: match plane.slot.wing.side {
+            tore_sim::ai::launch::Side::Friendly => tore_replay::Side::Friendly,
+            tore_sim::ai::launch::Side::Enemy => tore_replay::Side::Enemy,
+        },
+        wing: if numbered {
+            u16::from(plane.slot.wing.index) + 1
+        } else {
+            0
+        },
+        member: if numbered {
+            u16::from(plane.slot.member) + 1
+        } else {
+            0
+        },
+    };
+    let mut own = None;
+    let mut others = Vec::new();
+    for plane in world.roster.planes() {
+        match plane.pilot {
+            seats::Pilot::Human(who) if who == seat => own = Some(human(plane, "You".into())),
+            seats::Pilot::Human(who) => {
+                others.push(human(plane, format!("Seat {}", u16::from(who.0) + 1)))
+            }
+            seats::Pilot::Ai => {}
+        }
+    }
+    (
+        own.unwrap_or_else(|| replay::recorder::Human::single_player(aircraft_name, numbered)),
+        others,
+    )
+}
+
+/// The human-flown planes other than the one at cockpit `own`, for the
+/// recorder's tick. Only the app's own seat sends controls, so the others' read
+/// as idle.
+fn other_crews<'a>(
+    cockpits: &'a [world::Cockpit],
+    own: usize,
+    idle: &'a flight::PilotInput,
+) -> Vec<replay::recorder::Crewed<'a>> {
+    cockpits
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != own)
+        .map(|(_, cockpit)| replay::recorder::Crewed {
+            plane: cockpit.plane.0,
+            flight: &cockpit.flight,
+            pilot: idle,
+        })
+        .collect()
+}
+
 /// A recording's footer: why the flight ended, and for a mission the
 /// debrief's outcome, the player's fate and kills.
 fn replay_footer(
     combat: &combat::Combat,
+    player: u32,
     report: Option<&debrief::Report>,
     reason: &str,
 ) -> tore_replay::Footer {
@@ -4508,7 +4587,14 @@ fn replay_footer(
                 report.player.kills.iter().sum::<u32>().to_string(),
             ));
         }
-        None => result.push(("kills".into(), combat.state.own().kills.to_string())),
+        None => result.push((
+            "kills".into(),
+            combat
+                .state
+                .ownship(player)
+                .map_or(0, |own| own.kills)
+                .to_string(),
+        )),
     }
     tore_replay::Footer {
         end_tick: combat.state.tick(),
@@ -6132,12 +6218,15 @@ fn ai_probe_run(
                         if verify {
                             verify_probe_attitudes(mission.combat.render_snapshot(), bridge)?;
                         }
+                        let idle = flight::PilotInput::default();
+                        let others = other_crews(&mission.cockpits, OWN, &idle);
                         recording.begin(replay::recorder::Tick {
                             snapshot: mission.combat.render_snapshot(),
                             combat: &mission.combat,
                             flight: &mission.cockpits[OWN].flight,
                             previous: &mission.cockpits[OWN].previous_flight,
                             pilot: &input.pilot,
+                            others: &others,
                             wings: Some(bridge),
                             world: &mission.terrain,
                             events: &output.events,
@@ -6277,8 +6366,9 @@ fn ai_probe_run(
             tore_replay::Event::new(tore_replay::vocab::kind::SYSTEM_END)
                 .with(tore_replay::vocab::field::REASON, "probe finished"),
         );
+        let footer = replay_footer(combat, recording.player(), Some(&report), "probe finished");
         let path = recording
-            .finish(&replay_footer(combat, Some(&report), "probe finished"))
+            .finish(&footer)
             .ok_or("the mission recording could not be finished; see the session log")?;
         if verify {
             devices.push((
@@ -6358,15 +6448,12 @@ fn start_probe_recording(
         extra,
         std::time::SystemTime::now(),
     );
-    let roster = recorder::roster(
-        snapshot,
-        &hornet.profile.name,
-        true,
-        Some(bridge),
-        combat.dummy_types(),
-    );
+    // The probe has one human, seat 0 in plane 0.
+    let player = recorder::Human::single_player(&hornet.profile.name, true);
+    let roster = recorder::roster(snapshot, &player, &[], Some(bridge), combat.dummy_types());
     let mut recording = recorder::Recorder::start(record.path.clone(), &header, &roster)
-        .map_err(|error| format!("--record-mission {}: {error}", record.path.display()))?;
+        .map_err(|error| format!("--record-mission {}: {error}", record.path.display()))?
+        .for_seat(SEAT, player.id);
     // A probe has no frame rate to protect: wait for the writer rather than
     // drop ticks when the machine is busy.
     recording.wait_for_writer();
@@ -6376,6 +6463,7 @@ fn start_probe_recording(
         flight,
         previous: flight,
         pilot: &flight::PilotInput::default(),
+        others: &[],
         wings: Some(bridge),
         world,
         events: &[],

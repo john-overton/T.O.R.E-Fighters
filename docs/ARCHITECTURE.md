@@ -633,6 +633,17 @@ thread through a queue two seconds deep; a full queue drops the frame and the
 next reports a gap, so the flight never waits for the disk. Probes with
 recording on and off print byte-identical output.
 
+A recording is made for one seat (`Recorder::for_seat`, built in B5): the plane
+that seat flies is the recording's player, single player's default being seat 0
+flying plane 0. The recorder reads that plane's flight, controls and ownship
+where it read "the player, id 0", and records every other aircraft, human-flown
+planes included, the way it records an AI aircraft (`Tick::others` gives it
+their cockpits). A comms entry whose `heard_by` names only other seats is left
+out of the recording, and `heard_by` itself is not written. The header carries
+`draw.player` when the plane is not plane 0, and `convert::snapshot` reads it.
+The viewer's own id 0 assumptions are still to change. See
+[REPLAYS.md](REPLAYS.md#whose-flight-it-is).
+
 The reasons live beside the capture: `replay/recorder/why.rs` reads the AI's
 controller and actor records, the flight model's `FlightTrace` and the
 bridge's decoy rolls, emits reason events on each change, and samples the

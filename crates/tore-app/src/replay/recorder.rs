@@ -19,6 +19,12 @@
 //! every read is of state the tick already computed. Opinionated addition
 //! requested by John on 2026-09-26; see docs/REPLAYS.md.
 //!
+//! A recording is made for one seat ([`Recorder::for_seat`]): the plane that
+//! seat flies is the recording's player, and the pilot's input, the command
+//! notes, the cockpit sounds and the player-only reasons are its. Every other
+//! aircraft, human-flown or not, is recorded as an ordinary aircraft. Single
+//! player is seat 0 flying plane 0, which is the recorder's default.
+//!
 //! The reasons behind decisions live in two child modules: [`why`] turns the
 //! AI's and the flight model's write-only records into reason events and
 //! display trees, and [`journal`] turns the AI message journal and the
@@ -35,6 +41,7 @@ use crate::{
     ai_wings::AiWings,
     combat::{self, CommandNote},
     flight, flight_ui,
+    seats::SeatId,
     snapshot::RenderSnapshot,
     terrain,
 };
@@ -108,6 +115,8 @@ pub struct Tick<'a> {
     pub previous: &'a flight::State,
     /// The player's controls for the tick.
     pub pilot: &'a flight::PilotInput,
+    /// The other human-flown planes, recorded as ordinary aircraft.
+    pub others: &'a [Crewed<'a>],
     pub wings: Option<&'a AiWings>,
     pub world: &'a terrain::Terrain,
     /// Combat's events for the tick.
@@ -116,6 +125,15 @@ pub struct Tick<'a> {
     pub outcomes: &'a [ledger::Outcome],
     /// The AI message journal, drained for this tick (`None` without AI).
     pub journal: Option<&'a tore_sim::ai::thought::JournalBatch>,
+}
+
+/// A human-flown plane other than the recording's player: what the recorder
+/// reads of it is what it reads of an AI aircraft, from its own cockpit.
+pub struct Crewed<'a> {
+    pub plane: u32,
+    pub flight: &'a flight::State,
+    /// Its seat's controls for the tick.
+    pub pilot: &'a flight::PilotInput,
 }
 
 /// What the recorder remembers about one aircraft between ticks.
@@ -179,10 +197,10 @@ const TONE_STEP: f64 = 0.05;
 /// The `audio.tone` entry for the player's seeker tone, `now` against what
 /// was `last` recorded, each with its loudness: when it starts, stops,
 /// changes, or its loudness moves by [`TONE_STEP`] or more.
-fn tone_event(last: Option<(Tone, f64)>, now: Option<(Tone, f64)>) -> Option<Event> {
+fn tone_event(player: u32, last: Option<(Tone, f64)>, now: Option<(Tone, f64)>) -> Option<Event> {
     let event = |tone: Tone, on: bool| {
         Event::new(kind::AUDIO_TONE)
-            .with_subject(0)
+            .with_subject(player)
             .with(field::TONE, tone.name())
             .with(field::ON, on)
     };
@@ -210,13 +228,13 @@ type ViewTarget = (Option<u32>, bool);
 /// The `player.view_target` entry for `now` against what was `last`
 /// recorded: at the first look, and whenever the target or its sight hold
 /// changes.
-fn view_target_event(last: Option<ViewTarget>, now: ViewTarget) -> Option<Event> {
+fn view_target_event(player: u32, last: Option<ViewTarget>, now: ViewTarget) -> Option<Event> {
     if last == Some(now) {
         return None;
     }
     let (target, held) = now;
     let mut event = Event::new(kind::PLAYER_VIEW_TARGET)
-        .with_subject(0)
+        .with_subject(player)
         .with(field::HELD, held);
     if let Some(id) = target {
         event = event.with_object(id);
@@ -272,6 +290,9 @@ pub struct Recorder {
     danger: bool,
     /// The player's view target as last recorded.
     view: Option<ViewTarget>,
+    /// The plane the recording is for, its player, and the seat that flies it.
+    player: u32,
+    seat: SeatId,
     session: Option<Session>,
     bookmarks: u32,
     frames: u64,
@@ -350,6 +371,8 @@ impl Recorder {
             stall: None,
             danger: false,
             view: None,
+            player: 0,
+            seat: SeatId(0),
             session: None,
             bookmarks: 0,
             frames: 0,
@@ -371,6 +394,20 @@ impl Recorder {
     #[allow(dead_code)] // Read by the Replays screen.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Records for `seat`, which flies `plane`: that plane is the recording's
+    /// player. The default is seat 0 flying plane 0, single player.
+    pub fn for_seat(mut self, seat: SeatId, plane: u32) -> Self {
+        self.seat = seat;
+        self.player = plane;
+        self
+    }
+
+    /// The plane the recording is for, its player.
+    #[allow(dead_code)] // Read by tests and the probe.
+    pub fn player(&self) -> u32 {
+        self.player
     }
 
     fn register(&mut self, info: replay::AircraftInfo) {
@@ -572,7 +609,8 @@ impl Recorder {
                 self.note(event);
             }
         }
-        let designated = combat.state.own_view().designated();
+        let player = self.player;
+        let designated = combat.state.view(player).and_then(|view| view.designated());
         for note in combat.take_notes() {
             let (name, text) = match note {
                 CommandNote::Command(command) => (
@@ -582,7 +620,7 @@ impl Recorder {
                 CommandNote::Release => ("release".to_owned(), "trigger released".to_owned()),
             };
             let mut event = Event::new(kind::PLAYER_COMMAND)
-                .with_subject(0)
+                .with_subject(player)
                 .with(field::COMMAND, name)
                 .with_text(text);
             if let Some(target) = designated {
@@ -593,9 +631,18 @@ impl Recorder {
         // Looked at after each tick and before the next, so a change a
         // command makes between ticks lands on the tick on screen, like
         // the command.
-        let view = combat.state.own_view().view_target().map(|t| t.id);
-        let held = view.is_some() && combat.state.own_view().display_target().map(|t| t.id) != view;
-        if let Some(event) = view_target_event(self.view, (view, held)) {
+        let own = combat.state.view(player);
+        let view = own
+            .as_ref()
+            .and_then(|view| view.view_target())
+            .map(|t| t.id);
+        let held = view.is_some()
+            && own
+                .as_ref()
+                .and_then(|view| view.display_target())
+                .map(|t| t.id)
+                != view;
+        if let Some(event) = view_target_event(player, self.view, (view, held)) {
             self.note(event);
         }
         self.view = Some((view, held));
@@ -661,7 +708,7 @@ impl Recorder {
         let number = self.bookmarks;
         self.note(
             Event::new(kind::PLAYER_BOOKMARK)
-                .with_subject(0)
+                .with_subject(self.player)
                 .with("index", i64::from(number))
                 .with_text(format!("Bookmark {number}")),
         );
@@ -703,7 +750,7 @@ impl Recorder {
             let weapon = self.weapon_id(weapon);
             self.note(
                 Event::new(kind::AUDIO_RELEASE)
-                    .with_subject(0)
+                    .with_subject(self.player)
                     .with(field::SOUND, *sound)
                     .with(field::WEAPON, replay::Value::Id(weapon)),
             );
@@ -750,17 +797,17 @@ impl Recorder {
             .map(|t| (t.id, t))
             .collect();
         let player_ground = ground_height(tick.world, tick.flight.position);
+        let player = self.player;
 
-        // Aircraft: the player first, then every other aircraft in target
-        // order. Ground objects keep only their hit points.
-        let aircraft: Vec<&crate::snapshot::AircraftPose> = std::iter::once(&snapshot.player)
-            .chain(snapshot.targets.iter().filter(|p| p.aircraft.is_some()))
-            .collect();
+        // Aircraft: the player first, then every other aircraft in snapshot
+        // order, another human-flown plane among them. Ground objects keep
+        // only their hit points.
+        let aircraft = drawn_aircraft(snapshot, player);
         for pose in &aircraft {
             if !self.registered.contains(&pose.id) {
                 self.register(default_info(pose, tick.wings));
             }
-            let data = flight_data(pose, &tick, &targets, player_ground);
+            let data = flight_data(player, pose, &tick, &targets, player_ground);
             frame.aircraft.push(convert::aircraft_state(pose, &data));
         }
         for target in snapshot.targets.iter().filter(|p| p.aircraft.is_none()) {
@@ -780,11 +827,10 @@ impl Recorder {
             .iter()
             .map(|p| (p.id, p))
             .collect();
-        let config = tick.combat.state.own().configuration();
         let mut shots = BTreeMap::new();
         for pose in &snapshot.projectiles {
             let simulated = live_shots.get(&pose.id);
-            let weapon = simulated.map(|p| p.weapon(config));
+            let weapon = simulated.map(|p| p.weapon(stores_of(&tick, player, p.owner)));
             let weapon_id = match weapon {
                 Some(weapon) => self.weapon_id(weapon),
                 None => self.weapons.get(&pose.weapon).copied().unwrap_or(u32::MAX),
@@ -847,10 +893,10 @@ impl Recorder {
     ) {
         let state_of = |id: u32| frame.aircraft.iter().find(|a| a.id == id);
         // What a round with no target of its own was fired at: the AI's
-        // current target, or the player's designated one.
+        // current target, or the designated one of a human-flown plane.
         let intended = |owner: u32| {
-            if owner == 0 {
-                tick.combat.state.own_view().designated()
+            if let Some(view) = tick.combat.state.view(owner) {
+                view.designated()
             } else {
                 tick.wings
                     .and_then(|w| w.mission().actor(owner))
@@ -866,7 +912,7 @@ impl Recorder {
                     .with(field::WEAPON, replay::Value::Id(shot.weapon));
                 if let Some(weapon) = live_shots
                     .get(id)
-                    .map(|p| p.weapon(tick.combat.state.own().configuration()))
+                    .map(|p| p.weapon(stores_of(tick, self.player, p.owner)))
                 {
                     event = event.with(
                         field::CLASS,
@@ -883,7 +929,7 @@ impl Recorder {
                             "boresight"
                         }
                         Some(_) => "cued",
-                        None if live::is_gun(p.weapon(tick.combat.state.own().configuration())) => {
+                        None if live::is_gun(p.weapon(stores_of(tick, self.player, p.owner))) => {
                             "gun"
                         }
                         None => "unguided",
@@ -1063,9 +1109,9 @@ impl Recorder {
                 .outcomes
                 .iter()
                 .filter(|o| matches!(o.resolution, ledger::Resolution::Hit(_)));
-            if victim == 0 {
+            if victim == self.player {
                 hits.clone()
-                    .find(|o| o.key.aim == Some(0))
+                    .find(|o| o.key.aim == Some(victim))
                     .or_else(|| hits.clone().next())
             } else {
                 let owner = ledger.credit(victim).map(|kill| kill.owner);
@@ -1078,7 +1124,7 @@ impl Recorder {
             .events
             .iter()
             .filter_map(|e| match e {
-                live::Event::SubsystemDamaged { index, .. } => {
+                live::Event::SubsystemDamaged { aircraft, index } if *aircraft == self.player => {
                     Some(tore_sim::aircraft_systems::label(*index))
                 }
                 _ => None,
@@ -1087,11 +1133,7 @@ impl Recorder {
         for state in &frame.aircraft {
             let id = state.id;
             let actor = tick.wings.and_then(|wings| wings.mission().actor(id));
-            let flight = if id == 0 {
-                Some(tick.flight)
-            } else {
-                actor.map(|a| a.flight())
-            };
+            let flight = flight_of(self.player, tick, id);
             let mut watch = self.watches.remove(&id).unwrap_or_default();
             let first = !watch.seen;
             watch.seen = true;
@@ -1101,7 +1143,7 @@ impl Recorder {
             // Damage landed.
             if !first && state.hp < watch.hp {
                 let hit = hit_by(id);
-                let attacker = if id == 0 {
+                let attacker = if id == self.player {
                     hit.map(|o| o.key.owner)
                 } else {
                     ledger
@@ -1128,7 +1170,7 @@ impl Recorder {
                 if let Some(section) = section {
                     event = event.with(field::SECTION, section as i64);
                 }
-                if id == 0 && !subsystems.is_empty() {
+                if id == self.player && !subsystems.is_empty() {
                     event = event.with("subsystems", subsystems.join(", "));
                 }
                 events.push(event);
@@ -1140,8 +1182,8 @@ impl Recorder {
                 _ => false,
             });
             if destroyed {
-                let killer = if id == 0 {
-                    hit_by(0).map(|o| o.key.owner)
+                let killer = if id == self.player {
+                    hit_by(id).map(|o| o.key.owner)
                 } else {
                     ledger.credit(id).map(|kill| kill.owner)
                 };
@@ -1204,7 +1246,7 @@ impl Recorder {
                 // Engine and fuel.
                 let engine = f.engine && f.fuel > 0.;
                 if !first && watch.engine && !engine && alive && state.hp > 0 {
-                    let commanded = id == 0
+                    let commanded = id == self.player
                         && tick.pilot.commands.iter().any(|c| {
                             matches!(
                                 c,
@@ -1249,7 +1291,8 @@ impl Recorder {
                         .and_then(|e| e.assessment);
                     if let Some(hazard) = hazard {
                         event = event.with(field::REASON, trees::hazard_text(&hazard));
-                    } else if id == 0 && tick.pilot.commands.contains(&flight::PilotCommand::Eject)
+                    } else if id == self.player
+                        && tick.pilot.commands.contains(&flight::PilotCommand::Eject)
                     {
                         event = event.with(field::REASON, "you pulled the ejection handle");
                     }
@@ -1318,11 +1361,12 @@ impl Recorder {
     /// sounds and the ejection seat's warnings and effects.
     fn cue_events(&mut self, tick: &Tick<'_>, player_ground: f64, events: &mut Vec<Event>) {
         let flight = tick.flight;
+        let player = self.player;
         let tone = tick
             .combat
             .state
-            .own_view()
-            .seeker_tone(combat::launcher(flight))
+            .view(player)
+            .and_then(|view| view.seeker_tone(combat::launcher(flight)))
             .map(|t| {
                 let tone = Tone {
                     radar: t.radar,
@@ -1332,14 +1376,14 @@ impl Recorder {
                 // The loudness the mixer takes.
                 (tone, t.strength.clamp(0., 1.))
             });
-        if let Some(event) = tone_event(self.tone, tone) {
+        if let Some(event) = tone_event(player, self.tone, tone) {
             events.push(event);
             self.tone = tone;
         }
         let stall = crate::audio::stall_cue(flight.stall_alert(player_ground));
         if stall != self.stall {
             let mut event = Event::new(kind::AUDIO_STALL_WARNING)
-                .with_subject(0)
+                .with_subject(player)
                 .with(field::ON, stall.is_some());
             if let Some(sound) = stall.or(self.stall) {
                 event = event.with(field::SOUND, sound);
@@ -1355,7 +1399,7 @@ impl Recorder {
             if let Some(sound) = sound {
                 events.push(
                     Event::new(kind::AUDIO_DEVICE)
-                        .with_subject(0)
+                        .with_subject(player)
                         .with(field::DEVICE, device)
                         .with(field::SOUND, sound),
                 );
@@ -1367,7 +1411,7 @@ impl Recorder {
         .is_some();
         let ejection = |sound: &str, text: &str| {
             Event::new(kind::AUDIO_EJECTION)
-                .with_subject(0)
+                .with_subject(player)
                 .with(field::SOUND, sound)
                 .with_text(text)
         };
@@ -1645,9 +1689,59 @@ fn geometry(
         .with(field::TARGET_SPEED_KT, speed(target) * KT_PER_FPS)
 }
 
+/// The aircraft a recording draws, the player first: `player`'s pose, then
+/// every other aircraft of the snapshot in its order. The snapshot's own player
+/// pose is one of them when it is not `player`.
+pub(super) fn drawn_aircraft(
+    snapshot: &RenderSnapshot,
+    player: u32,
+) -> Vec<&crate::snapshot::AircraftPose> {
+    let own = if snapshot.player.id == player {
+        Some(&snapshot.player)
+    } else {
+        snapshot.target(player)
+    };
+    // A player the snapshot does not draw falls back to its own player pose.
+    let first = own.unwrap_or(&snapshot.player);
+    std::iter::once(first)
+        .chain(
+            std::iter::once(&snapshot.player)
+                .chain(&snapshot.targets)
+                .filter(|p| p.id != first.id && p.aircraft.is_some()),
+        )
+        .collect()
+}
+
+/// The flight state of aircraft `id`: the player's, another human-flown
+/// plane's or an AI aircraft's.
+pub(super) fn flight_of<'a>(player: u32, tick: &Tick<'a>, id: u32) -> Option<&'a flight::State> {
+    if id == player {
+        Some(tick.flight)
+    } else if let Some(other) = tick.others.iter().find(|o| o.plane == id) {
+        Some(other.flight)
+    } else {
+        tick.wings
+            .and_then(|wings| wings.mission().actor(id))
+            .map(|actor| actor.flight())
+    }
+}
+
+/// The stores that decide what a projectile fired by `owner` is: its own
+/// ownship's, or the player's for any other owner (an AI aircraft's round
+/// carries its weapon record already in the shape the recorder reads).
+fn stores_of<'a>(tick: &Tick<'a>, player: u32, owner: u32) -> &'a live::Configuration {
+    let state = &tick.combat.state;
+    state
+        .ownship(owner)
+        .or_else(|| state.ownship(player))
+        .unwrap_or_else(|| state.own())
+        .configuration()
+}
+
 /// Flight data for one drawn aircraft: the player's own state, an AI
 /// aircraft's, or what a straight-flight fixture's combat target holds.
 fn flight_data(
+    player: u32,
     pose: &crate::snapshot::AircraftPose,
     tick: &Tick<'_>,
     targets: &BTreeMap<u32, &live::Target>,
@@ -1656,7 +1750,7 @@ fn flight_data(
     let controls = |f: &flight::State, input: &flight::PilotInput| {
         [input.pitch, input.roll, input.yaw, f.throttle]
     };
-    if pose.id == 0 {
+    if pose.id == player {
         let f = tick.flight;
         return FlightData {
             airspeed: f.speed,
@@ -1665,7 +1759,11 @@ fn flight_data(
             controls: controls(f, tick.pilot),
             on_ground: f.supported_at(player_ground),
             alive: !f.crashed
-                && tick.combat.state.own().hp > 0
+                && tick
+                    .combat
+                    .state
+                    .ownship(player)
+                    .is_some_and(|own| own.hp > 0)
                 && !f.systems.pilot.dead
                 && f.escape.is_none(),
             ejected: f.escape.is_some(),
@@ -1673,6 +1771,21 @@ fn flight_data(
         };
     }
     let target = targets.get(&pose.id);
+    // Another human-flown plane: its own cockpit, as an AI aircraft's actor
+    // would give it.
+    if let Some(other) = tick.others.iter().find(|o| o.plane == pose.id) {
+        let f = other.flight;
+        return FlightData {
+            airspeed: f.speed,
+            g: f.g,
+            fuel_lb: f.fuel + f.systems.external_lbs(),
+            controls: controls(f, other.pilot),
+            on_ground: f.supported_at(ground_height(tick.world, f.position)),
+            alive: !f.crashed && pose.damage.hp > 0 && !f.systems.pilot.dead && f.escape.is_none(),
+            ejected: f.escape.is_some(),
+            wreck_gone: f.wreck_gone() || (!pose.airborne && pose.damage.hp <= 0),
+        };
+    }
     if let Some(actor) = tick.wings.and_then(|w| w.mission().actor(pose.id)) {
         let f = actor.flight();
         return FlightData {
@@ -1783,40 +1896,89 @@ fn type_name(
         .unwrap_or_else(|| id.label().to_owned())
 }
 
-/// Every aircraft at the start of a flight: the player, then each other
-/// aircraft the snapshot draws, named as the setup screen names them.
+/// A human pilot as the recording's roster registers it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Human {
+    /// The plane's id.
+    pub id: u32,
+    /// `You` for the recording's player.
+    pub label: String,
+    /// The aircraft's display name.
+    pub name: String,
+    pub side: replay::Side,
+    /// Wing and place in it, from 1; 0 when the flight has no wings.
+    pub wing: u16,
+    pub member: u16,
+}
+
+impl Human {
+    /// Single player: plane 0, `You`, the first friendly aircraft of the first
+    /// friendly wing when the flight is a mission.
+    pub fn single_player(name: &str, mission: bool) -> Self {
+        Self {
+            id: 0,
+            label: "You".into(),
+            name: name.into(),
+            side: replay::Side::Friendly,
+            wing: u16::from(mission),
+            member: u16::from(mission),
+        }
+    }
+
+    fn info(&self, pt: String) -> replay::AircraftInfo {
+        replay::AircraftInfo {
+            id: self.id,
+            pt,
+            name: self.name.clone(),
+            label: self.label.clone(),
+            side: self.side,
+            wing: self.wing,
+            member: self.member,
+            skill: "Human".into(),
+            human: true,
+        }
+    }
+}
+
+/// Every aircraft at the start of a flight: the recording's player, then each
+/// other aircraft the snapshot draws, named as the setup screen names them.
+/// `others` are the other human pilots.
 pub fn roster(
     snapshot: &RenderSnapshot,
-    player_name: &str,
-    player_wing: bool,
+    player: &Human,
+    others: &[Human],
     wings: Option<&AiWings>,
     models: &[std::sync::Arc<crate::aircraft_type::AircraftType>],
 ) -> Vec<replay::AircraftInfo> {
     let name_of = |id: tore_formats::aircraft::AircraftId| type_name(id, models, None);
-    let mut out = vec![replay::AircraftInfo {
-        id: 0,
-        pt: snapshot
-            .player
-            .aircraft
+    let poses = drawn_aircraft(snapshot, player.id);
+    let identity = |pose: &crate::snapshot::AircraftPose| {
+        pose.aircraft
             .map(|a| convert::identity_key(a).to_owned())
-            .unwrap_or_default(),
-        name: snapshot.player.aircraft.map_or_else(
-            || player_name.to_owned(),
-            |id| type_name(id, models, Some(player_name)),
+            .unwrap_or_default()
+    };
+    // The recorded pilot's aircraft by its exact name: the F-22N and the
+    // F/A-XX never show as the F-22 whose PT name they borrow.
+    let recorded = Human {
+        name: poses[0].aircraft.map_or_else(
+            || player.name.clone(),
+            |id| type_name(id, models, Some(&player.name)),
         ),
-        label: "You".into(),
-        side: replay::Side::Friendly,
-        wing: u16::from(player_wing),
-        member: u16::from(player_wing),
-        skill: "Human".into(),
-        human: true,
-    }];
-    for pose in snapshot.targets.iter().filter(|p| p.aircraft.is_some()) {
+        ..player.clone()
+    };
+    let mut out = vec![recorded.info(identity(poses[0]))];
+    for pose in &poses[1..] {
         let mut info = default_info(pose, wings);
         if let Some(id) = pose.aircraft {
             info.name = name_of(id);
         }
-        if let Some(actor) = wings.and_then(|w| w.mission().actor(pose.id)) {
+        if let Some(human) = others.iter().find(|h| h.id == pose.id) {
+            info = Human {
+                name: info.name.clone(),
+                ..human.clone()
+            }
+            .info(info.pt.clone());
+        } else if let Some(actor) = wings.and_then(|w| w.mission().actor(pose.id)) {
             info.skill = format!("{:?}", actor.experience().level);
         }
         out.push(info);
@@ -1898,6 +2060,7 @@ mod tests {
             flight: &flight,
             previous: &flight,
             pilot: &flight::PilotInput::default(),
+            others: &[],
             wings: None,
             world: &world,
             events: &[],
@@ -2019,22 +2182,22 @@ mod tests {
             locked: false,
             ..lock
         };
-        let started = tone_event(None, Some((lock, 0.912))).unwrap();
+        let started = tone_event(0, None, Some((lock, 0.912))).unwrap();
         assert_eq!(started.string(field::TONE), Some(named::INFRARED_LOCK));
         assert_eq!(started.flag(field::ON), Some(true));
         assert_eq!(started.num(field::STRENGTH), Some(0.91));
         assert_eq!(started.flag(field::SURFACE), Some(true));
         // Small swells are not recorded; one of a step or more is.
-        assert!(tone_event(Some((lock, 0.912)), Some((lock, 0.95))).is_none());
-        let louder = tone_event(Some((lock, 0.912)), Some((lock, 0.97))).unwrap();
+        assert!(tone_event(0, Some((lock, 0.912)), Some((lock, 0.95))).is_none());
+        let louder = tone_event(0, Some((lock, 0.912)), Some((lock, 0.97))).unwrap();
         assert_eq!(louder.num(field::STRENGTH), Some(0.97));
         // A new tone at the same loudness, and the tone stopping.
-        let changed = tone_event(Some((lock, 0.5)), Some((search, 0.5))).unwrap();
+        let changed = tone_event(0, Some((lock, 0.5)), Some((search, 0.5))).unwrap();
         assert_eq!(changed.string(field::TONE), Some(named::GROUND));
-        let stopped = tone_event(Some((search, 0.5)), None).unwrap();
+        let stopped = tone_event(0, Some((search, 0.5)), None).unwrap();
         assert_eq!(stopped.flag(field::ON), Some(false));
         assert_eq!(stopped.string(field::TONE), Some(named::GROUND));
-        assert!(tone_event(None, None).is_none());
+        assert!(tone_event(0, None, None).is_none());
     }
 
     #[test]
@@ -2103,7 +2266,7 @@ mod tests {
 
     #[test]
     fn the_view_target_is_noted_on_change_only() {
-        let entry = |last, now| view_target_event(last, now);
+        let entry = |last, now| view_target_event(0, last, now);
         // The first look records the starting state, even without a target.
         let start = entry(None, (None, false)).unwrap();
         assert_eq!(start.kind, kind::PLAYER_VIEW_TARGET);
@@ -2366,6 +2529,7 @@ mod tests {
             flight: &flight,
             previous: &flight,
             pilot: &flight::PilotInput::default(),
+            others: &[],
             wings: None,
             world: &world,
             events: &[],
@@ -2477,6 +2641,7 @@ mod tests {
                 flight: &flight,
                 previous: &flight,
                 pilot: &flight::PilotInput::default(),
+                others: &[],
                 wings: None,
                 world: &world,
                 events: &[],
