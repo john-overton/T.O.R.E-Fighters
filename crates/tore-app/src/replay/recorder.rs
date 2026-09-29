@@ -2773,4 +2773,107 @@ mod tests {
             u32::from(current.effects[1].ticks)
         );
     }
+
+    /// Records the fixture's two snapshots for the seat that flies `plane` and
+    /// returns the frames and the roster the recording registered.
+    fn record_for(
+        seat: SeatId,
+        plane: u32,
+        snapshots: &[RenderSnapshot; 2],
+    ) -> (Vec<Frame>, Vec<replay::AircraftInfo>) {
+        let human = |id: u32, label: &str| Human {
+            id,
+            label: label.into(),
+            name: String::new(),
+            side: replay::Side::Friendly,
+            wing: 1,
+            member: 1 + id as u16,
+        };
+        let others: Vec<Human> = [0, plane]
+            .into_iter()
+            .filter(|id| *id != plane)
+            .map(|id| human(id, "Seat 1"))
+            .collect();
+        let roster = roster(&snapshots[1], &human(plane, "You"), &others, None, &[]);
+        let (recorder, receiver) = Recorder::detached(64, &roster);
+        let mut recorder = recorder.for_seat(seat, plane);
+        let mut combat = fixture::combat(
+            fixture::models(),
+            (0..3).map(|i| (i % 3, [0.; 3])).collect(),
+        );
+        let mut ui = flight_ui::FlightUi::default();
+        tick(&mut recorder, &mut combat, &snapshots[0], 10, &mut ui);
+        recorder.bookmark();
+        tick(&mut recorder, &mut combat, &snapshots[1], 11, &mut ui);
+        tick(&mut recorder, &mut combat, &snapshots[1], 12, &mut ui);
+        assert_eq!(recorder.player(), plane);
+        let mut infos = Vec::new();
+        let mut frames = Vec::new();
+        for message in receiver.try_iter() {
+            match message {
+                Message::Aircraft(info) => infos.push(*info),
+                Message::Frame(frame) => frames.push(*frame),
+                _ => {}
+            }
+        }
+        (frames, infos)
+    }
+
+    #[test]
+    fn a_recording_for_seat_1_names_seat_1s_plane_as_the_player() {
+        let mut combat = fixture::combat(
+            fixture::models(),
+            (0..7).map(|i| (i % 3, [0.; 3])).collect(),
+        );
+        let player = fixture::player();
+        let scene = fixture::scene(combat.state.own().configuration());
+        let snapshots = fixture::snapshots(&mut combat, &scene, true, &player);
+        // Seat 1 flies the first AI aircraft of the picture.
+        let plane = snapshots[1]
+            .targets
+            .iter()
+            .find(|t| t.aircraft.is_some())
+            .unwrap()
+            .id;
+        assert_ne!(plane, 0);
+        let (frames, infos) = record_for(SeatId(1), plane, &snapshots);
+        // The roster registers it first, as `You`, a human; plane 0 is an
+        // ordinary human pilot of the mission.
+        assert_eq!(infos[0].id, plane);
+        assert_eq!((infos[0].label.as_str(), infos[0].human), ("You", true));
+        let zero = infos.iter().find(|i| i.id == 0).unwrap();
+        assert_eq!((zero.label.as_str(), zero.human), ("Seat 1", true));
+        // Every frame lists the player first and plane 0 among the others,
+        // each aircraft once.
+        for frame in &frames {
+            assert_eq!(frame.aircraft[0].id, plane);
+            let mut ids: Vec<u32> = frame.aircraft.iter().map(|a| a.id).collect();
+            assert!(ids.contains(&0));
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), frame.aircraft.len());
+        }
+        // What only the player has is the seat's plane's.
+        let events: Vec<&Event> = frames.iter().flat_map(|f| &f.events).collect();
+        let personal: Vec<&&Event> = events
+            .iter()
+            .filter(|e| e.kind.starts_with("player."))
+            .collect();
+        assert!(
+            personal.iter().any(|e| e.kind == kind::PLAYER_BOOKMARK)
+                && personal.iter().any(|e| e.kind == kind::PLAYER_VIEW_TARGET)
+        );
+        assert!(personal.iter().all(|e| e.subject == Some(plane)));
+        // Single player's recording of the same picture names plane 0.
+        let (frames, infos) = record_for(SeatId(0), 0, &snapshots);
+        assert_eq!(infos[0].id, 0);
+        assert_eq!(frames[0].aircraft[0].id, 0);
+        assert!(
+            frames
+                .iter()
+                .flat_map(|f| &f.events)
+                .filter(|e| e.kind.starts_with("player."))
+                .all(|e| e.subject == Some(0))
+        );
+    }
 }

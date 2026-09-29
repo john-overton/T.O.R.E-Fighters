@@ -458,3 +458,24 @@ fn a_line_through_the_channel_is_heard_once_at_its_delivery() {
         "every entry names the same line"
     );
 }
+
+#[test]
+fn a_recording_keeps_only_the_lines_about_its_own_seat() {
+    use crate::seats::SeatId;
+    let (recorder, _receiver) = Recorder::detached(64, &roster());
+    let mut recorder = recorder.for_seat(SeatId(1), 5);
+    let origin = Origin::of(Source::Radio, Cause::Unspecified).by(5);
+    let fox = call("Blue two", "Fox two", origin);
+    let entry = |seats: &[u8]| {
+        talk::Entry::call(1., Some(7), &fox, Said::Delivered { waited: 0. })
+            .heard_by(seats.iter().map(|seat| SeatId(*seat)))
+    };
+    // Delivered to seat 0 only, to seat 1 only, queued for both, and a line
+    // that is not addressed to a seat.
+    recorder.comms(vec![entry(&[0]), entry(&[1]), entry(&[0, 1]), entry(&[])]);
+    assert_eq!(recorder.early.len(), 3);
+    // Single player's recording has no line about another seat to leave out.
+    let (mut single, _receiver) = Recorder::detached(64, &roster());
+    single.comms(vec![entry(&[0]), entry(&[])]);
+    assert_eq!(single.early.len(), 2);
+}

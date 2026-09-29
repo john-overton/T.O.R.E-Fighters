@@ -1103,6 +1103,59 @@ mod tests {
         assert_eq!(range.draw(4, Some(AircraftId::F18)), Draw::Ownship);
     }
 
+    #[test]
+    fn a_recording_names_a_player_other_than_plane_0_in_its_header() {
+        let rules = Presentation {
+            models: vec![AircraftId::Mig29],
+            slots: 4,
+            player: 3,
+        };
+        let header = replay::Header {
+            extra: rules.extras(),
+            ..Default::default()
+        };
+        assert_eq!(header.extra(PLAYER_KEY), Some("3"));
+        assert_eq!(Presentation::from_header(&header), rules);
+        // Plane 3 draws with the player's airframe and plane 0 is one of the
+        // others, drawn with its own model.
+        assert_eq!(rules.draw(3, Some(AircraftId::Mig29)), Draw::Ownship);
+        assert_eq!(
+            rules.draw(0, Some(AircraftId::Mig29)),
+            Draw::Model(AircraftId::Mig29)
+        );
+        // Plane 0's recordings carry no such entry.
+        let single = Presentation {
+            player: 0,
+            ..rules.clone()
+        };
+        assert!(
+            single
+                .extras()
+                .iter()
+                .all(|(key, _)| key.as_str() != PLAYER_KEY)
+        );
+        // The frame's player is plane 3's state.
+        let frame = replay::Frame {
+            tick: 5,
+            aircraft: [0, 3, 4]
+                .into_iter()
+                .map(|id| replay::AircraftState {
+                    id,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let picture = snapshot(&frame, &[], &rules, &Identities::default());
+        assert_eq!(picture.player.id, 3);
+        assert_eq!(
+            picture.targets.iter().map(|t| t.id).collect::<Vec<_>>(),
+            [0, 4]
+        );
+        let single = snapshot(&frame, &[], &single, &Identities::default());
+        assert_eq!(single.player.id, 0);
+    }
+
     fn effect(kind: live::EffectKind, x: f64, ticks: u16) -> EffectPose {
         EffectPose {
             kind,

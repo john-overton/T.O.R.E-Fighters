@@ -1348,6 +1348,26 @@ mod tests {
         assert_eq!(first.wingman.unwrap().friendly_fire, 1);
     }
     #[test]
+    fn a_cockpits_airframe_reads_its_own_flight_and_ownship() {
+        let mut flight = crate::combat_view::render_hash_tests::player();
+        flight.damage_fraction = 0.4;
+        let flying = cockpit_airframe(2, true, &flight, 500);
+        assert_eq!((flying.id, flying.alive, flying.ejected), (2, true, false));
+        assert_eq!(flying.damage, 0.4);
+        // No hit points left: shot down, though the flight itself is intact.
+        assert!(!cockpit_airframe(2, true, &flight, 0).alive);
+        // The pilot escaped: ejected, not alive; a dead pilot is never ejected.
+        flight.systems.pilot.ejected = true;
+        let out = cockpit_airframe(2, true, &flight, 500);
+        assert_eq!((out.alive, out.ejected), (false, true));
+        flight.systems.pilot.dead = true;
+        let dead = cockpit_airframe(2, true, &flight, 500);
+        assert_eq!((dead.alive, dead.ejected), (false, false));
+        flight.systems.pilot = Default::default();
+        flight.crashed = true;
+        assert!(!cockpit_airframe(2, true, &flight, 500).alive);
+    }
+    #[test]
     fn kill_rows_take_the_first_matching_class_bit() {
         assert_eq!(kill_row(0x8000), Some(0));
         assert_eq!(kill_row(0x4000), Some(1));
