@@ -35,6 +35,9 @@ const FROZEN_TICKS: u64 = 2 * 120;
 /// rather than turning, degrees per second.
 const SPIN_DEG_S: f64 = 40.;
 const SPIN_TICKS: u64 = 30 * 120;
+/// Two aircraft centres closer than this a tick before one dies were touching
+/// (two 28 ft contact radii plus one tick of closure at 300 ft/s), feet.
+const TOUCHING_FT: f64 = 60.;
 /// Within [`FLAP_TICKS`], this many activity changes or pitch-stick reversals
 /// mean the AI is flipping between two decisions every few ticks for seconds.
 /// A second of dithering at a weapon-envelope edge stays below these.
@@ -70,6 +73,8 @@ struct Track {
 pub struct ProbeInvariants {
     tracks: BTreeMap<u32, Track>,
     reported: BTreeSet<(u32, &'static str)>,
+    /// Alive aircraft positions after the previous tick.
+    previous_positions: BTreeMap<u32, [f64; 3]>,
     seen_projectiles: BTreeSet<u32>,
     anomalies: u32,
     samples: u64,
@@ -321,6 +326,52 @@ impl ProbeInvariants {
                 self.flag(tick, id, &label, kind, detail);
             }
         }
+        // Aircraft that died this tick within touching distance of another
+        // aircraft (as they were last tick) collided in the air.
+        let now: Vec<_> = bridge
+            .slots()
+            .iter()
+            .filter_map(|slot| {
+                let actor = bridge.mission().actor(slot.id)?;
+                Some((
+                    slot.id,
+                    slot.label(),
+                    actor.flight().position,
+                    actor.alive(),
+                ))
+            })
+            .collect();
+        let previous = std::mem::take(&mut self.previous_positions);
+        for (id, label, _, alive) in &now {
+            if *alive || self.tracks.get(id).and_then(|t| t.death_tick) != Some(tick) {
+                continue;
+            }
+            let Some(at) = previous.get(id) else { continue };
+            for (other, other_label, other_at) in previous
+                .iter()
+                .filter(|(other, _)| *other != id)
+                .filter_map(|(other, p)| {
+                    now.iter()
+                        .find(|n| n.0 == *other)
+                        .map(|n| (*other, n.1.clone(), *p))
+                })
+            {
+                let gap = (0..3)
+                    .map(|k| (at[k] - other_at[k]).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                if gap < TOUCHING_FT {
+                    self.flag(
+                        tick,
+                        *id,
+                        label,
+                        "mid-air collision",
+                        format!("with {other_label} (id {other}) {gap:.0} ft apart a tick earlier"),
+                    );
+                }
+            }
+        }
+        self.previous_positions = now.iter().filter(|n| n.3).map(|n| (n.0, n.2)).collect();
         // Rounds and missiles that appeared this tick, from a dead owner.
         let mut fresh = Vec::new();
         for p in &state.projectiles {
