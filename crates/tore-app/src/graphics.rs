@@ -188,12 +188,20 @@ impl Options {
         }
         Ok(())
     }
-    /// A missing or unreadable file falls back to the defaults.
+    /// A missing file falls back to the defaults quietly; an unreadable or
+    /// malformed one falls back to them with a warning in the log.
     pub fn load(path: &Path) -> Self {
-        crate::preferences::read(path)
-            .ok()
-            .and_then(|text| Self::parse(&text).ok())
-            .unwrap_or_default()
+        match crate::preferences::read(path) {
+            Ok(text) => Self::parse(&text).unwrap_or_else(|e| {
+                log::warn!("Graphics options not loaded: {e}; using the defaults");
+                Self::default()
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Self::default(),
+            Err(e) => {
+                log::warn!("Graphics options not loaded: {e}; using the defaults");
+                Self::default()
+            }
+        }
     }
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         crate::preferences::write(path, &self.text())
