@@ -757,7 +757,13 @@ pub fn render(
             if y + height + 2 > HEIGHT as i32 {
                 break;
             }
-            Canvas(&mut shot).text(font, "Ber\u{eb}zovka \u{fc}\u{e9}\u{f1}\u{df}\u{e0} ABC", 4, y, None);
+            Canvas(&mut shot).text(
+                font,
+                "Ber\u{eb}zovka \u{fc}\u{e9}\u{f1}\u{df}\u{e0} ABC",
+                4,
+                y,
+                None,
+            );
             Canvas(&mut shot).text(&sprites["QUICKFONT"], name, 400, y, None);
             y += height + 3;
         }
