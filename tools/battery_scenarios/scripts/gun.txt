@@ -1,0 +1,8 @@
+# Quick Mission, enemy 10 nm ahead holding fire: the gun is selected at the start, hold the trigger.
+wait 1
+waittick 120
+down Space
+waittick 360
+up Space
+waittick 480
+exit

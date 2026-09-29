@@ -1,0 +1,14 @@
+# Free flight: heading and altitude autopilot on and off, NAV mode, waypoint autopilot.
+wait 1
+waittick 120
+key a
+waittick 360
+key a
+waittick 480
+key n
+waittick 600
+key Ctrl+a
+waittick 840
+key Ctrl+a
+waittick 960
+exit

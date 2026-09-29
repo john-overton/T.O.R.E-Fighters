@@ -1,0 +1,25 @@
+# Free flight: throttle, gear down and up, flaps, hook, airbrake, afterburner, chaff and flare.
+wait 1
+key 5
+waittick 240
+key g
+waittick 700
+key g
+waittick 900
+key f
+key h
+key b
+waittick 1500
+key f
+key h
+key b
+waittick 2100
+key 6
+waittick 2300
+key 5
+waittick 2450
+key Insert
+waittick 2600
+key Delete
+waittick 2750
+exit

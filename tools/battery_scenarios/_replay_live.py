@@ -18,11 +18,13 @@ from battery_scenarios._replay_record import AIRCRAFT, invariant_problems, secti
 PY = "python3"
 
 
-def live_checks(work: Path, output: str, *, tower: bool = False, ai: int | None = None) -> list[str]:
+def live_checks(work: Path, output: str, *, tower: bool = False, ai: int | None = None, timed: bool = True) -> list[str]:
     problems: list[str] = []
     s = sections(output)
-    if "frame interval: mean" not in s[0]:
+    if timed and "frame interval: mean" not in s[0]:
         problems.append("the timed flight did not finish")
+    if not timed and "Input script: exit" not in s[0]:
+        problems.append("the input script did not reach its exit step")
     if "recordings: 1 finished, 0 partial" not in s.get(1, ""):
         problems.append(f"expected one finished recording and no partial one: {s.get(1, '').strip()[:120]}")
     info = s.get(2, "")
@@ -63,7 +65,7 @@ def live_checks(work: Path, output: str, *, tower: bool = False, ai: int | None 
     return problems
 
 
-def live_scenario(name: str, args: list[str], *, frames: int = 240, audio: bool = False, tower: bool = False, ai: int | None = None, extra_env: dict | None = None) -> Scenario:
+def live_scenario(name: str, args: list[str], *, frames: int = 240, audio: bool = False, tower: bool = False, ai: int | None = None, extra_env: dict | None = None, more=None, timed: bool = True) -> Scenario:
     steps = [
         Step([PY, tools.__file__, "newest", "{work}/data", "{work}/live.tore-replay"], app=False),
         Step(["--recording-info", "{work}/live.tore-replay"]),
@@ -77,9 +79,9 @@ def live_scenario(name: str, args: list[str], *, frames: int = 240, audio: bool 
         args=[*args, *([] if audio else ["--no-audio"])],
         window=True,
         timeout=300,
-        env={"TORE_RECORD_MISSIONS": "1", "TORE_PERF_FRAMES": str(frames), **(extra_env or {})},
+        env={"TORE_RECORD_MISSIONS": "1", **({"TORE_PERF_FRAMES": str(frames)} if timed else {}), **(extra_env or {})},
         then=steps,
-        check_work=lambda work, output: live_checks(work, output, tower=tower, ai=ai),
+        check_work=lambda work, output: live_checks(work, output, tower=tower, ai=ai, timed=timed) + (more(work, output) if more else []),
     )
 
 

@@ -1,0 +1,8 @@
+# Free flight: eject (Shift+E twice).
+wait 1
+waittick 240
+key Shift+e
+wait 0.6
+key Shift+e
+waittick 1200 20
+exit
