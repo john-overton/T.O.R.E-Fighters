@@ -87,6 +87,8 @@ def extremes_problems(output: str, engine_off_ok: bool = False) -> list[str]:
             problems.append(f"large energy gain with the engine off: {e['dead_stick_gain_ft']} ft")
         if float(e["max_speed_kt"]) > 1300:
             problems.append(f"impossible speed {e['max_speed_kt']} kt")
+        if float(e.get("speed_over_envelope_top", 0)) > 1.02:
+            problems.append(f"flew faster than the aircraft's own top speed: {e['speed_over_envelope_top']} of it")
         if not (-12 <= float(e["min_g"]) and float(e["max_g"]) <= 16):
             problems.append(f"impossible load {e['min_g']}..{e['max_g']} G")
         if float(e["max_altitude_ft"]) > 70000:
@@ -976,6 +978,39 @@ def device_scenarios() -> list[Scenario]:
     ]
 
 
+# ----------------------------------------------------------- damage visuals
+
+
+def capture_scenarios() -> list[Scenario]:
+    """Windowed captures of the damage, ejection and animation fixtures, each
+    checked for a blank frame. The images themselves need a human eye."""
+    out = []
+
+    def add(name: str, args: list[str]) -> None:
+        out.append(
+            Scenario(
+                name=f"flight-{name}",
+                lane="flight",
+                args=[*args, "--capture-flight", "{work}/frame.ppm", "--no-audio"],
+                window=True,
+                check=frame_problems,
+                timeout=180,
+            )
+        )
+
+    for ac in AIRCRAFT:
+        for fraction in ("0.5", "1"):
+            add(f"damage-{ac}-{fraction}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--damage-preview", fraction, "--damage-preview-section", "core"])
+        for pose in ("seat", "freefall", "chute"):
+            add(f"ejectionpose-{ac}-{pose}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--ejection-preview", pose])
+    for section in ("nose", "cockpit", "core", "left-wing", "right-wing", "tail"):
+        for fraction in ("0.3", "0.7", "1"):
+            add(f"damage-f18-{section}-{fraction}", ["--free-flight", "--aircraft", "f18", "--flight-view", "1", "--damage-preview", fraction, "--damage-preview-section", section])
+    for bay in ("0", "0.5", "1"):
+        add(f"bay-f22-{bay}", ["--free-flight", "--aircraft", "f22", "--flight-view", "1", "--flight-look", "150,-30", "--flight-bay", bay])
+    return out
+
+
 # -------------------------------------------------------- instrument panels
 
 
@@ -1008,6 +1043,25 @@ def panel_scenarios() -> list[Scenario]:
     return out
 
 
+def daytime_scenarios() -> list[Scenario]:
+    """One frame at every hour of the day in three theaters."""
+    out = []
+    for theater in ("UKR", "TVIET", "KURILE"):
+        for hour in range(24):
+            out.append(
+                Scenario(
+                    name=f"flight-hour{hour:02d}-{_theater_tag(theater)}",
+                    lane="flight",
+                    args=["--free-flight", "--theater", theater, "--capture-flight", "{work}/frame.ppm", "--no-audio"],
+                    env={"TORE_WEATHER_TIME": f"{hour:02d}:00"},
+                    window=True,
+                    check=lambda out, night=(hour < 5 or hour >= 21): frame_problems(out, night),
+                    timeout=180,
+                )
+            )
+    return out
+
+
 def scenarios() -> list[Scenario]:
     return (
         takeoff_scenarios()
@@ -1027,6 +1081,8 @@ def scenarios() -> list[Scenario]:
         + panel_scenarios()
         + cheat_combat_scenarios()
         + device_scenarios()
+        + capture_scenarios()
+        + daytime_scenarios()
         + fuel_scenarios()
         + waypoint_scenarios()
     )
