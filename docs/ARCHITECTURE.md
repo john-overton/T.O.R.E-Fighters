@@ -886,10 +886,11 @@ byte for byte:
 2. Add `World` (`crates/tore-app/src/world.rs`) and move the mission fields of
    `App` into it. The tick body still runs in the redraw handler.
 3. Move the tick body into `World::step`, with presentation after it.
-4. Move mission construction and restart (the simulation half of `MissionFly`
-   and `FreeFlight`) into `World::new` and `World::restart`, from a `Setup`
-   holding the Quick Mission choices that restart now reads back from the
-   creator's UI state.
+4. Move the simulation half of a flight's start (`FreeFlight`, which is also
+   restart) into `World::restart`, from a `Setup` that the creator fills when
+   the player presses Fly, so a restart no longer reads the creator's UI state.
+   A `World::new` that builds a mission with no app at all follows the A2
+   splits, since combat is still built from the aircraft's render model.
 5. Switch the AI probe to `World::step` (re-recorded output).
 6. Add the full-tick fingerprint.
 

@@ -9,13 +9,16 @@
 //! same order, for the app to present after the step.
 
 use crate::{
-    AppResult, ai_wings, airfield_radio, attitude, combat, combat_tape, comms, crew_voice, flight,
-    radio_calls, terrain,
+    AppResult, ai_wings, aircraft, airfield_radio, attitude, combat, combat_tape, comms,
+    crew_voice, flight, quick_mission, radio_calls, terrain,
 };
+use std::collections::BTreeMap;
 use tore_sim::models::FlightModel;
 
 /// The whole mission. The app drives it and presents it.
 pub struct World {
+    /// What the flight is built from; a restart rebuilds it from this.
+    pub setup: Setup,
     /// Terrain queries, the airport scene and the weather clock. Until the
     /// crate move splits it, it also holds the scenery the renderer draws.
     pub terrain: terrain::Terrain,
@@ -42,6 +45,43 @@ pub struct World {
     pub overspeed_message_at: Option<f64>,
     /// Simulation second of the last turn-back warning past the map edge.
     pub edge_message_at: Option<f64>,
+}
+
+/// The mission a flight is built from. The creator fills it when the player
+/// presses Fly, and a restart rebuilds the flight from it unchanged.
+#[derive(Clone, Default)]
+pub struct Setup {
+    /// Launch altitude and fuel of an accepted Quick Mission; `None` flies free.
+    pub mission: Option<(f64, f64)>,
+    /// The accepted runway start.
+    pub ground_start: Option<u32>,
+    /// The player flies the hybrid model, the default; `--legacy-flight` turns
+    /// it off.
+    pub researched_flight: bool,
+    /// The restricted native research adapter's tables.
+    pub native_tables: Option<std::sync::Arc<tore_sim::native::Tables>>,
+    /// The AI wings, when the AI flies the Quick Mission.
+    pub ai: Option<AiSetup>,
+}
+
+/// The Quick Mission's AI wings and their standing orders.
+#[derive(Clone)]
+pub struct AiSetup {
+    pub wings: Vec<tore_sim::ai::launch::WingLaunch>,
+    pub guns_only: bool,
+    pub preset: ai_wings::Preset,
+    pub group_objectives: [tore_sim::ai::engagement::GroupObjective; 6],
+    pub group_must_survive: [bool; 6],
+}
+
+/// What a restart tells the app about the new flight.
+pub struct Restarted {
+    /// The airport of a ground start.
+    pub ground_airport: Option<u32>,
+    /// The Quick Mission layout the player was placed from.
+    pub layout: Option<quick_mission::MissionLayout>,
+    /// How many AI aircraft fly, when the AI flies the mission.
+    pub ai_aircraft: Option<usize>,
 }
 
 /// A queued airport command: the navigation mode switch or a tower request.
@@ -117,6 +157,153 @@ pub struct TickOutput {
 }
 
 impl World {
+    /// Restarts the weather clock, turbulence and the camera weather from the
+    /// launch conditions and their fixed seeds.
+    pub fn reset_weather(&mut self) {
+        self.terrain.weather_presentation = tore_sim::environment::Presentation::seeded(1)
+            .expect("fixed valid weather presentation seed");
+        self.terrain.auxiliary_presentations =
+            std::array::from_fn(|_| self.terrain.weather_presentation.clone());
+        self.terrain.weather =
+            tore_sim::environment::Environment::new(self.terrain.weather.configuration().clone());
+        self.turbulence = Default::default();
+        self.turbulence_rng.reseed_word(1);
+    }
+
+    /// Rebuilds the flight from its setup: the radio, the weather, the
+    /// player's start, combat, the airport service and the AI wings, in the
+    /// order a flight has always started. The app ends the old flight's
+    /// recording before and starts the new one after.
+    pub fn restart(
+        &mut self,
+        aircraft: &aircraft::Airframe,
+        resources: &BTreeMap<String, Vec<u8>>,
+    ) -> AppResult<Restarted> {
+        // A fixed seed keeps headless runs deterministic.
+        self.comms.restart(1);
+        self.crew_voice = crew_voice::CrewVoice::new(&aircraft.profile);
+        self.radio = Default::default();
+        self.reset_weather();
+        self.flight = aircraft.start(&self.terrain);
+        if let Some((altitude, fuel)) = self.setup.mission {
+            self.flight.position[1] = altitude;
+            self.flight.fuel = fuel;
+        }
+        // The accepted creator layout, reused unchanged on restart.
+        let layout = self
+            .setup
+            .mission
+            .and(self.combat.mission_layout.clone())
+            .filter(|layout| layout.ground.is_some() == self.setup.ground_start.is_some());
+        let parked = layout.as_ref().and_then(|layout| layout.ground.clone());
+        self.airfield_radio.reset(parked.as_ref().map(|g| g.runway));
+        if let Some(layout) = layout.as_ref().filter(|l| l.player_turn != 0.) {
+            // Airborne: the whole scene turns so the enemy ahead stays on the
+            // map.
+            self.flight.yaw += layout.player_turn;
+            let basis = attitude::Basis::new(self.flight.yaw, 0., 0.);
+            self.flight.velocity = std::array::from_fn(|i| {
+                basis.forward[i] * self.flight.speed + self.terrain.wind()[i]
+            });
+        }
+        if let Some(object) = self.setup.ground_start {
+            let (position, heading) = match &parked {
+                Some(ground) => (ground.slots[0], ground.heading),
+                None => quick_mission::runway_pose(&self.terrain, object)?,
+            };
+            self.flight.position[0] = position[0];
+            self.flight.position[2] = position[2];
+            if self.setup.mission.is_none() {
+                self.flight.position[1] = self.flight.position[1].max(position[1] + 5000.);
+            }
+            self.flight.yaw = heading;
+            let basis = attitude::Basis::new(heading, 0., 0.);
+            self.flight.velocity = std::array::from_fn(|i| {
+                basis.forward[i] * self.flight.speed + self.terrain.wind()[i]
+            });
+        }
+        if self.setup.researched_flight {
+            self.flight.enable_research(1)?;
+        }
+        if let Some(tables) = &self.setup.native_tables {
+            if self.combat.range || self.setup.mission.is_some() {
+                return Err("native research flight currently requires clean free flight".into());
+            }
+            self.flight.enable_native(tables.clone(), 1)?;
+        }
+        self.combat.reset(&mut self.flight)?;
+        self.combat.raise_airborne_spawns(&self.terrain);
+        if self.combat.uses_normal_startup_defaults() {
+            self.combat.apply_startup_weapons();
+        }
+        let ground_airport = match self.setup.ground_start {
+            Some(object) => Some(match &parked {
+                Some(ground) => {
+                    quick_mission::place_on_runway(&self.terrain, &mut self.flight, ground, 0)
+                        .map(|()| ground.airport)?
+                }
+                None => quick_mission::apply_ground_start(&self.terrain, &mut self.flight, object)?,
+            }),
+            None => None,
+        };
+        self.airport_service
+            .reset(&self.terrain.airport_scene)
+            .map_err(std::io::Error::other)?;
+        // A ground start begins on NAV, and so does an aircraft with nothing
+        // loaded in the selected station: an empty station is never armed.
+        self.airport_nav_mode =
+            ground_airport.is_some() || !self.combat.state.carries(self.combat.state.selected);
+        self.combat.state.armed = !self.airport_nav_mode;
+        if let Some(airport) = ground_airport {
+            self.airport_service.command(
+                &self.terrain.airport_scene,
+                airport_aircraft(&self.terrain, &self.flight, self.airport_nav_mode),
+                tore_sim::airport::Command::SelectAirport(airport),
+            );
+        }
+        // The AI bridge is built from the targets the existing spawner just
+        // placed, so the AI aircraft start exactly where the straight-flight
+        // fixtures would have started.
+        self.ai_wings = None;
+        self.combat.ai_poses = false;
+        let mut ai_aircraft = None;
+        if self.setup.mission.is_some()
+            && let Some(ai) = &self.setup.ai
+        {
+            // Home runways for every aircraft; a ground start parks the
+            // player's wingmen behind the player.
+            let airfields = ai_wings::Airfields::from_world(
+                &self.terrain,
+                parked.as_ref().map(quick_mission::GroundLayout::departure),
+            );
+            let mut bridge = ai_wings::AiWings::build_mission(
+                &ai.wings,
+                &self.combat.state.targets,
+                ai.guns_only,
+                resources,
+                &airfields,
+            )?;
+            bridge.apply_mission_preset(ai.preset, self.flight.position);
+            bridge.apply_group_objectives(&ai.group_objectives, self.flight.position);
+            bridge.apply_group_survival(&ai.group_must_survive);
+            bridge.mirror_pose_out(&mut self.combat.state.targets);
+            self.combat.ai_poses = !bridge.is_empty();
+            ai_aircraft = Some(bridge.len());
+            self.ai_wings = Some(bridge);
+        }
+        // Draw from the placed start, including the AI's own poses.
+        self.combat
+            .restart_render(&self.flight, self.ai_wings.as_ref());
+        self.previous_flight = self.flight.clone();
+        self.overspeed_message_at = None;
+        self.edge_message_at = None;
+        Ok(Restarted {
+            ground_airport,
+            layout,
+            ai_aircraft,
+        })
+    }
+
     /// The simulation half of the weapon selector: step the player's weapon
     /// selection. The navigation mode follows the arming.
     pub fn cycle_weapon(&mut self, forward: bool) {
