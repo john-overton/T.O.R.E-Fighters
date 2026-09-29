@@ -15,7 +15,7 @@ examples go from `0.1.0` to `0.1.1`; substitute your own numbers.
 
 | File | What to change |
 | --- | --- |
-| `crates/*/Cargo.toml` (every crate, eight since `tore-replay` joined) | `version = "0.1.1"` on line 3. `tore-app` is the one the release checks; the rest are kept equal. |
+| `crates/*/Cargo.toml` (every crate, nine since `tore-world` joined) | `version = "0.1.1"` on line 3. `tore-app` is the one the release checks; the rest are kept equal. |
 | `Cargo.lock` | Refreshed by the build in step 2; never edit it by hand. |
 | `README.md` | The milestone badge's alt text near the top, and "Version 0.1.0 completes..." under **What works today**, with that section's paragraphs (such as **Replays**) if the release changes what they say. |
 | `docs/DEVELOPMENT.md` | The `TORE_BUILD_VERSION=0.1.0` example under **Packaging**. |

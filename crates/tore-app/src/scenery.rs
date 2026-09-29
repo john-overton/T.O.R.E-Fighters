@@ -719,7 +719,7 @@ pub(crate) mod tests {
             w.static_lines.insert(id, vec![-(id as f32); 10]);
         }
         // Object 1 stands, 2 was destroyed and 3 never had a target.
-        let mut targets = crate::ai_wings::tests::spawned();
+        let mut targets = tore_world::test_support::spawned();
         targets.truncate(2);
         targets[1].hp = 0;
         let expected = |ids: &[u32], sign: f32| -> Vec<f32> {
@@ -743,7 +743,7 @@ pub(crate) mod tests {
     /// restores the launch settings exactly, whatever set the wind.
     #[test]
     fn water_has_no_opaque_fallback_but_shore_art_keeps_its_geometry() {
-        let mut terrain = crate::terrain::tests::world();
+        let mut terrain = tore_world::test_support::terrain();
         terrain.theater.cells[0].color = 255;
         let height = terrain.height(2048., 2048.);
         let mut textures = BTreeMap::new();
@@ -786,7 +786,7 @@ pub(crate) mod tests {
     #[test]
     fn whiteout_cheat_clears_all_views_without_ticks_and_preserves_sun() {
         use tore_formats::weather::shape::{Primitive, WeatherShape};
-        let mut w = crate::terrain::tests::world();
+        let mut w = tore_world::test_support::terrain();
         let mut s = scenery();
         let mut module =
             tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(1))
@@ -881,7 +881,7 @@ pub(crate) mod tests {
         module.layers[1].low_feet = 7500;
         module.layers[1].fog_far = 1000;
         module.layers[1].tint_scalar = 0;
-        let mut w = crate::terrain::tests::world();
+        let mut w = tore_world::test_support::terrain();
         let mut s = scenery();
         w.weather = tore_sim::environment::Environment::new(
             tore_sim::environment::Configuration::new(module, 12, 0, 0, None).unwrap(),

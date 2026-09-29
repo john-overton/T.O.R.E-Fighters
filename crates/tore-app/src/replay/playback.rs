@@ -467,7 +467,7 @@ mod tests {
         // in `direction`, noting everything at every half-tick position.
         let play = |reverse: bool| {
             let mut playback = Playback::new(Arc::clone(&recording));
-            let mut world = crate::terrain::tests::world();
+            let mut world = tore_world::test_support::terrain();
             let mut scenery = crate::scenery::tests::scenery();
             let mut weather = WeatherTrack::new(&world, &scenery, fixture::LAST);
             let mut scratch = template.clone();

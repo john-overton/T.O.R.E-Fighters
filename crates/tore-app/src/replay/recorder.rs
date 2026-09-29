@@ -1883,7 +1883,7 @@ mod tests {
         ui: &mut flight_ui::FlightUi,
     ) {
         let flight = fixture::player();
-        let world = terrain::tests::world();
+        let world = tore_world::test_support::terrain();
         let mut snapshot = snapshot.clone();
         snapshot.tick = number;
         recorder.start_tick(Some(ui), combat);
@@ -2359,7 +2359,7 @@ mod tests {
             }
             let mut snapshot = snapshot.clone();
             snapshot.tick = number;
-            let (world, flight) = (terrain::tests::world(), fixture::player());
+            let (world, flight) = (tore_world::test_support::terrain(), fixture::player());
             recorder.begin(Tick {
                 snapshot: &snapshot,
                 combat: &combat,

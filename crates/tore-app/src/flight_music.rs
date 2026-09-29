@@ -306,13 +306,10 @@ mod tests {
 
     #[test]
     fn hits_and_guided_missiles_feed_air_and_danger() {
-        let world = crate::terrain::tests::world();
-        let mut combat = crate::ai_wings::tests::combat_fixture(true);
-        let flight = flight::State::new(
-            &crate::flight::animation_tests::profile(),
-            [0., 20_000., 0.],
-        )
-        .unwrap();
+        let world = tore_world::test_support::terrain();
+        let mut combat = tore_world::test_support::combat_fixture(true);
+        let flight =
+            flight::State::new(&tore_world::test_support::profile(), [0., 20_000., 0.]).unwrap();
         let mut observer = Observer::new(None);
         let step = |observer: &mut Observer, combat: &live::State, events: &[live::Event]| {
             observer.step(&flight, combat, events, None, &world, None)
@@ -348,13 +345,10 @@ mod tests {
 
     #[test]
     fn input_changes_are_journaled_with_the_reasons_behind_them() {
-        let world = crate::terrain::tests::world();
-        let mut combat = crate::ai_wings::tests::combat_fixture(true);
-        let flight = flight::State::new(
-            &crate::flight::animation_tests::profile(),
-            [0., 20_000., 0.],
-        )
-        .unwrap();
+        let world = tore_world::test_support::terrain();
+        let mut combat = tore_world::test_support::combat_fixture(true);
+        let flight =
+            flight::State::new(&tore_world::test_support::profile(), [0., 20_000., 0.]).unwrap();
         let mut observer = Observer::new(None);
         let step = |observer: &mut Observer, combat: &live::State, events: &[live::Event]| {
             observer.step(&flight, combat, events, None, &world, None)
@@ -396,13 +390,11 @@ mod tests {
 
     #[test]
     fn result_calls_match_what_the_host_sends_and_carry_their_trigger() {
-        let world = crate::terrain::tests::world();
-        let combat = crate::ai_wings::tests::combat_fixture(true);
-        let flight = flight::State::new(
-            &crate::flight::animation_tests::profile(),
-            [0., 5_000., 10_000.],
-        )
-        .unwrap();
+        let world = tore_world::test_support::terrain();
+        let combat = tore_world::test_support::combat_fixture(true);
+        let flight =
+            flight::State::new(&tore_world::test_support::profile(), [0., 5_000., 10_000.])
+                .unwrap();
         let mut observer = Observer::new(Some([0.; 3]));
         // Not yet at the first check, then a success on the 4 s cadence.
         let step = (0..600)

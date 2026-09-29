@@ -634,8 +634,8 @@ mod tests {
     use super::*;
 
     fn state() -> flight::State {
-        let mut s = flight::State::new(&crate::flight::animation_tests::profile(), [0., 5000., 0.])
-            .unwrap();
+        let mut s =
+            flight::State::new(&tore_world::test_support::profile(), [0., 5000., 0.]).unwrap();
         s.enable_research(1).unwrap();
         s
     }

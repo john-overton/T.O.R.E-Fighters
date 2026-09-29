@@ -486,7 +486,7 @@ mod tests {
     fn collected_records_write_the_same_bytes() {
         let dir = std::env::temp_dir().join(format!("tore-tape-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let config = crate::ai_wings::tests::combat_fixture(false)
+        let config = tore_world::test_support::combat_fixture(false)
             .configuration()
             .clone();
         let data = BTreeMap::new();

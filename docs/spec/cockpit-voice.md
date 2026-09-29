@@ -314,9 +314,9 @@ Stems are the recording names without the `.5K` extension.
 
 ## Implementation in TORE
 
-Implementation, 2026-09-23: `crates/tore-app/src/crew_voice.rs`, evaluated on
+Implementation, 2026-09-23: `crates/tore-world/src/crew_voice.rs`, evaluated on
 every fixed 120 Hz tick just before due radio lines are delivered. Lines go
-through the shared channel (`crates/tore-app/src/comms.rs`), which applies the
+through the shared channel (`crates/tore-world/src/comms.rs`), which applies the
 3 second hold, the radio silence filter and delivery. Components are
 spec-derived unless listed below.
 

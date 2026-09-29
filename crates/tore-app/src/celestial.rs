@@ -355,7 +355,7 @@ mod tests {
     use super::*;
     #[test]
     fn sunset_glare_is_soft_then_drops_below_the_horizon() {
-        let world = crate::terrain::tests::world();
+        let world = tore_world::test_support::terrain();
         let mut scenery = crate::scenery::tests::scenery();
         scenery.smooth_weather = true;
         // Above all finite dense fixture bands, so this checks the solar envelope.
@@ -375,7 +375,7 @@ mod tests {
     }
     #[test]
     fn visual_sun_advances_inside_a_whole_second() {
-        let mut world = crate::terrain::tests::world();
+        let mut world = tore_world::test_support::terrain();
         let module =
             tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(1))
                 .unwrap();
@@ -425,7 +425,7 @@ mod tests {
     }
     #[test]
     fn lunar_geometry_is_independent_of_camera_bank_and_translation() {
-        let mut world = crate::terrain::tests::world();
+        let mut world = tore_world::test_support::terrain();
         let mut module =
             tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(1))
                 .unwrap();

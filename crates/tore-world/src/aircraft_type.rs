@@ -1,9 +1,10 @@
 //! What the simulation knows about one aircraft type: the imported profile,
 //! its flight model, its sensors and where its engines exhaust. Nothing here
 //! draws, so the mission core can hold it without art, menus or animation rigs.
-//! The drawn half, [`crate::aircraft::Airframe`], wraps one of these.
-use crate::{flight, terrain::Terrain};
+//! The app's drawn half, `Airframe`, wraps one of these.
+use crate::terrain::Terrain;
 use tore_formats::aircraft::Aircraft;
+use tore_sim::flight;
 use tore_sim::{attitude::Vector, models::AircraftModel, sensors::SensorProfiles};
 
 /// One aircraft type as the simulation needs it. The player's flight, combat
@@ -55,16 +56,16 @@ impl AircraftType {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl AircraftType {
     /// A type built from the synthetic F/A-18D record and flight model, so
     /// tests run without retail media. `id` selects the identity the drawing
     /// and combat rules see.
-    pub(crate) fn synthetic(
+    pub fn synthetic(
         id: tore_formats::aircraft::AircraftId,
         contrail_offsets: Vec<Vector>,
     ) -> Self {
-        let source = crate::flight::animation_tests::profile();
+        let source = crate::test_support::profile();
         let model = AircraftModel::for_aircraft(&source).expect("synthetic flight model");
         let mut profile = source;
         profile.id = id;

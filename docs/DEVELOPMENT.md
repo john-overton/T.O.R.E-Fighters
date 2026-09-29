@@ -474,7 +474,7 @@ The quick-mission snapshot is a headless CPU image. `--capture-terrain` requires
 
 Controls: arrows move horizontally, Shift accelerates translation 8×, Q/E or PageDown/PageUp lower/raise, A/D turn, W/S pitch. Camera movement uses elapsed time with a 50 ms cap, clamps to the theater and stays at least 100 feet above the rendered surface. It is an inspection camera, not aircraft physics. Focus loss clears held keys. Escape returns to the creator, then Choose Activity. The viewer schedules frames while active; menus remain idle when no redraw is needed.
 
-`terrain.rs` owns the renderer-independent surface, airport and weather data (`Terrain`) and the free camera, `scenery.rs` the art, mesh and camera weather built from it (`Scenery`); `sim_renderer.rs` and `terrain.wgsl` own the depth-tested GPU scene and sky. Follow [the recovery notes](formats/theater.md) before extending source semantics; record approximations and native evidence. The initial renderer builds the whole selected theater mesh at startup, including when entering through the main menu. Streaming, LOD, object rendering and complete weather remain open.
+`terrain.rs` (in `tore-world`) owns the renderer-independent surface, airport and weather data (`Terrain`), `camera.rs` the free camera, `scenery.rs` the art, mesh and camera weather built from it (`Scenery`); `sim_renderer.rs` and `terrain.wgsl` own the depth-tested GPU scene and sky. Follow [the recovery notes](formats/theater.md) before extending source semantics; record approximations and native evidence. The initial renderer builds the whole selected theater mesh at startup, including when entering through the main menu. Streaming, LOD, object rendering and complete weather remain open.
 
 ### All-theater selection and text
 

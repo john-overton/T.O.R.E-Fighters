@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn snapshots_equal_stepping_every_tick_from_launch() {
         let tracks = tracks(3_000);
-        let mut sequential = crate::terrain::tests::world();
+        let mut sequential = tore_world::test_support::terrain();
         let mut sequential_scenery = crate::scenery::tests::scenery();
         let mut states = vec![(
             sequential.weather.clone(),
@@ -195,7 +195,7 @@ mod tests {
                 sequential_scenery.weather_presentation.clone(),
             ));
         }
-        let mut world = crate::terrain::tests::world();
+        let mut world = tore_world::test_support::terrain();
         let mut scenery = crate::scenery::tests::scenery();
         let mut track = WeatherTrack::new(&world, &scenery, 3_000);
         // Forwards a tick at a time, far jumps both ways, reverse play and
@@ -227,7 +227,7 @@ mod tests {
         for tick in 1..=100 {
             tracks.push_view(tick, View::default());
         }
-        let mut world = crate::terrain::tests::world();
+        let mut world = tore_world::test_support::terrain();
         let mut scenery = crate::scenery::tests::scenery();
         let mut track = WeatherTrack::new(&world, &scenery, 1_000);
         assert_eq!(track.seek(&mut world, &mut scenery, &tracks, 500), 100);

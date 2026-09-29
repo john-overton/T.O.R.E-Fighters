@@ -3,11 +3,9 @@
 // CLI/probe output stays on stdout; startup diagnostics also go to session logs.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 mod additional_animation;
-mod ai_wings;
+mod ai_roster_probe;
 mod aircraft;
 mod aircraft_animation;
-mod aircraft_type;
-mod airfield_radio;
 mod assets;
 mod attitude;
 mod audio;
@@ -16,14 +14,10 @@ mod canvas_present;
 mod celestial;
 mod clouds;
 mod cockpit_renderer;
-mod combat;
 mod combat_smoke;
-mod combat_tape;
 mod combat_view;
-mod comms;
 mod controls_editor;
 mod countermeasure_renderer;
-mod crew_voice;
 mod damage_art;
 mod debrief;
 mod diagnostics;
@@ -55,7 +49,6 @@ mod media_source;
 mod menu;
 mod mirrors;
 mod missile_acceptance;
-mod mission_layout;
 mod navigation;
 mod ocean;
 mod ordnance;
@@ -64,7 +57,6 @@ mod performance;
 mod preferences;
 mod probe_invariants;
 mod quick_mission;
-mod radio_calls;
 mod rafale_animation;
 mod reel;
 mod render_snapshot;
@@ -76,9 +68,7 @@ mod rwr_tone;
 mod scenery;
 mod scope;
 mod sim_renderer;
-mod situation;
 mod smoke_renderer;
-mod snapshot;
 mod sound_prefs;
 mod sound_screen;
 mod startup;
@@ -86,13 +76,16 @@ mod static_art;
 mod surface_lighting;
 mod tape_file;
 mod target_preview;
-mod target_window;
-mod terrain;
 mod version;
 mod view_compass;
 mod weapon_hud;
 mod weather;
-mod world;
+
+// The mission core lives in tore-world; these keep the app's module paths.
+pub(crate) use tore_world::{
+    ai_wings, aircraft_type, airfield_radio, combat, combat_tape, comms, crew_voice,
+    mission_layout, radio_calls, situation, snapshot, target_window, terrain, world,
+};
 
 use assets::Assets;
 use menu::{Action, Menu};
@@ -9529,7 +9522,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     probe_script.takeoff = maneuver == "takeoff";
     if let Some(ticks) = ai_probe {
         if ai_roster_probe {
-            ai_wings::roster_probe(ticks, &theater_resources, &world)?;
+            ai_roster_probe::roster_probe(ticks, &theater_resources, &world)?;
             return Ok(Outcome::Done);
         }
         if let Some(directory) = &probe_script.matrix {

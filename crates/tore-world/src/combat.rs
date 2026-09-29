@@ -1,8 +1,7 @@
 //! Live range host, original geometry and sampled original effect art.
 use crate::{
-    AppResult,
+    WorldResult,
     aircraft_type::AircraftType,
-    flight,
     snapshot::{
         AircraftPose, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
         ProjectilePose, RenderSnapshot,
@@ -11,6 +10,7 @@ use crate::{
 };
 use std::{collections::BTreeMap, sync::Arc};
 use tore_formats::aircraft::AircraftId;
+use tore_sim::flight;
 use tore_sim::{
     attitude::{Basis, Vector},
     combat::live::{self, Event, Launcher},
@@ -179,7 +179,7 @@ impl Combat {
     pub fn uses_normal_startup_defaults(&self) -> bool {
         !self.range && self.tape.is_none() && !self.clean_recording
     }
-    pub fn add_airport_targets(&mut self, scene: &tore_sim::airport::Scene) -> AppResult<()> {
+    pub fn add_airport_targets(&mut self, scene: &tore_sim::airport::Scene) -> WorldResult<()> {
         scene.validate().map_err(std::io::Error::other)?;
         // A new layout replaces static identities atomically in the staged state.
         let mut staged = self.state.clone();
@@ -194,7 +194,7 @@ impl Combat {
     fn register_airport_object(
         state: &mut live::State,
         object: &tore_sim::airport::StaticObject,
-    ) -> AppResult<()> {
+    ) -> WorldResult<()> {
         state.add_ground_target(object.id, object.bounds, object.hit_points, object.category)?;
         if let Some(target) = state.targets.iter_mut().find(|t| t.id == object.id) {
             target.signature.radar = object.radar_signature;
@@ -208,7 +208,11 @@ impl Combat {
             .find(|o| o.id == id)
             .map(|o| o.name.as_str())
     }
-    pub fn new(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>, range: bool) -> AppResult<Self> {
+    pub fn new(
+        h: &AircraftType,
+        data: &BTreeMap<String, Vec<u8>>,
+        range: bool,
+    ) -> WorldResult<Self> {
         let config = live::Configuration::from_source(&h.profile, |name| {
             data.get(name)
                 .cloned()
@@ -219,7 +223,7 @@ impl Combat {
     pub fn with_loadout(
         h: &AircraftType,
         load: &tore_sim::combat::loadout::Loadout,
-    ) -> AppResult<Self> {
+    ) -> WorldResult<Self> {
         load.validate()?;
         Self::configured(
             h,
@@ -233,7 +237,7 @@ impl Combat {
         range: bool,
         config: live::Configuration,
         initial_ammo: Option<Vec<u16>>,
-    ) -> AppResult<Self> {
+    ) -> WorldResult<Self> {
         Ok(Self {
             contrail_offsets: h.contrail_offsets.clone(),
             contrail_sortie: 0,
@@ -603,8 +607,8 @@ impl Combat {
         wings: &[tore_sim::ai::launch::WingLaunch],
         layout: &crate::mission_layout::MissionLayout,
         data: &BTreeMap<String, Vec<u8>>,
-        load: &mut dyn FnMut(AircraftId) -> AppResult<Arc<AircraftType>>,
-    ) -> AppResult<()> {
+        load: &mut dyn FnMut(AircraftId) -> WorldResult<Arc<AircraftType>>,
+    ) -> WorldResult<()> {
         self.mission_dummies(
             &tore_sim::ai::launch::legacy_pairs(wings),
             layout.enemy.distance_ft,
@@ -624,8 +628,8 @@ impl Combat {
         wings: &[(AircraftId, usize)],
         separation: f64,
         data: &BTreeMap<String, Vec<u8>>,
-        load: &mut dyn FnMut(AircraftId) -> AppResult<Arc<AircraftType>>,
-    ) -> AppResult<()> {
+        load: &mut dyn FnMut(AircraftId) -> WorldResult<Arc<AircraftType>>,
+    ) -> WorldResult<()> {
         for (id, count) in wings {
             if *count == 0 {
                 continue;
@@ -719,7 +723,7 @@ impl Combat {
         self.controller.cancel();
         self.state.release();
     }
-    pub fn reset(&mut self, s: &mut flight::State) -> AppResult<()> {
+    pub fn reset(&mut self, s: &mut flight::State) -> WorldResult<()> {
         self.render.restart();
         self.contrails = Default::default();
         self.contrail_sortie = self.contrail_sortie.wrapping_add(1);
@@ -803,7 +807,7 @@ impl Combat {
         }
         raised
     }
-    pub fn step(&mut self, s: &mut flight::State, world: &Terrain) -> AppResult<Vec<Event>> {
+    pub fn step(&mut self, s: &mut flight::State, world: &Terrain) -> WorldResult<Vec<Event>> {
         let l = launcher(s);
         self.last_launcher = Some(l);
         self.record_tape(
@@ -1021,102 +1025,6 @@ pub fn feedback(event: &Event, config: &live::Configuration) -> Option<tore_inpu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tore_formats::aircraft::AircraftId;
-    /// A player combat state with a gun and a missile, loaded as given.
-    fn loaded(ammo: [u16; 2]) -> (Combat, flight::State) {
-        let mut c = fixtures::combat(vec![], vec![]);
-        let mut config = c.state.configuration().clone();
-        config.stations[0].weapon.source = AircraftId::F18.gun().into();
-        c.state = live::State::new(config, true).unwrap();
-        c.initial_ammo = Some(ammo.to_vec());
-        let mut f =
-            flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
-        c.reset(&mut f).unwrap();
-        c.apply_startup_weapons();
-        (c, f)
-    }
-    fn listed(c: &Combat, f: &flight::State) -> Vec<(String, u32, bool)> {
-        crate::combat_view::readout(c, f, 1.).weapons
-    }
-    #[test]
-    fn an_emptied_station_stays_empty_and_is_not_listed() {
-        let (c, f) = loaded([500, 0]);
-        assert_eq!(
-            c.state.ammo,
-            [500, 0],
-            "a zero quantity is not the default load"
-        );
-        let list = listed(&c, &f);
-        assert_eq!(list.len(), 1, "the empty missile is not carried: {list:?}");
-        assert_eq!(list[0].1, 500);
-    }
-    #[test]
-    fn a_fully_empty_aircraft_starts_on_nav_with_nothing_listed() {
-        let (mut c, f) = loaded([0, 0]);
-        assert_eq!(c.state.ammo, [0, 0]);
-        assert!(!c.state.armed, "nothing to arm");
-        assert!(listed(&c, &f).is_empty());
-        // Cycling the selection has nowhere to go.
-        c.state.cycle_selection(true);
-        assert!(!c.state.armed);
-        c.state.cycle_selection(false);
-        assert!(!c.state.armed);
-    }
-    #[test]
-    fn the_selection_ring_skips_empty_stations_and_startup_falls_back() {
-        let (mut c, _) = loaded([0, 3]);
-        assert!(c.state.armed);
-        assert_eq!(
-            c.state.selected, 1,
-            "the empty gun is not selected at startup"
-        );
-        c.state.cycle_selection(true);
-        assert!(!c.state.armed, "NAV");
-        c.state.cycle_selection(true);
-        assert_eq!((c.state.armed, c.state.selected), (true, 1));
-    }
-    #[test]
-    fn a_station_emptied_in_flight_keeps_its_row_but_is_never_selectable() {
-        let (mut c, f) = loaded([500, 3]);
-        assert_eq!((c.state.armed, c.state.selected), (true, 0), "the gun");
-        assert_eq!(listed(&c, &f).len(), 2);
-        // The gun's last round is fired: the selection moves to the missile
-        // and the gun keeps a row at zero, greyed by the window.
-        c.state.ammo[0] = 0;
-        c.state.advance_from_empty();
-        assert_eq!((c.state.armed, c.state.selected), (true, 1));
-        let list = listed(&c, &f);
-        assert_eq!(list.len(), 2, "the dry gun is still listed: {list:?}");
-        assert_eq!((list[0].1, list[0].2), (0, false));
-        assert_eq!((list[1].1, list[1].2), (3, true));
-        // The ring skips the dry gun.
-        c.state.cycle_selection(true);
-        assert!(!c.state.armed, "NAV");
-        c.state.cycle_selection(true);
-        assert_eq!((c.state.armed, c.state.selected), (true, 1));
-        // The last missile goes too: NAV, both rows still listed.
-        c.state.ammo[1] = 0;
-        c.state.advance_from_empty();
-        assert!(!c.state.armed);
-        assert_eq!(listed(&c, &f).len(), 2);
-        c.state.cycle_selection(true);
-        assert!(!c.state.armed, "nothing left to select");
-    }
-    #[test]
-    fn a_dry_station_hands_on_only_to_an_allowed_one() {
-        let (mut c, _) = loaded([500, 3]);
-        c.state.cheats.guns_only = true;
-        c.state.ammo[0] = 0;
-        c.state.advance_from_empty();
-        assert!(!c.state.armed, "the missile is not allowed under guns only");
-    }
-    #[test]
-    fn a_restart_reloads_exactly_the_edited_quantities() {
-        let (mut c, mut f) = loaded([500, 0]);
-        c.state.ammo.fill(7);
-        c.reset(&mut f).unwrap();
-        assert_eq!(c.state.ammo, [500, 0]);
-    }
 
     #[test]
     fn fire_requires_unmodified_press_and_release_after_interruption() {
@@ -1275,12 +1183,12 @@ mod ai_pose_tests {
     }
 }
 
-/// Synthetic combat scenes for tests, with no art: a state with a gun and a
-/// missile station, other aircraft, fixtures, weapons, effects, debris and
-/// pilots, and the snapshots live flight would take of them. Drawing tests in
-/// `combat_view` build on it.
-#[cfg(test)]
-pub(crate) mod fixtures {
+/// Synthetic combat scenes for tests here and in the app, with no art: a
+/// state with a gun and a missile station, other aircraft, fixtures, weapons,
+/// effects, debris and pilots, and the snapshots live flight would take of
+/// them. The app's drawing tests (`combat_view`) build on it.
+#[cfg(any(test, feature = "test-support"))]
+pub mod fixtures {
     use super::*;
     use tore_formats::{aircraft::AircraftId, weapons::Weapon};
     use tore_sim::attitude::unit;
@@ -1297,7 +1205,7 @@ pub(crate) mod fixtures {
 
     /// The player's gun and one missile station with a loaded shape.
     fn state() -> live::State {
-        let mut config = crate::ai_wings::tests::combat_fixture(false)
+        let mut config = crate::test_support::combat_fixture(false)
             .configuration()
             .clone();
         config.stations[0].weapon.source = "M61.JT".into();
@@ -1307,10 +1215,20 @@ pub(crate) mod fixtures {
         config.stations.push(missile);
         live::State::new(config, true).unwrap()
     }
-    pub(crate) fn combat(
-        dummy_types: Vec<Arc<AircraftType>>,
-        dummies: Vec<(usize, Vector)>,
-    ) -> Combat {
+    /// A player combat state with a gun and a missile, loaded as given, and
+    /// the flight it was reset with. The app's weapon-list tests use it.
+    pub fn loaded(ammo: [u16; 2]) -> (Combat, flight::State) {
+        let mut c = combat(vec![], vec![]);
+        let mut config = c.state.configuration().clone();
+        config.stations[0].weapon.source = AircraftId::F18.gun().into();
+        c.state = live::State::new(config, true).unwrap();
+        c.initial_ammo = Some(ammo.to_vec());
+        let mut f = flight::State::new(&crate::test_support::profile(), [0.; 3]).unwrap();
+        c.reset(&mut f).unwrap();
+        c.apply_startup_weapons();
+        (c, f)
+    }
+    pub fn combat(dummy_types: Vec<Arc<AircraftType>>, dummies: Vec<(usize, Vector)>) -> Combat {
         Combat {
             state: state(),
             contrail_offsets: Vec::new(),
@@ -1336,22 +1254,18 @@ pub(crate) mod fixtures {
     }
     /// Synthetic types for the three other aircraft the scene draws, in the
     /// order of the drawn models.
-    pub(crate) fn types() -> Vec<Arc<AircraftType>> {
+    pub fn types() -> Vec<Arc<AircraftType>> {
         [AircraftId::F18, AircraftId::Rafale, AircraftId::F14]
             .into_iter()
             .map(|id| Arc::new(AircraftType::synthetic(id, Vec::new())))
             .collect()
     }
     /// Sets where the player's aircraft's engines exhaust.
-    pub(crate) fn set_contrail_offsets(combat: &mut Combat, offsets: Vec<Vector>) {
+    pub fn set_contrail_offsets(combat: &mut Combat, offsets: Vec<Vector>) {
         combat.contrail_offsets = offsets;
     }
     /// Makes two snapshots the render history.
-    pub(crate) fn set_history(
-        combat: &mut Combat,
-        previous: RenderSnapshot,
-        current: RenderSnapshot,
-    ) {
+    pub fn set_history(combat: &mut Combat, previous: RenderSnapshot, current: RenderSnapshot) {
         combat.render = RenderHistory::default();
         combat.render.set_current(previous);
         combat.render.advance(current);
@@ -1443,15 +1357,15 @@ pub(crate) mod fixtures {
         }
     }
 
-    pub(crate) struct Scene {
-        pub(crate) previous: Vec<live::Target>,
-        pub(crate) current: Vec<live::Target>,
-        pub(crate) devices: Vec<(u32, [f64; 11], [f64; 11])>,
-        pub(crate) projectiles: Vec<live::Projectile>,
-        pub(crate) effects: Vec<live::Effect>,
-        pub(crate) debris: Vec<Piece>,
+    pub struct Scene {
+        pub previous: Vec<live::Target>,
+        pub current: Vec<live::Target>,
+        pub devices: Vec<(u32, [f64; 11], [f64; 11])>,
+        pub projectiles: Vec<live::Projectile>,
+        pub effects: Vec<live::Effect>,
+        pub debris: Vec<Piece>,
     }
-    pub(crate) fn scene(config: &live::Configuration) -> Scene {
+    pub fn scene(config: &live::Configuration) -> Scene {
         use AircraftId::{F14, F18, Rafale};
         use tore_sim::wreck::Phase::{Exploded, Falling};
         let b = Basis::new;
@@ -1699,9 +1613,8 @@ pub(crate) mod fixtures {
         }
     }
     /// The presented player state that fixture targets copy.
-    pub(crate) fn player() -> flight::State {
-        let mut s =
-            flight::State::new(&flight::animation_tests::profile(), [0., 5000., 0.]).unwrap();
+    pub fn player() -> flight::State {
+        let mut s = flight::State::new(&crate::test_support::profile(), [0., 5000., 0.]).unwrap();
         s.bay = 0.35;
         s.speed = 820.;
         s.throttle = 0.95;
@@ -1718,7 +1631,7 @@ pub(crate) mod fixtures {
         s.damage_variant = Some(DamageSection::LeftWing as usize);
         s
     }
-    pub(crate) fn pilots() -> Vec<Escape> {
+    pub fn pilots() -> Vec<Escape> {
         [
             Phase::Seat,
             Phase::Freefall,
@@ -1744,14 +1657,14 @@ pub(crate) mod fixtures {
     /// Loads the scene as live flight would hold it: the previous and
     /// current tick's snapshots, each aircraft's devices as the AI simulated
     /// them on those ticks.
-    pub(crate) fn load(combat: &mut Combat, scene: &Scene, ai_poses: bool, player: &flight::State) {
+    pub fn load(combat: &mut Combat, scene: &Scene, ai_poses: bool, player: &flight::State) {
         let [previous, current] = snapshots(combat, scene, ai_poses, player);
         set_history(combat, previous, current);
     }
     /// The scene's previous and current tick as live flight snapshots them,
     /// with each aircraft's devices as the AI simulated them on those ticks.
     /// Leaves the current tick's scene in `combat.state`.
-    pub(crate) fn snapshots(
+    pub fn snapshots(
         combat: &mut Combat,
         scene: &Scene,
         ai_poses: bool,

@@ -625,7 +625,7 @@ mod tests {
     }
     #[test]
     fn faxx_hides_fins_and_opens_only_commanded_flap_about_fixed_hinge() {
-        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         let fin_shape = vec![[13., -55., 1.], [29., -24., 36.], [14., -11., 4.]];
         for address in [0x361d, 0x3670, 0x38e4, 0x3903, 0x3926] {
             let fin = face(address, fin_shape.clone());
@@ -796,7 +796,7 @@ mod tests {
     }
     #[test]
     fn rudder_keeps_forward_skin_fixed_and_sweep_uses_documented_schedule() {
-        let mut s = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut s = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         let f = face(
             0x1bd3,
             vec![
@@ -842,7 +842,7 @@ mod tests {
                 [-2., 20., -8.],
             ],
         );
-        let mut s = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut s = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         assert_eq!(faces(Id::Mig21, &f, &s)[0].positions, f.positions);
         s.brake = 0.5;
         let moved = faces(Id::Mig21, &f, &s);

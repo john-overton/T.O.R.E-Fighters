@@ -143,7 +143,7 @@ drone camera are plain data and can drive a live source; the viewer and
 playback themselves are tied to a finished file.
 
 **Radio.** Calls are built as lists of recordings with matching text
-(`crates/tore-app/src/comms.rs`) and already go into replays. The recordings for
+(`crates/tore-world/src/comms.rs`) and already go into replays. The recordings for
 "bearing", "angels" and colour callsigns are imported but unused. There is no
 comm rose and no frequencies.
 

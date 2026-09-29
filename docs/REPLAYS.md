@@ -1453,7 +1453,7 @@ scripted flight twice, draining the journal every tick and never, and hear
 the same lines at the same ticks with the same rolls left over. The shape of
 the records is an agent decision (2026-09-26).
 
-The code is `tore-app/src/comms/journal.rs`. The mission recorder drains
+The code is `tore-world/src/comms/journal.rs`. The mission recorder drains
 it every tick and records each entry as an event
 ([communication events](#communication-events)); a flight that is not
 recorded never drains it, and it simply stays within its bound.

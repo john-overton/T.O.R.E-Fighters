@@ -1301,7 +1301,7 @@ mod tests {
         let dir = TempDir::new("convert");
         let ownship = fixture::hornet_airframe(true);
         let player = fixture::player();
-        let world = crate::terrain::tests::world();
+        let world = tore_world::test_support::terrain();
         let scenery = crate::scenery::tests::scenery();
         let art = fixture::escape_art();
         let mut drawn = 0;

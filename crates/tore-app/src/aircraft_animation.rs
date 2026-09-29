@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn deployed_brake_shows_top_skin_above_and_underside_below() {
         let mut s =
-            crate::flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+            crate::flight::State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         for brake in [1., 0.5, 0.1] {
             s.brake = brake;
             let faces: Vec<_> = brake_twins()

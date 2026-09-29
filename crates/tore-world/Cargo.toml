@@ -1,0 +1,19 @@
+[package]
+name = "tore-world"
+version = "0.1.2"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+tore-formats = { path = "../tore-formats" }
+tore-input = { path = "../tore-input" }
+tore-sim = { path = "../tore-sim" }
+
+[features]
+# Synthetic fixtures (terrain, aircraft profile, AI wings, combat) that tests in
+# other crates share. Always on under this crate's own tests.
+test-support = []
+
+[lints]
+workspace = true

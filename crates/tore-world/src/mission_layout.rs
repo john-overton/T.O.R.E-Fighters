@@ -324,7 +324,7 @@ pub fn relative_offsets(slots: &[[f64; 3]], heading: f64) -> Vec<[f64; 2]> {
         .collect()
 }
 
-pub fn runway_pose(world: &Terrain, object: u32) -> crate::AppResult<([f64; 3], f64)> {
+pub fn runway_pose(world: &Terrain, object: u32) -> crate::WorldResult<([f64; 3], f64)> {
     let runway = world
         .airport_scene
         .runway(object)
@@ -382,7 +382,11 @@ impl GroundLayout {
 /// must be on the airport's paving, on a landable surface and clear of
 /// buildings. If the staggered layout cannot fit, its spacing tightens, and
 /// if none works the start is rejected with a message for the creator.
-pub fn ground_layout(world: &Terrain, object: u32, count: usize) -> crate::AppResult<GroundLayout> {
+pub fn ground_layout(
+    world: &Terrain,
+    object: u32,
+    count: usize,
+) -> crate::WorldResult<GroundLayout> {
     let runway = world
         .airport_scene
         .runway(object)
@@ -458,7 +462,7 @@ pub fn place_on_runway(
     flight: &mut tore_sim::flight::State,
     layout: &GroundLayout,
     order: usize,
-) -> crate::AppResult<()> {
+) -> crate::WorldResult<()> {
     let position = *layout
         .slots
         .get(order)
@@ -490,7 +494,7 @@ pub fn apply_ground_start(
     world: &Terrain,
     flight: &mut tore_sim::flight::State,
     object: u32,
-) -> crate::AppResult<u32> {
+) -> crate::WorldResult<u32> {
     let layout = ground_layout(world, object, 1)?;
     place_on_runway(world, flight, &layout, 0)?;
     Ok(layout.airport)
@@ -581,7 +585,7 @@ mod placement_tests {
     /// threshold 1096 ft into the map.
     fn airfield(length_ft: f64) -> Terrain {
         use tore_sim::airport::{Airport, Allegiance, OrientedBox, SourceKey, StaticObject};
-        let mut world = crate::terrain::tests::world();
+        let mut world = crate::test_support::terrain();
         let surface = OrientedBox {
             center: [4096., 20., 4096.],
             half: [1500., 2., length_ft / 2.],
@@ -683,8 +687,7 @@ mod placement_tests {
         assert_eq!(departure.runway.object, RUNWAY);
         // The player stands in the front slot on the researched model.
         let mut player =
-            tore_sim::flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3])
-                .unwrap();
+            tore_sim::flight::State::new(&crate::test_support::profile(), [0.; 3]).unwrap();
         assert!(place_on_runway(&world, &mut player, &layout, 0).is_err());
         player.enable_research(1).unwrap();
         place_on_runway(&world, &mut player, &layout, 0).unwrap();
@@ -737,8 +740,7 @@ mod placement_tests {
         assert_eq!(layout.departure().headings, layout.headings);
         assert_eq!(layout.offsets()[1], [150., -200.]);
         let mut wingman =
-            tore_sim::flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3])
-                .unwrap();
+            tore_sim::flight::State::new(&crate::test_support::profile(), [0.; 3]).unwrap();
         wingman.enable_research(2).unwrap();
         place_on_runway(&world, &mut wingman, &layout, 1).unwrap();
         assert_eq!(
@@ -821,9 +823,7 @@ mod placement_tests {
         assert_eq!(plan.enemy_turn, 0.5);
         assert_eq!(plan.runway_slots.unwrap(), ground.offsets());
         // Planning from the runway uses the leader's slot and runway heading.
-        let start =
-            tore_sim::flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3])
-                .unwrap();
+        let start = tore_sim::flight::State::new(&crate::test_support::profile(), [0.; 3]).unwrap();
         let planned = MissionLayout::plan(&world, &start, Some(ground), &[], 1000.);
         assert_eq!(planned.player_turn, 0.);
         assert_eq!(planned.enemy, EnemyAim::straight(1000.));

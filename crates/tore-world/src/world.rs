@@ -9,11 +9,12 @@
 //! same order, for the app to present after the step.
 
 use crate::{
-    AppResult, ai_wings, aircraft_type, airfield_radio, attitude, combat, combat_tape, comms,
-    crew_voice, flight, mission_layout, radio_calls, terrain,
+    WorldResult, ai_wings, aircraft_type, airfield_radio, combat, combat_tape, comms, crew_voice,
+    mission_layout, radio_calls, terrain,
 };
 use std::collections::BTreeMap;
 use tore_sim::models::FlightModel;
+use tore_sim::{attitude, flight};
 
 #[cfg(test)]
 mod tick_tests;
@@ -178,7 +179,7 @@ impl World {
         &mut self,
         aircraft: &aircraft_type::AircraftType,
         resources: &BTreeMap<String, Vec<u8>>,
-    ) -> AppResult<Restarted> {
+    ) -> WorldResult<Restarted> {
         // A fixed seed keeps headless runs deterministic.
         self.comms.restart(1);
         self.crew_voice = crew_voice::CrewVoice::new(&aircraft.profile);
@@ -323,7 +324,7 @@ impl World {
 
     /// One fixed 120 Hz tick of the whole mission. See the module
     /// documentation; the order below is the order the redraw loop ran.
-    pub fn step(&mut self, input: &TickInput, out: &mut TickOutput) -> AppResult<()> {
+    pub fn step(&mut self, input: &TickInput, out: &mut TickOutput) -> WorldResult<()> {
         *out = TickOutput::default();
         for &forward in &input.weapon_cycles {
             self.cycle_weapon(forward);

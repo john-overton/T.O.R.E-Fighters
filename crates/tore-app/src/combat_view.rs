@@ -590,17 +590,14 @@ pub fn status(combat: &Combat, s: &flight::State) -> String {
 #[cfg(test)]
 pub(crate) mod render_hash_tests {
     use super::*;
-    use crate::{
-        combat::fixtures, damage_art::DamageArt, render_snapshot::combat_geometry,
-        snapshot::pose_state,
-    };
-    use fixtures::load;
+    use crate::{damage_art::DamageArt, render_snapshot::combat_geometry, snapshot::pose_state};
     pub(crate) use fixtures::{pilots, player, scene, snapshots};
     use tore_formats::{
         aircraft::AircraftId,
         shape::{Face, FogMode, Line, Shape},
     };
     use tore_sim::combat::live::DamageSection;
+    use tore_world::combat::fixtures::{self, load};
 
     /// Batches per model, fixture targets with the ownship, combat geometry
     /// beside loaded models, camera poses and ejected pilots.
@@ -909,10 +906,10 @@ pub(crate) mod render_hash_tests {
         stepped.smooth_weather = false;
         let worlds = [
             (
-                crate::terrain::tests::world(),
+                tore_world::test_support::terrain(),
                 crate::scenery::tests::scenery(),
             ),
-            (crate::terrain::tests::world(), stepped),
+            (tore_world::test_support::terrain(), stepped),
         ];
         let (mut with_models, mut with_models_view) =
             pair(models(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
@@ -1001,7 +998,7 @@ pub(crate) mod render_hash_tests {
     #[test]
     fn aircraft_keep_their_shape_far_from_the_map_origin() {
         let ownship = hornet_airframe(true);
-        let world = crate::terrain::tests::world();
+        let world = tore_world::test_support::terrain();
         let mut scenery = crate::scenery::tests::scenery();
         let near = player();
         let camera = cameras().remove(0);
@@ -1032,7 +1029,7 @@ pub(crate) mod render_hash_tests {
     #[test]
     fn fixture_targets_keep_the_player_copy_rule() {
         let ownship = hornet_airframe(true);
-        let world = crate::terrain::tests::world();
+        let world = tore_world::test_support::terrain();
         let scenery = crate::scenery::tests::scenery();
         let (mut fixture, fixture_view) = pair(Vec::new(), Vec::new());
         let scene = scene(fixture.state.configuration());
@@ -1180,10 +1177,10 @@ pub(crate) mod render_hash_tests {
     #[test]
     fn the_player_round_trips_through_snapshots() {
         let ownship = hornet_airframe(true);
-        let world = crate::terrain::tests::world();
+        let world = tore_world::test_support::terrain();
         let scenery = crate::scenery::tests::scenery();
         let template =
-            flight::State::new(&flight::animation_tests::profile(), [0., 5000., 0.]).unwrap();
+            flight::State::new(&tore_world::test_support::profile(), [0., 5000., 0.]).unwrap();
         let (mut combat, view) = pair(Vec::new(), Vec::new());
         let scene = scene(combat.state.configuration());
         combat.state.targets.clone_from(&scene.current);
@@ -1258,5 +1255,94 @@ pub(crate) mod render_hash_tests {
                 }
             }
         }
+    }
+}
+
+/// The bug bash's empty-station rules, read through the weapons window.
+#[cfg(test)]
+mod empty_station_tests {
+    use super::*;
+    use tore_world::combat::fixtures::loaded;
+    fn listed(c: &Combat, f: &flight::State) -> Vec<(String, u32, bool)> {
+        readout(c, f, 1.).weapons
+    }
+    #[test]
+    fn an_emptied_station_stays_empty_and_is_not_listed() {
+        let (c, f) = loaded([500, 0]);
+        assert_eq!(
+            c.state.ammo,
+            [500, 0],
+            "a zero quantity is not the default load"
+        );
+        let list = listed(&c, &f);
+        assert_eq!(list.len(), 1, "the empty missile is not carried: {list:?}");
+        assert_eq!(list[0].1, 500);
+    }
+    #[test]
+    fn a_fully_empty_aircraft_starts_on_nav_with_nothing_listed() {
+        let (mut c, f) = loaded([0, 0]);
+        assert_eq!(c.state.ammo, [0, 0]);
+        assert!(!c.state.armed, "nothing to arm");
+        assert!(listed(&c, &f).is_empty());
+        // Cycling the selection has nowhere to go.
+        c.state.cycle_selection(true);
+        assert!(!c.state.armed);
+        c.state.cycle_selection(false);
+        assert!(!c.state.armed);
+    }
+    #[test]
+    fn the_selection_ring_skips_empty_stations_and_startup_falls_back() {
+        let (mut c, _) = loaded([0, 3]);
+        assert!(c.state.armed);
+        assert_eq!(
+            c.state.selected, 1,
+            "the empty gun is not selected at startup"
+        );
+        c.state.cycle_selection(true);
+        assert!(!c.state.armed, "NAV");
+        c.state.cycle_selection(true);
+        assert_eq!((c.state.armed, c.state.selected), (true, 1));
+    }
+    #[test]
+    fn a_station_emptied_in_flight_keeps_its_row_but_is_never_selectable() {
+        let (mut c, f) = loaded([500, 3]);
+        assert_eq!((c.state.armed, c.state.selected), (true, 0), "the gun");
+        assert_eq!(listed(&c, &f).len(), 2);
+        // The gun's last round is fired: the selection moves to the missile
+        // and the gun keeps a row at zero, greyed by the window.
+        c.state.ammo[0] = 0;
+        c.state.advance_from_empty();
+        assert_eq!((c.state.armed, c.state.selected), (true, 1));
+        let list = listed(&c, &f);
+        assert_eq!(list.len(), 2, "the dry gun is still listed: {list:?}");
+        assert_eq!((list[0].1, list[0].2), (0, false));
+        assert_eq!((list[1].1, list[1].2), (3, true));
+        // The ring skips the dry gun.
+        c.state.cycle_selection(true);
+        assert!(!c.state.armed, "NAV");
+        c.state.cycle_selection(true);
+        assert_eq!((c.state.armed, c.state.selected), (true, 1));
+        // The last missile goes too: NAV, both rows still listed.
+        c.state.ammo[1] = 0;
+        c.state.advance_from_empty();
+        assert!(!c.state.armed);
+        assert_eq!(listed(&c, &f).len(), 2);
+        c.state.cycle_selection(true);
+        assert!(!c.state.armed, "nothing left to select");
+    }
+    #[test]
+    fn a_dry_station_hands_on_only_to_an_allowed_one() {
+        let (mut c, _) = loaded([500, 3]);
+        c.state.cheats.guns_only = true;
+        c.state.ammo[0] = 0;
+        c.state.advance_from_empty();
+        assert!(!c.state.armed, "the missile is not allowed under guns only");
+    }
+    #[test]
+    fn a_restart_reloads_exactly_the_edited_quantities() {
+        let (mut c, mut f) = loaded([500, 0]);
+        c.state.ammo.fill(7);
+        c.reset(&mut f).unwrap();
+        assert_eq!(c.state.ammo, [500, 0]);
     }
 }

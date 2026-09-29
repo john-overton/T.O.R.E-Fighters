@@ -26,7 +26,7 @@ mkdir -p .local/theater-research
 objdump -d gameassets/fighters-anthology/FA.EXE > .local/theater-research/fa-disassembly.txt
 ```
 
-Addresses below are virtual addresses in this exact `FA.EXE`, SHA-256 `e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`. They are not portable to another edition. The extraction report records archive/output SHA-256, offsets and decoded sizes, plus structured terrain/mission metadata. Full inputs and derived captures remain ignored. Readers live in `crates/tore-formats/src/theater.rs`; runtime construction in `crates/tore-app/src/terrain.rs` (queries) and `crates/tore-app/src/scenery.rs` (art and mesh).
+Addresses below are virtual addresses in this exact `FA.EXE`, SHA-256 `e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`. They are not portable to another edition. The extraction report records archive/output SHA-256, offsets and decoded sizes, plus structured terrain/mission metadata. Full inputs and derived captures remain ignored. Readers live in `crates/tore-formats/src/theater.rs`; runtime construction in `crates/tore-world/src/terrain.rs` (queries) and `crates/tore-app/src/scenery.rs` (art and mesh).
 
 ## BIT2 / T2: confirmed packed layout
 

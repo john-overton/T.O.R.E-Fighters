@@ -498,11 +498,11 @@ Every stem above is present in the local `FA_2.LIB` except `^FIRGUN`.
 ## Implementation in TORE
 
 Implementation mode, 2026-09-23. The calls in this spec are produced by
-`crates/tore-app/src/radio_calls.rs` (wording, listeners, cooldowns and
+`crates/tore-world/src/radio_calls.rs` (wording, listeners, cooldowns and
 per-aircraft limits) from the player's combat events and from AI events
-surfaced by `crates/tore-app/src/ai_wings/chatter.rs`. Delivery (delays, radio
+surfaced by `crates/tore-world/src/ai_wings/chatter.rs`. Delivery (delays, radio
 silence, the channel hold and playback) is the shared channel in
-`crates/tore-app/src/comms.rs`. To attribute hits, combat keeps a short list
+`crates/tore-world/src/comms.rs`. To attribute hits, combat keeps a short list
 of every damaging projectile with its owner, victim and store flags; the AI
 reports each accepted opposite-side launch warning and exposes its fuel level
 read-only. The radio never changes a combat or AI decision.

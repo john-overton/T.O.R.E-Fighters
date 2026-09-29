@@ -64,7 +64,8 @@ use tore_sim::{
     sensors::{self, Observable, Sensors},
 };
 
-use crate::{AppResult, flight, terrain::Terrain};
+use crate::{WorldResult, terrain::Terrain};
+use tore_sim::flight;
 
 fn terrain_visible(from: Vector, to: Vector, ground: &dyn Fn(f64, f64) -> f64) -> bool {
     (1..=8).all(|step| {
@@ -545,7 +546,7 @@ impl AiWings {
         targets: &[live::Target],
         guns_only: bool,
         resources: &BTreeMap<String, Vec<u8>>,
-    ) -> AppResult<Self> {
+    ) -> WorldResult<Self> {
         Self::build_mission(wings, targets, guns_only, resources, &Airfields::default())
     }
 
@@ -558,7 +559,7 @@ impl AiWings {
         guns_only: bool,
         resources: &BTreeMap<String, Vec<u8>>,
         airfields: &Airfields,
-    ) -> AppResult<Self> {
+    ) -> WorldResult<Self> {
         let mut bridge = Self::build_at(wings, targets, airfields, |id| {
             let bytes = resources
                 .get(id.pt())
@@ -665,13 +666,13 @@ impl AiWings {
 
     /// [`build`](Self::build) with the aircraft records supplied by the caller,
     /// so a test can build a mission from a synthetic profile and no media.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn build_with(
         wings: &[WingLaunch],
         targets: &[live::Target],
         _station: usize,
-        resolve: impl FnMut(AircraftId) -> AppResult<(Aircraft, Option<sensors::SensorProfiles>)>,
-    ) -> AppResult<Self> {
+        resolve: impl FnMut(AircraftId) -> WorldResult<(Aircraft, Option<sensors::SensorProfiles>)>,
+    ) -> WorldResult<Self> {
         Self::build_at(wings, targets, &Airfields::default(), resolve)
     }
 
@@ -680,8 +681,8 @@ impl AiWings {
         wings: &[WingLaunch],
         targets: &[live::Target],
         airfields: &Airfields,
-        mut resolve: impl FnMut(AircraftId) -> AppResult<(Aircraft, Option<sensors::SensorProfiles>)>,
-    ) -> AppResult<Self> {
+        mut resolve: impl FnMut(AircraftId) -> WorldResult<(Aircraft, Option<sensors::SensorProfiles>)>,
+    ) -> WorldResult<Self> {
         let mut mission = AiMission::new();
         // Opinionated host setup: level delta formations using B43's
         // alternating trailing slots, 512 ft spacing, independently per wing.
@@ -886,7 +887,7 @@ impl AiWings {
         researched: bool,
         enemy_heading: Option<f64>,
         wind: Vector,
-    ) -> AppResult<()> {
+    ) -> WorldResult<()> {
         for actor in self.mission.actors_mut() {
             let id = actor.id();
             if actor.identity().side == ENEMY_SIDE
@@ -1050,7 +1051,7 @@ impl AiWings {
         state: &mut live::State,
         player: &flight::State,
         world: &Terrain,
-    ) -> AppResult<()> {
+    ) -> WorldResult<()> {
         let ground = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32));
         // The decoy draws and rolls describe this step only. Clearing the
         // log never touches the generator's state.
@@ -1463,7 +1464,7 @@ impl AiWings {
         player: WorldObject,
         targets: &mut [live::Target],
         ground: &dyn Fn(f64, f64) -> f64,
-    ) -> AppResult<tore_sim::ai::mission::MissionOutput> {
+    ) -> WorldResult<tore_sim::ai::mission::MissionOutput> {
         self.advance_on_surface(player, targets, ground, &|x, z| {
             tore_sim::research::Surface::terrain(ground(x, z))
         })
@@ -1480,7 +1481,7 @@ impl AiWings {
         targets: &mut [live::Target],
         terrain: &dyn Fn(f64, f64) -> f64,
         surface: &dyn Fn(f64, f64) -> tore_sim::research::Surface,
-    ) -> AppResult<tore_sim::ai::mission::MissionOutput> {
+    ) -> WorldResult<tore_sim::ai::mission::MissionOutput> {
         self.mirror_damage_in(targets);
         let escaped: Vec<_> = self
             .mission
@@ -2056,7 +2057,7 @@ impl AiWings {
         &mut self,
         event: &tore_sim::ai::mission::DeviceEvent,
         state: &mut live::State,
-    ) -> AppResult<()> {
+    ) -> WorldResult<()> {
         use tore_sim::ai::threat::{self, DecoyOutcome, GuidingMissile};
         let Some(actor) = self.mission.actor(event.actor) else {
             return Ok(());
@@ -2358,143 +2359,17 @@ impl AiWings {
     }
 }
 
-/// Imported-media validation, separate from synthetic model tests. No retail
-/// bytes or generated assets are written by this probe.
-pub fn roster_probe(
-    ticks: usize,
-    resources: &BTreeMap<String, Vec<u8>>,
-    world: &Terrain,
-) -> AppResult<()> {
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::terrain as world;
+    pub(crate) use crate::test_support::{aircraft, combat_fixture, payload, spawned, target};
     use tore_sim::ai::{
         Experience,
+        controller::TargetView,
+        engagement::{GroupObjective, Policy, Priority},
+        experience::{EnemySkillOverride, ExperienceOrigin},
         launch::{WingId, WingSelection, resolve_wings},
-    };
-    for id in AircraftId::ALL {
-        let aircraft = Aircraft::parse(
-            resources
-                .get(id.pt())
-                .ok_or_else(|| format!("missing {}", id.pt()))?,
-        )?;
-        let config = live::Configuration::from_source(&aircraft, |name| {
-            resources
-                .get(name)
-                .cloned()
-                .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
-        })?;
-        for level in Experience::ALL {
-            let wings = resolve_wings(
-                &[
-                    WingSelection {
-                        wing: WingId::new(launch::Side::Friendly, 0)?,
-                        aircraft: id,
-                        count: 1,
-                        skill_level: level.index() as i32,
-                    },
-                    WingSelection {
-                        wing: WingId::new(launch::Side::Enemy, 0)?,
-                        aircraft: id,
-                        count: 1,
-                        skill_level: level.index() as i32,
-                    },
-                ],
-                None,
-            )?;
-            let mut combat = live::State::new(config.clone(), true)?;
-            combat.add_dummy(&config, [512.0, 30000.0, -512.0], Basis::new(0.0, 0.0, 0.0));
-            combat.add_dummy(
-                &config,
-                [0.0, 30000.0, 30000.0],
-                Basis::new(std::f64::consts::PI, 0.0, 0.0),
-            );
-            let mut bridge = AiWings::build(&wings, &combat.targets, false, resources)?;
-            for actor in bridge.mission.actors() {
-                if actor.stations().len() != config.stations.len()
-                    || actor
-                        .stations()
-                        .iter()
-                        .zip(&config.stations)
-                        .any(|(station, imported)| {
-                            station.employment_zone != Some(imported.weapon.seeker.zones[1])
-                                || station.rounds()
-                                    != tore_sim::ai::weapon_service::Rounds::Finite(u32::from(
-                                        imported.count,
-                                    ))
-                        })
-                {
-                    return Err(format!("AI inventory/envelope mismatch for {}", id.pt()).into());
-                }
-            }
-            let mut player = flight::State::new(&aircraft, [0.0, 30000.0, 0.0])?;
-            let mut peak_roll = 0.0f64;
-            let mut peak_turn = 0.0f64;
-            for _ in 0..ticks {
-                let before: Vec<_> = bridge
-                    .mission
-                    .actors()
-                    .iter()
-                    .map(|a| (a.alive(), a.flight().clone()))
-                    .collect();
-                player.step(&flight::PilotInput::default(), |x, z| {
-                    f64::from(world.height(x as f32, z as f32))
-                });
-                combat.step(false, crate::combat::launcher(&player), |x, z| {
-                    f64::from(world.height(x as f32, z as f32))
-                });
-                bridge.step(&mut combat, &player, world)?;
-                for (actor, (was_alive, mut replay)) in bridge.mission.actors().iter().zip(before) {
-                    let bank = replay.bank;
-                    let yaw = replay.yaw;
-                    if was_alive && actor.alive() {
-                        replay.damage_fraction = actor.flight().damage_fraction;
-                        replay.payload_lbs = actor.flight().payload_lbs;
-                        replay.step(actor.last_input(), |x, z| {
-                            f64::from(world.height(x as f32, z as f32))
-                        });
-                        if &replay != actor.flight() {
-                            return Err(
-                                format!("AI input replay diverged {} {level:?}", id.pt()).into()
-                            );
-                        }
-                    }
-                    let f = actor.flight();
-                    if !f.position.iter().all(|v| v.is_finite()) {
-                        return Err(format!("nonfinite {} {level:?}", id.pt()).into());
-                    }
-                    let rate = |delta: f64| {
-                        ((delta.to_degrees() + 180.0).rem_euclid(360.0) - 180.0).abs() * 120.0
-                    };
-                    peak_roll = peak_roll.max(rate(f.bank - bank));
-                    peak_turn = peak_turn.max(rate(f.yaw - yaw));
-                }
-            }
-            println!(
-                "AI roster {} {level:?}: ticks={ticks} models=2 radar={} ir={} stores={} gun={} projectiles={} dropped={} peak_roll={peak_roll:.3} peak_turn={peak_turn:.3} PASS",
-                id.pt(),
-                config.sensors.radar.is_some(),
-                config.sensors.infrared.is_some(),
-                config.stations.len(),
-                config.stations.iter().any(|s| s.weapon.source == id.gun()),
-                bridge.realised_launches,
-                bridge.dropped_launches
-            );
-        }
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use crate::terrain::tests::world;
-    use tore_sim::{
-        ai::{
-            Experience,
-            controller::TargetView,
-            engagement::{GroupObjective, Policy, Priority},
-            experience::{EnemySkillOverride, ExperienceOrigin},
-            launch::{WingId, WingSelection, resolve_wings},
-        },
-        combat::missiles::{TargetRole, seeker::Heat},
     };
 
     #[test]
@@ -2572,190 +2447,8 @@ pub(crate) mod tests {
     /// `velocity / 120` to every live target once per tick.
     const FIXTURE_TICK_RATE: f64 = 120.0;
 
-    pub(crate) fn combat_fixture(guided: bool) -> live::State {
-        use live::{Configuration, State, Station};
-        use tore_formats::weapons::*;
-        let zone = Zone {
-            heading: 12000,
-            pitch: 12000,
-            minimum_range: 0,
-            maximum_range: 10000,
-            minimum_altitude: i32::MIN,
-            maximum_altitude: i32::MAX,
-        };
-        let seeker = Seeker {
-            flags: [0; 2],
-            signature: if guided { 3 } else { 0 },
-            look_down: 0,
-            doppler_above: 0,
-            doppler_below: 0,
-            doppler_minimum_range: 0,
-            all_aspect: 0,
-            zones: [zone; 2],
-            chaff_flare_chance: 0,
-            deception_chance: 0,
-        };
-        let w = Weapon {
-            source: "SYNTHETIC.JT".into(),
-            name: "Synthetic".into(),
-            hud_name: "SYN".into(),
-            shape: None,
-            fire_sound: None,
-            native_callback: "_PROJProc".into(),
-            flags: if guided { 0x240 } else { 0x844 },
-            object_flags: 0,
-            weight: 10,
-            movement: Movement {
-                minimum_speed: 10,
-                corner_speed: 1000,
-                maximum_speed: 2000,
-                acceleration: 100,
-                deceleration: 2,
-                initial_speed: 1000,
-                final_speed: 500,
-                launch_retard: 100,
-                ignite_t: 0,
-                fuel_t: 10,
-                remove_t: 20,
-                powered_turn_rate: 10000,
-                unpowered_turn_rate: 10000,
-                performance_at_0: 100,
-                performance_at_20: 100,
-                cruise: [0; 4],
-                jink: [0; 3],
-            },
-            burst: Burst {
-                projectiles_in_pod: 1,
-                actual_rounds_per_game: 2,
-                game_rounds_in_burst: 1,
-                game_rounds_in_carpet_burst: 1,
-                game_burst_t: 1,
-                reload_t: 0,
-                startup_shots: 0,
-                random_fire_percent: 0,
-                offset_fire_percent: 0,
-                offset_fire_heading: 0,
-                offset_fire_pitch: 0,
-                sine_pattern: [0; 4],
-            },
-            seeker,
-            guidance: Guidance {
-                track_t: 1,
-                track_max_g_raw: 1,
-                target_sun_chance: 0,
-                max_aon: 0,
-                chances: [100; 4],
-                hit_modifiers: [0; 9],
-            },
-            damage: Damage {
-                by_class: [10; 5],
-                fuze_arm_t: 0,
-                fuze_radius: 0,
-                side_hit_fuze_failure: 0,
-                collateral_radius: 0,
-                collateral_percent: 0,
-            },
-            effects: Effects {
-                object_explosion: 0,
-                land_explosion: 0,
-                water_explosion: 0,
-                crater_size: 0,
-                smoke: [0; 5],
-                max_sound_distance: 0,
-                frequency_adjustment: 0,
-            },
-        };
-        State::new(
-            Configuration {
-                fragment_offsets: [[0.; 3]; 2],
-                ecm: tore_formats::weapons::Countermeasures {
-                    weight: 0,
-                    flags: 0,
-                    mode_flags: 0x10,
-                    chaff: [0; 4],
-                    flare: [0; 4],
-                    radar_deception_chance: 30,
-                    radar_signature_add: 0,
-                    radar_noise_range: [0; 2],
-                    infrared_deception_chance: 0,
-                    infrared_signature_add: 0,
-                    infrared_lose_lock_time: 0,
-                },
-                system_damage: [0x11; 45],
-                damage_capacity: 30,
-                afterburner_available: true,
-                hardpoint_slots: vec![Some(0)],
-                radar_hardpoint: 1,
-                visual_hardpoint: 3,
-                ecm_hardpoint: 2,
-                aircraft: AircraftId::F18,
-                stations: vec![Station {
-                    weapon: w,
-                    mount: [0.; 3],
-                    count: 11,
-                    internal: !guided,
-                }],
-                hit_points: 20,
-                target_category: 0x80,
-                external_equipment_lbs: 0,
-                external_fuel_lbs: [0.; 9],
-                engines: 1,
-                wreck_power: tore_sim::wreck::Power::default(),
-                infrared_hardpoint: None,
-                rwr_hardpoint: None,
-                sensors: sensors::SensorProfiles {
-                    aircraft: AircraftId::F18,
-                    radar: None,
-                    infrared: None,
-                    visual: None,
-                    jammer: None,
-                    signature: sensors::SignatureProfile::default(),
-                },
-            },
-            true,
-        )
-        .unwrap()
-    }
-    pub(crate) fn aircraft() -> Aircraft {
-        crate::flight::animation_tests::profile()
-    }
-
     pub(super) fn flat(_x: f64, _z: f64) -> f64 {
         0.0
-    }
-
-    fn target(id: u32, position: Vector, yaw: f64) -> live::Target {
-        let basis = Basis::new(yaw, 0., 0.);
-        live::Target {
-            aircraft: Some(AircraftId::F18),
-            role: TargetRole::Aircraft,
-            heat: Heat::Engine {
-                on: true,
-                throttle: 0.7,
-                afterburner: false,
-            },
-            radar_emitting: false,
-            id,
-            position,
-            velocity: basis.forward.map(|v| v * 300.),
-            basis,
-            configuration: sensors::Configuration::CLEAN,
-            signature: sensors::SignatureProfile::default(),
-            jammer: None,
-            jammer_active: false,
-            airborne: true,
-            on_ground: false,
-            radius: 28.,
-            hp: 100,
-            initial_hp: 100,
-            fragment_offsets: [[0.; 3]; 2],
-            wreck: None,
-            wreck_power: tore_sim::wreck::Power::default(),
-            fragment_released: false,
-            localized_damage: live::LocalizedDamage::default(),
-            faults: Default::default(),
-            category: 0,
-        }
     }
 
     fn runway_view(object: u32, center: Vector) -> RunwayView {
@@ -3037,33 +2730,6 @@ pub(crate) mod tests {
         (1..=5)
             .map(|id| target(id, [0., 9000., f64::from(id) * 1000.], 0.))
             .collect()
-    }
-
-    /// Two friendly aircraft in wing 2 and two enemy aircraft in wing 1, the
-    /// same shape `--ai-probe-ticks` flies.
-    pub(crate) fn payload(enemy_override: Option<EnemySkillOverride>) -> Vec<WingLaunch> {
-        let selections = [
-            (launch::Side::Friendly, 1u8, 2usize, 1i32),
-            (launch::Side::Enemy, 0, 2, 3),
-        ]
-        .map(|(side, index, count, skill_level)| WingSelection {
-            wing: WingId::new(side, index).unwrap(),
-            aircraft: AircraftId::F18,
-            count,
-            skill_level,
-        });
-        resolve_wings(&selections, enemy_override).unwrap()
-    }
-
-    /// The four rows `Combat::reset` would have spawned: friendly pair facing
-    /// the enemy pair, which face back.
-    pub(crate) fn spawned() -> Vec<live::Target> {
-        vec![
-            target(1, [0., 20000., 0.], 0.),
-            target(2, [1500., 20000., 0.], 0.),
-            target(3, [0., 20000., 40000.], std::f64::consts::PI),
-            target(4, [1500., 20000., 40000.], std::f64::consts::PI),
-        ]
     }
 
     #[test]

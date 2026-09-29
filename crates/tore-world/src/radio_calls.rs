@@ -922,7 +922,7 @@ pub fn step(
     events: &[live::Event],
     state: &mut live::State,
     wings: Option<&mut AiWings>,
-    player: &crate::flight::State,
+    player: &tore_sim::flight::State,
 ) {
     let strikes = state.take_strikes();
     let (members, chatter) = match wings {
@@ -1011,7 +1011,7 @@ mod tests {
         ]
     }
     fn target(id: u32, position: [f64; 3]) -> live::Target {
-        let mut t = crate::ai_wings::tests::spawned().remove(0);
+        let mut t = crate::test_support::spawned().remove(0);
         t.id = id;
         t.position = position;
         t.aircraft = Some(AircraftId::Mig29);

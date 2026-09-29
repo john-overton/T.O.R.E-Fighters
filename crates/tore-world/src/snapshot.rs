@@ -5,9 +5,9 @@
 //! frame's tick fraction, which the app owns (`CombatView`). Snapshots never
 //! feed back into sensors, physics or the AI. Nothing here draws: the vertex
 //! building that turns a snapshot into a picture is `render_snapshot.rs`.
-use crate::flight;
 use std::collections::BTreeMap;
 use tore_formats::aircraft::AircraftId;
+use tore_sim::flight;
 use tore_sim::{
     attitude::{Basis, Vector},
     combat::live::{DAMAGE_SECTIONS, DamageSection, EffectKind},
@@ -322,7 +322,7 @@ fn presented_player(previous: &AircraftPose, current: &AircraftPose, alpha: f64)
     pose
 }
 
-pub(crate) fn wreck_in(phase: wreck::Phase) -> wreck::Wreck {
+pub fn wreck_in(phase: wreck::Phase) -> wreck::Wreck {
     let mut wreck = wreck::Wreck::new(0, 0, [0.; 3]);
     wreck.phase = phase;
     wreck

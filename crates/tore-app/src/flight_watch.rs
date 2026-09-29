@@ -353,7 +353,7 @@ mod tests {
     use super::*;
 
     fn state() -> flight::State {
-        flight::State::new(&crate::flight::animation_tests::profile(), [0., 5000., 0.]).unwrap()
+        flight::State::new(&tore_world::test_support::profile(), [0., 5000., 0.]).unwrap()
     }
 
     #[test]

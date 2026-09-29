@@ -2787,7 +2787,7 @@ mod tests {
             Path::new("/x/test.tore-replay"),
             recording,
             (
-                crate::terrain::tests::world(),
+                tore_world::test_support::terrain(),
                 crate::scenery::tests::scenery(),
             ),
             ownship,
@@ -3934,7 +3934,7 @@ mod tests {
                 Path::new("x"),
                 recording,
                 (
-                    crate::terrain::tests::world(),
+                    tore_world::test_support::terrain(),
                     crate::scenery::tests::scenery(),
                 ),
                 crate::combat_view::render_hash_tests::hornet_airframe(true),

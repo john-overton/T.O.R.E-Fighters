@@ -953,7 +953,7 @@ enum Line {
 /// The loaded envelope's speed band and corner speed at the aircraft's
 /// altitude. Fitted, the same host rule as the AI's `speed_limits`: corner is
 /// the slowest speed of the highest-G envelope.
-fn speed_limits(flight: &crate::flight::State) -> tore_sim::ai::SpeedLimits {
+fn speed_limits(flight: &tore_sim::flight::State) -> tore_sim::ai::SpeedLimits {
     use tore_sim::ai::{ScalarSpeed, SpeedLimits, mission};
     let envelopes = &flight.model().configuration().aerodynamics.envelopes;
     let (mut minimum, mut maximum, mut corner, mut best) =
@@ -986,7 +986,7 @@ fn speed_limits(flight: &crate::flight::State) -> tore_sim::ai::SpeedLimits {
 /// B48 fuel state for the player. Fitted, the AI host's rule: endurance is
 /// all remaining fuel at the military flow scaled by the current throttle
 /// (floored at 10%), time home is the straight distance to `home` at cruise.
-fn fuel_state(flight: &crate::flight::State, home: Vector) -> FuelState {
+fn fuel_state(flight: &tore_sim::flight::State, home: Vector) -> FuelState {
     let propulsion = &flight.model().configuration().propulsion;
     let flow = (propulsion.military_fuel_lbs_per_second * flight.throttle.max(0.1))
         .max(tore_sim::ai::mission::MINIMUM_FUEL_FLOW_LBS_PER_S);
@@ -1031,7 +1031,7 @@ fn missile_would_lock(
 
 /// The live state the crew voice reads, borrowed field by field from the app.
 pub struct Host<'a> {
-    pub flight: &'a crate::flight::State,
+    pub flight: &'a tore_sim::flight::State,
     pub combat: &'a tore_sim::combat::live::State,
     pub wings: Option<&'a crate::ai_wings::AiWings>,
     pub world: &'a crate::terrain::Terrain,
@@ -1884,7 +1884,7 @@ mod tests {
         let targets: Vec<_> = [(1, [500., 10_000., -500.]), (3, [0., 10_000., 30_000.])]
             .into_iter()
             .map(|(id, position)| {
-                let mut t = crate::ai_wings::tests::spawned().remove(0);
+                let mut t = crate::test_support::spawned().remove(0);
                 t.id = id;
                 t.position = position;
                 t.aircraft = Some(tore_formats::aircraft::AircraftId::Mig29);

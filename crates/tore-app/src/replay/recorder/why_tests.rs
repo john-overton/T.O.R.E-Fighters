@@ -2,10 +2,9 @@
 //! change detection against synthetic effect lists.
 use super::super::{Message, Recorder, Tick};
 use super::*;
-use crate::ai_wings::tests::{aircraft, combat_fixture, payload, spawned};
 use crate::combat_view::render_hash_tests as fixture;
-use crate::terrain;
 use tore_sim::flight::trace::Effect;
+use tore_world::test_support::{aircraft, combat_fixture, payload, spawned};
 
 #[test]
 fn an_effect_turns_on_and_off_once_through_flicker_and_a_moment_has_no_off() {
@@ -92,7 +91,7 @@ fn fly(ticks: u64, record: bool) -> (Fingerprint, Vec<tore_replay::Frame>) {
     combat.state = combat_fixture(true);
     combat.state.targets = targets;
     let player = flight::State::new(&aircraft(), [0., 20_000., -5_000.]).unwrap();
-    let world = terrain::tests::world();
+    let world = tore_world::test_support::terrain();
     combat.restart_render(&player, Some(&wings));
     let (mut recorder, receiver) = Recorder::detached(1 << 20, &[]);
     for tick in 0..ticks {

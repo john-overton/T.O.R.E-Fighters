@@ -171,7 +171,7 @@ mod tests {
         bytes[8..12].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(Image::parse(&bytes).is_err());
         let mut s =
-            crate::flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+            crate::flight::State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         for power in [0., 0.25, 0.5, 1.] {
             s.throttle = power;
             assert_eq!(heat(&s), power as f32);

@@ -539,7 +539,7 @@ mod tests {
     #[test]
     fn contacts_count_the_group_and_measure_from_the_player() {
         let wings = wings();
-        let mut player = crate::flight::State::new(&aircraft(), [0., 20000., 0.]).unwrap();
+        let mut player = tore_sim::flight::State::new(&aircraft(), [0., 20000., 0.]).unwrap();
         player.yaw = 0.;
         // Enemy 3 is 40,000 ft ahead with its wingman 1,500 ft away, same heading.
         let c = wings.contact(3, &player, true).unwrap();
@@ -550,7 +550,7 @@ mod tests {
         // 40,000 ft is inside the 42,240 ft identification range.
         assert_eq!(c.named, Some(aircraft().name));
         assert!(c.advise);
-        let far = crate::flight::State::new(&aircraft(), [0., 30000., -10000.]).unwrap();
+        let far = tore_sim::flight::State::new(&aircraft(), [0., 30000., -10000.]).unwrap();
         let c = wings.contact(3, &far, false).unwrap();
         assert_eq!((c.named, c.elevation, c.miles), (None, Elevation::Low, 8));
     }
@@ -587,7 +587,7 @@ mod tests {
                 (id, flight)
             })
             .into();
-        let player = crate::flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
+        let player = tore_sim::flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
         for _ in 0..3000 {
             for (id, flight) in &fixed {
                 *wings.mission.actor_mut(*id).unwrap().flight_mut() = flight.clone();
@@ -669,7 +669,7 @@ mod tests {
         use tore_sim::ai::wing::{TargetId, TargetOrder, WingRequest};
         let mut wings = wings();
         let mut targets = spawned();
-        let player = crate::flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
+        let player = tore_sim::flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
         for id in [1, 2] {
             wings
                 .mission
@@ -749,7 +749,7 @@ mod tests {
         let run = |drain: bool| {
             let mut wings = wings();
             let mut targets = spawned();
-            let player = crate::flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
+            let player = tore_sim::flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
             wings
                 .mission
                 .order(1, WingRequest::TargetAssignment(TargetOrder::FreeSelection))

@@ -7,10 +7,10 @@ use crate::{
     ai_wings::AiWings,
     comms::journal::{Audience, Cause, Entry, Origin, Outcome, Reason, Roll, Source, TowerEvent},
     comms::{Call, Comms, Kind, Phrase, Phrases},
-    flight,
     terrain::Terrain,
 };
 use std::collections::{BTreeMap, VecDeque};
+use tore_sim::flight;
 use tore_sim::{
     ai::airfield::{Phase, RunwayView},
     airport::{ApproachEnd, Reply, Service},
@@ -553,7 +553,7 @@ mod tests {
         Airport, Allegiance, OrientedBox, Runway, Scene, SourceKey, StaticObject,
     };
     fn fixture() -> (Terrain, Service, flight::State, Phrases) {
-        let mut world = crate::terrain::tests::world();
+        let mut world = crate::test_support::terrain();
         let bounds = OrientedBox {
             center: [0., 100., 0.],
             half: [500., 10., 5000.],
@@ -596,11 +596,8 @@ mod tests {
             }],
         };
         let service = Service::new(&world.airport_scene).unwrap();
-        let mut f = flight::State::new(
-            &crate::flight::animation_tests::profile(),
-            [0., 108., -4900.],
-        )
-        .unwrap();
+        let mut f =
+            flight::State::new(&crate::test_support::profile(), [0., 108., -4900.]).unwrap();
         f.enable_research(1).unwrap();
         f.start_on_runway([0., 100., -4900.], 0.).unwrap();
         let phrases = tore_formats::radio::STEMS

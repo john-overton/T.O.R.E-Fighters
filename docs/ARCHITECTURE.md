@@ -13,7 +13,7 @@ The M0 environment supports the M1a menu slice, the M1b renderer across all 16 t
 | Component | Choice | Purpose |
 | --- | --- | --- |
 | Language | Rust 2024, compiler 1.91.1 | Reproducible native builds |
-| Workspace | `crates/tore-app`, `tore-formats`, `tore-extract`, `tore-sim`, `tore-input`, `tore-input-native`, `tore-diagnostics-native`, `tore-replay` | Desktop shell and entry point, plus the format, extraction, simulation, input and mission recording crates |
+| Workspace | `crates/tore-app`, `tore-formats`, `tore-extract`, `tore-sim`, `tore-input`, `tore-input-native`, `tore-diagnostics-native`, `tore-replay`, `tore-world` | Desktop shell and entry point, plus the format, extraction, simulation, input, mission recording and mission core crates |
 | Window/input | `winit` 0.30 | Native window lifecycle and input |
 | Graphics | `wgpu` 27 | Metal on macOS; native backends for Windows/Linux |
 | Diagnostic facade | Existing `log` 0.4 and `tracing` 0.1 | Bounded app/backend logs without a logging framework |
@@ -82,13 +82,13 @@ keeps rectangular aircraft/smoke images and paged world/weather art distinct.
 All sample, palette-remap and shadow paths use the corresponding addressing.
 [Source coverage and static variant composition](spec/terrain-detail.md).
 
-`terrain.rs` builds `Terrain` from the selected retail MM and its resolved T2: the grid, the airport scene and the weather clock, with the height, surface and wind queries the simulation uses. It holds no art and reads no environment variable. `scenery.rs` builds `Scenery` from the same resources and the finished `Terrain`: the named or numbered texture references, DAY2 variant palette, terrain mesh, sky art, static airport geometry and per-camera weather. Neither has a GPU or window dependency. `sim_renderer.rs` uploads geometry and a texture array, owns depth targets and draws terrain plus a fullscreen sky pass; `terrain.wgsl` supplies the initial perspective, sampling and fog. `renderer.rs` composes this scene with the transparent CPU HUD, resizing depth and surface together. This separation allows aircraft/object/weather passes and a deterministic simulation to be added without coupling format readers to wgpu.
+`terrain.rs` (in `tore-world`) builds `Terrain` from the selected retail MM and its resolved T2: the grid, the airport scene and the weather clock, with the height, surface and wind queries the simulation uses. It holds no art and reads no environment variable. `scenery.rs` builds `Scenery` from the same resources and the finished `Terrain`: the named or numbered texture references, DAY2 variant palette, terrain mesh, sky art, static airport geometry and per-camera weather. Neither has a GPU or window dependency. `sim_renderer.rs` uploads geometry and a texture array, owns depth targets and draws terrain plus a fullscreen sky pass; `terrain.wgsl` supplies the initial perspective, sampling and fog. `renderer.rs` composes this scene with the transparent CPU HUD, resizing depth and surface together. This separation allows aircraft/object/weather passes and a deterministic simulation to be added without coupling format readers to wgpu.
 
 The initial implementation uses full-resolution fixed triangles and an authored sky/fog projection. It is not the native adaptive renderer. All geometry/colors come from local source data at runtime; no retail derivatives are embedded. See [theater findings](formats/theater.md) for recovered versus authored behavior. The Hornet adapter now advances at 120 fixed ticks/second; the developer free camera still uses elapsed wall time for inspection.
 
 The creator selects among all 16 base theaters. Scene replacement rebuilds the GPU vertex/texture buffers for that world; a variable texture-array layer count also supplies the sky shader's layer index. Only the active world mesh is built, while the bounded source bundle remains cached. Maps and fonts stay in the menu compositor. Source text shading is preserved when tinting; ARMFont/SMLFONT replace the unsuitable BODYFONT in the investigation UI and notices.
 
-The Hornet slice adds dependency resolution and bounded BRF/SH/FNT readers to `tore-formats`. `tore-sim::flight` contains fixed-tick state/integration without wgpu/winit dependencies; the app re-exports its interface; `aircraft.rs` adapts imported geometry and camera poses, and holds `Airframe`, which wraps the simulation's `AircraftType` (`aircraft_type.rs`: the imported profile, flight model, sensors and engine outlet points, with no art) beside the drawn half. `instruments.rs` renders independent small rasters from flight/equipment state, each framed by the aircraft's own original instrument window picture (named by its HUD) and coloured every frame through the live cockpit palette, as the cockpit art is; page content draws in coordinates relative to the 138×114 screen ([bezel spec](spec/instrument-bezel.md)). The GPU terrain pass now accepts an aircraft vertex stream and original rectangular atlas with shared depth; front/other instrument cameras render offscreen. CLI extraction and cache import share the same dependency resolver. These adapters do not execute imported x86 modules. See [aircraft evidence and open questions](formats/aircraft.md).
+The Hornet slice adds dependency resolution and bounded BRF/SH/FNT readers to `tore-formats`. `tore-sim::flight` contains fixed-tick state/integration without wgpu/winit dependencies; the app re-exports its interface; `aircraft.rs` adapts imported geometry and camera poses, and holds `Airframe`, which wraps the simulation's `AircraftType` (`aircraft_type.rs` in `tore-world`: the imported profile, flight model, sensors and engine outlet points, with no art) beside the drawn half. `instruments.rs` renders independent small rasters from flight/equipment state, each framed by the aircraft's own original instrument window picture (named by its HUD) and coloured every frame through the live cockpit palette, as the cockpit art is; page content draws in coordinates relative to the 138×114 screen ([bezel spec](spec/instrument-bezel.md)). The GPU terrain pass now accepts an aircraft vertex stream and original rectangular atlas with shared depth; front/other instrument cameras render offscreen. CLI extraction and cache import share the same dependency resolver. These adapters do not execute imported x86 modules. See [aircraft evidence and open questions](formats/aircraft.md).
 
 `surface_lighting.rs` owns three geometric shadow maps and the shared light
 uniform. `surface_lighting.wgsl` supplies continuous diffuse response, solar
@@ -241,7 +241,7 @@ than reconstructing the original executable's combat tick.
 (hit with damage, missed, spoofed by a decoy, jammed), keyed by shooter,
 intended target and retail weapon class, plus credited kills and each target's
 last attacker. Nothing in flight reads it. The app's `debrief.rs` turns it into
-the post-mission pages; `ai_wings.rs` supplies the intended target of AI gun rounds and
+the post-mission pages; `ai_wings.rs` (in `tore-world`) supplies the intended target of AI gun rounds and
 reports decoyed missiles. See the [debrief spec](spec/debrief.md).
 
 `combat::gunsight` supplies a renderer-independent fixed-step gun solution using
@@ -557,7 +557,7 @@ and other surface objects. Original MCICONS artwork
 is optional for older caches. [Display rules](spec/flight-map.md).
 
 The [target window](spec/target-window.md) builds read-only presentation data in
-`tore-app::target_window`; its refresh clock, camera and picture contrast are
+`tore-world::target_window`; its refresh clock, camera and picture contrast are
 in `tore-app::target_preview`. It uses the same retained selection as the HUD,
 existing aircraft activity, and an independent weather slot. Its asynchronous
 camera results carry the requested target identity so a changed selection cannot
@@ -614,7 +614,7 @@ or the renderer: the recording model, the chunked writer, the bounded reader
 and the exports (debug log, summary, anomaly flags, Tacview, comparison).
 `tore-app/src/replay/` is the only place the app's types meet it.
 
-The capture boundary is the per-tick `RenderSnapshot` (`snapshot.rs`). Each tick, right after
+The capture boundary is the per-tick `RenderSnapshot` (`snapshot.rs` in `tore-world`). Each tick, right after
 the AI step, `replay/recorder.rs` reads the snapshot live flight draws plus
 flight data the snapshot lacks, and diffs both against the previous tick to
 find launches, hits, crashes, departures and AI activity changes.
@@ -697,7 +697,7 @@ only read: the menu's camera changes go through the ordinary view commands.
 ## Mission core and seats
 
 Design for stages A and B of the [multiplayer plan](multiplayer-plan.md#stages),
-written 2026-09-28. **Stage A1 is built; the A2 crate move and stage B are
+written 2026-09-28. **Stages A1 and A2 are built; stage B is
 not yet.** The section is rewritten as the stages land. John approved the design on 2026-09-28 with the decisions
 credited to him below; every other choice is an agent decision. His decisions
 are also in the [multiplayer guide](MULTIPLAYER.md#decisions).
@@ -718,20 +718,49 @@ In short:
 
 ### Where the code stands
 
-Stage A1 is built inside `tore-app`, and the A2 terrain split is done. `World` (`crates/tore-app/src/world.rs`)
-holds the mission state that `App` used to keep in separate fields and steps it
-in `World::step`. The redraw loop builds each tick's input, calls the step and
-hands the output to a `TickPresenter` in `main.rs`, which plays the cues in the
-loop's old order. `World::restart` rebuilds a flight from its `Setup`. The AI
-probe runs the same tick, so headless runs now cover the live loop, and a
-fingerprint test (`world/tick_tests.rs`) pins its order. The terrain is split:
-`Terrain` (`terrain.rs`) holds what the simulation queries and `Scenery`
-(`scenery.rs`) what the renderer draws, and `App` holds a `Scenery` beside
-`World`. The combat and aircraft split is done as well: `AircraftType` apart
-from `Airframe`, `Combat` apart from its art, models, readouts and tape file
-(`CombatView` in `combat_view.rs` holds the app's half), and the render
-snapshot's data (`snapshot.rs`) apart from its vertex building. The crate
-move itself (A2) is still to come.
+Stages A1 and A2 are built. The mission core is the `tore-world` crate
+(`crates/tore-world`), which depends on `tore-sim`, `tore-formats` and
+`tore-input` and on nothing that draws, opens a window or plays sound. `World`
+(`crates/tore-world/src/world.rs`) holds the mission state that `App` used to
+keep in separate fields and steps it in `World::step`. The redraw loop builds
+each tick's input, calls the step and hands the output to a `TickPresenter` in
+`main.rs`, which plays the cues in the loop's old order. `World::restart`
+rebuilds a flight from its `Setup`. The AI probe runs the same tick, so
+headless runs cover the live loop, and a fingerprint test
+(`crates/tore-world/src/world/tick_tests.rs`) pins its order. The terrain is
+split: `Terrain` (`terrain.rs`, in `tore-world`) holds what the simulation
+queries and `Scenery` (`scenery.rs`, in the app) what the renderer draws, and
+`App` holds a `Scenery` beside `World`. Combat and the aircraft are split as
+well: `AircraftType` apart from `Airframe`, `Combat` apart from its art,
+models, readouts and tape file (`CombatView` in the app's `combat_view.rs`
+holds the app's half), and the render snapshot's data (`snapshot.rs`) apart
+from its vertex building.
+
+`tore-world` holds these modules, and the app re-exports each at its crate root
+(`pub(crate) use tore_world::{...}` in `main.rs`) so app code keeps its
+`crate::combat` style paths:
+
+| Module | What it is |
+| --- | --- |
+| `world` | `World`, `Setup`, `TickInput`, `TickOutput` and `step`; `world/tick_tests.rs` is the fingerprint |
+| `terrain` | `Terrain`, its `Overrides` and the shared `Placements` loader |
+| `combat`, `combat_tape` | `Combat`; the tape's command names and the `Entry` record |
+| `aircraft_type` | `AircraftType`, the simulation's view of one aircraft |
+| `snapshot` | The tick's picture as data (`RenderSnapshot`, poses, `interpolate`) |
+| `ai_wings` | `AiWings`, its orders, reports, chatter and engagement |
+| `comms`, `radio_calls`, `crew_voice`, `airfield_radio` | The radio channel and every call generator |
+| `situation` | The in-flight mission result check that drives music |
+| `mission_layout`, `target_window` | The Quick Mission layout and the target window's data |
+| `test_support` | Synthetic fixtures for tests here and, through the `test-support` feature, in the app |
+
+The app keeps what draws, listens or writes: `camera.rs` (the free camera, whose
+start point is `Terrain::free_flight_start`), `combat_smoke.rs` (the
+`--combat-smoke` check, which reads `TORE_COMBAT_EVIDENCE`), `tape_file.rs` (the
+combat tape's writer and reader), `ai_roster_probe.rs` (the
+`--ai-roster-probe-ticks` check, which prints) and the presentation half of
+each split module. `tore-world` has its own `WorldResult` alias for boxed-error
+results, uses `tore_sim::flight` and `tore_sim::attitude` directly, and has no
+`log`, `tore-replay`, `unsafe` or environment variable read outside test code.
 
 Stage B has not started. The player is `world.flight` plus one ownship's worth
 of player-only fields in `combat::live::State`; every AI aircraft is an
@@ -863,7 +892,7 @@ the point where the picture was taken); the player's weapon
 release sounds; shot outcomes; the AI journal; sound emissions; and the native
 fault, if the tick stopped early. Every output queue inside `World` is drained
 into it each tick, whether or not anyone reads it, so the state between ticks
-never depends on its consumers. Until the crate move, the radio's journal and
+never depends on its consumers. The radio's journal and
 the player's command notes still go to the replay recorder directly, as they
 did before.
 
@@ -879,7 +908,7 @@ did before.
   planned change of probe output. The scripted pilot, the attack script, orders
   and threat fixtures act before each step, and the probe presents what it needs
   from the tick's output in the live order.
-- **Full-tick fingerprint:** `crates/tore-app/src/world/tick_tests.rs` builds a
+- **Full-tick fingerprint:** `crates/tore-world/src/world/tick_tests.rs` builds a
   `World` from synthetic fixtures (a low-flying player, two friendly and two
   enemy AI aircraft, two drones, a small airport), steps it 1,200 ticks with
   scripted input and folds the player's flight, combat's projectiles and
@@ -903,8 +932,8 @@ did before.
 
 #### Rules for mission state
 
-These make exact checkpoints (stage G) possible. They apply to everything that
-moves into `tore-world` and to all new mission state from stage B on:
+These make exact checkpoints (stage G) possible. They apply to everything in
+`tore-world` and to all new mission state from stage B on:
 
 - No file handles, sockets, threads, locks, `Rc`/`RefCell` or stored closures.
   The combat tape, the formation trace and the replay recorder are writers
@@ -918,7 +947,11 @@ moves into `tore-world` and to all new mission state from stage B on:
   random stream has a fixed seed from the mission and, for an aircraft, its slot.
 - No environment variables read inside `World`. The weather time, wind, cloud
   altitude and turbulence overrides are resolved into the mission setup before
-  `World::new`, so every peer runs one configuration.
+  `World::new`, so every peer runs one configuration. One known exception: the
+  flight model's weight-scaled stall speed can be switched off for the whole
+  process with `--retail-stall-speeds` or `TORE_RETAIL_STALL_SPEEDS=1`
+  (`tore_sim::flight::retail_stall_speeds`). It is a developer option, never a
+  mission setting, and a networked game must not rely on it.
 - No `log` or `tore-replay` in `tore-world`: warnings go into the tick output,
   and conversions to replay types live in the app.
 
@@ -928,7 +961,7 @@ A1, inside `tore-app`, done. Each commit was compared with the single-player
 baselines byte for byte:
 
 1. Rename `terrain::World` to `terrain::Terrain`.
-2. Add `World` (`crates/tore-app/src/world.rs`) and move the mission fields of
+2. Add `World` (`crates/tore-world/src/world.rs`) and move the mission fields of
    `App` into it. The tick body still runs in the redraw handler.
 3. Move the tick body into `World::step`, with presentation after it.
 4. Move the simulation half of a flight's start (`FreeFlight`, which is also
@@ -939,8 +972,8 @@ baselines byte for byte:
 5. Switch the AI probe to `World::step` (re-recorded output).
 6. Add the full-tick fingerprint.
 
-A2 first splits, inside `tore-app`, what mixes simulation with presentation.
-These splits touch different files and can run in parallel:
+A2 first split, inside `tore-app`, what mixes simulation with presentation, then
+moved the simulation set into `tore-world`. Both are done. The splits:
 
 - `Airframe`: the aircraft type the simulation needs apart from the render
   model. Done: `AircraftType` (`aircraft_type.rs`) holds the profile, flight
@@ -994,10 +1027,24 @@ These splits touch different files and can run in parallel:
   `TORE_COMBAT_EVIDENCE` variable stays in the `--combat-smoke` harness, which
   is a command-line check and not mission state.
 
-Then `git mv` moves the simulation set into `crates/tore-world`, with a
+Then `git mv` moved the simulation set into `crates/tore-world`, with a
 `[profile.dev.package.tore-world] opt-level = 2` entry like `tore-sim`'s, and
-`tore-app` depends on it. `cargo tree -p tore-world` must show no wgpu, winit,
-cpal or pollster.
+`tore-app` depends on it. It went in four commits. First, `Camera` left
+`terrain.rs` for the app's `camera.rs`, and the free-flight start point became
+`Terrain::free_flight_start`, which both the camera and `AircraftType::start`
+call. Second, the `--combat-smoke` check left `combat.rs` for the app's
+`combat_smoke.rs`. Third, the combat tape's writer and reader left
+`combat_tape.rs` for the app's `tape_file.rs`, leaving the names and `Entry`
+with combat. Fourth, the crate: the modules listed under
+[where the code stands](#where-the-code-stands), plus `test_support` and
+`combat::fixtures`, which hold the synthetic terrain, aircraft profile, combat
+scene and AI wing rows that tests in both crates use (the app enables
+`test-support` through its `dev-dependencies`; the tests that only the app uses
+stayed in it). `cargo tree -p tore-world` shows no wgpu, winit, cpal or
+pollster. The full-tick fingerprint, every behaviour item of the baseline
+harness, every capture that does not depend on frame timing and the live
+recordings' shared checksums, states and events matched the commit before the
+move.
 
 **Verification.** A local harness (`.local/mp-baseline/`, never committed)
 records golden fingerprints, headless flights, AI probes with their mission
@@ -1269,7 +1316,7 @@ applies when play resumes (stage B).
    0. No behaviour change.
 2. In parallel, each owning its own files:
    - **B1 combat**: ownships, events with aircraft ids, the hit rule and friendly
-     fire setting (`tore-sim` combat, the app's `combat.rs`).
+     fire setting (`tore-sim` combat, `tore-world`'s `combat.rs`).
    - **B2 seat input**: every between-tick command becomes a seat command (the
      world's input path and `main.rs`'s handlers).
    - **B3 AI**: several humans, current leaders and succession, the actor

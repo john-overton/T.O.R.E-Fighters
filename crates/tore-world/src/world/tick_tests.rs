@@ -31,9 +31,8 @@
 
 use super::*;
 use crate::{
-    ai_wings::tests::{aircraft, payload, spawned},
-    combat_view::render_hash_tests,
-    terrain::tests::world,
+    combat::fixtures,
+    test_support::{aircraft, payload, spawned, terrain as world},
 };
 use std::fmt::{self, Write as _};
 use tore_formats::aircraft::Token;
@@ -225,7 +224,7 @@ fn mission() -> World {
     );
     let mut flight = flight::State::new(&profile, [0., PLAYER_ALTITUDE, -2000.]).unwrap();
     flight.speed = 600.;
-    let mut combat = render_hash_tests::combat(Vec::new(), Vec::new());
+    let mut combat = fixtures::combat(Vec::new(), Vec::new());
     combat.apply_startup_weapons();
     // The AI rows: a friendly pair facing an enemy pair, closed to 9,000 ft.
     let mut targets = spawned();
@@ -655,14 +654,14 @@ fn mission_tick_matches_recorded_fingerprint() {
                 first.total, recorded,
                 "the mission tick changed: recorded {recorded:#018x}, now {:#018x}. \
                  A step was reordered, dropped or changed. If that is deliberate, update \
-                 RECORDED in crates/tore-app/src/world/tick_tests.rs in the same commit and \
+                 RECORDED in crates/tore-world/src/world/tick_tests.rs in the same commit and \
                  explain the change in the commit message. Run with TORE_GOLDEN_VERBOSE=1 \
                  before and after to see the tick where the first difference appears.",
                 first.total,
             ),
             None => panic!(
                 "the mission tick fingerprint is not recorded yet: set RECORDED to Some({:#018x}) \
-                 in crates/tore-app/src/world/tick_tests.rs",
+                 in crates/tore-world/src/world/tick_tests.rs",
                 first.total,
             ),
         }

@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn any_tick_in_any_order_matches_flying_every_tick_in_order() {
-        let world = crate::terrain::tests::world();
+        let world = tore_world::test_support::terrain();
         let mut entries = vec![
             released(10, 1, EffectKind::Flare, 100.),
             released(10, 2, EffectKind::Chaff, 120.),
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn a_recording_without_devices_has_none_at_every_tick() {
-        let world = crate::terrain::tests::world();
+        let world = tore_world::test_support::terrain();
         let mut track = DeviceTrack::new(&[]);
         assert!(track.is_empty());
         for tick in [0, 5, 100_000] {

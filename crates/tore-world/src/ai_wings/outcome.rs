@@ -1,7 +1,7 @@
 //! In-flight mission result cadence for situation music (SUCC and HOME).
 //!
 //! The result itself comes from the debrief evaluator
-//! ([`crate::debrief::capture`]), so the music and the debrief always agree.
+//! (the app's `debrief::capture`), so the music and the debrief always agree.
 //! This file keeps the parts only flight needs: the 4 second check, the rule
 //! that a result already decided at flight start disables SUCC and HOME, the
 //! home check and the two radio calls.

@@ -751,8 +751,7 @@ mod tests {
 
     #[test]
     fn rendered_ladder_marks_the_actual_pitch_at_the_forward_point() {
-        let mut state =
-            State::new(&crate::flight::animation_tests::profile(), [0., 5000., 0.]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0., 5000., 0.]).unwrap();
         let font = Font {
             height: 8,
             glyphs: (0..256)
@@ -807,8 +806,7 @@ mod tests {
 
     #[test]
     fn rendered_horizon_replaces_the_compact_zero_bar() {
-        let mut state =
-            State::new(&crate::flight::animation_tests::profile(), [0., 5000., 0.]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0., 5000., 0.]).unwrap();
         state.pitch = 4f64.to_radians();
         let font = Font {
             height: 8,

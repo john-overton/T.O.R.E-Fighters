@@ -271,7 +271,7 @@ impl AiWings {
         order: PlayerOrder,
         selected: Option<u32>,
         recipient: Option<u8>,
-    ) -> AppResult<OrderReport> {
+    ) -> WorldResult<OrderReport> {
         self.command_at(order, selected, recipient, None)
     }
 
@@ -283,7 +283,7 @@ impl AiWings {
         selected: Option<u32>,
         recipient: Option<u8>,
         site: Option<&LandingSite>,
-    ) -> AppResult<OrderReport> {
+    ) -> WorldResult<OrderReport> {
         if matches!(order, PlayerOrder::BugOut | PlayerOrder::LandAtSelected) {
             return self.command_landing(order, recipient, site);
         }
@@ -591,7 +591,7 @@ impl AiWings {
         order: PlayerOrder,
         recipient: Option<u8>,
         site: Option<&LandingSite>,
-    ) -> AppResult<OrderReport> {
+    ) -> WorldResult<OrderReport> {
         let mut members: Vec<_> = self
             .mission
             .actors()
@@ -1325,7 +1325,7 @@ mod landing_tests {
             target(4, [1500., 20000., 40000.], std::f64::consts::PI),
         ];
         AiWings::build_with(&wings, &targets, 0, |_| {
-            Ok((crate::flight::animation_tests::profile(), None))
+            Ok((crate::test_support::profile(), None))
         })
         .unwrap()
     }

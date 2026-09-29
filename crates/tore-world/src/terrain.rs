@@ -1,9 +1,9 @@
 //! Simulation half of the mission's world: the T2 grid and its height, surface
 //! and water queries, the airport scene and its runway anchors, and the weather
 //! clock. It holds no art, palette, render origin or per-frame state (those are
-//! [`crate::scenery::Scenery`]) and reads no environment variable. World units
+//! the app's scenery) and reads no environment variable. World units
 //! are feet, X east, Y up, Z north.
-use crate::AppResult;
+use crate::WorldResult;
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::theater::{CELL_FEET, Environment, HEIGHT_FEET, Theater};
 
@@ -38,7 +38,7 @@ pub struct Terrain {
 /// Launch settings that replace the mission's own weather start time, wind
 /// and cloud deck. The app resolves them from `TORE_WEATHER_TIME`,
 /// `TORE_WIND` and `TORE_CLOUD_ALTITUDE` (see
-/// [`crate::scenery::launch_overrides`]) and passes them in, so the terrain
+/// the app's `scenery::launch_overrides`) and passes them in, so the terrain
 /// itself reads no environment variable.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Overrides {
@@ -169,7 +169,7 @@ pub struct Recorded {
 /// The imported layout of one theater with the definitions and shapes its
 /// placements name. Both halves of the airport scene build from it: the
 /// terrain's objects and runways, and the scenery's static geometry.
-pub(crate) struct Placements {
+pub struct Placements {
     pub layout: tore_formats::mission::Layout,
     pub definitions: BTreeMap<String, tore_formats::static_object::Definition>,
     pub shapes: BTreeMap<String, tore_formats::shape::Shape>,
@@ -183,7 +183,7 @@ pub(crate) struct Placements {
 }
 
 /// Where one placed shape stands in the world.
-pub(crate) struct Stance {
+pub struct Stance {
     pub scale: f64,
     pub min: [f64; 3],
     pub max: [f64; 3],
@@ -200,7 +200,7 @@ pub(crate) struct Stance {
 }
 
 impl Placements {
-    pub(crate) fn load(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> AppResult<Self> {
+    pub fn load(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> WorldResult<Self> {
         let layout_name = format!("{code}.MM");
         let layout = tore_formats::mission::Layout::parse(
             &layout_name,
@@ -270,7 +270,7 @@ impl Placements {
 
     /// Where `placement` stands on ground `ground` feet high, or `None` when it
     /// has no drawable shape or the shape has no finite extent.
-    pub(crate) fn stance(
+    pub fn stance(
         &self,
         placement: &tore_formats::mission::Placement,
         ground: f64,
@@ -351,7 +351,7 @@ impl Placements {
 
 impl Terrain {
     /// The terrain with the mission's own weather and no launch overrides.
-    pub fn for_theater(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> AppResult<Self> {
+    pub fn for_theater(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> WorldResult<Self> {
         Self::for_mission(resources, code, None, &Overrides::default())
     }
 
@@ -363,7 +363,7 @@ impl Terrain {
         code: &str,
         condition: Option<usize>,
         overrides: &Overrides,
-    ) -> AppResult<Self> {
+    ) -> WorldResult<Self> {
         Self::build(resources, code, condition, None, overrides)
     }
 
@@ -375,7 +375,7 @@ impl Terrain {
     pub fn for_recorded(
         resources: &BTreeMap<String, Vec<u8>>,
         recorded: &Recorded,
-    ) -> AppResult<Self> {
+    ) -> WorldResult<Self> {
         Self::build(
             resources,
             &recorded.code,
@@ -391,7 +391,7 @@ impl Terrain {
         condition: Option<usize>,
         recorded: Option<&Recorded>,
         overrides: &Overrides,
-    ) -> AppResult<Self> {
+    ) -> WorldResult<Self> {
         let required = |n: &str| {
             resources
                 .get(n)
@@ -505,7 +505,7 @@ impl Terrain {
         &mut self,
         resources: &BTreeMap<String, Vec<u8>>,
         code: &str,
-    ) -> AppResult<()> {
+    ) -> WorldResult<()> {
         use tore_sim::airport::{
             Airport, Allegiance, OrientedBox, Runway, SourceKey, StaticObject,
         };
@@ -709,7 +709,7 @@ impl Terrain {
     /// No weather-derived temperature/pressure is inferred from LAY colors.
     pub fn air_data(
         &self,
-        state: &crate::flight::State,
+        state: &tore_sim::flight::State,
     ) -> tore_formats::Result<tore_sim::telemetry::AirData> {
         tore_sim::telemetry::AirData::sample(
             state,
@@ -806,7 +806,7 @@ pub const EDGE_WARNING_NM: f64 = 100.;
 pub const EDGE_DESTROY_NM: f64 = 105.;
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
     #[test]
     fn the_map_edge_distance_is_measured_from_the_nearest_point_of_the_rectangle() {
@@ -822,48 +822,7 @@ pub(crate) mod tests {
         // Past a corner the nearest point is the corner: 3-4-5 miles.
         assert!((d(-3. * nm, -4. * nm) - 5.).abs() < 1e-9);
     }
-    pub(crate) fn world() -> Terrain {
-        use tore_formats::theater::TerrainCell;
-        let cells = [0, 4, 8, 12]
-            .map(|elevation| TerrainCell {
-                color: 100,
-                class: 2,
-                elevation,
-            })
-            .to_vec();
-        Terrain {
-            theater: Theater {
-                name: "Synthetic".into(),
-                map: "T.PIC".into(),
-                tiles: [1, 1],
-                cells_per_tile: 2,
-                cols: 2,
-                rows: 2,
-                cells,
-                coarse: vec![],
-            },
-            environment: Environment::default(),
-            airport_scene: tore_sim::airport::Scene::default(),
-            airfield_anchors: BTreeMap::new(),
-            static_manifest: Vec::new(),
-            catalog: vec![],
-            layout: "TEST.MM".into(),
-            condition: None,
-            weather: tore_sim::environment::Environment::new(
-                tore_sim::environment::Configuration::new(
-                    tore_formats::weather::Module::parse(&tore_formats::weather::synthetic_module(
-                        1,
-                    ))
-                    .unwrap(),
-                    12,
-                    0,
-                    0,
-                    None,
-                )
-                .unwrap(),
-            ),
-        }
-    }
+    use crate::test_support::terrain as world;
     #[test]
     fn dominant_pavement_not_roof_controls_grounding() {
         use tore_formats::shape::{Face, FogMode, Shape};

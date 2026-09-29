@@ -1284,7 +1284,7 @@ mod tests {
     use tore_formats::aircraft::Hardpoint;
 
     fn fixture() -> Ordnance {
-        let mut config = crate::ai_wings::tests::combat_fixture(true)
+        let mut config = tore_world::test_support::combat_fixture(true)
             .configuration()
             .clone();
         config.stations[0].weapon.source = "AIM9M.JT".into();

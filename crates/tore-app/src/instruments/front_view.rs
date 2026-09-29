@@ -255,8 +255,7 @@ mod tests {
 
     #[test]
     fn sampling_uses_true_airspeed_and_hides_the_marker_when_stopped() {
-        let mut state =
-            State::new(&crate::flight::animation_tests::profile(), [0., 5000., 0.]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0., 5000., 0.]).unwrap();
         state.speed = 5.;
         assert_eq!(Symbology::new(&state, None).path, None);
         state.speed = 400.;

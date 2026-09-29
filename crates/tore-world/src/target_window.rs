@@ -2,8 +2,9 @@
 //! target, built from simulation state with no clock, camera or drawing. The
 //! refresh timer and the target camera are in `target_preview`. See
 //! docs/spec/target-window.md.
-use crate::{ai_wings::AiWings, flight::State};
+use crate::ai_wings::AiWings;
 use tore_sim::combat::live::Target;
+use tore_sim::flight::State;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TargetObjective {

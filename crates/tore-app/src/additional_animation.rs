@@ -624,7 +624,7 @@ mod tests {
     }
     #[test]
     fn native_hook_deploys_to_source_geometry_and_stows_out_of_sight() {
-        let mut s = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut s = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         for id in [AircraftId::F22n, AircraftId::Faxx] {
             for address in [0x40a1, 0x40c0] {
                 let source = native_hook(address);
@@ -702,7 +702,7 @@ mod tests {
     }
     #[test]
     fn roster_devices_keep_roots_and_preserve_each_source_endpoint() {
-        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         for id in AircraftId::ALL {
             let Some(flame_root) = roster_flame_root(id) else {
                 continue;
@@ -770,7 +770,7 @@ mod tests {
             id: AircraftId::F14,
             parts: [(7, Part::Gear), (8, Part::Flame)].into(),
         };
-        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         state.gear = 1.;
         state.exhaust = 1.;
         let source = face(7);
@@ -789,7 +789,7 @@ mod tests {
             id: AircraftId::A4E,
             parts: BTreeMap::new(),
         };
-        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         state.elevator = 1.;
         for address in [
             0x4345, 0x4361, 0x44b5, 0x44d5, 0x4967, 0x4982, 0x49dd, 0x49f8,
@@ -818,7 +818,7 @@ mod tests {
             id: AircraftId::X31,
             parts: BTreeMap::new(),
         };
-        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         for (addresses, axis) in [
             ([0x44b2, 0x44da], [1., 0., 0.]),
             ([0x4406, 0x442e], [-1., 0., 2.]),
@@ -860,7 +860,7 @@ mod tests {
             id: AircraftId::X31,
             parts: [(8, Part::Flame)].into(),
         };
-        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         state.exhaust = 1.;
         let mut source = face(8);
         source.positions = vec![[0., -41., 0.], [0., -51., 0.], [1., -51., 0.]];
@@ -881,7 +881,7 @@ mod tests {
     }
     #[test]
     fn sweep_respects_speed_and_flaps_and_rotations_preserve_shape() {
-        let mut state = State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
         state.flaps = 0.;
         for (knots, degrees) in [
             (300., 0.),

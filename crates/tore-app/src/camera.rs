@@ -114,7 +114,7 @@ impl Camera {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terrain::tests::world;
+    use tore_world::test_support::terrain as world;
     #[test]
     fn variant_label_does_not_move_the_inspection_camera() {
         let mut w = world();

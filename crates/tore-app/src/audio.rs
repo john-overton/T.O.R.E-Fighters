@@ -1885,7 +1885,7 @@ mod tests {
         use tore_formats::aircraft::AircraftId;
         use tore_input::{PilotCommand, PilotInput, Switch};
         for id in AircraftId::ALL {
-            let mut profile = crate::flight::animation_tests::profile();
+            let mut profile = tore_world::test_support::profile();
             profile.id = id;
             profile.name = match id {
                 AircraftId::F18 => "F/A-18D",

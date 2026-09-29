@@ -151,7 +151,7 @@ mod tests {
         ];
         for (n, wind) in winds.into_iter().enumerate() {
             let configuration = Configuration::new(module(), 7, 21, 3, wind).unwrap();
-            let mut w = crate::terrain::tests::world();
+            let mut w = tore_world::test_support::terrain();
             w.layout = "~UKR1.MM".into();
             w.theater.name = "Ukraine (UKR1)".into();
             w.condition = Some(3);
@@ -199,7 +199,7 @@ mod tests {
             let _ = Weather::new(rebuilt);
         }
         // No deck and the map's own weather.
-        let mut w = crate::terrain::tests::world();
+        let mut w = tore_world::test_support::terrain();
         w.environment.clouds = Some(0);
         let identity = of(&w);
         assert_eq!(identity.clouds.deck_ft, None);
@@ -210,7 +210,7 @@ mod tests {
     #[test]
     fn impossible_identities_are_refused() {
         let good = || {
-            let mut w = crate::terrain::tests::world();
+            let mut w = tore_world::test_support::terrain();
             w.layout = "UKR.MM".into();
             of(&w)
         };

@@ -1857,7 +1857,7 @@ mod lighting_tests {
                 .await
                 .unwrap();
             let render = |distance: f32, pavement: u8, overhead: bool, height: f32| {
-                let world = crate::terrain::tests::world();
+                let world = tore_world::test_support::terrain();
                 let mut scenery = crate::scenery::tests::scenery();
                 scenery.vertices = plane(0., 20_000.);
                 scenery.texture_indices = vec![100; 65536];
@@ -2025,7 +2025,7 @@ mod lighting_tests {
                 .await
                 .unwrap();
             let render = |distance: f32, shift: f32, ground: bool, samples: u32| {
-                let world = crate::terrain::tests::world();
+                let world = tore_world::test_support::terrain();
                 let mut scenery = crate::scenery::tests::scenery();
                 scenery.smooth_weather = false;
                 scenery.texture_indices = vec![100; 65536];
@@ -2170,7 +2170,7 @@ mod lighting_tests {
                 .await
                 .unwrap();
             let render = |flare: bool| {
-                let mut world = crate::terrain::tests::world();
+                let mut world = tore_world::test_support::terrain();
                 let mut scenery = crate::scenery::tests::scenery();
                 let mut module = tore_formats::weather::Module::parse(
                     &tore_formats::weather::synthetic_module(1),
@@ -2325,7 +2325,7 @@ mod lighting_tests {
                           water: bool,
                           caster_height: f32,
                           elapsed_steps: usize| {
-                let mut world = crate::terrain::tests::world();
+                let mut world = tore_world::test_support::terrain();
                 let mut scenery = crate::scenery::tests::scenery();
                 let mut module = tore_formats::weather::Module::parse(
                     &tore_formats::weather::synthetic_module(1),
