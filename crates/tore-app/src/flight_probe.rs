@@ -209,6 +209,10 @@ pub struct Landing {
     rollout_start_speed_fps: f64,
     min_agl_ft: f64,
     variant: LandingVariant,
+    /// First tick the aircraft rolled onto ground that is not a runway, after
+    /// touching down, and its ground speed then.
+    left_runway_tick: Option<u64>,
+    left_runway_kt: f64,
 }
 
 /// What the scripted landing does wrong on purpose, to check the game's
@@ -306,6 +310,8 @@ impl Landing {
             rollout_start_speed_fps: 0.,
             min_agl_ft: f64::MAX,
             variant,
+            left_runway_tick: None,
+            left_runway_kt: 0.,
         }
     }
 
@@ -369,7 +375,12 @@ impl Landing {
     }
 
     /// Controls for the next tick, from the state after the last one.
-    pub fn keys(&mut self, state: &flight::State, ground_height: f64) -> PilotInput {
+    pub fn keys(
+        &mut self,
+        state: &flight::State,
+        ground_height: f64,
+        landable: bool,
+    ) -> PilotInput {
         let mut keys = PilotInput::default();
         let agl = state.position[1] - ground_height - self.clearance_ft;
         self.min_agl_ft = self.min_agl_ft.min(agl);
@@ -431,6 +442,10 @@ impl Landing {
             // Airborne again after touching down.
         }
         self.last_on_ground = on_ground;
+        if on_ground && !landable && self.left_runway_tick.is_none() && self.touchdown.is_some() {
+            self.left_runway_tick = Some(state.ticks);
+            self.left_runway_kt = state.velocity[0].hypot(state.velocity[2]) / 1.68781;
+        }
         if state.crashed {
             if self.unsafe_reason.is_none() {
                 self.unsafe_reason = Some("crashed".to_owned());
@@ -571,7 +586,9 @@ impl Landing {
             _ => "stopped=false".to_owned(),
         };
         format!(
-            "landing: {touch} {stop} unsafe={} bounces={} crashed={} approach_kt={:.1} limit_forward_kt={:.1} max_cross_ft={:.0} max_sink_fps={:.1} min_agl_ft={:.1} gear={:.2} hook={:.2} brake={:.2} ticks={}",
+            "landing: {touch} {stop} left_runway={} left_runway_kt={:.1} unsafe={} bounces={} crashed={} approach_kt={:.1} limit_forward_kt={:.1} max_cross_ft={:.0} max_sink_fps={:.1} min_agl_ft={:.1} gear={:.2} hook={:.2} brake={:.2} ticks={}",
+            self.left_runway_tick.is_some(),
+            self.left_runway_kt,
             self.unsafe_reason
                 .as_deref()
                 .map_or("none".to_owned(), |r| r.replace([' ', ','], "_")),
@@ -671,5 +688,141 @@ mod tests {
             Some(LandingVariant::GearUp)
         );
         assert_eq!(LandingVariant::from_maneuver("takeoff"), None);
+    }
+}
+
+/// Start height of the stall recovery probe, feet above the flat probe ground.
+pub const STALL_START_FT: f64 = 15_000.;
+/// Airspeed the stall recovery probe starts at, feet per second.
+pub const STALL_START_FPS: f64 = 200. * 1.687_81;
+/// Ticks of pull allowed before the probe gives up on stalling the aircraft.
+const STALL_ENTRY_LIMIT: u64 = 120 * 60;
+/// Ticks the pull is held after the first warning, so recovery starts deep in it.
+const STALL_HOLD_TICKS: u64 = 120 * 3;
+/// Ticks allowed for the recovery.
+const STALL_RECOVERY_LIMIT: u64 = 120 * 90;
+
+/// The manual's stall recovery (Flight Manual, Stall Recovery): a pull at low
+/// speed until the departure alert sounds, held for three seconds, then the
+/// afterburner if there is one, nose down and wings level until the alert
+/// clears. `fitted` test harness (agent decision, 2026-09-28).
+#[derive(Debug)]
+pub struct StallRecovery {
+    phase: SpinPhase,
+    phase_start: u64,
+    alerted_at: Option<u64>,
+    recovery_started_at: Option<u64>,
+    recovered_at: Option<u64>,
+    calm_since: Option<u64>,
+    start_altitude_ft: f64,
+    min_altitude_ft: f64,
+    min_speed_kt: f64,
+    worst_alert: u8,
+}
+
+impl StallRecovery {
+    pub fn new(state: &flight::State) -> Self {
+        Self {
+            phase: SpinPhase::Enter,
+            phase_start: 0,
+            alerted_at: None,
+            recovery_started_at: None,
+            recovered_at: None,
+            calm_since: None,
+            start_altitude_ft: state.position[1],
+            min_altitude_ft: state.position[1],
+            min_speed_kt: state.speed / 1.687_81,
+            worst_alert: 0,
+        }
+    }
+
+    pub fn finished(&self) -> bool {
+        self.phase == SpinPhase::Done
+    }
+
+    pub fn keys(&mut self, state: &flight::State) -> PilotInput {
+        use tore_formats::flight_model::departure::DepartureMode;
+        let tick = state.ticks;
+        self.min_altitude_ft = self.min_altitude_ft.min(state.position[1]);
+        self.min_speed_kt = self.min_speed_kt.min(state.speed / 1.687_81);
+        let alert = state.stall_alert(f64::MIN);
+        let rank = match alert {
+            None | Some(DepartureMode::Normal) => 0,
+            Some(DepartureMode::Warning) => 1,
+            Some(DepartureMode::ExtendedWarning) => 2,
+            Some(DepartureMode::Stalled) => 3,
+            Some(DepartureMode::Spinning) => 4,
+        };
+        self.worst_alert = self.worst_alert.max(rank);
+        let mut keys = PilotInput::default();
+        if state.crashed {
+            self.phase = SpinPhase::Done;
+            return keys;
+        }
+        match self.phase {
+            SpinPhase::Enter => {
+                keys.pitch = 1.;
+                keys.commands = vec![PilotCommand::Throttle(0.3)];
+                if rank > 0 {
+                    self.alerted_at = Some(tick);
+                    self.phase = SpinPhase::Hold;
+                    self.phase_start = tick;
+                } else if tick >= STALL_ENTRY_LIMIT {
+                    self.phase = SpinPhase::Done;
+                }
+            }
+            SpinPhase::Hold => {
+                keys.pitch = 1.;
+                keys.commands = vec![PilotCommand::Throttle(0.3)];
+                if tick >= self.phase_start + STALL_HOLD_TICKS {
+                    self.phase = SpinPhase::Recover;
+                    self.phase_start = tick;
+                    self.recovery_started_at = Some(tick);
+                }
+            }
+            SpinPhase::Recover => {
+                // Nose down until the nose is well below the horizon, throttle
+                // and afterburner in, wings level.
+                keys.pitch = if state.pitch.to_degrees() > -25. {
+                    -0.6
+                } else {
+                    0.
+                };
+                keys.roll = (-state.bank * 2.).clamp(-1., 1.);
+                keys.commands = vec![
+                    PilotCommand::Throttle(1.),
+                    PilotCommand::Set(Switch::Burner, true),
+                ];
+                if rank == 0 {
+                    let since = *self.calm_since.get_or_insert(tick);
+                    if tick >= since + 240 {
+                        self.recovered_at = Some(since);
+                        self.phase = SpinPhase::Done;
+                    }
+                } else {
+                    self.calm_since = None;
+                }
+                if tick >= self.phase_start + STALL_RECOVERY_LIMIT {
+                    self.phase = SpinPhase::Done;
+                }
+            }
+            SpinPhase::Done => {}
+        }
+        keys
+    }
+
+    pub fn report(&self, state: &flight::State) -> String {
+        let show = |t: Option<u64>| t.map_or("never".to_owned(), |t| t.to_string());
+        format!(
+            "stall_recovery: alert_tick={} recovery_started_tick={} recovered_tick={} worst_alert={} altitude_lost_ft={:.0} min_altitude_ft={:.0} min_speed_kt={:.1} crashed={}",
+            show(self.alerted_at),
+            show(self.recovery_started_at),
+            show(self.recovered_at),
+            self.worst_alert,
+            self.start_altitude_ft - self.min_altitude_ft,
+            self.min_altitude_ft,
+            self.min_speed_kt,
+            state.crashed,
+        )
     }
 }

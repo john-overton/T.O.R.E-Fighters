@@ -359,6 +359,33 @@ def spin_scenarios() -> list[Scenario]:
     ]
 
 
+def check_stall_recovery(output: str) -> list[str]:
+    problems = extremes_problems(output, engine_off_ok=True)
+    s = _numbers(output, "stall_recovery:")
+    if not s:
+        return problems + ["no stall_recovery: line"]
+    if s.get("alert_tick") == "never":
+        problems.append("a full-back-stick pull at low speed never raised a stall alert")
+    elif s.get("recovered_tick") == "never":
+        problems.append("nose down with the afterburner in did not clear the stall")
+    if s.get("crashed") != "false":
+        problems.append("crashed in the stall recovery")
+    return problems
+
+
+def stall_scenarios() -> list[Scenario]:
+    return [
+        Scenario(
+            name=f"flight-stallrecover-{ac}",
+            lane="flight",
+            args=["--headless-flight", "20000", "--aircraft", ac, "--maneuver", "stall-recover", "--no-audio"],
+            check=check_stall_recovery,
+            timeout=120,
+        )
+        for ac in AIRCRAFT
+    ]
+
+
 # ------------------------------------------------------------ system faults
 
 
@@ -466,8 +493,17 @@ def combat_scenarios() -> list[Scenario]:
 # --------------------------------------------------------------- windowed
 
 
+# Stations whose weapon is a surface missile or similar and refuses the aircraft
+# fixture, so the trigger must not spend a round (docs/spec/missiles.md).
+REFUSED_SLOTS = {
+    ("f18", 3), ("f18", 4), ("f22", 3), ("f22n", 3), ("faxx", 3), ("mig23", 3), ("mig23", 4),
+    ("rafale", 2), ("su25", 3), ("x31", 3),
+}
+
+
 def check_slot(ac: str, slot: int):
     capacity = STATIONS[ac]
+    refused = (ac, slot) in REFUSED_SLOTS
 
     def check(output: str) -> list[str]:
         problems = []
@@ -481,6 +517,10 @@ def check_slot(ac: str, slot: int):
         for index, (left, cap) in enumerate(zip(ammo, capacity)):
             if left < 0 or left > cap:
                 problems.append(f"station {index + 1} ammo {left} outside 0..{cap}")
+        if refused and shots != 0:
+            problems.append(f"a surface weapon fired at the practice aircraft ({shots} shots)")
+        if not refused and shots == 0:
+            problems.append("the trigger fired nothing")
         fired_slot = capacity[slot - 1] - ammo[slot - 1]
         if fired_slot != shots:
             problems.append(f"fired {shots} but the station lost {fired_slot}")
@@ -756,6 +796,186 @@ def cheat_scenarios() -> list[Scenario]:
     return out
 
 
+def check_unlimited_ammo(ac: str, slot: int):
+    capacity = STATIONS[ac]
+
+    def check(output: str) -> list[str]:
+        m = re.search(r"Combat probe: .* shots=(\d+) hits=(\d+) kills=(\d+) active=(\d+) ammo=\[([\d, ]+)\]", output)
+        if not m:
+            return ["no Combat probe line"]
+        shots = int(m.group(1))
+        ammo = [int(v) for v in m.group(5).split(",")]
+        problems = []
+        if shots == 0:
+            problems.append("nothing was fired")
+        # The gun's count is set by the first round; a missile station keeps its full count.
+        if slot > 1 and ammo[slot - 1] != capacity[slot - 1]:
+            problems.append(f"Unlimited ammo on but station {slot} went {capacity[slot - 1]} -> {ammo[slot - 1]}")
+        if slot == 1 and ammo[0] < capacity[0] - 1:
+            problems.append(f"Unlimited ammo on but the gun went {capacity[0]} -> {ammo[0]}")
+        return problems
+
+    return check
+
+
+def make_check_damage_cheat(mode: str):
+    def check(output: str) -> list[str]:
+        m = re.search(r"\| HP (\d+) SYS (\S+) ", output)
+        if not m:
+            return ["no status line with HP"]
+        hp, sys = int(m.group(1)), m.group(2)
+        problems = []
+        if mode == "invulnerable":
+            if hp == 0 or "LAUNCHER LOST" in output:
+                problems.append(f"Invulnerable but the aircraft was destroyed (HP {hp})")
+        elif mode == "normal":
+            if sys != "--":
+                problems.append(f"Normal damage but system faults appeared: SYS {sys}")
+        elif mode == "realistic":
+            if sys == "--" and hp < 232:
+                problems.append("Realistic damage took hit points but caused no system fault")
+        return problems
+
+    return check
+
+
+def cheat_combat_scenarios() -> list[Scenario]:
+    out = []
+    # The first air-to-air missile station of each aircraft (the Rafale's second
+    # station is a surface missile that refuses the practice aircraft).
+    for ac, missile_slot in [("f18", 2), ("rafale", 3), ("f14", 2), ("mig29", 2), ("su27", 2), ("f22", 2)]:
+        for slot in (1, missile_slot):
+            out.append(
+                Scenario(
+                    name=f"flight-cheat-unlimited-ammo-{ac}-slot{slot}",
+                    lane="flight",
+                    args=["--live-fire", "--aircraft", ac, "--weapon-slot", str(slot), "--flight-cheat", "unlimited-ammo", "--combat-probe-ticks", "1200", "--capture-flight", "{work}/c.ppm", "--no-audio"],
+                    window=True,
+                    check=check_unlimited_ammo(ac, slot),
+                    timeout=180,
+                )
+            )
+    for ac in ["f18", "su27", "f22"]:
+        for mode, flags in [("invulnerable", ["--flight-cheat", "invulnerable"]), ("normal", []), ("realistic", ["--flight-cheat", "realistic-damage"])]:
+            if mode == "realistic" and ac != "f18":
+                continue
+            out.append(
+                Scenario(
+                    name=f"flight-cheat-damage-{mode}-{ac}",
+                    lane="flight",
+                    args=["--live-fire", "--aircraft", ac, "--weapon-slot", "2", *flags, "--combat-command", "incoming", "--combat-command", "incoming", "--combat-probe-ticks", "1500", "--capture-flight", "{work}/c.ppm", "--no-audio"],
+                    window=True,
+                    check=make_check_damage_cheat(mode),
+                    timeout=180,
+                )
+            )
+    return out
+
+
+def check_waypoint(output: str) -> list[str]:
+    """The waypoint autopilot turns right toward waypoint 1 (60,000 ft out, 60
+    degrees right of north) from a heading of 17 degrees and holds the altitude
+    it captured. After 25 seconds it has turned well toward it without
+    overshooting past the bearing."""
+    problems = extremes_problems(output)
+    f = _numbers(output, "final_position:")
+    e = _numbers(output, "extremes:")
+    try:
+        heading = float(f["heading_deg"])
+        if not 30 <= heading <= 75:
+            problems.append(f"heading {heading:.1f} after 25 s, expected a turn from 17 toward 60 degrees")
+        if float(e["max_altitude_ft"]) - float(e["min_altitude_ft"]) > 80:
+            problems.append("the altitude hold wandered more than 80 ft")
+    except (KeyError, ValueError):
+        problems.append("no result line")
+    return problems
+
+
+def waypoint_scenarios() -> list[Scenario]:
+    return [
+        Scenario(
+            name=f"flight-waypoint-{ac}",
+            lane="flight",
+            args=["--headless-flight", "3000", "--aircraft", ac, "--maneuver", "waypoint", "--no-audio"],
+            check=check_waypoint,
+            timeout=120,
+        )
+        for ac in AIRCRAFT
+    ]
+
+
+# -------------------------------------------------------------------- fuel
+
+
+def check_fuel_out(output: str) -> list[str]:
+    """Run out of fuel in level flight: the fuel stops at zero and the dead
+    engine gives no energy."""
+    problems = extremes_problems(output)
+    e = _numbers(output, "extremes:")
+    n = _plain_numbers(output)
+    try:
+        if abs(float(e["fuel_end_lb"])) > 1e-6:
+            problems.append(f"25 lb of fuel did not run out in 100 seconds of level flight: {e['fuel_end_lb']} lb left")
+        if float(n["fuel_lb"]) < 0:
+            problems.append("negative fuel")
+        if n.get("crashed") != "false":
+            problems.append("crashed after running out of fuel in level flight at 5,000 ft")
+    except (KeyError, ValueError):
+        problems.append("no result line")
+    return problems
+
+
+def fuel_scenarios() -> list[Scenario]:
+    return [
+        Scenario(
+            name=f"flight-fuelout-{ac}",
+            lane="flight",
+            args=["--headless-flight", "12000", "--aircraft", ac, "--maneuver", "level", "--flight-fuel", "25", "--no-audio"],
+            check=check_fuel_out,
+            timeout=120,
+        )
+        for ac in AIRCRAFT
+    ]
+
+
+# ----------------------------------------------------------------- devices
+
+
+def check_devices(output: str) -> list[str]:
+    problems = extremes_problems(output)
+    d = _numbers(output, "devices:")
+    if not d:
+        return problems + ["no devices: line"]
+    if d["violations"] != "0":
+        problems.append(f"device moved wrongly: {d['first_violation']}")
+    travel = float(d["deployment_seconds"])
+    for name in ("gear", "flaps", "brake", "hook"):
+        if name == "hook" and d["hook_available"] != "true":
+            if d["hook_down_s"] != "none":
+                problems.append("an aircraft with no hook lowered one")
+            continue
+        for way in ("down", "up"):
+            value = d[f"{name}_{way}_s"]
+            if value == "none":
+                problems.append(f"{name} never finished going {way}")
+            elif abs(float(value) - travel) > 0.1:
+                problems.append(f"{name} took {value} s going {way}, the aircraft's travel is {travel} s")
+    return problems
+
+
+def device_scenarios() -> list[Scenario]:
+    return [
+        Scenario(
+            name=f"flight-devices-{ac}",
+            lane="flight",
+            args=["--headless-flight", "3600", "--aircraft", ac, "--maneuver", "devices", "--no-audio"],
+            check=check_devices,
+            timeout=120,
+        )
+        for ac in AIRCRAFT
+    ]
+
+
 # -------------------------------------------------------- instrument panels
 
 
@@ -794,6 +1014,7 @@ def scenarios() -> list[Scenario]:
         + landing_scenarios()
         + maneuver_scenarios()
         + spin_scenarios()
+        + stall_scenarios()
         + fault_scenarios()
         + combat_scenarios()
         + slot_scenarios()
@@ -804,4 +1025,8 @@ def scenarios() -> list[Scenario]:
         + weather_scenarios()
         + cheat_scenarios()
         + panel_scenarios()
+        + cheat_combat_scenarios()
+        + device_scenarios()
+        + fuel_scenarios()
+        + waypoint_scenarios()
     )

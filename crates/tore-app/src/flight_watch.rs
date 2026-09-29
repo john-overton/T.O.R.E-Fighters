@@ -186,6 +186,106 @@ impl FlightWatch {
     }
 }
 
+/// Watches the four deployable devices (gear, flaps, airbrake, hook): positions
+/// must stay within 0..1, never move against the command, and the time a full
+/// travel takes is reported so it can be compared with the aircraft's own
+/// deployment time.
+#[derive(Debug, Default)]
+pub struct DeviceWatch {
+    previous: [f64; 4],
+    commanded: [bool; 4],
+    changed_at: [u64; 4],
+    /// Seconds of the last full travel down (deploying) and up, per device.
+    down_seconds: [Option<f64>; 4],
+    up_seconds: [Option<f64>; 4],
+    violations: u32,
+    first: Option<String>,
+}
+
+const DEVICE_NAMES: [&str; 4] = ["gear", "flaps", "brake", "hook"];
+
+impl DeviceWatch {
+    pub fn new(state: &flight::State) -> Self {
+        Self {
+            previous: Self::positions(state),
+            commanded: Self::commands(state),
+            ..Default::default()
+        }
+    }
+
+    fn positions(state: &flight::State) -> [f64; 4] {
+        [state.gear, state.flaps, state.brake, state.hook]
+    }
+
+    fn commands(state: &flight::State) -> [bool; 4] {
+        [
+            state.gear_down,
+            state.flaps_down,
+            state.brake_out,
+            state.hook_down,
+        ]
+    }
+
+    pub fn observe(&mut self, state: &flight::State) {
+        let now = Self::positions(state);
+        let commanded = Self::commands(state);
+        for i in 0..4 {
+            if commanded[i] != self.commanded[i] {
+                self.commanded[i] = commanded[i];
+                self.changed_at[i] = state.ticks;
+            }
+            let delta = now[i] - self.previous[i];
+            let bad = if !(-1e-9..=1. + 1e-9).contains(&now[i]) {
+                Some("left 0..1")
+            } else if (commanded[i] && delta < -1e-9) || (!commanded[i] && delta > 1e-9) {
+                Some("moved against its command")
+            } else {
+                None
+            };
+            if let Some(why) = bad {
+                self.violations += 1;
+                self.first.get_or_insert_with(|| {
+                    format!(
+                        "{}_{}_at_tick_{}",
+                        DEVICE_NAMES[i],
+                        why.replace(' ', "_"),
+                        state.ticks
+                    )
+                });
+            }
+            let seconds = (state.ticks - self.changed_at[i]) as f64 / 120.;
+            if commanded[i] && now[i] >= 1. && self.previous[i] < 1. {
+                self.down_seconds[i] = Some(seconds);
+            }
+            if !commanded[i] && now[i] <= 0. && self.previous[i] > 0. {
+                self.up_seconds[i] = Some(seconds);
+            }
+        }
+        self.previous = now;
+    }
+
+    pub fn report(&self, state: &flight::State) -> String {
+        use tore_sim::models::FlightModel;
+        let show = |v: Option<f64>| v.map_or("none".to_owned(), |v| format!("{v:.2}"));
+        let mut line = format!(
+            "devices: violations={} first_violation={} deployment_seconds={:.2} hook_available={}",
+            self.violations,
+            self.first.as_deref().unwrap_or("none"),
+            state.model().configuration().equipment.deployment_seconds,
+            state.hook_available()
+        );
+        for i in 0..4 {
+            line += &format!(
+                " {0}_down_s={1} {0}_up_s={2}",
+                DEVICE_NAMES[i],
+                show(self.down_seconds[i]),
+                show(self.up_seconds[i])
+            );
+        }
+        line
+    }
+}
+
 fn total_fuel(state: &flight::State) -> f64 {
     state.fuel + state.systems.external_lbs()
 }

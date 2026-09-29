@@ -620,27 +620,42 @@ Shift + arrows look around in the cockpit or orbit around the aircraft externall
 
 ### Headless flight checks
 
-Every `--headless-flight` run ends with an `extremes:` line: sample count, `non_finite`
-(any NaN or infinite pose, speed, load or fuel), top speed, highest and lowest load,
-lowest and highest altitude, peak pitch and roll rates, fuel at the start and end, `fuel_rise_lb`
-(fuel that went up, which it never should) and `dead_stick_gain_ft` (energy height gained above
-60 feet with the engine off, which should stay at zero). `--flight-trace TICKS` also prints a
-`trace:` line every that many ticks. `--flight-fault TICK:INDEX` (repeatable, index 0..44) applies
-a system fault to the player's aircraft at that tick through the normal fault path and adds a
-`systems:` line with the outcome. These are development harness options, not game behaviour.
+Every `--headless-flight` run ends with a `final_position:` line and an `extremes:` line: sample
+count, `non_finite` (any NaN or infinite pose, speed, load or fuel), top speed, highest and
+lowest load, lowest and highest altitude, peak pitch and roll rates, fuel at the start and
+end, `fuel_rise_lb` (fuel that went up, which it never should), `dead_stick_gain_ft` (energy
+height gained above 60 feet with the engine off, which should stay at zero) and
+`energy_rate_over_thrust` (the largest one-second energy gain as a share of what full thrust
+could give, which should stay well under 1). `--flight-trace TICKS` also prints a `trace:` line
+every that many ticks. These are development harness options, not game behaviour:
 
-Three scripted pilots share the run, so a script can fly the same manoeuvre in every aircraft:
+- `--flight-fault TICK:INDEX` (repeatable, index 0..44) applies a system fault to the player's
+  aircraft at that tick through the normal fault path and adds a `systems:` line.
+- `--flight-cheat NAME` (repeatable) turns on `extra-g`, `no-spins`, `no-crashes`,
+  `unlimited-fuel`, `unlimited-ammo`, `invulnerable` or `realistic-damage`. It also applies to
+  `--live-fire` captures.
+- `--flight-fuel POUNDS` sets the internal fuel, to run dry on purpose.
+- `--countermeasure-preview` also prints the chaff and flare counts carried against capacity.
+
+Scripted pilots fly the same manoeuvre in every aircraft. Each is a `fitted` test harness (agent
+decision, 2026-09-28):
 
 | `--maneuver` | What it flies | Result line |
 | --- | --- | --- |
 | `spin-recover` | Starts at 15,000 feet, holds pro-spin controls until the aircraft spins, holds the spin for four seconds, then follows the manual's recovery (stick centred then slightly forward, full opposite rudder, full throttle). Aircraft whose PT disables spins report `entered_tick=never`. | `spin_recovery:` |
+| `stall-recover` | Starts slow at 15,000 feet, pulls until the departure alert sounds, holds it three seconds, then afterburner, nose down and wings level until the alert clears. | `stall_recovery:` |
 | `land` | With `--ground-start N`: starts four miles out on a three degree slope with gear, flaps and hook down at a speed taken from the aircraft's own stall speed and landing limits, flares, closes the throttle, brakes to a stop. | `landing_start:` and `landing:` |
-| `land-gear-up`, `land-hard`, `land-off-runway` | The same approach with the gear left up, no flare, or lined up 1,500 feet beside the runway, to check that unsafe touchdowns crash for the reason the aircraft's landing limits give. | `landing:` |
+| `land-gear-up`, `land-hard`, `land-off-runway` | The same approach with the gear left up, no flare, or lined up 1,500 feet beside the runway's footprint, to check that unsafe touchdowns crash for the reason the aircraft's landing limits give. | `landing:` |
+| `autopilot` | Starts in a 25 degree bank with heading and altitude hold engaged. | `extremes:` |
+| `waypoint` | Waypoint autopilot toward a waypoint 60,000 feet out, 60 degrees right of north. | `final_position:` |
+| `devices` | Gear, flaps, airbrake and hook down one after another, then up again. | `devices:` |
+| `eject`, `eject-low` | Shift-E twice at 5,000 feet, or at 250 feet, and the pilot's descent. | `ejection=` |
 
-The scripted landing is a `fitted` test harness (agent decision, 2026-09-28): it floats about
-1,500 feet past the aim point, so on runways under about 5,500 feet it can overrun, and on the
-small airstrips (about 1,000 feet) it lands off the end. Only long runways are expected to end
-with `stopped=true` and `crashed=false`. `TORE_WIND=heading,speed` applies to these runs.
+The scripted landing floats about 1,500 feet past the aim point, so on runways under about 5,500
+feet it can overrun, and on the small airstrips (about 1,000 feet) it lands off the end. Only long
+runways are expected to end with `stopped=true` and `crashed=false`. `TORE_WIND=heading,speed`
+applies to these runs. Every ground-start airport is a flat square of at least 5,000 feet a side
+(`footprint_half_ft` in `landing_start:`), and a touchdown anywhere on it counts as landing.
 See [the flight lane](testing/lane-flight.md).
 
 ## Directional cockpit checks

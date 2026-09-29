@@ -4479,6 +4479,48 @@ impl ApplicationHandler for App {
         event_loop.set_control_flow(ControlFlow::WaitUntil(next));
     }
 }
+/// The `--maneuver devices` script: each device is set down one after another,
+/// then up again, so the run shows every travel.
+fn device_schedule(tick: u64) -> Option<Vec<flight::PilotCommand>> {
+    use flight::{PilotCommand::Set, Switch::*};
+    let (device, down) = match tick {
+        120 => (Gear, true),
+        240 => (Flaps, true),
+        360 => (Airbrake, true),
+        480 => (Hook, true),
+        1800 => (Gear, false),
+        1920 => (Flaps, false),
+        2040 => (Airbrake, false),
+        2160 => (Hook, false),
+        _ => return None,
+    };
+    Some(vec![Set(device, down)])
+}
+
+/// The `--flight-cheat` names, for headless probes and live-fire captures.
+const PROBE_CHEATS: [&str; 7] = [
+    "extra-g",
+    "no-spins",
+    "no-crashes",
+    "unlimited-fuel",
+    "unlimited-ammo",
+    "invulnerable",
+    "realistic-damage",
+];
+
+fn apply_probe_cheat(cheats: &mut tore_sim::cheats::Cheats, name: &str) {
+    use tore_sim::cheats::Damage;
+    match name {
+        "extra-g" => cheats.extra_g = true,
+        "no-spins" => cheats.no_spins = true,
+        "no-crashes" => cheats.no_crashes = true,
+        "unlimited-fuel" => cheats.unlimited_fuel = true,
+        "unlimited-ammo" => cheats.unlimited_ammo = true,
+        "invulnerable" => cheats.damage = Damage::Invulnerable,
+        _ => cheats.damage = Damage::Realistic,
+    }
+}
+
 /// What the headless AI probe scripts for the human leader
 /// (`--maneuver takeoff`, `--probe-wing-size`, `--probe-wing-order`,
 /// `--probe-player-home`, `--probe-attack`). Development harness only.
@@ -6931,6 +6973,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut flight_trace_ticks = 0u64;
     let mut flight_faults: Vec<(u64, usize)> = Vec::new();
     let mut flight_cheats: Vec<String> = Vec::new();
+    let mut flight_fuel: Option<f64> = None;
     let mut flight_devices = None;
     let mut flight_controls = None;
     let mut flight_throttle = None;
@@ -7438,10 +7481,17 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 }
                 flight_faults.push((tick, index));
             }
+            "--flight-fuel" => {
+                let pounds: f64 = args.next().ok_or("--flight-fuel needs internal fuel in pounds")?.parse()?;
+                if !pounds.is_finite() || !(0. ..=100_000.).contains(&pounds) {
+                    return Err("--flight-fuel needs 0..100000 pounds".into());
+                }
+                flight_fuel = Some(pounds);
+            }
             "--flight-cheat" => {
-                let name = args.next().ok_or("--flight-cheat needs extra-g, no-spins, no-crashes or unlimited-fuel")?;
-                if !["extra-g", "no-spins", "no-crashes", "unlimited-fuel"].contains(&name.as_str()) {
-                    return Err("--flight-cheat needs extra-g, no-spins, no-crashes or unlimited-fuel".into());
+                let name = args.next().ok_or("--flight-cheat needs extra-g, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage")?;
+                if !PROBE_CHEATS.contains(&name.as_str()) {
+                    return Err("--flight-cheat needs extra-g, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage".into());
                 }
                 flight_cheats.push(name);
             }
@@ -7505,7 +7555,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "stall",
                     "spin",
                     "spin-recover",
+                    "stall-recover",
+                    "devices",
                     "autopilot",
+                    "waypoint",
                     "eject",
                     "eject-low",
                     "land",
@@ -8241,11 +8294,32 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 keys.yaw = 1.;
             }
             "eject-low" => state.position[1] = 250.,
+            "waypoint" => {
+                // Waypoint 1 lies 60,000 feet away, 60 degrees right of north.
+                state.autopilot.set_navigation_target(Some(
+                    tore_sim::autopilot::NavigationTarget {
+                        number: 1,
+                        position: [51_961.5, 30_000.],
+                    },
+                ));
+                keys.commands = vec![flight::PilotCommand::Set(
+                    flight::Switch::WaypointAutopilot,
+                    true,
+                )];
+            }
             "autopilot" => {
                 // A 25 degree bank with the heading and altitude hold engaged: it
                 // has to level the wings and hold the 5,000 feet it captured.
                 state.bank = 25f64.to_radians();
                 keys.commands = vec![flight::PilotCommand::Set(flight::Switch::Autopilot, true)];
+            }
+            "stall-recover" => {
+                state.speed = flight_probe::STALL_START_FPS;
+                state.position[1] = flight_probe::STALL_START_FT;
+                state.throttle = 0.3;
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
             }
             "spin-recover" => {
                 state.speed = 180.;
@@ -8332,23 +8406,25 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 probe.place(&mut state, layout.heading);
                 landing_probe = Some(probe);
                 println!(
-                    "landing_start: position={:?} heading={:.1} runway_length_ft={length:.0} anchored={} slot={:?} runway_center={:?} runway_heading={:.1}",
+                    "landing_start: position={:?} heading={:.1} runway_length_ft={length:.0} anchored={} slot={:?} runway_center={:?} runway_heading={:.1} footprint_half_ft={:?}",
                     state.position,
                     layout.heading.to_degrees(),
                     layout.anchored,
                     layout.slots[0],
                     layout.runway.center,
-                    layout.runway.heading.to_degrees()
+                    layout.runway.heading.to_degrees(),
+                    world
+                        .airport_scene
+                        .runway(object)
+                        .map(|runway| runway.surface.half.map(f64::round))
                 );
             }
         }
         for name in &flight_cheats {
-            match name.as_str() {
-                "extra-g" => state.cheats.extra_g = true,
-                "no-spins" => state.cheats.no_spins = true,
-                "no-crashes" => state.cheats.no_crashes = true,
-                _ => state.cheats.unlimited_fuel = true,
-            }
+            apply_probe_cheat(&mut state.cheats, name);
+        }
+        if let Some(pounds) = flight_fuel {
+            state.fuel = pounds;
         }
         if flight_probe::LandingVariant::from_maneuver(&maneuver).is_some()
             && landing_probe.is_none()
@@ -8367,6 +8443,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let mut watch = flight_watch::FlightWatch::new(flight_trace_ticks, &state);
         let mut spin_recovery =
             (maneuver == "spin-recover").then(|| flight_probe::SpinRecovery::new(&state));
+        let mut devices = (maneuver == "devices").then(|| flight_watch::DeviceWatch::new(&state));
+        let mut stall_recovery =
+            (maneuver == "stall-recover").then(|| flight_probe::StallRecovery::new(&state));
         for tick in 0..ticks {
             let scripted;
             let keys = if let Some(probe) = spin_recovery.as_mut() {
@@ -8380,6 +8459,17 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     commands: vec![flight::PilotCommand::Eject],
                     ..Default::default()
                 };
+                &scripted
+            } else if maneuver == "devices"
+                && let Some(commands) = device_schedule(tick as u64)
+            {
+                scripted = flight::PilotInput {
+                    commands,
+                    ..Default::default()
+                };
+                &scripted
+            } else if let Some(probe) = stall_recovery.as_mut() {
+                scripted = probe.keys(&state);
                 &scripted
             } else if let Some(probe) = landing_probe.as_mut() {
                 let world = replay_world.as_ref().unwrap();
@@ -8406,6 +8496,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 return Err(error.into());
             }
             watch.observe(&state);
+            if let Some(devices) = devices.as_mut() {
+                devices.observe(&state);
+            }
             let basis = attitude::Basis::new(state.yaw, state.pitch, state.bank);
             vertical |= basis.forward[1] > 0.999;
             inverted |= basis.up[1] < -0.9;
@@ -8425,6 +8518,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 break;
             }
             if spin_recovery.as_ref().is_some_and(|probe| probe.finished())
+                || stall_recovery
+                    .as_ref()
+                    .is_some_and(|probe| probe.finished())
                 || landing_probe.as_ref().is_some_and(|probe| probe.finished())
             {
                 break;
@@ -8455,6 +8551,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.fuel,
             state.crashed
         );
+        println!(
+            "final_position: x={:.0} z={:.0} heading_deg={:.1}",
+            state.position[0],
+            state.position[2],
+            state.yaw.to_degrees().rem_euclid(360.)
+        );
         println!("{}", watch.report());
         if !flight_faults.is_empty() {
             println!(
@@ -8466,6 +8568,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             );
         }
         if let Some(probe) = &spin_recovery {
+            println!("{}", probe.report(&state));
+        }
+        if let Some(devices) = &devices {
+            println!("{}", devices.report(&state));
+        }
+        if let Some(probe) = &stall_recovery {
             println!("{}", probe.report(&state));
         }
         if let Some(probe) = &landing_probe {
@@ -9104,6 +9212,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     combat.mission_dummies(&dummy_aircraft, 5280., &theater_resources)?;
     combat.reset(&mut flight)?;
+    for name in &flight_cheats {
+        apply_probe_cheat(&mut flight.cheats, name);
+        apply_probe_cheat(&mut combat.state.cheats, name);
+    }
     let normal_startup_defaults = !live_fire
         && record_input.is_none()
         && replay_frames.is_none()
