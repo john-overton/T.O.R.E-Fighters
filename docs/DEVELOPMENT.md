@@ -513,6 +513,8 @@ A mission replay frame is captured the same way with `--watch-replay FILE --capt
 
 ## Headless development
 
+For many runs at once with automatic checks (menus, flight, AI fights up to 15 against 15, replays) use the battery in [testing](testing/README.md).
+
 Run from the repository root with the pinned Rust toolchain and `--locked`.
 `cargo run` uses the dev profile by default, retaining debug symbols and
 assertions; no `--dev` flag is needed. Keep runtime data separate from normal
@@ -1105,6 +1107,7 @@ or `TICK:engage-my-target`; `--probe-trace SECONDS`
 prints each wingman's airfield phase and position. `--probe-player-home FROM:UNTIL`
 flies the scripted leader gear down toward the field during that tick range.
 `--separation 200` or `300` also exercises the expanded enemy-distance choices.
+`--probe-fight FRIENDLY:ENEMY` sizes a whole battle, 1 to 15 aircraft a side filled five to a wing (the scripted leader counts as one friendly), and `--probe-friendly-aircraft ID` picks the friendly AI aircraft; `--probe-enemy-aircraft` and `--probe-enemy-skill` still choose the enemy. Fifteen against fifteen is the creator's own limit.
 The scripted leader is only a test harness and can hit terrain on a long cruise.
 [Reproduction and limits](baselines/ground-start.md#whole-wing-ground-start-2026-09-23).
 

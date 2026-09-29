@@ -134,6 +134,7 @@ not have to be replaced by a `native` one before acceptance. See
 | --- | --- |
 | Research facts: formats, byte layouts, decoded contracts | `docs/formats/` |
 | Measured evidence: what was run, on what, with what result | `docs/baselines/` |
+| Testing: how the battery and probes work, lanes, adding scenarios | `docs/testing/` |
 | Behaviour specs: what a player experiences, with numbers | `docs/spec/` |
 | Planning: milestones | `docs/ROADMAP.md` |
 | Planning: current parity status and next feature (one page) | `docs/parity-plan.md` |
@@ -170,6 +171,7 @@ not have to be replaced by a `native` one before acceptance. See
 
 From the repository root, use `TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --headless-flight 1200 --no-audio`, or the CPU menu snapshot commands in [headless development](docs/DEVELOPMENT.md#headless-development).
 `--no-audio` alone does not disable the window; the linked guide covers isolated imports and the dev profile, while GPU captures and `--smoke-test` require a display.
+For broad bug hunting run the battery, `python3 tools/battery.py --lane ai`, described in [testing](docs/testing/README.md). Add a scenario there for any bug you fix that a headless or wrapped run can reproduce.
 Anything that opens a window (those, `--free-flight`, a plain launch) must go through `tools/agent-run.sh`, for example `tools/agent-run.sh cargo run --locked -p tore-app -- --smoke-test`, so John's active workspace is not covered. Never launch a window bare.
 
 ## Development checks
