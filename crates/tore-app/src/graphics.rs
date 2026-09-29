@@ -188,12 +188,27 @@ impl Options {
         }
         Ok(())
     }
-    /// A missing or unreadable file falls back to the defaults.
+    /// A missing file gives the defaults. An unreadable or damaged one does
+    /// too, with a warning in the session log saying why, like the other
+    /// settings files.
     pub fn load(path: &Path) -> Self {
-        crate::preferences::read(path)
-            .ok()
-            .and_then(|text| Self::parse(&text).ok())
-            .unwrap_or_default()
+        match crate::preferences::read(path) {
+            Ok(text) => Self::parse(&text).unwrap_or_else(|error| {
+                log::warn!(
+                    "Graphics options not loaded from {}: {error}; using the defaults",
+                    path.display()
+                );
+                Self::default()
+            }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Self::default(),
+            Err(error) => {
+                log::warn!(
+                    "Graphics options not loaded from {}: {error}; using the defaults",
+                    path.display()
+                );
+                Self::default()
+            }
+        }
     }
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         crate::preferences::write(path, &self.text())
@@ -223,6 +238,23 @@ mod tests {
         assert!(Options::parse(&(text.clone() + "sun-glint true\n")).is_err());
         assert!(Options::parse(&text.replace("tore-graphics 1", "tore-graphics 2")).is_err());
         assert!(Options::parse("tore-graphics 1\n").is_err());
+    }
+    #[test]
+    fn a_missing_or_damaged_file_gives_the_defaults() {
+        let dir = std::env::temp_dir().join(format!("tore-graphics-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(Options::load(&dir.join("none.conf")), Options::default());
+        let bad = dir.join("bad.conf");
+        std::fs::write(&bad, b"\xff\xfe not a config").unwrap();
+        assert_eq!(Options::load(&bad), Options::default());
+        let good = dir.join("good.conf");
+        let options = Options {
+            render_scale: 150,
+            ..Options::default()
+        };
+        options.save(&good).unwrap();
+        assert_eq!(Options::load(&good), options);
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn flags_override_in_order() {
