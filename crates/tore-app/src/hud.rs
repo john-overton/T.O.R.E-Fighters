@@ -238,8 +238,8 @@ pub fn draw(
     zoom: f32,
     ils: Option<(&tore_sim::airport::Guidance, &str, &str)>,
     wind: Option<&tore_sim::runway_wind::Assessment>,
-    gyro_bank: f64,
-    time_scale: f64,
+    // The gyro-smoothed bank for the bank scale, and the time compression rate.
+    (gyro_bank, time_scale): (f64, f64),
 ) {
     let mut p = Paint {
         pixels,
@@ -743,8 +743,7 @@ mod tests {
                 1.,
                 None,
                 None,
-                state.bank,
-                1.,
+                (state.bank, 1.),
             );
             draw(
                 &mut without,
@@ -758,8 +757,7 @@ mod tests {
                 1.,
                 None,
                 None,
-                state.bank,
-                1.,
+                (state.bank, 1.),
             );
             let visible = (297..316).any(|x| {
                 let at = (240 * 640 + x) * 4;
@@ -800,8 +798,7 @@ mod tests {
             1.,
             None,
             None,
-            state.bank,
-            1.,
+            (state.bank, 1.),
         );
         draw(
             &mut without,
@@ -815,8 +812,7 @@ mod tests {
             1.,
             None,
             None,
-            state.bank,
-            1.,
+            (state.bank, 1.),
         );
         let horizon = project(state.pitch, 0., 0., 0., 1.).unwrap().1.round() as usize;
         let compact = ladder_project(state.pitch, 0., 0., 0., 1.)
