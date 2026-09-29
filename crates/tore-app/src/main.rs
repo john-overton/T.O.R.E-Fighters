@@ -34,6 +34,7 @@ mod flight_probe;
 mod flight_ui;
 mod flight_views;
 mod flight_watch;
+mod formation_trace;
 mod graphics;
 mod graphics_screen;
 mod hud;
@@ -234,6 +235,8 @@ struct App {
     frame_time: Instant,
     instrument_time: Instant,
     target_refresh: target_preview::Refresh,
+    /// The open `TORE_FORMATION_TRACE` file for the mission in flight.
+    formation_trace: Option<formation_trace::FormationTrace>,
     menu: Menu,
     audio: Option<audio::Audio>,
     wing_recipient: Option<u8>,
@@ -2165,6 +2168,9 @@ impl App {
                     self.finish_recording();
                 }
                 self.input.context(true, self.focused);
+                // The old mission's trace is closed first, so its last rows
+                // land before the new header.
+                self.formation_trace = None;
                 let restarted_flight =
                     match self.world.restart(&self.hornet, &self.theater_resources) {
                         Ok(restarted) => restarted,
@@ -2174,6 +2180,16 @@ impl App {
                             return;
                         }
                     };
+                if let Some(wings) = &mut self.world.ai_wings {
+                    match formation_trace::start(wings) {
+                        Ok(trace) => self.formation_trace = trace,
+                        Err(error) => {
+                            self.error = Some(error.into());
+                            event_loop.exit();
+                            return;
+                        }
+                    }
+                }
                 self.airport_commands.clear();
                 self.instruments.navigation = navigation::Navigation::default();
                 self.wing_recipient = None;
@@ -2251,6 +2267,7 @@ impl App {
                     });
                 }
                 self.world.ai_wings = None;
+                self.formation_trace = None;
                 self.wing_recipient = None;
                 self.world.combat.ai_poses = false;
                 if let Err(e) = self.world.combat.finish_recording() {
@@ -3395,7 +3412,11 @@ impl ApplicationHandler for App {
                                     .collect(),
                                 crew: comms::crew(&self.hornet.profile),
                             };
-                            if let Err(error) = self.world.step(&input, &mut output) {
+                            let stepped = self.world.step(&input, &mut output);
+                            if let Some(wings) = &mut self.world.ai_wings {
+                                formation_trace::drain(&mut self.formation_trace, wings);
+                            }
+                            if let Err(error) = stepped {
                                 self.error = Some(error);
                                 event_loop.exit();
                                 return;
@@ -5694,6 +5715,7 @@ fn ai_probe_run(
         resources,
         &airfields,
     )?;
+    let mut formation_trace = formation_trace::start(&mut bridge)?;
     combat.ai_poses = !bridge.is_empty();
     if script.researched && flight.research.is_none() {
         flight.enable_research(1)?;
@@ -5956,7 +5978,11 @@ fn ai_probe_run(
             airport: Vec::new(),
             crew: comms::crew(&hornet.profile),
         };
-        mission.step(&input, &mut output)?;
+        let stepped = mission.step(&input, &mut output);
+        if let Some(wings) = &mut mission.ai_wings {
+            formation_trace::drain(&mut formation_trace, wings);
+        }
+        stepped?;
         if let Some(error) = &output.fault {
             return Err(error.clone().into());
         }
@@ -10214,6 +10240,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         frame_time: Instant::now(),
         instrument_time: Instant::now(),
         target_refresh: target_preview::Refresh::new(),
+        formation_trace: None,
         menu,
         audio,
         wing_recipient: None,

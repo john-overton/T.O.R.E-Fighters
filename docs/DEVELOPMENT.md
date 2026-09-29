@@ -1336,7 +1336,7 @@ set `TORE_FORMATION_TRACE` to a local CSV path before starting the application:
 TORE_FORMATION_TRACE=.local/formation-flight.csv cargo run --locked -p tore-app
 ```
 
-The parent directory must exist. The bridge appends a header at each mission
+The parent directory must exist. The app appends a header at each mission
 start and samples every 12 simulation ticks (10 Hz), flushing every second.
 Rows contain the decision phase, its duration, slot error, closure, altitude error, predicted
 minimum separation, yielding actor, steering target, achieved position/speed/

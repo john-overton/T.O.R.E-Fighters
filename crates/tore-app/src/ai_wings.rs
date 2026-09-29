@@ -282,12 +282,51 @@ impl Slot {
     }
 }
 
+/// The formation trace samples every 12 simulation ticks (10 Hz).
+const FORMATION_TRACE_EVERY: u64 = 12;
+/// The file is flushed on the first sample of each second (every 120 ticks).
+const FORMATION_TRACE_FLUSH_EVERY: u64 = 120;
+/// The most rows held between two drains. The app drains every tick, so this is
+/// only a bound: a wing of 29 aircraft adds 29 rows per sample, and rows past
+/// the limit are dropped.
+const FORMATION_TRACE_MAX_ROWS: usize = 4096;
+
+/// One sampled row of the formation trace: what one aircraft's formation logic
+/// decided this tick and where the aircraft is. Decision quantities precede
+/// that tick's physics; the achieved ones follow it. Plain numbers only: the
+/// app turns rows into the CSV file.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FormationRow {
+    pub tick: u64,
+    pub actor: u32,
+    pub trace: tore_sim::ai::formation::Trace,
+    pub position: [f64; 3],
+    pub speed: f64,
+    pub bank: f64,
+    pub g: f64,
+    pub pitch_input: f64,
+    pub roll_input: f64,
+    pub yaw_input: f64,
+    pub throttle: f64,
+    pub afterburner: bool,
+}
+
+/// What [`AiWings::take_formation_trace`] hands over.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FormationBatch {
+    pub rows: Vec<FormationRow>,
+    /// True when a sample fell on a whole second since the last drain, the
+    /// point where the file is flushed.
+    pub flush: bool,
+}
+
 /// The live AI bridge for one mission.
 pub struct AiWings {
     mission: AiMission,
     mission_preset: Preset,
     reports: reports::Reports,
-    formation_log: Option<std::io::BufWriter<std::fs::File>>,
+    /// Formation trace rows waiting for the app; `None` while tracing is off.
+    formation_trace: Option<FormationBatch>,
     slots: Vec<Slot>,
     weapons: BTreeMap<(u32, u8), tore_formats::weapons::Weapon>,
     device_random: tore_sim::ai::DecisionRandom,
@@ -788,17 +827,10 @@ impl AiWings {
             }
         }
         mission.start_in_formation();
-        let formation_log = std::env::var_os("TORE_FORMATION_TRACE").map(|path| {
-            use std::io::Write;
-            let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
-            let mut log = std::io::BufWriter::new(file);
-            writeln!(log, "tick,actor,phase,phase_seconds,slot_distance_ft,closure_fps,altitude_error_ft,predicted_separation_ft,yielding_to,x,y,z,speed_fps,bank_deg,g,pitch_input,roll_input,yaw_input,throttle,burner,aim_x,aim_y,aim_z")?;
-            Ok::<_, std::io::Error>(log)
-        }).transpose()?;
         Ok(Self {
             mission,
             mission_preset: Preset::Free,
-            formation_log,
+            formation_trace: None,
             slots,
             weapons: BTreeMap::new(),
             device_random: tore_sim::ai::DecisionRandom::seeded(0xdec0),
@@ -1536,59 +1568,58 @@ impl AiWings {
         Ok(output)
     }
 
+    /// Switch the formation trace on or off. While it is on, every sampled tick
+    /// adds its rows to a bounded list that [`take_formation_trace`] drains;
+    /// switching it off drops whatever was waiting. The trace only reads the
+    /// mission, so it never changes how an aircraft flies.
+    ///
+    /// [`take_formation_trace`]: Self::take_formation_trace
+    pub fn set_formation_trace(&mut self, on: bool) {
+        self.formation_trace = on.then(FormationBatch::default);
+    }
+
+    /// The rows collected since the last call, in tick order. The app calls
+    /// this every tick; with tracing off the batch is empty.
+    pub fn take_formation_trace(&mut self) -> FormationBatch {
+        self.formation_trace
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
     fn record_formation_trace(&mut self) {
-        use std::io::Write;
-        let Some(log) = self.formation_log.as_mut() else {
+        let Some(batch) = self.formation_trace.as_mut() else {
             return;
         };
         let tick = self.mission.tick();
-        if !tick.is_multiple_of(12) {
+        if !tick.is_multiple_of(FORMATION_TRACE_EVERY) {
             return;
         }
-        let result = (|| -> std::io::Result<()> {
-            for actor in self.mission.actors() {
-                let Some(trace) = actor.controller().formation_trace() else {
-                    continue;
-                };
-                let state = actor.flight();
-                let input = actor.last_input();
-                writeln!(
-                    log,
-                    "{},{},{:?},{:.3},{:.2},{:.2},{:.2},{:.2},{},{:.2},{:.2},{:.2},{:.2},{:.2},{:.3},{:.4},{:.4},{:.4},{:.4},{},{:.2},{:.2},{:.2}",
-                    tick,
-                    actor.id(),
-                    trace.phase,
-                    trace.phase_seconds,
-                    trace.slot_distance_ft,
-                    trace.closure_fps,
-                    trace.altitude_error_ft,
-                    trace.minimum_predicted_separation_ft,
-                    trace.yielding_to.map_or(String::new(), |id| id.to_string()),
-                    state.position[0],
-                    state.position[1],
-                    state.position[2],
-                    state.speed,
-                    state.bank.to_degrees(),
-                    state.g,
-                    input.pitch,
-                    input.roll,
-                    input.yaw,
-                    state.throttle,
-                    state.afterburner_active(),
-                    trace.aim[0],
-                    trace.aim[1],
-                    trace.aim[2]
-                )?;
+        for actor in self.mission.actors() {
+            let Some(trace) = actor.controller().formation_trace() else {
+                continue;
+            };
+            if batch.rows.len() >= FORMATION_TRACE_MAX_ROWS {
+                break;
             }
-            if tick.is_multiple_of(120) {
-                log.flush()?;
-            }
-            Ok(())
-        })();
-        if let Err(error) = result {
-            eprintln!("Formation trace disabled after write failure: {error}");
-            self.formation_log = None;
+            let state = actor.flight();
+            let input = actor.last_input();
+            batch.rows.push(FormationRow {
+                tick,
+                actor: actor.id(),
+                trace,
+                position: state.position,
+                speed: state.speed,
+                bank: state.bank,
+                g: state.g,
+                pitch_input: input.pitch,
+                roll_input: input.roll,
+                yaw_input: input.yaw,
+                throttle: state.throttle,
+                afterburner: state.afterburner_active(),
+            });
         }
+        batch.flush |= tick.is_multiple_of(FORMATION_TRACE_FLUSH_EVERY);
     }
 
     /// The player as the AI sees it: an ordinary object on the friendly side,
@@ -3267,13 +3298,12 @@ pub(crate) mod tests {
             || AiWings::build_with(&payload, &targets, 0, |_| Ok((aircraft(), None))).unwrap();
         let mut logged = build();
         let mut plain = build();
-        let path =
-            std::env::temp_dir().join(format!("tore-formation-trace-{}.csv", std::process::id()));
-        logged.formation_log = Some(std::io::BufWriter::new(
-            std::fs::File::create(&path).unwrap(),
-        ));
+        assert!(logged.take_formation_trace().rows.is_empty());
+        logged.set_formation_trace(true);
         let mut a = targets.clone();
         let mut b = targets;
+        let mut rows = Vec::new();
+        let mut flushes = Vec::new();
         for tick in 0..120 {
             let player = player_object([0., 20000., 800. * tick as f64 / 120.]);
             logged.advance(player.clone(), &mut a, &flat).unwrap();
@@ -3284,20 +3314,45 @@ pub(crate) mod tests {
                     plain.mission.actor(id).unwrap().flight()
                 );
             }
+            let batch = logged.take_formation_trace();
+            if batch.flush {
+                flushes.push(tick);
+            }
+            rows.extend(batch.rows);
         }
-        drop(logged);
-        let rows = std::fs::read_to_string(&path).unwrap();
-        std::fs::remove_file(path).unwrap();
-        assert_eq!(rows.lines().count(), 20);
-        for row in rows.lines() {
-            let columns: Vec<_> = row.split(',').collect();
-            assert_eq!(columns.len(), 23);
-            assert_eq!(
-                columns[17].parse::<f64>().unwrap(),
-                0.,
-                "formation commands no rudder"
-            );
+        assert_eq!(rows.len(), 20);
+        assert_eq!(flushes, [119], "flushed on the whole-second tick");
+        for row in &rows {
+            assert_eq!(row.yaw_input, 0., "formation commands no rudder");
+            assert_eq!(row.tick % 12, 0);
         }
+        // With the trace off nothing is kept, and nothing changes.
+        logged.set_formation_trace(false);
+        logged
+            .advance(player_object([0., 20000., 800.]), &mut a, &flat)
+            .unwrap();
+        assert_eq!(logged.take_formation_trace(), FormationBatch::default());
+    }
+
+    #[test]
+    fn formation_trace_rows_are_bounded_when_nobody_drains_them() {
+        let selections = [WingSelection {
+            wing: WingId::new(launch::Side::Friendly, 0).unwrap(),
+            aircraft: AircraftId::F18,
+            count: 2,
+            skill_level: 2,
+        }];
+        let payload = resolve_wings(&selections, None).unwrap();
+        let mut targets = vec![
+            target(1, [512., 20000., -512.], 0.),
+            target(2, [-512., 20000., -512.], 0.),
+        ];
+        let mut wings =
+            AiWings::build_with(&payload, &targets, 0, |_| Ok((aircraft(), None))).unwrap();
+        wings.set_formation_trace(true);
+        run(&mut wings, &mut targets, 12 * 2200);
+        let batch = wings.take_formation_trace();
+        assert_eq!(batch.rows.len(), FORMATION_TRACE_MAX_ROWS);
     }
 
     #[test]

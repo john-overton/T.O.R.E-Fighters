@@ -926,7 +926,9 @@ These splits touch different files and can run in parallel:
   pages; the target window's data apart from its refresh clock (`target_window.rs`
   keeps the data, `target_preview.rs` the clock and camera; done in this stage).
 - File writers and environment-variable reads leave simulation code, and `log`
-  calls become output.
+  calls become output. The formation trace is done: `AiWings` collects its rows
+  in a bounded list, and `formation_trace.rs` in the app reads
+  `TORE_FORMATION_TRACE` and writes the file.
 
 Then `git mv` moves the simulation set into `crates/tore-world`, with a
 `[profile.dev.package.tore-world] opt-level = 2` entry like `tore-sim`'s, and
