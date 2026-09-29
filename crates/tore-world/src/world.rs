@@ -335,9 +335,6 @@ impl World {
             bridge.apply_group_objectives(&ai.group_objectives, cockpit.flight.position);
             bridge.apply_group_survival(&ai.group_must_survive);
             bridge.mirror_pose_out(&mut self.combat.state.targets);
-            // The designation keys skip the player's friends.
-            self.combat.own_mut().friendlies =
-                bridge.friendly_ids(tore_sim::ai::launch::Side::Friendly);
             self.combat.ai_poses = !bridge.is_empty();
             ai_aircraft = Some(bridge.len());
             self.ai_wings = Some(bridge);
@@ -348,6 +345,12 @@ impl World {
         );
         self.comms
             .set_seats(self.roster.seats().iter().map(|seat| seat.id));
+        // The designation keys skip the player's friends.
+        if let Some(friends) = friendlies_of(self.ai_wings.as_ref(), &self.roster, cockpit.plane)
+            && let Some(own) = self.combat.state.ownship_mut(cockpit.plane.0)
+        {
+            own.friendlies = friends;
+        }
         // Draw from the placed start, including the AI's own poses.
         self.combat
             .restart_render(&cockpit.flight, self.ai_wings.as_ref());
@@ -359,6 +362,20 @@ impl World {
             layout,
             ai_aircraft,
         })
+    }
+
+    /// Set each human-flown plane's designation skip list to the aircraft of
+    /// its own side, humans and AI. Restart does it; a handoff that moves an
+    /// aircraft between the AI and a human calls it again.
+    pub fn refresh_friendlies(&mut self) {
+        for cockpit in &self.cockpits {
+            if let Some(friends) =
+                friendlies_of(self.ai_wings.as_ref(), &self.roster, cockpit.plane)
+                && let Some(own) = self.combat.state.ownship_mut(cockpit.plane.0)
+            {
+                own.friendlies = friends;
+            }
+        }
     }
 
     /// The tick the next step runs. Seat inputs name it.
@@ -588,20 +605,21 @@ impl World {
                 }
             }
         }
-        let own = &self.cockpits[0];
-        // Manual p.65: the player always lands first and other aircraft hold at
+        // Manual p.65: a human always lands first and other aircraft hold at
         // marshal. The retail condition (gear, height, speed and range) is
-        // re-evaluated every tick, so climbing away, raising the gear, a crash
-        // or restart release it.
+        // re-evaluated every tick for every human-flown plane, in id order,
+        // so climbing away, raising the gear, a crash or restart release it.
         if let Some(wings) = &mut self.ai_wings {
-            let [x, _, z] = own.flight.position;
-            wings.update_landing_priority(
-                ai_wings::PLAYER_ID,
-                &self.terrain.airport_scene,
-                &own.airport_service,
-                &own.flight,
-                self.terrain.surface(x, z).height,
-            );
+            for cockpit in &self.cockpits {
+                let [x, _, z] = cockpit.flight.position;
+                wings.update_landing_priority(
+                    cockpit.plane.0,
+                    &self.terrain.airport_scene,
+                    &cockpit.airport_service,
+                    &cockpit.flight,
+                    self.terrain.surface(x, z).height,
+                );
+            }
         }
         for message in self.cockpits[0].flight.systems.messages.drain(..) {
             out.cues.push(Cue::Message(message));
@@ -677,20 +695,34 @@ impl World {
         // One AI tick per combat tick, immediately after it, so the AI reads
         // the damage combat just applied and then writes the authoritative pose
         // back.
-        let own = &self.cockpits[0];
         if let Some(mut bridge) = self.ai_wings.take() {
             bridge.report_weapon_hits(&events);
-            let ownship = self
-                .combat
-                .state
-                .ownship(own.plane.0)
-                .ok_or("a human-flown plane needs an ownship")?;
-            let humans = [ai_wings::HumanAircraft::new(
-                ai_wings::HumanSlot::SINGLE_PLAYER,
-                &own.flight,
-                ownship.hp,
-                ownship.configuration(),
-            )];
+            // Every human-flown plane, in id order, is a world object to the
+            // AI, with its own ownship's hit points and configuration.
+            let mut humans = Vec::with_capacity(self.cockpits.len());
+            for cockpit in &self.cockpits {
+                let plane = self
+                    .roster
+                    .plane(cockpit.plane)
+                    .ok_or("a human-flown plane belongs to the roster")?;
+                // A plane combat keeps no ownship for has no hit points or
+                // configuration to show the AI, so it is not one of its
+                // human aircraft yet.
+                let Some(ownship) = self.combat.state.ownship(cockpit.plane.0) else {
+                    continue;
+                };
+                humans.push(ai_wings::HumanAircraft::new(
+                    ai_wings::HumanSlot {
+                        id: cockpit.plane.0,
+                        side: plane.slot.wing.side,
+                        wing: plane.slot.wing.index,
+                        member: plane.slot.member,
+                    },
+                    &cockpit.flight,
+                    ownship.hp,
+                    ownship.configuration(),
+                ));
+            }
             let stepped = bridge.step(&mut self.combat.state, &humans, &self.terrain);
             self.combat.ai_crashes(&bridge, &self.terrain);
             for (id, message, friendly) in bridge.ejection_events.drain(..) {
@@ -711,7 +743,7 @@ impl World {
         // for it. The mission recording reads the same picture, before the
         // radio drains this tick's strikes.
         self.combat
-            .advance_render(&own.flight, self.ai_wings.as_ref());
+            .advance_render(&self.cockpits[0].flight, self.ai_wings.as_ref());
         out.outcomes = self.combat.state.ledger.take_outcomes();
         // The AI's messages of this tick; the journal is write-only, so
         // draining it changes nothing.
@@ -980,6 +1012,16 @@ impl World {
 }
 
 /// The AI's planes and where each sits, from the AI wings' slots.
+/// The aircraft on `plane`'s own side, which its designation keys skip. `None`
+/// without an AI bridge or when the roster does not hold the plane.
+fn friendlies_of(
+    wings: Option<&ai_wings::AiWings>,
+    roster: &Roster,
+    plane: PlaneId,
+) -> Option<std::collections::BTreeSet<u32>> {
+    Some(wings?.friendly_ids(roster.plane(plane)?.slot.wing.side))
+}
+
 pub fn ai_planes(wings: &ai_wings::AiWings) -> impl Iterator<Item = (PlaneId, Slot)> + '_ {
     wings.slots().iter().map(|slot| {
         (

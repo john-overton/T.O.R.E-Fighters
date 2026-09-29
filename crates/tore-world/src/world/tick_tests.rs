@@ -1116,3 +1116,24 @@ fn every_human_flown_plane_is_in_the_picture_and_leaves_with_its_ownship() {
             .all(|t| t.id != 50)
     );
 }
+
+/// The AI hears of every human-flown plane with an ownship, in id order, each
+/// with its place in its wing from the roster; a plane's side sets its
+/// designation skip list.
+#[test]
+fn the_ai_is_handed_every_human_flown_plane_with_its_place_in_its_wing() {
+    let mut world = two_ownship_mission();
+    let mut out = TickOutput::default();
+    for _ in 0..3 {
+        tick_both(&mut world, [false, false], &mut out);
+    }
+    let humans = world.ai_wings.as_ref().unwrap().mission().humans();
+    let seen: Vec<_> = humans.iter().map(|h| (h.id, h.wing, h.member)).collect();
+    assert_eq!(seen, [(0, 0, 0), (50, 0, 5)]);
+    // Each ownship skips the aircraft of its own side, humans included.
+    world.refresh_friendlies();
+    for plane in [0, 50] {
+        let friends = &world.combat.state.ownship(plane).unwrap().friendlies;
+        assert!(friends.contains(&0) && friends.contains(&50), "{friends:?}");
+    }
+}
