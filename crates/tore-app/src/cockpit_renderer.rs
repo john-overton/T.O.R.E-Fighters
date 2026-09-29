@@ -1,9 +1,9 @@
 //! Aircraft-forward cockpit and HUD with flat translation and directional fading.
 use crate::{
     attitude::{Basis, dot},
+    camera::Camera,
     flight::State,
     menu::Sprite,
-    terrain::Camera,
 };
 
 pub struct CockpitRenderer {

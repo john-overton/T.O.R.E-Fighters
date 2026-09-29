@@ -1,5 +1,5 @@
 //! Manual-derived flight views, with fitted camera geometry. Never changes simulation.
-use crate::{attitude::Basis, combat::Combat, flight, terrain::Camera};
+use crate::{attitude::Basis, camera::Camera, combat::Combat, flight};
 use tore_sim::attitude::{Vector, dot};
 
 // Preserve the existing capture interface: 0 front, 1 external, 2 oblique, 3 back, 4 up.

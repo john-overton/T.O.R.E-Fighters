@@ -1,5 +1,5 @@
 //! Runtime masks from reviewed flat source fills; fitted rear-view optics.
-use crate::{attitude::Basis, flight::State, menu::Sprite, terrain::Camera};
+use crate::{attitude::Basis, camera::Camera, flight::State, menu::Sprite};
 use tore_formats::aircraft::AircraftId;
 pub const SIZE: [u32; 2] = [768, 384];
 

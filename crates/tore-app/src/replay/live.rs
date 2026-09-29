@@ -6,6 +6,7 @@
 //! look. Nothing here changes the flight: the menu only moves the camera and
 //! opens panels. Opinionated addition requested by John on 2026-09-26; the
 //! details are agent design decisions (2026-09-26).
+use crate::camera::Camera;
 use crate::controls_editor::{Rect, TITLE, text_width};
 use crate::flight_canvas::FlightCanvas;
 use crate::menu::Canvas;
@@ -15,7 +16,6 @@ use crate::replay::overlay::Placement;
 use crate::replay::panels::{self, Data, Kind, Panels};
 use crate::replay::viewer::{Label, Request};
 use crate::snapshot::RenderSnapshot;
-use crate::terrain::Camera;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use tore_formats::font::Font;
 use tore_replay::{AircraftInfo, Event, Side, TimedEvent, TreeSample};

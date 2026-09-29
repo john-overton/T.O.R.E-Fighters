@@ -2,10 +2,7 @@
 //! its flight model, its sensors and where its engines exhaust. Nothing here
 //! draws, so the mission core can hold it without art, menus or animation rigs.
 //! The drawn half, [`crate::aircraft::Airframe`], wraps one of these.
-use crate::{
-    flight,
-    terrain::{Camera, Terrain},
-};
+use crate::{flight, terrain::Terrain};
 use tore_formats::aircraft::Aircraft;
 use tore_sim::{attitude::Vector, models::AircraftModel, sensors::SensorProfiles};
 
@@ -46,8 +43,7 @@ impl AircraftType {
     /// theater's camera start, 2,000 feet above the ground or at 5,000 feet,
     /// whichever is higher.
     pub fn start(&self, world: &Terrain) -> flight::State {
-        let c = Camera::for_world(world);
-        let mut p = c.position;
+        let mut p = world.free_flight_start();
         p[1] = 5000f64.max(world.height(p[0] as f32, p[2] as f32) as f64 + 2000.);
         let mut state = flight::State::from_model(self.model.clone(), p);
         // State velocity is ground-relative; initialize the requested airspeed

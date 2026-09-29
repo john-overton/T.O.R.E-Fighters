@@ -14,10 +14,10 @@
 //! after a jump. Scheduling is plain data ([`Cue`]), tested without a sound
 //! device and written to the session log with `TORE_REPLAY_SOUND_LOG=1`.
 use crate::audio::{self, Audio, EngineLoops, EngineSounds};
+use crate::camera::Camera;
 use crate::replay::clock::{self, Clock, Direction};
 use crate::replay::convert;
 use crate::replay::playback::Playback;
-use crate::terrain::Camera;
 use std::sync::Arc;
 use tore_formats::aircraft::{Aircraft, AircraftId};
 use tore_formats::flight_model::departure::DepartureMode;

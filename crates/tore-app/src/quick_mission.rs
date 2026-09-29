@@ -1,9 +1,10 @@
 //! Retail option values with an explicit editable setup; simulation capabilities
 //! are validated separately. Popup frame/focus feedback are authored presentation.
 use crate::{
+    camera::Camera,
     menu::{Action, Canvas, HEIGHT, Sprite, WIDTH, text_width},
     mission_layout::{FEET_PER_NM, RETAIL_SEPARATIONS, SEPARATION_NM},
-    terrain::{Camera, Terrain},
+    terrain::Terrain,
 };
 use std::collections::BTreeMap;
 use tore_formats::{aircraft::AircraftId, ui::creator::Options};

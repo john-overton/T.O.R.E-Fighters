@@ -1,6 +1,6 @@
 //! Camera-facing original smoke artwork. Simulation owns emission and lifetime.
+use crate::camera::Camera;
 use crate::countermeasure_renderer::{FlareLight, glow};
-use crate::terrain::Camera;
 use tore_formats::Pic;
 use tore_sim::combat::countermeasures::{Devices, MAX_FLARE_PUFFS};
 use tore_sim::combat::smoke::{Kind, MAX_CONTRAIL_PUFFS, MAX_PUFFS, Smoke};

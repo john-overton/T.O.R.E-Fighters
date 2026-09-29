@@ -7,12 +7,12 @@
 //! keys and mouse the flight menu uses. Opinionated addition requested by
 //! John on 2026-09-26; items, wording and the pick radius are agent design
 //! decisions (2026-09-26).
+use crate::camera::Camera;
 use crate::controls_editor::{
     Editor, FOCUS, GOOD, HEADER, MUTED, PALE, PANEL, Rect, TITLE, WHITE, fit, inside, text_width,
 };
 use crate::menu::Canvas;
 use crate::replay::panels::ascii;
-use crate::terrain::Camera;
 use tore_formats::font::Font;
 use tore_replay::Side;
 

@@ -4,8 +4,8 @@
 //! plus where the aircraft is drawn now, so it grows and shrinks with the
 //! playhead in either direction. Included suggestion approved by John on
 //! 2026-09-26; lengths, colours and width are agent choices.
+use crate::camera::Camera;
 use crate::replay::tracks::SAMPLE_TICKS;
-use crate::terrain::Camera;
 use tore_replay::Side;
 
 /// Trail lengths Shift+R steps through, in seconds.

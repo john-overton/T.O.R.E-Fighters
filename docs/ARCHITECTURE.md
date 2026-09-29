@@ -767,8 +767,10 @@ its own. `Theater` would read better but already names the parsed T2 grid in
   The weather time, wind and cloud altitude that `TORE_WEATHER_TIME`,
   `TORE_WIND` and `TORE_CLOUD_ALTITUDE` set arrive as an explicit `Overrides`
   that the app reads (`scenery::launch_overrides`); a recording's identity
-  replaces them (`Terrain::for_recorded`). The camera type `Camera` stays in
-  `terrain.rs`, since it is plain geometry and many presentation files name it.
+  replaces them (`Terrain::for_recorded`). The camera type `Camera` is
+  presentation geometry the simulation never reads, so it lives in the app
+  (`camera.rs`); the point a free flight and the free camera start from is
+  `Terrain::free_flight_start`, which both use.
 - `Scenery` (`scenery.rs`, `App` owns it) is what the renderer draws: the land,
   sky and deck textures, the terrain mesh, the static airport geometry, ocean
   motion, the weather presentations for the main view and the four auxiliary

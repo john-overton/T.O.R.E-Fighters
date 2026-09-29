@@ -80,7 +80,7 @@ pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     sim: crate::sim_renderer::SimRenderer,
     cockpit: crate::cockpit_renderer::CockpitRenderer,
-    mirror_camera: crate::terrain::Camera,
+    mirror_camera: crate::camera::Camera,
     mirror_vertices: Vec<f32>,
     pub mirror_frames: u64,
     mirrors_enabled: bool,
@@ -108,7 +108,7 @@ impl Renderer {
     pub fn cockpit(
         &mut self,
         state: &crate::flight::State,
-        camera: &crate::terrain::Camera,
+        camera: &crate::camera::Camera,
         art: bool,
         hud: bool,
         pixels: &[u8],
@@ -130,7 +130,7 @@ impl Renderer {
         hornet: &crate::aircraft::Airframe,
         state: &crate::flight::State,
         visible: bool,
-        camera: &crate::terrain::Camera,
+        camera: &crate::camera::Camera,
         world: &crate::terrain::Terrain,
         scenery: &crate::scenery::Scenery,
     ) {
@@ -404,7 +404,7 @@ impl Renderer {
         crate::diagnostics::stage_done();
         Ok(Self {
             first_frame: Default::default(),
-            mirror_camera: crate::terrain::Camera::new(),
+            mirror_camera: crate::camera::Camera::new(),
             mirror_vertices: Vec::new(),
             mirror_frames: 0,
             mirrors_enabled: std::env::var("TORE_MIRRORS").as_deref() != Ok("0"),
@@ -456,7 +456,7 @@ impl Renderer {
     pub fn capture_sim(
         &mut self,
         path: &std::path::Path,
-        camera: &crate::terrain::Camera,
+        camera: &crate::camera::Camera,
         world: &crate::terrain::Terrain,
         scenery: &crate::scenery::Scenery,
         overlay: bool,
@@ -478,7 +478,7 @@ impl Renderer {
     }
     pub fn scene_pixels(
         &mut self,
-        camera: &crate::terrain::Camera,
+        camera: &crate::camera::Camera,
         world: &crate::terrain::Terrain,
         scenery: &crate::scenery::Scenery,
         width: u32,
@@ -515,7 +515,7 @@ impl Renderer {
     pub fn request_preview(
         &mut self,
         page: u8,
-        camera: &crate::terrain::Camera,
+        camera: &crate::camera::Camera,
         world: &crate::terrain::Terrain,
         scenery: &crate::scenery::Scenery,
     ) -> AppResult<bool> {
@@ -531,7 +531,7 @@ impl Renderer {
     }
     fn submit_readback(
         &mut self,
-        camera: &crate::terrain::Camera,
+        camera: &crate::camera::Camera,
         world: &crate::terrain::Terrain,
         scenery: &crate::scenery::Scenery,
         width: u32,
@@ -719,7 +719,7 @@ impl Renderer {
         &mut self,
         pixels: &[u8],
         scene: Option<(
-            &crate::terrain::Camera,
+            &crate::camera::Camera,
             &crate::terrain::Terrain,
             &crate::scenery::Scenery,
         )>,

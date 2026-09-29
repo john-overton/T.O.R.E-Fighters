@@ -28,9 +28,9 @@ impl Refresh {
 
 /// Camera on the player-to-target segment, at most one nautical mile from the
 /// subject. Nearby targets retain the player-eye position. Roll stays level.
-pub fn camera(eye: [f64; 3], target: [f64; 3]) -> crate::terrain::Camera {
+pub fn camera(eye: [f64; 3], target: [f64; 3]) -> crate::camera::Camera {
     let delta: [f64; 3] = std::array::from_fn(|i| target[i] - eye[i]);
-    let mut camera = crate::terrain::Camera::new();
+    let mut camera = crate::camera::Camera::new();
     let distance = delta.iter().map(|v| v * v).sum::<f64>().sqrt();
     let maximum = tore_sim::sensors::FEET_PER_NAUTICAL_MILE;
     camera.position = if distance > maximum {
@@ -46,7 +46,7 @@ pub fn camera(eye: [f64; 3], target: [f64; 3]) -> crate::terrain::Camera {
 
 /// Fit the actual projected silhouette between the text rows. These limits
 /// leave five percent side margins and the top/bottom information bands.
-pub fn fit(camera: &mut crate::terrain::Camera, points: impl IntoIterator<Item = [f64; 3]>) {
+pub fn fit(camera: &mut crate::camera::Camera, points: impl IntoIterator<Item = [f64; 3]>) {
     use tore_sim::attitude::{Basis, dot};
     let basis = Basis::new(f64::from(camera.yaw), f64::from(camera.pitch), 0.);
     let eye = camera.position;
@@ -124,7 +124,7 @@ mod tests {
         assert!(depth(1., 60000.) > depth(1., 60000.125));
         assert!(depth(camera.near_clip, 6076.) > depth(camera.near_clip, 6076.125));
         assert!(camera.near_clip < 6026.);
-        assert_eq!(crate::terrain::Camera::new().near_clip, 1.);
+        assert_eq!(crate::camera::Camera::new().near_clip, 1.);
     }
 
     #[test]

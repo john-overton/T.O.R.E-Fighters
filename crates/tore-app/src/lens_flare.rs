@@ -1,10 +1,7 @@
 //! Source lens-flare circles over a completed world view, before cockpit/UI.
 //! Smooth presentation adds continuous optical emission; stepped compatibility
 //! retains the imported palette remaps inside the original circles.
-use crate::{
-    scenery::Scenery,
-    terrain::{Camera, Terrain},
-};
+use crate::{camera::Camera, scenery::Scenery, terrain::Terrain};
 
 pub struct LensFlare {
     pipeline: wgpu::RenderPipeline,

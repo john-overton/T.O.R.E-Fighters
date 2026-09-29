@@ -27,10 +27,7 @@ use crate::replay::trails;
 use crate::replay::weather::WeatherTrack;
 use crate::snapshot::{self, AircraftPose, RenderSnapshot};
 use crate::{AppResult, attitude::Basis};
-use crate::{
-    scenery::Scenery,
-    terrain::{Camera, Terrain},
-};
+use crate::{camera::Camera, scenery::Scenery, terrain::Terrain};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

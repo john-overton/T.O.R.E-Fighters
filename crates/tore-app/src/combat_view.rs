@@ -11,13 +11,14 @@ use crate::{
     AppResult,
     aircraft::Airframe,
     aircraft_type::AircraftType,
+    camera::Camera,
     combat::{Combat, launcher, target_pose},
     flight,
     render_snapshot::CombatArt,
     scenery::Scenery,
     sim_renderer::Contact,
     snapshot::{AircraftPose, RenderSnapshot, blend, interpolate},
-    terrain::{Camera, Terrain},
+    terrain::Terrain,
 };
 use std::{collections::BTreeMap, sync::Arc};
 use tore_formats::aircraft::AircraftId;

@@ -1,11 +1,11 @@
 //! The replay's drone camera, adapted from the free-camera viewer
-//! (`terrain::Camera::step`): W A S D move, E and Q climb and descend, Shift
+//! (`camera::Camera::step`): W A S D move, E and Q climb and descend, Shift
 //! is four times faster, the mouse wheel sets the speed and a right-drag
 //! turns the view. It flies free, or follows the selected aircraft at a
 //! fixed offset in world axes, so the aircraft stays where it was framed
 //! while the camera travels with it. It moves in real time, so a shot can be
 //! framed while playback is paused. Agent design (2026-09-26).
-use crate::terrain::Camera;
+use crate::camera::Camera;
 use std::collections::BTreeSet;
 
 /// Slowest and fastest drone speed, feet per second: slow enough to creep

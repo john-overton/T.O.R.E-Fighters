@@ -1,9 +1,5 @@
 //! Original weather primitives, projected independently of camera translation.
-use crate::{
-    AppResult,
-    scenery::Scenery,
-    terrain::{Camera, Terrain},
-};
+use crate::{AppResult, camera::Camera, scenery::Scenery, terrain::Terrain};
 use std::collections::BTreeMap;
 use tore_formats::{
     Pic,

@@ -297,7 +297,7 @@ fn demo() {
     let world =
         crate::terrain::Terrain::for_mission(resources, "UKR", Some(0), &Default::default())
             .unwrap();
-    let centre = crate::terrain::Camera::for_world(&world)
+    let centre = crate::camera::Camera::for_world(&world)
         .position
         .map(f64::from);
     let ground = f64::from(world.height(centre[0] as f32, centre[2] as f32));

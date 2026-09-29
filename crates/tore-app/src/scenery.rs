@@ -7,7 +7,8 @@ mod runway_cutout;
 
 use crate::{
     AppResult,
-    terrain::{Camera, Overrides, Placements, Stance, Terrain},
+    camera::Camera,
+    terrain::{Overrides, Placements, Stance, Terrain},
 };
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::{

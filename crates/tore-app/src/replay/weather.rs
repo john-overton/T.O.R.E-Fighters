@@ -15,10 +15,7 @@
 //! so it is kept every ten seconds; the view presentation, which depends on
 //! the player's path, is kept every second.
 use crate::replay::tracks::{Tracks, View};
-use crate::{
-    scenery::Scenery,
-    terrain::{Camera, Terrain},
-};
+use crate::{camera::Camera, scenery::Scenery, terrain::Terrain};
 use tore_sim::environment::{Environment, Presentation};
 
 /// Ticks between presentation snapshots: one second.

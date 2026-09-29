@@ -1,8 +1,5 @@
 //! Extensible 3D pass. World data/camera are independent of wgpu; UI composites afterward.
-use crate::{
-    scenery::Scenery,
-    terrain::{Camera, Terrain},
-};
+use crate::{camera::Camera, scenery::Scenery, terrain::Terrain};
 use wgpu::util::DeviceExt;
 
 /// Material-local packing flag. World and weather art use sixteen independent

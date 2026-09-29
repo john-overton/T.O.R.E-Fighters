@@ -10,11 +10,12 @@
 use crate::{
     AppResult,
     aircraft::Airframe,
+    camera::Camera,
     flight,
     scenery::Scenery,
     sim_renderer::{CombatGeometry, Contact},
     snapshot::{AircraftPose, Draw, RenderSnapshot, set_devices, wreck_in},
-    terrain::{Camera, Terrain},
+    terrain::Terrain,
 };
 use std::collections::BTreeMap;
 use tore_formats::{Pic, aircraft::AircraftId, shape::Shape};

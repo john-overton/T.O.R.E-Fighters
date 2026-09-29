@@ -11,6 +11,7 @@ mod airfield_radio;
 mod assets;
 mod attitude;
 mod audio;
+mod camera;
 mod canvas_present;
 mod celestial;
 mod clouds;
@@ -231,7 +232,7 @@ struct App {
     instruments: instruments::Instruments,
     airport_commands: Vec<flight_ui::Command>,
     theater_resources: std::collections::BTreeMap<String, Vec<u8>>,
-    camera: terrain::Camera,
+    camera: camera::Camera,
     quick: quick_mission::QuickMission,
     launch_creator: bool,
     /// `--loadout none|guns`: the stores the Load Ordnance page would leave, applied
@@ -1925,7 +1926,7 @@ impl App {
                                 renderer.prepare_aircraft(&self.hornet);
                                 diagnostics::stage_done();
                             }
-                            self.camera = terrain::Camera::for_world(&world);
+                            self.camera = camera::Camera::for_world(&world);
                             self.world.terrain = world;
                             self.scenery = scenery;
                             self.world.airport_service = service;
@@ -9482,7 +9483,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         Ok("0") => false,
         _ => return Err("TORE_TURBULENCE needs 0 or 1".into()),
     };
-    let mut camera = terrain::Camera::for_world(&world);
+    let mut camera = camera::Camera::for_world(&world);
     if let Ok(pose) = std::env::var("TORE_WEATHER_VIEW") {
         let values = pose
             .split(',')

@@ -1,9 +1,6 @@
 //! Shared, opinionated surface lighting and geometric shadows.
 //! Player-visible rules: docs/spec/surface-lighting.md.
-use crate::{
-    scenery::Scenery,
-    terrain::{Camera, Terrain},
-};
+use crate::{camera::Camera, scenery::Scenery, terrain::Terrain};
 use wgpu::util::DeviceExt;
 
 pub const MAP_SIZE: u32 = 2048;

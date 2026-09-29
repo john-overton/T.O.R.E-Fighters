@@ -1,11 +1,7 @@
 //! Imported aircraft geometry, cockpit and data. Does not use reference runtime code.
 use crate::{
-    AppResult,
-    aircraft_type::AircraftType,
-    flight,
-    menu::Sprite,
-    scenery::Scenery,
-    terrain::{Camera, Terrain},
+    AppResult, aircraft_type::AircraftType, camera::Camera, flight, menu::Sprite, scenery::Scenery,
+    terrain::Terrain,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
