@@ -48,7 +48,7 @@ Without the matrix and the long runs it is about 15 minutes.
 | Ground starts | `ai-ground-*` | takeoff with wings of 1 to 5, landing and bug-out orders, a fight after takeoff, an idle wing |
 | Long runs | `ai-long-*` | 30 simulated minutes (216,000 ticks) of 1 v 1, 5 v 5, 15 v 15, hold, guns and a ground landing |
 | Recordings | `ai-record-*` | `--record-mission --verify-render` must say PASS |
-| Determinism | `ai-determinism-*` | the same arguments run twice on fresh profile copies give identical output |
+| Determinism | `ai-determinism-*` | the same arguments run twice on fresh profile copies give identical output; `ai-determinism-recordings` records a 5 v 5 twice and `--recording-diff` must say they match |
 | Regressions | `ai-regress-*` | one per defect fixed below, checked strictly |
 | Acceptance probes | `ai-roster-probe`, `ai-probe-matrix` | the fixed roster and 1,008-encounter probes |
 
@@ -190,7 +190,13 @@ Behaviour the specs do not define, with the evidence. None of these were changed
    formation (wing leaders, singletons, leaderless wingmen) avoid other
    traffic? Today nothing does, and two of them on converging straight courses
    collide (see "Found, not fixed").
-10. **The in-flight activity line after a death.** A "Destroyed" change inside
+10. **"Land at selected airport" for an aircraft still on the ground.** A
+    wingman still waiting to take off counts in the reply ("Land at
+    Simferopol: 3 landing"), then takes off once the runway frees (645 s
+    later, behind the others' long approaches) only to fly the marshal and
+    approach and land again at 1,484 s. Bug out is ignored on the ground by
+    spec; the land order's spec (opinionated, John 2026-09-23) does not say.
+11. **The in-flight activity line after a death.** A "Destroyed" change inside
    the 2-second message interval is dropped rather than queued, so the bar can
    keep showing "Friendly 1-2: Defending" for an aircraft that has just died.
 
@@ -210,6 +216,4 @@ Behaviour the specs do not define, with the evidence. None of these were changed
 ## What was not run
 
 Windowed captures (this lane is headless only), other theaters than Ukraine,
-Windows and macOS, and a retail comparison. `--recording-diff` of two
-recordings was checked by hand (identical); the battery's determinism
-scenarios compare the probe's full text output instead.
+Windows and macOS, and a retail comparison.

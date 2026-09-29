@@ -184,6 +184,33 @@ def rerun_same(args: list[str]) -> Callable[[str], list[str]]:
     return check
 
 
+def recordings_match(args: list[str]) -> Callable[[str], list[str]]:
+    """Determinism of recordings: record the probe twice on fresh profile
+    copies and require `--recording-diff` to say they match."""
+
+    def check(output: str) -> list[str]:
+        problems = probe_problems(output)
+        profile = Path(os.environ.get("TORE_BATTERY_PROFILE", ROOT / ".local" / "bugbash-data"))
+        binary = os.environ.get("TORE_BATTERY_BIN", str(ROOT / "target" / "debug" / "tore-app"))
+        with tempfile.TemporaryDirectory(prefix="bb-ai-rec-") as tmp:
+            paths = []
+            for n in range(2):
+                data = Path(tmp) / f"data{n}"
+                if subprocess.run(["cp", "-a", "--reflink=auto", str(profile), str(data)]).returncode != 0:
+                    shutil.copytree(profile, data)
+                path = Path(tmp) / f"run{n}.tore-replay"
+                env = dict(os.environ, TORE_DATA_DIR=str(data), TORE_NO_ERROR_DIALOG="1")
+                subprocess.run([binary, *args, "--record-mission", str(path)], env=env, capture_output=True, timeout=900)
+                paths.append(str(path))
+            diff = subprocess.run([binary, "--recording-diff", *paths], capture_output=True, text=True, errors="replace", timeout=300)
+        if "Verdict: the recordings match" not in diff.stdout:
+            tail = [line for line in diff.stdout.splitlines() if line.strip()][-3:]
+            problems.append(f"two recordings of the same probe differ: {' / '.join(tail)[:200]}")
+        return problems
+
+    return check
+
+
 def probe(name: str, args: list[str], *, ticks: int = 7200, timeout: float = 900, check=None, expect=None, outputs=None, notes: str = "") -> Scenario:
     return Scenario(
         name=f"ai-{name}",
@@ -351,6 +378,10 @@ def scenarios() -> list[Scenario]:
     ]:
         out.append(Scenario(name=f"ai-{name}", lane="ai", args=args, timeout=1800,
                             expect=[r"AI probe totals:"], check=rerun_same(args)))
+
+    recorded = ["--ai-probe-ticks", "4800", *fight(5, 5, "--separation", "5", *attack), "--no-audio"]
+    out.append(Scenario(name="ai-determinism-recordings", lane="ai", args=recorded, timeout=1800,
+                        expect=[r"AI probe totals:"], check=recordings_match(recorded)))
 
     # 13b. Regressions for fixed defects, checked strictly.
     out.append(probe("regress-visual-incoming-flap", fight(6, 6, "--aircraft", "f22", "--probe-friendly-aircraft", "f22",
