@@ -994,7 +994,10 @@ There is no cockpit, HUD, instrument panel or mirror in a replay.
   side's colour (friendly blue, enemy red, neutral green, grey when
   unknown), drawn at the view's full resolution with a dark shadow; the
   selected aircraft's is in brackets. Aircraft over 100 nautical miles away,
-  wrecks on the ground and the aircraft the camera sits in have none.
+  wrecks on the ground and the aircraft the camera sits in have none. Labels
+  that would print over one another (a formation seen from a distance) are
+  lifted so each stays readable; the order follows the aircraft's number
+  (agent decision, 2026-09-28).
 - **Mission timer** (T, on at first): mission time as `mm:ss.t` and the tick.
 - **Cockpit messages:** printed as flight prints them, in the HUD's colour
   and font at its size, centered, newest lowest, just above the transport
