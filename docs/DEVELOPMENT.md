@@ -694,6 +694,12 @@ decision, 2026-09-28):
 | `devices` | Gear, flaps, airbrake and hook down one after another, then up again. | `devices:` |
 | `eject`, `eject-low` | Shift-E twice at 5,000 feet, or at 250 feet, and the pilot's descent. | `ejection=` |
 
+A ground-start `--maneuver takeoff` (and the `takeoff-gear-*` variants) prints an `envelope:` line
+(the aircraft's imported 1 G, 2 G and 3 G speed range in knots at the airport's altitude, the flap
+lift coefficient, the loading divisor and the imported landing limit) and a `liftoff:` line (the
+tick, speed in knots, distance in feet from the start, and the rotation speed at which the nose
+first passed 1.5 degrees). See [stall and liftoff speeds](testing/lane-flight.md#stall-and-liftoff-speeds-against-the-imported-data).
+
 Every headless flight also prints `loss: cause=...` (`none`, `overspeed` or `out of bounds`), and
 flying on out over a theater edge ends in the loss 105 nautical miles past the map
 ([world edge](spec/world-edge.md)).

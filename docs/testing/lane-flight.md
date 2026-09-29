@@ -119,6 +119,71 @@ terrain checks. Three problems belong to other lanes and were handed on:
   and both are lost; the AI invariant counts it. The fight scenarios do not count mid-air
   collisions between AI aircraft.
 
+## Stall and liftoff speeds against the imported data
+
+John doubted the F-22, Su-27 and Su-25 numbers on 2026-09-29: at 80 knots they were
+inside their lift envelope, and he expected 130 to 150 knots to fly. This was checked
+with the headless takeoff (`envelope:` and `liftoff:` lines, sea-level airports, calm
+air, the default loadout, full flaps and afterburner, back stick 0.35 held from the
+start). The model is doing what the imported data says. Nothing was changed.
+
+**How the model gets its stall speed** (`flight.rs`, hybrid adapter). It takes the left
+edge of the aircraft's imported 1 G speed and altitude polygon at the current altitude
+(the game's "stall speed limit", manual p. 90). Full flaps lower it 25 percent (the
+reviewed flap effect, [takeoff rules](../spec/takeoff-ground-contact.md)). Lift is
+`(speed / stall)^2` of one G up to the stall speed. Between the stall speed and the next
+G row's left edge the G limit ramps from 1 G up to that row, and loading divides it
+(`1 + loading * loadedElevator / 100`, for example 1.35 for the F-22), so a loaded
+aircraft gets a full 1 G only above the stall speed. That is the only weight term: the
+polygon itself is fixed, and it is not scaled by the square root of the weight. Thrust
+contributes its vertical share while the nose is up. There is no wing area or CLmax in
+the model: the imported polygon stands for them.
+
+**The imported data.** The sea-level vertex of each 1 G polygon is round in feet per
+second: F/A-18D 200 (118.5 kt), Su-27 180 (106.7), Su-25 130 (77.0), F-22 120 (71.1). The
+F-22's edge is 120 ft/s, low against the F/A-18D's 200; the game data gives the F-22 the low
+figure, and F-22N and F/A-XX share it. The manual has no stall, takeoff or approach figure
+for the F-22, Su-27 or Su-25 (its real-aircraft pages give approach speeds only for a few
+other types; the 80 to 90 knot "stall speed" on pp. 70 to 71 is the STOVL vector-nozzle
+procedure), so the polygons are the only per-aircraft data. The imported landing limit is
+195.5 kt for every aircraft (a touchdown limit, not an approach speed).
+
+| Aircraft | Gross lb | 1 G edge (kt) | With flaps (kt) | Min 1 G with flaps and load (kt) | Rotation (kt) | Liftoff (kt) | Liftoff run (ft) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| F/A-18D | 41,838 | 118.5 | 88.9 | 110.1 | 103.1 | 111.9 | 780 |
+| Rafale C | 32,092 | 118.5 | 88.9 | 107.6 | 105.3 | 111.6 | 588 |
+| F-14D | 64,511 | 100.7 | 75.5 | 88.5 | 85.7 | 91.3 | 607 |
+| A-4E | 22,026 | 106.7 | 80.0 | 91.2 | 90.4 | 94.1 | 847 |
+| X-31 | 28,620 | 130.4 | 97.8 | 115.0 | 114.2 | 120.5 | 597 |
+| MiG-29 | 31,895 | 118.5 | 88.9 | 106.2 | 105.4 | 111.0 | 506 |
+| Su-27 | 57,920 | 106.7 | 80.0 | 91.4 | 92.6 | 96.9 | 429 |
+| MiG-21 | 18,018 | 118.5 | 88.9 | 97.2 | 96.2 | 100.9 | 662 |
+| Su-25 | 69,875 | 77.0 | 57.8 | 70.8 | 68.4 | 73.4 | 513 |
+| MiG-23 | 39,413 | 106.7 | 80.0 | 97.4 | 91.4 | 99.4 | 748 |
+| Su-35 | 69,054 | 106.7 | 80.0 | 93.1 | 91.9 | 97.1 | 523 |
+| F-22, F-22N, F/A-XX | 57,800 | 71.1 | 53.3 | 70.0 | 73.2 | 77.6 | 207 |
+
+Sea level, so calibrated and true airspeed and ground speed are the same here. The
+"Min 1 G" column is where the loaded G limit first reaches 1 G, and liftoff follows it
+closely. The default loadout is the takeoff weight in the table; the stall speed does not
+change with weight, only the loading term does.
+
+**Against John's reference figures** (unsourced real-world numbers, a plausibility range
+only): liftoff 135 to 150 kt for the Su-27, 130 to 145 kt for the Su-25 and 130 to 150 kt
+for the F-22; approach 120 to 135, 125 to 140 and 135 to 145 kt. The model lifts them off at
+97, 73 and 78 kt, 30 to 45 percent lower. The other types sit low the same way (the F/A-18D lifts
+off at 112 kt and its 1 G edge is 118.5 kt, against a real approach of about 135 kt), so the
+cause is the game's own polygons, whose left edges are below real stall speeds, and not a
+fault in one aircraft's handling. The scripted landing's
+approach speed is 1.3 times the 1 G edge (F-22 92 kt, Su-25 100, Su-27 139), a probe choice
+and not an aircraft figure.
+
+Decision for John: to make these aircraft need 130 to 150 knots the polygon edge or a
+weight-scaled stall term would have to be invented, which the takeoff spec forbids without
+a source ("no real-aircraft flight manual values ... are used to fill those gaps"). The
+`flight-takeoff-*` scenarios now check that liftoff is between 0.75 and 1.6 times the 1 G edge
+so the lift model cannot drift unnoticed.
+
 ## Needs a decision
 
 None of these is defined in the specs, the manual text or the feature matrix, so none was changed.

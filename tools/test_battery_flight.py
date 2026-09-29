@@ -15,6 +15,8 @@ EXTREMES = (
 TAKEOFF = (
     "loadout: empty_lb=23050 internal_fuel_lb=11220 fuel_lb=11220 carried_lb=7568 gross_lb=41838 max_takeoff_lb=49224\n"
     "takeoff_complete=true airport_ground_ft=0\n"
+    "envelope: altitude_ft=8.0 g1_kt=118.5..705.1 g2_kt=154.1..693.3 g3_kt=198.5..681.4 loading=0.8\n"
+    "liftoff: tick=978 speed_kt=111.9 distance_ft=780 rotation_kt=103.1\n"
     "ticks=1617 speed_kt=162.436 altitude_ft=100.306 fuel_lb=11220.000 crashed=false\n" + EXTREMES
 )
 LANDING = (
@@ -59,6 +61,14 @@ class ExtremesTests(unittest.TestCase):
 class TakeoffAndLandingTests(unittest.TestCase):
     def test_clean_takeoff(self):
         self.assertEqual(flight.check_takeoff(TAKEOFF), [])
+
+    def test_liftoff_band(self):
+        env = "envelope: altitude_ft=8.0 g1_kt=118.5..705.1 g2_kt=154.1..693.3 g3_kt=198.5..681.4 loading=0.8\n"
+        ok = env + "liftoff: tick=978 speed_kt=111.9 distance_ft=780 rotation_kt=103.1\n"
+        self.assertEqual(flight.liftoff_problems(ok), [])
+        self.assertTrue(flight.liftoff_problems(ok.replace("speed_kt=111.9", "speed_kt=60.0")))
+        self.assertTrue(flight.liftoff_problems(ok.replace("speed_kt=111.9", "speed_kt=200.0")))
+        self.assertTrue(flight.liftoff_problems("liftoff: none\n"))
 
     def test_overweight_and_stuck(self):
         text = TAKEOFF.replace("gross_lb=41838", "gross_lb=50000")
@@ -172,6 +182,11 @@ class LossTests(unittest.TestCase):
         self.assertEqual(flight.check_dive(self.LOST + EXTREMES + "loss: cause=none\n"), [])
         fast = EXTREMES.replace("speed_over_envelope_top=0.604", "speed_over_envelope_top=1.7")
         self.assertTrue(flight.check_dive(self.LOST + fast + "loss: cause=overspeed\n"))
+
+    def test_invulnerable_overspeed_is_not_a_loss(self):
+        kept = "ticks=600 speed_kt=900.0 altitude_ft=20000.0 fuel_lb=1.0 crashed=false\nloss: cause=none\n"
+        self.assertEqual(flight.check_overspeed_invulnerable(kept), [])
+        self.assertTrue(flight.check_overspeed_invulnerable(self.LOST + "loss: cause=overspeed\n"))
 
     def test_belly_checks(self):
         roll = "gear_pulled=true belly_wear_percent={} gear=0.00\nticks=9000 speed_kt=4.7 altitude_ft=8.0 fuel_lb=1.0 crashed=false\n"

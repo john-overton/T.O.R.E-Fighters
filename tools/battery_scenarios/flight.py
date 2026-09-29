@@ -176,7 +176,23 @@ def check_takeoff(output: str) -> list[str]:
             problems.append(f"liftoff speed {speed} kt")
     except (KeyError, ValueError):
         problems.append("no result line")
-    return problems
+    return problems + liftoff_problems(output)
+
+
+def liftoff_problems(output: str) -> list[str]:
+    """The wheels leave the ground at a speed the aircraft's own imported 1 G
+    envelope supports: no lower than its flap-adjusted stall speed (0.75 of the
+    envelope's left edge) and no higher than 1.6 times the left edge. The model
+    takes its stall speed from that edge (docs/testing/lane-flight.md, "Stall and
+    liftoff speeds"), so a liftoff outside this band means the lift model moved."""
+    env = re.search(r"^envelope: .*? g1_kt=([\d.]+)\.\.[\d.]+", output, re.M)
+    lift = re.search(r"^liftoff: tick=\d+ speed_kt=([\d.]+) distance_ft=(\d+)", output, re.M)
+    if not env or not lift:
+        return ["no envelope: or liftoff: line"]
+    stall, speed = float(env.group(1)), float(lift.group(1))
+    if not 0.75 * stall <= speed <= 1.6 * stall:
+        return [f"lifted off at {speed} kt with a 1 G stall edge of {stall} kt"]
+    return []
 
 
 def _theater_tag(theater: str) -> str:
@@ -1352,6 +1368,16 @@ def edge_scenarios() -> list[Scenario]:
                     timeout=180,
                 )
             )
+            if theater == "UKR":
+                out.append(
+                    Scenario(
+                        name=f"flight-edge-lost-invulnerable-{edge}-{_theater_tag(theater)}",
+                        lane="flight",
+                        args=["--theater", theater, "--headless-flight", "150000", "--flight-start", f"{x},{z},{heading},20000", "--flight-cheat", "invulnerable", "--no-audio"],
+                        check=lambda output, theater=theater: check_edge_lost(output, theater),
+                        timeout=300,
+                    )
+                )
             out.append(
                 Scenario(
                     name=f"flight-edge-lost-{edge}-{_theater_tag(theater)}",
@@ -1372,6 +1398,16 @@ def check_overspeed_loss(output: str) -> list[str]:
         problems.append("the aircraft was not lost at 1.6 times its top speed")
     if "loss: cause=overspeed" not in output:
         problems.append("the loss did not name overspeed as the cause")
+    return problems
+
+
+def check_overspeed_invulnerable(output: str) -> list[str]:
+    """The same 1.6 times the top speed with the Invulnerable cheat: not lost."""
+    problems = []
+    if _plain_numbers(output).get("crashed") != "false":
+        problems.append("an invulnerable player was lost to overspeed")
+    if "loss: cause=none" not in output:
+        problems.append("an invulnerable player's overspeed reported a loss")
     return problems
 
 
@@ -1402,6 +1438,14 @@ def overspeed_scenarios() -> list[Scenario]:
                 lane="flight",
                 args=["--headless-flight", "600", "--maneuver", "overspeed", "--aircraft", ac, "--no-audio"],
                 check=check_overspeed_loss,
+            )
+        )
+        out.append(
+            Scenario(
+                name=f"flight-overspeed-invulnerable-{ac}",
+                lane="flight",
+                args=["--headless-flight", "600", "--maneuver", "overspeed", "--flight-cheat", "invulnerable", "--aircraft", ac, "--no-audio"],
+                check=check_overspeed_invulnerable,
             )
         )
         out.append(
