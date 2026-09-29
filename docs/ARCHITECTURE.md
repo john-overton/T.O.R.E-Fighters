@@ -1391,6 +1391,24 @@ and flies on. Each aircraft has a side: the host sets it on ownships
 wing's side), and `NO_SIDE` (ground objects, fixtures, rounds nobody owns) is
 never spared. Collisions stay on whatever the setting (John, 2026-09-28).
 
+*Found by B7b's fight test, fixed in its own commit:* a hit on an ownship went
+through the player's damage pipeline but never reached the ledger, so a human who
+shot down another human (or its own leader) was credited with nothing and a
+friendly-fire kill of a human never showed in the debrief. Now a hit on an
+ownship by another ownship's round records the shooter as the last hit on it, and
+a destroyed ownship is a recorded kill, as a hit on an AI row already was. An AI
+shooter's hit on an ownship is still not credited (*agent decision*): the replay
+recorder names the killer of the player from the ledger, so crediting it would
+add a killer to single player's recordings, which do not change. The ownship's
+own score (`hits`, `kills`) still counts hits on AI rows only, as before.
+
+A loss with no shooter credits nobody (lead's decision, 2026-09-29): a
+human-flown aircraft lost to the map edge, to overspeed or to belly wear is
+recorded as lost without credit (`Ledger::lose_without_credit`, in
+`Combat::step_all`) even when a shooter hit it earlier, as an AI aircraft lost
+that way is (`AiWings::lose_uncredited`). An ordinary crash still goes to the
+last shooter.
+
 #### Handoff between the AI and a human
 
 A handoff is a command, applied at the start of a tick before any other

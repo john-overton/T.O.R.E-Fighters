@@ -3872,6 +3872,7 @@ impl State {
         if self.cheats.invulnerable() {
             ownship_hits.clear();
         }
+        let human_shooters: Vec<u32> = ships.iter().map(|o| o.aircraft).collect();
         for (n, amount, section, direct_gun, owner, weapon_flags) in ownship_hits {
             let own = &mut ships[rows[n].index];
             own.localized_damage
@@ -3895,6 +3896,24 @@ impl State {
             let alive = own.hp > 0;
             self.damage_ownship(own, amount, &mut events);
             if alive && amount > 0 {
+                // The debrief credits a human shooter with the kill, or, if the
+                // aircraft is lost another way, with the last hit on it, as it
+                // does for a hit on an AI aircraft. An AI shooter's hit on an
+                // ownship stays uncredited: the recording names the killer of
+                // the player from this ledger, and single player's recordings
+                // do not change.
+                if human_shooters.contains(&owner) {
+                    let credit = Kill {
+                        owner,
+                        victim: own.aircraft,
+                        category: own.config.target_category,
+                        aircraft: true,
+                    };
+                    self.ledger.damaged(credit);
+                    if own.hp == 0 {
+                        self.ledger.kill(credit);
+                    }
+                }
                 self.strike(Strike {
                     owner,
                     victim: own.aircraft,
@@ -8110,6 +8129,33 @@ mod pair_tests {
         assert!(strikes.iter().all(|k| k.owner == 0 && k.victim == 1));
         assert!(!strikes.is_empty());
         assert!(s.ownship(0).unwrap().shots > 0);
+    }
+
+    #[test]
+    fn the_shooter_is_credited_with_an_ownship_it_shoots_down() {
+        let (mut s, l) = pair(600.);
+        s.own_mut().config.stations[0].weapon.source = "M61.JT".into();
+        // Ownship 1 is one hit from destruction.
+        s.ownship_mut(1).unwrap().hp = 1;
+        for _ in 0..300 {
+            step(&mut s, &l, [true, false]);
+        }
+        assert_eq!(s.ownship(1).unwrap().hp, 0);
+        let kills = s.ledger.kills();
+        assert_eq!(kills.len(), 1, "{kills:?}");
+        assert_eq!((kills[0].owner, kills[0].victim), (0, 1));
+        assert!(kills[0].aircraft);
+        // A hit that does not destroy it is the last hit, credited if the
+        // aircraft is lost another way.
+        let (mut s, l) = pair(600.);
+        s.own_mut().config.stations[0].weapon.source = "M61.JT".into();
+        for _ in 0..300 {
+            step(&mut s, &l, [true, false]);
+        }
+        assert!(s.ownship(1).unwrap().hp > 0);
+        assert!(s.ledger.kills().is_empty());
+        let credit = s.ledger.credit(1).expect("the last shooter to hit it");
+        assert_eq!((credit.owner, credit.victim), (0, 1));
     }
 
     #[test]
