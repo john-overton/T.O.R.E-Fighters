@@ -127,6 +127,28 @@ def kill_run(seconds: float, command: list[str]) -> int:
     return 0
 
 
+def seed_replays(data: str, source: str) -> None:
+    """Fills the data folder's replays/ with dated copies of `source` and settings that keep five."""
+    import shutil
+
+    folder = os.path.join(data, "replays")
+    os.makedirs(folder, exist_ok=True)
+    for day in range(11, 19):
+        shutil.copy(source, os.path.join(folder, f"2026-09-{day}_1200_UKR_F18.tore-replay"))
+    with open(os.path.join(folder, "2026-09-10_1200_UKR_F18.tore-replay"), "wb") as f:
+        f.write(b"not a recording, only named like one\n")
+    with open(os.path.join(folder, "notes.txt"), "w") as f:
+        f.write("mine\n")
+    with open(os.path.join(data, "replays-v1.conf"), "w") as f:
+        f.write("tore-replays 1\nauto-delete on\nrule keep-last\nkeep-last 5\nolder-than-days 30\nkeep 2026-09-11_1200_UKR_F18.tore-replay\n")
+    print("seeded 8 recordings, one impostor and one note")
+
+
+def list_replays(data: str) -> None:
+    folder = os.path.join(data, "replays")
+    print("REPLAYS", sorted(os.listdir(folder)))
+
+
 def read_ppm(path: str):
     raw = open(path, "rb").read()
     if not raw.startswith(b"P6"):
@@ -172,7 +194,11 @@ def ppm_stats(path: str, expect_ui: bool, min_colors: int) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 5 and sys.argv[1] == "killrun":
+    if len(sys.argv) >= 4 and sys.argv[1] == "seed":
+        seed_replays(sys.argv[2], sys.argv[3])
+    elif len(sys.argv) >= 3 and sys.argv[1] == "list":
+        list_replays(sys.argv[2])
+    elif len(sys.argv) >= 5 and sys.argv[1] == "killrun":
         sys.exit(kill_run(float(sys.argv[2]), sys.argv[3:]))
     elif len(sys.argv) >= 4 and sys.argv[1] == "newest":
         sys.exit(newest_replay(sys.argv[2], sys.argv[3]))

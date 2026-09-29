@@ -176,6 +176,54 @@ def settings_scenarios() -> list[Scenario]:
     return out
 
 
+def replays_screen_scenario() -> Scenario:
+    """The Replays screen on real files: auto-delete on opening, delete asks first, only the chosen file goes."""
+    listing = "REPLAYS"
+
+    def check(work: Path, output: str) -> list[str]:
+        s = sections(output)
+        problems = []
+        if "driver: ok" not in s.get(3, ""):
+            problems.append(f"the viewer did not run and quit cleanly: {s.get(3, '').strip()[-200:]}")
+        after = s.get(4, "")
+        names = re.findall(r"'([^']+)'", after)
+        expected = [
+            "2026-09-10_1200_UKR_F18.tore-replay",  # named like a recording but not one: never touched
+            "2026-09-11_1200_UKR_F18.tore-replay",  # marked Keep: survives the rule
+            "2026-09-14_1200_UKR_F18.tore-replay",
+            "2026-09-15_1200_UKR_F18.tore-replay",
+            "2026-09-16_1200_UKR_F18.tore-replay",
+            "2026-09-17_1200_UKR_F18.tore-replay",  # 12 and 13 fell to keep-last 5; 18 was deleted by hand
+            "notes.txt",  # not a recording: never touched
+        ]
+        if names != expected:
+            problems.append(f"replays folder after the run is {names}, expected {expected}")
+        log = s.get(5, "")
+        if log.count("Recording auto-deleted") != 2:
+            problems.append("expected exactly two auto-deleted recordings in the session log")
+        if log.count("Recording deleted:") != 1:
+            problems.append("expected exactly one recording deleted by hand")
+        return problems
+
+    return Scenario(
+        name="replay-screen-auto-delete-and-delete",
+        lane="replay",
+        args=["--ai-probe-ticks", "300", "--separation", "2", "--record-mission", "{work}/src.tore-replay", "--no-audio"],
+        then=[
+            Step([PY, tools.__file__, "seed", "{work}/data", "{work}/src.tore-replay"], app=False),
+            Step(["--version"]),
+            drive_step(
+                "wait 2;Escape;wait 1;Return;wait 3;Delete;wait 1;Return;wait 1;Delete;wait 1;Tab;wait 0.5;Return;wait 2",
+                ["--watch-replay", "{work}/src.tore-replay", "--no-audio"],
+            ),
+            Step([PY, tools.__file__, "list", "{work}/data"], app=False),
+            Step([PY, "-c", "import glob,sys; print(''.join(open(f,errors='replace').read() for f in sorted(glob.glob(sys.argv[1]+'/logs/*.log'))))", "{work}/data"], app=False),
+        ],
+        check_work=check,
+        timeout=240,
+    )
+
+
 def check_settings(output: str, warning: str) -> list[str]:
     s = sections(output)
     problems = []
@@ -190,7 +238,7 @@ def check_settings(output: str, warning: str) -> list[str]:
 
 
 def scenarios() -> list[Scenario]:
-    out: list[Scenario] = settings_scenarios()
+    out: list[Scenario] = settings_scenarios() + [replays_screen_scenario()]
     free = ["--free-flight", "--no-audio"]
     out.append(keyed_flight("replay-keys-bookmarks", free, keys="wait 2;ctrl+B;ctrl+P;wait 1;ctrl+B;ctrl+P;wait 2;ctrl+B;ctrl+P;wait 1;ctrl+P;wait 2;ctrl+B;wait 1", min_bookmarks=4))
     out.append(keyed_flight("replay-keys-end-flight", free, keys="wait 3;ctrl+Q;wait 2", ended="end flight"))
@@ -240,6 +288,26 @@ def scenarios() -> list[Scenario]:
             keys="wait 1;F8;m;shift+t;Down;k;ctrl+F2;shift+Up;space;shift+l;Return;F5;m;x;bracketright;shift+m;1;F4;1;space;space;2;shift+Left;shift+m;m;v;shift+Left;comma;Up;Escape;v;shift+Right;ctrl+1;ctrl+P;g;shift+9;j;ctrl+B;Return;Return;semicolon;5;m;Insert;h;3;shift+1;ctrl+shift+i;semicolon;shift+1;shift+5;Up;F8;F5;m;alt+F1;shift+2;F4;F3",
         )
     )
+    # Alt+F4 quits from every other screen and flight overlay.
+    screens_alt = {
+        "main-menu": ([], ""),
+        "creator": (["--quick-mission"], ""),
+        "terrain-viewer": (["--viewer"], ""),
+        "flight-help": (["--free-flight"], "F11"),
+        "flight-menu": (["--free-flight"], "Escape"),
+        "flight-map": (["--free-flight"], "shift+m"),
+    }
+    for name, (args, key) in screens_alt.items():
+        out.append(
+            Scenario(
+                name=f"replay-keys-alt-f4-on-{name}",
+                lane="replay",
+                args=["--version"],
+                then=[drive_step(f"wait 1;{key};wait 1" if key else "wait 2", [*args, "--no-audio"])],
+                check_work=lambda work, output: viewer_checks(output) if "driver: ok" in sections(output).get(1, "") else ["Alt+F4 did not quit"],
+                timeout=200,
+            )
+        )
     # The first-run locate screen, with nothing to detect, quits on Alt+F4 like every other screen.
     out.append(
         Scenario(
