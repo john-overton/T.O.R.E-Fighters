@@ -744,6 +744,30 @@ pub fn render(
             std::fs::write(folder.join(format!("worst-{name}.ppm")), out)?;
         }
     }
+    // Every bitmap font drawing a sample with accented letters, saved when
+    // TORE_CREATOR_DUMP names a folder, to see that no cell is a blank or a box.
+    if let Some(folder) = std::env::var_os("TORE_CREATOR_DUMP").map(std::path::PathBuf::from) {
+        let mut shot = vec![0u8; WIDTH * HEIGHT * 4];
+        for pixel in shot.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&[60, 60, 70, 255]);
+        }
+        let mut y = 4;
+        for (name, font) in sprites.iter().filter(|(_, f)| f.glyphs.len() == 256) {
+            let height = font.glyphs.iter().map(|g| g[2]).max().unwrap_or(0) as i32;
+            if y + height + 2 > HEIGHT as i32 {
+                break;
+            }
+            Canvas(&mut shot).text(font, "Ber\u{eb}zovka \u{fc}\u{e9}\u{f1}\u{df}\u{e0} ABC", 4, y, None);
+            Canvas(&mut shot).text(&sprites["QUICKFONT"], name, 400, y, None);
+            y += height + 3;
+        }
+        std::fs::create_dir_all(&folder)?;
+        let mut out = format!("P6\n{WIDTH} {HEIGHT}\n255\n").into_bytes();
+        for p in shot.chunks_exact(4) {
+            out.extend_from_slice(&p[..3]);
+        }
+        std::fs::write(folder.join("fonts.ppm"), out)?;
+    }
     // The debrief with the biggest numbers it can be handed, and with distinct
     // spoofed and jammed counts (so a swapped row would show), on every page,
     // for a look at columns that run into each other.
