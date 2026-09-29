@@ -348,8 +348,18 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
     };
     let mut quick = QuickMission::new(AircraftId::F18, options, data);
     let selectable = quick.aircraft_files.len();
+    // The player's theater list is the sixteen base theaters and nothing else.
+    let listed = quick.options.fields[13].len();
+    if listed != 16 || quick.theater_codes.iter().any(|c| c.starts_with('~')) {
+        m.problems.push(format!(
+            "the theater list offers {listed} entries, expected the 16 base theaters"
+        ));
+    }
+    // The sweep below also covers the imported `~` layout variants, added the
+    // way `--theater ~CODE` adds one; players never see them.
+    quick.add_developer_theaters(data, None);
     println!(
-        "creator matrix: {selectable} player aircraft, {} theaters",
+        "creator matrix: {selectable} player aircraft, {listed} listed theaters, {} layouts",
         quick.theater_codes.len()
     );
 

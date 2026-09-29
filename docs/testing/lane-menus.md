@@ -179,7 +179,7 @@ prints every in-flight menu item with what it does), a unit test, or the code pa
 | Creator: wing size 0 to 5 (player wing never 0), up to three enemy wings | 19, 20 | OK | matrix sweep, `menus-snap-quick-field-4` |
 | Creator: skill Ace, Experienced, Average, Novice (plus Dummy) | 19 | OK | `menus-snap-quick-field-5` |
 | Creator: aircraft list is the supported imported aircraft | 19 | DIFFERS | 14 exact identities (John, 2026-09-16), not the 26 retail choices |
-| Creator: location list of 16 theaters | 19 | OK | `menus-snap-quick-theaters`; the imported layout variants are listed after them |
+| Creator: location list of 16 theaters | 19 | OK | `menus-snap-quick-theater-*`; the imported layout variants are no longer listed (they load with `--theater ~CODE`, checked by `menus-snap-quick-devtheater-*` and the matrix probe) |
 | Creator: altitude 5,000 to 40,000 ft | 19 | OK | field 14 popup: 5,000, 10,000, 20,000, 40,000 |
 | Creator: weather Dawn, Clear, Cloudy, Overcast, Foggy, Sunset, Night | 19 | DIFFERS | six choices; Overcast is dropped as a duplicate of Cloudy ([quick-mission.md](../formats/quick-mission.md)) |
 | Creator: situation Advantage, Neutral, Disadvantage | 19 | NOT IMPLEMENTED | the row is shown; the mission ignores it ([spec](../spec/quick-mission-menu.md)) |

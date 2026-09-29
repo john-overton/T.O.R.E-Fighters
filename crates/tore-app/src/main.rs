@@ -9248,12 +9248,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 &theater_resources,
             );
             quick.ai_mission = ai_mission;
-            let selection = world
-                .catalog
-                .iter()
-                .position(|(code, _)| code == &theater_code)
-                .unwrap_or(0);
-            quick.theater(selection);
+            quick.choose_theater_code(&theater_code, &theater_resources);
             if let Some(object) = ground_start {
                 quick.choose_ground_runway(object)?;
             }
@@ -9402,15 +9397,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         camera.pitch = values[4].to_radians();
         camera.roll = values.get(5).copied().unwrap_or(0.).to_radians();
     }
-    let selection = world
-        .catalog
-        .iter()
-        .position(|(code, _)| code == &theater_code)
-        .unwrap_or(0);
     let mut quick =
         quick_mission::QuickMission::new(aircraft_id, creator_options.clone(), &theater_resources);
     quick.ai_mission = ai_mission;
-    quick.theater(selection);
+    quick.choose_theater_code(&theater_code, &theater_resources);
     if let Some(object) = ground_start {
         quick.choose_ground_runway(object)?;
     }
@@ -9470,7 +9460,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                                     creator_options.clone(),
                                     &theater_resources,
                                 );
-                                setup.theater(selection);
+                                setup.choose_theater_code(&theater_code, &theater_resources);
                                 setup.draft.values[17] = quick.draft.values[17];
                                 let name =
                                     probe_case_name(player, enemy, skill, geometry, researched);

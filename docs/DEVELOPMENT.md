@@ -1414,10 +1414,13 @@ The [view validation](baselines/flight-views.md) records fixtures and limitation
 
 ## Retail map detail validation
 
-The location picker includes the sixteen base maps and 59 source variants.
-`--theater '~UKR1'` selects an exact variant for the viewer, free flight,
-Quick Mission or headless flight. Shell quotes preserve the tilde. Existing
-flight adapters remain independent of map selection.
+The Quick Mission location picker offers the sixteen base maps only; the 59
+imported `~` source variants are incomplete (mostly one or two airports) and are
+not player choices since 2026-09-29. They remain a developer option for probes
+and the battery: `--theater '~UKR1'` selects an exact variant for the viewer,
+free flight, Quick Mission (where that one layout is added to the picker for the
+run) or headless flight. Shell quotes preserve the tilde. Existing flight
+adapters remain independent of map selection.
 
 ```sh
 TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --validate-maps --no-audio
