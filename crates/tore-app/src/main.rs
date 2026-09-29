@@ -4095,6 +4095,7 @@ impl ApplicationHandler for App {
                                 ils,
                                 airport_wind(&self.world, &presented, guidance.as_ref()).as_ref(),
                                 gyro_bank,
+                                self.flight_ui.time_scale,
                             );
                         }
                         let target_friendly = self.combat.state.display_target().is_some_and(|target| {

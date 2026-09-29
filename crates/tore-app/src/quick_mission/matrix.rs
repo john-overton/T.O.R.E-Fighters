@@ -1346,11 +1346,16 @@ pub fn flight_menu_table(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 let mut ui = crate::flight_ui::FlightUi::default();
                 let command = ui.activate(&node.label, &node.shortcut);
                 let notes = ui.take_notes();
-                let missing = notes.iter().any(|(text, _)| text.contains("not implemented yet"));
+                let missing = notes
+                    .iter()
+                    .any(|(text, _)| text.contains("not implemented yet"));
                 let result = if missing {
                     "NOT IMPLEMENTED".to_string()
                 } else {
-                    let said = notes.first().map(|(t, _)| format!(", says \"{t}\"")).unwrap_or_default();
+                    let said = notes
+                        .first()
+                        .map(|(t, _)| format!(", says \"{t}\""))
+                        .unwrap_or_default();
                     format!("{command:?}{said}")
                 };
                 out.push((here, node.shortcut.clone(), result));
@@ -1365,6 +1370,9 @@ pub fn flight_menu_table(data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     for (path, shortcut, result) in &rows {
         println!("flight menu | {path} | {shortcut} | {result}");
     }
-    println!("flight menu: {} items, {missing} not implemented", rows.len());
+    println!(
+        "flight menu: {} items, {missing} not implemented",
+        rows.len()
+    );
     Ok(())
 }
