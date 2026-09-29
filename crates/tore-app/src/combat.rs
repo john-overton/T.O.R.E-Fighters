@@ -1315,7 +1315,9 @@ pub(crate) fn apply_startup_weapon_state(state: &mut live::State) {
         .iter()
         .position(|station| live::is_gun(&station.weapon))
         .filter(|index| state.carries(*index));
-    let choice = gun.or_else(|| (0..stations.len()).find(|index| state.carries(*index)));
+    let choice = gun.or_else(|| {
+        (0..stations.len()).find(|index| state.carries(*index) && state.station_allowed(*index))
+    });
     match choice {
         Some(index) => {
             state.selected = index;
