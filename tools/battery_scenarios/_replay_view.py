@@ -193,7 +193,31 @@ def scenarios() -> list[Scenario]:
         )
     )
     out += speed_scenarios()
+    out += flight_panel_scenarios()
     out += bad_recording_scenarios()
+    return out
+
+
+def flight_panel_scenarios() -> list[Scenario]:
+    """The debug panels over a live flight (GPU capture): thought, telemetry, guidance, comms, right-click menu."""
+    out = []
+    combos = ["thought", "telemetry", "guidance", "comms", "menu", "thought,telemetry,guidance,comms,menu"]
+    for panels in combos:
+        for label, extra in (("air", []), ("ground", ["--ground-start", "1"])):
+            if extra and panels == "guidance":
+                continue
+            name = panels.replace(",", "-")
+            out.append(
+                Scenario(
+                    name=f"replay-flight-panels-{name}-{label}",
+                    lane="replay",
+                    args=["--launch-quick-mission", *extra, "--flight-panels", panels, "--flight-probe-ticks", "240", "--capture-flight", "{work}/c.ppm", "--no-audio"],
+                    window=True,
+                    timeout=200,
+                    outputs=["c.ppm"],
+                    check_work=lambda work, output: tools.ppm_problems(str(work / "c.ppm")),
+                )
+            )
     return out
 
 
