@@ -18,10 +18,11 @@ cargo build --locked -p tore-app
 python3 tools/battery.py --lane menus --jobs 6 --windows 2 --tag menus
 ```
 
-It takes about twenty minutes on the dev machine: the headless scenarios (CPU
-snapshots and headless mission starts, about 200) take three minutes, the
-windowed ones (about 130, each a real window through `tools/agent-run.sh`) about
-ten, and the creator probe `menus-validate-creator` about ten on its own. The
+It takes about thirty minutes on the dev machine (550 scenarios): the headless
+ones (CPU snapshots, instrument windows and headless mission starts, about 450)
+take five minutes, the windowed ones (about 95, each a real window through
+`tools/agent-run.sh`) about ten, and the creator probe `menus-validate-creator`
+about ten on its own. The
 scenarios count as the pass or fail; pictures the scenarios write are checked
 for size and blankness, and were also looked at by the agent that wrote them.
 
@@ -36,7 +37,8 @@ for size and blankness, and were also looked at by the agent that wrote them.
 | `menus-start-*` | The headless AI probe starts a mission through the creator's launch layout code: every aircraft on three theaters, every weather choice, every separation, every wing size. No aircraft may start off the map |
 | `menus-loadout-*` | `--loadout none` and `--loadout guns` (stores taken off) for every aircraft, flown headless |
 | `menus-window-launch-*` | The real launch path (`--launch-quick-mission --loadout none|guns`) for every aircraft: the launch line must show exactly the ammunition the page left, and the weapons window must list nothing (none) or only the gun (guns) |
-| `menus-window-cockpit-*`, `-view-*`, `-page-*`, `-flight-*`, `-flight-menu-*` | Real-window captures: every aircraft's cockpit at 960 by 720, all 12 flight views, all 10 instrument pages, and the flight and paused-menu screens at 960 by 720, 1280 by 720 and 640 by 900 |
+| `menus-panel-*` | Instrument windows drawn on the CPU: every page (0 to 9) for every aircraft, and every panel-only systems fault (1 to 35) on the systems window |
+| `menus-window-cockpit-*`, `-view-*`, `-flight-*`, `-flight-menu-*`, `-size-*` | Real-window captures: every aircraft's cockpit at 960 by 720, all 12 flight views, the flight and paused-menu screens at 960 by 720, 1280 by 720 and 640 by 900, and six more window sizes (out-of-range sizes must be refused with a message) |
 | `menus-window-graphics-*`, `-preview-*`, `-weapons-page-*`, `-smoke-*` | Every graphics option value, the map, debug panels, weapon diagnostics, small layout, damage, ejection and chaff previews, the weapons window for stores-off loads, and smoke starts of the creator, the controls screen and free flight |
 | `menus-combat-smoke-mig29` | The combat smoke probe, for the one aircraft it still passes (see below) |
 
@@ -71,6 +73,14 @@ for size and blankness, and were also looked at by the agent that wrote them.
 | Stores taken off the Load Ordnance page (John's Mavericks) still appeared in the flight's WEAPONS window, and an aircraft with everything off started with an empty gun selected, armed and listed as `0 M61` | The weapons list, the selection ring and the flown-mission startup treated every configured station as on the aircraft, even with a count of zero. The ammunition itself was already correct (zero stayed zero) | The list leaves out empty stations, `[` and `]` step over them, startup falls back to the first loaded station or NAV, and a flown mission starts on NAV when the selected station is empty (`bb72502`, `042ec7b`, `242d106`) |
 | `--validate-creator` stopped with `F18: damage region 3 at 0.1 has no distinct finite geometry` | The probe still expected visible partial damage on surviving aircraft, which the game deliberately draws intact | The probe now expects survivors intact and only a destroyed aircraft to change shape (`bb72502`) |
 | The RCS window's "NO EXPOSURE DATA" ran over its 270 and 90 bearing labels | Same row as the labels | Moved below the axis (`2e79269`) |
+| A broken `input-v1.conf` stopped start-up with "missing input profile version" and no file name | The error text carried no path | The message now starts with the file's path (`3570984`) |
+| A malformed `graphics-v1.conf` was ignored without a word, unlike the preferences and sound files | The loader swallowed the error | It now logs why the defaults were used (`0a1d5af`) |
+
+Also checked and fine: every settings file (preferences, graphics, sound) as empty,
+random bytes, 400 KB, NUL bytes, a wrong version, duplicated lines, NaN and a directory
+starts the game on the defaults, with the preferences and sound cases reported in the log
+(no panics in 24 windowed starts); preference files with empty, duplicate or out-of-range
+instrument pages load or are rejected cleanly.
 
 New tests: `combat::tests::an_emptied_station_stays_empty_and_is_not_listed` and three more,
 `live::tests::the_selection_ring_skips_stations_that_carry_nothing`,
@@ -108,6 +118,12 @@ New tests: `combat::tests::an_emptied_station_stays_empty_and_is_not_listed` and
 - **Creator rows that change nothing yet.** The situation row (neutral, friendly,
   hostile) and both nationality rows are presentation only; the mission does not use
   them ([creator spec](../spec/quick-mission-menu.md)).
+- **A broken controls file stops the game starting.** `input-v1.conf` that is empty,
+  binary or the wrong version makes start-up fail with an error, while every other
+  settings file falls back to defaults. The controls guide says a bad profile "fails with
+  a line number"; that holds for a bad line but an empty or binary file has no line. The
+  message now names the file. Whether it should instead fall back to the default
+  bindings, as the other files do, is a decision.
 - **HUD line for a dry station.** After the last round is fired, the station stays
   selected and the HUD reads `0 M61`, the weapons window still lists it, until the next
   `[` or `]`. Retail behaviour here is not recorded.

@@ -744,6 +744,90 @@ pub fn render(
             std::fs::write(folder.join(format!("worst-{name}.ppm")), out)?;
         }
     }
+    // The debrief with the biggest numbers it can be handed, and with distinct
+    // spoofed and jammed counts (so a swapped row would show), on every page,
+    // for a look at columns that run into each other.
+    {
+        use crate::debrief::{Debrief, Objective, Outcome, Pilot, Report, Status};
+        use tore_sim::combat::ledger::Tally;
+        let folder = std::env::var_os("TORE_CREATOR_DUMP").map(std::path::PathBuf::from);
+        for (name, tally) in [
+            (
+                "big",
+                Tally {
+                    launched: 99_999,
+                    hit: 88_888,
+                    damage: 1_234_567,
+                    missed: 5,
+                    spoofed: 6,
+                    jammed: 7,
+                },
+            ),
+            (
+                "distinct",
+                Tally {
+                    launched: 100,
+                    hit: 10,
+                    damage: 55,
+                    missed: 20,
+                    spoofed: 30,
+                    jammed: 40,
+                },
+            ),
+        ] {
+            let pilot = Pilot {
+                status: Status::Ejected,
+                damage: 1.,
+                landing_grade: Some(100),
+                kills: [999; 10],
+                friendly_fire: 999,
+                air_to_air: tally,
+                air_to_ground: tally,
+                gun: tally,
+                bombs: tally,
+                enemy_aam: tally,
+                enemy_sam: tally,
+                enemy_gun: tally,
+                enemy_aaa: tally,
+            };
+            let report = Report {
+                outcome: Outcome::Success,
+                objectives: vec![
+                    Objective::Destroy {
+                        destroyed: 29,
+                        total: 29,
+                    },
+                    Objective::Protect {
+                        protected: 29,
+                        total: 29,
+                    },
+                ],
+                elapsed_seconds: 359_999,
+                player: pilot.clone(),
+                wingman: Some(pilot),
+            };
+            for page in 1..=5usize {
+                let mut debrief = Debrief::new(report.clone(), data, Some("DEBSCV.PIC"))?;
+                debrief.page = page - 1;
+                let mut shot = vec![0u8; WIDTH * HEIGHT * 4];
+                let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    debrief.render(&mut shot);
+                }))
+                .is_err();
+                if panicked {
+                    problems.push(format!("debrief page {page} ({name}) panicked"));
+                }
+                if let Some(folder) = &folder {
+                    std::fs::create_dir_all(folder)?;
+                    let mut out = format!("P6\n{WIDTH} {HEIGHT}\n255\n").into_bytes();
+                    for p in shot.chunks_exact(4) {
+                        out.extend_from_slice(&p[..3]);
+                    }
+                    std::fs::write(folder.join(format!("debrief-{name}-{page}.ppm")), out)?;
+                }
+            }
+        }
+    }
     quick.help = true;
     draw(&mut quick, "help".into(), &mut problems);
     quick.help = false;
