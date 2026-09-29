@@ -38,6 +38,7 @@ mod hud;
 mod hud_aperture;
 mod input;
 mod input_catalog;
+mod input_script;
 mod instruments;
 mod lens_flare;
 mod locate;
@@ -287,6 +288,8 @@ struct App {
     /// The Replays screen, open over the main menu. It stays open while the
     /// replay viewer plays one of its recordings.
     replays_screen: Option<replay::screen::Replays>,
+    /// `--input-script`: key presses and clicks fed in as if from the window.
+    script: Option<input_script::Runner>,
 }
 /// Deliver due radio and crew lines: HUD text and recordings together. The
 /// channel's journal records each delivery for the mission recording.
@@ -2250,6 +2253,362 @@ impl App {
         }
     }
 }
+impl App {
+    /// Runs the next due step of `--input-script`, if there is one.
+    fn run_script(&mut self, event_loop: &ActiveEventLoop) {
+        use input_script::Step;
+        use winit::dpi::PhysicalPosition;
+        use winit::event::{DeviceId, Modifiers, MouseScrollDelta, TouchPhase};
+        let Some(mut runner) = self.script.take() else {
+            return;
+        };
+        let Some(renderer) = &self.renderer else {
+            self.script = Some(runner);
+            return;
+        };
+        let id = renderer.window.id();
+        let viewport = renderer.viewport();
+        renderer.window.request_redraw();
+        // The script stands in for a focused player, whatever the compositor says.
+        self.focused = true;
+        let device_id = DeviceId::dummy();
+        let set_mods = |app: &mut App, runner: &mut input_script::Runner, mods: ModifiersState| {
+            if runner.mods != mods {
+                runner.mods = mods;
+                app.window_event(
+                    event_loop,
+                    id,
+                    WindowEvent::ModifiersChanged(Modifiers::from(mods)),
+                );
+            }
+        };
+        if let Some((spec, _)) = runner.release.take() {
+            let action = self.key_input(event_loop, spec.input(false));
+            self.action(event_loop, action);
+            set_mods(self, &mut runner, ModifiersState::empty());
+            self.script = Some(runner);
+            return;
+        }
+        let tick = self.combat.state.tick();
+        if let Some(step) = runner.due(tick, Instant::now()) {
+            let mouse = |app: &mut App, event: WindowEvent| app.window_event(event_loop, id, event);
+            match step {
+                Step::Wait(_) | Step::WaitTick(..) => {}
+                Step::Tap(spec) => {
+                    set_mods(self, &mut runner, spec.mods);
+                    let action = self.key_input(event_loop, spec.input(true));
+                    self.action(event_loop, action);
+                    runner.release = Some((spec, false));
+                }
+                Step::Down(spec) => {
+                    set_mods(self, &mut runner, spec.mods);
+                    let action = self.key_input(event_loop, spec.input(true));
+                    self.action(event_loop, action);
+                }
+                Step::Up(spec) => {
+                    let action = self.key_input(event_loop, spec.input(false));
+                    self.action(event_loop, action);
+                    set_mods(self, &mut runner, ModifiersState::empty());
+                }
+                Step::Move(x, y) => mouse(
+                    self,
+                    WindowEvent::CursorMoved {
+                        device_id,
+                        position: PhysicalPosition::new(x, y),
+                    },
+                ),
+                Step::MoveMenu(x, y) => {
+                    let (x, y) = (
+                        f64::from(viewport.x) + x * f64::from(viewport.width) / menu::WIDTH as f64,
+                        f64::from(viewport.y)
+                            + y * f64::from(viewport.height) / menu::HEIGHT as f64,
+                    );
+                    mouse(
+                        self,
+                        WindowEvent::CursorMoved {
+                            device_id,
+                            position: PhysicalPosition::new(x, y),
+                        },
+                    );
+                }
+                Step::Press(button) => mouse(
+                    self,
+                    WindowEvent::MouseInput {
+                        device_id,
+                        state: ElementState::Pressed,
+                        button,
+                    },
+                ),
+                Step::Release(button) => mouse(
+                    self,
+                    WindowEvent::MouseInput {
+                        device_id,
+                        state: ElementState::Released,
+                        button,
+                    },
+                ),
+                Step::Click(button) => {
+                    for state in [ElementState::Pressed, ElementState::Released] {
+                        mouse(
+                            self,
+                            WindowEvent::MouseInput {
+                                device_id,
+                                state,
+                                button,
+                            },
+                        );
+                    }
+                }
+                Step::Wheel(notches) => mouse(
+                    self,
+                    WindowEvent::MouseWheel {
+                        device_id,
+                        delta: MouseScrollDelta::LineDelta(0., notches),
+                        phase: TouchPhase::Moved,
+                    },
+                ),
+                Step::Snapshot(path) => {
+                    let result = (|| -> std::io::Result<()> {
+                        use std::io::Write;
+                        let mut file = std::fs::File::create(&path)?;
+                        write!(file, "P6\n{} {}\n255\n", menu::WIDTH, menu::HEIGHT)?;
+                        for pixel in self.menu.pixels.chunks_exact(4) {
+                            file.write_all(&pixel[..3])?;
+                        }
+                        Ok(())
+                    })();
+                    match result {
+                        Ok(()) => println!("Script snapshot: {}", path.display()),
+                        Err(error) => {
+                            self.error = Some(format!("{}: {error}", path.display()).into())
+                        }
+                    }
+                }
+                Step::Exit => {
+                    println!("Input script: exit");
+                    self.action(event_loop, Action::Exit);
+                }
+            }
+        }
+        self.script = Some(runner);
+    }
+
+    /// A key press or release, from the window or from `--input-script`.
+    /// Returns what the game should do next.
+    fn key_input(&mut self, event_loop: &ActiveEventLoop, event: input_script::KeyInput) -> Action {
+        let mut name = match &event.logical {
+            Key::Named(k) => format!("{k:?}"),
+            Key::Character(c) => c.to_ascii_lowercase(),
+            _ => String::new(),
+        };
+        if self.screen == Screen::Flight {
+            name = flight_key(event.physical, &name);
+        }
+        // Alt-Enter switches window mode on every screen, before any
+        // screen claims the key. F11 is not used: it already opens the
+        // flight keyboard help (docs/FLIGHT-CONTROLS.md).
+        if name == "Enter" && self.modifiers.alt_key() && event.pressed {
+            if !event.repeat {
+                self.toggle_fullscreen();
+            }
+            return Action::None;
+        }
+        // Exit to desktop keeps its meaning over every screen, the
+        // controls, sound and graphics screens included.
+        if event.pressed
+            && ((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
+                || (self.modifiers.alt_key() && name == "F4"))
+            && (self.controls.is_some()
+                || self.sound_screen.is_some()
+                || self.graphics_screen.is_some())
+        {
+            self.action(event_loop, Action::Exit);
+            return Action::None;
+        }
+        // The controls screen takes every key press while it is open,
+        // with the same physical key names flight uses for capture.
+        if event.pressed
+            && let Some(editor) = &mut self.controls
+        {
+            if event.repeat && editor.capturing() {
+                return Action::None;
+            }
+            // The search field takes printable text with its case;
+            // Ctrl and Alt combinations stay shortcuts.
+            if editor.typing()
+                && !self.modifiers.control_key()
+                && !self.modifiers.alt_key()
+                && let Some(text) = &event.text
+                && text.chars().any(|c| !c.is_control())
+            {
+                let result = editor.text_input(text);
+                let action = self.controls_result(result);
+                self.action(event_loop, action);
+                return Action::None;
+            }
+            let name = flight_key(event.physical, &name);
+            let result = editor.key(
+                &name,
+                self.modifiers.shift_key(),
+                self.modifiers.control_key(),
+                self.modifiers.alt_key(),
+            );
+            let action = self.controls_result(result);
+            self.action(event_loop, action);
+            return Action::None;
+        }
+        if event.pressed
+            && let Some(screen) = &mut self.sound_screen
+        {
+            let outcome = screen.key(&name, self.modifiers.shift_key());
+            let action = self.sound_result(outcome);
+            self.action(event_loop, action);
+            return Action::None;
+        }
+        if event.pressed
+            && let Some(editor) = &mut self.graphics_screen
+        {
+            let result = editor.key(&name, self.modifiers.shift_key());
+            let action = self.graphics_result(result);
+            self.action(event_loop, action);
+            return Action::None;
+        }
+        // The Replays screen takes key presses too, except the
+        // shortcuts that quit the game.
+        if event.pressed
+            && self.screen == Screen::Main
+            && !((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
+                || (self.modifiers.alt_key() && name == "F4"))
+            && let Some(screen) = &mut self.replays_screen
+        {
+            let result = screen.key(&name, self.modifiers.shift_key(), event.repeat);
+            let action = self.replays_result(result);
+            self.action(event_loop, action);
+            return Action::None;
+        }
+        if self.screen == Screen::Flight
+            && event.pressed
+            && self.flight_ui.debug_panels
+            && !self.flight_ui.menu
+            && let Some(view) = self.live_debug.key(&name, self.modifiers.shift_key())
+        {
+            if let Some(view) = view {
+                let action = self.live_view(view);
+                self.action(event_loop, action);
+            }
+            return Action::None;
+        }
+        if self.screen == Screen::Flight
+            && !(event.pressed
+                && self.flight_ui.map.open
+                && matches!(
+                    name.as_str(),
+                    "m" | "Escape"
+                        | "+"
+                        | "="
+                        | "-"
+                        | "_"
+                        | "ArrowLeft"
+                        | "ArrowRight"
+                        | "ArrowUp"
+                        | "ArrowDown"
+                        | "Home"
+                ))
+            && (!event.pressed
+                || (!(self.flight_ui.menu
+                    && matches!(
+                        name.as_str(),
+                        "Escape"
+                            | "Tab"
+                            | "ArrowUp"
+                            | "ArrowDown"
+                            | "ArrowLeft"
+                            | "ArrowRight"
+                            | "Enter"
+                            | "Space"
+                    ))))
+            && (if event.repeat {
+                self.input.claimed(&name)
+            } else {
+                self.input.key(&name, event.pressed, self.modifiers)
+            })
+        {
+            return Action::None;
+        }
+        if self.screen == Screen::Flight && name == "Space" {
+            let blocked = self.flight_ui.frozen() || !self.focused || !self.modifiers.is_empty();
+            self.combat
+                .input
+                .space(event.pressed, event.repeat, blocked);
+            if !self.flight_ui.menu {
+                return Action::None;
+            }
+        }
+        if matches!(self.screen, Screen::Viewer | Screen::Flight) && !event.pressed {
+            self.camera.keys.remove(&name);
+            self.camera.keys.remove(&format!("Look{name}"));
+            return Action::None;
+        }
+        if !event.pressed {
+            return Action::None;
+        }
+        if (self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
+            || (self.modifiers.alt_key() && name == "F4")
+        {
+            Action::Exit
+        } else if self.screen == Screen::Flight {
+            let map_before = self.flight_ui.map.open;
+            let before = self.flight_ui.frozen();
+            let command = if event.repeat || self.modifiers.super_key() {
+                flight_ui::Command::None
+            } else {
+                self.flight_ui.key(
+                    &name,
+                    self.modifiers.shift_key(),
+                    self.modifiers.control_key(),
+                    self.modifiers.alt_key(),
+                    &self.hornet.flight_menu,
+                )
+            };
+            if self.flight_ui.map.open != map_before {
+                self.flight_ui.map.cancel_press();
+                self.camera.keys.clear();
+                self.combat.cancel();
+                self.instruments.cancel_press();
+            }
+            if self.flight_ui.frozen() || before != self.flight_ui.frozen() {
+                self.camera.keys.clear();
+                self.combat.cancel();
+                self.instruments.cancel_press();
+                self.flight_clock.remainder = 0.;
+                self.previous_flight.clone_from(&self.flight);
+                self.frame_time = Instant::now();
+            } else if !self.flight_ui.map.open {
+                look::press(&mut self.camera.keys, &name, self.modifiers);
+            }
+            self.flight_command(command)
+        } else if self.screen == Screen::Viewer {
+            if name == "Escape" {
+                Action::Back
+            } else {
+                self.camera.keys.insert(name);
+                Action::None
+            }
+        } else if event.repeat {
+            Action::None
+        } else if self.screen == Screen::Quick {
+            self.quick.key(
+                if name == "Space" { " " } else { &name },
+                self.modifiers.shift_key(),
+            )
+        } else {
+            self.menu.state.key(
+                if name == "Space" { " " } else { &name },
+                self.modifiers.shift_key(),
+            )
+        }
+    }
+}
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.renderer.is_some() {
@@ -2545,7 +2904,7 @@ impl ApplicationHandler for App {
                 self.focused = true;
                 Action::None
             }
-            WindowEvent::Focused(false) => {
+            WindowEvent::Focused(false) if self.script.is_none() => {
                 self.focused = false;
                 self.input.context(true, false);
                 if self.screen == Screen::Flight {
@@ -2787,228 +3146,16 @@ impl ApplicationHandler for App {
                 self.modifiers = modifiers.state();
                 Action::None
             }
-            WindowEvent::KeyboardInput { event, .. } => {
-                let mut name = match &event.logical_key {
-                    Key::Named(k) => format!("{k:?}"),
-                    Key::Character(c) => c.to_ascii_lowercase(),
-                    _ => String::new(),
-                };
-                if self.screen == Screen::Flight {
-                    name = flight_key(event.physical_key, &name);
-                }
-                // Alt-Enter switches window mode on every screen, before any
-                // screen claims the key. F11 is not used: it already opens the
-                // flight keyboard help (docs/FLIGHT-CONTROLS.md).
-                if name == "Enter"
-                    && self.modifiers.alt_key()
-                    && event.state == ElementState::Pressed
-                {
-                    if !event.repeat {
-                        self.toggle_fullscreen();
-                    }
-                    return;
-                }
-                // Exit to desktop keeps its meaning over every screen, the
-                // controls, sound and graphics screens included.
-                if event.state == ElementState::Pressed
-                    && ((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
-                        || (self.modifiers.alt_key() && name == "F4"))
-                    && (self.controls.is_some()
-                        || self.sound_screen.is_some()
-                        || self.graphics_screen.is_some())
-                {
-                    self.action(event_loop, Action::Exit);
-                    return;
-                }
-                // The controls screen takes every key press while it is open,
-                // with the same physical key names flight uses for capture.
-                if event.state == ElementState::Pressed
-                    && let Some(editor) = &mut self.controls
-                {
-                    if event.repeat && editor.capturing() {
-                        return;
-                    }
-                    // The search field takes printable text with its case;
-                    // Ctrl and Alt combinations stay shortcuts.
-                    if editor.typing()
-                        && !self.modifiers.control_key()
-                        && !self.modifiers.alt_key()
-                        && let Some(text) = &event.text
-                        && text.chars().any(|c| !c.is_control())
-                    {
-                        let result = editor.text_input(text);
-                        let action = self.controls_result(result);
-                        self.action(event_loop, action);
-                        return;
-                    }
-                    let name = flight_key(event.physical_key, &name);
-                    let result = editor.key(
-                        &name,
-                        self.modifiers.shift_key(),
-                        self.modifiers.control_key(),
-                        self.modifiers.alt_key(),
-                    );
-                    let action = self.controls_result(result);
-                    self.action(event_loop, action);
-                    return;
-                }
-                if event.state == ElementState::Pressed
-                    && let Some(screen) = &mut self.sound_screen
-                {
-                    let outcome = screen.key(&name, self.modifiers.shift_key());
-                    let action = self.sound_result(outcome);
-                    self.action(event_loop, action);
-                    return;
-                }
-                if event.state == ElementState::Pressed
-                    && let Some(editor) = &mut self.graphics_screen
-                {
-                    let result = editor.key(&name, self.modifiers.shift_key());
-                    let action = self.graphics_result(result);
-                    self.action(event_loop, action);
-                    return;
-                }
-                // The Replays screen takes key presses too, except the
-                // shortcuts that quit the game.
-                if event.state == ElementState::Pressed
-                    && self.screen == Screen::Main
-                    && !((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
-                        || (self.modifiers.alt_key() && name == "F4"))
-                    && let Some(screen) = &mut self.replays_screen
-                {
-                    let result = screen.key(&name, self.modifiers.shift_key(), event.repeat);
-                    let action = self.replays_result(result);
-                    self.action(event_loop, action);
-                    return;
-                }
-                if self.screen == Screen::Flight
-                    && event.state == ElementState::Pressed
-                    && self.flight_ui.debug_panels
-                    && !self.flight_ui.menu
-                    && let Some(view) = self.live_debug.key(&name, self.modifiers.shift_key())
-                {
-                    if let Some(view) = view {
-                        let action = self.live_view(view);
-                        self.action(event_loop, action);
-                    }
-                    return;
-                }
-                if self.screen == Screen::Flight
-                    && !(event.state == ElementState::Pressed
-                        && self.flight_ui.map.open
-                        && matches!(
-                            name.as_str(),
-                            "m" | "Escape"
-                                | "+"
-                                | "="
-                                | "-"
-                                | "_"
-                                | "ArrowLeft"
-                                | "ArrowRight"
-                                | "ArrowUp"
-                                | "ArrowDown"
-                                | "Home"
-                        ))
-                    && (event.state == ElementState::Released
-                        || (!(self.flight_ui.menu
-                            && matches!(
-                                name.as_str(),
-                                "Escape"
-                                    | "Tab"
-                                    | "ArrowUp"
-                                    | "ArrowDown"
-                                    | "ArrowLeft"
-                                    | "ArrowRight"
-                                    | "Enter"
-                                    | "Space"
-                            ))))
-                    && (if event.repeat {
-                        self.input.claimed(&name)
-                    } else {
-                        self.input
-                            .key(&name, event.state == ElementState::Pressed, self.modifiers)
-                    })
-                {
-                    return;
-                }
-                if self.screen == Screen::Flight && name == "Space" {
-                    let blocked =
-                        self.flight_ui.frozen() || !self.focused || !self.modifiers.is_empty();
-                    self.combat.input.space(
-                        event.state == ElementState::Pressed,
-                        event.repeat,
-                        blocked,
-                    );
-                    if !self.flight_ui.menu {
-                        return;
-                    }
-                }
-                if matches!(self.screen, Screen::Viewer | Screen::Flight)
-                    && event.state == ElementState::Released
-                {
-                    self.camera.keys.remove(&name);
-                    self.camera.keys.remove(&format!("Look{name}"));
-                    return;
-                }
-                if event.state != ElementState::Pressed {
-                    return;
-                }
-                if (self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
-                    || (self.modifiers.alt_key() && name == "F4")
-                {
-                    Action::Exit
-                } else if self.screen == Screen::Flight {
-                    let map_before = self.flight_ui.map.open;
-                    let before = self.flight_ui.frozen();
-                    let command = if event.repeat || self.modifiers.super_key() {
-                        flight_ui::Command::None
-                    } else {
-                        self.flight_ui.key(
-                            &name,
-                            self.modifiers.shift_key(),
-                            self.modifiers.control_key(),
-                            self.modifiers.alt_key(),
-                            &self.hornet.flight_menu,
-                        )
-                    };
-                    if self.flight_ui.map.open != map_before {
-                        self.flight_ui.map.cancel_press();
-                        self.camera.keys.clear();
-                        self.combat.cancel();
-                        self.instruments.cancel_press();
-                    }
-                    if self.flight_ui.frozen() || before != self.flight_ui.frozen() {
-                        self.camera.keys.clear();
-                        self.combat.cancel();
-                        self.instruments.cancel_press();
-                        self.flight_clock.remainder = 0.;
-                        self.previous_flight.clone_from(&self.flight);
-                        self.frame_time = Instant::now();
-                    } else if !self.flight_ui.map.open {
-                        look::press(&mut self.camera.keys, &name, self.modifiers);
-                    }
-                    self.flight_command(command)
-                } else if self.screen == Screen::Viewer {
-                    if name == "Escape" {
-                        Action::Back
-                    } else {
-                        self.camera.keys.insert(name);
-                        Action::None
-                    }
-                } else if event.repeat {
-                    Action::None
-                } else if self.screen == Screen::Quick {
-                    self.quick.key(
-                        if name == "Space" { " " } else { &name },
-                        self.modifiers.shift_key(),
-                    )
-                } else {
-                    self.menu.state.key(
-                        if name == "Space" { " " } else { &name },
-                        self.modifiers.shift_key(),
-                    )
-                }
-            }
+            WindowEvent::KeyboardInput { event, .. } => self.key_input(
+                event_loop,
+                input_script::KeyInput {
+                    logical: event.logical_key.clone(),
+                    physical: event.physical_key,
+                    pressed: event.state == ElementState::Pressed,
+                    repeat: event.repeat,
+                    text: event.text.clone(),
+                },
+            ),
             WindowEvent::RedrawRequested => {
                 let frame_start = Instant::now();
                 let mut simulation_ms = 0.;
@@ -4418,6 +4565,7 @@ impl ApplicationHandler for App {
         self.renderer = None;
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.run_script(event_loop);
         // The replay viewer shows instead of the Replays screen, which stays
         // open underneath and reads the list again when it is back.
         if self.screen != Screen::Main
@@ -4515,9 +4663,12 @@ impl ApplicationHandler for App {
             }
             self.next_frame = None;
         }
-        let next = self
+        let mut next = self
             .next_frame
             .map_or(self.input.next_poll, |n| n.min(self.input.next_poll));
+        if self.script.is_some() {
+            next = next.min(Instant::now() + Duration::from_millis(10));
+        }
         event_loop.set_control_flow(ControlFlow::WaitUntil(next));
     }
 }
@@ -7018,6 +7169,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     // Mission replay viewer; see docs/REPLAYS.md.
     let mut watch_replay: Option<PathBuf> = None;
     let mut replay_capture: Option<PathBuf> = None;
+    let mut input_script_steps: Option<Vec<input_script::Step>> = None;
     let mut replay_options = replay::viewer::Options::default();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -7592,6 +7744,14 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     args.next().ok_or("--capture-replay needs a .ppm or .png path")?,
                 ));
                 smoke_test = true;
+            }
+            "--input-script" => {
+                let path = PathBuf::from(args.next().ok_or("--input-script needs a script file")?);
+                let text = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                input_script_steps = Some(
+                    input_script::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?,
+                );
             }
             "--replay-tick" => {
                 replay_options.tick = Some(option_number(
@@ -9600,6 +9760,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         replay_recorder: None,
         live_debug: Default::default(),
         replays_screen: None,
+        script: input_script_steps.map(input_script::Runner::new),
     };
     app.live_debug.requests = flight_panels;
     diagnostics::stage_done();

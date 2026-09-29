@@ -356,7 +356,6 @@ def validate_scenarios() -> list[Scenario]:
             lane="replay",
             args=["--validate-creator"],
             timeout=600,
-            known_failure="F18 damage region 3 at 0.1 draws the same mesh as the intact aircraft; see lane-replay.md",
         ),
         Scenario(name="replay-sensor-summary", lane="replay", args=["--sensor-summary"], timeout=120),
         Scenario(name="replay-help", lane="replay", args=["--help"], expect=[r"Mission recordings:", r"--replay-menu"]),

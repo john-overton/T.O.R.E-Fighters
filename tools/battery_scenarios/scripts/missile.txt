@@ -1,0 +1,13 @@
+# Quick Mission, enemy 10 nm ahead holding fire: designate, select the missile, fire it, chaff and flare.
+wait 1
+key t
+waittick 240
+key ]
+waittick 300
+key Space
+waittick 600
+key Insert
+waittick 750
+key Delete
+waittick 900
+exit

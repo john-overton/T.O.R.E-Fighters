@@ -1,0 +1,20 @@
+# Ground start: release the brakes, afterburner, rotate, gear and flaps up, then ask the tower for landing.
+wait 1
+key b
+key 6
+waittick 750
+down Down
+waittick 900
+up Down
+waittick 1100
+key g
+waittick 1300
+key f
+waittick 1500
+key 5
+waittick 1700
+key Shift+n
+waittick 1800
+key Shift+l
+waittick 2400
+exit
