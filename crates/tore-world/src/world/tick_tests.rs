@@ -265,23 +265,31 @@ fn mission() -> World {
         .iter()
         .map(|(stem, _)| (stem.to_string(), format!("Synthetic {stem}")))
         .collect();
+    let roster = Roster::single_player(
+        Some(comms::Crew::Rio),
+        ai_planes(&wings).collect::<Vec<_>>(),
+    );
     World {
         terrain,
-        previous_flight: flight.clone(),
-        flight,
+        roster,
+        cockpits: vec![Cockpit {
+            plane: PlaneId(0),
+            previous_flight: flight.clone(),
+            flight,
+            airport_service,
+            airport_nav_mode: false,
+            turbulence: tore_sim::turbulence::Turbulence::default(),
+            turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng::seeded(1).unwrap(),
+            overspeed_message_at: None,
+            edge_message_at: None,
+        }],
         combat,
         ai_wings: Some(wings),
-        airport_service,
-        airport_nav_mode: false,
-        turbulence: tore_sim::turbulence::Turbulence::default(),
-        turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng::seeded(1).unwrap(),
         comms: comms::Comms::new(1),
         airfield_radio: Default::default(),
         radio: Default::default(),
         phrases,
         crew_voice: crew_voice::CrewVoice::new(&profile),
-        overspeed_message_at: None,
-        edge_message_at: None,
         // The step never reads the setup.
         setup: Setup::default(),
     }
@@ -294,7 +302,7 @@ const DRONES: [u32; 2] = [5, 6];
 /// so the gun has something to hit whatever the flight model did to the
 /// heading.
 fn place_drone(world: &mut World, id: u32) {
-    let player = &world.flight;
+    let player = &world.cockpits[0].flight;
     let forward = attitude::Basis::new(player.yaw, player.pitch, player.bank).forward;
     let position = player.position;
     let drone = world
@@ -310,11 +318,8 @@ fn place_drone(world: &mut World, id: u32) {
 /// The scripted input for one tick: stick movement, a throttle change, gear
 /// and flap commands, weapon-page cycles, airport commands and two bursts of
 /// the trigger.
-fn script(tick: usize) -> TickInput {
-    let mut input = TickInput {
-        crew: Some(comms::Crew::Rio),
-        ..TickInput::default()
-    };
+fn script(tick: usize) -> SeatInput {
+    let mut input = SeatInput::default();
     let pilot = &mut input.pilot;
     match tick {
         // Radar on and the gear up, as after takeoff.
@@ -343,26 +348,42 @@ fn script(tick: usize) -> TickInput {
     match tick {
         // Tower calls, then the navigation mode on and off.
         60 => input
-            .airport
-            .push(AirportInput::Command(Command::SelectAirport(7))),
+            .commands
+            .push(SeatCommand::Airport(AirportInput::Command(
+                Command::SelectAirport(7),
+            ))),
         90 => input
-            .airport
-            .push(AirportInput::Command(Command::RequestLanding)),
-        110 => input.airport.push(AirportInput::NavMode),
-        130 => input.airport.push(AirportInput::NavMode),
+            .commands
+            .push(SeatCommand::Airport(AirportInput::Command(
+                Command::RequestLanding,
+            ))),
+        110 => input
+            .commands
+            .push(SeatCommand::Airport(AirportInput::NavMode)),
+        130 => input
+            .commands
+            .push(SeatCommand::Airport(AirportInput::NavMode)),
         800 => input
-            .airport
-            .push(AirportInput::Command(Command::RepeatReply)),
+            .commands
+            .push(SeatCommand::Airport(AirportInput::Command(
+                Command::RepeatReply,
+            ))),
         900 => input
-            .airport
-            .push(AirportInput::Command(Command::CancelApproach)),
+            .commands
+            .push(SeatCommand::Airport(AirportInput::Command(
+                Command::CancelApproach,
+            ))),
         // Weapon page: to the missile and back to the gun.
-        150 => input.weapon_cycles.push(true),
-        170 => input.weapon_cycles.push(false),
+        150 => input
+            .commands
+            .push(SeatCommand::CycleWeapon { forward: true }),
+        170 => input
+            .commands
+            .push(SeatCommand::CycleWeapon { forward: false }),
         _ => {}
     }
     // The trigger: a burst at the drone and a second one later.
-    input.fire = matches!(tick, 200..260 | 700..730);
+    input.trigger = matches!(tick, 200..260 | 700..730);
     input
 }
 
@@ -483,7 +504,7 @@ fn record_player(fp: &mut Fingerprint, s: &flight::State) {
 
 /// Everything one tick changed: the state it left, then what it reported.
 fn record_tick(fp: &mut Fingerprint, world: &World, out: &TickOutput, seen: &mut Seen) {
-    record_player(fp, &world.flight);
+    record_player(fp, &world.cockpits[0].flight);
     let combat = &world.combat.state;
     fp.u64(combat.tick());
     fp.int(combat.player_hp);
@@ -514,7 +535,7 @@ fn record_tick(fp: &mut Fingerprint, world: &World, out: &TickOutput, seen: &mut
     }
     fp.int(world.terrain.weather.ticks());
     fp.int(world.terrain.weather.seconds_of_day());
-    fp.bool(world.airport_nav_mode);
+    fp.bool(world.cockpits[0].airport_nav_mode);
 
     fp.count(out.cues.len());
     for cue in &out.cues {
@@ -583,7 +604,9 @@ fn fly() -> Run {
             695 => place_drone(&mut world, DRONES[1]),
             _ => {}
         }
-        world.step(&script(tick), &mut out).unwrap();
+        let mut input = script(tick);
+        input.tick = world.tick();
+        world.step(&[input], &mut out).unwrap();
         record_tick(&mut fp, &world, &out, &mut seen);
         if (tick + 1) % 120 == 0 {
             parts.push((tick + 1, fp.0));

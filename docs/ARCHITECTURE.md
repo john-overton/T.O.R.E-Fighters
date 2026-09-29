@@ -697,8 +697,8 @@ only read: the menu's camera changes go through the ordinary view commands.
 ## Mission core and seats
 
 Design for stages A and B of the [multiplayer plan](multiplayer-plan.md#stages),
-written 2026-09-28. **Stages A1 and A2 are built; stage B is
-not yet.** The section is rewritten as the stages land. John approved the design on 2026-09-28 with the decisions
+written 2026-09-28. **Stage A is built; stage B is under way (B0
+is built).** The section is rewritten as the stages land. John approved the design on 2026-09-28 with the decisions
 credited to him below; every other choice is an agent decision. His decisions
 are also in the [multiplayer guide](MULTIPLAYER.md#decisions).
 
@@ -762,10 +762,21 @@ each split module. `tore-world` has its own `WorldResult` alias for boxed-error
 results, uses `tore_sim::flight` and `tore_sim::attitude` directly, and has no
 `log`, `tore-replay`, `unsafe` or environment variable read outside test code.
 
-Stage B has not started. The player is `world.flight` plus one ownship's worth
-of player-only fields in `combat::live::State`; every AI aircraft is an
-`AiActor` in `tore-sim::ai` plus a `live::Target` row, mirrored into each other
-once per tick. The plan's [code findings](multiplayer-plan.md#where-the-code-stands)
+Stage B's first slice, B0, is built. `seats.rs` holds the planes, pilots and
+seats below: `World::roster` lists every plane with its pilot and every seat,
+and single player is seat 0 flying plane 0. What a human-flown plane keeps
+outside combat (its flight, the flight at the start of the tick, turbulence,
+the airport service, NAV mode and the clocks of its world-edge and OVERSPEED
+messages) is a `Cockpit`, one per human-flown plane in
+`World::cockpits`; the app presents `cockpits[0]`. `World::step` takes one
+`SeatInput` from every seat that flies a plane, for the tick `World::tick`
+names, and applies each seat's commands to its own plane. The flight step,
+building contact, turbulence, the world edge and OVERSPEED rules and the
+airport service run for every cockpit in plane order; combat, the AI and the radio still serve the first cockpit only,
+with one ownship's worth of player-only fields in `combat::live::State`, until
+slices B1, B3 and B4 land. Every AI aircraft is an `AiActor` in
+`tore-sim::ai` plus a `live::Target` row, mirrored into each other once per
+tick. The plan's [code findings](multiplayer-plan.md#where-the-code-stands)
 describe the code before stage A.
 
 ### Stage A: one mission core
@@ -1059,11 +1070,11 @@ tick, so every later change is covered.
 #### Aircraft, pilots and seats
 
 ```rust
-pub struct AircraftId(pub u32); // one per Quick Mission slot, for the whole mission
+pub struct PlaneId(pub u32);    // one aircraft of the mission, for the whole mission
 pub struct SeatId(pub u8);      // one per human; single player is seat 0
 
-pub struct Aircraft {           // World's registry, in id order
-    pub id: AircraftId,
+pub struct Plane {              // World's roster, in id order
+    pub id: PlaneId,
     pub slot: Slot,             // side, wing and member, fixed at setup
     pub pilot: Pilot,
 }
@@ -1073,29 +1084,37 @@ pub enum Pilot {
 }
 pub struct Seat {
     pub id: SeatId,
-    pub aircraft: Option<AircraftId>, // None: waiting or observing
-    // its radio queue, crew voice, tower conversation and wing recipient
+    pub plane: Option<PlaneId>, // None: waiting or observing
+    pub crew: Option<Crew>,     // the radio's name for a second seat
+    // later: its radio queue, crew voice, tower conversation and wing recipient
 }
 pub struct SeatInput {
     pub seat: SeatId,
-    pub tick: u64,              // the tick it applies to
+    pub tick: u64,              // the tick it applies to: World::tick
     pub pilot: PilotInput,
     pub trigger: bool,
-    pub sensors: sensors::Controls,
     pub commands: Vec<SeatCommand>, // applied in order at the start of the tick
 }
 ```
 
-`World::step(&[SeatInput])` takes one input per human seat. Settings changes
+These live in `crates/tore-world/src/seats.rs` (built in B0), with `Roster`, which
+holds the planes and seats. *Agent decision:* the design first called a plane's
+id `AircraftId`, but that name already means an aircraft type
+(`tore_formats::aircraft::AircraftId`, used about 600 times), so a mission's
+aircraft are planes. The scope controls join `SeatInput` when B2 turns every
+between-tick command into a seat command.
+
+`World::step(&[SeatInput])` takes one input per seat that flies a plane, and
+refuses a missing, duplicate or wrong-tick input. Settings changes
 (cheats in single player, the King's settings in multiplayer) are a separate
 mission command, applied at the start of the tick before any seat.
 
 **Where an aircraft's state lives.** An AI-flown aircraft keeps its state where
 it lives today: the AI actor (flight state, stores, dispensers, sensors,
 awareness) and its combat target row (hit points, hit sections, fault counts,
-wreck). A human-flown aircraft has a record in `World` (flight state, its state
-at the start of the tick, turbulence and the airport service) and an ownship in
-combat (below). The flight state is the same type for both, `flight::State`.
+wreck). A human-flown aircraft has a `Cockpit` in `World` (flight state, its state
+at the start of the tick, turbulence, the airport service and NAV mode) and an
+ownship in combat (below). The flight state is the same type for both, `flight::State`.
 Stores, damage and countermeasures convert exactly at a handoff, because the AI
 and the cockpit both build them from the same `live::Configuration`.
 
@@ -1313,7 +1332,8 @@ applies when play resumes (stage B).
 #### How stage B lands
 
 1. **B0** (lead): the types above and the registry, with seat 0 flying aircraft
-   0. No behaviour change.
+   0. No behaviour change. Done: `seats.rs`, `World::roster`, `World::cockpits`
+   and `World::step(&[SeatInput])`.
 2. In parallel, each owning its own files:
    - **B1 combat**: ownships, events with aircraft ids, the hit rule and friendly
      fire setting (`tore-sim` combat, `tore-world`'s `combat.rs`).

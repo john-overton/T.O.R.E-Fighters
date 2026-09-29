@@ -10,7 +10,9 @@
 
 use crate::{
     WorldResult, ai_wings, aircraft_type, airfield_radio, combat, combat_tape, comms, crew_voice,
-    mission_layout, radio_calls, terrain,
+    mission_layout, radio_calls,
+    seats::{PlaneId, Roster, SeatCommand, SeatId, SeatInput, Slot},
+    terrain,
 };
 use std::collections::BTreeMap;
 use tore_sim::models::FlightModel;
@@ -26,16 +28,13 @@ pub struct World {
     /// Terrain queries, the airport scene and the weather clock. What the
     /// renderer draws of it is the app's `Scenery`.
     pub terrain: terrain::Terrain,
-    /// The player's flight state.
-    pub flight: flight::State,
-    /// The player's flight state at the start of the last tick.
-    pub previous_flight: flight::State,
+    /// Every plane with its pilot, and every seat.
+    pub roster: Roster,
+    /// What each human-flown plane keeps outside combat, in plane id order.
+    /// Single player has one, seat 0's plane 0, and the app presents it.
+    pub cockpits: Vec<Cockpit>,
     pub combat: combat::Combat,
     pub ai_wings: Option<ai_wings::AiWings>,
-    pub airport_service: tore_sim::airport::Service,
-    pub airport_nav_mode: bool,
-    pub turbulence: tore_sim::turbulence::Turbulence,
-    pub turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng,
     /// Radio and crew voice delivery; see docs/spec/radio-chatter.md.
     pub comms: comms::Comms,
     pub airfield_radio: airfield_radio::AirfieldRadio,
@@ -45,6 +44,21 @@ pub struct World {
     pub phrases: comms::Phrases,
     /// The player's crew voice; see docs/spec/cockpit-voice.md.
     pub crew_voice: crew_voice::CrewVoice,
+}
+
+/// A human-flown plane's state outside combat: its flight, where the tick
+/// started it, its turbulence and its conversation with the tower. An AI-flown
+/// plane keeps the same things in its AI actor.
+pub struct Cockpit {
+    pub plane: PlaneId,
+    pub flight: flight::State,
+    /// The flight state at the start of the last tick.
+    pub previous_flight: flight::State,
+    pub turbulence: tore_sim::turbulence::Turbulence,
+    pub turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng,
+    pub airport_service: tore_sim::airport::Service,
+    /// NAV is selected instead of a weapon, which the tower reads.
+    pub airport_nav_mode: bool,
     /// Simulation second of the last OVERSPEED message, so it repeats at an interval.
     pub overspeed_message_at: Option<f64>,
     /// Simulation second of the last turn-back warning past the map edge.
@@ -93,21 +107,6 @@ pub struct Restarted {
 pub enum AirportInput {
     NavMode,
     Command(tore_sim::airport::Command),
-}
-
-/// Everything the app hands one tick.
-#[derive(Clone, Debug, Default)]
-pub struct TickInput {
-    /// The player's stick, throttle and pilot commands for this tick.
-    pub pilot: flight::PilotInput,
-    /// The bound fire control is held.
-    pub fire: bool,
-    /// Weapon-page buttons since the last tick, in order; true steps forward.
-    pub weapon_cycles: Vec<bool>,
-    /// Queued airport commands, navigation-page selections included, in order.
-    pub airport: Vec<AirportInput>,
-    /// The player's crew, which labels radio calls to the cockpit.
-    pub crew: Option<comms::Crew>,
 }
 
 /// Something the tick did for the screen, the speakers or the controllers, in
@@ -161,20 +160,24 @@ pub struct TickOutput {
 }
 
 impl World {
-    /// Restarts the weather clock and turbulence from the launch conditions and
-    /// their fixed seeds. The camera weather is the scenery's
-    /// (`Scenery::reset_presentations`); the app restarts it beside this.
+    /// Restarts the weather clock and every cockpit's turbulence from the
+    /// launch conditions and their fixed seeds. The camera weather is the
+    /// scenery's (`Scenery::reset_presentations`); the app restarts it beside
+    /// this.
     pub fn reset_weather(&mut self) {
         self.terrain.weather =
             tore_sim::environment::Environment::new(self.terrain.weather.configuration().clone());
-        self.turbulence = Default::default();
-        self.turbulence_rng.reseed_word(1);
+        for cockpit in &mut self.cockpits {
+            cockpit.turbulence = Default::default();
+            cockpit.turbulence_rng.reseed_word(1);
+        }
     }
 
     /// Rebuilds the flight from its setup: the radio, the weather, the
     /// player's start, combat, the airport service and the AI wings, in the
-    /// order a flight has always started. The app ends the old flight's
-    /// recording before and starts the new one after.
+    /// order a flight has always started. Single player's seat 0 flies plane 0
+    /// from the first cockpit. The app ends the old flight's recording before
+    /// and starts the new one after.
     pub fn restart(
         &mut self,
         aircraft: &aircraft_type::AircraftType,
@@ -184,11 +187,16 @@ impl World {
         self.comms.restart(1);
         self.crew_voice = crew_voice::CrewVoice::new(&aircraft.profile);
         self.radio = Default::default();
+        self.cockpits.truncate(1);
         self.reset_weather();
-        self.flight = aircraft.start(&self.terrain);
+        let Some(cockpit) = self.cockpits.first_mut() else {
+            return Err("a flight needs a cockpit to restart".into());
+        };
+        cockpit.plane = PlaneId(0);
+        cockpit.flight = aircraft.start(&self.terrain);
         if let Some((altitude, fuel)) = self.setup.mission {
-            self.flight.position[1] = altitude;
-            self.flight.fuel = fuel;
+            cockpit.flight.position[1] = altitude;
+            cockpit.flight.fuel = fuel;
         }
         // The accepted creator layout, reused unchanged on restart.
         let layout = self
@@ -201,10 +209,10 @@ impl World {
         if let Some(layout) = layout.as_ref().filter(|l| l.player_turn != 0.) {
             // Airborne: the whole scene turns so the enemy ahead stays on the
             // map.
-            self.flight.yaw += layout.player_turn;
-            let basis = attitude::Basis::new(self.flight.yaw, 0., 0.);
-            self.flight.velocity = std::array::from_fn(|i| {
-                basis.forward[i] * self.flight.speed + self.terrain.wind()[i]
+            cockpit.flight.yaw += layout.player_turn;
+            let basis = attitude::Basis::new(cockpit.flight.yaw, 0., 0.);
+            cockpit.flight.velocity = std::array::from_fn(|i| {
+                basis.forward[i] * cockpit.flight.speed + self.terrain.wind()[i]
             });
         }
         if let Some(object) = self.setup.ground_start {
@@ -212,27 +220,27 @@ impl World {
                 Some(ground) => (ground.slots[0], ground.heading),
                 None => mission_layout::runway_pose(&self.terrain, object)?,
             };
-            self.flight.position[0] = position[0];
-            self.flight.position[2] = position[2];
+            cockpit.flight.position[0] = position[0];
+            cockpit.flight.position[2] = position[2];
             if self.setup.mission.is_none() {
-                self.flight.position[1] = self.flight.position[1].max(position[1] + 5000.);
+                cockpit.flight.position[1] = cockpit.flight.position[1].max(position[1] + 5000.);
             }
-            self.flight.yaw = heading;
+            cockpit.flight.yaw = heading;
             let basis = attitude::Basis::new(heading, 0., 0.);
-            self.flight.velocity = std::array::from_fn(|i| {
-                basis.forward[i] * self.flight.speed + self.terrain.wind()[i]
+            cockpit.flight.velocity = std::array::from_fn(|i| {
+                basis.forward[i] * cockpit.flight.speed + self.terrain.wind()[i]
             });
         }
         if self.setup.researched_flight {
-            self.flight.enable_research(1)?;
+            cockpit.flight.enable_research(1)?;
         }
         if let Some(tables) = &self.setup.native_tables {
             if self.combat.range || self.setup.mission.is_some() {
                 return Err("native research flight currently requires clean free flight".into());
             }
-            self.flight.enable_native(tables.clone(), 1)?;
+            cockpit.flight.enable_native(tables.clone(), 1)?;
         }
-        self.combat.reset(&mut self.flight)?;
+        self.combat.reset(&mut cockpit.flight)?;
         self.combat.raise_airborne_spawns(&self.terrain);
         if self.combat.uses_normal_startup_defaults() {
             self.combat.apply_startup_weapons();
@@ -240,27 +248,28 @@ impl World {
         let ground_airport = match self.setup.ground_start {
             Some(object) => Some(match &parked {
                 Some(ground) => {
-                    mission_layout::place_on_runway(&self.terrain, &mut self.flight, ground, 0)
+                    mission_layout::place_on_runway(&self.terrain, &mut cockpit.flight, ground, 0)
                         .map(|()| ground.airport)?
                 }
                 None => {
-                    mission_layout::apply_ground_start(&self.terrain, &mut self.flight, object)?
+                    mission_layout::apply_ground_start(&self.terrain, &mut cockpit.flight, object)?
                 }
             }),
             None => None,
         };
-        self.airport_service
+        cockpit
+            .airport_service
             .reset(&self.terrain.airport_scene)
             .map_err(std::io::Error::other)?;
         // A ground start begins on NAV, and so does an aircraft with nothing
         // loaded in the selected station: an empty station is never armed.
-        self.airport_nav_mode =
+        cockpit.airport_nav_mode =
             ground_airport.is_some() || !self.combat.state.carries(self.combat.state.selected);
-        self.combat.state.armed = !self.airport_nav_mode;
+        self.combat.state.armed = !cockpit.airport_nav_mode;
         if let Some(airport) = ground_airport {
-            self.airport_service.command(
+            cockpit.airport_service.command(
                 &self.terrain.airport_scene,
-                airport_aircraft(&self.terrain, &self.flight, self.airport_nav_mode),
+                airport_aircraft(&self.terrain, &cockpit.flight, cockpit.airport_nav_mode),
                 tore_sim::airport::Command::SelectAirport(airport),
             );
         }
@@ -286,20 +295,24 @@ impl World {
                 resources,
                 &airfields,
             )?;
-            bridge.apply_mission_preset(ai.preset, self.flight.position);
-            bridge.apply_group_objectives(&ai.group_objectives, self.flight.position);
+            bridge.apply_mission_preset(ai.preset, cockpit.flight.position);
+            bridge.apply_group_objectives(&ai.group_objectives, cockpit.flight.position);
             bridge.apply_group_survival(&ai.group_must_survive);
             bridge.mirror_pose_out(&mut self.combat.state.targets);
             self.combat.ai_poses = !bridge.is_empty();
             ai_aircraft = Some(bridge.len());
             self.ai_wings = Some(bridge);
         }
+        self.roster = Roster::single_player(
+            comms::crew(&aircraft.profile),
+            self.ai_wings.iter().flat_map(ai_planes),
+        );
         // Draw from the placed start, including the AI's own poses.
         self.combat
-            .restart_render(&self.flight, self.ai_wings.as_ref());
-        self.previous_flight = self.flight.clone();
-        self.overspeed_message_at = None;
-        self.edge_message_at = None;
+            .restart_render(&cockpit.flight, self.ai_wings.as_ref());
+        cockpit.previous_flight = cockpit.flight.clone();
+        cockpit.overspeed_message_at = None;
+        cockpit.edge_message_at = None;
         Ok(Restarted {
             ground_airport,
             layout,
@@ -307,9 +320,28 @@ impl World {
         })
     }
 
-    /// The simulation half of the weapon selector: step the player's weapon
-    /// selection. The navigation mode follows the arming.
-    pub fn cycle_weapon(&mut self, forward: bool) {
+    /// The tick the next step runs. Seat inputs name it.
+    pub fn tick(&self) -> u64 {
+        self.combat.state.tick()
+    }
+
+    /// Where the plane `seat` flies keeps its cockpit, if it flies one.
+    pub fn cockpit_of(&self, seat: SeatId) -> Option<usize> {
+        let plane = self.roster.seat(seat)?.plane?;
+        self.cockpits
+            .iter()
+            .position(|cockpit| cockpit.plane == plane)
+    }
+
+    /// The simulation half of the weapon selector: step the weapon selection
+    /// of the plane `seat` flies. Its NAV mode follows the arming.
+    pub fn cycle_weapon(&mut self, seat: SeatId, forward: bool) {
+        if let Some(cockpit) = self.cockpit_of(seat) {
+            self.cycle_cockpit_weapon(cockpit, forward);
+        }
+    }
+
+    fn cycle_cockpit_weapon(&mut self, cockpit: usize, forward: bool) {
         self.combat.cancel();
         self.combat.command(
             if forward {
@@ -317,69 +349,130 @@ impl World {
             } else {
                 tore_sim::combat::live::Command::PreviousSelection
             },
-            combat::launcher(&self.flight),
+            combat::launcher(&self.cockpits[cockpit].flight),
         );
-        self.airport_nav_mode = !self.combat.state.armed;
+        self.cockpits[cockpit].airport_nav_mode = !self.combat.state.armed;
     }
 
-    /// One fixed 120 Hz tick of the whole mission. See the module
-    /// documentation; the order below is the order the redraw loop ran.
-    pub fn step(&mut self, input: &TickInput, out: &mut TickOutput) -> WorldResult<()> {
-        *out = TickOutput::default();
-        for &forward in &input.weapon_cycles {
-            self.cycle_weapon(forward);
-            out.cues.push(Cue::WeaponCycled);
-        }
-        for &command in &input.airport {
-            self.airport_command(command, out);
-        }
-        self.previous_flight.clone_from(&self.flight);
-        self.flight
-            .step_surface(&input.pilot, |x, z| self.terrain.surface(x, z));
-        if self.flight.native.is_none()
-            && self
-                .terrain
-                .solid_contact(
-                    self.previous_flight.position,
-                    self.flight.position,
-                    self.combat
-                        .state
-                        .targets
-                        .iter()
-                        .filter(|target| target.hp > 0)
-                        .map(|target| target.id),
+    /// Each cockpit's input for this tick, in cockpit order: every seat that
+    /// flies a plane sends exactly one, for [`Self::tick`], and no other seat
+    /// sends any.
+    fn cockpit_inputs<'a>(&self, inputs: &'a [SeatInput]) -> WorldResult<Vec<&'a SeatInput>> {
+        let tick = self.tick();
+        for input in inputs {
+            if input.tick != tick {
+                return Err(format!(
+                    "seat {} sent input for tick {}, but the next tick is {tick}",
+                    input.seat.0, input.tick
                 )
-                .is_some()
-        {
-            if self.flight.cheats.no_crashes {
-                self.flight.rebound(self.previous_flight.position);
-            } else {
-                self.flight.crashed = true;
+                .into());
+            }
+            if inputs
+                .iter()
+                .filter(|other| other.seat == input.seat)
+                .count()
+                > 1
+            {
+                return Err(format!("seat {} sent two inputs for one tick", input.seat.0).into());
+            }
+            if self.cockpit_of(input.seat).is_none() {
+                return Err(format!("seat {} flies no plane", input.seat.0).into());
             }
         }
-        if let Some(error) = self.flight.native_fault() {
-            out.fault = Some(error.to_owned());
-            return Ok(());
+        self.cockpits
+            .iter()
+            .map(|cockpit| {
+                let seat = self.roster.seat_of(cockpit.plane).ok_or_else(|| {
+                    format!("plane {} has a cockpit but no human pilot", cockpit.plane.0)
+                })?;
+                inputs
+                    .iter()
+                    .find(|input| input.seat == seat)
+                    .ok_or_else(|| format!("seat {} sent no input for tick {tick}", seat.0).into())
+            })
+            .collect()
+    }
+
+    /// One fixed 120 Hz tick of the whole mission, with one input from every
+    /// seat that flies a plane. See the module documentation; the order below
+    /// is the order the redraw loop ran. Combat, the AI and the radio still
+    /// serve the first cockpit only (docs/ARCHITECTURE.md, "Where the code
+    /// stands").
+    pub fn step(&mut self, inputs: &[SeatInput], out: &mut TickOutput) -> WorldResult<()> {
+        *out = TickOutput::default();
+        let inputs = self.cockpit_inputs(inputs)?;
+        let Some(&first_input) = inputs.first() else {
+            return Err("a tick needs a human-flown plane".into());
+        };
+        // Commands first, in seat order, on each seat's own plane.
+        let mut by_seat: Vec<(usize, &SeatInput)> = inputs.iter().copied().enumerate().collect();
+        by_seat.sort_by_key(|(_, input)| input.seat);
+        for (cockpit, input) in by_seat {
+            for &command in &input.commands {
+                match command {
+                    SeatCommand::CycleWeapon { forward } => {
+                        self.cycle_cockpit_weapon(cockpit, forward);
+                        out.cues.push(Cue::WeaponCycled);
+                    }
+                    SeatCommand::Airport(command) => self.airport_command(cockpit, command, out),
+                }
+            }
+        }
+        for (cockpit, input) in self.cockpits.iter_mut().zip(&inputs) {
+            cockpit.previous_flight.clone_from(&cockpit.flight);
+            cockpit
+                .flight
+                .step_surface(&input.pilot, |x, z| self.terrain.surface(x, z));
+            if cockpit.flight.native.is_none()
+                && self
+                    .terrain
+                    .solid_contact(
+                        cockpit.previous_flight.position,
+                        cockpit.flight.position,
+                        self.combat
+                            .state
+                            .targets
+                            .iter()
+                            .filter(|target| target.hp > 0)
+                            .map(|target| target.id),
+                    )
+                    .is_some()
+            {
+                if cockpit.flight.cheats.no_crashes {
+                    cockpit.flight.rebound(cockpit.previous_flight.position);
+                } else {
+                    cockpit.flight.crashed = true;
+                }
+            }
+            if let Some(error) = cockpit.flight.native_fault() {
+                out.fault = Some(error.to_owned());
+                return Ok(());
+            }
         }
         // Weather shares the authoritative tick; pausing simply stops calling
         // it, with no elapsed-time catch-up.
         self.terrain.weather.step();
-        let turbulence = !self.flight.cheats.no_turbulence;
-        let turbulence_cue = step_turbulence(
-            &mut self.turbulence,
-            &mut self.turbulence_rng,
-            &mut self.flight,
-            &self.terrain,
-            turbulence,
-        );
-        self.edge_and_overspeed(out);
-        if let Some(cue) = turbulence_cue {
-            out.cues.push(Cue::Feedback(cue));
+        for cockpit in &mut self.cockpits {
+            let turbulence = !cockpit.flight.cheats.no_turbulence;
+            let turbulence_cue = step_turbulence(
+                &mut cockpit.turbulence,
+                &mut cockpit.turbulence_rng,
+                &mut cockpit.flight,
+                &self.terrain,
+                turbulence,
+            );
+            edge_and_overspeed(cockpit, &self.terrain, out);
+            if let Some(cue) = turbulence_cue {
+                out.cues.push(Cue::Feedback(cue));
+            }
         }
         out.cues.push(Cue::Flown);
-        self.combat.controller.space(input.fire, false, false);
+        self.combat
+            .controller
+            .space(first_input.trigger, false, false);
+        let own = &mut self.cockpits[0];
         if self.combat.recording_tape() {
-            let airport = airport_aircraft(&self.terrain, &self.flight, self.airport_nav_mode);
+            let airport = airport_aircraft(&self.terrain, &own.flight, own.airport_nav_mode);
             self.combat.record_tape(
                 format!(
                     "airport-state:{}:{}:{}",
@@ -387,56 +480,59 @@ impl World {
                     u8::from(airport.gear_down),
                     u8::from(airport.supported)
                 ),
-                combat::launcher(&self.flight),
+                combat::launcher(&own.flight),
             );
         }
-        let events = self.combat.step(&mut self.flight, &self.terrain)?;
+        let events = self.combat.step(&mut own.flight, &self.terrain)?;
         out.cues.push(Cue::CombatStepped);
-        for airport_event in self.airport_service.synchronize_health(
-            self.combat
-                .state
-                .targets
-                .iter()
-                .filter(|target| target.role == tore_sim::combat::missiles::TargetRole::Surface)
-                .map(|target| (target.id, target.hp)),
-        ) {
-            if matches!(
-                airport_event,
-                tore_sim::airport::Event::ClearanceInvalidated(_)
+        for cockpit in &mut self.cockpits {
+            for airport_event in cockpit.airport_service.synchronize_health(
+                self.combat
+                    .state
+                    .targets
+                    .iter()
+                    .filter(|target| target.role == tore_sim::combat::missiles::TargetRole::Surface)
+                    .map(|target| (target.id, target.hp)),
             ) {
-                let message = "Landing clearance cancelled: runway unavailable";
-                // Journal only: the tower speech it cuts.
-                self.comms
-                    .record(comms::journal::Entry::clearance_cancelled(
-                        self.combat.state.tick() as f64 / 120.,
-                        message,
-                    ));
-                out.cues.push(Cue::Message(message.into()));
-                out.cues.push(Cue::Tower(None));
+                if matches!(
+                    airport_event,
+                    tore_sim::airport::Event::ClearanceInvalidated(_)
+                ) {
+                    let message = "Landing clearance cancelled: runway unavailable";
+                    // Journal only: the tower speech it cuts.
+                    self.comms
+                        .record(comms::journal::Entry::clearance_cancelled(
+                            self.combat.state.tick() as f64 / 120.,
+                            message,
+                        ));
+                    out.cues.push(Cue::Message(message.into()));
+                    out.cues.push(Cue::Tower(None));
+                }
+            }
+            for event in cockpit.airport_service.step(
+                &self.terrain.airport_scene,
+                airport_aircraft(&self.terrain, &cockpit.flight, cockpit.airport_nav_mode),
+            ) {
+                if matches!(event, tore_sim::airport::Event::LandingComplete { .. }) {
+                    out.cues.push(Cue::Message("Landing complete".into()));
+                }
             }
         }
-        for event in self.airport_service.step(
-            &self.terrain.airport_scene,
-            airport_aircraft(&self.terrain, &self.flight, self.airport_nav_mode),
-        ) {
-            if matches!(event, tore_sim::airport::Event::LandingComplete { .. }) {
-                out.cues.push(Cue::Message("Landing complete".into()));
-            }
-        }
+        let own = &mut self.cockpits[0];
         // Manual p.65: the player always lands first and other aircraft hold at
         // marshal. The retail condition (gear, height, speed and range) is
         // re-evaluated every tick, so climbing away, raising the gear, a crash
         // or restart release it.
         if let Some(wings) = &mut self.ai_wings {
-            let [x, _, z] = self.flight.position;
+            let [x, _, z] = own.flight.position;
             wings.update_player_landing(
                 &self.terrain.airport_scene,
-                &self.airport_service,
-                &self.flight,
+                &own.airport_service,
+                &own.flight,
                 self.terrain.surface(x, z).height,
             );
         }
-        for message in self.flight.systems.messages.drain(..) {
+        for message in own.flight.systems.messages.drain(..) {
             out.cues.push(Cue::Message(message));
         }
         for event in &events {
@@ -446,7 +542,7 @@ impl World {
             }
             match event {
                 Event::Jolt(jolt) => match jolt.target {
-                    None => self.flight.jolt_from(jolt.from, jolt.strength),
+                    None => own.flight.jolt_from(jolt.from, jolt.strength),
                     Some(id) => {
                         if let Some(wings) = &mut self.ai_wings {
                             wings.jolt(id, jolt.from, jolt.strength);
@@ -464,7 +560,7 @@ impl World {
                 | Event::SeekerActivated(_)
                 | Event::Pitbull(_) => {}
                 Event::PlayerDestroyed => {
-                    self.flight.crashed = true;
+                    own.flight.crashed = true;
                 }
                 Event::Fired(i) => {
                     if let Some(name) = self.combat.state.configuration().stations[*i]
@@ -496,7 +592,7 @@ impl World {
         // back.
         if let Some(mut bridge) = self.ai_wings.take() {
             bridge.report_weapon_hits(&events);
-            let stepped = bridge.step(&mut self.combat.state, &self.flight, &self.terrain);
+            let stepped = bridge.step(&mut self.combat.state, &own.flight, &self.terrain);
             self.combat.ai_crashes(&bridge, &self.terrain);
             for (id, message, friendly) in bridge.ejection_events.drain(..) {
                 out.cues.push(Cue::WingEjection {
@@ -516,7 +612,7 @@ impl World {
         // for it. The mission recording reads the same picture, before the
         // radio drains this tick's strikes.
         self.combat
-            .advance_render(&self.flight, self.ai_wings.as_ref());
+            .advance_render(&own.flight, self.ai_wings.as_ref());
         out.outcomes = self.combat.state.ledger.take_outcomes();
         // The AI's messages of this tick; the journal is write-only, so
         // draining it changes nothing.
@@ -529,30 +625,34 @@ impl World {
             self.combat.state.tick() as f64 / 120.,
             &self.phrases,
             &mut self.comms,
-            &self.flight,
+            &own.flight,
             &self.terrain,
-            &self.airport_service,
+            &own.airport_service,
             self.ai_wings.as_ref(),
         );
         self.crew_voice.step_host(
             &mut self.comms,
             &self.phrases,
             &crew_voice::Host {
-                flight: &self.flight,
+                flight: &own.flight,
                 combat: &self.combat.state,
                 wings: self.ai_wings.as_ref(),
                 world: &self.terrain,
             },
         );
+        let crew = self
+            .roster
+            .seat(first_input.seat)
+            .and_then(|seat| seat.crew);
         radio_calls::step(
             &mut self.radio,
             &mut self.comms,
             &self.phrases,
-            input.crew,
+            crew,
             &events,
             &mut self.combat.state,
             self.ai_wings.as_mut(),
-            &self.flight,
+            &own.flight,
         );
         for call in self.comms.due(self.combat.state.tick() as f64 / 120.) {
             out.cues.push(Cue::Radio(call));
@@ -562,77 +662,32 @@ impl World {
         Ok(())
     }
 
-    /// Beyond the map: a turn-back warning every ten seconds from 100
-    /// nautical miles out, and the aircraft is lost at 105. Past the top
-    /// speed: a short cockpit message, repeated every four seconds. Both
-    /// requested by John, 2026-09-29; see docs/spec/world-edge.md and
-    /// docs/spec/overspeed.md.
-    fn edge_and_overspeed(&mut self, out: &mut TickOutput) {
-        if !self.flight.crashed {
-            let [x, _, z] = self.flight.position;
-            let out_nm = self.terrain.edge_distance_nm(x, z);
-            if out_nm >= terrain::EDGE_DESTROY_NM {
-                self.flight
-                    .systems
-                    .destroy(tore_sim::aircraft_systems::LossCause::OutOfBounds);
-                self.flight.crashed = true;
-            } else if out_nm >= terrain::EDGE_WARNING_NM {
-                let now = self.flight.ticks as f64 * flight::DT;
-                if self
-                    .edge_message_at
-                    .is_none_or(|at| now - at >= 10. || now < at)
-                {
-                    self.edge_message_at = Some(now);
-                    out.cues.push(Cue::Message(
-                        "You have left the theater: turn back now".into(),
-                    ));
-                }
-            } else {
-                self.edge_message_at = None;
-            }
-        }
-        if !self.flight.crashed
-            && self
-                .flight
-                .overspeed_ratio()
-                .is_some_and(|r| r >= flight::OVERSPEED_SHAKE_FULL)
-        {
-            let now = self.flight.ticks as f64 * flight::DT;
-            if self
-                .overspeed_message_at
-                .is_none_or(|at| now - at >= 4. || now < at)
-            {
-                self.overspeed_message_at = Some(now);
-                out.cues.push(Cue::Message("OVERSPEED".into()));
-            }
-        }
-    }
-
-    /// A queued NAV mode switch or tower request, applied at the start of the
-    /// tick in the order it was given.
-    fn airport_command(&mut self, command: AirportInput, out: &mut TickOutput) {
+    /// A queued NAV mode switch or tower request for a cockpit's plane,
+    /// applied at the start of the tick in the order it was given.
+    fn airport_command(&mut self, cockpit: usize, command: AirportInput, out: &mut TickOutput) {
+        let cockpit = &mut self.cockpits[cockpit];
         match command {
             AirportInput::NavMode => {
-                self.airport_nav_mode = !self.airport_nav_mode;
+                cockpit.airport_nav_mode = !cockpit.airport_nav_mode;
                 self.combat.cancel();
                 self.combat.command(
-                    if self.airport_nav_mode {
+                    if cockpit.airport_nav_mode {
                         tore_sim::combat::live::Command::SelectNav
                     } else {
                         tore_sim::combat::live::Command::NextSelection
                     },
-                    combat::launcher(&self.flight),
+                    combat::launcher(&cockpit.flight),
                 );
                 self.combat.record_tape(
-                    if self.airport_nav_mode {
+                    if cockpit.airport_nav_mode {
                         "airport-nav:1"
                     } else {
                         "airport-nav:0"
                     },
-                    combat::launcher(&self.flight),
+                    combat::launcher(&cockpit.flight),
                 );
                 out.cues.push(Cue::Message(
-                    if self.airport_nav_mode {
+                    if cockpit.airport_nav_mode {
                         "Navigation mode selected"
                     } else {
                         "Navigation mode off"
@@ -643,11 +698,13 @@ impl World {
             AirportInput::Command(command) => {
                 self.combat.record_tape(
                     combat_tape::airport_command_name(command),
-                    combat::launcher(&self.flight),
+                    combat::launcher(&cockpit.flight),
                 );
-                let aircraft = airport_aircraft(&self.terrain, &self.flight, self.airport_nav_mode);
+                let aircraft =
+                    airport_aircraft(&self.terrain, &cockpit.flight, cockpit.airport_nav_mode);
                 for event in
-                    self.airport_service
+                    cockpit
+                        .airport_service
                         .command(&self.terrain.airport_scene, aircraft, command)
                 {
                     if let tore_sim::airport::Event::Reply(reply) = event {
@@ -668,6 +725,22 @@ impl World {
             }
         }
     }
+}
+
+/// The AI's planes and where each sits, from the AI wings' slots.
+pub fn ai_planes(wings: &ai_wings::AiWings) -> impl Iterator<Item = (PlaneId, Slot)> + '_ {
+    wings.slots().iter().map(|slot| {
+        (
+            PlaneId(slot.id),
+            Slot {
+                wing: tore_sim::ai::launch::WingId {
+                    side: slot.side,
+                    index: slot.wing_number - 1,
+                },
+                member: slot.member_number - 1,
+            },
+        )
+    })
 }
 
 /// One tick of physical turbulence, applied to attitude and height only.
@@ -798,5 +871,51 @@ pub fn airport_reply_audio(reply: &tore_sim::airport::Reply) -> Option<&'static 
         Reply::Landed { .. } => Some(tore_formats::radio::AIRPORT_WELCOME_HOME),
         Reply::Repeated(reply) => airport_reply_audio(reply),
         Reply::Selected { .. } | Reply::Declined { .. } | Reply::Cancelled { .. } => None,
+    }
+}
+
+/// Beyond the map: a turn-back warning every ten seconds from 100 nautical
+/// miles out, and the aircraft is lost at 105. Past the top speed: a short
+/// cockpit message, repeated every four seconds. Both requested by John,
+/// 2026-09-29; see docs/spec/world-edge.md and docs/spec/overspeed.md. Each
+/// human-flown plane has its own warnings and its own clocks.
+fn edge_and_overspeed(cockpit: &mut Cockpit, terrain: &terrain::Terrain, out: &mut TickOutput) {
+    let flight = &mut cockpit.flight;
+    if !flight.crashed {
+        let [x, _, z] = flight.position;
+        let out_nm = terrain.edge_distance_nm(x, z);
+        if out_nm >= terrain::EDGE_DESTROY_NM {
+            flight
+                .systems
+                .destroy(tore_sim::aircraft_systems::LossCause::OutOfBounds);
+            flight.crashed = true;
+        } else if out_nm >= terrain::EDGE_WARNING_NM {
+            let now = flight.ticks as f64 * flight::DT;
+            if cockpit
+                .edge_message_at
+                .is_none_or(|at| now - at >= 10. || now < at)
+            {
+                cockpit.edge_message_at = Some(now);
+                out.cues.push(Cue::Message(
+                    "You have left the theater: turn back now".into(),
+                ));
+            }
+        } else {
+            cockpit.edge_message_at = None;
+        }
+    }
+    if !flight.crashed
+        && flight
+            .overspeed_ratio()
+            .is_some_and(|r| r >= flight::OVERSPEED_SHAKE_FULL)
+    {
+        let now = flight.ticks as f64 * flight::DT;
+        if cockpit
+            .overspeed_message_at
+            .is_none_or(|at| now - at >= 4. || now < at)
+        {
+            cockpit.overspeed_message_at = Some(now);
+            out.cues.push(Cue::Message("OVERSPEED".into()));
+        }
     }
 }

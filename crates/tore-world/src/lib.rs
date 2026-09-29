@@ -15,6 +15,7 @@ pub mod comms;
 pub mod crew_voice;
 pub mod mission_layout;
 pub mod radio_calls;
+pub mod seats;
 pub mod situation;
 pub mod snapshot;
 pub mod target_window;
