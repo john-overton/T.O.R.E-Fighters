@@ -18,6 +18,7 @@ from battery_scenarios import _replay_checks as rc
 
 TOOLS = "tools/battery_scenarios/_replay_tools.py"
 PY = "python3"
+ROOT = Path(__file__).resolve().parents[2]
 
 # The imported aircraft by command-line name.
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
@@ -76,7 +77,7 @@ def semantic_log_problems(text: str) -> list[str]:
                 dead_at.setdefault(d["subject"], d["t"])
             if k in ("comms.radio", "comms.tower", "comms.hud") and f.get("outcome") == "delivered":
                 text_ = d.get("text", "")
-                if not f.get("speaker") or not text_.strip():
+                if not text_.strip() or (k != "comms.hud" and not f.get("speaker")):
                     problems.append(f"empty delivered line at {d['t']}s: {f}")
                 key = (f.get("speaker"), text_)
                 last = delivered.get(key)
@@ -90,6 +91,63 @@ def semantic_log_problems(text: str) -> list[str]:
             problems.append("... more problems suppressed")
             break
     return problems
+
+
+def invariant_problems(text: str) -> list[str]:
+    """Event-stream invariants: order, ownership, one outcome per shot, decoy counts, no revivals."""
+    problems: list[str] = []
+    lines = [json.loads(line) for line in text.splitlines()]
+    events = [e for e in lines if e["type"] == "event"]
+    ids = {a["id"] for a in lines if a["type"] == "aircraft"}
+    last = -1
+    for e in events:
+        if e["tick"] < last:
+            problems.append(f"events run backwards at tick {e['tick']} (after {last})")
+            break
+        last = e["tick"]
+    footer = [e for e in lines if e["type"] == "footer"]
+    if footer and any(e["tick"] > footer[0]["end_tick"] for e in events):
+        problems.append("an event is later than the recording's end")
+    for e in events:
+        s = e.get("subject")
+        if s is not None and s < 1000 and s not in ids:
+            problems.append(f"{e['kind']} names unknown aircraft {s}")
+            break
+    dead: dict[int, float] = {}
+    for e in events:
+        if e["kind"] in ("combat.destroyed", "aircraft.crashed") and e.get("subject") is not None:
+            dead.setdefault(e["subject"], e["t"])
+    launched = set()
+    outcomes: dict[int, int] = {}
+    left: dict[tuple, int] = {}
+    for e in events:
+        f = e.get("fields", {})
+        if e["kind"] == "weapon.launch":
+            launched.add(f["projectile"])
+            if e["subject"] in dead and e["t"] > dead[e["subject"]] + 0.01:
+                problems.append(f"aircraft {e['subject']} fired at {e['t']}s after it was lost at {dead[e['subject']]}s")
+        elif e["kind"] == "weapon.outcome":
+            outcomes[f["projectile"]] = outcomes.get(f["projectile"], 0) + 1
+        elif e["kind"] == "combat.countermeasure" and f.get("left") is not None:
+            key = (e.get("subject"), f.get("decoy"))
+            if f["left"] < 0 or f["left"] > left.get(key, 10**9):
+                problems.append(f"aircraft {key[0]} {key[1]} count went to {f['left']} at {e['t']}s")
+            left[key] = f["left"]
+    for shot, count in outcomes.items():
+        if count > 1:
+            problems.append(f"shot {shot} has {count} outcomes")
+        if shot not in launched:
+            problems.append(f"shot {shot} has an outcome but no launch")
+    revived: set[int] = set()
+    zero: set[int] = set()
+    for e in lines:
+        if e["type"] == "sample":
+            if e["hp"] <= 0:
+                zero.add(e["id"])
+            elif e["id"] in zero and e["id"] not in revived:
+                revived.add(e["id"])
+                problems.append(f"aircraft {e['id']} came back to life at {e['t']}s")
+    return problems[:20]
 
 
 def recorded_probe_checks(work: Path, output: str, *, same_run: bool) -> list[str]:
@@ -123,6 +181,7 @@ def recorded_probe_checks(work: Path, output: str, *, same_run: bool) -> list[st
     if log.exists():
         try:
             problems += semantic_log_problems(log.read_text())
+            problems += invariant_problems(log.read_text())
         except (ValueError, KeyError) as e:
             problems.append(f"log.jsonl could not be read for state checks: {e!r}")
     acmi = work / "a.acmi"
@@ -303,8 +362,45 @@ def check_soft_damage(work: Path, output: str) -> list[str]:
     return problems
 
 
+def killed_probe_scenario() -> Scenario:
+    """A recording whose writer is killed mid-flight must still read back as incomplete."""
+    binary = str(ROOT / "target" / "debug" / "tore-app")
+    return Scenario(
+        name="replay-rec-killed-probe",
+        lane="replay",
+        args=["--version"],
+        then=[
+            Step(
+                [PY, TOOLS, "killrun", "6", binary, "--ai-probe-ticks", "90000", "--separation", "5", "--record-mission", "{work}/k.tore-replay", "--no-audio"],
+                app=False,
+                timeout=60,
+            ),
+            Step(["--recording-info", "{work}/k.tore-replay.partial"]),
+            Step(["--recording-log", "{work}/k.tore-replay.partial", "--out", "{work}/log", "--rate", "2"]),
+            Step(["--recording-acmi", "{work}/k.tore-replay.partial", "--out", "{work}/k.acmi"]),
+        ],
+        check_work=check_killed,
+    )
+
+
+def check_killed(work: Path, output: str) -> list[str]:
+    s = sections(output)
+    problems = []
+    if not (work / "k.tore-replay.partial").exists():
+        problems.append("no .partial recording was left")
+    if (work / "k.tore-replay").exists():
+        problems.append("a killed run left a finished-looking recording")
+    if "INCOMPLETE" not in s.get(2, ""):
+        problems.append("recording-info does not call it incomplete")
+    if "Length      0:" not in s.get(2, ""):
+        problems.append("the partial recording has no length")
+    problems += rc.file_problems(work, "log/log.jsonl", rc.check_jsonl)
+    problems += rc.file_problems(work, "k.acmi", rc.check_acmi)
+    return problems
+
+
 def failure_scenarios() -> list[Scenario]:
-    out: list[Scenario] = []
+    out: list[Scenario] = [killed_probe_scenario()]
     make = ["--ai-probe-ticks", "1200", "--separation", "2", "--record-mission", "{work}/src.tore-replay", "--no-audio"]
 
     out.append(

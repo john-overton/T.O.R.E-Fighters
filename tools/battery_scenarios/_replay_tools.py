@@ -95,6 +95,38 @@ def media(kind: str, dest: str) -> None:
         raise SystemExit(f"unknown media kind {kind}")
 
 
+def newest_replay(data: str, dest: str) -> int:
+    """Copies the newest finished recording in the data folder's replays/ to `dest`."""
+    import glob
+    import shutil
+
+    found = sorted(glob.glob(os.path.join(data, "replays", "*.tore-replay")), key=os.path.getmtime)
+    partial = glob.glob(os.path.join(data, "replays", "*.partial"))
+    print(f"recordings: {len(found)} finished, {len(partial)} partial")
+    if not found:
+        print("no finished recording in replays/")
+        return 1
+    shutil.copy(found[-1], dest)
+    print(f"copied {os.path.basename(found[-1])}")
+    return 0
+
+
+def kill_run(seconds: float, command: list[str]) -> int:
+    """Runs `command` and kills it dead (SIGKILL) after `seconds`, as a crash or power cut would."""
+    import subprocess
+    import time
+
+    proc = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(seconds)
+    if proc.poll() is not None:
+        print(f"the run had already finished with {proc.returncode}: use a longer run")
+        return 1
+    proc.kill()
+    proc.wait()
+    print(f"killed after {seconds} s")
+    return 0
+
+
 def read_ppm(path: str):
     raw = open(path, "rb").read()
     if not raw.startswith(b"P6"):
@@ -140,7 +172,11 @@ def ppm_stats(path: str, expect_ui: bool, min_colors: int) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 4 and sys.argv[1] == "media":
+    if len(sys.argv) >= 5 and sys.argv[1] == "killrun":
+        sys.exit(kill_run(float(sys.argv[2]), sys.argv[3:]))
+    elif len(sys.argv) >= 4 and sys.argv[1] == "newest":
+        sys.exit(newest_replay(sys.argv[2], sys.argv[3]))
+    elif len(sys.argv) >= 4 and sys.argv[1] == "media":
         media(sys.argv[2], sys.argv[3])
     elif len(sys.argv) >= 5 and sys.argv[1] == "mangle":
         mangle(*sys.argv[2:5])

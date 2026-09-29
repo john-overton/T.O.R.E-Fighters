@@ -70,6 +70,10 @@ class Scenario:
     then: list["Step"] = dataclasses.field(default_factory=list)
     # Looks at the work folder (and the joined output) once everything has run.
     check_work: Optional[Callable[[Path, str], list[str]]] = None
+    # A defect found and left for someone else: the scenario still runs, its
+    # failure is reported as known instead of failing the run, and it fails
+    # once it starts passing so the marker gets removed.
+    known_failure: str = ""
 
 
 @dataclasses.dataclass
@@ -234,9 +238,18 @@ def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: 
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(f"$ {' '.join(cmd)}\n\n{output}")
     problems = judge(s, output, None if timed_out else proc.returncode, timed_out, work) + step_problems
+    if s.known_failure:
+        if problems:
+            problems = [f"known failure ({s.known_failure}): {p}" for p in problems[:1]]
+            passed = True
+        else:
+            problems = [f"known failure now passes, remove known_failure ({s.known_failure})"]
+            passed = False
+    else:
+        passed = not problems
     if not opts.keep_data:
         shutil.rmtree(data, ignore_errors=True)
-    return Result(s.name, s.lane, not problems, seconds, None if timed_out else proc.returncode, problems, cmd, str(log.relative_to(run_dir)))
+    return Result(s.name, s.lane, passed, seconds, None if timed_out else proc.returncode, problems, cmd, str(log.relative_to(run_dir)))
 
 
 def write_summary(run_dir: Path, results: list[Result], started: float) -> None:

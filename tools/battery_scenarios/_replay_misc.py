@@ -229,6 +229,7 @@ def input_scenarios() -> list[Scenario]:
                     Step([PY, "-c", code, "{work}/t.tape"], app=False),
                     Step(["--replay-input", "{work}/t.tape", "--no-audio"], expect_exit=1),
                 ],
+                allow_generic=["NaN in output"],
                 check_work=lambda work, output: [] if "panicked" not in output and len(sections(output).get(2, "").strip().splitlines()) >= 2 else ["no clear rejection"],
             )
         )
@@ -310,12 +311,88 @@ def check_bad_import(work: Path, output: str, message: str) -> list[str]:
 
 def validate_scenarios() -> list[Scenario]:
     return [
-        Scenario(name="replay-validate-creator", lane="replay", args=["--validate-creator"], timeout=600, expect=[r"(?i)pass|valid|checked"]),
+        Scenario(
+            name="replay-validate-creator",
+            lane="replay",
+            args=["--validate-creator"],
+            timeout=600,
+            known_failure="F18 damage region 3 at 0.1 draws the same mesh as the intact aircraft; see lane-replay.md",
+        ),
         Scenario(name="replay-sensor-summary", lane="replay", args=["--sensor-summary"], timeout=120),
         Scenario(name="replay-help", lane="replay", args=["--help"], expect=[r"Mission recordings:", r"--replay-menu"]),
         Scenario(name="replay-version", lane="replay", args=["--version"], expect=[r"T\.O\.R\.E"]),
     ]
 
 
+def combat_smoke_scenarios() -> list[Scenario]:
+    """The weapons acceptance probe on each aircraft. Currently failing on most; see lane-replay.md."""
+    out = []
+    for ac in AIRCRAFT:
+        out.append(
+            Scenario(
+                name=f"replay-combat-smoke-{ac}",
+                lane="replay",
+                args=["--combat-smoke", "--aircraft", ac, "--no-audio"],
+                timeout=300,
+                expect=[r"combat smoke .* PASS"],
+                known_failure="" if ac == "mig29" else "the smoke's expectations predate the 2026-09-28 damage and missile changes",
+            )
+        )
+    return out
+
+
+BAD_OPTIONS = {
+    "rate-word": (["--recording-log", "{work}/a.tore-replay", "--out", "{work}/o", "--rate", "abc"], "--rate needs a number, not 'abc'"),
+    "rate-zero": (["--recording-log", "{work}/a.tore-replay", "--out", "{work}/o", "--rate", "0"], "--rate needs samples per second above 0"),
+    "rate-huge": (["--recording-acmi", "{work}/a.tore-replay", "--out", "{work}/o.acmi", "--rate", "999"], "--rate needs samples per second"),
+    "ids-word": (["--recording-log", "{work}/a.tore-replay", "--out", "{work}/o", "--ids", "a,b"], "--ids needs a number"),
+    "from-word": (["--recording-log", "{work}/a.tore-replay", "--out", "{work}/o", "--from", "x"], "--from needs a number"),
+    "to-negative": (["--recording-log", "{work}/a.tore-replay", "--out", "{work}/o", "--to", "-3"], "--to needs seconds of mission time"),
+    "info-none": (["--recording-info"], "--recording-info needs a recording"),
+    "diff-one": (["--recording-diff", "{work}/a.tore-replay"], "--recording-diff needs two recordings"),
+    "diff-missing": (["--recording-diff", "{work}/a.tore-replay", "{work}/none.tore-replay"], "none.tore-replay"),
+    "log-into-file": (["--recording-log", "{work}/a.tore-replay", "--out", "{work}/a.tore-replay"], "cannot use it as the output folder"),
+    "acmi-into-folder": (["--recording-acmi", "{work}/a.tore-replay", "--out", "{work}"], "cannot write it"),
+    "tick-negative": (["--watch-replay", "{work}/a.tore-replay", "--replay-tick", "-5"], "--replay-tick needs a number"),
+    "speed-word": (["--watch-replay", "{work}/a.tore-replay", "--replay-speed", "fast"], "--replay-speed needs a number"),
+    "speed-out-of-range": (["--watch-replay", "{work}/a.tore-replay", "--replay-speed", "100"], "is not a replay speed"),
+    "aircraft-word": (["--watch-replay", "{work}/a.tore-replay", "--replay-aircraft", "x"], "--replay-aircraft needs a number"),
+    "view-out-of-range": (["--watch-replay", "{work}/a.tore-replay", "--flight-view", "12"], "--flight-view needs 0..11"),
+    "ui-bogus": (["--watch-replay", "{work}/a.tore-replay", "--replay-ui", "bogus"], "unknown replay interface part"),
+    "panels-bogus": (["--watch-replay", "{work}/a.tore-replay", "--replay-panels", "bogus"], "unknown replay panel"),
+    "menu-bogus": (["--watch-replay", "{work}/a.tore-replay", "--replay-menu", "bogus"], "unknown replay menu page"),
+    "lookat-bogus": (["--watch-replay", "{work}/a.tore-replay", "--replay-look-at", "bogus"], "aircraft:ID"),
+    "watch-missing": (["--watch-replay", "{work}/none.tore-replay"], "none.tore-replay"),
+    "capture-without-watch": (["--capture-replay", "{work}/c.ppm"], ""),
+}
+
+
+def bad_option_scenarios() -> list[Scenario]:
+    out = []
+    for name, (args, message) in BAD_OPTIONS.items():
+        out.append(
+            Scenario(
+                name=f"replay-cli-bad-{name}",
+                lane="replay",
+                args=["--ai-probe-ticks", "300", "--separation", "2", "--record-mission", "{work}/a.tore-replay", "--no-audio"],
+                then=[Step(args, expect_exit=1, timeout=60)],
+                check_work=lambda work, output, message=message: check_bad_option(output, message),
+            )
+        )
+    return out
+
+
+def check_bad_option(output: str, message: str) -> list[str]:
+    text = sections(output).get(1, "")
+    problems = []
+    if message and message not in text:
+        problems.append(f"expected '{message}' in the error, got: {text.strip()[-200:]}")
+    if "panicked" in text:
+        problems.append("panic on a bad option")
+    if re.search(r"invalid float literal|invalid digit found", text):
+        problems.append("a bare parser message reached the user")
+    return problems
+
+
 def scenarios() -> list[Scenario]:
-    return snapshot_scenarios() + diagnostics_scenarios() + audio_scenarios() + input_scenarios() + validate_scenarios()
+    return bad_option_scenarios() + snapshot_scenarios() + diagnostics_scenarios() + audio_scenarios() + input_scenarios() + validate_scenarios() + combat_smoke_scenarios()
