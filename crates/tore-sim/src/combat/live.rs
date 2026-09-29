@@ -26,6 +26,9 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
     (*state % u32::from(bound)) as u16
 }
 
+mod handoff;
+pub use handoff::{AiHandback, AiPose, AiStores};
+
 pub const MAX_PROJECTILES: usize = 256;
 pub use crate::ai::targeting::Side;
 /// The side of nothing: ground objects, fixtures and rounds nobody owns. It is
