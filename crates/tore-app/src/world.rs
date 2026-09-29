@@ -15,6 +15,9 @@ use crate::{
 use std::collections::BTreeMap;
 use tore_sim::models::FlightModel;
 
+#[cfg(test)]
+mod tick_tests;
+
 /// The whole mission. The app drives it and presents it.
 pub struct World {
     /// What the flight is built from; a restart rebuilds it from this.

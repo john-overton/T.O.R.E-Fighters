@@ -845,10 +845,21 @@ did before.
   is the one planned change of probe output. The scripted pilot, the attack
   script, orders and threat fixtures become tick input and commands before the
   step.
-- **Full-tick fingerprint:** a new committed test that builds a `World` from
-  synthetic fixtures, steps it with scripted input and fingerprints flight,
-  combat and AI state. It pins the tick order from then on. Like the existing
-  goldens, its recorded values are compared on the recorded platform only.
+- **Full-tick fingerprint:** `crates/tore-app/src/world/tick_tests.rs` builds a
+  `World` from synthetic fixtures (a low-flying player, two friendly and two
+  enemy AI aircraft, two drones, a small airport), steps it 1,200 ticks with
+  scripted input and folds the player's flight, combat's projectiles and
+  targets, every AI actor, the weather clock and the whole `TickOutput` into
+  one fingerprint each tick. It pins the tick order: a step that is swapped,
+  dropped or repeated changes the value. It follows the conventions of the
+  existing goldens (`tore-sim`'s `golden_tests.rs`): two runs in one process
+  must match on every platform, and the recorded value is compared only on
+  macOS on Apple silicon. The value is not recorded yet, because it can only be
+  generated there: until it is set, that platform's run fails with the value in
+  its message, and the constant `RECORDED` is then filled in. A deliberate
+  behaviour change updates it in the same commit.
+  `TORE_GOLDEN_VERBOSE=1` prints the fingerprint every 120 ticks to find where
+  a change starts.
 - **Unchanged:** `--headless-flight` and `--replay-input` stay the isolated
   flight-model probe, and the component probes (`--flight-probe-ticks`,
   `--countermeasure-preview`, `--combat-probe-ticks`, `--replay-combat`,
