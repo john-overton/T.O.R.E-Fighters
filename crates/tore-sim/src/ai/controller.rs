@@ -722,6 +722,9 @@ pub struct Controller {
     gun_phase: Option<weapon_service::Phase>,
     damage_recovery: bool,
     gun_tracking: Option<super::gunnery::View>,
+    /// B42: after no store resolved, the tick before which a missile is not
+    /// chosen again for the motion (the nominal no-station retry).
+    missile_retry_until: Option<u64>,
     variation: FormationVariation,
     smooth_variation: [f64; 3],
     variation_tick: Option<u64>,
@@ -886,6 +889,7 @@ impl Controller {
             gun_phase: None,
             damage_recovery: false,
             gun_tracking: None,
+            missile_retry_until: None,
             identity,
             profile,
             experience,
@@ -1768,7 +1772,21 @@ impl Controller {
                     .find(|g| g.station == frame.stations[i].station)
             })
             .copied();
-        self.gun_tracking = (station.is_none() || chosen_gun.is_some())
+        // B42: no suitable station waits the nominal 2 s retry. The motion
+        // honours it too: once no store resolved, gun tracking keeps the
+        // aircraft until the retry ends, rather than handing it back to the
+        // missile tactic on the next tick the missile's zone test passes.
+        // Without it a fighter at a zone edge swapped maneuvers every few
+        // ticks, its own stick input moving the zone test each time
+        // (overnight bug battery, 2026-09-29).
+        if station.is_none() && target.is_some() {
+            self.missile_retry_until =
+                Some(frame.tick + u64::from(weapon_service::NO_STATION_RETRY.quarter_count()) * 30);
+        }
+        let retrying = self
+            .missile_retry_until
+            .is_some_and(|until| frame.tick < until);
+        self.gun_tracking = (station.is_none() || chosen_gun.is_some() || retrying)
             .then(|| {
                 self.gun_views
                     .iter()

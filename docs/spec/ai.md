@@ -341,7 +341,11 @@ lock checking, firing and reload. A valid hostile target, an available compatibl
 station, weapon-specific lock checks and an unblocked firing path precede the
 reviewed firing branch. Losing a target sends the service back toward search.
 A failed lock causes a nominal one-second retry; no suitable station causes a
-nominal two-second retry. Pre-firing service states can add half a second to a
+nominal two-second retry. The motion honours that retry as well: once no store
+resolves, gun lead tracking keeps the aircraft until the retry ends instead of
+handing it back to a missile tactic on the next tick the missile's zone test
+passes (agent decision 2026-09-29; without it a fighter at a zone edge swapped
+maneuvers every few ticks, its own stick input moving the zone test). Pre-firing service states can add half a second to a
 chosen delay with a 10% gate. These are eligible service times, subject to the
 clock and scheduling limits in B13, not a guaranteed time to the first shot.
 
