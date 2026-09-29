@@ -323,6 +323,30 @@ def scenarios() -> list[Scenario]:
                 check=flight_picture(size),
             )
         )
+    for label in ("640x480", "641x481", "800x600", "1000x1000", "1600x900", "1920x1080"):
+        width, height = (int(v) for v in label.split("x"))
+        out.append(
+            Scenario(
+                name=f"menus-window-size-{label}",
+                lane="menus",
+                window=True,
+                args=["--capture-flight", "{work}/flight.ppm", "--window-size", label, "--no-audio"],
+                timeout=120,
+                expect=[r"Smoke test: requested screen presented successfully"],
+                check=flight_picture((width, height)),
+            )
+        )
+    for label in ("480x320", "100x100", "3841x2161"):
+        out.append(
+            Scenario(
+                name=f"menus-window-size-refused-{label}",
+                lane="menus",
+                args=["--capture-flight", "{work}/flight.ppm", "--window-size", label, "--no-audio"],
+                timeout=60,
+                expect_exit=1,
+                expect=[r"window size outside 640x480\.\.3840x2160"],
+            )
+        )
     for a in AIRCRAFT:
         out.append(
             Scenario(
@@ -347,13 +371,25 @@ def scenarios() -> list[Scenario]:
                 check=flight_picture((960, 720)),
             )
         )
-    for page in range(10):
+    # Instrument windows are drawn on the CPU: every page for every aircraft,
+    # and every panel-only systems fault (1 to 35) on the systems window.
+    for a in AIRCRAFT:
+        for page in range(10):
+            out.append(
+                Scenario(
+                    name=f"menus-panel-{a}-page-{page}",
+                    lane="menus",
+                    args=["--aircraft", a, "--panel-snapshot", "{work}/panel.ppm", "--instrument-page", str(page), "--no-audio"],
+                    timeout=120,
+                    outputs=["panel.ppm"],
+                )
+            )
+    for fault in range(1, 36):
         out.append(
             Scenario(
-                name=f"menus-window-page-{page}",
+                name=f"menus-panel-fault-{fault}",
                 lane="menus",
-                window=True,
-                args=["--panel-snapshot", "{work}/panel.ppm", "--instrument-page", str(page), "--no-audio"],
+                args=["--panel-snapshot", "{work}/panel.ppm", "--instrument-page", "7", "--systems-preview", str(fault), "--no-audio"],
                 timeout=120,
                 outputs=["panel.ppm"],
             )
