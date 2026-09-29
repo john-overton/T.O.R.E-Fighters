@@ -30,6 +30,8 @@ mod handoff;
 mod handoff_tests;
 pub use commands::{MissionCommand, OrderCall, OrderOutcome, OrderReply, Settings};
 #[cfg(test)]
+mod succession_tests;
+#[cfg(test)]
 mod tick_tests;
 
 /// The whole mission. The app drives it and presents it.
