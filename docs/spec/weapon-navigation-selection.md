@@ -79,6 +79,8 @@ longer be selected: `[`, `]` and the minus and plus buttons skip it, and when
 the selected station runs dry the selection moves on to the next loaded station
 in ring order (never while the trigger is still held), or to NAV when nothing is
 left (requested by John on 2026-09-29; the dim row is an agent choice).
+Jettisoning the selected store empties it and hands the selection on the same
+way, so a following trigger press fires the next loaded station.
 NAV has no selected-weapon marker. Six rows fit each page; the third button `P`
 wraps pages and does nothing on a single page. Minus/plus use the same selection
 ring as the bracket keys and reveal the selected weapon's page. Detailed range
