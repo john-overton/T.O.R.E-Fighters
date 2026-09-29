@@ -55,7 +55,12 @@ def count(events: list[dict], kind: str, subject: int | None = 0, **fields) -> i
     )
 
 
-def systems_check(work: Path, output: str) -> list[str]:
+# Carrier aircraft have a tailhook and only these two have no afterburner (an A-4E, an Su-25).
+HOOK = {"f18", "f14", "a4e", "f22n", "faxx"}
+NO_BURNER = {"a4e", "su25"}
+
+
+def systems_check(work: Path, output: str, ac: str = "f18") -> list[str]:
     events, samples = load(work)
     problems = []
     if not samples:
@@ -65,10 +70,16 @@ def systems_check(work: Path, output: str) -> list[str]:
         problems.append("key 5 did not bring the throttle to 100 percent within 4 s")
     problems += device_cycle(samples, "gear", 1.5, 5.8)
     problems += device_cycle(samples, "flaps", 7.5, 12.5)
-    problems += device_cycle(samples, "hook", 7.5, 12.5)
+    if ac in HOOK:
+        problems += device_cycle(samples, "hook", 7.5, 12.5)
+    elif max(d["devices"]["hook"] for d in samples) > 0.1:
+        problems.append(f"the {ac} has no tailhook but its hook moved")
     problems += device_cycle(samples, "brake", 7.5, 12.5)
     burner = first_time(samples, lambda d: "afterburner" in d["flags"], 17.0)
-    if burner is None:
+    if ac in NO_BURNER:
+        if burner is not None:
+            problems.append(f"the {ac} has no afterburner but lit one")
+    elif burner is None:
         problems.append("key 6 did not light the afterburner")
     elif first_time(samples, lambda d: "afterburner" not in d["flags"], burner) is None:
         problems.append("key 5 did not put the afterburner out again")
@@ -135,7 +146,30 @@ def takeoff_check(work: Path, output: str) -> list[str]:
 
 def nav_check(work: Path, output: str) -> list[str]:
     events, samples = load(work)
-    return [] if samples and len(samples) > 5 else ["no flight recorded"]
+    problems = []
+    steering = [e["fields"] for e in events if e["kind"] == "flight.effect" and e["fields"].get("effect") == "Autopilot steering"]
+    modes = [f["reason"] for f in steering if f["on"]]
+    if len(modes) != 2 or "heading" not in modes[0] or "waypoint" not in modes[1]:
+        problems.append(f"expected heading then waypoint autopilot, got {modes}")
+    if [f["on"] for f in steering] != [True, False, True, False]:
+        problems.append("the autopilot did not go on and off twice")
+    if not any("Navigation mode selected" in (e.get("text") or "") for e in events):
+        problems.append("key n did not select the navigation mode")
+    return problems
+
+
+def maneuvers_check(work: Path, output: str) -> list[str]:
+    events, samples = load(work)
+    problems = []
+    if max(d["g"] for d in samples) < 5:
+        problems.append("the held pull never reached 5 G")
+    if max(abs(d["att_deg"][2]) for d in samples) < 90:
+        problems.append("the held roll never passed 90 degrees of bank")
+    if count(events, "flight.g_limit", None) < 1:
+        problems.append("the pull reached the stick stop but no flight.g_limit event was recorded")
+    if any(d["g"] > 12 or d["g"] < -8 for d in samples):
+        problems.append("a G outside the aircraft's possible range")
+    return problems
 
 
 def views_check(work: Path, output: str) -> list[str]:
@@ -322,7 +356,14 @@ def scenarios() -> list[Scenario]:
             **kw,
         )
 
+    from battery_scenarios._replay_record import AIRCRAFT
+
+    every = [
+        build(f"systems-{ac}", "systems.txt", ["--free-flight", "--no-audio", "--aircraft", ac, "--researched-flight"], lambda work, output, ac=ac: systems_check(work, output, ac))
+        for ac in AIRCRAFT
+    ]
     return [
+        *every,
         build("systems", "systems.txt", free, systems_check),
         build("missile", "missile.txt", [*quick, "--separation", "10", "--ai-mission", "hold"], missile_check, ai=3),
         build("gun", "gun.txt", [*quick, "--separation", "10", "--ai-mission", "hold"], gun_check, ai=3),
@@ -330,6 +371,7 @@ def scenarios() -> list[Scenario]:
         build("takeoff-and-landing-request", "takeoff.txt", [*quick, "--ground-start", "1", "--probe-wing-size", "3"], takeoff_check, tower=True),
         build("navigation", "nav.txt", free, nav_check),
         build("views", "views.txt", free, views_check),
+        build("maneuvers", "maneuvers.txt", free, maneuvers_check),
         build("pause-menu-bookmarks", "pause.txt", free, pause_check),
         build("cheats", "cheats.txt", free, cheats_check),
         *mouse_scenarios(),
