@@ -481,6 +481,41 @@ fn ai_wingmen_join_their_leaders_landing_and_wait_their_turn() {
 }
 
 #[test]
+fn a_wingman_stops_following_a_destroyed_leader_down() {
+    // Battery finding (2026-09-28): an enemy wingman joined its damaged
+    // leader's landing and kept landing after the leader ejected. Wing abort
+    // applies when the leader is neither landing nor on the ground.
+    let mut mission = AiMission::new();
+    mission.push(hornet(1, 0, [0., 6_000., -110_000.], 0.));
+    mission.push(hornet(2, 1, [-600., 6_000., -110_600.], 0.));
+    mission.start_in_formation();
+    mission
+        .order(1, land(LandingReason::Ordered))
+        .unwrap()
+        .unwrap();
+    let mut joined = false;
+    for _ in 0..600 * 120 {
+        step(&mut mission, None);
+        let wingman = mission.actor(2).unwrap();
+        if wingman.airfield_phase().is_some()
+            && wingman.landing_order().map(|o| o.reason) == Some(LandingReason::JoinLeader)
+        {
+            joined = true;
+            break;
+        }
+    }
+    assert!(joined, "the wingman never joined the leader's landing");
+    mission.actor_mut(1).unwrap().set_alive(false);
+    step(&mut mission, None);
+    let wingman = mission.actor(2).unwrap();
+    assert!(
+        wingman.landing_order().is_none(),
+        "still joining a dead leader"
+    );
+    assert!(wingman.airfield_phase().is_none());
+}
+
+#[test]
 fn a_formation_order_cancels_an_ordered_landing_in_the_early_approach() {
     let mut mission = AiMission::new();
     mission.push(hornet(1, 1, [0., 6_000., -110_000.], 0.));
