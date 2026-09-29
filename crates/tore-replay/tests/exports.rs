@@ -656,6 +656,42 @@ fn the_summary_counts_airborne_time_only_off_the_ground() {
 }
 
 #[test]
+fn the_summary_and_units_say_when_external_tanks_are_counted() {
+    let dir = temp_dir("summary-fuel");
+    let frames = golden_frames();
+    let (aircraft, weapons) = registry();
+    let mut new = header();
+    new.extra.push((FUEL_KEY.into(), FUEL_WITH_EXTERNAL.into()));
+    assert!(new.fuel_includes_external() && !header().fuel_includes_external());
+    let mut writer = Writer::create(dir.join("new.tore-replay"), &new).unwrap();
+    for a in &aircraft {
+        writer.register_aircraft(a).unwrap();
+    }
+    for w in &weapons {
+        writer.register_weapon(w).unwrap();
+    }
+    for frame in &frames {
+        writer.push(frame).unwrap();
+    }
+    let path = writer.finish(&golden_footer()).unwrap();
+    let newer = Recording::open(path).unwrap();
+    let mut out = Vec::new();
+    write_summary(&newer, &SummaryOptions::default(), &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(text.contains("lb, external tanks included)"), "{text}");
+    // An older recording reads as it always did.
+    let older = golden_recording(&dir);
+    let mut out = Vec::new();
+    write_summary(&older, &SummaryOptions::default(), &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("(used 10 lb)") && !text.contains("external"),
+        "{text}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn golden_summary() {
     let dir = temp_dir("golden-summary");
     let recording = golden_recording(&dir);

@@ -143,6 +143,7 @@ pub fn write_summary(
     let names = Names::new(recording);
     let header = recording.header();
     let w = &header.world;
+    let external_fuel = header.fuel_includes_external();
 
     // One pass over every frame.
     let mut stats: BTreeMap<u32, Stats> = recording
@@ -465,10 +466,17 @@ pub fn write_summary(
         )?;
         let fuel = match st.fuel_first {
             Some(start) => format!(
-                "fuel {} -> {} lb (used {} lb)",
+                "fuel {} -> {} lb (used {} lb{})",
                 thousands(start),
                 thousands(st.fuel_last),
-                thousands(st.fuel_used)
+                thousands(st.fuel_used),
+                // Older recordings count the internal tanks only and read as
+                // they always did.
+                if external_fuel {
+                    ", external tanks included"
+                } else {
+                    ""
+                }
             ),
             None => "fuel not recorded".into(),
         };

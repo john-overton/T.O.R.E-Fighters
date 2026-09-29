@@ -389,7 +389,7 @@ is positive right wing down.
 
 | Item | Values |
 | --- | --- |
-| Aircraft | Position, attitude, velocity, airspeed, G, the 11 animated devices, engine heat, flags (engine, afterburner, airborne, on the ground, crashed, wreck gone, alive, ejected, and animated: whether anything moves the devices, since straight-flight fixtures keep the model's neutral pose), wreck phase, fuel, pilot controls, the auxiliary body rates that thrust-vectoring paddles and plumes follow, hit points, regional damage and the failed structural section |
+| Aircraft | Position, attitude, velocity, airspeed, G, the 11 animated devices, engine heat, flags (engine, afterburner, airborne, on the ground, crashed, wreck gone, alive, ejected, and animated: whether anything moves the devices, since straight-flight fixtures keep the model's neutral pose), wreck phase, fuel (internal and external tanks, see [Versions and damage](#versions-and-damage)), pilot controls, the auxiliary body rates that thrust-vectoring paddles and plumes follow, hit points, regional damage and the failed structural section |
 | Projectiles | Owner, weapon, target, position, previous position, direction, speed, tracer, inbound on the player, age, and the seeker's state |
 | Debris and ejected pilots | Position and attitude or heading |
 | Effects and puffs | Only those released this tick; the viewer ages them itself. A hit, kill or ground strike stores its [explosion type](spec/explosions.md) in its effect code (64 to 87 hit, 96 to 119 kill, 128 to 151 ground, the type less 15 added); a crater is 160 plus its size and lasts for good; a crash-site fire is code 7; the crash-site column is puff kind 3, stored in its own byte; the viewer drifts every puff with the recorded wind, and each column puff also by the cone its release point gives it; replayed flare smoke drifts with the wind as in flight. Older builds read these codes as unknown kinds and skip them; recordings made before explosion types draw and sound their plain hit, kill or ground effect |
@@ -486,6 +486,12 @@ beyond them.
   and a recording from before them has no releases and no lit flames: its
   chaff and flares were short effects, which the viewer does not draw, as
   flight no longer draws them.
+- A sample's fuel counts the internal tanks and, since 2026-09-29, the external
+  tanks too (requested by John on 2026-09-29). New recordings say so with the
+  header setting `fuel=internal and external tanks`, which the summary and the
+  log's units echo (`fuel ... (used N lb, external tanks included)`). Older
+  recordings have no such setting and hold internal fuel only; they read as they
+  always did. A jettisoned tank's fuel leaves the total, so it counts as used.
 
 ## Exports
 
