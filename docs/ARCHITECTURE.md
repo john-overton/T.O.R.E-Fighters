@@ -360,8 +360,9 @@ straight-flight compatibility path. `Combat::mission_aircraft` retains the six
 wing groups and their fitted spawn poses for restart. `AiWings` builds actors
 after reset. AI emits aircraft inputs and the flight model alone advances
 its pose; no steering pose overwrite follows physics. The bridge mirrors results into `combat::live::Target` for sensors,
-rendering and damage. Each wing follows its own leader from the shared world
-snapshot; the human leader remains outside the AI actor list.
+rendering and damage. Each wing follows its own current leader from the shared
+world snapshot ([lead succession](#lead-succession)); a human-flown aircraft
+remains outside the AI actor list and is one world object in that snapshot.
 `ai::awareness` owns timestamped current observations and frozen aircraft memory
 for each actor. Only current observations enter target selection, weapon geometry
 and firing; lost hostile records enter a separate controller search input. The
@@ -785,15 +786,15 @@ messages) is a `Cockpit`, one per human-flown plane in
 names, and applies each seat's commands to its own plane. The flight step,
 building contact, turbulence, the world edge and OVERSPEED rules and the
 airport service run for every cockpit in
-plane order; combat and the AI still serve the first cockpit only, with one
-ownship's worth of player-only fields in `combat::live::State`, until slices B1
-and B3 land. The radio is per seat (slice B4, below): each seat has its own
+plane order. Combat keeps one ownship per human-flown plane (B1), and the AI
+is handed every human-flown plane that has one (B3, see [the AI with several
+humans](#the-ai-with-several-humans)). The radio is per seat (slice B4, below): each seat has its own
 delivery queue, busy hold and radio silence, and each call is generated once.
 B2 is built as well: everything a player does between ticks is a `SeatCommand`
 in that seat's input, applied by `world/commands.rs` at the start of the tick
-(see [seat input](#seat-input)). Every AI aircraft is an `AiActor` in
-`tore-sim::ai` plus a `live::Target` row, mirrored into each other once per
-tick. The plan's [code findings](multiplayer-plan.md#where-the-code-stands)
+(see [seat input](#seat-input)). B3, the AI with several humans, is built. Every
+AI aircraft is an `AiActor` in `tore-sim::ai` plus a `live::Target` row,
+mirrored into each other once per tick. The plan's [code findings](multiplayer-plan.md#where-the-code-stands)
 describe the code before stage A.
 
 ### Stage A: one mission core
@@ -1222,10 +1223,10 @@ takes effect on the first tick after resuming, instead of at once. And the
 mission recording must keep listing a command on the frame before the tick that
 applies it, as it does today (done, above).
 
-The AI still takes orders from the lead of Friendly Wing 1 whoever sends them:
-the step hands the order to `AiWings::command_at` and keeps the sender's plane
-beside it, unread, until the AI routes an order to its sender's own wing
-(slice B3).
+The step hands an order to `AiWings::command_at` with the sender's plane, and
+the AI routes it to the sender's own wing (slice B3, built): AI members act on
+it, a human member only records that it was ordered, and a plane that does not
+lead its wing is refused.
 
 *Agent decisions (B2):*
 
@@ -1402,19 +1403,67 @@ their fraction to within one point.
 
 #### The AI with several humans
 
-- Each human-flown aircraft is a world object in the AI's snapshot, built at the
-  AI step from its flight state and ownship, as the player's is today.
-- Each wing led by a human registers that human as its external leader, so AI
-  wingmen fly formation on any human lead, not only on Friendly Wing 1.
-- Every human keeps landing priority over AI traffic, in id order.
-- Mission assignments and must-survive lists are kept per aircraft, not for "the
-  player".
-- The friendly list that T and Enter skip is built per side.
-- Return to base (the bug bash's rule of 2026-09-29): a wing led by a human
-  stays with its human. *Agent decision:* an AI-led wing with a human wingman
-  goes home like any AI-led wing, and the human is never ordered. An ejected
-  human counts as lost in return to base, traffic avoidance and succession, as
-  an ejected AI pilot does: ejecting ends the aircraft's flight (`crashed`).
+*Built (B3).* The host hands the AI one `HumanAircraft` for each human-flown
+plane that has an ownship, in id order (`AiWings::step`): its `HumanSlot` (plane
+id, side, wing and member, from the roster's `Plane.slot`), its flight state,
+its ownship's hit points and the signature and jammer of its configuration.
+The AI builds a world object with `human_controlled` set from each, where it
+built one for "the player". A human is never an `AiActor`.
+
+- **Snapshots and evidence.** Missile snapshots take one launcher per ownship,
+  attack evidence from an aircraft's RWR, emitters and sensors is delivered to
+  that aircraft alone, `locks_on(id)` lists the locks on one aircraft, and a
+  launch aimed at any human is `incoming` for it. Decoy rolls and compatibility
+  threat reports read the weapon of the round's own owner, never plane 0's.
+- **External leaders.** A wing whose current leader is human-flown has that human
+  as its external leader, so AI wingmen fly formation on any human lead, not
+  only on Friendly Wing 1. Each step refreshes the AI's list of humans
+  (`AiMission::set_humans`), so a human that leaves stops leading.
+- **Landing priority.** Every human keeps landing priority over AI traffic:
+  `World::step` evaluates every cockpit in id order
+  (`AiWings::update_landing_priority(id, ..)`), a claim keeps its runway busy
+  and a joining wingman's wing-abort reads its own leader's claim.
+- **Assignments.** Mission assignments and must-survive lists are kept for each
+  human (`human_assignment(id)`, `must_survive(id)`). The presets and group
+  stamps write every human they name: Escort and Intercept name every friendly
+  human, a group stamp reaches only the humans in that group, and a survival list
+  is written for every human. *Agent decision.*
+- **Friendly lists.** `AiWings::friendly_ids(side)` lists a side's AI and human
+  aircraft; `World::refresh_friendlies` gives each ownship its own side's list
+  (restart calls it; a handoff calls it again).
+- **Orders.** Wing orders, `next_formation` and the landing orders take the
+  sender's plane and go to the sender's own wing, to AI and human members
+  alike; a human member answers "flown by a human". Only the plane that leads its
+  wing can order it (*agent decision*, following "orders from a seat whose
+  aircraft leads its wing" below).
+- **Numbering.** A wing with humans in it leaves their member numbers free of AI
+  aircraft: the k-th AI member takes the k-th number no human holds
+  (`AiWings::build_for`). One human at member 0 of Friendly Wing 1 is the old
+  shift by one.
+- **Contact reports.** A contact carries its group size and advice once and its
+  clock position, elevation, range and type name measured from each human
+  (`Contact::views`), for a radio that voices each seat's report; the plain
+  fields are the first human's. *Agent decision:* B4 has not adopted `views`
+  yet.
+- **Return to base** (the bug bash's rule of 2026-09-29). A wing led by a human
+  stays with its human (the AI skips any wing with an external leader).
+  *Agent decision:* an AI-led wing with a human wingman goes home like any
+  AI-led wing, and the human is never ordered. An ejected human counts as lost
+  in return to base, traffic avoidance and succession, as an ejected AI pilot
+  does: ejecting ends the aircraft's flight (`crashed`), which both the human's
+  world object and an AI actor read.
+
+*Removing and inserting actors, for handoff.* `AiWings::remove_actor(id)` takes
+an AI aircraft out and returns its flight state, stores, dispensers, sensors,
+missile warnings, equipment faults, skill and combat configuration; the others
+keep their order. `AiWings::insert_actor` adds an aircraft in id order as at
+mission start: same slot, the seed rule (its rank among the wing's member
+numbers no human holds), fresh awareness, neutral, home the nearest runway its
+side may use. It leads if it is its wing's leader, and takes its member number
+as its formation slot, or its rank behind the leader once the flight has
+re-formed. `ActorInsert::from_removed` puts an actor back as it left. The
+preset assignment is not re-applied (*agent decision*). Both calls are for the
+lead's handoff and have no caller yet.
 
 #### Lead succession
 
@@ -1422,26 +1471,49 @@ John's rule (2026-09-28): if a flight lead is shot down, a human in the flight
 takes the lead if there is one; otherwise the next AI member does, and the
 flight re-forms on the new leader.
 
-- Each wing has a current leader. At the start of the mission it is the wing's
-  first member. When the leader's aircraft is destroyed or its pilot ejects,
-  lead passes on that tick to the lowest-numbered living human member, or, if
-  there is none, to the lowest-numbered living AI member. Every aircraft keeps
-  its member number and callsign. A member that was following the lost leader
-  in to land stops, as the bug bash's succession did; this rule replaced the
-  bug bash's renumbering at John's decision of 2026-09-29.
-- Everything in the AI that keys on "the leader" reads the current leader
-  instead of the first member: formation, airfield clearance, escorts,
-  automatic release, contact reports and orders.
-- The new leader hears "You're the Wingleader now" (`^WNGLDR`, already imported)
-  five seconds later, spoken by the previous leader if that pilot is still alive,
-  for example after ejecting (retail: "voiced only when the previous leader is
-  still alive to send it"). Otherwise a HUD line only (*agent proposal*; retail's
-  triggers are unknown, see the
-  [radio chatter spec](spec/radio-chatter.md#youre-the-wingleader-now)).
-- Single player gains the same succession (John, 2026-09-28): when the player is
-  shot down, the first living wingman leads the rest, and when an AI leader dies
-  its next living member leads. This changes AI behaviour and its fingerprints, so it lands
-  as its own commit with re-recorded baselines.
+*Built (B3).*
+
+- Each wing has a current leader, `AiMission::wing_leader`. At the start of the
+  mission it is the wing's member 0 (a wing with no member 0 has none, as before).
+  When the leader's aircraft is destroyed or its pilot ejects, lead passes on that
+  tick to the lowest-numbered flying human member, or, if there is none, to the
+  lowest-numbered flying AI member. The check runs at the start of every mission
+  step, before anyone decides whom to follow, and again at its end, so a leader
+  lost during the tick hands over on that tick. A wing with nobody left keeps its
+  last leader.
+- `ActorIdentity::leads` is the flag `is_leader()` reads; `member` stays the
+  fixed roster number. The flight re-forms: the followers, human and AI, take
+  formation slots 1, 2 and so on in member order. A member that was following
+  the lost leader in to land stops, as the bug bash's succession did; this rule
+  replaced the bug bash's renumbering at John's decision of 2026-09-29.
+- Everything in the AI that keys on "the leader" reads the current leader instead
+  of member 0: `leader_view` and the external leader, airfield clearance,
+  escorts, automatic release, the contact report hold rule (the leader and the
+  first wingman behind it report) and orders.
+- A `LeadershipChange` in the mission output (wing, new leader, previous leader,
+  whether the previous leader's pilot is alive: ejected and unhurt) becomes a
+  `Chatter::Leadership` event, and the radio journals it (`Cause::Leadership`).
+  It speaks nothing yet: B4 turns it into "You're the Wingleader now".
+
+The new leader will hear "You're the Wingleader now" (`^WNGLDR`, already
+imported) five seconds later, spoken by the previous leader if that pilot is
+still alive, for example after ejecting (retail: "voiced only when the previous
+leader is still alive to send it"). Otherwise a HUD line only (*agent
+proposal*; retail's triggers are unknown, see the
+[radio chatter spec](spec/radio-chatter.md#youre-the-wingleader-now)).
+
+Single player gained the same succession (John, 2026-09-28): when the player is
+shot down, the first living wingman leads the rest, and when an AI leader dies
+its next living member leads. It landed as its own commit with re-recorded
+baselines. In the stage C chain, where it replaced the bug bash's succession,
+it changed 33 of the 49 default probe recordings and 7 printed outputs. In 27
+recordings only the journal's "now leads the wing" note differs (and, in one,
+the "leader" or "wingman" word in the AI thinking record). In six, aircraft move
+from the tick a wing changes leader, where the two rules differ: a wing whose
+human leader is lost passes the lead to its first living wingman (the bug bash
+left a human-led wing alone), which releases the wingmen to engage and refuses
+the dead player's later wing order; and an AI wing keeps its members' numbers
+where the bug bash renumbered them.
 
 #### Radio, orders and debrief for each seat
 
@@ -1544,6 +1616,19 @@ start, seeded as the AI probe's `--probe-flight-model researched` does, so a
 human taking over an AI aircraft never feels its handling change. AI air combat
 on the hybrid model is checked with AI probe runs against the legacy baselines.
 
+*Built (B3).* `ai_wings::AiFlightModel` is the setting: `AiSetup::flight_model`
+in `world.rs` (single player passes `Standard`) and the probe's
+`--probe-ai-flight-model standard|all-hybrid`. `AllHybrid` gives every AI
+aircraft that is not on the hybrid model yet the researched adapter, seeded
+`1 + aircraft id` as the probe seeds its researched actors, and the same
+seeding applies to an aircraft inserted later. Training targets, which only
+drift on a straight line, stay as they are, and `Standard` cannot undo
+`AllHybrid` (*agent decisions*). On the 41 default probes `AllHybrid` leaves 10
+recordings identical (those already on the researched model, and the wing-only
+ground start) and changes 31: the seven ground starts differ by fractions of a
+knot in wings other than the player's, and the 24 air fights diverge from the
+first tick with small shifts in launches and hits. The full comparison is B7's.
+
 #### Single-player guarantee
 
 Single player keeps its results tick for tick through stages A and B, checked
@@ -1575,7 +1660,8 @@ applies when play resumes (stage B).
      [seat input](#seat-input).
    - **B3 AI**: several humans, current leaders and succession, the actor
      removal and insertion handoff needs, and the flight-model setting
-     (`tore-sim` AI, `ai_wings`).
+     (`tore-sim` AI, `ai_wings`). Done: see [the AI with several
+     humans](#the-ai-with-several-humans).
    - **B4 radio**: the listener rule, queues, crew voice and tower for each seat.
    - **B5 debrief and recorder**: both for a chosen seat.
 3. **B6** (lead): handoff, with its tests.
