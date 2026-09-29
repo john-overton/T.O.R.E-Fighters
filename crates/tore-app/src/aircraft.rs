@@ -1,20 +1,30 @@
 //! Imported aircraft geometry, cockpit and data. Does not use reference runtime code.
 use crate::{
-    AppResult, flight,
+    AppResult,
+    aircraft_type::AircraftType,
+    flight,
     menu::Sprite,
     scenery::Scenery,
     terrain::{Camera, Terrain},
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::Deref,
+    sync::Arc,
+};
 use tore_formats::{Pic, aircraft::Aircraft, font::Font, shape::Shape};
+/// One aircraft type ready to draw: the simulation's [`AircraftType`] plus the
+/// imported art, cockpit, HUD, animation rig and damage art. It dereferences
+/// to its type, so `airframe.profile`, `airframe.sensors` and
+/// `airframe.start(..)` read as before.
 pub struct Airframe {
+    /// The simulation half, shared with combat and the world.
+    pub kind: Arc<AircraftType>,
     pub engine_material: Option<crate::engine_material::Image>,
     nozzle_bounds: [[f32; 4]; 2],
     rig: Option<crate::additional_animation::Rig>,
     /// Wing vapor attachment, from the shape's own streamer definition.
     pub streamer: Option<tore_formats::shape::StreamerDef>,
-    model: tore_sim::models::AircraftModel,
-    pub profile: Aircraft,
     pub atlas: Pic,
     damage_art: crate::damage_art::DamageArt,
     pub palette: [[u8; 3]; 256],
@@ -27,10 +37,13 @@ pub struct Airframe {
     pub hud_font: Font,
     pub hud: tore_formats::hud::Hud,
     pub flight_menu: Vec<tore_formats::ui::MenuNode>,
-    /// Imported sensor capability for this identity, resolved by record
-    /// channel. Used for capability reporting and scope labels.
-    pub sensors: tore_sim::sensors::SensorProfiles,
     pub poses: Vec<Shape>,
+}
+impl Deref for Airframe {
+    type Target = AircraftType;
+    fn deref(&self) -> &AircraftType {
+        &self.kind
+    }
 }
 impl Airframe {
     pub fn load(
@@ -233,12 +246,13 @@ impl Airframe {
             }
         }
         let damage_art = crate::damage_art::DamageArt::load(id, data, &mut atlas)?;
+        let model = tore_sim::models::AircraftModel::for_aircraft(&profile)?;
+        let contrail_offsets = contrail_offsets(id, &poses[0], rig.as_ref());
         Ok(Self {
+            kind: Arc::new(AircraftType::new(profile, model, sensors, contrail_offsets)),
             engine_material,
             nozzle_bounds,
             rig,
-            model: tore_sim::models::AircraftModel::for_aircraft(&profile)?,
-            profile,
             atlas,
             damage_art,
             palette,
@@ -249,7 +263,6 @@ impl Airframe {
             hud_font: Font::parse(get("HUD11.FNT")?)?,
             hud,
             flight_menu,
-            sensors,
             poses,
             streamer,
         })
@@ -360,18 +373,6 @@ impl Airframe {
         streamer_world_points(def, s.position, [s.yaw, s.pitch, s.bank])
     }
 
-    pub fn start(&self, world: &Terrain) -> flight::State {
-        let c = Camera::for_world(world);
-        let mut p = c.position;
-        p[1] = 5000f64.max(world.height(p[0] as f32, p[2] as f32) as f64 + 2000.);
-        let mut state = flight::State::from_model(self.model.clone(), p);
-        // State velocity is ground-relative; initialize the requested airspeed
-        // with advection already present so the first tick does not subtract it twice.
-        for (v, wind) in state.velocity.iter_mut().zip(world.wind()) {
-            *v += wind;
-        }
-        state
-    }
     /// Shared fitted instrument camera pose for fixed-tick weather and rendering.
     pub fn panel_camera(&self, state: &flight::State, page: u8) -> Camera {
         let mut camera = self.camera(state, if page == 2 { 0 } else { 3 }, Default::default());
@@ -418,64 +419,6 @@ impl Airframe {
         }
         c
     }
-    /// Fitted attachment behind reviewed nozzle bounds, with a bounds-based
-    /// fallback for aircraft whose outlet faces have not been reviewed.
-    pub fn contrail_offsets(&self) -> Vec<[f64; 3]> {
-        use tore_formats::aircraft::AircraftId;
-        let count = match self.profile.id {
-            AircraftId::A4E | AircraftId::X31 | AircraftId::Mig21 | AircraftId::Mig23 => 1,
-            _ => 2,
-        };
-        let scale = f64::from(self.rig.as_ref().map_or(1. / 3., |r| r.scale()));
-        (0..count)
-            .map(|group| {
-                let positions: Vec<_> = self.poses[0]
-                    .faces
-                    .iter()
-                    .filter(|f| {
-                        crate::engine_material::nozzle(self.profile.id, f.address)
-                            && crate::engine_material::outlet_group(self.profile.id, &f.positions)
-                                == group
-                    })
-                    .flat_map(|f| f.positions.iter())
-                    .collect();
-                if !positions.is_empty() {
-                    let min: [f64; 3] = std::array::from_fn(|i| {
-                        positions
-                            .iter()
-                            .map(|p| f64::from(p[i]))
-                            .fold(f64::INFINITY, f64::min)
-                    });
-                    let max: [f64; 3] = std::array::from_fn(|i| {
-                        positions
-                            .iter()
-                            .map(|p| f64::from(p[i]))
-                            .fold(f64::NEG_INFINITY, f64::max)
-                    });
-                    [
-                        (min[0] + max[0]) * 0.5 * scale,
-                        (min[2] + max[2]) * 0.5 * scale,
-                        min[1] * scale - 2.,
-                    ]
-                } else {
-                    let positions = self.poses[0].faces.iter().flat_map(|f| &f.positions);
-                    let mut aft = 0_f64;
-                    let mut span = 0_f64;
-                    for p in positions {
-                        aft = aft.min(f64::from(p[1]) * scale);
-                        span = span.max(f64::from(p[0]).abs() * scale);
-                    }
-                    let lateral = if count == 1 {
-                        0.
-                    } else {
-                        span * 0.15 * if group == 0 { -1. } else { 1. }
-                    };
-                    [lateral, 0., aft - 2.]
-                }
-            })
-            .collect()
-    }
-
     pub fn vertices(
         &self,
         s: &flight::State,
@@ -747,6 +690,67 @@ impl Airframe {
     }
 }
 
+/// Fitted attachment behind reviewed nozzle bounds, with a bounds-based
+/// fallback for aircraft whose outlet faces have not been reviewed.
+fn contrail_offsets(
+    id: tore_formats::aircraft::AircraftId,
+    neutral: &Shape,
+    rig: Option<&crate::additional_animation::Rig>,
+) -> Vec<[f64; 3]> {
+    use tore_formats::aircraft::AircraftId;
+    let count = match id {
+        AircraftId::A4E | AircraftId::X31 | AircraftId::Mig21 | AircraftId::Mig23 => 1,
+        _ => 2,
+    };
+    let scale = f64::from(rig.map_or(1. / 3., |r| r.scale()));
+    (0..count)
+        .map(|group| {
+            let positions: Vec<_> = neutral
+                .faces
+                .iter()
+                .filter(|f| {
+                    crate::engine_material::nozzle(id, f.address)
+                        && crate::engine_material::outlet_group(id, &f.positions) == group
+                })
+                .flat_map(|f| f.positions.iter())
+                .collect();
+            if !positions.is_empty() {
+                let min: [f64; 3] = std::array::from_fn(|i| {
+                    positions
+                        .iter()
+                        .map(|p| f64::from(p[i]))
+                        .fold(f64::INFINITY, f64::min)
+                });
+                let max: [f64; 3] = std::array::from_fn(|i| {
+                    positions
+                        .iter()
+                        .map(|p| f64::from(p[i]))
+                        .fold(f64::NEG_INFINITY, f64::max)
+                });
+                [
+                    (min[0] + max[0]) * 0.5 * scale,
+                    (min[2] + max[2]) * 0.5 * scale,
+                    min[1] * scale - 2.,
+                ]
+            } else {
+                let positions = neutral.faces.iter().flat_map(|f| &f.positions);
+                let mut aft = 0_f64;
+                let mut span = 0_f64;
+                for p in positions {
+                    aft = aft.min(f64::from(p[1]) * scale);
+                    span = span.max(f64::from(p[0]).abs() * scale);
+                }
+                let lateral = if count == 1 {
+                    0.
+                } else {
+                    span * 0.15 * if group == 0 { -1. } else { 1. }
+                };
+                [lateral, 0., aft - 2.]
+            }
+        })
+        .collect()
+}
+
 /// Source-space X and Z bounds of each engine outlet's nozzle faces, which
 /// the engine material spans.
 fn nozzle_bounds(id: tore_formats::aircraft::AircraftId, shape: &Shape) -> [[f32; 4]; 2] {
@@ -800,13 +804,21 @@ impl Airframe {
             height: 1,
             glyphs: Vec::new(),
         };
+        let sensors = tore_sim::sensors::SensorProfiles {
+            aircraft: id,
+            radar: None,
+            infrared: None,
+            visual: None,
+            jammer: None,
+            signature: Default::default(),
+        };
+        let contrail_offsets = contrail_offsets(id, &poses[0], rig.as_ref());
         Self {
+            kind: Arc::new(AircraftType::new(profile, model, sensors, contrail_offsets)),
             nozzle_bounds: nozzle_bounds(id, &poses[0]),
             engine_material,
             rig,
             streamer: None,
-            model,
-            profile,
             atlas: pic(16),
             damage_art,
             palette: std::array::from_fn(|i| [i as u8, 255 - i as u8, (i * 37 % 256) as u8]),
@@ -823,14 +835,6 @@ impl Airframe {
                 press_color: 0,
             },
             flight_menu: Vec::new(),
-            sensors: tore_sim::sensors::SensorProfiles {
-                aircraft: id,
-                radar: None,
-                infrared: None,
-                visual: None,
-                jammer: None,
-                signature: Default::default(),
-            },
             poses,
         }
     }

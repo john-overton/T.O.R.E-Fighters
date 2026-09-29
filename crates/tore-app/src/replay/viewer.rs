@@ -902,8 +902,11 @@ impl Viewer {
             missiles: missiles(&recording),
             devices: DeviceTrack::new(events),
             outlets: (
-                ownship.contrail_offsets(),
-                models.iter().map(Airframe::contrail_offsets).collect(),
+                ownship.contrail_offsets.clone(),
+                models
+                    .iter()
+                    .map(|model| model.contrail_offsets.clone())
+                    .collect(),
             ),
             recording,
             world,

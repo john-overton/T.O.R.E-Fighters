@@ -6,6 +6,7 @@ mod additional_animation;
 mod ai_wings;
 mod aircraft;
 mod aircraft_animation;
+mod aircraft_type;
 mod airfield_radio;
 mod assets;
 mod attitude;

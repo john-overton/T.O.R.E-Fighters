@@ -9,7 +9,7 @@
 //! same order, for the app to present after the step.
 
 use crate::{
-    AppResult, ai_wings, aircraft, airfield_radio, attitude, combat, combat_tape, comms,
+    AppResult, ai_wings, aircraft_type, airfield_radio, attitude, combat, combat_tape, comms,
     crew_voice, flight, quick_mission, radio_calls, terrain,
 };
 use std::collections::BTreeMap;
@@ -176,7 +176,7 @@ impl World {
     /// recording before and starts the new one after.
     pub fn restart(
         &mut self,
-        aircraft: &aircraft::Airframe,
+        aircraft: &aircraft_type::AircraftType,
         resources: &BTreeMap<String, Vec<u8>>,
     ) -> AppResult<Restarted> {
         // A fixed seed keeps headless runs deterministic.

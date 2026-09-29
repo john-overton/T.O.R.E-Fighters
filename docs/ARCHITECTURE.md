@@ -88,7 +88,7 @@ The initial implementation uses full-resolution fixed triangles and an authored 
 
 The creator selects among all 16 base theaters. Scene replacement rebuilds the GPU vertex/texture buffers for that world; a variable texture-array layer count also supplies the sky shader's layer index. Only the active world mesh is built, while the bounded source bundle remains cached. Maps and fonts stay in the menu compositor. Source text shading is preserved when tinting; ARMFont/SMLFONT replace the unsuitable BODYFONT in the investigation UI and notices.
 
-The Hornet slice adds dependency resolution and bounded BRF/SH/FNT readers to `tore-formats`. `tore-sim::flight` contains fixed-tick state/integration without wgpu/winit dependencies; the app re-exports its interface; `aircraft.rs` adapts imported geometry and camera poses. `instruments.rs` renders independent small rasters from flight/equipment state, each framed by the aircraft's own original instrument window picture (named by its HUD) and coloured every frame through the live cockpit palette, as the cockpit art is; page content draws in coordinates relative to the 138×114 screen ([bezel spec](spec/instrument-bezel.md)). The GPU terrain pass now accepts an aircraft vertex stream and original rectangular atlas with shared depth; front/other instrument cameras render offscreen. CLI extraction and cache import share the same dependency resolver. These adapters do not execute imported x86 modules. See [aircraft evidence and open questions](formats/aircraft.md).
+The Hornet slice adds dependency resolution and bounded BRF/SH/FNT readers to `tore-formats`. `tore-sim::flight` contains fixed-tick state/integration without wgpu/winit dependencies; the app re-exports its interface; `aircraft.rs` adapts imported geometry and camera poses, and holds `Airframe`, which wraps the simulation's `AircraftType` (`aircraft_type.rs`: the imported profile, flight model, sensors and engine outlet points, with no art) beside the drawn half. `instruments.rs` renders independent small rasters from flight/equipment state, each framed by the aircraft's own original instrument window picture (named by its HUD) and coloured every frame through the live cockpit palette, as the cockpit art is; page content draws in coordinates relative to the 138×114 screen ([bezel spec](spec/instrument-bezel.md)). The GPU terrain pass now accepts an aircraft vertex stream and original rectangular atlas with shared depth; front/other instrument cameras render offscreen. CLI extraction and cache import share the same dependency resolver. These adapters do not execute imported x86 modules. See [aircraft evidence and open questions](formats/aircraft.md).
 
 `surface_lighting.rs` owns three geometric shadow maps and the shared light
 uniform. `surface_lighting.wgsl` supplies continuous diffuse response, solar
@@ -937,8 +937,15 @@ baselines byte for byte:
 A2 first splits, inside `tore-app`, what mixes simulation with presentation.
 These splits touch different files and can run in parallel:
 
-- `Airframe`: the aircraft type the simulation needs (profile, flight model,
-  sensors, contrail and streamer points) apart from the render model.
+- `Airframe`: the aircraft type the simulation needs apart from the render
+  model. Done: `AircraftType` (`aircraft_type.rs`) holds the profile, flight
+  model, sensors and the engine outlet points that contrails and afterburner
+  lights use, and `start` for the player's flight. `Airframe` (`aircraft.rs`)
+  holds an `Arc<AircraftType>` beside the art, cockpit, HUD, animation rig and
+  damage art, and dereferences to it. `World::restart`, `Combat::new`,
+  `Combat::with_loadout` and the combat smoke harness take `&AircraftType`.
+  The wing vapor attachments (`streamer_points`) stay on `Airframe`, since only
+  the renderer reads them.
 - `Combat`: its art, render history, readouts and target cameras move out;
   plain types that live in renderer files today (`Contact`, `CombatGeometry`,
   `Afterburner`) move to plain modules. `render_snapshot` splits its pose data

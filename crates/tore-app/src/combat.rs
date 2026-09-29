@@ -2,6 +2,7 @@
 use crate::{
     AppResult,
     aircraft::Airframe,
+    aircraft_type::AircraftType,
     flight,
     render_snapshot::{
         AircraftPose, CombatArt, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
@@ -214,7 +215,7 @@ impl Combat {
             .find(|o| o.id == id)
             .map(|o| o.name.as_str())
     }
-    pub fn new(h: &Airframe, data: &BTreeMap<String, Vec<u8>>, range: bool) -> AppResult<Self> {
+    pub fn new(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>, range: bool) -> AppResult<Self> {
         let config = live::Configuration::from_source(&h.profile, |name| {
             data.get(name)
                 .cloned()
@@ -223,7 +224,7 @@ impl Combat {
         Self::configured(h, data, range, config, None)
     }
     pub fn with_loadout(
-        h: &Airframe,
+        h: &AircraftType,
         data: &BTreeMap<String, Vec<u8>>,
         load: &tore_sim::combat::loadout::Loadout,
     ) -> AppResult<Self> {
@@ -237,7 +238,7 @@ impl Combat {
         )
     }
     fn configured(
-        h: &Airframe,
+        h: &AircraftType,
         data: &BTreeMap<String, Vec<u8>>,
         range: bool,
         config: live::Configuration,
@@ -247,7 +248,7 @@ impl Combat {
         art.add_weapon_shapes(&config, data);
         Ok(Self {
             art,
-            contrail_offsets: h.contrail_offsets(),
+            contrail_offsets: h.contrail_offsets.clone(),
             contrail_sortie: 0,
             contrails: Default::default(),
             state: live::State::new(config, true)?,
@@ -713,7 +714,7 @@ impl Combat {
                     })?);
                 self.art
                     .add_weapon_shapes(self.dummy_configs.last().unwrap(), data);
-                self.dummy_contrail_offsets.push(h.contrail_offsets());
+                self.dummy_contrail_offsets.push(h.contrail_offsets.clone());
                 self.dummy_models.push(h);
                 self.dummy_models.len() - 1
             };
@@ -1429,7 +1430,7 @@ fn first_difference(a: &str, b: &str) -> String {
     )
 }
 
-pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
+pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let world = Terrain::for_theater(data, "UKR")?;
     let mut combat = Combat::new(h, data, true)?;
     println!(
