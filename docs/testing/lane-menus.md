@@ -156,6 +156,114 @@ behaviour is documented as failing, so it stays as it is; the round one change m
 error name the file. It is no longer an open decision, only a note that an empty or
 binary file has no line number to report.
 
+## Manual audit (round three, 2026-09-29)
+
+Each screen, dropdown, button, key and in-flight display in the retail manual
+(`.local/missile-update/manual.txt`) was checked against the app. Results: **OK** works
+and reads as the manual says; **FIXED** was wrong and is corrected (commit named);
+**DIFFERS** is a documented, deliberate difference; **NOT IMPLEMENTED** is marked so in
+`docs/features.md` or the game itself says "not implemented yet" (out of scope). Evidence
+is a snapshot or capture named in the scenario list, a probe (`TORE_CREATOR_STAGE=menu`
+prints every in-flight menu item with what it does), a unit test, or the code path.
+
+| Item | Manual page | Result | Evidence |
+| --- | --- | --- | --- |
+| Choose Activity: nine buttons with the retail labels | 11 | OK | `menus-snap-normal` |
+| Replay Last Mission, Continue Old Campaign greyed; Play Single Mission and the campaign entries say "coming soon" | 11 | NOT IMPLEMENTED | `menus-snap-notice`, features row |
+| ? menu with Exit to Desktop | 12 | OK | `menus-snap-help` |
+| Pref menu: Graphics, Sound (Screen Resolution absent, Controls and Re-import media added) | 12, 326 | DIFFERS | `menus-snap-pref`; the game has one window size setting via `--window-size` and Alt-Enter |
+| Multi menu (retail: serial, modem, IPX, TCP) | 12 | DIFFERS | `menus-snap-multi`: Host, Join, Player Setup for the new multiplayer, not the retail transports |
+| OK is Enter and Cancel is Escape on every screen | 12 | DIFFERS | Load Ordnance and debrief: Enter is OK, Escape backs out. Creator: Escape is Cancel, but Enter activates the focused field and OK is reached by Tab ([keyboard traversal spec](../spec/quick-mission-menu.md)) |
+| Text buttons: left click cycles forward, right backward, Shift-click opens the list | 13 | OK | `quick_mission` right-click tests, creator fuzz |
+| Aircraft menu: Fly All, Era | 14, 18, 326 | NOT IMPLEMENTED | the menu says "Aircraft era filters are not available yet" |
+| Creator: wing size 0 to 5 (player wing never 0), up to three enemy wings | 19, 20 | OK | matrix sweep, `menus-snap-quick-field-4` |
+| Creator: skill Ace, Experienced, Average, Novice (plus Dummy) | 19 | OK | `menus-snap-quick-field-5` |
+| Creator: aircraft list is the supported imported aircraft | 19 | DIFFERS | 14 exact identities (John, 2026-09-16), not the 26 retail choices |
+| Creator: location list of 16 theaters | 19 | OK | `menus-snap-quick-theaters`; the imported layout variants are listed after them |
+| Creator: altitude 5,000 to 40,000 ft | 19 | OK | field 14 popup: 5,000, 10,000, 20,000, 40,000 |
+| Creator: weather Dawn, Clear, Cloudy, Overcast, Foggy, Sunset, Night | 19 | DIFFERS | six choices; Overcast is dropped as a duplicate of Cloudy ([quick-mission.md](../formats/quick-mission.md)) |
+| Creator: situation Advantage, Neutral, Disadvantage | 19 | NOT IMPLEMENTED | the row is shown; the mission ignores it ([spec](../spec/quick-mission-menu.md)) |
+| Creator: separation 1 to 50 nmi | 19 | OK | field 17 popup (100 to 300 added by John) |
+| Creator: Standard or Custom weapons load opens the load screen | 20 | OK | field 18, `menus-window-launch-*` |
+| Creator: Combat scope Guns only removes air-to-air missiles, air-to-ground allowed | 20 | DIFFERS | Guns only removes every non-gun store (John, 2026-09-22, [spec](../spec/quick-mission-menu.md#mission-wings)) |
+| Creator: nationality is for designation only | 19, 20 | OK | no effect on the mission, lists match the manual |
+| Creator: ground target, AAA and SAM defense | 20 | NOT IMPLEMENTED | popup "not implemented yet" |
+| Quick Mission saved and replayable | 18 | NOT IMPLEMENTED | features row (no save) |
+| Load Ordnance: left panel weapons with weight and guidance under each | 16, 17 | OK | `menus-snap-quick-ordnance` |
+| Load Ordnance: drag to hardpoint, drag back to unload, click and right-click quantities | 16, 17 | OK | ordnance unit tests, `menus-snap-quick-ordnance-drag` |
+| Load Ordnance: empty hardpoint reads NOTHING | 16 | DIFFERS | an empty station is a red outline with no text (John, 2026-09-22, [spec](../spec/ordnance-presentation.md#dragging-and-empty-stations)) |
+| Load Ordnance: air-to-air and air-to-surface lights | 16 | OK | `menus-snap-quick-ordnance` |
+| Load Ordnance: FLIR pods, laser pods, external tanks | 16 | NOT IMPLEMENTED | features row ("Tanks ... remain") |
+| Load Ordnance: internal fuel switch and weight box | 17 | OK | ordnance tests, page shows max, current and available |
+| Load Ordnance: gun rounds unload and reload | 17 | OK | `taking_every_store_off_by_any_route_leaves_zeros_that_still_validate` |
+| Load Ordnance menu: Weapons > Unload All, Cheat | 329 | OK | `cheat_button_unloads_and_toggles_any_store_on_any_station` |
+| Load Ordnance: Fly and Select Plane buttons | 16 | OK | Fly starts the mission, Select Plane returns to the creator |
+| Debrief: clipboard pages, right and left click, arrow keys, OK | 17 | OK | `menus-snap-quick-debrief*`, `debrief::key` |
+| Mission brief and map screens (single missions) | 14, 15 | NOT IMPLEMENTED | Play Single Mission is not available |
+| In-flight menu bar: ? (End mission, Exit to Windows) | 332 | OK | probe: `End` and `Exit` |
+| Control menu: Keyboard | 332 | OK | opens the controls screen |
+| Control menu: joystick types, rudder pedals, throttle stick, HAT | 332 | NOT IMPLEMENTED | probe; the controls screen binds any device instead |
+| Pref: Graphics, Sound, Time (Paused, Slow-motion, 1x to 8x), HUD pitch ladder, Dim and Brighten HUD, Show cockpit, Large windows | 332 | OK | probe: each opens its screen or toggles |
+| Pref: Accelerated time, Rear-view mirrors, Authentic radar CRT, Show target info, IR/Laser targeting, Radio silence | 332, 333 | NOT IMPLEMENTED | probe prints "not implemented yet" (the mirrors are always on) |
+| View menu: 11 views with F1 to F12 shortcuts | 333, 103 | OK | probe, `menus-window-view-*` |
+| View menu: Ctrl and Alt use missile or target, View transitions | 333 | NOT IMPLEMENTED | probe (the Ctrl and Alt keys themselves work, see CONTROLS) |
+| Window menu: envelope (Current), the nine windows, RCS | 333 | OK | probe, `menus-panel-*` |
+| Window menu: envelope All and Compare | 333, 92 | NOT IMPLEMENTED | probe (the U, A and C buttons in the window draw) |
+| Cheat menu: damage (Invulnerable, Normal, Realistic), unlimited ammo and fuel, easy aiming, no crashes, no spins, no turbulence, extra G, ignore weights, no whiteout, no redout or blackout, no shake, enemy AI, ignore midair, easy targeting, guns only | 333, 334 | OK | probe: all 14 toggle and each flag is read by the simulation (checked by code search) |
+| Multi menu items and Position menu | 334 | NOT IMPLEMENTED | probe |
+| HUD: heading tape, G meter, thrust percent and AFT, flight path marker, pitch ladder (solid up, dashed down), weapon and rounds | 78 to 80 | OK | flight captures, `menus-window-cockpit-*` |
+| HUD: airspeed and altitude tapes with AGL bar and corner speed bar | 78, 79 | DIFFERS | boxed TAS and MSL values instead of tapes (features row, [HUD layout](../spec/hud-layout.md)) |
+| HUD: GEAR, FLAP, BRAKE, HOOK in the upper right | 79 | OK | `--flight-devices 1,1,1,1,1` capture |
+| HUD: BAY when the weapons bay is open (F-22) | 79 | FIXED | was never drawn; now the fifth label (`hud::draw`) |
+| HUD: time compression rate in the upper right | 80 | FIXED | was a one-off message only; now `2X`, `4X`, `8X`, `1/2X` (`hud::time_label` test) |
+| HUD: Weapons and Navigation modes (LCOS, NAV, ILS), N toggles | 77 | OK | launch line, ground start shows NAV |
+| HUD: thrust vectoring VCTR, stability indicator, HSI | 81, 82 | NOT IMPLEMENTED | FLIGHT-CONTROLS ("thrust vectoring remains unavailable") |
+| HUD: TD box, target range, closure, aspect angle, hit probability, weapon range scale, seeker diamond | 83, 84 | OK | `--hud-target-preview` capture, flight lane weapon scenarios |
+| HUD: gun pipper at 1,000 ft with radar off, range arc | 86 | OK | `--validate-creator` (1,000 ft sight solution) |
+| HUD: ILS glide slope, localizer, AGL and vertical speed | 87 | OK | `hud::draw` tests, AGL only on an active ILS |
+| Windows: Front view (s2), Other view (s3, V sets it) | 88, 89 | OK | `menus-panel-*-page-2/3`, CONTROLS |
+| Windows: Weapons status with + and -, System status (THR, TEMP, OIL, HYD), Nav (bearing, distance, ETA, + and -) | 89, 93 | OK | `menus-panel-*-page-6/7/8` |
+| Windows: Envelope U, A, C buttons | 92 | OK | `menus-panel-*-page-1` |
+| Windows: RWR with range (max 50), R and I indicators, JAM, comma and period range | 94 | FIXED | the range keys were reversed (see below); rest OK |
+| Windows: RCS | 95 | OK | `menus-panel-*-page-0` |
+| Radar window: RWS beyond tracking range, TWS within it, range number, squares with flags, Y history, M mode, +/- range | 96 to 100 | OK | captures at 150 and 5 nmi (RWS, TWS) |
+| Radar range keys: comma increases, period decreases | 21, 97 | FIXED | were reversed in the game, the keyboard spec and the keyboard map |
+| Ground radar (Ctrl-R), HARM (M), authentic radar CRT | 99, 100 | NOT IMPLEMENTED | features and probe |
+| Target window: skill dots, tactical goal letter, activity, bearing, damage bar, range | 101 | OK | `target_window` tests; the bearing clock shows in the `--hud-target-preview` capture |
+| In-flight map (Shift-M) with show toggles | 102, 201 | OK | `menus-window-preview-map`: aircraft, airfields, buildings, surface, emitters |
+| View keys F1 to F12, pan with Shift and arrows, +/- zoom, Alt and Ctrl references | 103, 104 | OK | CONTROLS, `menus-window-view-*` |
+| Cockpit toggle (Backspace) | 77 | OK | probe ("BS", `Show cockpit?`) |
+| Wingman orders Alt-1 to Alt-9, E, R, P, D, B, T, C, H, V | 159 | OK | `docs/INPUT.md` table, `flight_ui` order key test |
+| Wingman Alt-W (engage every target of the target's class) and Alt-F (attack on contact, IR targeting) | 159 | DIFFERS | Alt-W is attack on contact here and Alt-F reports "unavailable" ([INPUT.md](../INPUT.md), documented) |
+| Pre-flight ? menu labelled Exit to Windows | 12 | DIFFERS | main menu and creator say Exit to Desktop; the in-flight menu keeps Exit to Windows |
+| In-flight map: Shift-M toggles, +/- zoom, scroll | 102, 202 | OK | the manual's "A S W Z" and "W Z A S" are its typeface's arrow-key symbols (the same symbols name pitch, roll and Shift-panning, which the catalog binds to the arrows), so the arrows scroll |
+| In-flight map: Show menu classes (planes, SAM, AAA, ships, airports, vehicles, other), SAM ranges, 5 nmi grid | 201, 328 | DIFFERS | category toggles are Aircraft, Airfields, Buildings, Surface, Emitters; no SAM ranges or grid yet ([map spec](../spec/flight-map.md)) |
+| In-flight map pauses the flight | 334 | DIFFERS | the flight keeps running under the map (`map_shortcut_pan_and_escape_do_not_pause_or_switch_sensors`) |
+| Keys: 1 to 8 throttle, A autopilot, B brakes, F flaps, G gear, H hook, O bay, [ ] weapons, R radar, I IR, T targets, Enter visual target, W and Shift-W waypoints, Insert and Delete countermeasures, Shift-1 to 0 windows, Ctrl-P pause, Shift-E twice | 60 to 104 | OK | `docs/CONTROLS.md` row by row, `flight_ui` key test |
+
+**CONTROLS.md against the catalog and the manual.** The document is generated from
+`input_catalog.rs` and the `controls_doc_matches_the_catalog` test fails when they differ,
+so there is no mismatch between them. Every catalog action is dispatched: the 100 command
+entries either have a match arm in the app's named-action table in `main.rs` or are switch actions handled in
+`tore-input` (airbrake, bay, engine, flaps, gear, hook, jammer, waypoint autopilot), and
+the one arm that returns nothing on purpose is the retired `master-arm`. Against the manual's key boxes
+one key was wrong: comma and period, reversed. Documented differences that stay: Z and X
+are extra rudder keys here (the manual uses them for vectored thrust nozzles); Shift and
+arrows pan the view (manual p. 104: its "ASWZ" is the arrow-key symbols);
+Ctrl and arrows (thrust vectoring), Ctrl-R, M for HARM and the wing sweep keys have no
+binding, as FLIGHT-CONTROLS.md says.
+
+**Round three summary.** Fixed from the audit: the scope range keys were reversed (comma
+raises the range and period lowers it, manual pp. 21, 94, 97), the HUD had no BAY entry for
+aircraft with a weapons bay, and the HUD did not show the time compression rate the manual
+prints beside the clock (`1/2X`, `2X`, `4X`, `8X`). One attempted fix was wrong and was
+reverted: the manual's "A S W Z" for scrolling the map are its typeface's arrow-key
+symbols, so the arrows already do it, and A stays the autopilot. Also added: `TORE_CREATOR_STAGE=menu`
+prints every retail in-flight menu leaf with its result (96 items, 35 not implemented, all
+of which say "not implemented yet" when chosen). The merged menus lane and the windowed
+flight subset were rerun on the merged tree; results are in the report to the parent
+(no regressions from this lane's changes).
+
 ## Found and not fixed
 
 - **`--combat-smoke` fails for 13 of the 14 aircraft** (only the MiG-29 passes). Its
@@ -191,6 +299,12 @@ binary file has no line number to report.
 - **HUD line for a dry station.** After the last round is fired, the station stays
   selected and the HUD reads `0 M61`, the weapons window still lists it, until the next
   `[` or `]`. Retail behaviour here is not recorded.
+
+- **Enter in the creator.** The manual says Enter accepts the whole form (OK); here Enter
+  activates the focused field and OK is a button. Either is workable, the choice is a
+  design decision.
+- **Rear-view mirrors menu row.** The mirrors are always on; the retail toggle row shows
+  "not implemented yet".
 
 ## Needs a human eye or ear
 

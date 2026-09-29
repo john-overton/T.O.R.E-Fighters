@@ -1,0 +1,16 @@
+# Free flight: pause with Ctrl+P and resume, open and close the Escape menu, bookmarks.
+wait 1
+waittick 120
+key Ctrl+B
+key Ctrl+P
+wait 0.5
+key Ctrl+B
+key Ctrl+P
+waittick 300
+key Escape
+wait 0.5
+key Escape
+waittick 480
+key Ctrl+B
+waittick 600
+exit

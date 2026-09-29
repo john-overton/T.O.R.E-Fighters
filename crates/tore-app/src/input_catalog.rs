@@ -283,8 +283,8 @@ pub const ENTRIES: &[Entry] = &[
     cmd("sensor-channel", "Cycle sensor channel", Sensors, &["m"]),
     cmd("sensor-infrared", "Infrared channel", Sensors, &["i"]),
     cmd("sensor-history", "Contact history", Sensors, &["y"]),
-    cmd("range-down", "Scope range down", Sensors, &[","]),
-    cmd("range-up", "Scope range up", Sensors, &["."]),
+    cmd("range-down", "Scope range down", Sensors, &["."]),
+    cmd("range-up", "Scope range up", Sensors, &[","]),
     cmd("airport-nav", "NAV / ILS mode", Sensors, &["n"]),
     cmd("waypoint-next", "Next waypoint", Sensors, &["w"]),
     cmd(
@@ -891,6 +891,19 @@ mod tests {
             current == generated,
             "docs/CONTROLS.md is out of date; run TORE_UPDATE_CONTROLS_DOC=1 cargo test -p tore-app controls_doc"
         );
+    }
+    #[test]
+    fn scope_range_keys_follow_the_manual() {
+        // Manual pp. 21, 94, 97: comma increases the radar and RWR range,
+        // period decreases it.
+        let keys = |action: &str| {
+            ENTRIES
+                .iter()
+                .find(|entry| entry.action == action)
+                .map(|entry| entry.keys.to_vec())
+        };
+        assert_eq!(keys("range-up"), Some(vec![","]));
+        assert_eq!(keys("range-down"), Some(vec!["."]));
     }
     #[test]
     fn labels_use_xbox_names_and_hat_directions() {

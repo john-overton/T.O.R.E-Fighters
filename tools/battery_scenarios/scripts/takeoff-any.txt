@@ -1,0 +1,30 @@
+# Ground start on any aircraft: brakes off, full power, pulse the stick back from 8 s until airborne,
+# gear and flaps up, then level off.
+wait 1
+key b
+key 6
+key 5
+waittick 480
+key 6
+waittick 900
+down Down
+waittick 960
+up Down
+waittick 1080
+down Down
+waittick 1140
+up Down
+waittick 1260
+down Down
+waittick 1320
+up Down
+waittick 1440
+down Down
+waittick 1500
+up Down
+waittick 1800
+key g
+waittick 2000
+key f
+waittick 2400
+exit

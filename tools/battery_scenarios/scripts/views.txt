@@ -1,0 +1,31 @@
+# Free flight: every view key, sensors, instruments, map, help.
+wait 1
+key F1
+key F2
+key F3
+key F4
+key F5
+key F6
+key F7
+key F8
+key F9
+key F10
+key F12
+waittick 200
+key F1
+key m
+key i
+key r
+key y
+key j
+key Shift+1
+key Shift+2
+key Shift+3
+key Shift+m
+wait 0.5
+key Shift+m
+key F11
+wait 0.5
+key Escape
+waittick 400
+exit

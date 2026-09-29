@@ -105,8 +105,8 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Cycle sensor channel | M | - | - |
 | Infrared channel | I | - | - |
 | Contact history | Y | - | - |
-| Scope range down | Comma | - | - |
-| Scope range up | Period | - | - |
+| Scope range down | Period | - | - |
+| Scope range up | Comma | - | - |
 | NAV / ILS mode | N | - | - |
 | Next waypoint | W | - | - |
 | Previous waypoint | Shift+W | - | - |

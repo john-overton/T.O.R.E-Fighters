@@ -1,0 +1,58 @@
+# Main menu to the Replays screen (keys), then the mouse: select, Keep, Tacview, Debug log, Delete
+# with its confirmation, and the auto-delete panel. Menu-layer coordinates (640 by 480).
+wait 3
+key Tab
+key Tab
+key Tab
+key Tab
+key Enter
+wait 1
+snapshot list.ppm
+# select the second recording and mark it Keep
+movemenu 200 78
+click
+wait 0.3
+movemenu 136 465
+click
+wait 0.3
+# select the first: Tacview, Debug log
+movemenu 200 64
+click
+wait 0.3
+movemenu 320 465
+click
+wait 2
+movemenu 410 465
+click
+wait 2
+# Delete asks first: cancel, then really delete
+movemenu 230 465
+click
+wait 0.5
+snapshot confirm.ppm
+movemenu 386 277
+click
+wait 0.5
+movemenu 230 465
+click
+wait 0.5
+movemenu 256 277
+click
+wait 1
+snapshot after-delete.ppm
+# the auto-delete panel: off, by age, done
+movemenu 500 465
+click
+wait 0.5
+snapshot panel.ppm
+movemenu 314 146
+click
+wait 0.3
+movemenu 383 174
+click
+wait 0.3
+movemenu 483 333
+click
+wait 0.5
+snapshot final.ppm
+exit

@@ -401,6 +401,9 @@ def scenarios() -> list[Scenario]:
                                                           "--separation", "5", *attack),
                      ticks=6000, check=wingman_back_in_fight,
                      notes="wingman kept landing after its damaged leader ejected (fixed 2026-09-28)"))
+    out.append(probe("regress-envelope-edge-flap", fight(8, 8, "--separation", "5", *attack), ticks=7200,
+                     check=checker(strict=True, allow_anomalies=("mid-air collision",)),
+                     notes="Friendly 2-3 swapped between its missile tactic and gun tracking every few ticks (fixed 2026-09-29)"))
     out.append(probe("regress-decoy-over-100", fight(2, 2, "--aircraft", "su25", "--probe-friendly-aircraft", "su25",
                                                      "--probe-enemy-aircraft", "mig21", "--separation", "5", *attack),
                      ticks=6000, notes="mission aborted: decoy percentages exceed 100 (fixed 2026-09-28)"))
