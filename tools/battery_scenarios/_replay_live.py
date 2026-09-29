@@ -53,6 +53,11 @@ def live_checks(work: Path, output: str, *, tower: bool = False, ai: int | None 
                 problems.append("the ground start hint names PageUp, which no longer sets throttle")
         except (ValueError, KeyError) as e:
             problems.append(f"log.jsonl could not be read for state checks: {e!r}")
+    if log.exists():
+        problems += rc.info_vs_log(info, log.read_text())
+    acmi = work / "live.acmi"
+    if acmi.exists() and log.exists():
+        problems += rc.acmi_vs_log(acmi.read_text(), log.read_text())
     if "Verdict: the recordings match" not in s.get(5, ""):
         problems.append("recording-diff of a recording against itself does not say they match")
     return problems

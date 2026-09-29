@@ -184,7 +184,11 @@ def recorded_probe_checks(work: Path, output: str, *, same_run: bool) -> list[st
             problems += invariant_problems(log.read_text())
         except (ValueError, KeyError) as e:
             problems.append(f"log.jsonl could not be read for state checks: {e!r}")
+    if log.exists():
+        problems += rc.info_vs_log(info, log.read_text())
     acmi = work / "a.acmi"
+    if acmi.exists() and log.exists():
+        problems += rc.acmi_vs_log(acmi.read_text(), log.read_text())
     if acmi.exists() and n_info:
         ids = set(re.findall(r"^(1[0-9a-f]{10}),T=", acmi.read_text(), re.M))
         if len(ids) != n_info:

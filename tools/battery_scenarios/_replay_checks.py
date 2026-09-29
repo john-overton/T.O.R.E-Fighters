@@ -167,6 +167,63 @@ def _walk_numbers(v, n: int, problems: list[str]) -> None:
             _walk_numbers(x, n, problems)
 
 
+def info_vs_log(info: str, log: str) -> list[str]:
+    """`--recording-info` counts events by kind; log.jsonl holds every event, so the counts must agree."""
+    counted: dict[str, int] = {}
+    for line in info.splitlines():
+        m = re.match(r"^\s+(\d+) ([a-z_]+\.[a-z_]+)$", line)
+        if m:
+            counted[m.group(2)] = int(m.group(1))
+    total = re.search(r"^Events\s+(\d+) in all", info, re.M)
+    logged: dict[str, int] = {}
+    for line in log.splitlines():
+        d = json.loads(line)
+        if d["type"] == "event":
+            logged[d["kind"]] = logged.get(d["kind"], 0) + 1
+    problems = []
+    if total and int(total.group(1)) != sum(logged.values()):
+        problems.append(f"info counts {total.group(1)} events, log.jsonl holds {sum(logged.values())}")
+    for kind in sorted(set(counted) | set(logged)):
+        if counted.get(kind, 0) != logged.get(kind, 0):
+            problems.append(f"{kind}: info says {counted.get(kind, 0)}, log.jsonl holds {logged.get(kind, 0)}")
+    return problems[:8]
+
+
+def acmi_vs_log(acmi: str, log: str) -> list[str]:
+    """Where the Tacview file and the log both hold an aircraft at one moment, the positions agree."""
+    samples: dict[tuple[int, float], list[float]] = {}
+    for line in log.splitlines():
+        d = json.loads(line)
+        if d["type"] == "sample":
+            samples[(d["id"], round(d["t"], 3))] = d["pos_ft"]
+    problems: list[str] = []
+    now = 0.0
+    compared = 0
+    for line in acmi.split("\n"):
+        if line.startswith("#"):
+            try:
+                now = float(line[1:])
+            except ValueError:
+                pass
+            continue
+        m = re.match(r"^(1[0-9a-f]{10}),T=([^,]*)", line)
+        if not m:
+            continue
+        fields = m.group(2).split("|")
+        pos = samples.get((int(m.group(1), 16) - 0x10000000000, round(now, 3)))
+        if pos is None or len(fields) < 9:
+            continue
+        compared += 1
+        for index, feet, name in ((2, pos[1], "altitude"), (6, pos[0], "east"), (7, pos[2], "north")):
+            if fields[index] and abs(float(fields[index]) - feet * 0.3048) > 1.0:
+                problems.append(f"Tacview {name} of object {m.group(1)} at {now}s is {fields[index]} m, the log says {feet * 0.3048:.1f} m")
+        if len(problems) > 5:
+            break
+    if not compared:
+        problems.append("no moment was in both the Tacview file and the log to compare")
+    return problems
+
+
 def jsonl_time_key(text: str) -> str:
     """Which key holds time in event and sample lines (for the doc and the tests)."""
     for line in text.splitlines():

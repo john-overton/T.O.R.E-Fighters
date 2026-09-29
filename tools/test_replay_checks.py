@@ -30,6 +30,25 @@ class AcmiTests(unittest.TestCase):
         self.assertTrue(rc.check_acmi(GOOD_ACMI.split("#0\n")[0]))
 
 
+class AcmiVsLogTests(unittest.TestCase):
+    LOG = '{"type":"sample","t":1,"id":0,"pos_ft":[3280.84,1000,6561.68]}\n'
+
+    def test_matching_positions_pass_and_wrong_ones_fail(self):
+        good = "#1\n10000000000,T=1|2|304.8|0|0|0|1000|2000|0,Type=Air\n"
+        self.assertEqual(rc.acmi_vs_log(good, self.LOG), [])
+        bad = good.replace("304.8", "500")
+        self.assertTrue(rc.acmi_vs_log(bad, self.LOG))
+        self.assertTrue(rc.acmi_vs_log("#5\n10000000000,T=1|2|304.8|0|0|0|1000|2000|0\n", self.LOG))
+
+
+class InfoVsLogTests(unittest.TestCase):
+    def test_counts_must_agree(self):
+        info = "Events      3 in all\n                  2 weapon.launch\n                  1 system.end\n"
+        log = '{"type":"event","kind":"weapon.launch"}\n{"type":"event","kind":"weapon.launch"}\n{"type":"event","kind":"system.end"}\n'
+        self.assertEqual(rc.info_vs_log(info, log), [])
+        self.assertTrue(rc.info_vs_log(info, log.replace("system.end", "weapon.launch")))
+
+
 class JsonlTests(unittest.TestCase):
     def test_lines_must_be_json_with_one_header(self):
         header = '{"type":"header","format":1}\n{"type":"aircraft","id":0}\n'
