@@ -152,7 +152,10 @@ def judge(s: Scenario, output: str, code: Optional[int], timed_out: bool, work: 
     return problems
 
 
-def run_steps(s: Scenario, opts: argparse.Namespace, env: dict, work: Path, output: str, step_problems: list[str]) -> str:
+def run_steps(
+    s: Scenario, opts: argparse.Namespace, env: dict, work: Path, output: str, step_problems: list[str],
+    window_slots: Optional[threading.Semaphore] = None,
+) -> str:
     """Runs a scenario's follow-up commands, appending their output; returns the joined output."""
     for i, step in enumerate(s.then):
         step_cmd = [a.replace("{work}", str(work)) for a in step.args]
@@ -160,6 +163,10 @@ def run_steps(s: Scenario, opts: argparse.Namespace, env: dict, work: Path, outp
             step_cmd = [opts.bin, *step_cmd]
         if step.window:
             step_cmd = [str(ROOT / "tools" / "agent-run.sh"), *step_cmd]
+        # A window step counts against the window limit unless the scenario already holds a slot.
+        slot = window_slots if (step.window and not s.window and window_slots) else None
+        if slot:
+            slot.acquire()
         try:
             done = subprocess.run(
                 step_cmd, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -170,6 +177,12 @@ def run_steps(s: Scenario, opts: argparse.Namespace, env: dict, work: Path, outp
             step_out = (e.stdout.decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or ""))
             step_code = None
             step_problems.append(f"step {i + 1} timed out")
+        except OSError as e:
+            step_out, step_code = f"could not run the step: {e}\n", None
+            step_problems.append(f"step {i + 1} could not run: {e}")
+        finally:
+            if slot:
+                slot.release()
         output += f"\n$ then {i + 1}: {' '.join(step_cmd)}\n{step_out}"
         if step_code is not None and step.expect_exit is not None and step_code != step.expect_exit:
             step_problems.append(f"step {i + 1} exit code {step_code}, expected {step.expect_exit}")
@@ -187,7 +200,7 @@ def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: 
         cmd = [str(ROOT / "tools" / "agent-run.sh"), *cmd]
     env = dict(os.environ)
     env.update({"TORE_DATA_DIR": str(data), "TORE_NO_ERROR_DIALOG": "1", "RUST_BACKTRACE": "1"})
-    env.update(s.env)
+    env.update({k: v.replace("{work}", str(work)) for k, v in s.env.items()})
     timeout = s.timeout * opts.timeout_scale
     started = time.time()
     if s.window:
@@ -212,7 +225,7 @@ def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: 
                 os.killpg(proc.pid, 9)
                 output, _ = proc.communicate()
         step_problems: list[str] = []
-        output = run_steps(s, opts, env, work, output, step_problems)
+        output = run_steps(s, opts, env, work, output, step_problems, window_slots)
     finally:
         if s.window:
             window_slots.release()

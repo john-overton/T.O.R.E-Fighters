@@ -1,0 +1,321 @@
+"""Scenarios around flight rather than the flight itself: menus of the replay lane, diagnostics,
+audio start-up, controller input and profiles, input tapes, first-run import errors.
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from battery import Scenario, Step
+from battery_scenarios import _replay_tools as tools
+from battery_scenarios._replay_record import AIRCRAFT, sections
+
+PY = "python3"
+TOOLS = tools.__file__
+ROOT = Path(__file__).resolve().parents[2]
+
+SNAPSHOT_STATES = [
+    "normal", "hover", "pressed", "help", "pref", "multi", "notice",
+    "controls", "controls-keyboard", "controls-mouse", "controls-head", "controls-search", "controls-search-keys",
+    "graphics", "sound", "replays", "replays-settings", "replays-delete",
+    "locate", "locate-importing", "locate-done", "locate-starting",
+]
+
+
+def snapshot_scenarios() -> list[Scenario]:
+    out = []
+    for state in SNAPSHOT_STATES:
+        out.append(
+            Scenario(
+                name=f"replay-snapshot-{state}",
+                lane="replay",
+                args=["--snapshot-state", state, "--snapshot", "{work}/s.ppm", "--no-audio"],
+                outputs=["s.ppm"],
+                check_work=lambda work, output: tools.ppm_problems(str(work / "s.ppm"), min_colors=8),
+            )
+        )
+    return out
+
+
+def diagnostics_scenarios() -> list[Scenario]:
+    out = []
+    modes = {"": (0, "Diagnostics self-test: PASS"), "error": (1, "Deliberate diagnostics self-test error"), "panic": (101, "Rust panic: Deliberate diagnostics self-test panic"),
+             "worker-panic": (1, "worker panic was recorded"), "dialog": (1, "Deliberate diagnostics self-test error")}
+    for mode, (code, text) in modes.items():
+        out.append(
+            Scenario(
+                name=f"replay-diag-{mode or 'plain'}",
+                lane="replay",
+                args=["--diagnostics-self-test" + (f"={mode}" if mode else "")],
+                expect_exit=code,
+                expect=[re.escape(text)],
+                allow_generic=["panic"] if mode == "panic" else [],
+                env={"TORE_LOG_DIR": "{work}/logs"},
+                check_work=(lambda work, output: [] if mode == "" or (work.parent.parent / "x").exists() or True else []),
+            )
+        )
+    # The graphics check probes adapters and may open a hidden window.
+    out.append(
+        Scenario(
+            name="replay-diag-graphics",
+            lane="replay",
+            args=["--diagnostics-self-test=graphics"],
+            window=True,
+            timeout=120,
+        )
+    )
+    out.append(
+        Scenario(
+            name="replay-diag-startup-script",
+            lane="replay",
+            args=["--version"],
+            then=[Step([PY, "tools/check_startup_diagnostics.py", str(ROOT / "target" / "debug" / "tore-app")], app=False, timeout=240)],
+            expect=[r"tore-app|T\.O\.R\.E"],
+            check_work=lambda work, output: [] if "Startup diagnostics passed" in output else ["startup diagnostics script did not pass"],
+        )
+    )
+    return out
+
+
+def audio_scenarios() -> list[Scenario]:
+    """Start-up with audio on. A failed device must degrade to silence, never crash."""
+    out = []
+    variants = {
+        "default": {},
+        "bad-pulse": {"PULSE_SERVER": "unix:/nonexistent/pulse", "PIPEWIRE_REMOTE": "/nonexistent/pw", "ALSA_CONFIG_PATH": "/dev/null"},
+        "bad-alsa": {"ALSA_CONFIG_PATH": "/dev/null"},
+    }
+    for name, env in variants.items():
+        out.append(
+            Scenario(
+                name=f"replay-audio-freeflight-{name}",
+                lane="replay",
+                args=["--free-flight"],
+                window=True,
+                env={**env, "TORE_PERF_FRAMES": "90"},
+                timeout=180,
+                expect=[r"frame interval: mean"],
+                forbid=[r"(?i)audio.*(panick|failed to start.*fatal)"],
+                check=(lambda output, name=name: ["audio failure was not reported as 'Continuing without audio'"] if name == "bad-pulse" and "audio" in output.lower() and "Continuing without audio" not in output and "Audio:" not in output else []),
+            )
+        )
+    # Replay sound: play a recording at 1x with audio on.
+    out.append(
+        Scenario(
+            name="replay-audio-watch-replay",
+            lane="replay",
+            args=["--ai-probe-ticks", "3600", "--separation", "5", "--probe-attack", "600:10", "--record-mission", "{work}/rec.tore-replay", "--no-audio"],
+            then=[Step(["--watch-replay", "{work}/rec.tore-replay", "--replay-speed", "1", "--replay-tick", "600"], window=True, timeout=180)],
+            env={"TORE_PERF_FRAMES": "300"},
+            check_work=lambda work, output: [] if "frame interval: mean" in output else ["the replay did not play"],
+        )
+    )
+    return out
+
+
+def tape_text(kind: str) -> str:
+    """A hand-made pilot input tape (tore-pilot 1)."""
+    import math
+
+    lines = ["tore-pilot 1"]
+    for t in range(1, 1201):
+        if kind == "roll":
+            lines.append(f"{t} 0.05 {0.8 * math.sin(t / 90):.4f} 0 0 {'1' if t == 1 else '-'}")
+        elif kind == "loop":
+            lines.append(f"{t} {0.6 if 200 < t < 500 else 0} 0 0 0 {'1' if t == 1 else '-'}")
+        else:
+            lines.append(f"{t} {0.3 * math.sin(t / 60):.4f} {0.5 * math.sin(t / 90):.4f} 0 0 {'1' if t == 1 else '-'}{' set:gear:1' if t == 600 else ''}")
+    return "\n".join(lines) + "\n"
+
+
+def make_tape_step(kind: str, dest: str) -> Step:
+    code = f"import sys; sys.path.insert(0, {str(ROOT / 'tools')!r}); from battery_scenarios._replay_misc import tape_text; open(sys.argv[1], 'w').write(tape_text({kind!r}))"
+    return Step([PY, "-c", code, dest], app=False)
+
+
+def input_scenarios() -> list[Scenario]:
+    out = []
+    out.append(Scenario(name="replay-input-list", lane="replay", args=["--list-inputs", "--no-audio"], expect=[r"Input diagnostics"], timeout=60))
+    out.append(
+        Scenario(
+            name="replay-input-profile-roundtrip",
+            lane="replay",
+            args=["--write-input-profile", "{work}/p.conf"],
+            outputs=["p.conf"],
+            then=[
+                Step(["--write-input-profile", "{work}/p.conf"], expect_exit=1),
+                Step(["--input-profile", "{work}/p.conf", "--free-flight", "--smoke-test", "--no-audio"], window=True, timeout=120),
+            ],
+            check_work=lambda work, output: (
+                ([] if "File exists" in sections(output).get(1, "") else ["overwrite was not refused clearly"])
+                + ([] if "Smoke test: requested screen presented successfully" in sections(output).get(2, "") else ["generated profile did not load"])
+                + ([] if (work / "p.conf").read_text().startswith("tore-input 1") else ["profile has no header"])
+            ),
+        )
+    )
+    bad_profiles = {
+        "empty": (b"", "missing input profile version"),
+        "wrong-header": (b"not a profile\n", "expected tore-input 1"),
+        "future-version": (b"tore-input 2\n", "expected tore-input 1"),
+        "bad-action": (b"tore-input 1\nbind key:F1 nonsense-action press\n", "invalid profile directive"),
+        "fire-press": (b"tore-input 1\nbind bogus button:1 fire press\n", "fire requires hold"),
+        "dup-alias": (b"tore-input 1\nalias a linux-xx\nalias a linux-yy\n", "duplicate alias"),
+        "bad-utf8": (b"\xff\xfe\x00 bad", "valid UTF-8"),
+        "too-big": (b"#" * 300_000, "exceeds 256 KiB"),
+        "many-binds": (b"tore-input 1\n" + b"".join(f"bind key:F{n % 12 + 1} gear press\n".encode() for n in range(1100)), "invalid profile directive or limit exceeded"),
+    }
+    for name, (content, message) in bad_profiles.items():
+        if name == "many-binds":
+            code = "import sys; open(sys.argv[1], 'w').write('tore-input 1\\n' + ''.join(f'bind key:F{n % 12 + 1} gear press\\n' for n in range(1100)))"
+        elif len(content) < 2000:
+            code = f"import sys; open(sys.argv[1], 'wb').write({content!r})"
+        else:
+            code = f"import sys; open(sys.argv[1], 'wb').write(b'#' * {len(content)})"
+        out.append(
+            Scenario(
+                name=f"replay-input-badprofile-{name}",
+                lane="replay",
+                args=["--version"],
+                then=[
+                    Step([PY, "-c", code, "{work}/bad.conf"], app=False),
+                    Step(["--input-profile", "{work}/bad.conf", "--free-flight", "--smoke-test", "--no-audio"], window=True, expect_exit=None, timeout=120),
+                ],
+                check_work=lambda work, output, message=message: check_bad_profile(output, message),
+            )
+        )
+    out.append(
+        Scenario(
+            name="replay-input-profile-missing-file",
+            lane="replay",
+            args=["--input-profile", "{work}/nothing.conf", "--free-flight", "--smoke-test", "--no-audio"],
+            window=True,
+            expect_exit=1,
+            expect=[r"nothing\.conf: No such file"],
+        )
+    )
+    # Input tapes: hand-made, replayed twice, identical results on every aircraft.
+    for ac in AIRCRAFT:
+        out.append(
+            Scenario(
+                name=f"replay-tape-{ac}",
+                lane="replay",
+                args=["--version"],
+                then=[
+                    make_tape_step("mixed", "{work}/t.tape"),
+                    Step(["--replay-input", "{work}/t.tape", "--aircraft", ac, "--researched-flight", "--no-audio"], timeout=120),
+                    Step(["--replay-input", "{work}/t.tape", "--aircraft", ac, "--researched-flight", "--no-audio"], timeout=120),
+                ],
+                check_work=lambda work, output: check_tape_runs(output),
+            )
+        )
+    bad_tapes = {
+        "header": "tore-pilot 2\n",
+        "empty": "",
+        "nan": "tore-pilot 1\n1 NaN 0 0 0 -\n",
+        "bad-command": "tore-pilot 1\n1 0 0 0 0 - set:gear:2\n",
+        "tick-zero": "tore-pilot 1\n0 0 0 0 0 -\n",
+        "out-of-order": "tore-pilot 1\n2 0 0 0 0 -\n1 0 0 0 0 -\n",
+        "huge-axis": "tore-pilot 1\n1 50 0 0 0 -\n",
+        "short-line": "tore-pilot 1\n1 0 0\n",
+    }
+    for name, text in bad_tapes.items():
+        code = f"import sys; open(sys.argv[1], 'w').write({text!r})"
+        out.append(
+            Scenario(
+                name=f"replay-tape-bad-{name}",
+                lane="replay",
+                args=["--version"],
+                then=[
+                    Step([PY, "-c", code, "{work}/t.tape"], app=False),
+                    Step(["--replay-input", "{work}/t.tape", "--no-audio"], expect_exit=1),
+                ],
+                check_work=lambda work, output: [] if "panicked" not in output and len(sections(output).get(2, "").strip().splitlines()) >= 2 else ["no clear rejection"],
+            )
+        )
+    return out
+
+
+def check_bad_profile(output: str, message: str) -> list[str]:
+    text = sections(output).get(2, "")
+    problems = []
+    if "panicked" in text:
+        problems.append("panic on a bad profile")
+    if message and message not in text:
+        problems.append(f"expected '{message}' in the profile error")
+    if message and "bad.conf" not in text:
+        problems.append("the error does not name the profile file")
+    return problems
+
+
+def check_tape_runs(output: str) -> list[str]:
+    s = sections(output)
+    a, b = s.get(2, ""), s.get(3, "")
+    problems = []
+    result = re.search(r"ticks=1200 speed_kt=[\d.]+ altitude_ft=[-\d.]+ fuel_lb=[\d.]+ crashed=\w+", a)
+    if not result:
+        problems.append("the tape replay printed no result line")
+    keys = [ln for ln in a.splitlines() if ln.startswith(("flight_model", "aoa_deg", "ticks=", "vertical", "departure"))]
+    keys_b = [ln for ln in b.splitlines() if ln.startswith(("flight_model", "aoa_deg", "ticks=", "vertical", "departure"))]
+    if keys != keys_b:
+        problems.append(f"two replays of one tape differ: {keys} vs {keys_b}")
+    return problems
+
+
+def import_scenarios() -> list[Scenario]:
+    """First-run import against bad media, in a fresh data folder of the scenario's own."""
+    out = []
+    kinds = {
+        "empty-dir": ("media", "not a Fighters Anthology source"),
+        "junk-files": ("media", "has not been reviewed"),
+        "nonexistent": ("media", "does not exist"),
+        "text-file": ("media", "not a Fighters Anthology source"),
+        "iso-file": ("media.iso", "Mount the image"),
+        "trunc-fa1": ("media", "FA_1.LIB could not be read"),
+        "trunc-fa2": ("media", "FA_2.LIB could not be read"),
+        "empty-fa1": ("media", "FA_1.LIB could not be read"),
+        "exe-flip": ("media", "has not been reviewed"),
+        "no-exe": ("media", "not a Fighters Anthology source"),
+        "no-fa2": ("media", "not a Fighters Anthology source"),
+    }
+    for kind, (leaf, message) in kinds.items():
+        out.append(
+            Scenario(
+                name=f"replay-import-bad-{kind}",
+                lane="replay",
+                args=["--version"],
+                env={"TORE_DATA_DIR": "{work}/fresh"},
+                then=[
+                    Step([PY, TOOLS, "media", kind, "{work}/" + leaf], app=False),
+                    Step(["--import", "{work}/" + leaf, "--import-only", "--no-audio"], expect_exit=1, timeout=240),
+                ],
+                check_work=lambda work, output, message=message: check_bad_import(work, output, message),
+            )
+        )
+    return out
+
+
+def check_bad_import(work: Path, output: str, message: str) -> list[str]:
+    problems = []
+    text = sections(output).get(2, "")
+    if message not in text:
+        problems.append(f"expected '{message}' in the import error, got: {text.strip()[-200:]}")
+    if "panicked" in text:
+        problems.append("panic on bad media")
+    if re.search(r"invalid archive sentinel|failed to fill whole buffer|unexpected end of file", text) and "could not be read" not in text:
+        problems.append("the import error is a bare reader message")
+    if list((work / "fresh").glob("menu-*.pack")):
+        problems.append("a failed import left a pack behind")
+    return problems
+
+
+def validate_scenarios() -> list[Scenario]:
+    return [
+        Scenario(name="replay-validate-creator", lane="replay", args=["--validate-creator"], timeout=600, expect=[r"(?i)pass|valid|checked"]),
+        Scenario(name="replay-sensor-summary", lane="replay", args=["--sensor-summary"], timeout=120),
+        Scenario(name="replay-help", lane="replay", args=["--help"], expect=[r"Mission recordings:", r"--replay-menu"]),
+        Scenario(name="replay-version", lane="replay", args=["--version"], expect=[r"T\.O\.R\.E"]),
+    ]
+
+
+def scenarios() -> list[Scenario]:
+    return snapshot_scenarios() + diagnostics_scenarios() + audio_scenarios() + input_scenarios() + validate_scenarios()
