@@ -787,11 +787,6 @@ impl Airframe {
         damage_art: crate::damage_art::DamageArt,
         engine_material: Option<crate::engine_material::Image>,
     ) -> Self {
-        let source = crate::flight::animation_tests::profile();
-        let model =
-            tore_sim::models::AircraftModel::for_aircraft(&source).expect("synthetic flight model");
-        let mut profile = source;
-        profile.id = id;
         let pic = |size: usize| Pic {
             width: size,
             height: size,
@@ -804,17 +799,9 @@ impl Airframe {
             height: 1,
             glyphs: Vec::new(),
         };
-        let sensors = tore_sim::sensors::SensorProfiles {
-            aircraft: id,
-            radar: None,
-            infrared: None,
-            visual: None,
-            jammer: None,
-            signature: Default::default(),
-        };
         let contrail_offsets = contrail_offsets(id, &poses[0], rig.as_ref());
         Self {
-            kind: Arc::new(AircraftType::new(profile, model, sensors, contrail_offsets)),
+            kind: Arc::new(AircraftType::synthetic(id, contrail_offsets)),
             nozzle_bounds: nozzle_bounds(id, &poses[0]),
             engine_material,
             rig,

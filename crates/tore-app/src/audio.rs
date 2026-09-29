@@ -2143,7 +2143,7 @@ mod tests {
 
     #[test]
     fn replay_sources_match_live_sources_for_the_same_tick() {
-        use crate::combat::render_hash_tests as fixture;
+        use crate::combat_view::render_hash_tests as fixture;
         use tore_sim::acoustics::SourceId;
         let player = fixture::player();
         let mut combat = fixture::combat(Vec::new(), Vec::new());

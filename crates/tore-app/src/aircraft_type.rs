@@ -58,3 +58,28 @@ impl AircraftType {
         state
     }
 }
+
+#[cfg(test)]
+impl AircraftType {
+    /// A type built from the synthetic F/A-18D record and flight model, so
+    /// tests run without retail media. `id` selects the identity the drawing
+    /// and combat rules see.
+    pub(crate) fn synthetic(
+        id: tore_formats::aircraft::AircraftId,
+        contrail_offsets: Vec<Vector>,
+    ) -> Self {
+        let source = crate::flight::animation_tests::profile();
+        let model = AircraftModel::for_aircraft(&source).expect("synthetic flight model");
+        let mut profile = source;
+        profile.id = id;
+        let sensors = SensorProfiles {
+            aircraft: id,
+            radar: None,
+            infrared: None,
+            visual: None,
+            jammer: None,
+            signature: Default::default(),
+        };
+        Self::new(profile, model, sensors, contrail_offsets)
+    }
+}

@@ -17,6 +17,7 @@ mod clouds;
 mod cockpit_renderer;
 mod combat;
 mod combat_tape;
+mod combat_view;
 mod comms;
 mod controls_editor;
 mod countermeasure_renderer;
@@ -199,6 +200,8 @@ struct App {
     /// What the renderer draws of the world's terrain: art, palettes, camera
     /// weather and the render origin. Rebuilt wherever the terrain is.
     scenery: scenery::Scenery,
+    /// The art and models `world.combat` is drawn with; replaced with it.
+    combat_view: combat_view::CombatView,
     hornet: aircraft::Airframe,
     researched_flight: bool,
     native_tables: Option<std::sync::Arc<tore_sim::native::Tables>>,
@@ -604,9 +607,10 @@ impl TickPresenter<'_> {
                     &self
                         .world
                         .combat
-                        .models()
+                        .dummy_types()
                         .iter()
-                        .chain([self.hornet])
+                        .map(|kind| &**kind)
+                        .chain([&**self.hornet])
                         .map(|model| (model.profile.id, audio::EngineSounds::of(&model.profile)))
                         .collect::<Vec<_>>(),
                 ),
@@ -701,7 +705,7 @@ impl TickPresenter<'_> {
             self.scenery
                 .step_view_weather(&self.world.terrain, &camera, speed);
         }
-        if let Some(camera) = self.world.combat.target_camera(&self.world.flight) {
+        if let Some(camera) = combat_view::target_camera(&self.world.combat, &self.world.flight) {
             self.scenery
                 .step_view_weather(&self.world.terrain, &camera, speed);
         }
@@ -892,7 +896,7 @@ impl App {
             &self.hornet.profile.name,
             self.world.setup.mission.is_some(),
             self.world.ai_wings.as_ref(),
-            self.world.combat.models(),
+            self.world.combat.dummy_types(),
         );
         let mut recording = match recorder::Recorder::start(path, &header, &roster) {
             Ok(recording) => recording,
@@ -1341,7 +1345,7 @@ impl App {
                             .message(tore_sim::aircraft_systems::label(index));
                     }
                 }
-                for message in self.world.combat.equipment_damage_report() {
+                for message in combat_view::equipment_damage_report(&self.world.combat) {
                     self.flight_ui.message(message);
                 }
                 Action::None
@@ -1932,15 +1936,18 @@ impl App {
                                 self.world.combat.range,
                             )
                             .and_then(|mut c| {
+                                let view =
+                                    combat_view::CombatView::new(&c, &self.theater_resources)?;
                                 c.reset(&mut self.world.flight)?;
                                 if c.uses_normal_startup_defaults() {
                                     c.apply_startup_weapons();
                                 }
                                 c.add_airport_targets(&self.world.terrain.airport_scene)?;
-                                Ok(c)
+                                Ok((c, view))
                             }) {
-                                Ok(c) => {
+                                Ok((c, view)) => {
                                     self.world.combat = c;
+                                    self.combat_view = view;
                                     self.world.airport_nav_mode = false;
                                     self.instruments.navigation = navigation::Navigation::default();
                                 }
@@ -2127,8 +2134,11 @@ impl App {
                     return;
                 }
                 let fuel = load.fuel_lbs;
-                match combat::Combat::with_loadout(&self.hornet, &self.theater_resources, load) {
-                    Ok(mut c) => {
+                match combat::Combat::with_loadout(&self.hornet, load).and_then(|c| {
+                    let view = combat_view::CombatView::new(&c, &self.theater_resources)?;
+                    Ok((c, view))
+                }) {
+                    Ok((mut c, mut view)) => {
                         if let Err(error) = c.add_airport_targets(&self.world.terrain.airport_scene)
                         {
                             self.error = Some(error);
@@ -2136,10 +2146,11 @@ impl App {
                             return;
                         }
                         let populated = if self.ai_wings_enabled {
-                            c.mission_aircraft(&wings, &layout, &self.theater_resources)
+                            view.mission_aircraft(&mut c, &wings, &layout, &self.theater_resources)
                         } else {
                             c.mission_layout = Some(layout.clone());
-                            c.mission_dummies(
+                            view.mission_dummies(
+                                &mut c,
                                 &self.quick.dummy_wings(),
                                 layout.enemy.distance_ft,
                                 &self.theater_resources,
@@ -2150,6 +2161,7 @@ impl App {
                             return;
                         }
                         self.world.combat = c;
+                        self.combat_view = view;
                         self.world.setup = world::Setup {
                             mission: Some((altitude, fuel)),
                             ground_start: selected_ground,
@@ -2874,7 +2886,8 @@ impl ApplicationHandler for App {
                                 .as_ref()
                                 .map_or(0., |l| l.enemy.distance_ft / mission_layout::FEET_PER_NM),
                             self.world.combat.state.ammo,
-                            self.world.combat.readout(&self.world.flight, 1.).weapons,
+                            combat_view::readout(&self.world.combat, &self.world.flight, 1.)
+                                .weapons,
                         );
                     }
                 } else if self.screen == Screen::Flight {
@@ -3567,19 +3580,21 @@ impl ApplicationHandler for App {
                         );
                         renderer.vapor(&vapor);
                         renderer.smoke(
-                            &self.world.combat.art.smoke,
+                            &self.combat_view.art.smoke,
                             [&self.world.combat.state.smoke, &self.world.combat.contrails],
                             &self.world.combat.state.devices,
                         );
                         let picture = self.world.combat.render_snapshot();
                         renderer.effects(
-                            &self.world.combat.art.effects,
+                            &self.combat_view.art.effects,
                             &picture.effects,
                             &picture.marks,
                         );
                         renderer.emitters(
                             &self.world.combat.state.devices,
-                            &self.world.combat.afterburner_glows(&presented),
+                            &self
+                                .combat_view
+                                .afterburner_glows(&self.world.combat, &presented),
                         );
                         match renderer.poll_previews() {
                             Ok(previews) => {
@@ -3637,7 +3652,8 @@ impl ApplicationHandler for App {
                                     && if page == 4 { target_due } else { other_due }
                                 {
                                     let camera = if page == 4 {
-                                        let Some(camera) = self.world.combat.framed_target_camera(
+                                        let Some(camera) = self.combat_view.framed_target_camera(
+                                            &self.world.combat,
                                             &presented,
                                             &self.hornet,
                                             &self.world.terrain,
@@ -3671,14 +3687,14 @@ impl ApplicationHandler for App {
                                     });
                                     renderer.dummies(render_snapshot::aircraft_batches(
                                         &frame,
-                                        self.world.combat.models(),
+                                        &self.combat_view.models,
                                         &camera,
                                         &self.world.terrain,
                                         &self.scenery,
                                     ));
                                     renderer.combat(&render_snapshot::combat_geometry(
                                         &frame,
-                                        &self.world.combat.art,
+                                        &self.combat_view.art,
                                         &self.hornet,
                                         &presented,
                                         &camera,
@@ -3751,7 +3767,7 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        if let Some(art) = &self.world.combat.art.escape {
+                        if let Some(art) = &self.combat_view.art.escape {
                             renderer.escapees(
                                 art,
                                 &art.vertices_for(
@@ -3767,14 +3783,14 @@ impl ApplicationHandler for App {
                         }
                         renderer.dummies(render_snapshot::aircraft_batches(
                             &frame,
-                            self.world.combat.models(),
+                            &self.combat_view.models,
                             &self.camera,
                             &self.world.terrain,
                             &self.scenery,
                         ));
                         renderer.combat(&render_snapshot::combat_geometry(
                             &frame,
-                            &self.world.combat.art,
+                            &self.combat_view.art,
                             &self.hornet,
                             &presented,
                             &self.camera,
@@ -3790,11 +3806,11 @@ impl ApplicationHandler for App {
                             &self.scenery,
                         );
                         simulation_ms = frame_start.elapsed().as_secs_f64() * 1000.;
-                        self.instruments.combat = Some(
-                            self.world
-                                .combat
-                                .readout(&self.world.flight, self.instruments.rcs_scale_nmi()),
-                        );
+                        self.instruments.combat = Some(combat_view::readout(
+                            &self.world.combat,
+                            &self.world.flight,
+                            self.instruments.rcs_scale_nmi(),
+                        ));
                         if let Some(target) = self
                             .instruments
                             .combat
@@ -4371,7 +4387,7 @@ fn build_combat(
     } else {
         load.restrict_to_guns();
     }
-    combat::Combat::with_loadout(hornet, resources, &load)
+    combat::Combat::with_loadout(hornet, &load)
 }
 
 /// The map-edge rule for a probe's flight: lost 105 nautical miles beyond the
@@ -5699,6 +5715,7 @@ fn ai_probe_run(
         .wing_launches(enemy_skill)
         .map_err(|e| e.to_string())?;
     let mut combat = combat::Combat::new(hornet, resources, false)?;
+    let mut combat_view = combat_view::CombatView::new(&combat, resources)?;
     combat.add_airport_targets(&world.airport_scene)?;
     // The same launch layout a flown mission uses, including a ground start
     // when `--ground-start` chose a runway.
@@ -5721,7 +5738,7 @@ fn ai_probe_run(
         &ai_wings::enemy_group_offsets(&wings),
         quick.separation_feet(),
     );
-    combat.mission_aircraft(&wings, &layout, resources)?;
+    combat_view.mission_aircraft(&mut combat, &wings, &layout, resources)?;
     let heading = match &parked {
         Some(ground) => {
             flight.position[0] = ground.slots[0][0];
@@ -6331,7 +6348,7 @@ fn start_probe_recording(
         &hornet.profile.name,
         true,
         Some(bridge),
-        combat.models(),
+        combat.dummy_types(),
     );
     let mut recording = recorder::Recorder::start(record.path.clone(), &header, &roster)
         .map_err(|error| format!("--record-mission {}: {error}", record.path.display()))?;
@@ -8423,6 +8440,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             return Err("combat record and replay are mutually exclusive".into());
         }
         let c = combat::Combat::new(&hornet, &assets.theater_resources, true)?;
+        // Loads the art as combat's constructor used to, so this run's log and
+        // failures are unchanged.
+        combat_view::CombatView::new(&c, &assets.theater_resources)?;
         let w = scenery::launch_terrain(&assets.theater_resources, &theater_code, None)?;
         combat_tape::replay(
             &path,
@@ -8684,6 +8704,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     false,
                     stripped_loadout.as_deref(),
                 )?;
+                // Loads the art as combat's constructor used to, so this run's log and
+                // failures are unchanged.
+                combat_view::CombatView::new(&load, &assets.theater_resources)?;
                 if stripped_loadout.is_some() {
                     // A stripped load only takes effect on a reset, which also
                     // sets the payload and the fuel systems from it.
@@ -9110,6 +9133,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         use std::io::Write;
         let mut state = flight::State::new(&hornet.profile, [0., 5000., 0.])?;
         let mut combat = combat::Combat::new(&hornet, &assets.theater_resources, false)?;
+        // Loads the art as combat's constructor used to, so this run's log and
+        // failures are unchanged.
+        combat_view::CombatView::new(&combat, &assets.theater_resources)?;
         combat.reset(&mut state)?;
         if let Some(throttle) = flight_throttle {
             state.throttle = throttle;
@@ -9225,6 +9251,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && !(smoke_test && initial_screen == Screen::Flight)
     {
         let mut combat = combat::Combat::new(&hornet, &theater_resources, false)?;
+        // Loads the art as combat's constructor used to, so this run's log and
+        // failures are unchanged.
+        combat_view::CombatView::new(&combat, &theater_resources)?;
         combat.add_airport_targets(&world.airport_scene)?;
         let mut flight = hornet.start(&world);
         flight.position = aircraft.position;
@@ -9748,6 +9777,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         live_fire,
         stripped_loadout.as_deref(),
     )?;
+    let mut combat_view = combat_view::CombatView::new(&combat, &theater_resources)?;
     combat.add_airport_targets(&world.airport_scene)?;
     if let Some(ref path) = record_combat {
         combat.recorder = Some(combat_tape::Recorder::new(
@@ -9763,7 +9793,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             "Pilot-only recording keeps the existing clean-aircraft load; use combat recording for weapons."
         );
     }
-    combat.mission_dummies(&dummy_aircraft, 5280., &theater_resources)?;
+    combat_view.mission_dummies(&mut combat, &dummy_aircraft, 5280., &theater_resources)?;
     combat.reset(&mut flight)?;
     for name in &flight_cheats {
         apply_probe_cheat(&mut flight.cheats, name);
@@ -9958,7 +9988,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         println!(
             "Combat probe feedback generation (no hardware playback): {cues:?}, pulses={pulses}; {}",
-            combat.status(&flight)
+            combat_view::status(&combat, &flight)
         );
         combat.cancel();
         println!(
@@ -10231,6 +10261,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         ai_mission,
         world,
         scenery,
+        combat_view,
         preference_path: if preferences_enabled {
             Some(assets::data_directory()?.join("preferences-v1.conf"))
         } else {
@@ -10537,9 +10568,7 @@ fn cycle_player_weapon(
 
 /// Turns the weapon page to the selected weapon.
 fn show_selected_weapon_page(world: &world::World, instruments: &mut instruments::Instruments) {
-    let readout = world
-        .combat
-        .readout(&world.flight, instruments.rcs_scale_nmi());
+    let readout = combat_view::readout(&world.combat, &world.flight, instruments.rcs_scale_nmi());
     if let Some(index) = readout.weapons.iter().position(|row| row.2) {
         instruments.weapon_page = index / 6;
     }

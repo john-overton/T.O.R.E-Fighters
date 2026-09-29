@@ -598,7 +598,7 @@ impl Live {
             &flight.airframe.profile.name,
             flight.mission,
             flight.wings,
-            flight.combat.models(),
+            flight.combat.dummy_types(),
         );
         self.roster = Roster {
             ai: roster

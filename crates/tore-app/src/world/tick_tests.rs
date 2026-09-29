@@ -32,7 +32,7 @@
 use super::*;
 use crate::{
     ai_wings::tests::{aircraft, payload, spawned},
-    combat::render_hash_tests,
+    combat_view::render_hash_tests,
     terrain::tests::world,
 };
 use std::fmt::{self, Write as _};

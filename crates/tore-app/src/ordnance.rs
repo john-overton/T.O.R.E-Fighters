@@ -825,8 +825,9 @@ pub fn validate_sources(
                 .cloned()
                 .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
         })?;
-        let mut combat = crate::combat::Combat::with_loadout(&airframe, data, &load)?;
-        combat.mission_dummies(&[(id, 29)], 5280., data)?;
+        let mut combat = crate::combat::Combat::with_loadout(&airframe, &load)?;
+        let mut view = crate::combat_view::CombatView::new(&combat, data)?;
+        view.mission_dummies(&mut combat, &[(id, 29)], 5280., data)?;
         combat.reset(&mut airframe.start(world))?;
         validate_guns_only(&load, &airframe, &combat.state.targets, data, world)?;
         validate_dragging(&load, data)?;
@@ -845,6 +846,7 @@ pub fn validate_sources(
         })?;
         load.validate()?;
         let mut normal = crate::combat::Combat::new(&airframe, data, false)?;
+        let mut normal_view = crate::combat_view::CombatView::new(&normal, data)?;
         let mut flight = airframe.start(world);
         let mtow = flight.model().configuration().mass.max_takeoff_lbs;
         let wind_limits =
@@ -878,14 +880,14 @@ pub fn validate_sources(
             return Err("pilot-only recording gained external stores".into());
         }
         normal.clean_recording = false;
-        normal.mission_dummies(&[(id, 29)], 5280., data)?;
+        normal_view.mission_dummies(&mut normal, &[(id, 29)], 5280., data)?;
         normal.reset(&mut flight)?;
         let positions: Vec<_> = normal.state.targets.iter().map(|t| t.position).collect();
         if positions.len() != 29 {
             return Err("mission wing count mismatch".into());
         }
         let camera = airframe.panel_camera(&flight, 3);
-        let geometry = normal.dummy_geometry(&camera, world, scenery);
+        let geometry = normal_view.dummy_geometry(&normal, &camera, world, scenery);
         if geometry.len() != 1 || geometry[0].0.profile.id != id || geometry[0].1.is_empty() {
             return Err("dummy model identity or geometry mismatch".into());
         }
@@ -911,6 +913,7 @@ pub fn validate_sources(
             }
         }
         let mut gun = crate::combat::Combat::new(&airframe, data, false)?;
+        let gun_view = crate::combat_view::CombatView::new(&gun, data)?;
         gun.state.armed = true;
         let gun_flight = airframe.start(world);
         let launcher = crate::combat::launcher(&gun_flight);
@@ -943,7 +946,7 @@ pub fn validate_sources(
             return Err(format!("{id:?}: invalid imported gun sight/range").into());
         }
         gun.refresh_render(&gun_flight, None);
-        let tracer = gun.vertices(&airframe, &gun_flight, &camera, world, scenery);
+        let tracer = gun_view.vertices(&gun, &airframe, &gun_flight, &camera, world, scenery);
         if !tracer.vertices.chunks_exact(10).any(|v| v[5] == -8.) {
             return Err(format!("{id:?}: imported gun has no luminous tracer geometry").into());
         }
@@ -978,7 +981,7 @@ pub fn validate_sources(
         normal.refresh_render(&flight, None);
         normal.step(&mut flight, world)?;
         normal.advance_render(&flight, None);
-        if normal.dummy_geometry(&camera, world, scenery)[0]
+        if normal_view.dummy_geometry(&normal, &camera, world, scenery)[0]
             .1
             .is_empty()
         {
@@ -1018,7 +1021,7 @@ pub fn validate_sources(
                 let mut candidate = load.clone();
                 candidate.select(i, weapon)?;
                 candidate.validate()?;
-                let mut combat = crate::combat::Combat::with_loadout(&airframe, data, &candidate)?;
+                let mut combat = crate::combat::Combat::with_loadout(&airframe, &candidate)?;
                 let mut flight = airframe.start(world);
                 flight.fuel = candidate.fuel_lbs;
                 combat.reset(&mut flight)?;
@@ -1042,7 +1045,7 @@ pub fn validate_sources(
         load.quantities.fill(0);
         load.fuel_lbs = 0.;
         load.validate()?;
-        let mut combat = crate::combat::Combat::with_loadout(&airframe, data, &load)?;
+        let mut combat = crate::combat::Combat::with_loadout(&airframe, &load)?;
         let mut flight = airframe.start(world);
         flight.fuel = 0.;
         combat.reset(&mut flight)?;
@@ -1151,7 +1154,10 @@ fn validate_removed_stores(
         let mut edited = load.clone();
         edited.quantities = quantities.clone();
         edited.validate()?;
-        let mut combat = crate::combat::Combat::with_loadout(airframe, data, &edited)?;
+        let mut combat = crate::combat::Combat::with_loadout(airframe, &edited)?;
+        // Loads the art as combat's constructor used to, so a missing piece
+        // still fails this check.
+        crate::combat_view::CombatView::new(&combat, data)?;
         let mut flight = airframe.start(world);
         for _ in 0..2 {
             combat.reset(&mut flight)?;
@@ -1163,7 +1169,7 @@ fn validate_removed_stores(
                 )
                 .into());
             }
-            let listed = combat.readout(&flight, 1.).weapons;
+            let listed = crate::combat_view::readout(&combat, &flight, 1.).weapons;
             let carried: std::collections::BTreeSet<&str> = combat
                 .state
                 .configuration()
@@ -1259,7 +1265,7 @@ fn validate_guns_only(
     }
     let mut guns = load.clone();
     guns.restrict_to_guns();
-    let mut combat = crate::combat::Combat::with_loadout(airframe, data, &guns)?;
+    let mut combat = crate::combat::Combat::with_loadout(airframe, &guns)?;
     let mut flight = airframe.start(world);
     for _ in 0..2 {
         combat.reset(&mut flight)?;

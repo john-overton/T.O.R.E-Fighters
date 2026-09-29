@@ -145,14 +145,19 @@ impl Matrix<'_> {
         if !full {
             return Outcome::Started;
         }
-        let mut combat = match combat::Combat::with_loadout(hornet, data, &load) {
-            Ok(c) => c,
-            Err(e) => return Outcome::Fatal(format!("combat build: {e}")),
-        };
+        // As a flown launch builds it: combat, then the art that draws it.
+        let (mut combat, mut view) =
+            match combat::Combat::with_loadout(hornet, &load).and_then(|c| {
+                let view = crate::combat_view::CombatView::new(&c, data)?;
+                Ok((c, view))
+            }) {
+                Ok(built) => built,
+                Err(e) => return Outcome::Fatal(format!("combat build: {e}")),
+            };
         if let Err(e) = combat.add_airport_targets(&world.airport_scene) {
             return Outcome::Fatal(format!("airport targets: {e}"));
         }
-        if let Err(e) = combat.mission_aircraft(&wings, &layout, data) {
+        if let Err(e) = view.mission_aircraft(&mut combat, &wings, &layout, data) {
             return Outcome::Refused(e.to_string());
         }
         // FreeFlight: the same start again, then the reset and the AI build.

@@ -135,7 +135,7 @@ flight adapter runs. The HUD reads this state. See the
 
 ### Flight presentation and measurement
 
-`flight::State` remains authoritative at 120 Hz. `main` retains the preceding tick for render-only pose interpolation (shortest-path wrapped angles); pause/crash show authoritative state and restart resets history. Camera, exterior geometry and HUD consume the same presented pose. Everything else combat draws is captured once per tick, after the AI step, as a plain-data `RenderSnapshot` (`render_snapshot.rs`): other aircraft with their devices, damage and wreck state, fixtures, weapons, effects, debris and ejected pilots, plus the player's own pose. Combat keeps the last two snapshots, and the main view, mirrors and camera panels draw their blend at the same fraction through the shared `aircraft_batches` and `combat_geometry` helpers, which a mission replay uses to draw a recording, so both show the same picture. Each pose also carries whether its afterburner flame lights the scene; the shared `afterburner_glow`, `target_glows` and `engine_outlets` helpers turn those into lights at the presented poses. Chaff and flares are not part of the snapshot: live flight hands the countermeasure renderer the combat state's devices, and a replay the same devices flown again from their recorded releases (`replay/devices.rs`). `replay/convert.rs` turns each snapshot, plus flight data it does not carry, into a `tore-replay` frame and a decoded frame back into a snapshot; a synthetic round-trip test draws both through the shared helpers and requires every vertex within the format's 1/64 ft position precision. Reset clears that history. AI gear, flap, hook, brake, bay, exhaust and control-surface samples use that
+`flight::State` remains authoritative at 120 Hz. `main` retains the preceding tick for render-only pose interpolation (shortest-path wrapped angles); pause/crash show authoritative state and restart resets history. Camera, exterior geometry and HUD consume the same presented pose. Everything else combat draws is captured once per tick, after the AI step, as a plain-data `RenderSnapshot` (`render_snapshot.rs`): other aircraft with their devices, damage and wreck state, fixtures, weapons, effects, debris and ejected pilots, plus the player's own pose. Combat keeps the last two snapshots, and the main view, mirrors and camera panels draw their blend at the same fraction through the shared `aircraft_batches` and `combat_geometry` helpers (the app's `CombatView` in `combat_view.rs` supplies the art and the other aircraft's models), which a mission replay uses to draw a recording, so both show the same picture. Each pose also carries whether its afterburner flame lights the scene; the shared `afterburner_glow`, `target_glows` and `engine_outlets` helpers turn those into lights at the presented poses. Chaff and flares are not part of the snapshot: live flight hands the countermeasure renderer the combat state's devices, and a replay the same devices flown again from their recorded releases (`replay/devices.rs`). `replay/convert.rs` turns each snapshot, plus flight data it does not carry, into a `tore-replay` frame and a decoded frame back into a snapshot; a synthetic round-trip test draws both through the shared helpers and requires every vertex within the format's 1/64 ft position precision. Reset clears that history. AI gear, flap, hook, brake, bay, exhaust and control-surface samples use that
 same render fraction; an aircraft whose AI stopped flying holds its last
 devices, and fixtures retain their fixed devices. Audio consumes
 authoritative state. No renderer smoothing feeds back into physics.
@@ -946,10 +946,19 @@ These splits touch different files and can run in parallel:
   `Combat::with_loadout` and the combat smoke harness take `&AircraftType`.
   The wing vapor attachments (`streamer_points`) stay on `Airframe`, since only
   the renderer reads them.
-- `Combat`: its art, render history, readouts and target cameras move out;
-  plain types that live in renderer files today (`Contact`, `CombatGeometry`,
-  `Afterburner`) move to plain modules. `render_snapshot` splits its pose data
-  from its vertex building.
+- `Combat`: its art, readouts and target cameras move out, and its render
+  history splits from the interpolation. Done in part: `Combat` holds no art
+  and no drawn model. It keeps an `Arc<AircraftType>` for every other aircraft
+  type the mission loads (`dummy_types`), and the app keeps the matching
+  `Airframe`s and the effect, smoke, weapon and ejection art (`CombatArt`) in
+  a `CombatView` (`combat_view.rs`) beside the world, rebuilt wherever combat
+  is. `combat_view.rs` also holds what reads `&Combat` for the screen: vertex
+  building (`dummy_geometry`, `vertices`), the afterburner lights, the target
+  window's cameras, `readout`, `status` and `equipment_damage_report`.
+  `mission_aircraft` and `mission_dummies` take a loader that hands combat each
+  type once; `CombatView::mission_aircraft` and `mission_dummies` load the
+  drawn model with it. `render_snapshot` splits its pose data from its vertex
+  building next.
 - `Terrain`: the simulation half apart from the scenery, as above. Done.
 - Quick Mission setup apart from the creator's UI: `mission_layout.rs` holds
   the mission layout, ground layout, runway poses and map bounds, and

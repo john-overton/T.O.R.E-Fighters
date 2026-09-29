@@ -1761,7 +1761,7 @@ fn side(side: tore_sim::ai::launch::Side) -> replay::Side {
 /// exact label and are never shown as another aircraft.
 fn type_name(
     id: tore_formats::aircraft::AircraftId,
-    models: &[crate::aircraft::Airframe],
+    models: &[std::sync::Arc<crate::aircraft_type::AircraftType>],
     loaded: Option<&str>,
 ) -> String {
     use tore_formats::aircraft::AircraftId;
@@ -1786,7 +1786,7 @@ pub fn roster(
     player_name: &str,
     player_wing: bool,
     wings: Option<&AiWings>,
-    models: &[crate::aircraft::Airframe],
+    models: &[std::sync::Arc<crate::aircraft_type::AircraftType>],
 ) -> Vec<replay::AircraftInfo> {
     let name_of = |id: tore_formats::aircraft::AircraftId| type_name(id, models, None);
     let mut out = vec![replay::AircraftInfo {
@@ -1849,7 +1849,7 @@ pub fn header(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combat::render_hash_tests as fixture;
+    use crate::combat_view::render_hash_tests as fixture;
     use std::sync::mpsc::Receiver;
 
     #[test]

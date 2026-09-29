@@ -389,7 +389,7 @@ mod tests {
     fn vapor_rebuilt_at_any_tick_matches_stepping_from_launch() {
         let dir = TempDir::new("playback-vapor");
         let mut playback = playback(&dir, "vapor");
-        let mut ownship = crate::combat::render_hash_tests::hornet_airframe(true);
+        let mut ownship = crate::combat_view::render_hash_tests::hornet_airframe(true);
         ownship.streamer = Some(tore_formats::shape::StreamerDef {
             pivot: [0; 3],
             hinge_scale: 0,
@@ -398,7 +398,7 @@ mod tests {
                 [30 * 256, 2 * 256, -10 * 256],
             ],
         });
-        let template = crate::combat::render_hash_tests::player();
+        let template = crate::combat_view::render_hash_tests::player();
         let mut scratch = template.clone();
         // Live flight's vapor: seeded at launch, stepped every tick.
         let mut live = None;
@@ -429,7 +429,7 @@ mod tests {
         let rebuilt = playback.vapor(fixture::FIRST + 40, &ownship, &mut scratch);
         assert!(rebuilt.is_some());
         // An airframe without vapor points has none.
-        let bare = crate::combat::render_hash_tests::hornet_airframe(true);
+        let bare = crate::combat_view::render_hash_tests::hornet_airframe(true);
         playback.vapor = None;
         assert!(playback.vapor(500, &bare, &mut scratch).is_none());
     }
@@ -456,13 +456,13 @@ mod tests {
         let dir = TempDir::new("playback-reverse");
         let recording = Arc::new(fixture::recording(dir.path(), "reverse"));
         let tracks = Tracks::scan(&recording);
-        let mut ownship = crate::combat::render_hash_tests::hornet_airframe(true);
+        let mut ownship = crate::combat_view::render_hash_tests::hornet_airframe(true);
         ownship.streamer = Some(tore_formats::shape::StreamerDef {
             pivot: [0; 3],
             hinge_scale: 0,
             points: [[-30 * 256, 0, 0], [30 * 256, 0, 0]],
         });
-        let template = crate::combat::render_hash_tests::player();
+        let template = crate::combat_view::render_hash_tests::player();
         // Plays the whole recording at half speed, one real tick at a time,
         // in `direction`, noting everything at every half-tick position.
         let play = |reverse: bool| {

@@ -1030,7 +1030,7 @@ pub fn difference(live: &RenderSnapshot, replayed: &RenderSnapshot) -> Option<St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::combat::render_hash_tests as fixture;
+    use crate::combat_view::render_hash_tests as fixture;
     use crate::render_snapshot::{aircraft_batches, combat_geometry, interpolate, pose_state};
     use crate::replay::tests::TempDir;
     use std::path::Path;
@@ -1303,13 +1303,13 @@ mod tests {
         let art = fixture::escape_art();
         let mut drawn = 0;
         for with_models in [true, false] {
-            let mut combat = if with_models {
-                fixture::combat(
+            let (mut combat, view) = if with_models {
+                fixture::pair(
                     fixture::models(),
                     (0..7).map(|i| (i % 3, [0.; 3])).collect(),
                 )
             } else {
-                fixture::combat(Vec::new(), Vec::new())
+                fixture::pair(Vec::new(), Vec::new())
             };
             let scene = fixture::scene(combat.state.configuration());
             for ai_poses in [true, false] {
@@ -1376,7 +1376,7 @@ mod tests {
                     for camera in fixture::cameras() {
                         if with_models {
                             let batches = [&a, &b].map(|s| {
-                                aircraft_batches(s, combat.models(), &camera, &world, &scenery)
+                                aircraft_batches(s, &view.models, &camera, &world, &scenery)
                             });
                             assert_eq!(batches[0].len(), batches[1].len());
                             for ((ma, va, ca), (mb, vb, cb)) in batches[0].iter().zip(&batches[1]) {
@@ -1388,13 +1388,7 @@ mod tests {
                         }
                         let [ga, gb] = [&a, &b].map(|s| {
                             combat_geometry(
-                                s,
-                                &combat.art,
-                                &ownship,
-                                &player,
-                                &camera,
-                                &world,
-                                &scenery,
+                                s, &view.art, &ownship, &player, &camera, &world, &scenery,
                             )
                         });
                         assert_same_vertices("combat geometry", &ga.vertices, &gb.vertices);

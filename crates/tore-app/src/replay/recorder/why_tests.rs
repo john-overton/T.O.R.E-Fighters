@@ -3,7 +3,7 @@
 use super::super::{Message, Recorder, Tick};
 use super::*;
 use crate::ai_wings::tests::{aircraft, combat_fixture, payload, spawned};
-use crate::combat::render_hash_tests as fixture;
+use crate::combat_view::render_hash_tests as fixture;
 use crate::terrain;
 use tore_sim::flight::trace::Effect;
 

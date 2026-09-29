@@ -2782,7 +2782,7 @@ mod tests {
         let n = MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let recording = Arc::new(f::recording(dir.path(), &format!("viewer-{n}")));
         let art = CombatArt::synthetic(BTreeMap::new());
-        let mut ownship = crate::combat::render_hash_tests::hornet_airframe(true);
+        let mut ownship = crate::combat_view::render_hash_tests::hornet_airframe(true);
         // Menus measure their text, so the font needs its glyphs.
         ownship.font = crate::replay::panels::tests::font();
         Viewer::assemble(
@@ -3939,7 +3939,7 @@ mod tests {
                     crate::terrain::tests::world(),
                     crate::scenery::tests::scenery(),
                 ),
-                crate::combat::render_hash_tests::hornet_airframe(true),
+                crate::combat_view::render_hash_tests::hornet_airframe(true),
                 Vec::new(),
                 art,
                 &bad,
