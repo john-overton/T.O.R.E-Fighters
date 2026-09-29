@@ -236,6 +236,20 @@ impl ControlAdapter {
                 inside_envelope = true;
             }
         }
+        // The same two hybrid-only rules as the flight model (docs/FLIGHT-MODEL.md,
+        // "Envelope limits and loading"), so the AI never asks for G the aircraft
+        // cannot give: lift thins above the 1 G ceiling, and inside the envelope
+        // 1 G is always kept.
+        let hybrid = state.research.is_some();
+        if hybrid
+            && let Some(one_g) = config.aerodynamics.envelopes.iter().find(|e| e.g == 1)
+            && one_g.speeds(state.position[1]).is_none()
+        {
+            let top = one_g.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
+            if state.position[1] > top {
+                high *= crate::flight::ceiling_lift_ratio(state.position[1], top);
+            }
+        }
         let loading = 1.0
             + (state.fuel + state.carried_lbs()) / config.mass.empty_lbs
                 * config.aerodynamics.loaded_elevator_percent
@@ -243,7 +257,7 @@ impl ControlAdapter {
         low /= loading;
         high /= loading;
         // The flight model keeps 1 G anywhere inside the 1 G envelope.
-        if inside_envelope {
+        if hybrid && inside_envelope {
             high = high.max(1.0);
         }
         if state.systems.has(30) {
@@ -533,6 +547,27 @@ mod tests {
         );
         assert!(s.position[1] < 7_900.0);
         assert!(!s.crashed);
+    }
+
+    #[test]
+    fn above_the_ceiling_the_hybrid_request_uses_the_thinned_lift() {
+        // The flight model gives less than 1 G above the aircraft's 1 G ceiling
+        // (hybrid only), so a pull request must move the stick differently there than the
+        // same request just below it. (The legacy model's limits are pinned in
+        // `flight.rs`.)
+        let stick = |altitude: f64, research: bool| {
+            let mut s = State::new(&profile(), [0.0, altitude, 0.0]).unwrap();
+            if research {
+                s.enable_research(1).unwrap();
+            }
+            s.speed = 900.0;
+            s.velocity = [0.0, 0.0, 900.0];
+            controls(&s, &intent(0.0, 5.0, 900.0), crate::flight::DT)
+                .input
+                .pitch
+        };
+        let (below, above) = (stick(49_000.0, true), stick(70_000.0, true));
+        assert!(above.is_finite() && above != below, "{above} {below}");
     }
 
     #[test]
