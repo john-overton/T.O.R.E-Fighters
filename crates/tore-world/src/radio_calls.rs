@@ -1475,6 +1475,7 @@ mod tests {
             elevation: Elevation::High,
             miles: 12,
             advise: true,
+            views: Vec::new(),
         };
         let report = contact_phrase(&p, 39, &c);
         assert_eq!(

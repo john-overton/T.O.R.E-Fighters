@@ -158,10 +158,28 @@ impl Chatter {
     }
 }
 
-/// A new aircraft contact, measured from the player, who is the only
-/// listener TORE voices.
+/// Where a reported contact lies from one human-flown aircraft.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContactView {
+    /// The listening aircraft's plane id.
+    pub plane: u32,
+    /// The target's short type name, when close enough to identify.
+    pub named: Option<String>,
+    pub hour: u32,
+    pub elevation: Elevation,
+    /// Rounded nautical miles.
+    pub miles: u32,
+}
+
+/// A new aircraft contact. The group size and the advice are the same for
+/// every listener; where the contact lies depends on who listens, so `views`
+/// measures it from each human-flown aircraft, in id order, for a radio that
+/// voices each seat's report. The `named`, `hour`, `elevation` and `miles`
+/// fields are the first view's.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Contact {
+    /// Where the contact lies from each human-flown aircraft.
+    pub views: Vec<ContactView>,
     /// The target plus its flight members flying with it.
     pub count: u32,
     /// The target's short type name, when close enough to identify.
@@ -463,7 +481,6 @@ impl AiWings {
     /// `None` when the target is not a living airborne aircraft, or when no
     /// human listens.
     fn contact(&self, target: u32, humans: &[&HumanAircraft], advise: bool) -> Option<Contact> {
-        let player = humans.first()?.flight;
         let flight_of = |f: &flight::State| (f.position, f.yaw.to_degrees());
         let (position, heading, wing, aircraft) =
             if let Some(human) = humans.iter().find(|h| h.slot.id == target) {
@@ -508,24 +525,39 @@ impl AiWings {
                 count += u32::from(!human.flight.crashed && together(p, h));
             }
         }
-        let delta = missiles::sub(position, player.position);
-        let distance = missiles::length(delta);
-        let bearing = delta[0].atan2(delta[2]).to_degrees() - player.yaw.to_degrees();
+        let views: Vec<ContactView> = humans
+            .iter()
+            .map(|listener| {
+                let flight = listener.flight;
+                let delta = missiles::sub(position, flight.position);
+                let distance = missiles::length(delta);
+                let bearing = delta[0].atan2(delta[2]).to_degrees() - flight.yaw.to_degrees();
+                ContactView {
+                    plane: listener.slot.id,
+                    named: aircraft
+                        .filter(|_| distance <= IDENTIFY_FT)
+                        .and_then(|id| self.watch.names.get(id.pt()).cloned()),
+                    hour: crate::comms::clock_hour(bearing),
+                    elevation: if delta[1] >= HIGH_LOW_FT {
+                        Elevation::High
+                    } else if delta[1] <= -HIGH_LOW_FT {
+                        Elevation::Low
+                    } else {
+                        Elevation::Level
+                    },
+                    miles: (distance / FEET_PER_NAUTICAL_MILE).round() as u32,
+                }
+            })
+            .collect();
+        let first = views.first()?.clone();
         Some(Contact {
             count,
-            named: aircraft
-                .filter(|_| distance <= IDENTIFY_FT)
-                .and_then(|id| self.watch.names.get(id.pt()).cloned()),
-            hour: crate::comms::clock_hour(bearing),
-            elevation: if delta[1] >= HIGH_LOW_FT {
-                Elevation::High
-            } else if delta[1] <= -HIGH_LOW_FT {
-                Elevation::Low
-            } else {
-                Elevation::Level
-            },
-            miles: (distance / FEET_PER_NAUTICAL_MILE).round() as u32,
+            named: first.named,
+            hour: first.hour,
+            elevation: first.elevation,
+            miles: first.miles,
             advise,
+            views,
         })
     }
 }
@@ -593,6 +625,37 @@ mod tests {
                 aircraft: true
             }]
         ));
+    }
+
+    #[test]
+    fn a_contact_is_measured_from_every_human() {
+        let wings = wings();
+        let mut first = tore_sim::flight::State::new(&aircraft(), [0., 20000., 0.]).unwrap();
+        first.yaw = 0.;
+        // The second human is 20,000 ft to the side and 10,000 ft lower,
+        // facing the other way.
+        let mut second =
+            tore_sim::flight::State::new(&aircraft(), [20000., 10000., 20000.]).unwrap();
+        second.yaw = std::f64::consts::PI;
+        let slot = HumanSlot {
+            id: 9,
+            side: launch::Side::Friendly,
+            wing: 1,
+            member: 0,
+        };
+        let c = wings
+            .contact(3, &[&human(&first), &human_at(slot, &second)], true)
+            .unwrap();
+        assert_eq!(c.views.len(), 2);
+        assert_eq!((c.views[0].plane, c.views[1].plane), (0, 9));
+        // The plain fields are the first listener's, as before.
+        assert_eq!((c.hour, c.miles), (c.views[0].hour, c.views[0].miles));
+        assert_eq!(c.views[0].hour, 12);
+        assert_ne!(c.views[0].hour, c.views[1].hour);
+        assert_ne!(c.views[0].miles, c.views[1].miles);
+        assert_eq!(c.views[1].elevation, Elevation::High);
+        // With nobody listening there is nothing to report.
+        assert!(wings.contact(3, &[], true).is_none());
     }
 
     #[test]

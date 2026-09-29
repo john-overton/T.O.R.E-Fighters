@@ -24,7 +24,7 @@
 //! explicit weapon-rules option.
 
 mod chatter;
-pub use chatter::{Chatter, Contact, FuelLevel, Member};
+pub use chatter::{Chatter, Contact, ContactView, FuelLevel, Member};
 mod engagement;
 pub use engagement::Preset;
 mod orders;
@@ -1687,14 +1687,10 @@ impl AiWings {
                 }),
         );
         if state.weapon_rules == Rules::Compatibility {
-            let stations = state
-                .ownship(PLAYER_ID)
-                .expect("the human's ownship")
-                .configuration()
-                .stations
-                .clone();
-            self.report_threats(&state.projectiles, |index| {
-                match stations[index].weapon.seeker.signature {
+            // Each round's seeker comes from the weapon it carries: its own
+            // record, or a station of its owner's ownship.
+            self.report_threats(&state.projectiles, |projectile| {
+                match state.weapon(projectile).seeker.signature {
                     2 => Some(SeekerClass::Infrared),
                     3 => Some(SeekerClass::Radar),
                     _ => None,
@@ -1730,24 +1726,25 @@ impl AiWings {
     ) {
         use tore_sim::ai::{awareness, engagement::ThreatReport};
         use tore_sim::combat::threats::EvidenceSource;
-        // The human-flown aircraft whose ownship's records (RWR, emitters,
-        // sensor picture) reach the AI's attack evidence: the first with one.
-        let combat = humans
+        // The human-flown aircraft that combat keeps an ownship for, in id
+        // order: each one's own records (RWR, emitters, sensor picture) reach
+        // the AI's attack evidence for that aircraft alone.
+        let combats: Vec<(&HumanAircraft, &live::Ownship)> = humans
             .iter()
             .copied()
-            .find_map(|h| state.ownship(h.slot.id).map(|own| (h, own)));
-        let combat_human = combat.map(|(human, _)| human);
+            .filter_map(|h| state.ownship(h.slot.id).map(|own| (h, own)))
+            .collect();
         let mut reports = Vec::new();
         // A human-flown aircraft's RWR may identify a supporting source only
         // by a unique independently observed hostile emitter at the received
         // bearing. The records belong to one aircraft, so each is delivered
         // to that aircraft and no other.
-        for record in combat
-            .iter()
-            .flat_map(|(_, own)| own.missile_threats.records())
-            .filter(|r| r.targeting_receiver && !r.stale)
-        {
-            let (human, own) = combat.expect("a record comes from the combat human's ownship");
+        for (human, own, record) in combats.iter().flat_map(|(human, own)| {
+            own.missile_threats
+                .records()
+                .filter(|r| r.targeting_receiver && !r.stale)
+                .map(move |record| (*human, *own, record))
+        }) {
             let attacker_id = if record.source == EvidenceSource::ElectronicSupported {
                 record.radar_bearing_deg.and_then(|bearing| {
                     let mut matches = own.emitters.iter().filter(|emitter| {
@@ -1789,10 +1786,9 @@ impl AiWings {
             if gun && !projectile.tracer {
                 continue;
             }
-            // A human without combat records of its own (none but the combat
-            // player has them yet) cannot perceive a shot, so it is not a
-            // receiver here.
-            for receiver in combat_human.map(|h| h.slot.id).into_iter().chain(
+            // A human without an ownship has no records to perceive a shot
+            // with, so it is not a receiver here.
+            for receiver in combats.iter().map(|(h, _)| h.slot.id).chain(
                 self.mission
                     .actors()
                     .iter()
@@ -1803,7 +1799,9 @@ impl AiWings {
                     continue;
                 }
                 let (position, velocity, heading, pitch, skill, possible_shooters, incoming) =
-                    if let Some((human, own)) = combat.filter(|(h, _)| h.slot.id == receiver) {
+                    if let Some((human, own)) =
+                        combats.iter().copied().find(|(h, _)| h.slot.id == receiver)
+                    {
                         let player = human.flight;
                         (
                             player.position,
@@ -2550,14 +2548,20 @@ impl AiWings {
                 },
                 event.actor,
             );
-            let config = state
-                .ownship(PLAYER_ID)
-                .expect("the human's ownship")
-                .configuration()
-                .clone();
-            for projectile in &mut state.projectiles {
-                let weapon = projectile.weapon(&config);
-                let class = match weapon.seeker.signature {
+            // The seeker and decoy chance of each round, from the weapon it
+            // carries, so no particular ownship is needed.
+            let seekers: Vec<(u8, u8)> = state
+                .projectiles
+                .iter()
+                .map(|p| {
+                    let seeker = &state.weapon(p).seeker;
+                    (seeker.signature, seeker.chaff_flare_chance)
+                })
+                .collect();
+            for (projectile, (signature, chaff_flare_chance)) in
+                state.projectiles.iter_mut().zip(seekers)
+            {
+                let class = match signature {
                     2 => SeekerClass::Infrared,
                     3 => SeekerClass::Radar,
                     _ => continue,
@@ -2570,7 +2574,7 @@ impl AiWings {
                                 && flight.seeker.acquired
                                 && flight.seeker.observation.is_some()
                         }),
-                    decoy_susceptibility_percent: weapon.seeker.chaff_flare_chance.min(100),
+                    decoy_susceptibility_percent: chaff_flare_chance.min(100),
                 };
                 let decoy = threat::decoy_missile(
                     &missile,
@@ -2610,7 +2614,7 @@ impl AiWings {
     fn report_threats(
         &mut self,
         projectiles: &[live::Projectile],
-        seeker_of: impl Fn(usize) -> Option<SeekerClass>,
+        seeker_of: impl Fn(&live::Projectile) -> Option<SeekerClass>,
     ) {
         let mut reports: Vec<(u32, ThreatReport)> = Vec::new();
         for projectile in projectiles {
@@ -2630,17 +2634,8 @@ impl AiWings {
             let Some(actor) = self.mission.actor(target) else {
                 continue;
             };
-            let seeker = if let Some(weapon) = &projectile.weapon {
-                match weapon.seeker.signature {
-                    2 => SeekerClass::Infrared,
-                    3 => SeekerClass::Radar,
-                    _ => continue,
-                }
-            } else {
-                let Some(class) = seeker_of(projectile.station) else {
-                    continue;
-                };
-                class
+            let Some(seeker) = seeker_of(projectile) else {
+                continue;
             };
             let launcher_id = self
                 .ai_shots
@@ -5266,6 +5261,64 @@ mod tests {
         let mut compatibility = Vec::new();
         wings.realise(&event, &mut compatibility, &weapon, 0, &[], None);
         assert!(compatibility[0].guidance.is_none());
+    }
+
+    #[test]
+    fn a_decoy_reads_the_weapon_of_the_round_owners_own_ownship() {
+        use tore_sim::ai::mission::DeviceEvent;
+        let (mut wings, _) = build(None);
+        let mut combat = combat_fixture(true);
+        wings.device_effectiveness.insert(3, (100, 100));
+        // A second human-flown plane, 50, whose station 0 carries an
+        // infrared missile that any flare fools; plane 0's does not.
+        let mut config = combat.own().configuration().clone();
+        assert!(
+            config.stations[0].weapon.seeker.signature != 2
+                || config.stations[0].weapon.seeker.chaff_flare_chance != 100
+        );
+        config.stations[0].weapon.seeker.signature = 2;
+        config.stations[0].weapon.seeker.chaff_flare_chance = 100;
+        let side = combat.own().side;
+        combat
+            .add_ownship(live::Ownship::new(50, side, config, true).unwrap())
+            .unwrap();
+        let mut rounds = Vec::new();
+        let weapon = combat.own().configuration().stations[0].weapon.clone();
+        wings.realise(
+            &LaunchEvent {
+                actor: 1,
+                station: tore_sim::ai::weapon_service::StationId(0),
+                target: 3,
+                request_id: tore_sim::ai::weapon_service::RequestId(1),
+                projectiles: 1,
+            },
+            &mut rounds,
+            &weapon,
+            0,
+            &[],
+            None,
+        );
+        let mut round = rounds.remove(0);
+        round.weapon = None;
+        round.station = 0;
+        round.owner = 50;
+        round.target = Some(3);
+        round.guidance = None;
+        combat.projectiles = vec![round];
+        wings
+            .realise_device(
+                &DeviceEvent {
+                    actor: 3,
+                    class: SeekerClass::Infrared,
+                    released: 1,
+                },
+                &mut combat,
+            )
+            .unwrap();
+        assert_eq!(
+            combat.projectiles[0].target, None,
+            "decoyed by the flare, as plane 50's own missile"
+        );
     }
 
     #[test]
