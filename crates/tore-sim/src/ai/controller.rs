@@ -725,6 +725,8 @@ pub struct Controller {
     /// B42: after no store resolved, the tick before which a missile is not
     /// chosen again for the motion (the nominal no-station retry).
     missile_retry_until: Option<u64>,
+    /// B13: the tick the running 1-second gun-tracking motion started.
+    gun_tracking_since: Option<u64>,
     variation: FormationVariation,
     smooth_variation: [f64; 3],
     variation_tick: Option<u64>,
@@ -890,6 +892,7 @@ impl Controller {
             damage_recovery: false,
             gun_tracking: None,
             missile_retry_until: None,
+            gun_tracking_since: None,
             identity,
             profile,
             experience,
@@ -1786,37 +1789,53 @@ impl Controller {
         let retrying = self
             .missile_retry_until
             .is_some_and(|until| frame.tick < until);
-        self.gun_tracking = (station.is_none() || chosen_gun.is_some() || retrying)
-            .then(|| {
-                self.gun_views
-                    .iter()
-                    .find(|g| {
-                        g.target == target.map(|t| t.id)
-                            && g.target.is_some()
-                            && g.solution.is_some()
-                            && frame.stations.iter().any(|s| {
-                                s.station == g.station
-                                    && target.is_some_and(|t| {
-                                        matches!(
-                                            s.verdict(&frame.own, &t, class),
-                                            StationVerdict::Usable { .. }
-                                                | StationVerdict::OutsideEnvelope
-                                        )
-                                    })
-                                    && !s.inhibited
-                                    && !matches!(s.rounds, weapon_service::Rounds::Finite(0))
-                                    && g.solution.is_some_and(|p| {
-                                        p.range_ft >= s.minimum_range_ft
-                                            && s.maximum_range_ft.is_none_or(|m| p.range_ft <= m)
-                                    })
-                            })
-                    })
-                    .copied()
-            })
-            .flatten();
+        // B13: a timed motion runs to its deadline unless an event replaces
+        // it. Gun lead tracking is a 1-second motion, so once started it is
+        // not handed back to the missile tactic before that second is up,
+        // even if the store choice now prefers the missile (a fighter whose
+        // best store alternated between gun and missile otherwise swapped
+        // maneuvers every few ticks; overnight bug battery, 2026-09-29).
+        let tracking_held = self
+            .gun_tracking_since
+            .is_some_and(|since| frame.tick < since + GUN_TRACKING_MOTION_TICKS);
+        self.gun_tracking =
+            (station.is_none() || chosen_gun.is_some() || retrying || tracking_held)
+                .then(|| {
+                    self.gun_views
+                        .iter()
+                        .find(|g| {
+                            g.target == target.map(|t| t.id)
+                                && g.target.is_some()
+                                && g.solution.is_some()
+                                && frame.stations.iter().any(|s| {
+                                    s.station == g.station
+                                        && target.is_some_and(|t| {
+                                            matches!(
+                                                s.verdict(&frame.own, &t, class),
+                                                StationVerdict::Usable { .. }
+                                                    | StationVerdict::OutsideEnvelope
+                                            )
+                                        })
+                                        && !s.inhibited
+                                        && !matches!(s.rounds, weapon_service::Rounds::Finite(0))
+                                        && g.solution.is_some_and(|p| {
+                                            p.range_ft >= s.minimum_range_ft
+                                                && s.maximum_range_ft
+                                                    .is_none_or(|m| p.range_ft <= m)
+                                        })
+                                })
+                        })
+                        .copied()
+                })
+                .flatten();
         if self.recipient.target_order == Some(wing::TargetOrder::HoldFire) {
             self.gun_tracking = None;
         }
+        self.gun_tracking_since = match (self.gun_tracking, self.gun_tracking_since) {
+            (None, _) => None,
+            (Some(_), Some(since)) if frame.tick < since + GUN_TRACKING_MOTION_TICKS => Some(since),
+            (Some(_), _) => Some(frame.tick),
+        };
         for (id, cycle) in &mut self.gun_cycles {
             if chosen_gun.is_none_or(|g| g.station.0 != *id) {
                 cycle.advance(frame.tick, None, false, 1, 1);
@@ -3260,6 +3279,9 @@ impl Controller {
         }
     }
 }
+
+/// B13: gun lead tracking is issued as a 1-second timed motion.
+const GUN_TRACKING_MOTION_TICKS: u64 = 120;
 
 /// Why the controller could not use the mission's target: the first failing
 /// test of the mission-target filter in `select_target`. Explanation only.

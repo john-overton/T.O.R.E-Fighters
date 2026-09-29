@@ -465,6 +465,16 @@ def scenarios() -> list[Scenario]:
         "--theater", "UKR", "--aircraft", "f22", "--ground-start", "3",
         "--maneuver", "takeoff", "--probe-wing-size", "2", "--probe-wing-only"],
         ticks=9000, check=checker(ground=True, need_takeoff=True)))
+    out.append(probe("regress-gun-missile-flap-su35", ["--aircraft", "su35", "--probe-enemy-aircraft", "mig29",
+                                                       "--probe-enemy-skill", "average", "--probe-fight", "5:5",
+                                                       "--separation", "10", "--probe-attack", "100:8"],
+                     ticks=20000, check=checker(strict=True, allow_anomalies=("mid-air collision",)),
+                     notes="Enemy 1-5 swapped gun tracking and its missile tactic 30 times in 3 s (fixed 2026-09-29)"))
+    out.append(probe("regress-gun-missile-flap-a4e", fight(2, 2, "--aircraft", "a4e", "--probe-friendly-aircraft", "a4e",
+                                                            "--probe-enemy-aircraft", "mig29", "--probe-enemy-skill", "novice",
+                                                            "--separation", "5", *attack),
+                     ticks=6000, check=checker(strict=True, allow_anomalies=("mid-air collision",)),
+                     notes="Enemy 1-2 swapped gun tracking and its missile tactic every few ticks (fixed 2026-09-29)"))
     out.append(probe("regress-decoy-over-100", fight(2, 2, "--aircraft", "su25", "--probe-friendly-aircraft", "su25",
                                                      "--probe-enemy-aircraft", "mig21", "--separation", "5", *attack),
                      ticks=6000, notes="mission aborted: decoy percentages exceed 100 (fixed 2026-09-28)"))
