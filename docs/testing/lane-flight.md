@@ -244,32 +244,40 @@ would put the F/A-18D, Rafale and A-4E 20 percent or more too high. The rule and
 are for John to change; `STALL_REFERENCE_WEIGHT_FRACTION` in `flight.rs` is the single
 constant.
 
-**Short strips.** The roll to liftoff at full afterburner is now longer for the heavy
-loadouts. On the roughly 1,074 ft strips (Santa Fe, San Carlos) the F/A-18D (1,383 ft), A-4E
-(1,716 ft) and MiG-23 (1,219 ft) no longer lift off within the strip, and the Rafale (1,056
-ft) barely does; the X-31, F-14D, MiG-21, Su-35, MiG-29, Su-25, Su-27 and F-22 family (359
-ft) still do. Landing rollouts shorten slightly (touchdown is nearer the threshold with the
-same flare), for example the F/A-18D stops 3,623 ft past the threshold against 3,956 ft, so
-the 5,532 ft UKR runway still works for all twelve.
+**Short strips.** The roll to liftoff at full afterburner is longer for every aircraft, most
+for the heavy loadouts. From the Santa Fe start (`--theater APA --ground-start 3`, a strip
+of about 1,074 ft; San Carlos is the same length) the liftoff runs are, before and after: F/A-18D
+823 to 1,440 ft, Rafale C 620 to 1,099, A-4E 908 to 1,803, MiG-23 796 to 1,282, X-31 626 to
+1,040, F-14D 650 to 1,000, MiG-21 702 to 956, Su-35 555 to 896, Su-25 560 to 895, MiG-29 532 to
+886, Su-27 454 to 689 and the F-22 family 222 to 379. So the F/A-18D, Rafale, A-4E and MiG-23
+no longer lift off within the strip (they use the flat airport square past its end) and the
+X-31 barely does; the rest still do. The AI takeoffs on those strips were already known
+failures (lane-ai item 11) and roll further off the end. Landing rollouts shorten slightly
+(the flare from 60 ft touches down nearer the threshold), for example the F/A-18D stops 3,623 ft
+past the threshold against 3,956 ft, so the 5,532 ft UKR runway still works for all twelve.
 
 **Other users of the stall speed.** The flight model, the stall warning and departure
 behaviour, the autopilot, the ejection G check, the flight envelope window (the drawn slow
 edges follow the weight), the belly rule, the scripted landing probe and the crew callouts all
 read the scaled speeds. The HUD landing-speed brackets are not implemented in the game, so
 there is nothing to update. The AI reads the same scaled speeds through the model's
-configuration without any change to `tore-sim/src/ai`. **AI landing needs a follow-up** (in the
-AI agent's files): `ai-ground-land-selected-wing2` and `ai-rtb-after-win` now end with the
-wingman flying into the ground short of the runway (an F/A-18D on a 3 degree final at 138 kt
-and 15 ft, about 700 ft short of the threshold at Simferopol); both pass with
-`--retail-stall-speeds`. Cause: the AI's `speed_limits().minimum` is the lowest left edge of
-any envelope row, including the 0 G and negative G rows, which lies 20 to 30 percent under the
-1 G stall speed (raw 143 ft/s, 85 kt, for the F/A-18D; 114 kt scaled). The final speed
-(`APPROACH_SPEED_FACTOR` 1.1 times that, capped at 174 kt) is 125 kt, while the loaded minimum
-speed for 1 G with full flaps at that weight (`State::minimum_level_speed`) is about 140 kt, so
-the wingman decelerates through it and sinks. The retail speeds only worked with a smaller
-margin. A fix belongs in `ai/airfield.rs` and `ai/mission.rs`: fly final at the larger of
-1.1 times the 1 G stall edge and 1.05 times `minimum_level_speed`, and flare at that too.
-AI takeoffs are unaffected (all 56 `ai-takeoff-*` pass: the
+configuration without any change to `tore-sim/src/ai`. **AI needs a follow-up** (in the AI agent's files, which this change leaves alone). Twelve
+AI lane scenarios fail with the rule on and pass with `--retail-stall-speeds`: the landings
+`ai-ground-land-selected-wing2`, `ai-rtb-after-win` and the six `ai-theater-*-land-pair`
+(gre, ira, kurile, lfa, ukr, tviet), and `ai-long-guns-3v3`, `ai-long-15v15`, `ai-fuzz-0028` and
+`ai-fuzz-0043` (an aircraft flies into the ground undamaged). Cause: the AI's
+`speed_limits().minimum` is the lowest left edge of any envelope row, including the 0 G and
+negative G rows, which lies 20 to 30 percent under the 1 G stall speed (raw 143 ft/s, 85 kt,
+for the F/A-18D; 114 kt scaled). The final speed (`APPROACH_SPEED_FACTOR` 1.1 times that,
+capped at 174 kt) is 125 kt, while the loaded minimum speed for 1 G with full flaps at that
+weight (`State::minimum_level_speed`) is about 140 kt, so the wingman decelerates through it
+and sinks. The retail speeds only worked with a smaller margin. A candidate fix, tested here
+but not committed (it is in the AI's file): in `AiActor::speed_limits` (`ai/mission.rs`) raise
+`minimum` to at least `self.flight.minimum_level_speed(altitude, 1.0)`. With it the two
+landing scenarios, the six land pairs, `ai-rtb-after-win` and `ai-long-15v15` pass again;
+`ai-long-guns-3v3`, `ai-fuzz-0028` and `ai-fuzz-0043` still fly into the ground (low-speed
+combat that also needs a look), and the rest of the lane was not re-run with it. The patch is
+kept as `.local/ai-minimum-speed.patch`. AI takeoffs are unaffected (all 56 `ai-takeoff-*` pass: the
 roll only lasts longer).
 
 ## Needs a decision

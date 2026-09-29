@@ -1,20 +1,20 @@
-# Ground start: release the brakes, afterburner, rotate, gear and flaps up once airborne (a gear-up on the ground would now settle the aircraft on its belly), then ask the tower for landing.
+# Ground start: release the brakes, afterburner, rotate (stick back from 8 s), gear and flaps up once airborne (a gear-up on the ground would settle the aircraft on its belly), then ask the tower for landing.
 wait 1
 key b
 key 6
-waittick 750
+waittick 950
 down Down
-waittick 900
-up Down
-waittick 1350
-key g
 waittick 1500
-key f
-waittick 1600
-key 5
-waittick 1700
-key Shift+n
+up Down
 waittick 1800
+key g
+waittick 1950
+key f
+waittick 2050
+key 5
+waittick 2150
+key Shift+n
+waittick 2250
 key Shift+l
-waittick 2400
+waittick 3000
 exit

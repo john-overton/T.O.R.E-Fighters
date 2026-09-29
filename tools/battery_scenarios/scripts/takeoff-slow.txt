@@ -1,5 +1,5 @@
 # Ground start on any aircraft: brakes off, full power, pulse the stick back from 7.5 s until airborne (the weight-scaled stall speed
-# gives liftoff at 100 to 160 knots, up to 16 s of roll), gear and flaps up once airborne, then level off.
+# gives liftoff at 100 to 160 knots, up to 16 s of roll; this longer version is for the A-4E, which has no afterburner), gear and flaps up once airborne, then level off.
 wait 1
 key b
 key 6
@@ -26,9 +26,13 @@ waittick 1860
 down Down
 waittick 1980
 up Down
-waittick 2000
+waittick 2020
+down Down
+waittick 2080
+up Down
+waittick 2100
 key g
-waittick 2150
+waittick 2250
 key f
-waittick 2640
+waittick 3000
 exit
