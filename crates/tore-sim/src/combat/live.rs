@@ -1502,10 +1502,9 @@ impl State {
             PLAYER_OWNER,
         );
         for projectile in &mut self.projectiles {
-            let weapon = projectile
-                .weapon
-                .as_ref()
-                .unwrap_or(&self.config.stations[projectile.station].weapon);
+            // Lazy: an AI missile carries its own weapon and its station
+            // indexes the AI's loadout, which can be longer than the player's.
+            let weapon = projectile.weapon(&self.config);
             let guiding = projectile.target == Some(0)
                 && weapon.seeker.signature == signature
                 && projectile.guidance.as_ref().is_none_or(|flight| {
@@ -4950,6 +4949,19 @@ mod tests {
         s.cheats.unlimited_ammo = true;
         s.command(Command::ReleaseChaff, launcher());
         assert_eq!((s.chaff, s.projectiles[0].target), (2, None));
+    }
+    #[test]
+    fn countermeasures_tolerate_an_ai_missile_from_a_longer_loadout() {
+        let mut s = fixture(true);
+        s.config.ecm.chaff[1] = 100;
+        s.chaff = 1;
+        s.command(Command::Incoming, launcher());
+        // An AI shooter's station index need not exist on the player's aircraft.
+        let weapon = s.config.stations[0].weapon.clone();
+        s.projectiles[0].weapon = Some(weapon);
+        s.projectiles[0].station = s.config.stations.len();
+        s.command(Command::ReleaseChaff, launcher());
+        assert_eq!(s.chaff, 0);
     }
     #[test]
     fn every_released_device_sounds_once_from_its_aircraft() {
