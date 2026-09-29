@@ -200,7 +200,14 @@ fn comms(event: &Event, names: &Names, pad: bool) -> String {
         .string(field::SPEAKER)
         .map(str::to_owned)
         .or_else(|| event.subject.map(|id| names.who(id)))
-        .unwrap_or_else(|| "someone".into());
+        // A cockpit message from the game itself has no speaker.
+        .unwrap_or_else(|| {
+            if event.kind == kind::COMMS_HUD {
+                "cockpit".into()
+            } else {
+                "someone".into()
+            }
+        });
     let mut line = if pad {
         format!("{label:<8}{who}")
     } else {
