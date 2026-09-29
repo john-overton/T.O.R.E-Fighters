@@ -3,6 +3,7 @@
 mod envelope;
 pub mod front_view;
 use crate::{aircraft::Airframe, flight::State, menu::Sprite, scope};
+use tore_formats::text::GlyphCodes;
 use tore_formats::{Pic, font::Font};
 /// Window raster size: the 81x80 frame picture at double size. See
 /// docs/spec/instrument-bezel.md.
@@ -74,7 +75,7 @@ impl Raster {
         }
     }
     fn text(&mut self, font: &Font, s: &str, mut x: i32, y: i32, c: [u8; 4]) {
-        for ch in s.bytes() {
+        for ch in s.glyph_codes() {
             let g = &font.glyphs[ch as usize];
             for &(xx, yy) in &g.pixels {
                 self.rect(x + xx as i32, y + yy as i32, 1, 1, c);
@@ -124,7 +125,7 @@ impl Raster {
     /// Window label text centred on `centre`: one blank pixel between glyphs.
     fn label(&mut self, font: &Font, s: &str, centre: i32, top: i32, c: [u8; 4]) {
         let mut x = centre - (label_width(font, s) - 1).max(0) / 2;
-        for ch in s.bytes() {
+        for ch in s.glyph_codes() {
             let g = &font.glyphs[ch as usize];
             for &(xx, yy) in &g.pixels {
                 self.rect(x + xx as i32, top + yy as i32, 1, 1, c);
@@ -143,7 +144,7 @@ fn screen_background(id: u8) -> [u8; 4] {
 }
 /// Width of a window label: each glyph's advance plus one, less the last gap.
 fn label_width(font: &Font, s: &str) -> i32 {
-    s.bytes()
+    s.glyph_codes()
         .map(|ch| font.glyphs[ch as usize].advance as i32 + 1)
         .sum::<i32>()
         .saturating_sub(1)
@@ -849,7 +850,7 @@ impl Instruments {
                 let red = [235, 70, 50, 255];
                 let width = |value: &str| {
                     value
-                        .bytes()
+                        .glyph_codes()
                         .map(|ch| f.glyphs[ch as usize].advance as i32)
                         .sum::<i32>()
                 };
@@ -1072,8 +1073,10 @@ impl Instruments {
                             text(&mut r, "HIST", 6, 103);
                         }
                         if let Some(status) = scope.status {
-                            let width: usize =
-                                status.bytes().map(|ch| f.glyphs[ch as usize].advance).sum();
+                            let width: usize = status
+                                .glyph_codes()
+                                .map(|ch| f.glyphs[ch as usize].advance)
+                                .sum();
                             text(&mut r, status, 136 - width as i32, 103);
                         }
                     }
@@ -1107,12 +1110,14 @@ impl Instruments {
                             r.text(f, ">", 5, y, colour);
                         }
                         let count = count.to_string();
-                        let width: usize =
-                            count.bytes().map(|ch| f.glyphs[ch as usize].advance).sum();
+                        let width: usize = count
+                            .glyph_codes()
+                            .map(|ch| f.glyphs[ch as usize].advance)
+                            .sum();
                         r.text(f, &count, 48 - width as i32, y, colour);
                         let mut width = 0;
                         let name: String = name
-                            .bytes()
+                            .glyph_codes()
                             .take_while(|ch| {
                                 width += f.glyphs[*ch as usize].advance;
                                 width <= 80
@@ -1123,7 +1128,10 @@ impl Instruments {
                     }
                     text(&mut r, &format!("{} CHAFF", c.chaff), 4, 101);
                     let flare = format!("{} FLARE", c.flares);
-                    let width: usize = flare.bytes().map(|ch| f.glyphs[ch as usize].advance).sum();
+                    let width: usize = flare
+                        .glyph_codes()
+                        .map(|ch| f.glyphs[ch as usize].advance)
+                        .sum();
                     text(&mut r, &flare, 135 - width as i32, 101);
                 } else {
                     text(&mut r, "NO WEAPONS", 9, 14);
@@ -1139,22 +1147,22 @@ impl Instruments {
                         let label = format!(
                             "{}. {}",
                             (b'A' + (index % 26) as u8) as char,
-                            entry.name.to_ascii_uppercase()
+                            tore_formats::text::upper(&entry.name)
                         );
                         let mut width = 0;
                         let label: String = label
-                            .bytes()
+                            .chars()
                             .take_while(|ch| {
-                                width += f.glyphs[*ch as usize].advance;
+                                width += f.glyphs[usize::from(tore_formats::text::cp437_code(*ch))]
+                                    .advance;
                                 width <= 130
                             })
-                            .map(char::from)
                             .collect();
                         r.text(f, &label, 4, y, colour);
                         let bearing = format!("{:03}", entry.bearing(s.position));
                         r.text(f, &bearing, 16, y + 12, colour);
                         let width: usize = bearing
-                            .bytes()
+                            .glyph_codes()
                             .map(|ch| f.glyphs[ch as usize].advance)
                             .sum();
                         r.circle(18 + width as i32, y + 14, 1., colour);
@@ -1232,21 +1240,21 @@ impl Instruments {
                     let fit = |value: &str, limit: usize| {
                         let mut width = 0;
                         value
-                            .bytes()
+                            .chars()
                             .take_while(|ch| {
-                                width += f.glyphs[*ch as usize].advance;
+                                width += f.glyphs[usize::from(tore_formats::text::cp437_code(*ch))]
+                                    .advance;
                                 width <= limit
                             })
-                            .map(char::from)
                             .collect::<String>()
                     };
                     let width = |value: &str| {
                         value
-                            .bytes()
+                            .glyph_codes()
                             .map(|ch| f.glyphs[ch as usize].advance as i32)
                             .sum::<i32>()
                     };
-                    let label = fit(&target.name.to_ascii_uppercase(), 108);
+                    let label = fit(&tore_formats::text::upper(&target.name), 108);
                     r.text(f, &label, 1 + (119 - width(&label)) / 2, 3, ink);
                     let activity = fit(&target.activity, 119);
                     r.text(f, &activity, 1 + (119 - width(&activity)) / 2, 16, ink);

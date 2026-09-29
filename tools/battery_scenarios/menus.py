@@ -128,6 +128,17 @@ def scenarios() -> list[Scenario]:
             notes="Loadouts for every aircraft incl. removed stores, then the whole Quick Mission creator matrix.",
         )
     )
+    out.append(
+        Scenario(
+            name="menus-validate-text",
+            lane="menus",
+            args=["--validate-text", "--no-audio"],
+            timeout=300,
+            expect=[r"non-ASCII text: KURILE\.MM: name .?Ber\u00ebzovka", r"0 problems"],
+            forbid=[r"\ufffd", r"PROBLEM"],
+            notes="Every imported string decodes without U+FFFD and is drawable in the original fonts.",
+        )
+    )
     out.append(Scenario(name="menus-validate-maps", lane="menus", args=["--validate-maps", "--no-audio"], timeout=600, expect=[r"Validated 75 retail map layouts"]))
     out.append(Scenario(name="menus-validate-weather", lane="menus", args=["--validate-weather", "--no-audio"], timeout=900, expect=[r"Weather sources validated"]))
     # `--combat-smoke` fails for the other thirteen aircraft (a stale radar-off

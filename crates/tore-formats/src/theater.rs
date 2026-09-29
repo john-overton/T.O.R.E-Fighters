@@ -137,7 +137,7 @@ impl Environment {
         if bytes.len() > 4 * 1024 * 1024 {
             return Err(invalid("mission metadata exceeds limit"));
         }
-        let text = String::from_utf8_lossy(bytes);
+        let text = crate::text::decode_cp437(bytes);
         if !text.starts_with("textFormat") {
             return Err(invalid("expected textFormat mission"));
         }

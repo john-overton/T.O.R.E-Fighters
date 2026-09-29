@@ -4,6 +4,7 @@ use crate::{
     hud::{self, Paint},
 };
 use tore_formats::font::Font;
+use tore_formats::text::GlyphCodes;
 use tore_sim::{
     attitude::{Basis, Vector, dot},
     combat::{
@@ -179,7 +180,7 @@ pub fn draw(
         let max = state.estimated_max_range(l).unwrap_or(0.);
         // Retail reference: range scale just inside the altitude tape.
         let text_width = |text: &str| {
-            text.bytes()
+            text.glyph_codes()
                 .map(|c| font.glyphs[c as usize].advance)
                 .sum::<usize>() as i32
         };
@@ -226,7 +227,7 @@ pub fn draw(
     paint.text(font, &percent, 207, 283);
     if in_range && state.sensors.tick() % 60 < 30 {
         let width: usize = percent
-            .bytes()
+            .glyph_codes()
             .map(|c| font.glyphs[c as usize].advance)
             .sum();
         paint.text(font, "IN RNG", 211 + width as i32, 283);

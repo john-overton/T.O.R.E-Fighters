@@ -243,6 +243,30 @@ impl QuickMission {
         self.draft.values[20] =
             [10, 33, 14, 57, 3, 41, 23, 10, 20, 37, 34, 24, 9, 2, 10, 2][self.base_theater_index()];
     }
+    /// Every imported string the creator can show, with where it comes from,
+    /// for the `--validate-text` scan.
+    pub fn imported_strings(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for (id, list) in self.options.fields.iter().enumerate() {
+            for text in list {
+                out.push((format!("creator field {id}"), text.clone()));
+            }
+        }
+        for text in &self.aircraft_names {
+            out.push(("creator aircraft".into(), text.clone()));
+        }
+        for (theater, names) in self.theater_codes.iter().zip(&self.airport_names) {
+            for text in names {
+                out.push((format!("airport in {theater}"), text.clone()));
+            }
+        }
+        for (id, list) in self.options.targets.iter().enumerate() {
+            for text in list {
+                out.push((format!("ground target list {id}"), text.clone()));
+            }
+        }
+        out
+    }
     pub fn player(&self) -> Option<AircraftId> {
         self.aircraft_files
             .get(self.draft.values[6])

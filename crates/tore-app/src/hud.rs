@@ -1,6 +1,7 @@
 //! Flight display projection. Source fonts; authored layout and symbology.
 use crate::{flight::State, menu::Canvas};
 use tore_formats::font::Font;
+use tore_formats::text::GlyphCodes;
 
 pub struct Paint<'a> {
     pub pixels: &'a mut [u8],
@@ -39,7 +40,7 @@ impl Paint<'_> {
     }
     fn readout_box(&mut self, font: &Font, text: &str, x: i32, y: i32) {
         let width = text
-            .bytes()
+            .glyph_codes()
             .map(|c| font.glyphs[c as usize].advance)
             .sum::<usize>() as i32;
         let (left, top, right, bottom) = (
@@ -56,7 +57,7 @@ impl Paint<'_> {
         self.text(font, text, x, y);
     }
     pub fn text(&mut self, font: &Font, text: &str, mut x: i32, y: i32) {
-        for ch in text.bytes() {
+        for ch in text.glyph_codes() {
             let g = &font.glyphs[ch as usize];
             for &(xx, yy) in &g.pixels {
                 self.rect(x + xx as i32, y + yy as i32, 1, 1);
@@ -89,7 +90,7 @@ fn bank_scale(p: &mut Paint<'_>, font: &Font, bank: f64) {
         if major {
             let text = mark.abs().to_string();
             let width = text
-                .bytes()
+                .glyph_codes()
                 .map(|c| font.glyphs[c as usize].advance)
                 .sum::<usize>() as i32;
             let (x, y) = bank_point(angle, 239.);
@@ -363,12 +364,12 @@ pub fn draw(
     if let Some((guidance, airport, runway)) = ils {
         let airport: String = airport
             .chars()
-            .filter(|c| c.is_ascii_graphic() || *c == ' ')
+            .filter(|c| tore_formats::text::is_drawn(*c))
             .take(24)
             .collect();
         let runway: String = runway
             .chars()
-            .filter(|c| c.is_ascii_graphic() || *c == ' ')
+            .filter(|c| tore_formats::text::is_drawn(*c))
             .take(16)
             .collect();
         p.text(font, &format!("ILS {airport}"), 252, 106);

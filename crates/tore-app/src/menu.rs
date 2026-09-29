@@ -5,6 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tore_formats::Button;
+use tore_formats::text::GlyphCodes;
 
 pub const WIDTH: usize = 640;
 pub const HEIGHT: usize = 480;
@@ -656,7 +657,7 @@ pub(crate) fn flat_font_large(color: [u8; 3]) -> Sprite {
     }
 }
 pub(crate) fn text_width(font: &Sprite, text: &str) -> i32 {
-    text.bytes()
+    text.glyph_codes()
         .map(|c| font.glyphs[c as usize][1] as i32)
         .sum()
 }
@@ -665,7 +666,7 @@ impl Canvas<'_> {
     pub(crate) fn centered_text(&mut self, font: &Sprite, text: &str, rect: (i32, i32, i32, i32)) {
         let mut top = font.height;
         let mut bottom = 0;
-        for ch in text.bytes() {
+        for ch in text.glyph_codes() {
             let [sx, w, h] = font.glyphs[ch as usize];
             for y in 0..h {
                 if (sx..sx + w).any(|x| font.rgba[(y * font.width + x) * 4 + 3] > 0) {
@@ -706,7 +707,7 @@ impl Canvas<'_> {
         );
         let font = &sprites["QUICKFONT"];
         let height = label
-            .bytes()
+            .glyph_codes()
             .map(|b| font.glyphs[b as usize][2])
             .max()
             .unwrap_or(0) as i32;
@@ -805,7 +806,7 @@ impl Canvas<'_> {
         y: i32,
         tint: Option<[u8; 3]>,
     ) {
-        for c in text.bytes() {
+        for c in text.glyph_codes() {
             let [sx, w, h] = font.glyphs[c as usize];
             if let Some(rgb) = tint {
                 // The glyph alpha is coverage, so a tinted run has to blend

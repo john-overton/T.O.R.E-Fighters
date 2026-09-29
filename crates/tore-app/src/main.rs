@@ -6965,6 +6965,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut sensor_summary = false;
     let mut validate_weather = false;
     let mut validate_maps = false;
+    let mut validate_text = false;
     let mut weather_condition: Option<usize> = None;
     let mut airport_probe: Option<(u32, tore_sim::airport::Aircraft, Option<[f64; 2]>)> = None;
     let mut ground_start_airport: Option<u32> = None;
@@ -7656,6 +7657,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--scope-history" => scope_history = true,
             "--validate-weather" => validate_weather = true,
             "--validate-maps" => validate_maps = true,
+            "--validate-text" => validate_text = true,
             "--weather-condition" => {
                 let value: usize = args
                     .next()
@@ -7986,6 +7988,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && !validate_creator
         && !validate_weather
         && !validate_maps
+        && !validate_text
         && !(airport_probe.is_some() && !(smoke_test && initial_screen == Screen::Flight))
         && std::env::var_os("TORE_ENVIRONMENT_PROBE").is_none();
     // Borderless fullscreen on the monitor the window would have opened on is
@@ -8088,6 +8091,77 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     };
     diagnostics::stage_done();
     if import_only {
+        return Ok(Outcome::Done);
+    }
+    if validate_text {
+        // Every imported string must decode without loss and be drawable in the
+        // original fonts. Retail text is CP437 (tore_formats::text); the only
+        // byte above 0x7F in any text is the Kurile airport's e with a diaeresis.
+        let mut problems: Vec<String> = Vec::new();
+        let mut accented = Vec::new();
+        for (name, bytes) in &assets.theater_resources {
+            if !(bytes.starts_with(b"textFormat")
+                || name.ends_with(".MT")
+                || name.ends_with(".BRF"))
+            {
+                continue;
+            }
+            for line in bytes.split(|b| *b == b'\n' || *b == 0) {
+                if line.iter().any(|b| *b >= 0x80) {
+                    let text = tore_formats::text::decode_cp437(line);
+                    accented.push(format!("{name}: {}", text.trim()));
+                    if let Some(c) = text.chars().find(|c| {
+                        *c != '\r' && !tore_formats::text::is_drawn(*c) && !c.is_control()
+                    }) {
+                        problems.push(format!(
+                            "{name}: {c:?} cannot be drawn in the original fonts: {text}"
+                        ));
+                    }
+                }
+            }
+        }
+        let quick = quick_mission::QuickMission::new(
+            aircraft_id,
+            assets.creator_options.clone(),
+            &assets.theater_resources,
+        );
+        let mut strings = quick.imported_strings();
+        for (name, bytes) in &assets.theater_resources {
+            if name.ends_with(".JT")
+                && let Ok(weapon) = tore_formats::weapons::Weapon::parse(name, bytes)
+            {
+                strings.push((format!("weapon {name}"), weapon.name));
+                strings.push((format!("weapon {name} HUD name"), weapon.hud_name));
+            }
+            if name.ends_with(".PT")
+                && let Ok(aircraft) = tore_formats::aircraft::Aircraft::parse(bytes)
+            {
+                strings.push((format!("aircraft {name}"), aircraft.name));
+            }
+        }
+        for (what, text) in &strings {
+            if text.contains('\u{fffd}') {
+                problems.push(format!("{what}: replacement character in {text:?}"));
+            }
+            if let Some(c) = text.chars().find(|c| !tore_formats::text::is_drawn(*c)) {
+                problems.push(format!("{what}: {c:?} cannot be drawn in {text:?}"));
+            }
+        }
+        for line in &accented {
+            println!("non-ASCII text: {line}");
+        }
+        println!(
+            "Scanned {} imported strings, {} lines with non-ASCII bytes, {} problems",
+            strings.len(),
+            accented.len(),
+            problems.len()
+        );
+        for problem in &problems {
+            println!("  PROBLEM {problem}");
+        }
+        if !problems.is_empty() {
+            return Err("imported text problems".into());
+        }
         return Ok(Outcome::Done);
     }
     if validate_maps {
