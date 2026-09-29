@@ -948,6 +948,9 @@ pub struct State {
     ownships: Vec<Ownship>,
     pub projectiles: Vec<Projectile>,
     pub targets: Vec<Target>,
+    /// The targets the other ownships make of their aircraft, as the last step
+    /// left them; empty with fewer than two ownships.
+    ownship_rows: Vec<Target>,
     actor_support: BTreeMap<u32, ActorSupport>,
     /// Ground contact volumes keyed by stable target ID. Aircraft remain spheres.
     ground_bounds: BTreeMap<u32, crate::airport::OrientedBox>,
@@ -1052,6 +1055,29 @@ fn owner_ownship(ships: &[Ownship], owner: u32) -> Option<&Ownship> {
         .iter()
         .find(|own| own.aircraft == owner)
         .or(ships.first())
+}
+/// The rows of the other ownships, as seen from the ownship at `index`.
+fn peers(rows: &[OwnRow], index: usize) -> impl Iterator<Item = &Target> + Clone {
+    rows.iter()
+        .filter(move |r| r.index != index)
+        .map(|r| &r.target)
+}
+/// What the sensors are told of a target row.
+fn observable_of(t: &Target) -> Observable {
+    Observable {
+        id: t.id,
+        position: t.position,
+        velocity: t.velocity,
+        basis: t.basis,
+        configuration: t.configuration,
+        signature: t.signature,
+        jammer: t.jammer.clone(),
+        jammer_active: t.jammer_active,
+        radar_emitting: t.radar_emitting,
+        airborne: t.airborne,
+        destroyed: t.hp <= 0,
+    }
+    .on_ground(t.on_ground)
 }
 fn view<'a>(state: &'a State, own: &'a Ownship) -> OwnshipView<'a> {
     OwnshipView { state, own }
@@ -1345,6 +1371,17 @@ impl<'a> OwnshipView<'a> {
     pub fn designated(&self) -> Option<u32> {
         self.own.designated()
     }
+    /// A target row by its id: a target of the state, or another ownship's
+    /// aircraft. An ownship is never a contact of itself.
+    fn contact(&self, id: u32) -> Option<&'a Target> {
+        let state = self.state;
+        state.targets.iter().find(|t| t.id == id).or_else(|| {
+            state
+                .ownship_rows
+                .iter()
+                .find(|t| t.id == id && t.id != self.own.aircraft)
+        })
+    }
     pub fn guidance_available(&self, launcher: Launcher) -> bool {
         self.own.guidance_available(launcher)
     }
@@ -1356,20 +1393,14 @@ impl<'a> OwnshipView<'a> {
         } else {
             self.own.designated()
         }?;
-        self.state
-            .targets
-            .iter()
-            .find(|target| target.id == id && target.hp > 0)
+        self.contact(id).filter(|target| target.hp > 0)
     }
     /// The target the flight views follow: the display target, or without
     /// Easy targeting a dropped selection the pilot can still see.
     pub fn view_target(&self) -> Option<&'a Target> {
         self.display_target().or_else(|| {
             let id = self.own.sight_hold?;
-            self.state
-                .targets
-                .iter()
-                .find(|target| target.id == id && target.hp > 0)
+            self.contact(id).filter(|target| target.hp > 0)
         })
     }
     pub fn readiness(&self, launcher: Launcher) -> Readiness {
@@ -1421,10 +1452,7 @@ impl<'a> OwnshipView<'a> {
             }
             return Readiness::Ready;
         }
-        let Some(t) = self
-            .designated()
-            .and_then(|id| self.state.targets.iter().find(|t| t.id == id))
-        else {
+        let Some(t) = self.designated().and_then(|id| self.contact(id)) else {
             return Readiness::NoTarget;
         };
         if profile.is_some_and(|p| !p.accepts(t)) {
@@ -1614,13 +1642,8 @@ impl<'a> OwnshipView<'a> {
             let id = self.own.designated()?;
             let w = &self.own.config.stations[self.own.selected].weapon;
             if self.state.weapon_rules == Rules::Spec
-                && missiles::Profile::for_weapon(w).is_some_and(|p| {
-                    self.state
-                        .targets
-                        .iter()
-                        .find(|t| t.id == id)
-                        .is_none_or(|t| !p.accepts(t))
-                })
+                && missiles::Profile::for_weapon(w)
+                    .is_some_and(|p| self.contact(id).is_none_or(|t| !p.accepts(t)))
             {
                 return None;
             }
@@ -1737,6 +1760,7 @@ impl State {
             next_shot: 0,
             projectiles: vec![],
             targets: vec![],
+            ownship_rows: vec![],
             actor_support: BTreeMap::new(),
             ground_bounds: BTreeMap::new(),
             effects: vec![],
@@ -2856,6 +2880,32 @@ impl State {
             }
         }
         self.marks.retain(|m| m.ticks > 0);
+        // Each ownship is a target to every other aircraft, rebuilt every step
+        // from its launcher: what the others' sensors see, what rounds hit and
+        // what collides. Nothing before the damage stage changes it.
+        let rows: Vec<OwnRow> = active
+            .iter()
+            .map(|&(index, input)| {
+                let own = &mut ships[index];
+                let launcher = input.launcher;
+                let previous = own
+                    .previous_position
+                    .replace(launcher.position)
+                    .unwrap_or(launcher.position);
+                OwnRow {
+                    index,
+                    launcher,
+                    previous,
+                    target: ownship_target(own, launcher),
+                }
+            })
+            .collect();
+        // Cockpit questions about another ownship read its row.
+        self.ownship_rows.clear();
+        if rows.len() > 1 {
+            self.ownship_rows
+                .extend(rows.iter().map(|r| r.target.clone()));
+        }
         for &(k, input) in &active {
             let own = &mut ships[k];
             let (launcher, held) = (input.launcher, input.held);
@@ -2865,22 +2915,8 @@ impl State {
             let observables: Vec<Observable> = self
                 .targets
                 .iter()
-                .map(|t| {
-                    Observable {
-                        id: t.id,
-                        position: t.position,
-                        velocity: t.velocity,
-                        basis: t.basis,
-                        configuration: t.configuration,
-                        signature: t.signature,
-                        jammer: t.jammer.clone(),
-                        jammer_active: t.jammer_active,
-                        radar_emitting: t.radar_emitting,
-                        airborne: t.airborne,
-                        destroyed: t.hp <= 0,
-                    }
-                    .on_ground(t.on_ground)
-                })
+                .chain(peers(&rows, k))
+                .map(observable_of)
                 .collect();
             let observer = Observer {
                 position: launcher.position,
@@ -2992,6 +3028,7 @@ impl State {
                     let observations: Vec<_> = self
                         .targets
                         .iter()
+                        .chain(peers(&rows, k))
                         .filter(|t| t.hp > 0)
                         .filter(|t| bore || assigned == Some(t.id))
                         .filter_map(|t| seeker::observe(w, profile, &view, t))
@@ -3192,6 +3229,7 @@ impl State {
                             flight.qualified_target = target.filter(|id| {
                                 self.targets
                                     .iter()
+                                    .chain(peers(&rows, k))
                                     .find(|t| t.id == *id)
                                     .is_some_and(|t| flight.eligible(w, t))
                             });
@@ -3309,24 +3347,6 @@ impl State {
         for (id, position) in crashes {
             self.aircraft_crashed(id, position, water(position[0], position[2]));
         }
-        // Each ownship is a hit-test target, rebuilt every step from its launcher.
-        let rows: Vec<OwnRow> = active
-            .iter()
-            .map(|&(index, input)| {
-                let own = &mut ships[index];
-                let launcher = input.launcher;
-                let previous = own
-                    .previous_position
-                    .replace(launcher.position)
-                    .unwrap_or(launcher.position);
-                OwnRow {
-                    index,
-                    launcher,
-                    previous,
-                    target: ownship_target(own, launcher),
-                }
-            })
-            .collect();
         let mut ownship_hits = Vec::new();
         let mut strikes = Vec::new();
         let mut impacts = Vec::new();
@@ -7882,3 +7902,126 @@ fn guide(
 #[cfg(test)]
 #[path = "missile_tests.rs"]
 mod missile_tests;
+
+/// Two ownships in one synthetic scene: each is an aircraft to the other.
+#[cfg(test)]
+mod pair_tests {
+    use super::tests::fixture;
+    use super::*;
+
+    /// Ownship 0 faces north at the origin; ownship 1 faces it, `gap` feet north.
+    fn pair(gap: f64) -> (State, [Launcher; 2]) {
+        let mut s = fixture(false);
+        let config = s.own().configuration().clone();
+        s.add_ownship(Ownship::new(1, config, true).unwrap())
+            .unwrap();
+        let facing = |position: Vector, yaw: f64| Launcher {
+            position,
+            basis: Basis::new(yaw, 0., 0.),
+            speed_fps: 300.,
+            velocity: Basis::new(yaw, 0., 0.).forward.map(|v| v * 300.),
+            bay_ready: true,
+            radar_power: true,
+            radar: true,
+            jammer: false,
+            alive: true,
+            controls: sensors::Controls::default(),
+        };
+        let launchers = [
+            facing([0., 1000., 0.], 0.),
+            facing([0., 1000., gap], std::f64::consts::PI),
+        ];
+        (s, launchers)
+    }
+    fn step(s: &mut State, launchers: &[Launcher; 2], held: [bool; 2]) -> Vec<Event> {
+        let inputs: Vec<_> = (0..2)
+            .map(|n| OwnshipInput {
+                aircraft: n as u32,
+                held: held[n],
+                launcher: launchers[n],
+            })
+            .collect();
+        s.step(&inputs, |_, _| 0.)
+    }
+
+    #[test]
+    fn each_ownship_detects_the_other_and_neither_detects_itself() {
+        let (mut s, l) = pair(6000.);
+        for _ in 0..200 {
+            step(&mut s, &l, [false; 2]);
+        }
+        let seen = |aircraft: u32, id: u32| {
+            s.ownship(aircraft)
+                .unwrap()
+                .sensors
+                .observation(id)
+                .is_some()
+        };
+        assert!(seen(0, 1), "ownship 0 must see ownship 1");
+        assert!(seen(1, 0), "ownship 1 must see ownship 0");
+        assert!(!seen(0, 0) && !seen(1, 1));
+        // Designating the other shows it as the cockpit's target.
+        s.command(0, Command::DesignateTarget(1), l[0]);
+        assert_eq!(
+            s.view(0).unwrap().display_target().map(|t| t.id),
+            Some(1),
+            "the other ownship is a contact of the cockpit"
+        );
+        assert!(s.view(1).unwrap().display_target().is_none());
+    }
+
+    #[test]
+    fn a_gun_round_from_one_ownship_hits_the_other_and_never_its_shooter() {
+        let (mut s, l) = pair(600.);
+        s.own_mut().config.stations[0].weapon.source = "M61.JT".into();
+        let mut events = Vec::new();
+        for _ in 0..300 {
+            events.extend(step(&mut s, &l, [true, false]));
+        }
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::OwnshipDamaged { aircraft: 1, .. })),
+            "{events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::OwnshipDamaged { aircraft: 0, .. }))
+        );
+        assert_eq!(
+            s.ownship(0).unwrap().hp,
+            s.ownship(0).unwrap().config.damage_capacity
+        );
+        assert!(s.ownship(1).unwrap().hp < s.ownship(1).unwrap().config.damage_capacity);
+        let strikes = s.take_strikes();
+        assert!(strikes.iter().all(|k| k.owner == 0 && k.victim == 1));
+        assert!(!strikes.is_empty());
+        assert!(s.ownship(0).unwrap().shots > 0);
+    }
+
+    #[test]
+    fn a_midair_between_two_ownships_destroys_both() {
+        let (mut s, l) = pair(30.);
+        let events = step(&mut s, &l, [false; 2]);
+        for aircraft in [0, 1] {
+            assert!(
+                events.contains(&Event::OwnshipDestroyed { aircraft }),
+                "{events:?}"
+            );
+            assert_eq!(s.ownship(aircraft).unwrap().hp, 0);
+        }
+    }
+
+    #[test]
+    fn invulnerable_ownships_survive_a_midair() {
+        let (mut s, l) = pair(30.);
+        s.cheats.damage = crate::cheats::Damage::Invulnerable;
+        let events = step(&mut s, &l, [false; 2]);
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::OwnshipDestroyed { .. }))
+        );
+    }
+}
