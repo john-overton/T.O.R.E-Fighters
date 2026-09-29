@@ -380,11 +380,13 @@ hybrid adapter turns them into the highest and lowest G it will deliver:
   falls below 1 G. Without the floor the outermost band, where only the 1 G row
   holds, gave a loaded aircraft less than 1 G and it sank at full power near its
   top speed or its ceiling, and an AI wingman flew into the ground. The AI's own
-  G limit (`ai/steering_adapter.rs`) applies the same floor.
+  G limit (`ai/steering_adapter.rs`) applies the same floor and the same ceiling rule, so
+  it never asks for G the aircraft cannot give. Both rules are hybrid adapter rules; the
+  legacy compatibility model keeps the old limits.
 - **Above the ceiling (fitted, 2026-09-29).** Above the top of the 1 G polygon the
   air is too thin to lift the weight (manual p. 90), so the upper limit is
   multiplied by the ratio of the air density there to the density at the ceiling
-  (standard atmosphere). A zoom climb can carry an aircraft a little past its
+  (standard atmosphere, held at its 100,000 ft value above that, so the thinning stays finite). A zoom climb can carry an aircraft a little past its
   ceiling but it cannot stay there.
 - Outside every row at that speed (faster than the polygon's right edge) the limit
   stays at 1 G divided by the loading divisor: the aircraft cannot hold level
