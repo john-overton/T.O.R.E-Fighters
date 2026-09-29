@@ -314,6 +314,10 @@ pub struct AiWings {
     next_projectile_id: u32,
     weapon_rules: Rules,
     last_message_tick: u64,
+    /// The aircraft the activity line names, and a later change of that
+    /// aircraft's activity that arrived inside the interval.
+    shown_actor: Option<u32>,
+    stale_line: Option<(u32, Activity)>,
     /// Launch events that could not become a projectile, for honest reporting.
     pub dropped_launches: u32,
     /// Projectiles this bridge created.
@@ -808,6 +812,8 @@ impl AiWings {
             next_projectile_id: AI_PROJECTILE_ID_BASE,
             weapon_rules: Rules::Spec,
             last_message_tick: 0,
+            shown_actor: None,
+            stale_line: None,
             dropped_launches: 0,
             realised_launches: 0,
             threat_reports: Vec::new(),
@@ -2151,24 +2157,46 @@ impl AiWings {
     /// bar carries AI activity changes. Only a change into an activity
     /// [`worth_announcing`] posts, and at most one line per
     /// [`MESSAGE_INTERVAL_TICKS`].
+    ///
+    /// A held change of the aircraft the line already names is posted once
+    /// the interval allows (agent decision, 2026-09-28, overnight bug battery),
+    /// so the line never keeps saying "Defending" about an aircraft that has
+    /// since been destroyed.
     fn announce(&mut self, activities: &[(u32, Activity)]) {
         let tick = self.mission.tick();
+        let open = |last: u64| last == 0 || tick >= last + MESSAGE_INTERVAL_TICKS;
         for (id, activity) in activities {
             let changed = self.last_activity.insert(*id, *activity) != Some(*activity);
             if !changed || !worth_announcing(*activity) {
                 continue;
             }
-            if tick < self.last_message_tick + MESSAGE_INTERVAL_TICKS && self.last_message_tick > 0
-            {
+            if !open(self.last_message_tick) {
                 let remaining = self.last_message_tick + MESSAGE_INTERVAL_TICKS - tick;
                 self.activity_held(*id, *activity, remaining);
+                if self.shown_actor == Some(*id) {
+                    self.stale_line = Some((*id, *activity));
+                }
                 continue;
             }
-            let Some(slot) = self.slot(*id) else { continue };
-            let message = format!("{}: {}", slot.label(), activity.label());
-            self.activity_posted(*id, *activity);
-            self.pending_message = Some(message);
-            self.last_message_tick = tick.max(1);
+            self.post_activity(*id, *activity, tick);
+        }
+        if open(self.last_message_tick)
+            && let Some((id, activity)) = self.stale_line.take()
+            && self.last_activity.get(&id) == Some(&activity)
+        {
+            self.post_activity(id, activity, tick);
+        }
+    }
+
+    fn post_activity(&mut self, id: u32, activity: Activity, tick: u64) {
+        let Some(slot) = self.slot(id) else { return };
+        let message = format!("{}: {}", slot.label(), activity.label());
+        self.activity_posted(id, activity);
+        self.pending_message = Some(message);
+        self.last_message_tick = tick.max(1);
+        self.shown_actor = Some(id);
+        if self.stale_line.is_some_and(|(stale, _)| stale != id) {
+            self.stale_line = None;
         }
     }
 
@@ -3583,6 +3611,30 @@ pub(crate) mod tests {
         assert!(wings.take_message().is_none());
         // Repeating the same activity is never a change.
         wings.announce(&[(1, Activity::Attacking)]);
+        assert!(wings.take_message().is_none());
+    }
+
+    #[test]
+    fn the_activity_line_catches_up_with_its_own_aircraft() {
+        // Battery finding (2026-09-28): the line kept saying "Defending" for
+        // an aircraft destroyed a second later, because the change was dropped.
+        let (mut wings, _) = build(None);
+        wings.announce(&[(1, Activity::Defending)]);
+        assert_eq!(
+            wings.take_message().as_deref(),
+            Some("Friendly 2-1: Defending")
+        );
+        wings.announce(&[(1, Activity::Destroyed)]);
+        assert!(wings.take_message().is_none());
+        // The interval passes (0 reads as "no line posted yet").
+        wings.last_message_tick = 0;
+        wings.announce(&[]);
+        assert_eq!(
+            wings.take_message().as_deref(),
+            Some("Friendly 2-1: Destroyed")
+        );
+        // Another aircraft's dropped change is not revived.
+        wings.announce(&[(2, Activity::Defending)]);
         assert!(wings.take_message().is_none());
     }
     #[test]
