@@ -512,6 +512,12 @@ The following implementation rules and thresholds are **fitted, agent-authored**
   across traffic using equal current/candidate velocity weighting to approximate
   response lag. Penalize absolute offset by 0.2 ft/degree; formation side adds
   only a 0.05 ft/degree preference. Terrain pitch protection still applies.
+  Two additions (fitted, agent decision 2026-09-28, after the bug battery saw
+  two breaking-out wingmen collide): an aircraft already within 220 ft is scored
+  on its clearance from 2 seconds ahead, because from now every heading away
+  from it ties at the present distance; and a lower-ID aircraft that is itself
+  breaking out is predicted along its chosen escape (the same half-and-half
+  blend), as repositioning aircraft already yield to lower IDs' plans.
 - Before an ordinary approach becomes an emergency, screen requested headings
   at 0, +/-15, +/-30 and +/-45 degrees against traffic over 10 seconds. Use the
   same equal current/candidate velocity weighting, cap clearance credit at
