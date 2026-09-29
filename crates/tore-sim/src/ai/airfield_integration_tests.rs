@@ -620,6 +620,26 @@ fn aircraft_meeting_head_on_both_turn_right_and_pass_clear() {
 }
 
 #[test]
+fn a_side_still_taking_off_does_not_return_to_base() {
+    let mut mission = AiMission::new();
+    let mut airborne = hornet(1, 0, [0., 6_000., -60_000.], 0.);
+    airborne.set_home_runway(Some(runway()));
+    airborne.identity.wing = 2;
+    mission.push(airborne);
+    mission.push(parked(2, 1, [40., 0., -3250.]));
+    let mut hostile = object(mission.actor(1).unwrap(), 2);
+    hostile.id = 50;
+    hostile.position = [0., 6_000., 200_000.];
+    step(&mut mission, Some(hostile.clone()));
+    hostile.alive = false;
+    hostile.destroyed = true;
+    for _ in 0..120 {
+        step(&mut mission, Some(hostile.clone()));
+    }
+    assert_eq!(mission.actor(1).unwrap().landing_order(), None);
+}
+
+#[test]
 fn a_mission_without_hostile_aircraft_never_returns_to_base() {
     let mut mission = AiMission::new();
     let mut leader = hornet(1, 0, [0., 6_000., -60_000.], 0.);

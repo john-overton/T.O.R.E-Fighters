@@ -488,7 +488,9 @@ its wingmen join the leader's landing as for any ordered landing. A wing with
 no home runway has its leader fly the B48 return-to-base path to its home
 position (the launch point) and hold there by flying back over it, the
 wingmen staying in formation. Nothing changes while any hostile aircraft is
-alive, and a mission that never had a hostile aircraft does not end this way.
+alive or any aircraft on the side is still waiting or taking off (its landing
+traffic would hold the runway), and a mission that never had a hostile
+aircraft does not end this way.
 A wing led by the player stays with the player, whose own mission may still be
 open. The AI's objectives are air objectives (patrol, intercept, escort), so
 no hostile aircraft left means they are complete.

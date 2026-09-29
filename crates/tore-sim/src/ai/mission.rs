@@ -1441,8 +1441,9 @@ impl AiMission {
     /// home runway through the ordinary landing sequence. A wing with no
     /// home runway flies the B48 return-to-base path to its launch point and
     /// holds there, the wingmen in formation on the leader. Nothing happens while any hostile aircraft
-    /// remains. A wing led by the player stays with the player, whose own
-    /// mission may still be open.
+    /// remains, or while any aircraft on the side is still departing. A wing
+    /// led by the player stays with the player, whose own mission may still be
+    /// open.
     fn return_when_done(&mut self, world: &[WorldObject]) {
         let alive_on = |side: super::targeting::Side| {
             world
@@ -1466,7 +1467,13 @@ impl AiMission {
                 }
                 continue;
             }
-            if !self.hostiles_seen.contains(&side) || !alive_on(side) {
+            // A side with aircraft still departing has only just begun.
+            let departing = self.actors.iter().any(|a| {
+                a.identity.side == side
+                    && a.alive()
+                    && a.airfield.as_ref().is_some_and(|s| s.is_departure())
+            });
+            if !self.hostiles_seen.contains(&side) || !alive_on(side) || departing {
                 continue;
             }
             let external = &self.external_leaders;
