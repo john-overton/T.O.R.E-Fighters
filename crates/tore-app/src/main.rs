@@ -7225,9 +7225,11 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 ai_wings_enabled = true;
             }
             "--record-mission" => {
-                record_mission = Some(PathBuf::from(
-                    args.next().ok_or("--record-mission needs a new path")?,
-                ));
+                let path = args.next().ok_or("--record-mission needs a new path")?;
+                if path.is_empty() {
+                    return Err("--record-mission needs a new path, not an empty one".into());
+                }
+                record_mission = Some(PathBuf::from(path));
             }
             "--verify-render" => verify_render = true,
             "--recording-info" => {
