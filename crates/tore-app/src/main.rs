@@ -10044,6 +10044,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     // The first frame draws the prepared scene, ejected pilot included.
     combat.refresh_render(&flight, None);
+    // The saved controls file loads without being asked for; a damaged one
+    // falls back to the default controls with a warning. A file named with
+    // `--input-profile` is what the player asked for and fails loudly.
+    let explicit_input_profile = input_profile.is_some();
     if input_profile.is_none() {
         let default = assets::data_directory()?.join("input-v1.conf");
         if default.exists() {
@@ -10137,7 +10141,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         None => None,
     };
     diagnostics::stage("controller and input initialization");
-    let input = input::Input::new(input_profile.as_deref(), native_input)?;
+    let input = if explicit_input_profile {
+        input::Input::new(input_profile.as_deref(), native_input)?
+    } else {
+        input::Input::new_automatic(input_profile.as_deref(), native_input)?
+    };
     diagnostics::stage_done();
     diagnostics::stage("application state construction");
     let mut airfield_radio = airfield_radio::AirfieldRadio::default();

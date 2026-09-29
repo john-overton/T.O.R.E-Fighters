@@ -150,11 +150,11 @@ reading 1 to 6); the damage row said twelve aircraft (fourteen are selectable);
 `--help` listed four of the creator's thirty-odd snapshot states; the graphics spec said
 an unreadable settings file was silent.
 
-**Corrupt controls file.** `docs/INPUT.md` says a bad profile "fails with a line
-number", and no document says the automatic `input-v1.conf` must fall back. The
-behaviour is documented as failing, so it stays as it is; the round one change made the
-error name the file. It is no longer an open decision, only a note that an empty or
-binary file has no line number to report.
+**Corrupt controls file.** Decided by John on 2026-09-29: a damaged automatic
+`input-v1.conf` falls back to the default controls with a warning that names the file
+and the reason, like the other settings files; a file named with `--input-profile`
+still fails loudly ([INPUT.md](../INPUT.md)). Round three built it; the replay lane
+checks it (`replay-settings-corrupt-input*`).
 
 ## Manual audit (round three, 2026-09-29)
 
