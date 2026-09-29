@@ -1115,15 +1115,7 @@ impl Instruments {
                             .map(|ch| f.glyphs[ch as usize].advance)
                             .sum();
                         r.text(f, &count, 48 - width as i32, y, colour);
-                        let mut width = 0;
-                        let name: String = name
-                            .glyph_codes()
-                            .take_while(|ch| {
-                                width += f.glyphs[*ch as usize].advance;
-                                width <= 80
-                            })
-                            .map(char::from)
-                            .collect();
+                        let name = fit_width(f, name, 80);
                         r.text(f, &name, 54, y, colour);
                     }
                     text(&mut r, &format!("{} CHAFF", c.chaff), 4, 101);
@@ -1310,6 +1302,17 @@ impl Instruments {
         }
         r
     }
+}
+/// The longest leading part of `text` that fits in `max` pixels of `font`.
+/// Walks characters, not code page bytes, so accented names stay intact.
+fn fit_width(font: &Font, text: &str, max: usize) -> String {
+    let mut width = 0;
+    text.chars()
+        .take_while(|ch| {
+            width += font.glyphs[usize::from(tore_formats::text::cp437_code(*ch))].advance;
+            width <= max
+        })
+        .collect()
 }
 #[cfg(test)]
 mod tests {
@@ -1594,6 +1597,12 @@ mod frame_tests {
         (SCREEN.0..SCREEN.0 + SCREEN.2).contains(&x) && (SCREEN.1..SCREEN.1 + SCREEN.3).contains(&y)
     }
 
+    #[test]
+    fn a_truncated_weapon_name_keeps_its_accented_letters() {
+        let f = font(|_| 5, false);
+        assert_eq!(fit_width(&f, "Berëzovka", 80), "Berëzovka");
+        assert_eq!(fit_width(&f, "Berëzovka", 20), "Berë");
+    }
     #[test]
     fn frame_fills_the_window_at_double_size_through_the_live_palette() {
         let panel = panel();

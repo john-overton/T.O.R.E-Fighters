@@ -1205,7 +1205,8 @@ impl State {
             self.selected = next - 1;
         }
     }
-    fn station_allowed(&self, station: usize) -> bool {
+    /// Whether the guns only cheat lets this station be selected.
+    pub fn station_allowed(&self, station: usize) -> bool {
         !self.cheats.guns_only || is_gun(&self.config.stations[station].weapon)
     }
     /// A station the selection ring may stop on: one that carries something

@@ -3962,6 +3962,27 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn guns_only_with_an_empty_gun_starts_on_nav_not_on_a_missile() {
+        let fixture = combat_fixture(false);
+        let mut config = fixture.configuration().clone();
+        config.stations[0].weapon.source = "M61.JT".into();
+        let mut missile = config.stations[0].clone();
+        missile.weapon.source = "AIM9M.JT".into();
+        config.stations.insert(0, missile);
+        let mut state = live::State::new(config, true).unwrap();
+        state.cheats.guns_only = true;
+        // The gun (station 1) carries nothing; the missile (station 0) does.
+        state.ammo[1] = 0;
+        assert!(state.carries(0) && !state.carries(1));
+        crate::combat::apply_startup_weapon_state(&mut state);
+        assert!(!state.armed);
+        // Without the cheat the same load starts on the loaded missile.
+        state.cheats.guns_only = false;
+        crate::combat::apply_startup_weapon_state(&mut state);
+        assert!(state.armed && state.selected == 0);
+    }
+
+    #[test]
     fn active_ai_launch_uses_owned_guidance_and_cannot_be_decoyed_before_pitbull() {
         use tore_sim::ai::{mission::DeviceEvent, weapon_service::StationId};
         let (mut wings, _) = build(None);
