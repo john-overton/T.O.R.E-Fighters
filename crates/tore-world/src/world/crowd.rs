@@ -208,3 +208,14 @@ pub(super) fn radio_of(out: &TickOutput) -> Vec<(SeatId, comms::Call)> {
         })
         .collect()
 }
+
+/// The HUD lines the tick made, with the seat each is for.
+pub(super) fn messages_of(out: &TickOutput) -> Vec<(SeatId, String)> {
+    out.cues
+        .iter()
+        .filter_map(|cue| match cue {
+            Cue::Message { seat, text } => Some((*seat, text.clone())),
+            _ => None,
+        })
+        .collect()
+}

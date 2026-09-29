@@ -8,7 +8,8 @@
 //! other humans; ownships hit each other, with friendly fire on, and hit AI
 //! aircraft; the AI wingmen of a human-led wing fly on their human leader,
 //! also after the lead passes to the other human; each seat hears its own
-//! radio; and each seat's debrief inputs name its own plane.
+//! radio and gets its own HUD lines; and each seat's debrief inputs name its own
+//! plane.
 //!
 //! Open-loop stick input cannot aim a gun, so each burst starts with the
 //! victim moved onto the line the first round will fly (as `tick_tests.rs`
@@ -235,6 +236,8 @@ struct Seen {
     sensed: BTreeSet<(u32, u32)>,
     bursts: [Landed; BURSTS.len()],
     radio: Vec<(usize, SeatId, comms::Call)>,
+    /// Every HUD line, with its tick and the seat it was for.
+    messages: Vec<(usize, SeatId, String)>,
     journal: Vec<journal::Entry>,
     /// The tick each plane was first out of hit points.
     lost: Vec<(usize, u32)>,
@@ -381,6 +384,11 @@ fn fly(friendly_fire: FriendlyFire, ticks: usize) -> Run {
             digest.text(&call.text);
             call.stems.iter().for_each(|stem| digest.text(stem));
             seen.radio.push((tick, seat, call));
+        }
+        for (seat, text) in messages_of(&out) {
+            digest.int(i64::from(seat.0));
+            digest.text(&text);
+            seen.messages.push((tick, seat, text));
         }
         for entry in world.comms.take_journal() {
             digest.text(&entry.label);
@@ -806,4 +814,51 @@ fn each_seats_debrief_inputs_name_its_own_plane() {
         assert_eq!(own_rounds.launched, expect, "seat {seat}");
         assert_eq!(own_rounds.hit, expect, "seat {seat}");
     }
+}
+
+/// Each seat gets its own HUD lines: the hit line of a seat's own plane, a
+/// hit or two later, and the AI wings' lines only for the seats that fly in
+/// Friendly Wing 1.
+#[test]
+fn each_seat_gets_its_own_hud_lines() {
+    let run = whole_run();
+    let lines = run.seen.messages.iter();
+    // A burst that hits plane 4 gives seat 2 the hit line and nobody else, and
+    // the burst that hits plane 1 gives it to seat 1 alone.
+    let hit_lines = |from: usize, to: usize| -> Vec<SeatId> {
+        lines
+            .clone()
+            .filter(|m| (from..to).contains(&m.0) && m.2.starts_with("Aircraft hit"))
+            .map(|m| m.1)
+            .collect()
+    };
+    assert_eq!(
+        hit_lines(BURSTS[0].start, BURSTS[0].start + WATCH),
+        [SeatId(2)]
+    );
+    assert_eq!(
+        hit_lines(BURSTS[1].start, BURSTS[1].start + WATCH),
+        [SeatId(1)]
+    );
+    // The AI wings' lines ("Friendly 1-3: Defending") reach both seats of
+    // Friendly Wing 1 on the same tick, and neither enemy seat.
+    let wing: Vec<_> = lines
+        .clone()
+        .filter(|m| m.2.starts_with("Friendly "))
+        .collect();
+    assert!(wing.len() >= 6, "{wing:?}");
+    assert!(wing.iter().all(|m| m.1 < SeatId(2)), "{wing:?}");
+    for m in &wing {
+        assert!(
+            wing.iter()
+                .any(|other| other.0 == m.0 && other.2 == m.2 && other.1 != m.1),
+            "the other friendly seat missed {m:?}"
+        );
+    }
+    assert!(
+        lines
+            .filter(|m| m.1 >= SeatId(2))
+            .all(|m| m.2.starts_with("Aircraft hit")),
+        "an enemy seat was shown a line that is not its own"
+    );
 }
