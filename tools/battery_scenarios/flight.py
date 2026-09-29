@@ -180,19 +180,124 @@ def check_takeoff(output: str) -> list[str]:
 
 
 def liftoff_problems(output: str) -> list[str]:
-    """The wheels leave the ground at a speed the aircraft's own imported 1 G
-    envelope supports: no lower than its flap-adjusted stall speed (0.75 of the
-    envelope's left edge) and no higher than 1.6 times the left edge. The model
-    takes its stall speed from that edge (docs/testing/lane-flight.md, "Stall and
-    liftoff speeds"), so a liftoff outside this band means the lift model moved."""
-    env = re.search(r"^envelope: .*? g1_kt=([\d.]+)\.\.[\d.]+", output, re.M)
+    """The wheels leave the ground at the speed the weight-scaled model gives.
+    Two checks. The imported 1 G edge bounds it (0.75 to 1.9 times, since the
+    stall speed grows with the square root of the weight above the edge's
+    empty-weight reference, docs/spec/takeoff-ground-contact.md). And it lands
+    within 5 percent below to 12 percent above the loaded minimum speed for 1 G
+    with full flaps that the probe prints as `min_level_flaps_kt`, which is
+    the rule the model follows."""
+    env = re.search(r"^envelope: .*? g1_kt=([\d.]+)\.\.[\d.]+.*? min_level_flaps_kt=([\d.]+)", output, re.M)
     lift = re.search(r"^liftoff: tick=\d+ speed_kt=([\d.]+) distance_ft=(\d+)", output, re.M)
     if not env or not lift:
         return ["no envelope: or liftoff: line"]
-    stall, speed = float(env.group(1)), float(lift.group(1))
-    if not 0.75 * stall <= speed <= 1.6 * stall:
-        return [f"lifted off at {speed} kt with a 1 G stall edge of {stall} kt"]
-    return []
+    edge, minimum, speed = float(env.group(1)), float(env.group(2)), float(lift.group(1))
+    problems = []
+    if not 0.75 * edge <= speed <= 1.9 * edge:
+        problems.append(f"lifted off at {speed} kt with a 1 G stall edge of {edge} kt")
+    if not 0.95 * minimum <= speed <= 1.12 * minimum:
+        problems.append(f"lifted off at {speed} kt, the model's loaded minimum speed is {minimum} kt")
+    return problems
+
+
+# What John asked for on 2026-09-29 (unsourced real-world figures, a plausibility
+# range only), in knots: liftoff at the default gross weight and approach at a
+# landing weight of 65 percent internal fuel. `None` where there is no figure.
+LIFTOFF_TARGET = {"su27": (135, 150), "su25": (130, 145), "f22": (130, 150), "f22n": (130, 150), "faxx": (130, 150)}
+APPROACH_TARGET = {
+    "f18": (135, 135), "rafale": (130, 140), "f14": (130, 140), "a4e": (130, 140), "mig29": (135, 145),
+    "su27": (120, 135), "mig21": (160, 170), "su25": (125, 140), "mig23": (150, 165), "su35": (135, 145),
+    "f22": (135, 145), "f22n": (135, 145), "faxx": (135, 145),
+}
+# Where one rule (the polygon's edge is the stall speed at the empty weight) is
+# more than 10 percent off the target, the figure the model gives, kept as a
+# regression window of plus or minus 6 percent (docs/testing/lane-flight.md).
+KNOWN_LIFTOFF = {"su27": 119.5, "su25": 92.9, "f22": 102.5, "f22n": 102.5, "faxx": 102.5}
+KNOWN_APPROACH = {
+    "f18": 155.8, "rafale": 158.3, "mig21": 136.9, "su25": 97.0, "mig23": 134.4, "f22": 102.0,
+    "f22n": 102.0, "faxx": 102.0,
+}
+# Internal fuel of each aircraft's default load, pounds.
+INTERNAL_FUEL_LB = {
+    "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,
+    "mig21": 4534, "su25": 22664, "mig23": 11704, "su35": 22000, "f22": 25000, "f22n": 25000, "faxx": 25000,
+}
+
+
+def _in_target(value: float, target: tuple, known: float | None) -> str | None:
+    lo, hi = target
+    if 0.9 * lo <= value <= 1.1 * hi:
+        return None
+    if known is not None and 0.94 * known <= value <= 1.06 * known:
+        return None
+    return f"{value} kt, outside {lo} to {hi} kt and its recorded {known} kt"
+
+
+def check_liftoff_speed(output: str, ac: str) -> list[str]:
+    problems = check_takeoff(output)
+    lift = re.search(r"^liftoff: tick=\d+ speed_kt=([\d.]+)", output, re.M)
+    if lift and ac in LIFTOFF_TARGET:
+        p = _in_target(float(lift.group(1)), LIFTOFF_TARGET[ac], KNOWN_LIFTOFF.get(ac))
+        if p:
+            problems.append("liftoff at " + p)
+    return problems
+
+
+def check_approach_speed(output: str, ac: str) -> list[str]:
+    """The scripted approach at a landing weight: flown at 1.3 times the flapped,
+    weight-scaled stall speed (never under 1.05 times the loaded 1 G minimum),
+    lands, stops and does not crash."""
+    problems = check_landing(output)
+    m = re.search(r"approach_kt=([\d.]+)", output)
+    if not m:
+        return problems + ["no approach speed"]
+    if ac in APPROACH_TARGET:
+        p = _in_target(float(m.group(1)), APPROACH_TARGET[ac], KNOWN_APPROACH.get(ac))
+        if p:
+            problems.append("approach at " + p)
+    return problems
+
+
+def check_retail_liftoff(output: str) -> list[str]:
+    """`--retail-stall-speeds`: the imported polygon speeds at every weight."""
+    problems = check_takeoff(output)
+    if "stall_scale=1.000" not in output:
+        problems.append("the retail switch did not set the stall scale to 1")
+    return problems
+
+
+def liftoff_scenarios() -> list[Scenario]:
+    out = []
+    for ac in AIRCRAFT:
+        out.append(
+            Scenario(
+                name=f"flight-liftoff-{ac}",
+                lane="flight",
+                args=["--theater", "UKR", "--ground-start", "1", "--headless-flight", "9000", "--maneuver", "takeoff", "--aircraft", ac, "--no-audio"],
+                check=lambda output, ac=ac: check_liftoff_speed(output, ac),
+            )
+        )
+        out.append(
+            Scenario(
+                name=f"flight-liftoff-retail-{ac}",
+                lane="flight",
+                args=["--theater", "UKR", "--ground-start", "1", "--headless-flight", "9000", "--maneuver", "takeoff", "--retail-stall-speeds", "--aircraft", ac, "--no-audio"],
+                check=check_retail_liftoff,
+            )
+        )
+        out.append(
+            Scenario(
+                name=f"flight-approach-{ac}",
+                lane="flight",
+                args=[
+                    "--theater", "UKR", "--ground-start", "1", "--headless-flight", "60000", "--maneuver", "land",
+                    "--flight-fuel", str(round(0.65 * INTERNAL_FUEL_LB[ac])), "--aircraft", ac, "--no-audio",
+                ],
+                check=lambda output, ac=ac: check_approach_speed(output, ac),
+                timeout=300,
+            )
+        )
+    return out
 
 
 def _theater_tag(theater: str) -> str:
@@ -1459,9 +1564,10 @@ def overspeed_scenarios() -> list[Scenario]:
     return out
 
 
-# Aircraft that stay in their lift envelope at 80 knots (stall speed at or under it
-# in the model), so a gear-up there is a normal retraction and not a belly slide.
-BELLY_FLIES = {"su27", "su25", "f22", "f22n", "faxx"}
+# Aircraft whose thrust carries them through the belly slide from 80 knots to their
+# weight-scaled liftoff speed (the F-22 family: about 99 kt, with about 1 percent wear).
+# Every other aircraft is below its stall speed at 80 knots, slides, slows and wears.
+BELLY_FLIES = {"f22", "f22n", "faxx"}
 
 
 def check_belly_early(output: str, ac: str) -> list[str]:
@@ -1827,6 +1933,7 @@ def scenarios() -> list[Scenario]:
         + device_scenarios()
         + edge_scenarios()
         + overspeed_scenarios()
+        + liftoff_scenarios()
         + belly_scenarios()
         + terrain_scenarios()
         + fight_scenarios()

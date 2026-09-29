@@ -77,10 +77,16 @@ fn marker_color(tick: u64) -> [u8; 4] {
         [239, 249, 246, 255],
     ][(tick / 20 % 3) as usize]
 }
-fn spans(rows: &[Envelope], altitude: f64) -> Vec<(i32, f64, f64)> {
+/// One row's speed range with its slow edge multiplied by the weight scale, held
+/// to the fast edge (the same rule as `State::envelope_speeds`).
+fn scaled_speeds(e: &Envelope, altitude: f64, scale: f64) -> Option<(f64, f64)> {
+    e.speeds(altitude)
+        .map(|(low, high)| ((low * scale).min(high), high))
+}
+fn spans(rows: &[Envelope], altitude: f64, scale: f64) -> Vec<(i32, f64, f64)> {
     rows.iter()
         .filter(|e| e.g > 0)
-        .filter_map(|e| e.speeds(altitude).map(|(low, high)| (e.g, low, high)))
+        .filter_map(|e| scaled_speeds(e, altitude, scale).map(|(low, high)| (e.g, low, high)))
         .collect()
 }
 fn available(spans: &[(i32, f64, f64)], speed: f64) -> i32 {
@@ -110,9 +116,10 @@ struct Outline<'a> {
     rows: Vec<&'a Envelope>,
     summit: [f64; 2],
     fastest: [f64; 2],
+    scale: f64,
 }
 impl<'a> Outline<'a> {
-    fn new(rows: Vec<&'a Envelope>) -> Self {
+    fn new(rows: Vec<&'a Envelope>, scale: f64) -> Self {
         let points = || {
             rows.iter()
                 .flat_map(|e| &e.points)
@@ -132,16 +139,17 @@ impl<'a> Outline<'a> {
             rows,
             summit,
             fastest,
+            scale,
         }
     }
     /// Slowest edge of the outline at this altitude.
     fn stall_edge(&self, altitude: f64) -> f64 {
         if altitude > self.summit[1] {
-            return self.summit[0];
+            return self.summit[0] * self.scale;
         }
         self.rows
             .iter()
-            .filter_map(|e| e.speeds(altitude))
+            .filter_map(|e| scaled_speeds(e, altitude, self.scale))
             .map(|(low, _)| low)
             .reduce(f64::min)
             .unwrap_or(self.summit[0])
@@ -156,21 +164,31 @@ impl<'a> Outline<'a> {
         }
     }
 }
-fn chart(r: &mut Raster, rows: &[Envelope], target: &[Envelope], mode: Mode, g: f64) -> Scale {
+fn chart(
+    r: &mut Raster,
+    rows: &[Envelope],
+    target: &[Envelope],
+    mode: Mode,
+    g: f64,
+    weight_scale: f64,
+) -> Scale {
     let scale = Scale::new(rows, target);
     let current = current(rows, g);
     // U mode shades around the selected row, so the space it gives up as
     // G rises takes the stall, high or fast shade it now lies in.
-    let outline = Outline::new(match (mode, current) {
-        (Mode::Current, Some(e)) => vec![e],
-        _ => rows.iter().filter(|e| e.g > 0).collect(),
-    });
+    let outline = Outline::new(
+        match (mode, current) {
+            (Mode::Current, Some(e)) => vec![e],
+            _ => rows.iter().filter(|e| e.g > 0).collect(),
+        },
+        weight_scale,
+    );
     for y in 0..=BOTTOM {
         let altitude = f64::from(BOTTOM - y) / f64::from(BOTTOM) * scale.altitude;
-        let own = spans(rows, altitude);
-        let other = spans(target, altitude);
+        let own = spans(rows, altitude, weight_scale);
+        let other = spans(target, altitude, 1.);
         let stall_edge = outline.stall_edge(altitude);
-        let selected = current.and_then(|e| e.speeds(altitude));
+        let selected = current.and_then(|e| scaled_speeds(e, altitude, weight_scale));
         for x in 0..=RIGHT {
             let speed = f64::from(x) / f64::from(RIGHT) * scale.speed;
             let own_g = available(&own, speed);
@@ -224,6 +242,7 @@ pub(super) fn draw(
         },
         mode,
         state.g,
+        state.stall_scale(),
     );
     let (x, y) = scale.marker(state.speed, state.position[1]);
     r.rect(x, y, 4, 4, marker_color(state.ticks));
@@ -265,6 +284,20 @@ mod tests {
             },
         ]
     }
+    #[test]
+    fn a_weight_scale_moves_the_slow_edges_and_not_the_fast_ones() {
+        let rows = rows();
+        let plain = spans(&rows, 5000., 1.);
+        let heavy = spans(&rows, 5000., 1.4);
+        assert_eq!(plain.len(), heavy.len());
+        for ((_, low, high), (_, heavy_low, heavy_high)) in plain.iter().zip(&heavy) {
+            assert!((heavy_low - (low * 1.4).min(*high)).abs() < 1e-9);
+            assert_eq!(high, heavy_high);
+        }
+        let all: Vec<&Envelope> = rows.iter().collect();
+        let edge = Outline::new(all.clone(), 1.).stall_edge(2000.);
+        assert!((Outline::new(all, 1.4).stall_edge(2000.) - edge * 1.4).abs() < 1e-9);
+    }
     /// Synthetic nested rows 1..=6 G: each shrinks towards a corner-speed core.
     fn nested() -> Vec<Envelope> {
         (1..=6)
@@ -294,13 +327,13 @@ mod tests {
     fn filled_bands_current_curve_and_frame_clipping() {
         let rows = rows();
         let mut r = Raster::screen();
-        let scale = chart(&mut r, &rows, &[], Mode::All, 1.);
+        let scale = chart(&mut r, &rows, &[], Mode::All, 1., 1.);
         assert_eq!(pixel(&r, scale.point(500., 2000.)), BANDS[3]);
         assert_eq!(pixel(&r, scale.point(220., 2000.)), BANDS[0]);
         assert_eq!(pixel(&r, scale.point(50., 2000.)), STALL);
         // The fastest 1 G point is at sea level, so everything right of it is high.
         assert_eq!(pixel(&r, scale.point(1020., 2000.)), HIGH);
-        chart(&mut r, &rows, &[], Mode::Current, 4.);
+        chart(&mut r, &rows, &[], Mode::Current, 4., 1.);
         assert_eq!(pixel(&r, scale.point(500., 2000.)), CURRENT);
         assert_eq!(pixel(&r, scale.point(220., 2000.)), STALL);
         // Window pixels outside the screen stay untouched.
@@ -345,7 +378,7 @@ mod tests {
         let mut target = rows.clone();
         target[1].g = 8;
         let mut r = Raster::screen();
-        let scale = chart(&mut r, &rows, &target, Mode::Compare, 1.);
+        let scale = chart(&mut r, &rows, &target, Mode::Compare, 1., 1.);
         assert_eq!(pixel(&r, scale.point(500., 2000.)), ADVANTAGE);
         assert_eq!(pixel(&r, scale.point(220., 2000.)), BANDS[0]);
         assert_eq!(current(&rows, 3.6).unwrap().g, 4);
@@ -358,7 +391,7 @@ mod tests {
         let rows = nested();
         let area = |g: f64| {
             let mut r = Raster::screen();
-            chart(&mut r, &rows, &[], Mode::Current, g);
+            chart(&mut r, &rows, &[], Mode::Current, g, 1.);
             (count(&r, CURRENT), r.pixels)
         };
         let areas: Vec<_> = (1..=6).map(|g| area(f64::from(g)).0).collect();
@@ -375,7 +408,7 @@ mod tests {
     fn vacated_space_takes_the_current_row_backgrounds() {
         let rows = nested();
         let mut r = Raster::screen();
-        let scale = chart(&mut r, &rows, &[], Mode::Current, 1.);
+        let scale = chart(&mut r, &rows, &[], Mode::Current, 1., 1.);
         for p in [
             (300., 2000.),
             (800., 20000.),
@@ -384,7 +417,7 @@ mod tests {
         ] {
             assert_eq!(pixel(&r, scale.point(p.0, p.1)), CURRENT, "{p:?}");
         }
-        chart(&mut r, &rows, &[], Mode::Current, 6.);
+        chart(&mut r, &rows, &[], Mode::Current, 6., 1.);
         // Left of the 6 G stall edge: stall shade, as in the retail pull.
         assert_eq!(pixel(&r, scale.point(300., 2000.)), STALL);
         // Above the 6 G ceiling: stall shade left of its slow end, high beyond.
@@ -399,7 +432,7 @@ mod tests {
     fn all_curves_split_high_and_fast_at_the_fastest_point() {
         let rows = nested();
         let mut r = Raster::screen();
-        let scale = chart(&mut r, &rows, &[], Mode::All, 1.);
+        let scale = chart(&mut r, &rows, &[], Mode::All, 1., 1.);
         // 1 G fastest point is (1500 ft/s, 27,500 ft); its ceiling is 50,000 ft.
         assert_eq!(pixel(&r, scale.point(1450., 10000.)), FAST);
         assert_eq!(pixel(&r, scale.point(1480., 40000.)), HIGH);
@@ -456,7 +489,7 @@ mod tests {
         for (mode, name) in [(Mode::Current, "u"), (Mode::All, "a")] {
             for g in [1., 6.] {
                 let mut r = Raster::screen();
-                chart(&mut r, &rows, &[], mode, g);
+                chart(&mut r, &rows, &[], mode, g, 1.);
                 let mut out = format!(
                     "P6\n{} {}\n255\n",
                     super::super::WIDTH,

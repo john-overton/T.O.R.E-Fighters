@@ -694,9 +694,16 @@ decision, 2026-09-28):
 | `devices` | Gear, flaps, airbrake and hook down one after another, then up again. | `devices:` |
 | `eject`, `eject-low` | Shift-E twice at 5,000 feet, or at 250 feet, and the pilot's descent. | `ejection=` |
 
+`--retail-stall-speeds` turns the [weight-scaled stall speed](spec/takeoff-ground-contact.md#weight-scaled-stall-speed)
+off for the whole run (developer switch), so the imported polygon speeds apply at every weight and old
+comparisons and fingerprints can be re-run. The default is the weight-scaled rule, hybrid adapter only.
+The `envelope:` line then shows `stall_scale=1.000`. `TORE_RETAIL_STALL_SPEEDS=1` does the same for test runs and the
+battery (for example `TORE_RETAIL_STALL_SPEEDS=1 TORE_GOLDEN_VERBOSE=1 cargo test -p tore-sim golden` prints the fingerprints without the rule).
+
 A ground-start `--maneuver takeoff` (and the `takeoff-gear-*` variants) prints an `envelope:` line
 (the aircraft's imported 1 G, 2 G and 3 G speed range in knots at the airport's altitude, the flap
-lift coefficient, the loading divisor and the imported landing limit) and a `liftoff:` line (the
+lift coefficient, the loading divisor, the imported landing limit, the weight scale now, the flapped
+stall speed and the loaded minimum speed for 1 G with full flaps, both scaled) and a `liftoff:` line (the
 tick, speed in knots, distance in feet from the start, and the rotation speed at which the nose
 first passed 1.5 degrees). See [stall and liftoff speeds](testing/lane-flight.md#stall-and-liftoff-speeds-against-the-imported-data).
 

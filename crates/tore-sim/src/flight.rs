@@ -13,10 +13,69 @@ pub const OVERSPEED_SHAKE_START: f64 = 0.95;
 pub const OVERSPEED_SHAKE_FULL: f64 = 1.0;
 /// Share of its top speed at which the airframe is lost.
 pub const OVERSPEED_DESTROY: f64 = 1.5;
+/// Weight-scaled stall speed (hybrid adapter): the imported envelope's left edges
+/// are the aircraft's minimum speeds at its empty weight times this fraction, and
+/// they grow with the square root of the weight above it. `opinionated`
+/// (requested by John, 2026-09-29; the reference weight is an agent decision,
+/// docs/spec/takeoff-ground-contact.md).
+pub const STALL_REFERENCE_WEIGHT_FRACTION: f64 = 1.0;
+static RETAIL_STALL_SPEEDS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// `--retail-stall-speeds`: switch the weight scaling off for the whole process, so
+/// the retail polygon speeds stay reproducible.
+pub fn retail_stall_speeds() -> bool {
+    // `TORE_RETAIL_STALL_SPEEDS=1` does the same for test runs, which cannot
+    // pass the flag (for example to compare the golden fingerprints).
+    static ENVIRONMENT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    RETAIL_STALL_SPEEDS.load(std::sync::atomic::Ordering::Relaxed)
+        || *ENVIRONMENT.get_or_init(|| std::env::var_os("TORE_RETAIL_STALL_SPEEDS").is_some())
+}
+pub fn set_retail_stall_speeds(retail: bool) {
+    RETAIL_STALL_SPEEDS.store(retail, std::sync::atomic::Ordering::Relaxed);
+}
+/// The envelope with its slow edge multiplied by `scale`: the vertices from the
+/// first (slowest, lowest) up to the highest one make the slow side of the
+/// polygon, and are moved out; the fast side stays. Each moved vertex is held
+/// to the fast side at its height so the polygon cannot cross itself. Every imported
+/// envelope row is drawn this way (checked for all 12 aircraft).
+pub fn scale_left_edge(
+    envelope: &tore_formats::aircraft::Envelope,
+    scale: f64,
+) -> tore_formats::aircraft::Envelope {
+    let mut scaled = envelope.clone();
+    let top = envelope
+        .points
+        .iter()
+        .map(|p| p[1])
+        .fold(f64::NEG_INFINITY, f64::max);
+    let Some(top_index) = envelope.points.iter().position(|p| p[1] == top) else {
+        return scaled;
+    };
+    for (point, original) in scaled.points[..=top_index].iter_mut().zip(&envelope.points) {
+        // Held to the fast side of the polygon at the same height.
+        let fast = envelope
+            .speeds(original[1])
+            .map_or(original[0], |(_, high)| high);
+        point[0] = (original[0] * scale).min(fast.max(original[0]));
+    }
+    scaled
+}
+/// Stall speed multiplier for an aircraft of `weight_lbs` whose polygon holds at
+/// `reference_lbs`: the square root of the weight ratio, finite for any input.
+pub fn stall_scale_for(weight_lbs: f64, reference_lbs: f64) -> f64 {
+    if reference_lbs.is_nan() || reference_lbs <= 0. || !weight_lbs.is_finite() {
+        return 1.;
+    }
+    (weight_lbs.max(0.25 * reference_lbs) / reference_lbs).sqrt()
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct State {
     model: crate::models::AircraftModel,
     pub research: Option<crate::research::Research>,
+    /// The imported envelope polygons before the weight scaling, and the scale
+    /// the model's polygons carry now (see [`State::stall_scale`]).
+    raw_envelopes: Option<std::sync::Arc<Vec<tore_formats::aircraft::Envelope>>>,
+    envelope_scale: f64,
     pub native: Option<crate::native::Native>,
     pub position: [f64; 3],
     pub yaw: f64,
@@ -148,6 +207,8 @@ impl State {
         Self {
             model,
             research: None,
+            raw_envelopes: None,
+            envelope_scale: 1.,
             native: None,
             position,
             yaw: 0.3,
@@ -521,6 +582,103 @@ impl State {
             self.crashed = true;
         }
     }
+    /// The multiplier on every left edge of the imported speed envelope that the
+    /// model's polygons carry now: the square root of the weight over the
+    /// reference weight (the empty weight times
+    /// [`STALL_REFERENCE_WEIGHT_FRACTION`]), so 1 for the bare aircraft and higher
+    /// the more fuel and stores it carries. It follows fuel burn, jettisoned
+    /// stores and expended ordnance. Hybrid adapter only; the legacy adapter and
+    /// `--retail-stall-speeds` keep 1.
+    ///
+    /// The model's own configuration holds the scaled polygons
+    /// ([`State::update_stall_scale`] rewrites them when the weight has moved by
+    /// a quarter of a percent), so the flight model, the autopilot and the AI all
+    /// read the same weight-scaled speeds from `model().configuration()`.
+    pub fn stall_scale(&self) -> f64 {
+        self.envelope_scale
+    }
+    /// The scale the weight calls for now, before the quarter-percent rule.
+    pub fn target_stall_scale(&self) -> f64 {
+        if self.research.is_none() || retail_stall_speeds() {
+            return 1.;
+        }
+        let mass = self.model.configuration().mass;
+        stall_scale_for(
+            mass.empty_lbs + self.fuel + self.carried_lbs(),
+            mass.empty_lbs * STALL_REFERENCE_WEIGHT_FRACTION,
+        )
+    }
+    /// Bring the model's envelope polygons to the weight now. Called every step
+    /// by the hybrid adapter and when it is enabled; deterministic (a pure
+    /// function of the weight, updated only past a 0.25 percent change).
+    pub fn update_stall_scale(&mut self) {
+        let target = self.target_stall_scale();
+        if (target / self.envelope_scale - 1.).abs() < 0.0025
+            && !(target == 1. && self.envelope_scale != 1.)
+        {
+            return;
+        }
+        let raw = self
+            .raw_envelopes
+            .get_or_insert_with(|| {
+                std::sync::Arc::new(self.model.configuration().aerodynamics.envelopes.clone())
+            })
+            .clone();
+        let mut configuration = self.model.configuration().clone();
+        configuration.aerodynamics.envelopes =
+            raw.iter().map(|e| scale_left_edge(e, target)).collect();
+        if self.model.set_configuration(configuration).is_ok() {
+            self.envelope_scale = target;
+        }
+    }
+    /// The imported polygons, before the weight scaling.
+    pub fn retail_envelopes(&self) -> &[tore_formats::aircraft::Envelope] {
+        self.raw_envelopes
+            .as_deref()
+            .map_or(&self.model.configuration().aerodynamics.envelopes, |v| v)
+    }
+    /// The lowest speed at which the loaded aircraft can hold 1 G at `altitude_ft`
+    /// with the flaps at `flaps` (0 up, 1 full): the flapped stall speed plus the
+    /// part of the ramp to the next G row that the loading divisor takes.
+    /// Hybrid adapter; weight-scaled like the model itself.
+    pub fn minimum_level_speed(&self, altitude_ft: f64, flaps: f64) -> f64 {
+        let c = self.model.configuration();
+        let Some(one) = c.aerodynamics.envelopes.iter().find(|e| e.g == 1) else {
+            return 0.;
+        };
+        let Some((clean, _)) = one.speeds(altitude_ft) else {
+            return 0.;
+        };
+        let stall = clean * (1. - 0.25 * flaps);
+        let loading = (self.fuel + self.carried_lbs()) / c.mass.empty_lbs;
+        let divisor = 1. + loading * c.aerodynamics.loaded_elevator_percent / 100.;
+        let next = c
+            .aerodynamics
+            .envelopes
+            .iter()
+            .filter(|e| e.g > 1)
+            .filter_map(|e| e.speeds(altitude_ft).map(|speeds| (speeds.0, e.g)))
+            .filter(|(low, _)| *low > stall)
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        match next {
+            Some((low, g)) => {
+                let share = ((divisor - 1.) / f64::from(g - 1)).clamp(0., 1.);
+                stall + share * (low - stall)
+            }
+            None => stall,
+        }
+    }
+    /// The aircraft's 1 G minimum speed with the clean wing, weight-scaled.
+    pub fn clean_stall_speed(&self) -> Option<f64> {
+        let envelope = self
+            .model
+            .configuration()
+            .aerodynamics
+            .envelopes
+            .iter()
+            .find(|e| e.g == 1)?;
+        envelope.speeds(self.position[1]).map(|speeds| speeds.0)
+    }
     /// Airspeed as a share of the aircraft's own top speed at this altitude
     /// (the right edge of its 1 G envelope, the figure the envelope window and
     /// the flight probe use). `None` above the ceiling, where the envelope has
@@ -606,6 +764,7 @@ impl State {
             ));
         }
         self.research = Some(crate::research::Research::new(seed)?);
+        self.update_stall_scale();
         Ok(())
     }
     /// Authored coupling of recovered disturbance rates. Rotate the body basis
@@ -874,6 +1033,7 @@ impl State {
             return;
         }
         let mut input = input.bounded();
+        self.update_stall_scale();
         self.advance_systems(ground(self.position[0], self.position[2]).height);
         let requested = [input.pitch, input.roll, input.yaw];
         [input.pitch, input.roll, input.yaw] = self.systems.controls(
@@ -1077,6 +1237,7 @@ impl State {
             self.consume_fuel(rate * DT);
         }
         let env = c.aerodynamics.envelopes.iter().find(|e| e.g == 1).unwrap();
+        let stall_scale = self.envelope_scale;
         let env_speeds = env.speeds(self.position[1]);
         let (clean_stall, vmax) = env_speeds.unwrap_or((900., 1000.));
         let stall = if self.research.is_some() {
@@ -1150,6 +1311,7 @@ impl State {
             (1. + aero[0] * if aero[0] > 0. { hi - 1. } else { 1. - lo }).clamp(lo, hi) * authority;
         t.envelope = trace::EnvelopeTrace {
             clean_stall_fps: clean_stall,
+            stall_scale,
             stall_fps: stall,
             flaps: self.flaps,
             top_speed_fps: vmax,
@@ -1827,6 +1989,121 @@ mod tests {
                     .any(|m| m.contains("overspeed"))
             );
         }
+    }
+    #[test]
+    fn stall_speed_scales_with_the_square_root_of_the_weight() {
+        // The reference weight is the empty weight: bare, the polygon's own edge.
+        let mut bare = State::new(&profile(), [0., 1024., 0.]).unwrap();
+        bare.enable_research(1).unwrap();
+        bare.fuel = 0.;
+        bare.payload_lbs = 0.;
+        bare.update_stall_scale();
+        assert_eq!(bare.stall_scale(), 1.);
+        let raw = |s: &State, g: i32| {
+            s.retail_envelopes()
+                .iter()
+                .find(|e| e.g == g)
+                .unwrap()
+                .speeds(1024.)
+                .unwrap()
+        };
+        let edge = raw(&bare, 1).0;
+        assert!((bare.clean_stall_speed().unwrap() - edge).abs() < 1e-9);
+        // Heavier means faster, as the square root of the weight; burning fuel
+        // brings it back down and jettisoned stores take it down too.
+        let empty = bare.model().configuration().mass.empty_lbs;
+        let mut heavy = bare.clone();
+        heavy.fuel = empty * 0.5;
+        heavy.payload_lbs = empty * 0.25;
+        heavy.update_stall_scale();
+        let scale = heavy.stall_scale();
+        assert!((scale - 1.75_f64.sqrt()).abs() < 1e-12, "{scale}");
+        assert!((heavy.clean_stall_speed().unwrap() - edge * scale).abs() < 1e-9);
+        let mut burned = heavy.clone();
+        burned.fuel = empty * 0.1;
+        burned.update_stall_scale();
+        assert!(burned.stall_scale() < scale && burned.stall_scale() > 1.);
+        let mut dropped = heavy.clone();
+        dropped.payload_lbs = 0.;
+        dropped.update_stall_scale();
+        assert!(dropped.stall_scale() < scale);
+        // A tiny change in weight leaves the polygons alone (a quarter percent).
+        let mut nudged = heavy.clone();
+        nudged.fuel -= 1.;
+        nudged.update_stall_scale();
+        assert_eq!(nudged.stall_scale(), scale);
+        // Every slow edge scales, the fast edge (top speed) does not.
+        for e in &heavy.model().configuration().aerodynamics.envelopes {
+            let (raw_low, raw_high) = raw(&heavy, e.g);
+            if let Some((low, high)) = e.speeds(1024.) {
+                assert!(low >= raw_low && low <= raw_low * scale + 1e-9);
+                assert!((high - raw_high).abs() < 1e-9);
+            }
+        }
+        // The legacy adapter is unchanged.
+        let mut legacy = State::new(&profile(), [0., 1024., 0.]).unwrap();
+        legacy.fuel = empty;
+        legacy.update_stall_scale();
+        assert_eq!(legacy.stall_scale(), 1.);
+        // Finite for any input.
+        assert_eq!(stall_scale_for(f64::NAN, 100.), 1.);
+        assert_eq!(stall_scale_for(0., 100.), 0.5);
+        assert_eq!(stall_scale_for(100., 0.), 1.);
+        assert_eq!(stall_scale_for(100., 100.), 1.);
+    }
+    #[test]
+    fn scaling_an_envelope_moves_only_its_slow_side() {
+        let e = tore_formats::aircraft::Envelope {
+            g: 1,
+            points: vec![
+                [200., 0.],
+                [235., 13_000.],
+                [870., 60_000.],
+                [1_302., 60_000.],
+                [1_632., 51_000.],
+                [1_190., 0.],
+            ],
+        };
+        let scaled = scale_left_edge(&e, 1.3);
+        assert_eq!(scaled.points[0], [260., 0.]);
+        assert_eq!(scaled.points[1][0], 235. * 1.3);
+        assert_eq!(scaled.points[2][0], 870. * 1.3);
+        assert_eq!(scaled.points[3..], e.points[3..]);
+        // A huge scale cannot push the ceiling past the fast side.
+        let capped = scale_left_edge(&e, 10.);
+        assert!(capped.points[2][0] <= 1_302.);
+        assert!(capped.points[0][0] <= 1_190.);
+        assert_eq!(scale_left_edge(&e, 1.), e);
+    }
+    #[test]
+    fn the_flap_factor_and_the_ramp_use_the_scaled_stall_speed() {
+        let mut s = State::new(&profile(), [0., 5000., 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        s.fuel = s.model().configuration().mass.empty_lbs;
+        s.flaps = 1.;
+        s.speed = 300.;
+        s.velocity = [0., 0., 300.];
+        s.command(PilotCommand::Set(Switch::Flaps, true));
+        s.step(&PilotInput::default(), |_, _| 0.);
+        let e = s.trace().adapter.as_ref().unwrap().envelope;
+        assert!((e.stall_scale - s.stall_scale()).abs() < 1e-9);
+        assert!(e.stall_scale > 1.3);
+        assert!(e.flaps > 0.);
+        assert!((e.stall_fps - e.clean_stall_fps * (1. - 0.25 * e.flaps)).abs() < 1e-9);
+        let raw = s
+            .retail_envelopes()
+            .iter()
+            .find(|x| x.g == 1)
+            .unwrap()
+            .speeds(5000.)
+            .unwrap()
+            .0;
+        assert!((e.clean_stall_fps - raw * e.stall_scale).abs() < 1e-6);
+        // The heavier the aircraft, the higher the speed that holds 1 G.
+        let mut light = s.clone();
+        light.fuel = 0.;
+        light.update_stall_scale();
+        assert!(s.minimum_level_speed(5000., 1.) > light.minimum_level_speed(5000., 1.));
     }
     #[test]
     fn an_invulnerable_player_is_not_lost_to_overspeed_but_still_feels_it() {
