@@ -217,7 +217,6 @@ fn rung_project(
         ladder_project(pitch, bank, bearing, elevation, zoom)
     }
 }
-#[allow(clippy::too_many_arguments)]
 /// `2X`, `4X`, `8X` or `1/2X`: the compression level the HUD shows.
 pub fn time_label(scale: f64) -> String {
     if scale < 1. {
@@ -226,6 +225,7 @@ pub fn time_label(scale: f64) -> String {
         format!("{scale:.0}X")
     }
 }
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     pixels: &mut [u8],
     s: &State,
