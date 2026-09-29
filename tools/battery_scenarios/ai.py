@@ -302,8 +302,9 @@ def scenarios() -> list[Scenario]:
                          # pair is expected to be down inside the run.
                          ticks=90000, timeout=1800,
                          check=checker(ground=True, need_takeoff=True, need_landing=size == 2)))
+        # Bug out is ignored while taking off (spec), so order it once the wing is up.
         out.append(probe(f"ground-bug-out-wing{size}", ["--ground-start", GROUND_AIRPORT, "--probe-wing-size", str(size), "--maneuver", "takeoff",
-                                                        "--probe-wing-order", "9000:bug-out", "--separation", "200", "--probe-wing-only"],
+                                                        "--probe-wing-order", f"{6000 * size}:bug-out", "--separation", "200", "--probe-wing-only"],
                          ticks=48000, timeout=1800, check=checker(ground=True, need_takeoff=True)))
         out.append(probe(f"ground-fight-wing{size}", ["--ground-start", GROUND_AIRPORT, "--probe-wing-size", str(size), "--maneuver", "takeoff",
                                                       "--separation", "20", "--probe-attack", "6000:10"], ticks=24000, timeout=1800,

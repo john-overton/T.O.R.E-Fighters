@@ -117,9 +117,14 @@ aircraft of the same side, for example:
   degree, and both share that side, so they turned together, flew about 50 ft
   apart for 2.5 s and collided at 19.8 s. The formation spec (opinionated,
   John 2026-09-18) wants departures to account for neighbours, but its
-  clearances are documented as margins, not guarantees. A fix would be a
-  design change to a fitted rule, for example having the pair split to
-  opposite sides by position, so it was left for a decision.
+  clearances are documented as margins, not guarantees. A likely cause: the
+  escape score is the closest approach over the next 8 seconds counted from
+  now, so for two aircraft already 50 ft apart every heading that moves away
+  scores the same 50 ft, and the straight-ahead candidate wins on its smaller
+  offset penalty. Scoring from 1 second ahead was tried and made the
+  synthetic diving-reversal test's minimum separation worse (240 ft against
+  its 250 ft requirement), so the fitted rule was left for a decision; splitting
+  a converging pair to opposite sides by position is another option.
 
 The lane reports these as `mid-air collision` anomalies but does not fail on
 them (see `KNOWN_ANOMALIES` in the scenario file).
@@ -158,7 +163,10 @@ Behaviour the specs do not define, with the evidence. None of these were changed
 4. **Leaderless wingmen after a fight.** When a wing's leader dies, the
    survivors have no leader succession or route. Once the fight ends they fly
    straight ("Searching", no target) for as long as the run lasts; in 30
-   minutes they leave the map by up to 100 nm (`ai-long-5v5`).
+   minutes they leave the map by up to 100 nm (`ai-long-5v5`). The retail
+   game does pass leadership (the "You're the wingleader now" call in
+   [radio chatter](../spec/radio-chatter.md)), but the situations that pass it
+   are recorded there as unknown.
 5. **Aircraft with no route leave the map.** In a hold mission the enemies hold
    their heading (B48) and fly off the terrain after about 16 minutes
    (`ai-long-hold-4v4`). Nothing defines a map edge for AI.
@@ -174,9 +182,10 @@ Behaviour the specs do not define, with the evidence. None of these were changed
    Known failures).
 8. **A decoyed missile still kills.** A missile decoyed by chaff coasts on and
    can still hit an aircraft that flies straight into it. The shot table then
-   says "spoofed" while the kill is credited (2 v 2, shot 1 at 10.7 s). The
-   decoy rule and the shot report are consistent with their specs separately;
-   whether the report should show the later hit is open.
+   says "spoofed" while the kill is credited (2 v 2, shot 1 at 10.7 s), and
+   the debrief shows 0 air-to-air hits of 1 launch next to 1 kill. That
+   follows the [debrief spec](../spec/debrief.md) ("a missile resolves once",
+   retail), so it is not a bug by the specs, but a player may read it as one.
 9. **Deconfliction outside formation.** Should AI aircraft that are not in a
    formation (wing leaders, singletons, leaderless wingmen) avoid other
    traffic? Today nothing does, and two of them on converging straight courses
@@ -192,6 +201,11 @@ Behaviour the specs do not define, with the evidence. None of these were changed
 - Radio chatter volume in 10 v 10 and larger fights (the probe prints only the
   first 40 lines heard; none repeated, none spoken by a dead pilot).
 - How the formation and missile-defense changes look in the cockpit view.
+- Every aircraft that lands at Simferopol and taxis clear leaves the pavement
+  for about 25 seconds at the same runway-exit corner (x 1,106,135, z 593,076),
+  creeping at 3 kt while it turns (the fitted creep turn that replaces the
+  retail stopped pivot), then rejoins the taxiway. The probe reports and then
+  clears an "off landable surface" hazard there; worth a look in the viewer.
 
 ## What was not run
 
