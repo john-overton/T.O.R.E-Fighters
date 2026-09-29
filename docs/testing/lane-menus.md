@@ -297,9 +297,6 @@ keep their letters.
 - **Creator rows that change nothing yet.** The situation row (neutral, friendly,
   hostile) and both nationality rows are presentation only; the mission does not use
   them ([creator spec](../spec/quick-mission-menu.md)).
-- **HUD line for a dry station.** After the last round is fired, the station stays
-  selected and the HUD reads `0 M61`, the weapons window still lists it, until the next
-  `[` or `]`. Retail behaviour here is not recorded.
 
 - **Enter in the creator.** The manual says Enter accepts the whole form (OK); here Enter
   activates the focused field and OK is a button. Either is workable, the choice is a

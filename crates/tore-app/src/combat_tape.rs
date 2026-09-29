@@ -148,6 +148,7 @@ pub fn command_name(c: Command) -> String {
         Command::NextSelection => "selection-next",
         Command::PreviousSelection => "selection-previous",
         Command::SelectNav => "selection-nav",
+        Command::AdvanceFromEmpty => "selection-dry",
         Command::ToggleSeekerMode => "seeker-mode",
         Command::CompatibilityWeapons => "compatibility-weapons",
         Command::ToggleTargetRadar => "target-radar",
@@ -194,6 +195,7 @@ pub fn command(s: &str) -> Option<Command> {
         Command::NextSelection,
         Command::PreviousSelection,
         Command::SelectNav,
+        Command::AdvanceFromEmpty,
         Command::ToggleSeekerMode,
         Command::CompatibilityWeapons,
         Command::ToggleTargetRadar,
@@ -557,6 +559,12 @@ fn replay_reader(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_dry_station_hand_on_round_trips_through_a_tape() {
+        use tore_sim::combat::live::Command;
+        assert_eq!(command_name(Command::AdvanceFromEmpty), "selection-dry");
+        assert_eq!(command("selection-dry"), Some(Command::AdvanceFromEmpty));
+    }
     #[test]
     fn version_six_airport_commands_have_stable_bounded_names() {
         use tore_sim::airport::Command;

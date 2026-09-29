@@ -9811,11 +9811,20 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 combat::launcher(&flight),
             );
         }
+        // A station that carries nothing cannot be selected; start on NAV.
+        if !combat.state.carries(weapon_slot - 1) {
+            eprintln!("Weapon slot {weapon_slot} carries nothing; starting on NAV");
+            combat.command(
+                tore_sim::combat::live::Command::SelectNav,
+                combat::launcher(&flight),
+            );
+        }
     }
     // Scripted setup keeps the render history as live flight does: a changed
     // scene is retaken at once and each combat step ends a tick.
     if live_fire {
-        combat.state.armed = true;
+        // An empty station is never armed.
+        combat.state.armed = combat.state.carries(combat.state.selected);
         combat.command(
             tore_sim::combat::live::Command::ReplaceTarget,
             combat::launcher(&flight),
