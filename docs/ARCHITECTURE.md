@@ -757,14 +757,16 @@ taken out:
 1. **Settings and commands.** Cheats, the scope controls and the friendly list
    are applied. Queued weapon-page clicks, navigation-page selections and airport
    commands run in the order they were given.
-2. The player's flight state at the start of the tick is kept as `previous`.
+2. The player's flight state at the start of the tick is kept as `previous_flight`.
 3. **Player flight.** The flight model steps with the tick's pilot input over
    the runway and terrain surface, with wind.
 4. **Building contact**: a crash, or a rebound under the No Crashes cheat.
 5. A fault in the restricted native research adapter stops the tick here and is
    reported. Nothing else in the tick runs, as today.
 6. **Weather clock**: one environment step.
-7. **Turbulence** acts on the player.
+7. **Turbulence** acts on the player. Then the world edge (a turn-back
+   warning from 100 nm beyond the map, the loss at 105 nm) and the OVERSPEED
+   message are checked.
 8. **Combat.** The trigger level is set, then combat steps: sensors, the player's
    weapons, projectiles, hits, damage, wrecks and contrails.
 9. **Airport service.** It learns which runway objects were destroyed, then
@@ -827,7 +829,9 @@ the point where the picture was taken); the player's weapon
 release sounds; shot outcomes; the AI journal; sound emissions; and the native
 fault, if the tick stopped early. Every output queue inside `World` is drained
 into it each tick, whether or not anyone reads it, so the state between ticks
-never depends on its consumers.
+never depends on its consumers. Until the crate move, the radio's journal and
+the player's command notes still go to the replay recorder directly, as they
+did before.
 
 #### Drivers
 
