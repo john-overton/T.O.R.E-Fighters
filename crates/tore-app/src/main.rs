@@ -203,6 +203,9 @@ struct App {
     scenery: scenery::Scenery,
     /// The art and models `world.combat` is drawn with; replaced with it.
     combat_view: combat_view::CombatView,
+    /// The combat tape being written (`--record-combat`). Combat collects the
+    /// records and the app writes them after every tick and when the tape ends.
+    combat_tape: Option<combat_tape::Recorder>,
     hornet: aircraft::Airframe,
     researched_flight: bool,
     native_tables: Option<std::sync::Arc<tore_sim::native::Tables>>,
@@ -811,6 +814,22 @@ impl App {
                     .message(format!("Could not save preferences: {e}"));
             }
         }
+    }
+    /// Writes the records combat collected to the combat tape, if one is
+    /// being recorded.
+    fn drain_combat_tape(&mut self) {
+        if let Some(tape) = &mut self.combat_tape {
+            tape.write_all(self.world.combat.take_tape());
+        }
+    }
+    /// Ends the combat tape: writes what is left and flushes the file.
+    fn finish_combat_tape(&mut self) -> AppResult<()> {
+        self.drain_combat_tape();
+        self.world.combat.stop_tape();
+        if let Some(mut tape) = self.combat_tape.take() {
+            tape.flush()?;
+        }
+        Ok(())
     }
     fn finish_recording(&mut self) {
         use std::io::Write;
@@ -1877,7 +1896,7 @@ impl App {
                 return;
             }
             Action::Theater(index) => {
-                if let Err(e) = self.world.combat.finish_recording() {
+                if let Err(e) = self.finish_combat_tape() {
                     self.error = Some(e);
                     event_loop.exit();
                     return;
@@ -1919,7 +1938,7 @@ impl App {
                 }
             }
             Action::Aircraft(index) => {
-                if let Err(e) = self.world.combat.finish_recording() {
+                if let Err(e) = self.finish_combat_tape() {
                     self.error = Some(e);
                     event_loop.exit();
                     return;
@@ -2309,7 +2328,7 @@ impl App {
                 self.formation_trace = None;
                 self.wing_recipient = None;
                 self.world.combat.ai_poses = false;
-                if let Err(e) = self.world.combat.finish_recording() {
+                if let Err(e) = self.finish_combat_tape() {
                     self.error = Some(e);
                     event_loop.exit();
                     return;
@@ -3453,6 +3472,9 @@ impl ApplicationHandler for App {
                                 crew: comms::crew(&self.hornet.profile),
                             };
                             let stepped = self.world.step(&input, &mut output);
+                            if let Some(tape) = &mut self.combat_tape {
+                                tape.write_all(self.world.combat.take_tape());
+                            }
                             if let Some(wings) = &mut self.world.ai_wings {
                                 formation_trace::drain(&mut self.formation_trace, wings);
                             }
@@ -4258,7 +4280,7 @@ impl ApplicationHandler for App {
                 self.error = Some(error.into());
             }
         }
-        if let Err(e) = self.world.combat.finish_recording() {
+        if let Err(e) = self.finish_combat_tape() {
             self.error = Some(e);
         }
         self.renderer = None;
@@ -9795,14 +9817,19 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     )?;
     let mut combat_view = combat_view::CombatView::new(&combat, &theater_resources)?;
     combat.add_airport_targets(&world.airport_scene)?;
-    if let Some(ref path) = record_combat {
-        combat.recorder = Some(combat_tape::Recorder::new(
-            path,
-            &theater_resources,
-            combat.state.configuration(),
-            &theater_code,
-        )?);
-    }
+    let combat_tape = match record_combat {
+        Some(ref path) => {
+            let writer = combat_tape::Recorder::new(
+                path,
+                &theater_resources,
+                combat.state.configuration(),
+                &theater_code,
+            )?;
+            combat.start_tape();
+            Some(writer)
+        }
+        None => None,
+    };
     combat.clean_recording = record_input.is_some();
     if combat.clean_recording {
         log::warn!(
@@ -10278,6 +10305,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         world,
         scenery,
         combat_view,
+        combat_tape,
         preference_path: if preferences_enabled {
             Some(assets::data_directory()?.join("preferences-v1.conf"))
         } else {

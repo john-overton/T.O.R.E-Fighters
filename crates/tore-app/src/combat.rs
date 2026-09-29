@@ -130,7 +130,10 @@ pub struct Combat {
     dummy_types: Vec<Arc<AircraftType>>,
     dummy_configs: Vec<live::Configuration>,
     airport_objects: Vec<tore_sim::airport::StaticObject>,
-    pub recorder: Option<crate::combat_tape::Recorder>,
+    /// The records of the combat tape being written, collected until the app
+    /// drains them (`take_tape`); `None` when no tape is being recorded.
+    /// Combat holds no file: the app owns the writer.
+    tape: Option<Vec<crate::combat_tape::Entry>>,
     last_launcher: Option<Launcher>,
     /// Player commands since the mission recorder last looked. Nothing in
     /// flight reads them.
@@ -174,7 +177,7 @@ impl Combat {
         apply_startup_weapon_state(&mut self.state);
     }
     pub fn uses_normal_startup_defaults(&self) -> bool {
-        !self.range && self.recorder.is_none() && !self.clean_recording
+        !self.range && self.tape.is_none() && !self.clean_recording
     }
     pub fn add_airport_targets(&mut self, scene: &tore_sim::airport::Scene) -> AppResult<()> {
         scene.validate().map_err(std::io::Error::other)?;
@@ -249,7 +252,7 @@ impl Combat {
             clean_recording: false,
             initial_ammo,
             render: RenderHistory::default(),
-            recorder: None,
+            tape: None,
             last_launcher: None,
             notes: Default::default(),
         })
@@ -659,8 +662,8 @@ impl Combat {
         Ok(())
     }
     pub fn command(&mut self, command: live::Command, l: Launcher) {
-        if let Some(r) = &mut self.recorder {
-            r.record(&crate::combat_tape::command_name(command), l);
+        if self.tape.is_some() {
+            self.record_tape(crate::combat_tape::command_name(command), l);
         }
         self.note(CommandNote::Command(command));
         self.state.command(command, l);
@@ -677,15 +680,37 @@ impl Combat {
     pub fn take_notes(&mut self) -> Vec<CommandNote> {
         self.notes.drain(..).collect()
     }
-    pub fn finish_recording(&mut self) -> AppResult<()> {
-        if let Some(mut r) = self.recorder.take() {
-            r.flush()?;
+    /// Starts collecting the combat tape's records.
+    pub fn start_tape(&mut self) {
+        self.tape.get_or_insert_with(Vec::new);
+    }
+    /// Stops collecting; records not yet taken are dropped.
+    pub fn stop_tape(&mut self) {
+        self.tape = None;
+    }
+    /// A tape is being collected.
+    pub fn recording_tape(&self) -> bool {
+        self.tape.is_some()
+    }
+    /// Adds one record to the tape, when one is being collected.
+    pub fn record_tape(&mut self, action: impl Into<String>, launcher: Launcher) {
+        if let Some(tape) = &mut self.tape {
+            tape.push(crate::combat_tape::Entry {
+                action: action.into(),
+                launcher,
+            });
         }
-        Ok(())
+    }
+    /// The records collected since the last call, oldest first. Write-only:
+    /// nothing in combat reads them.
+    pub fn take_tape(&mut self) -> Vec<crate::combat_tape::Entry> {
+        self.tape.as_mut().map(std::mem::take).unwrap_or_default()
     }
     pub fn cancel(&mut self) {
-        if let (Some(r), Some(l)) = (&mut self.recorder, self.last_launcher) {
-            r.record("release", l);
+        if self.tape.is_some()
+            && let Some(l) = self.last_launcher
+        {
+            self.record_tape("release", l);
         }
         if self.input.held || self.controller.held {
             self.note(CommandNote::Release);
@@ -699,9 +724,7 @@ impl Combat {
         self.contrails = Default::default();
         self.contrail_sortie = self.contrail_sortie.wrapping_add(1);
         let l = launcher(s);
-        if let Some(r) = &mut self.recorder {
-            r.record(if self.range { "reset" } else { "reset-scene" }, l);
-        }
+        self.record_tape(if self.range { "reset" } else { "reset-scene" }, l);
         self.last_launcher = Some(l);
         let weapon_rules = self.state.weapon_rules;
         self.state = live::State::new(
@@ -709,10 +732,8 @@ impl Combat {
             s.native.is_none() && !self.clean_recording,
         )?;
         self.state.weapon_rules = weapon_rules;
-        if weapon_rules == tore_sim::combat::missiles::Rules::Compatibility
-            && let Some(r) = &mut self.recorder
-        {
-            r.record("compatibility-weapons", l);
+        if weapon_rules == tore_sim::combat::missiles::Rules::Compatibility {
+            self.record_tape("compatibility-weapons", l);
         }
         if let Some(ammo) = &self.initial_ammo {
             self.state.ammo.clone_from(ammo);
@@ -785,16 +806,14 @@ impl Combat {
     pub fn step(&mut self, s: &mut flight::State, world: &Terrain) -> AppResult<Vec<Event>> {
         let l = launcher(s);
         self.last_launcher = Some(l);
-        if let Some(r) = &mut self.recorder {
-            r.record(
-                if self.input.held || self.controller.held {
-                    "fire"
-                } else {
-                    "tick"
-                },
-                l,
-            );
-        }
+        self.record_tape(
+            if self.input.held || self.controller.held {
+                "fire"
+            } else {
+                "tick"
+            },
+            l,
+        );
         let mut events = Vec::new();
         self.state.note_loaded();
         if s.airburst()
@@ -1203,6 +1222,11 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
             );
         }
     }
+    // The tape file of the last slot that recorded one. A slot that stops early
+    // (a surface weapon refused against the aircraft target) leaves its tape
+    // open, and the records that follow go to that file until the next slot's
+    // tape replaces it, as they did when combat held the file.
+    let mut recorder: Option<crate::combat_tape::Recorder> = None;
     for index in 0..combat.state.ammo.len() {
         let station = &combat.state.configuration().stations[index];
         if !station.internal && station.weapon.seeker.signature == 0 {
@@ -1231,12 +1255,16 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 });
             if let Some(path) = &tape {
                 std::fs::create_dir_all(path.parent().ok_or("tape directory missing")?)?;
-                combat.recorder = Some(crate::combat_tape::Recorder::new(
+                if combat.recording_tape() && recorder.is_some() {
+                    write_tape(&mut combat, recorder.as_mut())?;
+                }
+                recorder = Some(crate::combat_tape::Recorder::new(
                     path,
                     data,
                     combat.state.configuration(),
                     "UKR",
                 )?);
+                combat.start_tape();
             }
             combat.reset(&mut flight)?;
             // This stationary range fixture starts with an open available bay.
@@ -1578,11 +1606,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 return Err("firing continued after release".into());
             }
             if let Some(path) = &tape {
-                combat
-                    .recorder
-                    .as_mut()
-                    .ok_or("missing smoke recorder")?
-                    .flush()?;
+                write_tape(&mut combat, recorder.as_mut())?;
                 let decoded = crate::combat_tape::replay_without_airports(
                     path,
                     data,
@@ -1623,11 +1647,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                     combat.command(command, launcher(&flight));
                     combat.step(&mut flight, &world)?;
                 }
-                combat
-                    .recorder
-                    .as_mut()
-                    .ok_or("missing smoke recorder")?
-                    .flush()?;
+                write_tape(&mut combat, recorder.as_mut())?;
                 let decoded = crate::combat_tape::replay_without_airports(
                     path,
                     data,
@@ -1646,7 +1666,8 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 }
                 combat.reset(&mut flight)?;
                 combat.step(&mut flight, &world)?;
-                combat.finish_recording()?;
+                write_tape(&mut combat, recorder.as_mut())?;
+                combat.stop_tape();
                 let decoded = crate::combat_tape::replay_without_airports(
                     path,
                     data,
@@ -1667,7 +1688,22 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
             }
         }
     }
+    if combat.recording_tape() && recorder.is_some() {
+        write_tape(&mut combat, recorder.as_mut())?;
+        combat.stop_tape();
+    }
     Ok(())
+}
+
+/// Writes the records combat has collected to the smoke harness's tape file
+/// and flushes it.
+fn write_tape(
+    combat: &mut Combat,
+    recorder: Option<&mut crate::combat_tape::Recorder>,
+) -> AppResult<()> {
+    let recorder = recorder.ok_or("missing smoke recorder")?;
+    recorder.write_all(combat.take_tape());
+    recorder.flush()
 }
 
 const ACQUISITION: usize = tore_sim::sensors::track::ACQUISITION_STEPS as usize;
@@ -2066,7 +2102,7 @@ pub(crate) mod fixtures {
             dummy_types,
             dummy_configs: Vec::new(),
             airport_objects: Vec::new(),
-            recorder: None,
+            tape: None,
             last_launcher: None,
             notes: Default::default(),
         }

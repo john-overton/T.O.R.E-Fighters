@@ -980,6 +980,14 @@ These splits touch different files and can run in parallel:
   calls become output. The formation trace is done: `AiWings` collects its rows
   in a bounded list, and `formation_trace.rs` in the app reads
   `TORE_FORMATION_TRACE` and writes the file.
+  The combat tape is done too: `Combat` holds no file. While a tape is being
+  recorded it collects each record (the action name and the `Launcher`, as
+  `combat_tape::Entry`) in a write-only list (`start_tape`, `record_tape`,
+  `take_tape`). The app owns the `combat_tape::Recorder`, writes the list after
+  every tick (`World::step` puts its airport records in the same list) and
+  again when the tape ends. The tape's bytes are the same as before. The
+  `TORE_COMBAT_EVIDENCE` variable stays in the `--combat-smoke` harness, which
+  is a command-line check and not mission state.
 
 Then `git mv` moves the simulation set into `crates/tore-world`, with a
 `[profile.dev.package.tore-world] opt-level = 2` entry like `tore-sim`'s, and

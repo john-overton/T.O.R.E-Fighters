@@ -40,6 +40,13 @@ fn airport_command(text: &str) -> Option<tore_sim::airport::Command> {
     }
 }
 
+/// One record of the tape: the action's name and the launcher it saw.
+/// `Combat` collects them; the app writes them with [`Recorder::write_all`].
+pub struct Entry {
+    pub action: String,
+    pub launcher: Launcher,
+}
+
 pub struct Recorder {
     out: std::io::BufWriter<std::fs::File>,
     count: usize,
@@ -121,6 +128,12 @@ impl Recorder {
         })();
         if let Err(e) = result {
             self.error = Some(e);
+        }
+    }
+    /// Writes collected records, oldest first.
+    pub fn write_all(&mut self, entries: impl IntoIterator<Item = Entry>) {
+        for entry in entries {
+            self.record(&entry.action, entry.launcher);
         }
     }
     pub fn flush(&mut self) -> AppResult<()> {
@@ -562,6 +575,50 @@ fn replay_reader(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn launcher(x: f64) -> Launcher {
+        Launcher {
+            position: [x, 5000., 0.],
+            basis: Basis::new(0.1, 0., 0.),
+            speed_fps: 700.,
+            velocity: [0., 0., 700.],
+            bay_ready: true,
+            radar_power: true,
+            radar: true,
+            jammer: false,
+            alive: true,
+            controls: Controls::default(),
+        }
+    }
+    /// Records that combat collects and the app writes are the bytes a
+    /// recorder writes when given the same records directly.
+    #[test]
+    fn collected_records_write_the_same_bytes() {
+        let dir = std::env::temp_dir().join(format!("tore-tape-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = crate::ai_wings::tests::combat_fixture(false)
+            .configuration()
+            .clone();
+        let data = BTreeMap::new();
+        let names = ["tick", "fire", "release", "airport-state:1:0:1", "reset"];
+        let mut direct = Recorder::new(&dir.join("direct"), &data, &config, "UKR").unwrap();
+        let mut drained = Recorder::new(&dir.join("drained"), &data, &config, "UKR").unwrap();
+        let mut entries = Vec::new();
+        for (i, name) in names.into_iter().enumerate() {
+            direct.record(name, launcher(i as f64));
+            entries.push(Entry {
+                action: name.into(),
+                launcher: launcher(i as f64),
+            });
+        }
+        drained.write_all(entries);
+        direct.flush().unwrap();
+        drained.flush().unwrap();
+        assert_eq!(
+            std::fs::read(dir.join("direct")).unwrap(),
+            std::fs::read(dir.join("drained")).unwrap()
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn the_dry_station_hand_on_round_trips_through_a_tape() {
         use tore_sim::combat::live::Command;

@@ -375,10 +375,10 @@ impl World {
         }
         out.cues.push(Cue::Flown);
         self.combat.controller.space(input.fire, false, false);
-        if let Some(recorder) = &mut self.combat.recorder {
+        if self.combat.recording_tape() {
             let airport = airport_aircraft(&self.terrain, &self.flight, self.airport_nav_mode);
-            recorder.record(
-                &format!(
+            self.combat.record_tape(
+                format!(
                     "airport-state:{}:{}:{}",
                     u8::from(airport.nav_mode),
                     u8::from(airport.gear_down),
@@ -620,16 +620,14 @@ impl World {
                     },
                     combat::launcher(&self.flight),
                 );
-                if let Some(recorder) = &mut self.combat.recorder {
-                    recorder.record(
-                        if self.airport_nav_mode {
-                            "airport-nav:1"
-                        } else {
-                            "airport-nav:0"
-                        },
-                        combat::launcher(&self.flight),
-                    );
-                }
+                self.combat.record_tape(
+                    if self.airport_nav_mode {
+                        "airport-nav:1"
+                    } else {
+                        "airport-nav:0"
+                    },
+                    combat::launcher(&self.flight),
+                );
                 out.cues.push(Cue::Message(
                     if self.airport_nav_mode {
                         "Navigation mode selected"
@@ -640,12 +638,10 @@ impl World {
                 ));
             }
             AirportInput::Command(command) => {
-                if let Some(recorder) = &mut self.combat.recorder {
-                    recorder.record(
-                        &combat_tape::airport_command_name(command),
-                        combat::launcher(&self.flight),
-                    );
-                }
+                self.combat.record_tape(
+                    combat_tape::airport_command_name(command),
+                    combat::launcher(&self.flight),
+                );
                 let aircraft = airport_aircraft(&self.terrain, &self.flight, self.airport_nav_mode);
                 for event in
                     self.airport_service
