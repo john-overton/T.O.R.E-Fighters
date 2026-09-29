@@ -644,6 +644,11 @@ every that many ticks. These are development harness options, not game behaviour
   `unlimited-fuel`, `unlimited-ammo`, `invulnerable` or `realistic-damage`. It also applies to
   `--live-fire` captures.
 - `--flight-fuel POUNDS` sets the internal fuel, to run dry on purpose.
+- `--loadout none|guns` now also applies to a headless ground start (payload and fuel systems follow
+  it), and a headless run ends with a `fuel_end:` line of internal and external fuel.
+- The `--live-fire ... --combat-probe-ticks` line now ends with `payload_start_lb`, `payload_lb`,
+  `flight_payload_lb` (what the flight model carries: the stores less the tank fuel already burned)
+  and `external_fuel_lb`, so a `--combat-command jettison` run shows the mass change.
 - `--flight-start X,Z,HEADING,AGL` starts the probe over a real theater (`--theater`), at that
   world position in feet, heading in degrees and height above the ground. With terrain the
   `extremes:` line adds `min_agl_ft` and `under_ground_ticks`, and a `map_extent_ft:` line gives
