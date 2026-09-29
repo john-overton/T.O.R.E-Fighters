@@ -658,6 +658,21 @@ floor. A separate terrain event can replace the current command with a
 records), but it is masked while motion commands run, so its delivery
 frequency is open.
 
+**Opinionated, requested by John on 2026-09-29 (numbers are agent
+decisions):** the look-ahead scales with speed. The floor looks six seconds
+of travel ahead, never less than the retail 1,000 ft, and uses the highest
+ground at up to twelve evenly spaced points along that track, so a ridge
+inside it is not skipped. It also asks at least for the flight-path climb that
+clears that ground by the minimum altitude, because B44's arc test alone
+reduces to a 5 degree climb at supersonic turn radii. Six seconds comes from
+the worst case the bug battery met: a fighter banked 90 degrees rolls level in
+2 s at the 45 degree per second cap, the pitch loop below the floor closes
+over 1 s, and at 1,800 ft/s with the 2.2 G available near the top of its
+envelope, raising the flight path 14 degrees for the steepest hillsides takes
+about 3 s more. At 440 kt the look-ahead is 4,500 ft; below 100 kt the retail
+1,000 ft applies. Before this, supersonic AI aircraft saw rising ground 0.6 s
+before hitting it.
+
 Other overrides: above its ceiling altitude the aircraft does not accept a
 climbing pitch request. On the ground it holds its entry pitch, and may pitch
 up only above minimum speed unless in the airborne part of a takeoff; the

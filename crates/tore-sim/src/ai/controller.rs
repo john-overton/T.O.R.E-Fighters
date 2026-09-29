@@ -154,8 +154,11 @@ pub struct OwnState {
     pub limits: SpeedLimits,
     pub altitude_msl_ft: f64,
     pub agl_ft: f64,
-    /// Terrain height 1000 ft ahead, for the B44 floor.
+    /// Highest terrain along the speed-scaled look-ahead, for the B44 floor.
     pub terrain_ahead_ft: f64,
+    /// Flight-path climb that clears the look-ahead's terrain by the minimum
+    /// altitude, degrees; -90 when none is needed or not measured.
+    pub terrain_climb_deg: f64,
     /// The record's minimum-altitude value; 300 in every inspected record.
     pub minimum_altitude_ft: f64,
     pub at_ceiling: bool,
@@ -3254,7 +3257,18 @@ impl Controller {
             minimum_altitude_feet: frame.own.minimum_altitude_ft,
             turn_radius_feet: radius,
         })?;
-        Ok(Some(floor.pitch_floor_deg))
+        // Opinionated (John, 2026-09-29): with the longer look-ahead the
+        // floor also asks for the climb gradient that clears the highest
+        // ground it can see, which B44's arc test alone reduces to 5 degrees
+        // at supersonic turn radii.
+        Ok(Some(
+            floor.pitch_floor_deg.max(
+                frame
+                    .own
+                    .terrain_climb_deg
+                    .min(steering::PITCH_REQUEST_LIMIT_DEG),
+            ),
+        ))
     }
 
     /// Build the steering request for a resolved intent (B44).
@@ -3403,6 +3417,7 @@ mod tests {
             altitude_msl_ft: 20000.0,
             agl_ft: 20000.0,
             terrain_ahead_ft: 0.0,
+            terrain_climb_deg: -90.0,
             minimum_altitude_ft: 300.0,
             at_ceiling: false,
             on_ground: false,

@@ -599,6 +599,7 @@ mod tests {
             altitude_msl_ft: position[1],
             agl_ft: position[1],
             terrain_ahead_ft: 0.,
+            terrain_climb_deg: -90.,
             minimum_altitude_ft: 300.,
             at_ceiling: false,
             on_ground: false,

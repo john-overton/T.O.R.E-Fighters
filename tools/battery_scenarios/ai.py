@@ -289,15 +289,7 @@ _STRIP = "1,074 ft strip, the roll runs off the end (docs/testing/lane-ai.md, de
 # Failures that are understood and documented in docs/testing/lane-ai.md. Each
 # turns red when it starts to pass, so the entry gets removed with the fix.
 KNOWN_FAILURES = {
-    "ai-big-a4e-vs-f22n-researched": _LOOKAHEAD,
-    "ai-big-x31-vs-faxx-researched": _LOOKAHEAD,
-    "ai-long-15v15": _LOOKAHEAD,
-    "ai-damaged-fault04-gun": _LOOKAHEAD,
-    "ai-damaged-fault04-hit": _LOOKAHEAD,
-    "ai-fuzz-0014": _LOOKAHEAD,
-    "ai-fuzz-0028": _LOOKAHEAD,
-    "ai-fuzz-0053": _LOOKAHEAD,
-    "ai-known-f22-leader-wingman-ukr3": "wingman far below its slot in the Intercept phase (docs/testing/lane-ai.md, decision 14)",
+    "ai-fuzz-0028": "F-22 wingmen follow the test harness leader at 1,070 kt to the map edge (docs/testing/lane-ai.md, decision 5)",
     "ai-theater-apa-takeoff-a3": _STRIP,
     "ai-theater-lfa-takeoff-a3": _STRIP,
     "ai-theater-cub-takeoff-a1": "friendly wing with no route leaves the map on a Key West ground start (docs/testing/lane-ai.md, decision 5)",

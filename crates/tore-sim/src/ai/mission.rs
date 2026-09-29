@@ -3110,10 +3110,16 @@ impl AiActor {
     fn own_state(&self, ground: &dyn Fn(f64, f64) -> f64) -> OwnState {
         let terrain = ground(self.flight.position[0], self.flight.position[2]);
         let agl = self.flight.position[1] - terrain;
-        // Terrain 1000 ft ahead of the aircraft, for the B44 floor.
+        // Terrain ahead of the aircraft, for the B44 floor: the highest
+        // ground along the look-ahead (see [`terrain_lookahead_ft`]).
         let heading = self.flight.yaw;
-        let ahead_x = self.flight.position[0] + heading.sin() * 1000.0;
-        let ahead_z = self.flight.position[2] + heading.cos() * 1000.0;
+        let (terrain_ahead, terrain_climb) = terrain_ahead_ft(
+            self.flight.position,
+            heading,
+            terrain_lookahead_ft(self.flight.speed),
+            MINIMUM_ALTITUDE_FT,
+            ground,
+        );
         let limits = self.speed_limits();
         let (positive_g, _negative_g) = self.g_limits();
         OwnState {
@@ -3126,7 +3132,8 @@ impl AiActor {
             limits,
             altitude_msl_ft: self.flight.position[1],
             agl_ft: agl,
-            terrain_ahead_ft: ground(ahead_x, ahead_z),
+            terrain_ahead_ft: terrain_ahead,
+            terrain_climb_deg: terrain_climb,
             minimum_altitude_ft: MINIMUM_ALTITUDE_FT,
             at_ceiling: false,
             on_ground: agl <= GROUND_CONTACT_FT,
@@ -3569,6 +3576,86 @@ fn dummy_frame(own: &OwnState) -> DecisionFrame<'static> {
 }
 
 /// The record's minimum-altitude value; 300 in every inspected record (B44).
+/// B44's retail terrain look-ahead, feet; the floor of the speed-scaled one.
+pub const TERRAIN_LOOKAHEAD_MIN_FT: f64 = 1000.0;
+/// Opinionated (requested by John, 2026-09-29; number an agent decision):
+/// the terrain floor looks this many seconds of travel ahead, never less than
+/// [`TERRAIN_LOOKAHEAD_MIN_FT`]. Derivation: an AI fighter may be banked
+/// 90 degrees when the floor bites; rolling level at the 45 degree per second
+/// cap takes 2 s, the pitch loop below the floor closes over 1 s, and at a
+/// supersonic 1,800 ft/s with the 2.2 G a fighter has near the top of its
+/// envelope, raising the flight path by the 14 degrees of the steepest
+/// hillsides the battery met takes about 3 s more (angle times speed over
+/// 32.174 times 1.2 G of excess). Six seconds therefore lets it clear a
+/// rising hillside it would otherwise meet 0.6 s after seeing it; at 440 kt
+/// it is 4,500 ft, and below 100 kt the retail 1,000 ft still applies.
+pub const TERRAIN_LOOKAHEAD_S: f64 = 6.0;
+/// Ground samples along the look-ahead, at most one per this many feet.
+const TERRAIN_SAMPLE_FT: f64 = 1000.0;
+/// At most this many samples, so long look-aheads stay cheap.
+const TERRAIN_SAMPLES_MAX: f64 = 12.0;
+
+/// How far ahead the B44 terrain floor looks at this speed, feet.
+pub fn terrain_lookahead_ft(speed_fps: f64) -> f64 {
+    (speed_fps.max(0.0) * TERRAIN_LOOKAHEAD_S).max(TERRAIN_LOOKAHEAD_MIN_FT)
+}
+
+#[cfg(test)]
+mod terrain_lookahead_tests {
+    use super::*;
+
+    #[test]
+    fn the_look_ahead_scales_with_speed_and_sees_ridges_inside_it() {
+        // John, 2026-09-29: 1,000 ft at low speed, six seconds of travel fast.
+        assert_eq!(terrain_lookahead_ft(100.0), 1000.0);
+        assert_eq!(terrain_lookahead_ft(1500.0), 9000.0);
+        // A 2,000 ft ridge 4,000 ft ahead of an aircraft at 1,000 ft, flying
+        // north: seen, and the climb to clear it by 300 ft is the gradient.
+        let ridge = |_: f64, z: f64| {
+            if (3500.0..4500.0).contains(&z) {
+                2000.0
+            } else {
+                0.0
+            }
+        };
+        let (highest, climb) = terrain_ahead_ft([0.0, 1000.0, 0.0], 0.0, 9000.0, 300.0, &ridge);
+        assert_eq!(highest, 2000.0);
+        let expected = (1300.0_f64).atan2(4000.0).to_degrees();
+        assert!((climb - expected).abs() < 0.5, "{climb} vs {expected}");
+        // The retail single point 1,000 ft ahead would have seen flat ground.
+        let (near, _) = terrain_ahead_ft([0.0, 1000.0, 0.0], 0.0, 1000.0, 300.0, &ridge);
+        assert_eq!(near, 0.0);
+    }
+}
+
+/// The highest ground along `reach` feet of the horizontal track, sampled
+/// evenly and always including the end, so a ridge inside the look-ahead is
+/// not skipped; and the flight-path climb, degrees, that clears every sample
+/// by `clearance_ft` (-90 when none is needed).
+pub fn terrain_ahead_ft(
+    position: [f64; 3],
+    heading_rad: f64,
+    reach_ft: f64,
+    clearance_ft: f64,
+    ground: &dyn Fn(f64, f64) -> f64,
+) -> (f64, f64) {
+    let samples = (reach_ft / TERRAIN_SAMPLE_FT)
+        .ceil()
+        .clamp(1.0, TERRAIN_SAMPLES_MAX) as u32;
+    let mut highest = f64::NEG_INFINITY;
+    let mut climb = -90.0_f64;
+    for k in 1..=samples {
+        let d = reach_ft * f64::from(k) / f64::from(samples);
+        let h = ground(
+            position[0] + heading_rad.sin() * d,
+            position[2] + heading_rad.cos() * d,
+        );
+        highest = highest.max(h);
+        climb = climb.max((h + clearance_ft - position[1]).atan2(d).to_degrees());
+    }
+    (highest, climb)
+}
+
 pub const MINIMUM_ALTITUDE_FT: f64 = 300.0;
 /// Fitted: AGL at or below this counts as ground contact for the B44 overrides.
 pub const GROUND_CONTACT_FT: f64 = 5.0;
@@ -5529,6 +5616,7 @@ mod tests {
             altitude_msl_ft: 0.0,
             agl_ft: 0.0,
             terrain_ahead_ft: 0.0,
+            terrain_climb_deg: -90.0,
             minimum_altitude_ft: 300.0,
             at_ceiling: false,
             on_ground: false,
