@@ -616,6 +616,12 @@ impl AiActor {
         self.sensors.as_ref()
     }
 
+    /// The aircraft this actor is engaged with or searching for, which a
+    /// human taking the aircraft over gets designated.
+    pub fn current_target(&self) -> Option<u32> {
+        self.controller.target().or(self.search_target)
+    }
+
     /// Current observations and frozen records, exposed for diagnostics only.
     pub fn awareness(&self) -> &Memory {
         &self.awareness

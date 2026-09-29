@@ -1379,7 +1379,9 @@ aircraft whose pilot is still aboard can change hands.
    station's rounds from the AI's stores (failed stations stay failed), chaff and
    flares from its dispensers. Its sensors and missile warnings move over; the
    AI's equipment failures become the ownship's failure flags.
-4. The gun is selected and armed, as at an airborne start, and the AI's current
+4. The weapon follows a flight start's rule (the gun if it carries something,
+   else the first loaded station Guns only allows, else NAV, the bug bash's
+   rule), belly wear not yet a whole hit point stays owed, and the AI's current
    target is designated if the aircraft's sensors hold it (*agent proposal*).
    The autopilot is off, and the human's controls apply from this tick.
 5. If the aircraft leads its wing, the human becomes the wing's leader and the
@@ -1400,6 +1402,65 @@ aircraft whose pilot is still aboard can change hands.
 Handoff tests check that position and speed change by no more than one normal
 tick of flight, that fuel and rounds are identical, and that hit points keep
 their fraction to within one point.
+
+*Built (B6).* The handoff is two calls on `World`, `take_plane(seat, plane)` and
+`give_back_plane(seat)`, and the mission commands `MissionCommand::Take { seat,
+plane }` and `GiveBack { seat }` that `step_with` applies first in the tick, in
+the order given, before any seat's commands. `can_take` and `can_give_back` say
+whether a handoff would go through; a refused one changes nothing, and inside a
+tick it is an error the host sees, so a host checks first. Each seat's input is
+checked against the planes as the commands leave them: a seat that takes a plane
+sends input for that tick, and a seat that gives its plane back sends none.
+
+The two conversions are in `tore-sim` combat (`live::Ownship::from_ai` and
+`Ownship::into_ai`, in `combat/live/handoff.rs`); the world's half is
+`world/handoff.rs`. What each field becomes:
+
+| Kept | AI to human | Human to AI |
+| --- | --- | --- |
+| Hit points | The row's fraction of `initial_hp` becomes the same fraction of the configuration's `damage_capacity` (twice the hit points), never below 1 for a living aircraft | The reverse, into the configuration's `hit_points` |
+| Damage taken, hit-section amounts, fault counts | Same fractions; the breakup variant and section copy over | Same, back |
+| Station rounds | Each station's rounds from the AI's store (an unlimited store counts as the station's full count); a station out of action gets the ownship's failed mark | Rounds and the failed mark back into a store per station, built as at mission start |
+| Chaff and flares | From the AI's radar and infrared dispensers | Back into the two dispensers |
+| Sensors and missile warnings | Moved over as they are | Moved back |
+| Avionics failures | The AI's radar, infrared, visual and RWR failures are the ownship's flags; a jammer the row lost is `ecm_failed` | The reverse |
+| Flight state | Moves to the cockpit unchanged (autopilot off, mission cheats applied) | Moves to the actor unchanged (cheats cleared: an AI aircraft carries none) |
+
+A living aircraft never rounds to zero hit points, so a handoff cannot kill it.
+The round trip keeps rounds, chaff and flares exactly and hit points to within
+one point.
+
+*Agent decisions in B6 (not settled by the brief):*
+
+- A station's failed mark is the AI's own record of a fault (`damaged_stations`),
+  not the `inhibited` flag the Air combat guns only setting also raises, so
+  switching that setting on does not fail a human's missiles for good. A store
+  that arrives at the AI already inhibited is recorded as damaged.
+- The cockpit of a taken plane starts fresh where the AI kept nothing: turbulence
+  at its default and seeded as a restart seeds it, no selected airport, NAV mode
+  off (the gun is armed), the result tracker on the mission's home base. The crew
+  voice, airfield radio and crew label are built for the plane's aircraft type,
+  which is found among the mission's other aircraft types; the combat
+  configuration is the AI's own, else the mission's for that type, else a flown
+  aircraft's.
+- The AI's current target (the one it engages or searches for) is designated
+  through combat's own designation, so it holds only if the aircraft's sensors
+  hold the contact, and no tape or command note records it.
+- The new actor takes the skill the aircraft had before a human took it, else
+  a wingmate's, else the side's first AI aircraft's. It gets no assignment, as
+  an aircraft at mission start has none before the mission preset and group
+  objectives are applied, so a preset such as CAP or Hold does not reach an
+  aircraft that comes back from a human, and it acts as under Free.
+- The first human-flown plane (the presented one, lowest id) cannot be given
+  back: the tick needs a human and `Combat::remove_ownship` keeps the first.
+  Taking a plane with a lower id than the first ownship makes that one the
+  first, so a host that presents one seat should reserve the lowest ids for it.
+- Only a plane whose row is alive and whose pilot is aboard changes hands, in
+  both directions. A destroyed or ejected plane stays as it is.
+- Rendering: a plane given back that has no drawn model among the mission's
+  other aircraft (plane 0 when its type is not one the wings fly) is hidden in
+  the tick's picture until the app supplies a model for it. Combat's snapshot
+  looks a row's model up by its place among the mission's other aircraft.
 
 #### The AI with several humans
 
@@ -1675,7 +1736,8 @@ applies when play resumes (stage B).
      humans](#the-ai-with-several-humans).
    - **B4 radio**: the listener rule, queues, crew voice and tower for each seat.
    - **B5 debrief and recorder**: both for a chosen seat.
-3. **B6** (lead): handoff, with its tests.
+3. **B6** (lead): handoff, with its tests. Done: see [handoff between the AI
+   and a human](#handoff-between-the-ai-and-a-human).
 4. **B7**: a headless test with two humans in each of two wings flying through a
    fight, succession tests with a human and an AI lead, and the hybrid probe
    comparison.

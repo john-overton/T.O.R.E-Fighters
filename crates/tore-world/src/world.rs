@@ -21,6 +21,7 @@ use tore_sim::{attitude, flight};
 #[cfg(test)]
 mod command_tests;
 mod commands;
+mod handoff;
 pub use commands::{MissionCommand, OrderCall, OrderOutcome, OrderReply, Settings};
 #[cfg(test)]
 mod tick_tests;
@@ -410,6 +411,55 @@ impl World {
             .is_none_or(|own| !own.armed);
     }
 
+    /// Checks the seats' inputs against the planes the tick's mission commands
+    /// will leave, before any of them applies: every seat that will fly a
+    /// plane sends exactly one input for [`Self::tick`], and no other seat
+    /// sends any. A handoff changes who flies, so a seat that takes a plane
+    /// sends input for the tick and one that gives its plane back sends none.
+    fn check_inputs(&self, mission: &[MissionCommand], inputs: &[SeatInput]) -> WorldResult<()> {
+        let mut flying: Vec<SeatId> = self
+            .roster
+            .seats()
+            .iter()
+            .filter(|seat| seat.plane.is_some())
+            .map(|seat| seat.id)
+            .collect();
+        for command in mission {
+            match *command {
+                MissionCommand::Take { seat, .. } if !flying.contains(&seat) => flying.push(seat),
+                MissionCommand::GiveBack { seat } => flying.retain(|s| *s != seat),
+                _ => {}
+            }
+        }
+        let tick = self.tick();
+        for input in inputs {
+            if input.tick != tick {
+                return Err(format!(
+                    "seat {} sent input for tick {}, but the next tick is {tick}",
+                    input.seat.0, input.tick
+                )
+                .into());
+            }
+            if inputs
+                .iter()
+                .filter(|other| other.seat == input.seat)
+                .count()
+                > 1
+            {
+                return Err(format!("seat {} sent two inputs for one tick", input.seat.0).into());
+            }
+            if !flying.contains(&input.seat) {
+                return Err(format!("seat {} flies no plane", input.seat.0).into());
+            }
+        }
+        for seat in flying {
+            if !inputs.iter().any(|input| input.seat == seat) {
+                return Err(format!("seat {} sent no input for tick {tick}", seat.0).into());
+            }
+        }
+        Ok(())
+    }
+
     /// Each cockpit's input for this tick, in cockpit order: every seat that
     /// flies a plane sends exactly one, for [`Self::tick`], and no other seat
     /// sends any.
@@ -481,14 +531,18 @@ impl World {
         commands_applied: impl FnOnce(&World, &TickOutput) -> WorldResult<()>,
     ) -> WorldResult<()> {
         *out = TickOutput::default();
+        self.check_inputs(mission, inputs)?;
+        // Mission commands first, then each seat's commands in seat order on
+        // its own plane. A handoff changes who flies which plane, so the
+        // seats' inputs are checked against the planes as the commands leave
+        // them: a seat that took a plane sends input for this tick, a seat
+        // that gave its plane back sends none.
+        for command in mission {
+            self.apply_mission_command(command)?;
+        }
         let inputs = self.cockpit_inputs(inputs)?;
         if inputs.is_empty() {
             return Err("a tick needs a human-flown plane".into());
-        }
-        // Mission commands first, then each seat's commands in seat order on
-        // its own plane.
-        for command in mission {
-            self.apply_mission_command(command);
         }
         let mut by_seat: Vec<(usize, &SeatInput)> = inputs.iter().copied().enumerate().collect();
         by_seat.sort_by_key(|(_, input)| input.seat);

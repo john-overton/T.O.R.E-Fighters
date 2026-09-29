@@ -482,6 +482,58 @@ pub struct FormationBatch {
     pub flush: bool,
 }
 
+/// The AI's weapon stations for an aircraft built from `config`: one per
+/// configuration station, in station order, with the configuration's full
+/// counts. With `guns_only` every station but the gun starts empty.
+pub(crate) fn station_specs(
+    config: &live::Configuration,
+    guns_only: bool,
+) -> Vec<tore_sim::ai::mission::StationSpec> {
+    let mut stores = Vec::new();
+    for (index, station) in config.stations.iter().enumerate() {
+        let w = &station.weapon;
+        let gun = w.source == config.aircraft.gun();
+        let mut spec = if gun {
+            simple_stations(0, u32::from(station.count), AI_STORE_SPEED).remove(0)
+        } else {
+            simple_stations(u32::from(station.count), 0, AI_STORE_SPEED).remove(0)
+        };
+        if guns_only && !gun {
+            spec.store.rounds = tore_sim::ai::weapon_service::Rounds::Finite(0);
+        }
+        spec.station = tore_sim::ai::weapon_service::StationId(index as u8);
+        spec.guided = w.flags & 1 != 0;
+        spec.capability = tore_sim::ai::weapon_service::StoreCapability {
+            air: w.flags & 0x10000 != 0,
+            surface: w.flags & 0x20000 != 0,
+        };
+        // The reviewed default inventory owns the record used at release.
+        spec.debit = u32::from(w.burst.actual_rounds_per_game).max(1);
+        spec.external_round_lbs = if station.internal {
+            0.0
+        } else {
+            f64::from(w.weight.max(0))
+        };
+        // Fitted: one representative projectile per release, as in
+        // the player live adapter. The source ammunition debit remains separate.
+        spec.projectile_count = 1;
+        spec.store_speed = ScalarSpeed(f64::from(w.movement.maximum_speed));
+        spec.tracking_delay =
+            tore_sim::ai::weapon_service::Delay::quarters(u32::from(w.guidance.track_t));
+        spec.damage_vs_category = f64::from(w.damage.by_class[0]);
+        spec.mount = station.mount;
+        spec.requires_radar = w.flags & 0x200 != 0;
+        spec.requires_sensor = w.flags & 0x400 != 0;
+        let zone = w.seeker.zones[1];
+        spec.minimum_range_ft = f64::from(zone.minimum_range);
+        spec.maximum_range_ft = Some(f64::from(zone.maximum_range));
+        spec.employment_limit_deg = None;
+        spec.employment_zone = Some(zone);
+        stores.push(spec);
+    }
+    stores
+}
+
 /// The live AI bridge for one mission.
 pub struct AiWings {
     mission: AiMission,
@@ -505,6 +557,9 @@ pub struct AiWings {
     /// Stations a system fault has put out of action; they stay out when
     /// Air combat guns only is turned off.
     damaged_stations: std::collections::BTreeSet<(u32, u8)>,
+    /// The skill of each aircraft a human has taken, kept for putting it
+    /// back in the AI when the human gives it back.
+    handed_over: BTreeMap<u32, tore_sim::ai::experience::ResolvedExperience>,
     /// Draws for what a damaged ECM suite loses, apart from the decoy rolls.
     fault_random: tore_sim::ai::DecisionRandom,
     /// Projectile ids already turned into threat reports.
@@ -781,48 +836,11 @@ impl AiWings {
                     .cloned()
                     .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
             })?;
-            let mut stores = Vec::new();
+            let stores = station_specs(&config, guns_only);
             for (index, station) in config.stations.iter().enumerate() {
-                let w = &station.weapon;
-                let gun = w.source == aircraft.id.gun();
-                let mut spec = if gun {
-                    simple_stations(0, u32::from(station.count), AI_STORE_SPEED).remove(0)
-                } else {
-                    simple_stations(u32::from(station.count), 0, AI_STORE_SPEED).remove(0)
-                };
-                if guns_only && !gun {
-                    spec.store.rounds = tore_sim::ai::weapon_service::Rounds::Finite(0);
-                }
-                spec.station = tore_sim::ai::weapon_service::StationId(index as u8);
-                spec.guided = w.flags & 1 != 0;
-                spec.capability = tore_sim::ai::weapon_service::StoreCapability {
-                    air: w.flags & 0x10000 != 0,
-                    surface: w.flags & 0x20000 != 0,
-                };
-                // The reviewed default inventory owns the record used at release.
-                spec.debit = u32::from(w.burst.actual_rounds_per_game).max(1);
-                spec.external_round_lbs = if station.internal {
-                    0.0
-                } else {
-                    f64::from(w.weight.max(0))
-                };
-                // Fitted: one representative projectile per release, as in
-                // the player live adapter. The source ammunition debit remains separate.
-                spec.projectile_count = 1;
-                spec.store_speed = ScalarSpeed(f64::from(w.movement.maximum_speed));
-                spec.tracking_delay =
-                    tore_sim::ai::weapon_service::Delay::quarters(u32::from(w.guidance.track_t));
-                spec.damage_vs_category = f64::from(w.damage.by_class[0]);
-                spec.mount = station.mount;
-                spec.requires_radar = w.flags & 0x200 != 0;
-                spec.requires_sensor = w.flags & 0x400 != 0;
-                let zone = w.seeker.zones[1];
-                spec.minimum_range_ft = f64::from(zone.minimum_range);
-                spec.maximum_range_ft = Some(f64::from(zone.maximum_range));
-                spec.employment_limit_deg = None;
-                spec.employment_zone = Some(zone);
-                bridge.weapons.insert((actor.id(), index as u8), w.clone());
-                stores.push(spec);
+                bridge
+                    .weapons
+                    .insert((actor.id(), index as u8), station.weapon.clone());
             }
             let payload = f64::from(config.external_equipment_lbs)
                 + stores
@@ -1084,6 +1102,7 @@ impl AiWings {
             device_effectiveness: BTreeMap::new(),
             configs: BTreeMap::new(),
             damaged_stations: Default::default(),
+            handed_over: Default::default(),
             fault_random: tore_sim::ai::DecisionRandom::seeded(0xfa17),
             seen_projectiles: Vec::new(),
             ai_shots: BTreeMap::new(),
@@ -1118,11 +1137,40 @@ impl AiWings {
     /// Take AI aircraft `id` out of the AI, for a human to fly. The others
     /// keep their order. The combat target row stays where it is: the caller
     /// turns it into the human's own record.
+    /// Belly scrape wear owed by an AI aircraft and not yet a whole hit point,
+    /// taken out for a handoff to a human.
+    pub fn take_scrape_carry(&mut self, id: u32) -> f64 {
+        self.scrape_carry.remove(&id).unwrap_or(0.)
+    }
+    /// The wear an aircraft brings back from a human (see
+    /// [`Self::take_scrape_carry`]).
+    pub fn set_scrape_carry(&mut self, id: u32, carry: f64) {
+        if carry > 0. {
+            self.scrape_carry.insert(id, carry);
+        }
+    }
     pub fn remove_actor(&mut self, id: u32) -> Option<RemovedActor> {
         let slot = *self.slot(id)?;
         let actor = self.mission.remove_actor(id)?;
         let experience = actor.experience();
-        let parts = actor.into_parts();
+        let mut parts = actor.into_parts();
+        // What the human gets is what the aircraft's systems put out of
+        // action, not what the mission's Air combat guns only setting holds
+        // back; that setting is the AI's, and the human's selection ring
+        // has its own.
+        let gun = slot.aircraft.gun();
+        for spec in &mut parts.stations {
+            let by_setting = self.guns_only
+                && self
+                    .weapons
+                    .get(&(id, spec.station.0))
+                    .is_some_and(|w| w.source != gun)
+                && !self.damaged_stations.contains(&(id, spec.station.0));
+            if by_setting {
+                spec.store.inhibited = false;
+            }
+        }
+        self.handed_over.insert(id, experience);
         self.slots.retain(|s| s.id != id);
         self.weapons.retain(|(actor, _), _| *actor != id);
         self.device_effectiveness.remove(&id);
@@ -1197,6 +1245,14 @@ impl AiWings {
                 },
             }),
         };
+        // A station that arrives out of action is out for good, as a fault
+        // leaves it, and stays so when Air combat guns only is turned off.
+        let failed: Vec<u8> = setup
+            .stations
+            .iter()
+            .filter(|spec| spec.store.inhibited)
+            .map(|spec| spec.station.0)
+            .collect();
         let mut actor = AiActor::new(setup).map_err(|e| e.to_string())?;
         if self.flight_model == AiFlightModel::AllHybrid && actor.flight().research.is_none() {
             actor.flight_mut().enable_research(1 + insert.id as i32)?;
@@ -1240,6 +1296,9 @@ impl AiWings {
         self.mission
             .insert_actor(actor)
             .map_err(|e| e.to_string())?;
+        self.damaged_stations
+            .extend(failed.into_iter().map(|station| (insert.id, station)));
+        self.handed_over.remove(&insert.id);
         let at = self.slots.partition_point(|s| s.id < insert.id);
         self.slots.insert(
             at,
@@ -1383,6 +1442,30 @@ impl AiWings {
 
     pub fn slot(&self, id: u32) -> Option<&Slot> {
         self.slots.iter().find(|s| s.id == id)
+    }
+
+    /// The combat configuration of AI aircraft `id`, when the bridge holds one.
+    pub fn configuration(&self, id: u32) -> Option<&live::Configuration> {
+        self.configs.get(&id)
+    }
+
+    /// The skill for an aircraft of `side` and `wing` that joins the AI
+    /// (index from 0): its own if the AI flew it before and a human took it,
+    /// otherwise a wingmate's, otherwise the side's first aircraft's.
+    pub fn experience_for(
+        &self,
+        id: u32,
+        side: launch::Side,
+        wing: u8,
+    ) -> Option<tore_sim::ai::experience::ResolvedExperience> {
+        let of = |slot: &Slot| self.mission.actor(slot.id).map(AiActor::experience);
+        self.handed_over.get(&id).copied().or_else(|| {
+            self.slots
+                .iter()
+                .filter(|s| s.side == side && s.wing_number == wing + 1)
+                .find_map(of)
+                .or_else(|| self.slots.iter().filter(|s| s.side == side).find_map(of))
+        })
     }
 
     /// Enemy AI cheat: every enemy aircraft flies at `level` from now on, or

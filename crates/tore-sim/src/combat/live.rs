@@ -1317,6 +1317,14 @@ impl Ownship {
             *loaded |= ammo & 0x7fff != 0;
         }
     }
+    /// Belly scrape wear owed and not yet a whole hit point, which a handoff
+    /// carries between the AI and a human.
+    pub fn scrape_carry(&self) -> f64 {
+        self.scrape_carry
+    }
+    pub fn set_scrape_carry(&mut self, carry: f64) {
+        self.scrape_carry = carry;
+    }
     /// Whether a station was loaded at the start of the mission, whatever it
     /// holds now.
     pub fn was_loaded(&self, station: usize) -> bool {

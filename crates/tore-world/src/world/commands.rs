@@ -4,7 +4,7 @@
 
 use super::{Cue, SeatInput, TickOutput, World};
 use crate::{
-    ai_wings, combat, comms,
+    WorldResult, ai_wings, combat, comms,
     seats::{PlaneId, SeatCommand, SeatId},
 };
 use tore_sim::{ai::wing::PlayerOrder, cheats::Cheats, combat::live::Command as Live};
@@ -16,6 +16,14 @@ use tore_sim::{ai::wing::PlayerOrder, cheats::Cheats, combat::live::Command as L
 pub enum MissionCommand {
     /// New settings in force.
     Settings(Settings),
+    /// A human takes the AI-flown `plane` from `seat`: joining, or rejoining
+    /// the aircraft reserved for it ([`World::take_plane`]). The seat sends
+    /// input for this tick, as it now flies a plane.
+    Take { seat: SeatId, plane: PlaneId },
+    /// A human gives its plane back to the AI: leaving, dropping or being
+    /// kicked ([`World::give_back_plane`]). The seat sends no input for this
+    /// tick.
+    GiveBack { seat: SeatId },
 }
 
 /// What the player's order call does to the radio channel. Agent decision:
@@ -66,7 +74,11 @@ pub struct Settings {
 impl World {
     /// Puts a mission command into force: every human-flown plane, combat and
     /// the AI wings take the new cheats.
-    pub(super) fn apply_mission_command(&mut self, command: &MissionCommand) {
+    ///
+    /// A handoff the mission refuses (see [`World::can_take`] and
+    /// [`World::can_give_back`]) is an error, which stops the tick before
+    /// anything after it in the list changes: a host checks first.
+    pub(super) fn apply_mission_command(&mut self, command: &MissionCommand) -> WorldResult<()> {
         match command {
             MissionCommand::Settings(Settings { cheats }) => {
                 for cockpit in &mut self.cockpits {
@@ -78,7 +90,10 @@ impl World {
                     wings.set_guns_only(cheats.guns_only);
                 }
             }
+            MissionCommand::Take { seat, plane } => self.take_plane(*seat, *plane)?,
+            MissionCommand::GiveBack { seat } => self.give_back_plane(*seat)?,
         }
+        Ok(())
     }
 
     /// Applies one seat's commands, in the order given, to the plane whose

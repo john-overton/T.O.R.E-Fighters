@@ -189,6 +189,57 @@ impl Roster {
         }
     }
 
+    /// A human takes the AI-flown `plane`: `seat` flies it, joining the roster
+    /// as a new seat with `crew` for its radio if it does not exist yet. The
+    /// seat must be waiting (flying no plane).
+    pub fn take_plane(
+        &mut self,
+        seat: SeatId,
+        plane: PlaneId,
+        crew: Option<comms::Crew>,
+    ) -> Result<(), String> {
+        let index = self
+            .planes
+            .binary_search_by_key(&plane, |p| p.id)
+            .map_err(|_| format!("plane {} is not in the mission", plane.0))?;
+        if self.planes[index].pilot != Pilot::Ai {
+            return Err(format!("plane {} is not flown by the AI", plane.0));
+        }
+        match self.seats.iter_mut().find(|s| s.id == seat) {
+            Some(existing) if existing.plane.is_some() => {
+                return Err(format!("seat {} already flies a plane", seat.0));
+            }
+            Some(existing) => {
+                existing.plane = Some(plane);
+                existing.crew = crew;
+                existing.wing_recipient = None;
+            }
+            None => {
+                self.seats.push(Seat {
+                    id: seat,
+                    plane: Some(plane),
+                    crew,
+                    wing_recipient: None,
+                });
+                self.seats.sort_by_key(|s| s.id);
+            }
+        }
+        self.planes[index].pilot = Pilot::Human(seat);
+        Ok(())
+    }
+
+    /// The seat gives its plane back to the AI. The seat stays, waiting.
+    /// Returns the plane, or `None` when the seat flies none.
+    pub fn release_plane(&mut self, seat: SeatId) -> Option<PlaneId> {
+        let seat = self.seats.iter_mut().find(|s| s.id == seat)?;
+        let plane = seat.plane.take()?;
+        seat.wing_recipient = None;
+        if let Some(entry) = self.planes.iter_mut().find(|p| p.id == plane) {
+            entry.pilot = Pilot::Ai;
+        }
+        Some(plane)
+    }
+
     /// The seat flying `plane`, if a human flies it.
     pub fn seat_of(&self, plane: PlaneId) -> Option<SeatId> {
         match self.plane(plane)?.pilot {
@@ -295,5 +346,36 @@ mod tests {
         assert_eq!(seat.plane, Some(PlaneId(0)));
         assert_eq!(seat.crew, Some(comms::Crew::Rio));
         assert_eq!(roster.seats().len(), 1);
+    }
+
+    #[test]
+    fn a_seat_takes_an_ai_plane_and_gives_it_back() {
+        let mut roster = Roster::single_player(
+            None,
+            [
+                (PlaneId(1), slot(Side::Friendly, 0, 1)),
+                (PlaneId(2), slot(Side::Friendly, 1, 0)),
+            ],
+        );
+        // A new seat joins by taking a plane; a plane with a human is refused.
+        assert!(roster.take_plane(SeatId(1), PlaneId(0), None).is_err());
+        assert!(roster.take_plane(SeatId(1), PlaneId(9), None).is_err());
+        roster
+            .take_plane(SeatId(1), PlaneId(2), Some(comms::Crew::Rio))
+            .unwrap();
+        assert_eq!(roster.seat_of(PlaneId(2)), Some(SeatId(1)));
+        assert_eq!(roster.seat(SeatId(1)).unwrap().plane, Some(PlaneId(2)));
+        assert_eq!(roster.seat(SeatId(1)).unwrap().crew, Some(comms::Crew::Rio));
+        // A seat flies one plane at a time.
+        assert!(roster.take_plane(SeatId(1), PlaneId(1), None).is_err());
+        // Giving it back leaves the seat waiting and the plane to the AI.
+        assert_eq!(roster.release_plane(SeatId(1)), Some(PlaneId(2)));
+        assert_eq!(roster.seat_of(PlaneId(2)), None);
+        assert_eq!(roster.seat(SeatId(1)).unwrap().plane, None);
+        assert_eq!(roster.release_plane(SeatId(1)), None);
+        // The waiting seat takes another.
+        roster.take_plane(SeatId(1), PlaneId(1), None).unwrap();
+        assert_eq!(roster.seat_of(PlaneId(1)), Some(SeatId(1)));
+        assert_eq!(roster.seats().len(), 2);
     }
 }
