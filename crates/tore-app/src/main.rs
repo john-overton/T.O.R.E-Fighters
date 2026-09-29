@@ -99,6 +99,11 @@ use winit::{
 };
 type AppResult<T> = Result<T, Box<dyn Error>>;
 
+/// A parse error for the number of a command-line option, naming the option.
+fn bad_number(option: &str, error: &dyn std::fmt::Display) -> Box<dyn Error> {
+    format!("{option} needs a number ({error})").into()
+}
+
 /// A number given to a command-line option, or an error that names the
 /// option and what was typed rather than the parser's bare message.
 fn option_number<T: std::str::FromStr>(option: &str, value: &str) -> AppResult<T> {
@@ -4803,7 +4808,7 @@ impl ProbeScript {
             "engage-my-target" => PlayerOrder::EngageMyTarget,
             _ => return Err(usage.into()),
         };
-        Ok((tick.parse()?, order))
+        Ok((option_number("--probe-wing-order", tick)?, order))
     }
 
     /// `TICK` for a single attack, or `TICK:REPEAT_SECONDS`.
@@ -7187,7 +7192,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 ground_start_airport=Some(option_number("--ground-start", &args.next().ok_or("--ground-start needs an airport number")?)?);
             }
             "--separation" => {
-                let nm: f64 = args.next().ok_or("--separation needs a distance in nautical miles")?.parse()?;
+                let nm: f64 = args.next().ok_or("--separation needs a distance in nautical miles")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !quick_mission::SEPARATION_NM.contains(&nm) {
                     return Err(format!("--separation needs one of {:?} nautical miles", quick_mission::SEPARATION_NM).into());
                 }
@@ -7222,19 +7227,19 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 if probe_script.threats.len() >= 64 { return Err("at most 64 controlled threats/faults per probe".into()); }
                 let value = args.next().ok_or("--probe-fault needs TICK:INDEX (0..44)")?;
                 let (tick, index) = value.split_once(':').ok_or("--probe-fault needs TICK:INDEX")?;
-                let index: usize = index.parse()?;
+                let index: usize = index.parse().map_err(|e| bad_number(&arg, &e))?;
                 if index >= 45 { return Err("fault index must be 0..44".into()); }
-                probe_script.threats.push((tick.parse()?, ProbeThreat::Fault(index)));
+                probe_script.threats.push((tick.parse().map_err(|e| bad_number(&arg, &e))?, ProbeThreat::Fault(index)));
             }
             "--probe-threat" => {
                 if probe_script.threats.len() >= 64 { return Err("at most 64 controlled threats per probe".into()); }
                 let value = args.next().ok_or("--probe-threat needs TICK:hit|gun|aaa")?;
                 let (tick, kind) = value.split_once(':').ok_or("--probe-threat needs TICK:hit|gun|aaa")?;
                 let kind = match kind { "hit" => ProbeThreat::Hit, "gun" => ProbeThreat::Gun, "aaa" => ProbeThreat::Aaa, _ => return Err("unknown probe threat".into()) };
-                probe_script.threats.push((tick.parse()?, kind));
+                probe_script.threats.push((tick.parse().map_err(|e| bad_number(&arg, &e))?, kind));
             }
             "--probe-wing-size" => {
-                let size: usize = args.next().ok_or("--probe-wing-size needs 1..5")?.parse()?;
+                let size: usize = args.next().ok_or("--probe-wing-size needs 1..5")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !(1..=5).contains(&size) {
                     return Err("--probe-wing-size needs 1..5".into());
                 }
@@ -7247,7 +7252,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 &args.next().ok_or("--probe-attack needs TICK or TICK:REPEAT_SECONDS")?,
             )?),
             "--probe-trace" => {
-                let seconds: f64 = args.next().ok_or("--probe-trace needs seconds")?.parse()?;
+                let seconds: f64 = args.next().ok_or("--probe-trace needs seconds")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !(seconds > 0. && seconds <= 3600.) {
                     return Err("--probe-trace needs 0..3600 seconds".into());
                 }
@@ -7257,7 +7262,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 let usage = "--probe-player-home needs FROM:UNTIL ticks";
                 let text = args.next().ok_or(usage)?;
                 let (from, until) = text.split_once(':').ok_or(usage)?;
-                probe_script.home = Some((from.parse()?, until.parse()?));
+                probe_script.home = Some((from.parse().map_err(|e| bad_number(&arg, &e))?, until.parse().map_err(|e| bad_number(&arg, &e))?));
             }
             "--airport-probe" => {
                 let value = args.next().ok_or("--airport-probe needs ID,X,Y,Z,NAV,GEAR[,HEADING,PITCH]")?;
@@ -7266,12 +7271,12 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     return Err("--airport-probe needs ID,X,Y,Z,NAV,GEAR[,HEADING,PITCH]".into());
                 }
                 let flag = |text: &str| match text { "0" => Ok(false), "1" => Ok(true), _ => Err("airport probe flags need 0 or 1") };
-                let position = [fields[1].parse()?, fields[2].parse()?, fields[3].parse()?];
+                let position = [fields[1].parse().map_err(|e| bad_number(&arg, &e))?, fields[2].parse().map_err(|e| bad_number(&arg, &e))?, fields[3].parse().map_err(|e| bad_number(&arg, &e))?];
                 if position.iter().any(|value: &f64| !value.is_finite()) {
                     return Err("airport probe position must be finite".into());
                 }
                 let angles = if fields.len() == 8 {
-                    let angles = [fields[6].parse::<f64>()?, fields[7].parse::<f64>()?];
+                    let angles = [fields[6].parse::<f64>().map_err(|e| bad_number(&arg, &e))?, fields[7].parse::<f64>().map_err(|e| bad_number(&arg, &e))?];
                     if !angles.iter().all(|value| value.is_finite())
                         || angles[0].abs() > 360_000.
                         || !(-90. ..=90.).contains(&angles[1])
@@ -7282,7 +7287,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 } else {
                     None
                 };
-                airport_probe = Some((fields[0].parse()?, tore_sim::airport::Aircraft {
+                airport_probe = Some((fields[0].parse().map_err(|e| bad_number(&arg, &e))?, tore_sim::airport::Aircraft {
                     position,
                     forward: [0., 0., 1.],
                     nav_mode: flag(fields[4])?,
@@ -7341,16 +7346,16 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 live_fire = true;
             }
             "--damage-preview-ticks" => {
-                damage_preview_ticks = args.next().ok_or("--damage-preview-ticks needs 1..7200")?.parse()?;
+                damage_preview_ticks = args.next().ok_or("--damage-preview-ticks needs 1..7200")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !(1..=7200).contains(&damage_preview_ticks) { return Err("--damage-preview-ticks needs 1..7200".into()); }
             }
             "--countermeasure-preview" => {
-                let ticks: usize = args.next().ok_or("--countermeasure-preview needs 1..7200")?.parse()?;
+                let ticks: usize = args.next().ok_or("--countermeasure-preview needs 1..7200")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !(1..=7200).contains(&ticks) { return Err("--countermeasure-preview needs 1..7200".into()); }
                 countermeasure_preview = Some(ticks);
             }
             "--damage-preview" => {
-                let fraction = args.next().ok_or("--damage-preview needs 0..1")?.parse::<f64>()?;
+                let fraction = args.next().ok_or("--damage-preview needs 0..1")?.parse::<f64>().map_err(|e| bad_number(&arg, &e))?;
                 if !fraction.is_finite() || !(0. ..=1.).contains(&fraction) { return Err("--damage-preview needs 0..1".into()); }
                 damage_preview = Some(fraction);
                 initial_screen = Screen::Flight;
@@ -7369,7 +7374,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--dummy-aircraft" => {
                 let value = args.next().ok_or("--dummy-aircraft needs ID,COUNT")?;
                 let (id, count) = value.split_once(',').ok_or("--dummy-aircraft needs ID,COUNT")?;
-                dummy_aircraft.push((tore_formats::aircraft::AircraftId::parse(id)?, count.parse::<usize>()?));
+                dummy_aircraft.push((tore_formats::aircraft::AircraftId::parse(id)?, count.parse::<usize>().map_err(|e| bad_number(&arg, &e))?));
                 initial_screen = Screen::Flight;
             }
             "--live-fire" => {
@@ -7492,14 +7497,14 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 weapon_slot = Some(
                     args.next()
                         .ok_or("--weapon-slot requires a 1-based PT weapon slot")?
-                        .parse()?,
+                        .parse().map_err(|e| bad_number(&arg, &e))?,
                 );
             }
             "--combat-probe-ticks" => {
                 let ticks: usize = args
                     .next()
                     .ok_or("--combat-probe-ticks requires 1..7200")?
-                    .parse()?;
+                    .parse().map_err(|e| bad_number(&arg, &e))?;
                 if !(1..=7200).contains(&ticks) {
                     return Err("combat probe tick limit exceeded".into());
                 }
@@ -7559,7 +7564,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 let (w, h) = size
                     .split_once('x')
                     .ok_or("--window-size needs WIDTHxHEIGHT")?;
-                window_size = [w.parse()?, h.parse()?];
+                window_size = [w.parse().map_err(|e| bad_number(&arg, &e))?, h.parse().map_err(|e| bad_number(&arg, &e))?];
                 window_size_flag = true;
                 if !(640..=3840).contains(&window_size[0])
                     || !(480..=2160).contains(&window_size[1])
@@ -7578,14 +7583,14 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 let page = args
                     .next()
                     .ok_or("--instrument-page needs 0..9")?
-                    .parse::<u8>()?;
+                    .parse::<u8>().map_err(|e| bad_number(&arg, &e))?;
                 if !(0..=9).contains(&page) {
                     return Err("--instrument-page needs 0..9".into());
                 }
                 instrument_page = Some(page);
             }
             "--flight-zoom" => {
-                flight_zoom = args.next().ok_or("--flight-zoom needs 0.5..4")?.parse()?;
+                flight_zoom = args.next().ok_or("--flight-zoom needs 0.5..4")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !flight_zoom.is_finite() || !(0.5..=4.).contains(&flight_zoom) {
                     return Err("--flight-zoom needs a finite value in 0.5..4".into());
                 }
@@ -7597,7 +7602,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 let (yaw, pitch) = value
                     .split_once(',')
                     .ok_or("--flight-look needs YAW,PITCH in degrees")?;
-                flight_look = [yaw.parse()?, pitch.parse()?];
+                flight_look = [yaw.parse().map_err(|e| bad_number(&arg, &e))?, pitch.parse().map_err(|e| bad_number(&arg, &e))?];
                 if flight_look.iter().any(|v| !v.is_finite() || v.abs() > 360.) {
                     return Err(
                         "flight look angles must be finite and within -360..360 degrees".into(),
@@ -7616,7 +7621,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 flight_view = args
                     .next()
                     .ok_or("--flight-view needs 0..11")?
-                    .parse::<u8>()?;
+                    .parse::<u8>().map_err(|e| bad_number(&arg, &e))?;
                 if flight_view > flight_views::MISSILE {
                     return Err("--flight-view needs 0..11".into());
                 }
@@ -7657,21 +7662,21 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 let ticks = args
                     .next()
                     .ok_or("--flight-probe-ticks needs a tick count")?
-                    .parse::<usize>()?;
+                    .parse::<usize>().map_err(|e| bad_number(&arg, &e))?;
                 if ticks > 120 * 60 {
                     return Err("rendered flight probe limited to one minute".into());
                 }
                 flight_probe_ticks = Some(ticks);
             }
             "--flight-bay" => {
-                let value: f64 = args.next().ok_or("missing bay fraction")?.parse()?;
+                let value: f64 = args.next().ok_or("missing bay fraction")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !value.is_finite() || !(0. ..=1.).contains(&value) {
                     return Err("--flight-bay requires 0..1".into());
                 }
                 flight_bay = Some(value);
             }
             "--flight-throttle" => {
-                let value: f64 = args.next().ok_or("missing flight throttle")?.parse()?;
+                let value: f64 = args.next().ok_or("missing flight throttle")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !value.is_finite() || !(0. ..=1.).contains(&value) { return Err("--flight-throttle requires 0..1".into()); }
                 flight_throttle = Some(value);
             }
@@ -7681,7 +7686,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     .ok_or("animation preview needs comma-separated values")?;
                 let values = raw
                     .split(',')
-                    .map(str::parse::<f64>)
+                    .map(|v| option_number::<f64>(&arg, v))
                     .collect::<Result<Vec<_>, _>>()?;
                 let devices = arg == "--flight-devices";
                 if values.len() != if devices { 5 } else { 3 }
@@ -7729,7 +7734,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 headless_ticks = Some(
                     args.next()
                         .ok_or("--headless-flight needs tick count")?
-                        .parse::<usize>()?,
+                        .parse::<usize>().map_err(|e| bad_number(&arg, &e))?,
                 )
             }
             "--systems-preview" => {
@@ -7856,7 +7861,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 let nmi: f64 = args
                     .next()
                     .ok_or("--scope-range needs a recovered scope setting in nautical miles")?
-                    .parse()?;
+                    .parse().map_err(|e| bad_number(&arg, &e))?;
                 scope_range = Some(
                     tore_sim::sensors::RANGE_LADDER_NMI
                         .iter()
@@ -7871,7 +7876,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 let value: usize = args
                     .next()
                     .ok_or("--weather-condition needs 0..5")?
-                    .parse()?;
+                    .parse().map_err(|e| bad_number(&arg, &e))?;
                 if value >= tore_sim::environment::CONDITIONS.len() {
                     return Err("--weather-condition needs one of the six source choices".into());
                 }

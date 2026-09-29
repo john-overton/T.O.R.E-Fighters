@@ -389,6 +389,29 @@ BAD_OPTIONS = {
     "to-negative": (["--recording-log", "{work}/a.tore-replay", "--out", "{work}/o", "--to", "-3"], "--to needs seconds of mission time"),
     "from-after-to": (["--recording-log", "{work}/a.tore-replay", "--out", "{work}/o", "--from", "20", "--to", "10"], "--from 20 is later than --to 10"),
     "ids-unknown": (["--recording-log", "{work}/a.tore-replay", "--out", "{work}/o", "--ids", "0,999"], "names aircraft 999"),
+    "flag-separation": (["--ai-probe-ticks", "60", "--separation", "x"], "--separation needs a number"),
+    "flag-wing-size": (["--ai-probe-ticks", "60", "--probe-wing-size", "x"], "--probe-wing-size needs a number"),
+    "flag-trace": (["--ai-probe-ticks", "60", "--probe-trace", "x"], "--probe-trace needs a number"),
+    "flag-fault-tick": (["--ai-probe-ticks", "60", "--probe-fault", "x:1"], "--probe-fault needs a number"),
+    "flag-threat-tick": (["--ai-probe-ticks", "60", "--probe-threat", "x:hit"], "--probe-threat needs a number"),
+    "flag-home": (["--ai-probe-ticks", "60", "--probe-player-home", "a:b"], "--probe-player-home needs a number"),
+    "flag-wing-order-tick": (["--ai-probe-ticks", "60", "--probe-wing-order", "x:bug-out"], "--probe-wing-order needs a number"),
+    "flag-damage-preview": (["--damage-preview", "x"], "--damage-preview needs a number"),
+    "flag-countermeasure-preview": (["--countermeasure-preview", "x"], "--countermeasure-preview needs a number"),
+    "flag-zoom": (["--flight-zoom", "x"], "--flight-zoom needs a number"),
+    "flag-window-size": (["--window-size", "axb"], "--window-size needs a number"),
+    "flag-look": (["--flight-look", "a,b"], "--flight-look needs a number"),
+    "flag-throttle": (["--flight-throttle", "x"], "--flight-throttle needs a number"),
+    "flag-bay": (["--flight-bay", "x"], "--flight-bay needs a number"),
+    "flag-devices": (["--flight-devices", "a,b,c,d,e"], "--flight-devices needs a number"),
+    "flag-controls": (["--flight-controls", "a,b,c"], "--flight-controls needs a number"),
+    "flag-weapon-slot": (["--weapon-slot", "x"], "--weapon-slot needs a number"),
+    "flag-combat-ticks": (["--combat-probe-ticks", "x"], "--combat-probe-ticks needs a number"),
+    "flag-scope-range": (["--scope-range", "x"], "--scope-range needs a number"),
+    "flag-instrument-page": (["--instrument-page", "x"], "--instrument-page needs a number"),
+    "flag-weather": (["--weather-condition", "x"], "--weather-condition needs a number"),
+    "flag-flight-view": (["--flight-view", "x"], "--flight-view needs a number"),
+    "flag-dummy-count": (["--dummy-aircraft", "f18,x"], "--dummy-aircraft needs a number"),
     "info-none": (["--recording-info"], "--recording-info needs a recording"),
     "diff-one": (["--recording-diff", "{work}/a.tore-replay"], "--recording-diff needs two recordings"),
     "diff-missing": (["--recording-diff", "{work}/a.tore-replay", "{work}/none.tore-replay"], "none.tore-replay"),
@@ -449,7 +472,8 @@ def check_bad_option(output: str, message: str) -> list[str]:
         problems.append(f"expected '{message}' in the error, got: {text.strip()[-200:]}")
     if "panicked" in text:
         problems.append("panic on a bad option")
-    if re.search(r"invalid float literal|invalid digit found", text):
+    # The parser's words may follow the option's own in brackets; they must not stand alone.
+    if re.search(r"^(invalid float literal|invalid digit found[a-z ]*)$", text, re.M):
         problems.append("a bare parser message reached the user")
     return problems
 
