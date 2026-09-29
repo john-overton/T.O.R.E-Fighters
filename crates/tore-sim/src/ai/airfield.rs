@@ -325,6 +325,10 @@ pub const GO_AROUND_PITCH_DEG: f64 = 8.0;
 pub const GO_AROUND_CLIMB_FT: f64 = 1_000.0;
 pub const GO_AROUND_CLIMB_S: f64 = 60.0;
 pub const GO_AROUND_GEAR_UP_FT: f64 = 200.0;
+/// Fitted (agent decision, 2026-09-29): how far below the final path, and
+/// down to what height, a final is abandoned for a go-around.
+pub const PATH_LOST_FT: f64 = 150.0;
+pub const PATH_LOST_FLOOR_FT: f64 = 100.0;
 /// Fitted: a hazardous final steeper than the steepest commanded glide
 /// goes around even when the projected touchdown is over pavement.
 pub const GO_AROUND_DESCENT_DEG: f64 = APPROACH_PATH_DEG + GLIDE_CORRECTION_LIMIT_DEG;
@@ -398,6 +402,9 @@ pub struct Situation {
     pub ground_clearance_ft: f64,
     /// Loaded envelope limits at the current altitude.
     pub minimum_speed_fps: f64,
+    /// Slowest speed with the fitted approach G margin in hand (0 when the
+    /// model has no low-speed lift ramp).
+    pub approach_minimum_fps: f64,
     pub maximum_speed_fps: f64,
     pub corner_speed_fps: f64,
     /// B48 cruise speed.
@@ -979,10 +986,33 @@ impl Sequence {
         if along > self.runway.length_ft * GO_AROUND_OVERRUN_FRACTION {
             return true;
         }
+        if self.path_lost(s) {
+            return true;
+        }
         (-GO_AROUND_GATE_FT..0.0).contains(&along)
             && (cross.abs() > GO_AROUND_CROSS_TRACK_FT
                 || wrap_deg(self.course().to_degrees() - s.heading_deg).abs()
                     > GO_AROUND_HEADING_DEG)
+    }
+
+    /// The height the 6 degree final path asks for here, and the wheel
+    /// height above the runway.
+    fn final_path(&self, s: &Situation) -> (f64, f64) {
+        let (along, _) = self.frame(s.position, self.landing_point());
+        let height = s.position[1] - self.runway.elevation_ft - s.ground_clearance_ft;
+        (
+            (-along).max(0.0) * APPROACH_PATH_DEG.to_radians().tan(),
+            height,
+        )
+    }
+
+    /// Fitted (agent decision, 2026-09-29): a final that has sunk more than
+    /// [`PATH_LOST_FT`] below its path while still above
+    /// [`PATH_LOST_FLOOR_FT`] goes around while it has height to climb away,
+    /// instead of sinking on until the ground is a second away.
+    fn path_lost(&self, s: &Situation) -> bool {
+        let (path, height) = self.final_path(s);
+        height > PATH_LOST_FLOOR_FT && height < path - PATH_LOST_FT
     }
 
     /// Whether the current taxi-clear leg is the one into the parking spot.
@@ -1253,8 +1283,15 @@ impl Sequence {
         if let Control::Air(guidance) = command.control
             && matches!(self.phase, Phase::Marshal | Phase::Approach | Phase::Final)
         {
+            // Fitted (agent decision, 2026-09-29): never with the aircraft
+            // below its final path; the drag then only deepens the sink.
+            let below_path = self.phase == Phase::Final && {
+                let (path, height) = self.final_path(s);
+                height < path
+            };
             command.brakes = !guidance.full_power
                 && !flaring
+                && !below_path
                 && s.speed_fps > guidance.speed_fps + SPEEDBRAKE_MARGIN_FPS;
         }
         command
@@ -1313,7 +1350,9 @@ fn marshal_speed(s: &Situation) -> f64 {
 
 /// Final speed: the fitted multiple of minimum speed under the retail cap.
 fn final_speed(s: &Situation) -> f64 {
-    (APPROACH_SPEED_FACTOR * s.minimum_speed_fps).min(FINAL_SPEED_LIMIT_FPS)
+    (APPROACH_SPEED_FACTOR * s.minimum_speed_fps)
+        .max(s.approach_minimum_fps)
+        .min(FINAL_SPEED_LIMIT_FPS)
 }
 
 /// Fitted runway-end choice; see [`Sequence::landing`].
@@ -1472,6 +1511,79 @@ mod tests {
         )
     }
 
+    /// On the final course `out_ft` before the landing point, `height_ft`
+    /// above the runway, at `speed_fps`.
+    fn on_final(seq: &Sequence, out_ft: f64, height_ft: f64, speed_fps: f64) -> Situation {
+        let lp = seq.landing_point();
+        let course = seq.course();
+        let position = [
+            lp[0] - out_ft * course.sin(),
+            height_ft + 8.,
+            lp[2] - out_ft * course.cos(),
+        ];
+        Situation {
+            tick: 1,
+            position,
+            velocity: [speed_fps * course.sin(), 0., speed_fps * course.cos()],
+            heading_deg: course.to_degrees(),
+            body_pitch_deg: 0.,
+            speed_fps,
+            on_ground: false,
+            agl_ft: height_ft,
+            terrain_ahead_ft: 0.,
+            ground_clearance_ft: 8.,
+            minimum_speed_fps: 150.,
+            approach_minimum_fps: 230.,
+            maximum_speed_fps: 1500.,
+            corner_speed_fps: 400.,
+            cruise_speed_fps: 440.,
+            has_afterburner: true,
+            wind: [0.; 3],
+            wing_position: 0,
+            turn_clear: true,
+            runway_free: true,
+            wing_landed: true,
+            free_slot: Some(0),
+        }
+    }
+
+    #[test]
+    fn a_final_below_its_path_goes_around_early_and_never_holds_the_speedbrake() {
+        // John, 2026-09-29: AI finals hold their path (fitted numbers).
+        let path = |out: f64| out * APPROACH_PATH_DEG.to_radians().tan();
+        let final_step = |height: f64, speed: f64| {
+            let mut seq = landing();
+            seq.phase = Phase::Final;
+            let step = seq.step(&on_final(&seq, 5000., height, speed));
+            (step, seq.phase())
+        };
+        // Fast and above the path: the speedbrake opens and the final goes on.
+        let (step, phase) = final_step(path(5000.) + 100., 400.);
+        assert!(step.command.brakes && !step.go_around);
+        assert_eq!(phase, Phase::Final);
+        // Fast but below the path: no speedbrake.
+        let (step, _) = final_step(path(5000.) - 50., 400.);
+        assert!(!step.command.brakes && !step.go_around);
+        // More than PATH_LOST_FT below it: go around while there is height.
+        let (step, phase) = final_step(path(5000.) - PATH_LOST_FT - 20., 240.);
+        assert!(step.go_around);
+        assert_eq!(phase, Phase::Marshal);
+        // Under the floor the ordinary flare and landing rules apply instead.
+        let (step, _) = final_step(PATH_LOST_FLOOR_FT - 20., 240.);
+        assert!(!step.go_around);
+    }
+
+    #[test]
+    fn the_final_speed_keeps_the_approach_lift_margin() {
+        let seq = landing();
+        let mut s = on_final(&seq, 5000., 525., 240.);
+        assert_eq!(final_speed(&s), 230.);
+        s.approach_minimum_fps = 0.;
+        assert!((final_speed(&s) - APPROACH_SPEED_FACTOR * 150.).abs() < 1e-9);
+        s.approach_minimum_fps = 400.;
+        assert_eq!(final_speed(&s), FINAL_SPEED_LIMIT_FPS);
+    }
+
     #[test]
     fn phases_map_to_the_b47_flight_states() {
         use Phase::*;
@@ -1600,6 +1712,7 @@ mod tests {
             terrain_ahead_ft: 0.,
             ground_clearance_ft: 8.,
             minimum_speed_fps: 170.,
+            approach_minimum_fps: 0.,
             maximum_speed_fps: 1500.,
             corner_speed_fps: 400.,
             cruise_speed_fps: 440.,

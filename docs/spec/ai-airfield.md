@@ -137,7 +137,12 @@ its home airport at cruise speed.
 - **Final** (spec-derived path, fitted speed and flare): down the 6 degree path
   to the landing point, wings level below 50 ft. Retail flies at most 293 ft/s
   with the nose 17 degrees above the path and has no flare. The AI flies 1.1
-  times its clean minimum speed under that 293 ft/s cap, lets the hybrid model
+  times its clean minimum speed, but never slower than the speed at which the
+  loaded aircraft with flaps down still has 1.3 G of lift in hand (fitted,
+  agent decision 2026-09-29: 232 ft/s, 137 kt, for a fuelled F/A-18D, where
+  1.1 times the minimum gave 94 kt and a final that could not hold its path),
+  under that 293 ft/s cap. The speedbrake stays closed while the aircraft is
+  below the final path (fitted, same date). It lets the hybrid model
   set its own angle of attack, and eases its descent toward height above the wheels divided by 6 seconds,
   with a minimum 1.5 degree downward path, so a fast final has time to flare.
   Below 60 ft it reduces the speed target to the clean minimum. The speedbrake
@@ -165,8 +170,10 @@ its home airport at cruise speed.
 - **Go-around** (fitted safety; retail has none): within 6,000 ft of the landing
   point a final more than 300 ft off the centerline or 30 degrees off the
   landing heading, an aircraft still airborne 35% of the runway length past the
-  landing point, or a bounce above 15 ft during the rollout goes back to the
-  marshal and flies the gates again.
+  landing point, a final more than 150 ft below its path while still more than
+  100 ft above the runway (fitted, agent decision 2026-09-29, so a sinking
+  final climbs away with height in hand), or a bounce above 15 ft during the
+  rollout goes back to the marshal and flies the gates again.
   The ejection assessment also requests a go-around for a hazardous final
   steeper than 9 degrees down, including one over the runway. This fitted
   threshold is the steepest commanded final (6 degrees plus 3 degrees of

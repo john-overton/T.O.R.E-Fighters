@@ -540,6 +540,38 @@ fn the_next_wingman_leads_when_the_leader_is_lost() {
 }
 
 #[test]
+fn a_hybrid_aircraft_may_always_ask_for_1_g_inside_its_1_g_envelope() {
+    // Before 2026-09-29 a loaded aircraft slowing on final was held to
+    // 1 G divided by its loading and sank into the ground short of the runway.
+    let mut actor = hornet(1, 0, [0., 1_000., 0.], 0.);
+    actor.flight_mut().enable_research(1).unwrap();
+    let config = actor.flight().model().configuration().clone();
+    let one_g = config
+        .aerodynamics
+        .envelopes
+        .iter()
+        .find(|e| e.g == 1)
+        .and_then(|e| e.speeds(1_000.))
+        .unwrap();
+    let mut checked = 0;
+    let mut speed = one_g.0;
+    while speed <= one_g.1 {
+        actor.flight_mut().speed = speed;
+        let (positive, _) = actor.g_limits();
+        assert!(positive >= 1.0, "{positive:.2} G at {speed:.0} ft/s");
+        checked += 1;
+        speed += 10.;
+    }
+    assert!(checked > 5);
+    // The approach floor keeps the fitted lift margin in hand, flaps down.
+    let floor = actor.approach_minimum_fps();
+    assert!(floor > one_g.0 * 0.75, "{floor:.0}");
+    actor.flight_mut().flaps = 1.0;
+    actor.flight_mut().speed = floor;
+    assert!(actor.g_limits().0 >= APPROACH_G_MARGIN - 1e-9);
+}
+
+#[test]
 fn a_wing_returns_to_base_once_no_hostile_aircraft_remains() {
     // John, 2026-09-29: mission return to base.
     let mut mission = AiMission::new();
