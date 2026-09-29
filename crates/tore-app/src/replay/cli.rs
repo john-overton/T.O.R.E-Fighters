@@ -28,6 +28,13 @@ fn clock(ticks: u64) -> String {
     format!("{}:{:02}.{}", tenths / 600, tenths / 10 % 60, tenths % 10)
 }
 
+fn plural_ids(ids: &[u32]) -> String {
+    ids.iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Creates a file for an export, saying which file when it cannot.
 fn create(path: &Path) -> AppResult<std::fs::File> {
     std::fs::File::create(path)
@@ -173,7 +180,22 @@ pub fn info(path: &Path, out: &mut impl Write) -> AppResult<()> {
 
 /// Writes the debug log and the plain-English summary; returns the folder.
 pub fn log(path: &Path, options: &LogOptions) -> AppResult<PathBuf> {
+    if let (Some(from), Some(to)) = (options.from_s, options.to_s)
+        && from > to
+    {
+        return Err(format!("--from {from} is later than --to {to}").into());
+    }
     let recording = open(path)?;
+    if let Some(ids) = &options.ids {
+        let known: Vec<u32> = recording.aircraft().map(|a| a.id).collect();
+        if let Some(id) = ids.iter().find(|id| !known.contains(id)) {
+            return Err(format!(
+                "--ids names aircraft {id}, which is not in the recording (its aircraft are {})",
+                plural_ids(&known)
+            )
+            .into());
+        }
+    }
     let folder = options.out.clone().unwrap_or_else(|| sibling(path, "-log"));
     std::fs::create_dir_all(&folder).map_err(|error| {
         format!(
