@@ -6,8 +6,8 @@
 //! the calls to its seat, whether or not the host has an audio device
 //! (docs/ARCHITECTURE.md, "Radio, orders and debrief for each seat"). The
 //! music reads the tracker's [`Status`]. The result comes from [`succeeded`],
-//! which follows the debrief evaluator (the app's `debrief::report`), so the
-//! music, the calls and the debrief agree. This file keeps the 4 second check,
+//! which is the one rule the debrief reads too ([`Standing`]), so the music,
+//! the calls and the debrief agree. This file keeps the 4 second check,
 //! the rule that a result already decided at flight start disables SUCC and
 //! HOME, and the home check.
 use crate::ai_wings::AiWings;
@@ -15,6 +15,7 @@ use crate::comms::journal::{Audience, Cause, Origin, Source};
 use crate::comms::{Call, Kind, Phrase, Phrases};
 use crate::terrain::Terrain;
 use tore_sim::ai::launch::Side;
+use tore_sim::combat::ledger::{Kill, Ledger};
 use tore_sim::combat::live;
 /// The mission result and home check run this often, game seconds.
 pub const CHECK_S: f64 = 4.;
@@ -131,72 +132,177 @@ pub fn home_base(world: &Terrain, airport: Option<u32>) -> Option<[f64; 3]> {
     })
 }
 
+/// One aircraft as the mission result sees it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Aircraft {
+    pub id: u32,
+    /// On the same side as the plane whose result this is.
+    pub friendly: bool,
+    /// Still flying with its pilot aboard.
+    pub alive: bool,
+}
+
+/// What the mission asks of one plane: the aircraft it must destroy and the
+/// ones it must protect. The debrief's objectives and the result check read
+/// the same lists (docs/spec/debrief.md).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Requirements {
+    pub destroy: Vec<u32>,
+    pub protect: Vec<u32>,
+}
+
+impl Requirements {
+    /// The requirements of `plane`, which flies for `side`. Retail Quick
+    /// Missions make every aircraft of the other side a target when the plane has no assigned target group, and the
+    /// aircraft the mission says must survive are protected by everyone.
+    ///
+    /// The AI mission holds one human assignment today, so every human plane
+    /// reads it; slice B3 gives each plane its own and this is the one place
+    /// that changes.
+    pub fn of(wings: &AiWings, plane: u32, side: Side) -> Self {
+        let mission = wings.mission();
+        let assignment = mission.player_assignment();
+        let mut destroy = assignment.destroy_ids.clone();
+        if destroy.is_empty() {
+            destroy = wings
+                .slots()
+                .iter()
+                .filter(|slot| slot.side != side)
+                .map(|slot| slot.id)
+                .collect();
+        }
+        let mut protect = assignment.protected_ids.clone();
+        // Only the plane's own side is its objective: an enemy group whose
+        // survival its own side requires is not (docs/spec/debrief.md,
+        // "Friendly objectives"; bug bash finding 2026-09-29).
+        for id in mission.must_survive() {
+            let own_side = *id == plane
+                || wings
+                    .slots()
+                    .iter()
+                    .any(|slot| slot.id == *id && slot.side == side);
+            if own_side && !protect.contains(id) {
+                protect.push(*id);
+            }
+        }
+        Self { destroy, protect }
+    }
+}
+
+/// The AI's aircraft as they stand, each friendly when it is on `side`, for
+/// [`Standing`]. The plane itself and any other human-flown plane are not in
+/// the AI's rows: the caller adds them.
+pub fn ai_aircraft(wings: &AiWings, side: Side) -> Vec<Aircraft> {
+    let mission = wings.mission();
+    wings
+        .slots()
+        .iter()
+        .map(|slot| Aircraft {
+            id: slot.id,
+            friendly: slot.side == side,
+            alive: mission
+                .actor(slot.id)
+                .is_some_and(|a| a.alive() && a.flight().escape.is_none()),
+        })
+        .collect()
+}
+
+/// How the mission stands for one plane, from the combat ledger, every
+/// aircraft's fate and the plane's requirements. The one place the mission
+/// result rule lives: the plane shot down no friendly aircraft, every
+/// aircraft it must destroy is gone and every one it must protect still
+/// flies.
+pub struct Standing<'a> {
+    pub ledger: &'a Ledger,
+    /// The plane whose result this is; it must be in `aircraft`.
+    pub plane: u32,
+    /// Every aircraft the plane knows of, the plane included. An id that is
+    /// not listed counts as gone.
+    pub aircraft: &'a [Aircraft],
+    pub requirements: &'a Requirements,
+}
+
+impl Standing<'_> {
+    fn aircraft(&self, id: u32) -> Option<&Aircraft> {
+        self.aircraft.iter().find(|a| a.id == id)
+    }
+    pub fn friendly(&self, id: u32) -> bool {
+        self.aircraft(id).is_some_and(|a| a.friendly)
+    }
+    /// Recorded kills, plus lost aircraft credited to their last attacker. The
+    /// plane's own loss credits nobody.
+    pub fn kills(&self) -> Vec<Kill> {
+        let mut kills = self.ledger.kills().to_vec();
+        for lost in self
+            .aircraft
+            .iter()
+            .filter(|a| a.id != self.plane && !a.alive)
+        {
+            if !kills.iter().any(|k| k.victim == lost.id)
+                && let Some(kill) = self.ledger.credit(lost.id)
+            {
+                kills.push(kill);
+            }
+        }
+        kills
+    }
+    /// The plane shot down an aircraft of its own side.
+    pub fn friendly_fire(&self) -> bool {
+        self.kills()
+            .iter()
+            .any(|k| k.owner == self.plane && self.friendly(k.victim))
+    }
+    /// How many of the aircraft to destroy are gone.
+    pub fn destroyed(&self) -> u32 {
+        self.requirements
+            .destroy
+            .iter()
+            .filter(|id| self.aircraft(**id).is_none_or(|a| !a.alive))
+            .count() as u32
+    }
+    /// How many of the aircraft to protect still fly.
+    pub fn protected(&self) -> u32 {
+        self.requirements
+            .protect
+            .iter()
+            .filter(|id| self.aircraft(**id).is_some_and(|a| a.alive))
+            .count() as u32
+    }
+    pub fn succeeded(&self) -> bool {
+        !self.friendly_fire()
+            && self.destroyed() as usize == self.requirements.destroy.len()
+            && self.protected() as usize == self.requirements.protect.len()
+    }
+}
+
 /// Whether the mission has succeeded for the plane `plane`, as the debrief
-/// decides it: the plane's side shot down no friendly aircraft, every aircraft
-/// it must destroy is gone and every one it must protect still flies. Retail
-/// Quick Missions make every enemy aircraft a target when the plane has no
-/// assigned group. `plane_alive` is whether the plane and its pilot are alive.
-/// Human-flown planes other than `plane` are not in the AI's rows, so they
-/// count as neither friendly nor alive here until the AI reports them (B3).
+/// decides it ([`Standing`]). `plane_alive` is whether the plane and its pilot
+/// are alive. Human-flown planes other than `plane` are not in the AI's rows,
+/// so they count as neither friendly nor alive here until the AI reports them
+/// (B3).
 pub fn succeeded(
     state: &live::State,
     wings: Option<&AiWings>,
     plane: u32,
     plane_alive: bool,
 ) -> bool {
-    let (mut friendly, mut alive) = (vec![plane], vec![(plane, plane_alive)]);
-    let (mut destroy, mut protect) = (Vec::new(), Vec::new());
-    let mut enemies = Vec::new();
+    let mut aircraft = vec![Aircraft {
+        id: plane,
+        friendly: true,
+        alive: plane_alive,
+    }];
+    let mut requirements = Requirements::default();
     if let Some(wings) = wings {
-        let mission = wings.mission();
-        for slot in wings.slots() {
-            let actor = mission.actor(slot.id);
-            alive.push((
-                slot.id,
-                actor.is_some_and(|a| a.alive() && a.flight().escape.is_none()),
-            ));
-            if slot.side == Side::Friendly {
-                friendly.push(slot.id);
-            } else {
-                enemies.push(slot.id);
-            }
-        }
-        let assignment = mission.player_assignment();
-        destroy = assignment.destroy_ids.clone();
-        if destroy.is_empty() {
-            destroy = enemies;
-        }
-        protect = assignment.protected_ids.clone();
-        // Only the plane's own side is its objective: an enemy group whose
-        // survival its own side requires is not (docs/spec/debrief.md,
-        // "Friendly objectives"), as the debrief decides it.
-        for id in mission.must_survive() {
-            if friendly.contains(id) && !protect.contains(id) {
-                protect.push(*id);
-            }
-        }
+        aircraft.extend(ai_aircraft(wings, Side::Friendly));
+        requirements = Requirements::of(wings, plane, Side::Friendly);
     }
-    let alive_of = |id: u32| {
-        alive
-            .iter()
-            .find(|(a, _)| *a == id)
-            .map(|(_, alive)| *alive)
-    };
-    // Recorded kills, plus lost aircraft credited to their last attacker.
-    let mut kills = state.ledger.kills().to_vec();
-    for (id, _) in alive.iter().filter(|(id, alive)| *id != plane && !*alive) {
-        if !kills.iter().any(|k| k.victim == *id)
-            && let Some(kill) = state.ledger.credit(*id)
-        {
-            kills.push(kill);
-        }
+    Standing {
+        ledger: &state.ledger,
+        plane,
+        aircraft: &aircraft,
+        requirements: &requirements,
     }
-    let friendly_fire = kills
-        .iter()
-        .any(|k| k.owner == plane && friendly.contains(&k.victim));
-    let destroyed = destroy.iter().all(|id| alive_of(*id).is_none_or(|a| !a));
-    let protected = protect.iter().all(|id| alive_of(*id).is_some_and(|a| a));
-    !friendly_fire && destroyed && protected
+    .succeeded()
 }
 
 /// One mission-result call: the stem, why it is sent and who says it.
@@ -353,6 +459,75 @@ mod tests {
             succeeded(&state, None, 0, false),
             "the plane's own death is not a failure"
         );
+    }
+
+    fn aircraft(id: u32, friendly: bool, alive: bool) -> Aircraft {
+        Aircraft {
+            id,
+            friendly,
+            alive,
+        }
+    }
+
+    #[test]
+    fn the_standing_of_a_plane_follows_its_own_kills_and_requirements() {
+        use tore_sim::combat::ledger::Kill;
+        let mut ledger = Ledger::default();
+        // Plane 2 shoots down a friendly, plane 0 an enemy; a lost enemy with
+        // only a last hit is credited to the plane that hit it.
+        ledger.kill(Kill {
+            owner: 2,
+            victim: 1,
+            category: 0x8000,
+            aircraft: true,
+        });
+        ledger.kill(Kill {
+            owner: 0,
+            victim: 10,
+            category: 0x8000,
+            aircraft: true,
+        });
+        ledger.damaged(Kill {
+            owner: 2,
+            victim: 11,
+            category: 0x8000,
+            aircraft: true,
+        });
+        let fates = [
+            aircraft(0, true, true),
+            aircraft(1, true, false),
+            aircraft(2, true, true),
+            aircraft(10, false, false),
+            aircraft(11, false, false),
+        ];
+        let requirements = Requirements {
+            destroy: vec![10, 11],
+            protect: vec![0],
+        };
+        let standing = |plane| Standing {
+            ledger: &ledger,
+            plane,
+            aircraft: &fates,
+            requirements: &requirements,
+        };
+        assert_eq!(standing(0).kills().len(), 3);
+        assert!(!standing(0).friendly_fire());
+        assert!(standing(0).succeeded());
+        assert_eq!((standing(0).destroyed(), standing(0).protected()), (2, 1));
+        // The same ledger fails the plane that shot a friend down.
+        assert!(standing(2).friendly_fire());
+        assert!(!standing(2).succeeded());
+        // An aircraft the standing does not list counts as gone: destroyed if
+        // it is a target, lost if it must be protected.
+        let unlisted = Requirements {
+            destroy: vec![99],
+            protect: vec![98],
+        };
+        let lists = Standing {
+            requirements: &unlisted,
+            ..standing(0)
+        };
+        assert_eq!((lists.destroyed(), lists.protected()), (1, 0));
     }
 
     /// The bug bash's objective-side rule (battery finding 2026-09-29): an

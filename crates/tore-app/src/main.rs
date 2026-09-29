@@ -1021,13 +1021,13 @@ impl App {
             tore_replay::Event::new(tore_replay::vocab::kind::SYSTEM_END)
                 .with(tore_replay::vocab::field::REASON, reason),
         );
-        let report = self.world.setup.mission.is_some().then(|| {
-            debrief::capture(
-                &self.world.combat,
-                &self.world.cockpits[OWN].flight,
-                self.world.ai_wings.as_ref(),
-            )
-        });
+        let report = self
+            .world
+            .setup
+            .mission
+            .is_some()
+            .then(|| debrief::capture(&self.world, SEAT))
+            .flatten();
         let footer = replay_footer(&self.world.combat, report.as_ref(), reason);
         if recording.finish(&footer).is_some()
             && let Some(library) = &self.replay_library
@@ -2234,14 +2234,11 @@ impl App {
             }
             Action::Back => {
                 if self.screen == Screen::Flight && self.world.setup.mission.is_some() {
-                    let report = debrief::capture(
-                        &self.world.combat,
-                        &self.world.cockpits[OWN].flight,
-                        self.world.ai_wings.as_ref(),
-                    );
-                    match debrief::Debrief::new(report, &self.theater_resources, None) {
-                        Ok(debrief) => self.quick.debrief = Some(debrief),
-                        Err(error) => self.quick.notice = Some(error.to_string()),
+                    if let Some(report) = debrief::capture(&self.world, SEAT) {
+                        match debrief::Debrief::new(report, &self.theater_resources, None) {
+                            Ok(debrief) => self.quick.debrief = Some(debrief),
+                            Err(error) => self.quick.notice = Some(error.to_string()),
+                        }
                     }
                     if let Some(ordnance) = &mut self.quick.ordnance {
                         ordnance.visible = false;
@@ -6225,7 +6222,7 @@ fn ai_probe_run(
             );
         }
     }
-    let report = debrief::capture(combat, flight, Some(bridge));
+    let report = debrief::capture(&mission, SEAT).expect("the probe's seat flies a plane");
     println!("AI probe debrief: {}", report.summary());
     println!(
         "AI probe radio: calls={} heard={}",

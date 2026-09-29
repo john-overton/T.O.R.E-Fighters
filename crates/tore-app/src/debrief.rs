@@ -1,10 +1,13 @@
 //! Post-mission debrief over the retail clipboard art. The BRIEFSCR.DLG
 //! controls, page text fonts and mission text are imported; page layout is
 //! fitted to John's retail screenshots. Spec: docs/spec/debrief.md.
+use crate::ai_wings::outcome::{self, Requirements, Standing};
 use crate::rocker::Rocker;
 use crate::{
     AppResult,
     menu::{Action, Canvas, HEIGHT, Sprite, WIDTH, text_width},
+    seats::{PlaneId, Roster, SeatId},
+    world::World,
 };
 use std::{collections::BTreeMap, time::Instant};
 use tore_formats::text::GlyphCodes;
@@ -126,18 +129,23 @@ impl Objective {
     }
 }
 
-/// Everything the five pages show, captured when the mission ends.
+/// Everything the five pages show, captured when the mission ends, for one
+/// seat.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Report {
     pub outcome: Outcome,
     pub objectives: Vec<Objective>,
     pub elapsed_seconds: u64,
+    /// The pilot column: the plane the seat flies. The page calls it the
+    /// player.
     pub player: Pilot,
-    /// The player's one tracked wingman; `None` when the player flew alone.
+    /// The one tracked wingman, the first other member of the seat's wing;
+    /// `None` when the seat's plane flew alone.
     pub wingman: Option<Pilot>,
 }
 
-/// One aircraft as the mission ends. The player is id 0.
+/// One aircraft as the mission ends. `id` is the plane's id, and `friendly`
+/// means on the side of the plane whose debrief this is.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Airframe {
     pub id: u32,
@@ -158,14 +166,15 @@ pub struct Airframe {
 pub struct Ending<'a> {
     pub ledger: &'a Ledger,
     pub ticks: u64,
+    /// The plane whose debrief this is: the pilot column.
     pub player: Airframe,
-    /// AI aircraft, both sides.
+    /// Every other aircraft, both sides: the AI's and the other human-flown
+    /// planes.
     pub aircraft: Vec<Airframe>,
-    /// The aircraft shown in the WINGMAN column, if the player had one.
+    /// The aircraft shown in the WINGMAN column, if the plane had one.
     pub wingman: Option<u32>,
-    /// Player-relative mission requirements.
-    pub destroy: Vec<u32>,
-    pub protect: Vec<u32>,
+    /// What the mission asks of the plane.
+    pub requirements: Requirements,
 }
 
 impl Ending<'_> {
@@ -176,25 +185,21 @@ impl Ending<'_> {
             self.aircraft.iter().find(|a| a.id == id)
         }
     }
-    fn friendly(&self, id: u32) -> bool {
-        self.airframe(id).is_some_and(|a| a.friendly)
-    }
     fn hostile(&self, id: u32) -> bool {
         self.airframe(id).is_some_and(|a| !a.friendly)
     }
-    /// Recorded kills, plus lost aircraft credited to their last attacker.
-    fn kills(&self) -> Vec<Kill> {
-        let mut kills = self.ledger.kills().to_vec();
-        for lost in self.aircraft.iter().filter(|a| !a.alive) {
-            if !kills.iter().any(|k| k.victim == lost.id)
-                && let Some(kill) = self.ledger.credit(lost.id)
-            {
-                kills.push(kill);
-            }
-        }
-        kills
+    /// The mission result rule, shared with the in-flight result check.
+    fn fates(&self) -> Vec<outcome::Aircraft> {
+        std::iter::once(&self.player)
+            .chain(&self.aircraft)
+            .map(|a| outcome::Aircraft {
+                id: a.id,
+                friendly: a.friendly,
+                alive: a.alive,
+            })
+            .collect()
     }
-    fn pilot(&self, airframe: &Airframe) -> Pilot {
+    fn pilot(&self, airframe: &Airframe, standing: &Standing, kills: &[Kill]) -> Pilot {
         let id = airframe.id;
         let own = |kind: ShotKind| self.ledger.total(|k| k.owner == id && k.kind == kind);
         // Enemy aircraft fire splits only into guns and everything else.
@@ -227,8 +232,8 @@ impl Ending<'_> {
             enemy_gun: at(true),
             ..Pilot::default()
         };
-        for kill in self.kills().iter().filter(|k| k.owner == id) {
-            if self.friendly(kill.victim) {
+        for kill in kills.iter().filter(|k| k.owner == id) {
+            if standing.friendly(kill.victim) {
                 pilot.friendly_fire += 1;
             } else if let Some(row) = kill_row(kill.category) {
                 pilot.kills[row] += 1;
@@ -259,34 +264,75 @@ pub fn kill_row(category: u16) -> Option<usize> {
         .map(|(_, row)| *row)
 }
 
-/// Reads the mission's results from the live flight, combat and AI bridge.
-/// Call before `Action::Back` drops the bridge.
-pub fn capture(
-    combat: &crate::combat::Combat,
+/// The aircraft in the wingman column for the plane `plane`: the first other
+/// member of its wing, human-flown or not.
+pub fn wingman_of(roster: &Roster, plane: PlaneId) -> Option<u32> {
+    let wing = roster.plane(plane)?.slot.wing;
+    roster
+        .planes()
+        .iter()
+        .filter(|p| p.id != plane && p.slot.wing == wing)
+        .min_by_key(|p| p.slot.member)
+        .map(|p| p.id.0)
+}
+
+/// A human-flown plane as the mission ends, from its cockpit's flight and its
+/// ownship's hit points.
+pub fn cockpit_airframe(
+    id: u32,
+    friendly: bool,
     flight: &crate::flight::State,
-    wings: Option<&crate::ai_wings::AiWings>,
-) -> Report {
-    use tore_sim::ai::launch::Side;
-    let state = &combat.state;
+    hp: i32,
+) -> Airframe {
     let pilot = &flight.systems.pilot;
-    let player = Airframe {
-        id: 0,
-        friendly: true,
-        alive: !flight.crashed && state.own().hp > 0 && !pilot.dead && !pilot.ejected,
+    Airframe {
+        id,
+        friendly,
+        alive: !flight.crashed && hp > 0 && !pilot.dead && !pilot.ejected,
         ejected: pilot.ejected && !pilot.dead,
         damage: flight.damage_fraction,
         landing_grade: flight.research.as_ref().and_then(|r| r.landings.grade()),
         cause: flight.systems.structure.cause,
+    }
+}
+
+/// Reads the mission's results for `seat` from the world: the pilot column is
+/// the plane the seat flies, the wingman column the first other member of its
+/// wing, the objectives are that plane's and friendly fire counts the kills it
+/// made. `None` when the seat flies no plane. Call before `Action::Back` drops
+/// the AI wings.
+pub fn capture(world: &World, seat: SeatId) -> Option<Report> {
+    let plane = world.roster.seat(seat)?.plane?;
+    let side = world.roster.plane(plane)?.slot.wing.side;
+    let state = &world.combat.state;
+    let fate = |cockpit: &crate::world::Cockpit| {
+        let id = cockpit.plane.0;
+        let hp = state.ownship(id).map_or(0, |own| own.hp);
+        let friendly = world
+            .roster
+            .plane(cockpit.plane)
+            .is_some_and(|p| p.slot.wing.side == side);
+        cockpit_airframe(id, friendly, &cockpit.flight, hp)
     };
-    let mut aircraft = Vec::new();
-    let (mut wingman, mut destroy, mut protect) = (None, Vec::new(), Vec::new());
-    if let Some(wings) = wings {
+    let player = fate(world.cockpits.iter().find(|c| c.plane == plane)?);
+    // Every other human-flown plane, then the AI's aircraft.
+    let mut aircraft: Vec<Airframe> = world
+        .cockpits
+        .iter()
+        .filter(|c| c.plane != plane)
+        .map(fate)
+        .collect();
+    let mut requirements = Requirements::default();
+    if let Some(wings) = world.ai_wings.as_ref() {
         let mission = wings.mission();
         for slot in wings.slots() {
+            if aircraft.iter().any(|a| a.id == slot.id) {
+                continue;
+            }
             let actor = mission.actor(slot.id);
             aircraft.push(Airframe {
                 id: slot.id,
-                friendly: slot.side == Side::Friendly,
+                friendly: slot.side == side,
                 alive: actor.is_some_and(|a| a.alive() && a.flight().escape.is_none()),
                 ejected: actor.is_some_and(|a| a.flight().escape.is_some()),
                 damage: actor.map_or(1., |a| a.flight().damage_fraction),
@@ -295,83 +341,43 @@ pub fn capture(
                 cause: actor.and_then(|a| a.flight().systems.structure.cause),
             });
         }
-        wingman = wings
-            .slots()
-            .iter()
-            .filter(|s| s.side == Side::Friendly && s.wing_number == 1)
-            .min_by_key(|s| s.member_number)
-            .map(|s| s.id);
-        let assignment = mission.player_assignment();
-        destroy = assignment.destroy_ids.clone();
-        // Retail Quick Missions make every enemy aircraft a target. That still
-        // applies when the player's flight has no assigned target group.
-        if destroy.is_empty() {
-            destroy = aircraft
-                .iter()
-                .filter(|a| !a.friendly)
-                .map(|a| a.id)
-                .collect();
-        }
-        protect = friendly_objectives(&assignment.protected_ids, mission.must_survive(), &aircraft);
+        requirements = Requirements::of(wings, plane.0, side);
     }
-    report(&Ending {
+    Some(report(&Ending {
         ledger: &state.ledger,
         ticks: state.tick(),
         player,
         aircraft,
-        wingman,
-        destroy,
-        protect,
-    })
-}
-
-/// The player's friendly objectives: the aircraft the player's flight
-/// protects, then every aircraft of the player's side whose group must
-/// survive (the player is id 0). An enemy group whose survival its own side
-/// requires is not the player's objective (docs/spec/debrief.md, "Friendly
-/// objectives"; battery finding 2026-09-29: destroying such a group failed
-/// the player's mission).
-fn friendly_objectives(protected: &[u32], must_survive: &[u32], aircraft: &[Airframe]) -> Vec<u32> {
-    let mut protect = protected.to_vec();
-    for id in must_survive {
-        let friendly = *id == 0 || aircraft.iter().any(|a| a.id == *id && a.friendly);
-        if friendly && !protect.contains(id) {
-            protect.push(*id);
-        }
-    }
-    protect
+        wingman: wingman_of(&world.roster, plane),
+        requirements,
+    }))
 }
 
 pub fn report(end: &Ending) -> Report {
-    let destroyed = end
-        .destroy
-        .iter()
-        .filter(|id| end.airframe(**id).is_none_or(|a| !a.alive))
-        .count() as u32;
-    let protected = end
-        .protect
-        .iter()
-        .filter(|id| end.airframe(**id).is_some_and(|a| a.alive))
-        .count() as u32;
+    let fates = end.fates();
+    let standing = Standing {
+        ledger: end.ledger,
+        plane: end.player.id,
+        aircraft: &fates,
+        requirements: &end.requirements,
+    };
+    let kills = standing.kills();
     let mut objectives = Vec::new();
-    if !end.destroy.is_empty() {
+    if !end.requirements.destroy.is_empty() {
         objectives.push(Objective::Destroy {
-            destroyed,
-            total: end.destroy.len() as u32,
+            destroyed: standing.destroyed(),
+            total: end.requirements.destroy.len() as u32,
         });
     }
-    if !end.protect.is_empty() {
+    if !end.requirements.protect.is_empty() {
         objectives.push(Objective::Protect {
-            protected,
-            total: end.protect.len() as u32,
+            protected: standing.protected(),
+            total: end.requirements.protect.len() as u32,
         });
     }
-    let player = end.pilot(&end.player);
-    let success = player.friendly_fire == 0
-        && destroyed as usize == end.destroy.len()
-        && protected as usize == end.protect.len();
+    let player = end.pilot(&end.player, &standing, &kills);
     Report {
-        outcome: if success {
+        outcome: if standing.succeeded() {
             Outcome::Success
         } else {
             Outcome::Failure
@@ -382,7 +388,7 @@ pub fn report(end: &Ending) -> Report {
         wingman: end
             .wingman
             .and_then(|id| end.airframe(id))
-            .map(|a| end.pilot(a)),
+            .map(|a| end.pilot(a, &standing, &kills)),
     }
 }
 
@@ -962,29 +968,6 @@ mod tests {
         .unwrap()
     }
     #[test]
-    fn enemy_survival_groups_are_not_the_players_objectives() {
-        let craft = |id, friendly| Airframe {
-            id,
-            friendly,
-            alive: false,
-            ejected: false,
-            damage: 1.,
-            landing_grade: None,
-            cause: None,
-        };
-        let aircraft = [
-            craft(1, true),
-            craft(2, true),
-            craft(7, false),
-            craft(8, false),
-        ];
-        assert_eq!(
-            friendly_objectives(&[2], &[0, 1, 2, 7, 8], &aircraft),
-            vec![2, 0, 1]
-        );
-    }
-
-    #[test]
     fn five_pages_with_mission_text_first() {
         let lost = pages(&Report::default(), &text());
         assert_eq!(lost.len(), 5);
@@ -1051,8 +1034,10 @@ mod tests {
                 airframe(11, false, true),
             ],
             wingman: Some(1),
-            destroy: vec![10, 11],
-            protect: vec![],
+            requirements: Requirements {
+                destroy: vec![10, 11],
+                protect: vec![],
+            },
         }
     }
     #[test]
@@ -1118,7 +1103,19 @@ mod tests {
         let report = report(&end);
         assert_eq!(report.player.kills, [0; 10]);
         assert_eq!(report.player.status, Status::Dead);
-        assert!(end.kills().iter().all(|k| k.victim != 10 && k.victim != 0));
+        let fates = end.fates();
+        let standing = Standing {
+            ledger: end.ledger,
+            plane: end.player.id,
+            aircraft: &fates,
+            requirements: &end.requirements,
+        };
+        assert!(
+            standing
+                .kills()
+                .iter()
+                .all(|k| k.victim != 10 && k.victim != 0)
+        );
     }
     #[test]
     fn a_surviving_target_or_friendly_kill_fails_the_mission() {
@@ -1209,6 +1206,146 @@ mod tests {
             ..ending(&ledger)
         });
         assert!(alone.wingman.is_none());
+    }
+    /// Two humans in Friendly Wing 1 (plane 0, the lead, is seat 0; plane 2 is
+    /// seat 1 and the wing's second member), an AI third member (plane 1) and
+    /// an enemy pair (10, 11).
+    fn two_seat_roster() -> Roster {
+        use tore_sim::ai::launch::{Side, WingId};
+        let slot = |side, member| crate::seats::Slot {
+            wing: WingId { side, index: 0 },
+            member,
+        };
+        Roster::with_humans(
+            [
+                (PlaneId(0), slot(Side::Friendly, 0), SeatId(0), None),
+                (PlaneId(2), slot(Side::Friendly, 1), SeatId(1), None),
+            ],
+            [
+                (PlaneId(1), slot(Side::Friendly, 2)),
+                (PlaneId(10), slot(Side::Enemy, 0)),
+                (PlaneId(11), slot(Side::Enemy, 1)),
+            ],
+        )
+    }
+    /// The debrief of the plane `plane` in the two seat mission: every other
+    /// aircraft is a member of the ending, friendly when it flies the same
+    /// side. Enemy 11 is the only aircraft still flying.
+    fn seat_ending<'a>(ledger: &'a Ledger, roster: &Roster, plane: u32) -> Ending<'a> {
+        let side = roster.plane(PlaneId(plane)).unwrap().slot.wing.side;
+        let frame = |id: u32| {
+            let p = roster.plane(PlaneId(id)).unwrap();
+            airframe(id, p.slot.wing.side == side, id == 11)
+        };
+        let requirements = Requirements {
+            destroy: [10, 11]
+                .into_iter()
+                .filter(|id| roster.plane(PlaneId(*id)).unwrap().slot.wing.side != side)
+                .collect(),
+            protect: vec![],
+        };
+        Ending {
+            ledger,
+            ticks: 600,
+            player: airframe(plane, true, true),
+            aircraft: [0, 1, 2, 10, 11]
+                .into_iter()
+                .filter(|id| *id != plane)
+                .map(frame)
+                .collect(),
+            wingman: wingman_of(roster, PlaneId(plane)),
+            requirements,
+        }
+    }
+    #[test]
+    fn the_wingman_is_the_first_other_member_of_the_planes_own_wing() {
+        let roster = two_seat_roster();
+        // Seat 0 keeps the lead's wingman, now the other human.
+        assert_eq!(wingman_of(&roster, PlaneId(0)), Some(2));
+        // Seat 1's is the lead, not the AI member and not an enemy.
+        assert_eq!(wingman_of(&roster, PlaneId(2)), Some(0));
+        assert_eq!(wingman_of(&roster, PlaneId(1)), Some(0));
+        assert_eq!(wingman_of(&roster, PlaneId(10)), Some(11));
+        // Alone in its wing: nobody.
+        let alone = Roster::single_player(None, []);
+        assert_eq!(wingman_of(&alone, PlaneId(0)), None);
+        // Single player as it is today: the lowest AI member of the wing.
+        use tore_sim::ai::launch::{Side, WingId};
+        let wing = WingId {
+            side: Side::Friendly,
+            index: 0,
+        };
+        let solo = Roster::single_player(
+            None,
+            [
+                (PlaneId(3), crate::seats::Slot { wing, member: 2 }),
+                (PlaneId(1), crate::seats::Slot { wing, member: 1 }),
+            ],
+        );
+        assert_eq!(wingman_of(&solo, PlaneId(0)), Some(1));
+    }
+    #[test]
+    fn a_seats_debrief_puts_its_own_plane_in_the_pilot_column() {
+        use tore_sim::combat::ledger::Kill;
+        let roster = two_seat_roster();
+        let mut ledger = Ledger::default();
+        // Seat 1's plane shoots down enemy 10; the lead fires its gun at
+        // enemy 11 and gets no kill.
+        ledger.launch(1, 2, Some(10), ShotKind::AirToAir);
+        ledger.launch(2, 0, Some(11), ShotKind::Gun);
+        ledger.kill(Kill {
+            owner: 2,
+            victim: 10,
+            category: 0x8000,
+            aircraft: true,
+        });
+        let second = report(&seat_ending(&ledger, &roster, 2));
+        let first = report(&seat_ending(&ledger, &roster, 0));
+        // Seat 1: its own shot and kill in the pilot column, the lead's gun in
+        // the wingman column.
+        assert_eq!(second.player.kills[0], 1);
+        assert_eq!(second.player.air_to_air.launched, 1);
+        assert_eq!(second.player.gun.launched, 0);
+        assert_eq!(second.wingman.as_ref().unwrap().gun.launched, 1);
+        assert_eq!(second.wingman.as_ref().unwrap().kills, [0; 10]);
+        // Seat 0 reads the same ledger from the other side.
+        assert_eq!(first.player.kills, [0; 10]);
+        assert_eq!(first.player.gun.launched, 1);
+        assert_eq!(first.wingman.as_ref().unwrap().kills[0], 1);
+        // Both must still destroy enemy 11.
+        let open = [Objective::Destroy {
+            destroyed: 1,
+            total: 2,
+        }];
+        assert_eq!(second.objectives, open);
+        assert_eq!(first.objectives, open);
+    }
+    #[test]
+    fn friendly_fire_counts_only_the_kills_the_seats_own_plane_made() {
+        use tore_sim::combat::ledger::Kill;
+        let roster = two_seat_roster();
+        let mut ledger = Ledger::default();
+        // Seat 1's plane shoots down the AI member of its own wing.
+        ledger.kill(Kill {
+            owner: 2,
+            victim: 1,
+            category: 0x8000,
+            aircraft: true,
+        });
+        let ending = |plane| {
+            let mut end = seat_ending(&ledger, &roster, plane);
+            // Every enemy is down, so only friendly fire can fail the mission.
+            for a in end.aircraft.iter_mut().filter(|a| !a.friendly) {
+                a.alive = false;
+            }
+            end
+        };
+        let (second, first) = (report(&ending(2)), report(&ending(0)));
+        assert_eq!(second.player.friendly_fire, 1);
+        assert_eq!(second.outcome, Outcome::Failure);
+        assert_eq!(first.player.friendly_fire, 0);
+        assert_eq!(first.outcome, Outcome::Success);
+        assert_eq!(first.wingman.unwrap().friendly_fire, 1);
     }
     #[test]
     fn kill_rows_take_the_first_matching_class_bit() {

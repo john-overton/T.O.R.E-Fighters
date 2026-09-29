@@ -83,6 +83,7 @@ Quick Mission (medium confidence, see the research).
 | Landing grade | Average landing score as `NN%`, `-` with no landings | retail format; scoring fitted, below |
 | Elapsed time | Simulated seconds as `M:SS`; minutes do not wrap | retail |
 | WINGMAN column | One aircraft: the lowest-numbered AI member of Friendly Wing 1. All `-` when the player flies alone | retail |
+| PLAYER and WINGMAN columns in multiplayer | Each seat has its own debrief. Its PLAYER column is the plane that seat flies and its WINGMAN column is the first other member of that plane's wing, human or AI. Alone in its wing, the column is all `-`. With one seat this is the row above | agent decision, 2026-09-29 |
 
 ### Weapon classes
 
@@ -114,7 +115,7 @@ attacker). Airport and scene objects count as not friendly.
 
 | Rule | Provenance |
 | --- | --- |
-| Any friendly-fire kill by the player fails the mission | retail |
+| Any friendly-fire kill by the player fails the mission. In a debrief for another seat, the kills of that seat's plane count, not the kills of the other seats | retail; multiplayer reading is an agent decision, 2026-09-29 |
 | Any target still alive fails it; a target counts as destroyed when it is shot down, crashed or its pilot has ejected | retail |
 | Any friendly objective lost fails it | retail |
 | Otherwise the mission succeeds | retail |

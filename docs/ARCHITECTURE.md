@@ -1474,6 +1474,24 @@ flight re-forms on the new leader.
 - **Debrief.** Built for each seat, with that seat's aircraft as the pilot column
   and the first other member of its wing as the wingman column. The full
   multiplayer results screen is stage E.
+
+  *Built (B5 step 1).* `debrief::capture(&World, SeatId)` builds the report of
+  the plane the seat flies (`None` for a seat that flies none). The pilot column
+  is that plane: its hit points come from its ownship and its pilot state from
+  its cockpit's flight. The wingman column is `debrief::wingman_of`, the first
+  other member of the plane's wing by the roster's slot, human-flown or not. The
+  objectives are `outcome::Requirements::of` for the plane, and friendly fire
+  counts the kills the plane made. Every other human-flown plane is an ordinary
+  aircraft of the ending, friendly when it flies the seat's side. The app asks
+  for `SEAT`, seat 0, in the game, at the end of a recording and in the AI
+  probe, which is today's debrief exactly. The success rule exists once, in
+  `outcome::Standing` (`tore-world`): the debrief's `report` and the in-flight
+  result check both read it, so the music, the radio calls and the debrief
+  cannot disagree. *Agent decisions:* the mission still holds one assignment
+  for the human (B3 makes it per plane), so every seat reads it; a seat that
+  flies for the enemy side is supported by the debrief (its targets are the
+  other side's aircraft) but the in-flight result check still assumes the
+  friendly side until B3 gives planes a side there.
 - **Mission result call.** The "mission accomplished" and "almost home" calls
   become `World` output for every seat (John, 2026-09-28). They used to be sent
   only when an audio device existed, so with `--no-audio` their HUD lines and
@@ -1487,7 +1505,7 @@ flight re-forms on the new leader.
   already decided at the first check disables the calls and the music's SUCC and
   HOME, and the home check. `World::step_results` runs it for every human-flown
   plane at the end of the tick's radio phase, with `outcome::succeeded`, which
-  follows the debrief's success rule for that plane (no friendly aircraft shot
+  is the debrief's success rule (`outcome::Standing`) for that plane (no friendly aircraft shot
   down by it, every aircraft to destroy gone, every aircraft to protect flying;
   the mission's assignment is still the one for plane 0 until B3). It sends the
   call to the plane's seat after the tick's due calls, so it is delivered on the
