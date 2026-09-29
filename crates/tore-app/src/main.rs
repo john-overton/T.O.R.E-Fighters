@@ -4254,7 +4254,7 @@ impl ApplicationHandler for App {
                                 self.flight_canvas.hud_zoom(1.),
                                 ils,
                                 airport_wind(&self.world, &presented, guidance.as_ref()).as_ref(),
-                                gyro_bank,
+                                (gyro_bank, self.flight_ui.time_scale),
                             );
                         }
                         let target_friendly = self.combat.state.display_target().is_some_and(|target| {
@@ -9075,6 +9075,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 &assets.theater_resources,
                 assets.creator_options.clone(),
             )?;
+        }
+        if wanted("menu") {
+            quick_mission::matrix::flight_menu_table(&assets.theater_resources)?;
         }
         if wanted("render") {
             let resources = assets.theater_resources.clone();
