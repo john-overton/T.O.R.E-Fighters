@@ -8984,6 +8984,32 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     mass.empty_lbs + state.fuel + state.carried_lbs(),
                     mass.max_takeoff_lbs
                 );
+                // The imported 1 G envelope row at the airport and the figures the
+                // hybrid model derives its stall speed and lift from.
+                let configuration = state.model().configuration();
+                let altitude = state.position[1];
+                let row = |g: i32| {
+                    configuration
+                        .aerodynamics
+                        .envelopes
+                        .iter()
+                        .find(|e| e.g == g)
+                        .and_then(|e| e.speeds(altitude))
+                        .map_or_else(
+                            || "none".to_string(),
+                            |(low, high)| format!("{:.1}..{:.1}", low / 1.68781, high / 1.68781),
+                        )
+                };
+                println!(
+                    "envelope: altitude_ft={altitude:.1} g1_kt={} g2_kt={} g3_kt={} flaps_lift_f8={} loaded_elevator_percent={} loading={:.3} landing_limit_kt={:.1}",
+                    row(1),
+                    row(2),
+                    row(3),
+                    configuration.aerodynamics.flaps_lift_f8,
+                    configuration.aerodynamics.loaded_elevator_percent,
+                    (state.fuel + state.carried_lbs()) / mass.empty_lbs,
+                    f64::from(configuration.native.landing.forward_fps) / 1.68781
+                );
             }
             if let Some(variant) = flight_probe::LandingVariant::from_maneuver(&maneuver) {
                 let layout = quick_mission::ground_layout(world, object, 1)?;
@@ -9045,6 +9071,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             (maneuver == "stall-recover").then(|| flight_probe::StallRecovery::new(&state));
         let mut gear_pulled = false;
         let mut belly_wear = 0.;
+        let mut takeoff_start: Option<attitude::Vector> = None;
+        let mut rotation: Option<f64> = None;
+        let mut liftoff: Option<(u64, f64, f64)> = None;
         for tick in 0..ticks {
             let scripted;
             let keys = if let Some(probe) = spin_recovery.as_mut() {
@@ -9103,6 +9132,21 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 return Err(error.into());
             }
             belly_wear += state.take_belly_scrape();
+            if takeoff_start.is_none() {
+                takeoff_start = Some(state.position);
+            }
+            let on_runway = state.research.as_ref().is_some_and(|r| r.on_ground);
+            if rotation.is_none() && on_runway && state.pitch > 1.5f64.to_radians() {
+                rotation = Some(state.speed / 1.68781);
+            }
+            if liftoff.is_none() && !on_runway && state.ticks > 1 {
+                let start = takeoff_start.unwrap_or(state.position);
+                liftoff = Some((
+                    state.ticks,
+                    state.speed / 1.68781,
+                    (state.position[0] - start[0]).hypot(state.position[2] - start[2]),
+                ));
+            }
             if let Some(world) = &replay_world {
                 apply_edge_loss(&mut state, world);
             }
@@ -9153,6 +9197,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.bank.to_degrees()
         );
         println!("vertical={vertical} inverted={inverted} loop_completed={completed}");
+        if maneuver.starts_with("takeoff") {
+            match liftoff {
+                Some((tick, speed, distance)) => println!(
+                    "liftoff: tick={tick} speed_kt={speed:.1} distance_ft={distance:.0} rotation_kt={}",
+                    rotation.map_or("none".into(), |r| format!("{r:.1}"))
+                ),
+                None => println!("liftoff: none"),
+            }
+        }
         if maneuver.starts_with("takeoff-gear") {
             println!(
                 "gear_pulled={gear_pulled} belly_wear_percent={:.3} gear={:.2}",
