@@ -682,7 +682,7 @@ impl Recorder {
     /// after a decoy roll; and its closest approach so far.
     fn guidance(&mut self, tick: &Tick<'_>, frame: &mut Frame) {
         let number = frame.tick;
-        let config = tick.combat.state.configuration();
+        let config = tick.combat.state.own().configuration();
         let infos = &self.infos;
         let named = |id: u32| who(infos, id);
         let position = |id: u32| -> Option<[f64; 3]> {

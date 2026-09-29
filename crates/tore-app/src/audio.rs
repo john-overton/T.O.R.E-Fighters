@@ -240,8 +240,10 @@ pub fn spatial_sources(
             .projectiles
             .iter()
             .filter(|p| {
-                tore_sim::combat::missiles::Profile::for_weapon(p.weapon(combat.configuration()))
-                    .is_some()
+                tore_sim::combat::missiles::Profile::for_weapon(
+                    p.weapon(combat.own().configuration()),
+                )
+                .is_some()
             })
             .map(|p| Source {
                 id: SourceId::Missile(p.id),
@@ -2147,11 +2149,13 @@ mod tests {
         use tore_sim::acoustics::SourceId;
         let player = fixture::player();
         let mut combat = fixture::combat(Vec::new(), Vec::new());
-        let scene = fixture::scene(combat.state.configuration());
+        let scene = fixture::scene(combat.state.own().configuration());
         // Leaves the scene's current tick in combat, then one shot becomes
         // a reviewed missile so the missile rule is exercised too.
         fixture::snapshots(&mut combat, &scene, true, &player);
-        let mut missile = combat.state.configuration().stations[1].weapon.clone();
+        let mut missile = combat.state.own().configuration().stations[1]
+            .weapon
+            .clone();
         missile.source = "AIM9M.JT".into();
         combat.state.projectiles[0].weapon = Some(missile);
         let live = spatial_sources(&combat.state, &player);

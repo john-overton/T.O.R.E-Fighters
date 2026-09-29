@@ -622,7 +622,7 @@ impl Live {
         let selected = match flight.reference {
             Reference::Player => Some(0),
             Reference::Aircraft(id) => Some(id),
-            Reference::Target => flight.combat.state.view_target().map(|t| t.id),
+            Reference::Target => flight.combat.state.own_view().view_target().map(|t| t.id),
             Reference::Missile => None,
         }
         .filter(|id| self.roster.info.contains_key(id));

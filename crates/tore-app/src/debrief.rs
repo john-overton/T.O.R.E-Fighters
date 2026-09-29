@@ -272,7 +272,7 @@ pub fn capture(
     let player = Airframe {
         id: 0,
         friendly: true,
-        alive: !flight.crashed && state.player_hp > 0 && !pilot.dead && !pilot.ejected,
+        alive: !flight.crashed && state.own().hp > 0 && !pilot.dead && !pilot.ejected,
         ejected: pilot.ejected && !pilot.dead,
         damage: flight.damage_fraction,
         landing_grade: flight.research.as_ref().and_then(|r| r.landings.grade()),

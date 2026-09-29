@@ -1060,7 +1060,7 @@ impl AiWings {
         self.weapon_rules = state.weapon_rules;
         self.mission
             .set_missiles(if state.weapon_rules == Rules::Spec {
-                state.missile_snapshots(crate::combat::launcher(player))
+                state.missile_snapshots(&[(PLAYER_ID, crate::combat::launcher(player))])
             } else {
                 Vec::new()
             });
@@ -1068,7 +1068,7 @@ impl AiWings {
             state
                 .projectiles
                 .iter()
-                .filter(|p| live::is_gun(p.weapon(state.configuration())))
+                .filter(|p| live::is_gun(state.weapon(p)))
                 .map(|p| tore_sim::ai::incoming_fire::Round {
                     id: p.id,
                     owner: p.owner,
@@ -1079,7 +1079,8 @@ impl AiWings {
                 .collect(),
         );
         self.lose_out_of_bounds(&mut state.ledger, |x, z| world.edge_distance_nm(x, z));
-        let object = self.player_object(player, state.player_hp, state.configuration());
+        let own = state.ownship(PLAYER_ID).expect("the human's ownship");
+        let object = self.player_object(player, own.hp, own.configuration());
         // Aircraft on the researched flight model roll on runways and feel
         // the wind; legacy airborne actors keep the terrain-only surface.
         let output = self.advance_on_surface(object, &mut state.targets, &ground, &|x, z| {
@@ -1246,7 +1247,12 @@ impl AiWings {
                 }),
         );
         if state.weapon_rules == Rules::Compatibility {
-            let stations = state.configuration().stations.clone();
+            let stations = state
+                .ownship(PLAYER_ID)
+                .expect("the human's ownship")
+                .configuration()
+                .stations
+                .clone();
             self.report_threats(&state.projectiles, |index| {
                 match stations[index].weapon.seeker.signature {
                     2 => Some(SeekerClass::Infrared),
@@ -1284,20 +1290,21 @@ impl AiWings {
     ) {
         use tore_sim::ai::{awareness, engagement::ThreatReport};
         use tore_sim::combat::threats::EvidenceSource;
+        let own = state.ownship(PLAYER_ID).expect("the human's ownship");
         let mut reports = Vec::new();
         // The player's RWR may identify a supporting source only by a unique
         // independently observed hostile emitter at the received bearing.
-        for record in state
+        for record in own
             .missile_threats
             .records()
             .filter(|r| r.targeting_receiver && !r.stale)
         {
             let attacker_id = if record.source == EvidenceSource::ElectronicSupported {
                 record.radar_bearing_deg.and_then(|bearing| {
-                    let mut matches = state.emitters.iter().filter(|emitter| {
+                    let mut matches = own.emitters.iter().filter(|emitter| {
                         self.slot(emitter.id)
                             .is_some_and(|slot| slot.side == launch::Side::Enemy)
-                            && state.sensors.observation(emitter.id).is_some()
+                            && own.sensors.observation(emitter.id).is_some()
                             && ((emitter.bearing_rad.to_degrees() - bearing + 180.)
                                 .rem_euclid(360.)
                                 - 180.)
@@ -1328,7 +1335,7 @@ impl AiWings {
         // only when that aircraft is independently observed. Hidden projectile
         // target IDs do not participate in this association.
         for projectile in state.projectiles.iter().filter(|p| p.age <= 30) {
-            let weapon = projectile.weapon(state.configuration());
+            let weapon = state.weapon(projectile);
             let gun = live::is_gun(weapon);
             if gun && !projectile.tracer {
                 continue;
@@ -1359,13 +1366,12 @@ impl AiWings {
                                         .is_some_and(|slot| slot.side == launch::Side::Enemy)
                                 })
                                 .filter_map(|target| {
-                                    state
-                                        .sensors
+                                    own.sensors
                                         .observation(target.id)
                                         .map(|o| (target.id, o.position))
                                 })
                                 .collect::<Vec<_>>(),
-                            state.missile_threats.records().any(|r| {
+                            own.missile_threats.records().any(|r| {
                                 r.missile_id == projectile.id && r.targeting_receiver && !r.stale
                             }),
                         )
@@ -2005,7 +2011,7 @@ impl AiWings {
         // Compatibility keeps its existing steering; reviewed profiles use
         // the same owner-aware seeker/propulsion lifecycle as player shots.
         let launched = (self.mission.tick() / 30) as u16;
-        let incoming = event.target == PLAYER_ID;
+        let incoming = (event.target == PLAYER_ID).then_some(PLAYER_ID);
         let mut emitted = 0;
         for _ in 0..event.projectiles {
             if projectiles.len() >= MAX_PROJECTILES {
@@ -2089,7 +2095,11 @@ impl AiWings {
                 },
                 event.actor,
             );
-            let config = state.configuration().clone();
+            let config = state
+                .ownship(PLAYER_ID)
+                .expect("the human's ownship")
+                .configuration()
+                .clone();
             for projectile in &mut state.projectiles {
                 let weapon = projectile.weapon(&config);
                 let class = match weapon.seeker.signature {
@@ -2371,6 +2381,7 @@ mod tests {
         experience::{EnemySkillOverride, ExperienceOrigin},
         launch::{WingId, WingSelection, resolve_wings},
     };
+    use tore_sim::combat::live::OwnshipInput;
 
     #[test]
     fn six_full_wings_have_separate_delta_formations_and_29_ai_members() {
@@ -3139,7 +3150,7 @@ mod tests {
         let slot = wings.slots()[0];
         let stations = wings.mission.actor(slot.id).unwrap().stations().to_vec();
         assert!(stations.len() > 1);
-        let mut gun = combat_fixture(false).configuration().stations[0]
+        let mut gun = combat_fixture(false).own().configuration().stations[0]
             .weapon
             .clone();
         gun.source = slot.aircraft.gun().into();
@@ -3435,7 +3446,7 @@ mod tests {
         let (mut wings, mut targets) = build(None);
         run(&mut wings, &mut targets, 1);
         let id = targets[2].id;
-        let config = combat_fixture(false).configuration().clone();
+        let config = combat_fixture(false).own().configuration().clone();
         wings.configs.insert(id, config);
         let actor = wings.mission.actor_mut(id).unwrap();
         let mut stations = simple_stations(4, 0, AI_STORE_SPEED);
@@ -3488,7 +3499,7 @@ mod tests {
             motion: None,
             guidance_ticks: None,
             age: 0,
-            incoming: false,
+            incoming: None,
             station: 0,
             position: [0., 20000., 30000.],
             previous: [0., 20000., 30000.],
@@ -3563,7 +3574,14 @@ mod tests {
             let player = flight::State::new(&aircraft(), [0.0, 20000.0, -5000.0]).unwrap();
             let mut previous = 1000.0;
             for tick in 0..1500 {
-                combat.step(false, crate::combat::launcher(&player), flat);
+                combat.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: false,
+                        launcher: crate::combat::launcher(&player),
+                    }],
+                    flat,
+                );
                 wings
                     .advance(player_object(player.position), &mut combat.targets, &flat)
                     .unwrap();
@@ -3585,7 +3603,7 @@ mod tests {
         use tore_sim::ai::weapon_service::{RequestId, StationId};
         let (mut wings, _) = build(None);
         let mut combat = combat_fixture(true);
-        let mut gun = combat_fixture(false).configuration().stations[0]
+        let mut gun = combat_fixture(false).own().configuration().stations[0]
             .weapon
             .clone();
         gun.source = "SYNTHETIC-GUN.JT".into();
@@ -3613,12 +3631,20 @@ mod tests {
                 .all(|p| p.weapon.as_ref() == Some(&gun) && p.target.is_none())
         );
         // Station 1 does not even exist on the player. Stepping must use the owned record.
-        combat.step(false, crate::combat::launcher(&player), flat);
+        combat.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: crate::combat::launcher(&player),
+            }],
+            flat,
+        );
         assert!(
-            combat
-                .projectiles
-                .iter()
-                .all(|p| p.weapon(combat.configuration()).seeker.signature == 0)
+            combat.projectiles.iter().all(|p| p
+                .weapon(combat.own().configuration())
+                .seeker
+                .signature
+                == 0)
         );
     }
 
@@ -3633,7 +3659,7 @@ mod tests {
         for actor in wings.mission.actors_mut() {
             actor.set_stations(Vec::new());
         }
-        let mut gun = combat_fixture(false).configuration().stations[0]
+        let mut gun = combat_fixture(false).own().configuration().stations[0]
             .weapon
             .clone();
         gun.source = "M61.JT".into();
@@ -3760,7 +3786,7 @@ mod tests {
         }
         let mut combat = combat_fixture(false);
         combat.targets = targets;
-        let mut gun = combat.configuration().stations[0].weapon.clone();
+        let mut gun = combat.own().configuration().stations[0].weapon.clone();
         gun.source = "M61.JT".into();
         gun.burst.actual_rounds_per_game = 2;
         gun.burst.game_rounds_in_burst = 4;
@@ -3793,7 +3819,10 @@ mod tests {
         let rounds: Vec<_> = combat.projectiles.iter().filter(|p| p.owner == 3).collect();
         assert_eq!(rounds.len(), 4);
         assert_eq!(
-            rounds.iter().map(|p| p.incoming).collect::<Vec<_>>(),
+            rounds
+                .iter()
+                .map(|p| p.incoming.is_some())
+                .collect::<Vec<_>>(),
             [true, true, false, false]
         );
         assert_eq!(
@@ -3833,7 +3862,7 @@ mod tests {
             }
             let mut combat = combat_fixture(false);
             combat.targets = spawned();
-            let gun = combat.configuration().stations[0].weapon.clone();
+            let gun = combat.own().configuration().stations[0].weapon.clone();
             wings.weapons.insert((1, 0), gun);
             wings.pending_guns.insert(
                 (1, 0),
@@ -3863,38 +3892,38 @@ mod tests {
     #[test]
     fn normal_startup_selects_and_arms_canonical_gun() {
         let fixture = combat_fixture(false);
-        let mut config = fixture.configuration().clone();
+        let mut config = fixture.own().configuration().clone();
         config.stations[0].weapon.source = "M61.JT".into();
         let mut missile = config.stations[0].clone();
         missile.weapon.source = "AIM9M.JT".into();
         config.stations.insert(0, missile);
         let mut state = live::State::new(config, true).unwrap();
-        state.selected = 0;
-        state.armed = true;
-        crate::combat::apply_startup_weapon_state(&mut state);
-        assert_eq!(state.selected, 1);
-        assert!(state.armed);
+        state.own_mut().selected = 0;
+        state.own_mut().armed = true;
+        crate::combat::apply_startup_weapon_state(state.own_mut(), false, false);
+        assert_eq!(state.own().selected, 1);
+        assert!(state.own().armed);
     }
 
     #[test]
     fn guns_only_with_an_empty_gun_starts_on_nav_not_on_a_missile() {
         let fixture = combat_fixture(false);
-        let mut config = fixture.configuration().clone();
+        let mut config = fixture.own().configuration().clone();
         config.stations[0].weapon.source = "M61.JT".into();
         let mut missile = config.stations[0].clone();
         missile.weapon.source = "AIM9M.JT".into();
         config.stations.insert(0, missile);
         let mut state = live::State::new(config, true).unwrap();
-        state.cheats.guns_only = true;
+        let own = state.own_mut();
         // The gun (station 1) carries nothing; the missile (station 0) does.
-        state.ammo[1] = 0;
-        assert!(state.carries(0) && !state.carries(1));
-        crate::combat::apply_startup_weapon_state(&mut state);
-        assert!(!state.armed);
+        own.ammo[1] = 0;
+        assert!(own.carries(0, false) && !own.carries(1, false));
+        // Guns only.
+        crate::combat::apply_startup_weapon_state(own, true, false);
+        assert!(!own.armed);
         // Without the cheat the same load starts on the loaded missile.
-        state.cheats.guns_only = false;
-        crate::combat::apply_startup_weapon_state(&mut state);
-        assert!(state.armed && state.selected == 0);
+        crate::combat::apply_startup_weapon_state(own, false, false);
+        assert!(own.armed && own.selected == 0);
     }
 
     #[test]
@@ -3902,7 +3931,7 @@ mod tests {
         use tore_sim::ai::{mission::DeviceEvent, weapon_service::StationId};
         let (mut wings, _) = build(None);
         let mut combat = combat_fixture(true);
-        let mut weapon = combat.configuration().stations[0].weapon.clone();
+        let mut weapon = combat.own().configuration().stations[0].weapon.clone();
         weapon.source = "AIM120.JT".into();
         weapon.seeker.signature = 3;
         weapon.seeker.chaff_flare_chance = 100;
@@ -3944,9 +3973,12 @@ mod tests {
         // The physical body remains visible after a successful decoy.
         assert_eq!(
             combat
-                .missile_snapshots(crate::combat::launcher(
-                    &flight::State::new(&aircraft(), [0., 20000., 0.]).unwrap()
-                ))
+                .missile_snapshots(&[(
+                    0,
+                    crate::combat::launcher(
+                        &flight::State::new(&aircraft(), [0., 20000., 0.]).unwrap()
+                    ),
+                )])
                 .len(),
             1
         );
@@ -3964,7 +3996,7 @@ mod tests {
         };
         let (mut wings, _) = build(None);
         let mut combat = combat_fixture(true);
-        let mut weapon = combat.configuration().stations[0].weapon.clone();
+        let mut weapon = combat.own().configuration().stations[0].weapon.clone();
         weapon.seeker.signature = 2;
         weapon.seeker.chaff_flare_chance = 100;
         wings.device_effectiveness.insert(3, (100, 100));
@@ -4025,7 +4057,7 @@ mod tests {
         };
         let (mut wings, _) = build(None);
         let mut combat = combat_fixture(true);
-        let mut weapon = combat.configuration().stations[0].weapon.clone();
+        let mut weapon = combat.own().configuration().stations[0].weapon.clone();
         weapon.seeker.signature = 2;
         weapon.seeker.chaff_flare_chance = 150;
         wings.device_effectiveness.insert(3, (200, 100));
@@ -4086,10 +4118,10 @@ mod tests {
                 if *id >= 3 { 2000.0 } else { 0.0 },
             ];
         }
-        let missile = combat_fixture(true).configuration().stations[0]
+        let missile = combat_fixture(true).own().configuration().stations[0]
             .weapon
             .clone();
-        let gun = combat_fixture(false).configuration().stations[0]
+        let gun = combat_fixture(false).own().configuration().stations[0]
             .weapon
             .clone();
         let mut realised = Vec::new();

@@ -163,7 +163,7 @@ impl World {
         }
         let flight = &mut self.cockpits[cockpit].flight;
         if let Err(error) = flight.set_payload(
-            (self.combat.state.payload_lbs() - flight.systems.used_external_lbs()).max(0.),
+            (self.combat.state.own().payload_lbs() - flight.systems.used_external_lbs()).max(0.),
         ) {
             out.cues.push(Cue::Message(error.to_string()));
         }
@@ -191,11 +191,15 @@ impl World {
     fn release_countermeasure(&mut self, cockpit: usize, chaff: bool, out: &mut TickOutput) {
         let flight = &self.cockpits[cockpit].flight;
         let launcher = combat::launcher(flight);
-        if !launcher.alive || flight.escape.is_some() || self.combat.state.player_hp <= 0 {
+        if !launcher.alive || flight.escape.is_some() || self.combat.state.own().hp <= 0 {
             return;
         }
         let count = |state: &tore_sim::combat::live::State| {
-            if chaff { state.chaff } else { state.flares }
+            if chaff {
+                state.own().chaff
+            } else {
+                state.own().flares
+            }
         };
         let before = count(&self.combat.state);
         self.combat.command(
@@ -232,7 +236,7 @@ impl World {
     ) {
         let now = self.combat.state.tick() as f64 / 120.;
         let recipient = self.roster.seat(seat).and_then(|s| s.wing_recipient);
-        let selected = self.combat.state.designated();
+        let selected = self.combat.state.own_view().designated();
         // Land at selected airport uses the airport Shift-N selected for the
         // tower.
         let site = if order == PlayerOrder::LandAtSelected {

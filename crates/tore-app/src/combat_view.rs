@@ -52,7 +52,7 @@ impl CombatView {
     /// player's stations name.
     pub fn new(combat: &Combat, data: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
         let mut art = CombatArt::load(data)?;
-        art.add_weapon_shapes(combat.state.configuration(), data);
+        art.add_weapon_shapes(combat.state.own().configuration(), data);
         Ok(Self {
             art,
             models: Vec::new(),
@@ -112,7 +112,7 @@ impl CombatView {
     /// The target window's camera on the displayed target, at its presented
     /// pose.
     pub fn target_camera(&self, combat: &Combat, player: &flight::State) -> Option<Camera> {
-        let target = combat.state.display_target()?;
+        let target = combat.state.own_view().display_target()?;
         let (position, _) = self.pose(combat, target);
         Some(crate::target_preview::camera(player.position, position))
     }
@@ -216,14 +216,14 @@ impl CombatView {
         player: &flight::State,
     ) -> Vec<crate::countermeasure_renderer::Afterburner> {
         let mut glows = Vec::new();
-        if player.afterburner_active() && player.escape.is_none() && combat.state.player_hp > 0 {
+        if player.afterburner_active() && player.escape.is_none() && combat.state.own().hp > 0 {
             glows.extend(crate::render_snapshot::afterburner_glow(
                 player.position,
                 [player.yaw, player.pitch, player.bank],
                 combat.contrail_offsets(),
             ));
         }
-        let player_type = combat.state.configuration().aircraft;
+        let player_type = combat.state.own().configuration().aircraft;
         // Only the lit aircraft, blended as the picture blends them, so the
         // rest of the picture is not built again for the lights.
         let lit = RenderSnapshot {
@@ -257,7 +257,7 @@ impl CombatView {
         world: &Terrain,
         scenery: &Scenery,
     ) -> Option<Camera> {
-        let target = combat.state.display_target()?;
+        let target = combat.state.own_view().display_target()?;
         let mut camera = self.target_camera(combat, player)?;
         if let Some(object) = combat.ground_object(target.id) {
             let bounds = object.bounds;
@@ -330,18 +330,25 @@ pub fn readout(
 ) -> crate::instruments::CombatReadout {
     // (source, name, rounds, selected, loaded at the start)
     let mut groups: Vec<(String, String, u32, bool, bool)> = Vec::new();
-    for (index, station) in combat.state.configuration().stations.iter().enumerate() {
-        let selected = combat.state.armed && index == combat.state.selected;
-        let loaded = combat.state.was_loaded(index);
+    for (index, station) in combat
+        .state
+        .own()
+        .configuration()
+        .stations
+        .iter()
+        .enumerate()
+    {
+        let selected = combat.state.own().armed && index == combat.state.own().selected;
+        let loaded = combat.state.own().was_loaded(index);
         if let Some(group) = groups.iter_mut().find(|g| g.0 == station.weapon.source) {
-            group.2 += u32::from(combat.state.rounds(index));
+            group.2 += u32::from(combat.state.own().rounds(index));
             group.3 |= selected;
             group.4 |= loaded;
         } else {
             groups.push((
                 station.weapon.source.clone(),
                 station.weapon.hud_name.clone(),
-                u32::from(combat.state.rounds(index)),
+                u32::from(combat.state.own().rounds(index)),
                 selected,
                 loaded,
             ));
@@ -356,9 +363,9 @@ pub fn readout(
             .filter(|(_, _, count, selected, loaded)| *count > 0 || *selected || *loaded)
             .map(|(_, name, count, selected, _)| (name, count, selected))
             .collect(),
-        chaff: combat.state.chaff,
-        flares: combat.state.flares,
-        target: combat.state.display_target().map(|target| {
+        chaff: combat.state.own().chaff,
+        flares: combat.state.own().flares,
+        target: combat.state.own_view().display_target().map(|target| {
             let name = combat
                 .ground_name(target.id)
                 .map(str::to_owned)
@@ -366,7 +373,7 @@ pub fn readout(
                 .unwrap_or_else(|| format!("CONTACT {}", target.id));
             crate::target_window::Readout::new(target, s, name)
         }),
-        envelope_target: combat.state.display_target().and_then(|target| {
+        envelope_target: combat.state.own_view().display_target().and_then(|target| {
             combat
                 .dummy_types()
                 .iter()
@@ -375,17 +382,18 @@ pub fn readout(
         }),
         scope: crate::scope::scope(&combat.state, s, controls),
         rcs: crate::scope::rcs(&combat.state, s, rcs_scale),
-        rwr_failed: combat.state.rwr_failed,
+        rwr_failed: combat.state.own().rwr_failed,
         rwr: rwr_readout(combat, s),
     }
 }
 fn rwr_readout(combat: &Combat, own: &flight::State) -> crate::scope::Rwr {
     use crate::scope::{EmitterKind, EmitterState, Indicator, Rwr, RwrEmitter, RwrMissile};
     use tore_sim::combat::threats::GuidanceClass;
-    let operating = !combat.state.rwr_failed && own.systems.counts[32] <= 1;
+    let operating = !combat.state.own().rwr_failed && own.systems.counts[32] <= 1;
     let emitters = if operating {
         combat
             .state
+            .own()
             .emitters
             .iter()
             .map(|emitter| RwrEmitter {
@@ -405,7 +413,7 @@ fn rwr_readout(combat: &Combat, own: &flight::State) -> crate::scope::Rwr {
     } else {
         Vec::new()
     };
-    let mut radar_indicator = if combat.state.emitters.is_empty() || !operating {
+    let mut radar_indicator = if combat.state.own().emitters.is_empty() || !operating {
         Indicator::Off
     } else {
         Indicator::Detected
@@ -413,6 +421,7 @@ fn rwr_readout(combat: &Combat, own: &flight::State) -> crate::scope::Rwr {
     let mut infrared_indicator = Indicator::Off;
     let missiles = combat
         .state
+        .own()
         .missile_threats
         .records()
         .map(|record| {
@@ -441,7 +450,7 @@ fn rwr_readout(combat: &Combat, own: &flight::State) -> crate::scope::Rwr {
         })
         .collect();
     let mut readout = Rwr {
-        tick: combat.state.sensors.tick(),
+        tick: combat.state.own().sensors.tick(),
         operating,
         emitters,
         missiles,
@@ -451,6 +460,7 @@ fn rwr_readout(combat: &Combat, own: &flight::State) -> crate::scope::Rwr {
     readout.mark_supported_sources(
         combat
             .state
+            .own()
             .missile_threats
             .records()
             .filter(|r| {
@@ -464,9 +474,9 @@ fn rwr_readout(combat: &Combat, own: &flight::State) -> crate::scope::Rwr {
 }
 
 pub fn equipment_damage_report(combat: &Combat) -> Vec<String> {
-    let config = combat.state.configuration();
+    let config = combat.state.own().configuration();
     (36..45)
-        .filter(|i| combat.state.subsystem_counts[*i] > 0)
+        .filter(|i| combat.state.own().subsystem_counts[*i] > 0)
         .map(|i| {
             let hardpoint = i - 36;
             if config.external_fuel_lbs[hardpoint] > 0. {
@@ -484,13 +494,13 @@ pub fn equipment_damage_report(combat: &Combat) -> Vec<String> {
             } else if hardpoint == config.ecm_hardpoint {
                 format!(
                     "Countermeasures: jammer {}, chaff {}, flares {}",
-                    if combat.state.ecm_failed {
+                    if combat.state.own().ecm_failed {
                         "failed"
                     } else {
                         "available"
                     },
-                    combat.state.chaff,
-                    combat.state.flares
+                    combat.state.own().chaff,
+                    combat.state.own().flares
                 )
             } else {
                 format!("Hardpoint {} equipment damaged", hardpoint + 1)
@@ -499,54 +509,59 @@ pub fn equipment_damage_report(combat: &Combat) -> Vec<String> {
         .collect()
 }
 pub fn status(combat: &Combat, s: &flight::State) -> String {
-    let i = combat.state.selected;
-    let target = combat.state.designated().map_or("NO TARGET".into(), |id| {
-        combat
-            .state
-            .targets
-            .iter()
-            .find(|t| t.id == id)
-            .map_or("NO TARGET".into(), |t| {
-                if t.hp == 0 {
-                    "DESTROYED".into()
-                } else {
-                    format!(
-                        "{} HP {} {}",
-                        combat
-                            .ground_name(id)
-                            .map_or_else(|| format!("T{id}"), str::to_owned),
-                        t.hp,
-                        if combat.state.configuration().stations[i]
-                            .weapon
-                            .seeker
-                            .signature
-                            == 0
-                        {
-                            "VISUAL"
-                        } else if combat.state.can_lock(launcher(s)) {
-                            "LOCK"
-                        } else {
-                            "NO LOCK"
-                        }
-                    )
-                }
-            })
-    });
+    let i = combat.state.own().selected;
+    let target = combat
+        .state
+        .own_view()
+        .designated()
+        .map_or("NO TARGET".into(), |id| {
+            combat
+                .state
+                .targets
+                .iter()
+                .find(|t| t.id == id)
+                .map_or("NO TARGET".into(), |t| {
+                    if t.hp == 0 {
+                        "DESTROYED".into()
+                    } else {
+                        format!(
+                            "{} HP {} {}",
+                            combat
+                                .ground_name(id)
+                                .map_or_else(|| format!("T{id}"), str::to_owned),
+                            t.hp,
+                            if combat.state.own().configuration().stations[i]
+                                .weapon
+                                .seeker
+                                .signature
+                                == 0
+                            {
+                                "VISUAL"
+                            } else if combat.state.own_view().can_lock(launcher(s)) {
+                                "LOCK"
+                            } else {
+                                "NO LOCK"
+                            }
+                        )
+                    }
+                })
+        });
     let scope = crate::scope::scope(&combat.state, s, s.sensors);
     format!(
         "{} {} {}  {} C{} HIT {} | HP {} SYS {} ECM {} T-JAM {} IN {} | {} {} {:.0}NM {} CONTACTS{}{}",
-        combat.state.configuration().stations[i].weapon.name,
-        combat.state.rounds(i),
-        combat.state.readiness(launcher(s)).label(),
+        combat.state.own().configuration().stations[i].weapon.name,
+        combat.state.own().rounds(i),
+        combat.state.own_view().readiness(launcher(s)).label(),
         target,
         live::damage_class(combat.state.range_category),
         combat.state.history.last().map_or(0, |hit| hit.applied),
-        combat.state.player_hp,
+        combat.state.own().hp,
         combat
             .state
+            .own()
             .last_subsystem
             .map_or("--".into(), |i| i.to_string()),
-        if combat.state.ecm_failed {
+        if combat.state.own().ecm_failed {
             "FAIL"
         } else if launcher(s).jammer {
             "ON"
@@ -562,7 +577,7 @@ pub fn status(combat: &Combat, s: &flight::State) -> String {
             .state
             .projectiles
             .iter()
-            .filter(|p| p.incoming)
+            .filter(|p| p.incoming.is_some())
             .count(),
         scope.channel,
         scope.mode.unwrap_or("OFF"),
@@ -907,7 +922,7 @@ pub(crate) mod render_hash_tests {
         let (mut with_models, mut with_models_view) =
             pair(models(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
         let (mut fixture, mut fixture_view) = pair(Vec::new(), Vec::new());
-        let scene = scene(with_models.state.configuration());
+        let scene = scene(with_models.state.own().configuration());
         let mut hashes = [(); 5].map(|()| Fnv::new());
         let mut drawn = [0; 3];
         for ai_poses in [true, false] {
@@ -1025,7 +1040,7 @@ pub(crate) mod render_hash_tests {
         let world = tore_world::test_support::terrain();
         let scenery = crate::scenery::tests::scenery();
         let (mut fixture, fixture_view) = pair(Vec::new(), Vec::new());
-        let scene = scene(fixture.state.configuration());
+        let scene = scene(fixture.state.own().configuration());
         fixture.state.targets.clone_from(&scene.current);
         let mut states = Vec::new();
         for case in 0..6 {
@@ -1107,7 +1122,7 @@ pub(crate) mod render_hash_tests {
         let (mut combat, mut view) = pair(models, (0..7).map(|i| (i % 3, [0.; 3])).collect());
         let own = vec![[-2., 0.5, -20.], [2., 0.5, -20.]];
         fixtures::set_contrail_offsets(&mut combat, own.clone());
-        let scene = scene(combat.state.configuration());
+        let scene = scene(combat.state.own().configuration());
         let [previous, mut current] = snapshots(&mut combat, &scene, true, &player);
         // Aircraft 1 (the player's type), 2 (Rafale) and 3 (F-14) burn.
         for pose in &mut current.targets {
@@ -1175,12 +1190,12 @@ pub(crate) mod render_hash_tests {
         let template =
             flight::State::new(&tore_world::test_support::profile(), [0., 5000., 0.]).unwrap();
         let (mut combat, view) = pair(Vec::new(), Vec::new());
-        let scene = scene(combat.state.configuration());
+        let scene = scene(combat.state.own().configuration());
         combat.state.targets.clone_from(&scene.current);
         combat.state.projectiles.clone_from(&scene.projectiles);
         combat.state.effects.clone_from(&scene.effects);
         combat.state.debris.clone_from(&scene.debris);
-        let capacity = combat.state.configuration().damage_capacity;
+        let capacity = combat.state.own().configuration().damage_capacity;
         for case in 0..8 {
             let mut previous = player();
             previous.position = [0., 5000., 2000.];
@@ -1219,14 +1234,15 @@ pub(crate) mod render_hash_tests {
             combat
                 .state
                 .preview_localized_damage(DamageSection::LeftWing, 0.8);
-            combat.state.player_hp = hp;
+            combat.state.own_mut().hp = hp;
             for s in [&mut previous, &mut current] {
                 s.damage_fraction = (1. - f64::from(hp) / f64::from(capacity)).clamp(0., 1.);
                 s.damage_variant = combat
                     .state
-                    .player_damage_section()
+                    .own()
+                    .damage_section()
                     .map(|section| section as usize);
-                s.damage_regions = combat.state.player_damage_regions();
+                s.damage_regions = combat.state.own().damage_regions();
             }
             let snapshots = [&previous, &current].map(|s| combat.snapshot(s, None));
             for alpha in [0., 0.37, 1.] {
@@ -1256,6 +1272,11 @@ pub(crate) mod render_hash_tests {
 mod empty_station_tests {
     use super::*;
     use tore_world::combat::fixtures::loaded;
+    /// What the step does when the selected station has run dry.
+    fn advance(c: &mut Combat) {
+        let (guns_only, unlimited) = (c.state.cheats.guns_only, c.state.cheats.unlimited_ammo);
+        c.state.own_mut().advance_from_empty(guns_only, unlimited);
+    }
     fn listed(c: &Combat, f: &flight::State) -> Vec<(String, u32, bool)> {
         readout(c, f, f.sensors, 1.).weapons
     }
@@ -1263,7 +1284,7 @@ mod empty_station_tests {
     fn an_emptied_station_stays_empty_and_is_not_listed() {
         let (c, f) = loaded([500, 0]);
         assert_eq!(
-            c.state.ammo,
+            c.state.own().ammo,
             [500, 0],
             "a zero quantity is not the default load"
         );
@@ -1274,68 +1295,76 @@ mod empty_station_tests {
     #[test]
     fn a_fully_empty_aircraft_starts_on_nav_with_nothing_listed() {
         let (mut c, f) = loaded([0, 0]);
-        assert_eq!(c.state.ammo, [0, 0]);
-        assert!(!c.state.armed, "nothing to arm");
+        assert_eq!(c.state.own().ammo, [0, 0]);
+        assert!(!c.state.own().armed, "nothing to arm");
         assert!(listed(&c, &f).is_empty());
         // Cycling the selection has nowhere to go.
-        c.state.cycle_selection(true);
-        assert!(!c.state.armed);
-        c.state.cycle_selection(false);
-        assert!(!c.state.armed);
+        c.state.cycle_selection(0, true);
+        assert!(!c.state.own().armed);
+        c.state.cycle_selection(0, false);
+        assert!(!c.state.own().armed);
     }
     #[test]
     fn the_selection_ring_skips_empty_stations_and_startup_falls_back() {
         let (mut c, _) = loaded([0, 3]);
-        assert!(c.state.armed);
+        assert!(c.state.own().armed);
         assert_eq!(
-            c.state.selected, 1,
+            c.state.own().selected,
+            1,
             "the empty gun is not selected at startup"
         );
-        c.state.cycle_selection(true);
-        assert!(!c.state.armed, "NAV");
-        c.state.cycle_selection(true);
-        assert_eq!((c.state.armed, c.state.selected), (true, 1));
+        c.state.cycle_selection(0, true);
+        assert!(!c.state.own().armed, "NAV");
+        c.state.cycle_selection(0, true);
+        assert_eq!((c.state.own().armed, c.state.own().selected), (true, 1));
     }
     #[test]
     fn a_station_emptied_in_flight_keeps_its_row_but_is_never_selectable() {
         let (mut c, f) = loaded([500, 3]);
-        assert_eq!((c.state.armed, c.state.selected), (true, 0), "the gun");
+        assert_eq!(
+            (c.state.own().armed, c.state.own().selected),
+            (true, 0),
+            "the gun"
+        );
         assert_eq!(listed(&c, &f).len(), 2);
         // The gun's last round is fired: the selection moves to the missile
         // and the gun keeps a row at zero, greyed by the window.
-        c.state.ammo[0] = 0;
-        c.state.advance_from_empty();
-        assert_eq!((c.state.armed, c.state.selected), (true, 1));
+        c.state.own_mut().ammo[0] = 0;
+        advance(&mut c);
+        assert_eq!((c.state.own().armed, c.state.own().selected), (true, 1));
         let list = listed(&c, &f);
         assert_eq!(list.len(), 2, "the dry gun is still listed: {list:?}");
         assert_eq!((list[0].1, list[0].2), (0, false));
         assert_eq!((list[1].1, list[1].2), (3, true));
         // The ring skips the dry gun.
-        c.state.cycle_selection(true);
-        assert!(!c.state.armed, "NAV");
-        c.state.cycle_selection(true);
-        assert_eq!((c.state.armed, c.state.selected), (true, 1));
+        c.state.cycle_selection(0, true);
+        assert!(!c.state.own().armed, "NAV");
+        c.state.cycle_selection(0, true);
+        assert_eq!((c.state.own().armed, c.state.own().selected), (true, 1));
         // The last missile goes too: NAV, both rows still listed.
-        c.state.ammo[1] = 0;
-        c.state.advance_from_empty();
-        assert!(!c.state.armed);
+        c.state.own_mut().ammo[1] = 0;
+        advance(&mut c);
+        assert!(!c.state.own().armed);
         assert_eq!(listed(&c, &f).len(), 2);
-        c.state.cycle_selection(true);
-        assert!(!c.state.armed, "nothing left to select");
+        c.state.cycle_selection(0, true);
+        assert!(!c.state.own().armed, "nothing left to select");
     }
     #[test]
     fn a_dry_station_hands_on_only_to_an_allowed_one() {
         let (mut c, _) = loaded([500, 3]);
         c.state.cheats.guns_only = true;
-        c.state.ammo[0] = 0;
-        c.state.advance_from_empty();
-        assert!(!c.state.armed, "the missile is not allowed under guns only");
+        c.state.own_mut().ammo[0] = 0;
+        advance(&mut c);
+        assert!(
+            !c.state.own().armed,
+            "the missile is not allowed under guns only"
+        );
     }
     #[test]
     fn a_restart_reloads_exactly_the_edited_quantities() {
         let (mut c, mut f) = loaded([500, 0]);
-        c.state.ammo.fill(7);
+        c.state.own_mut().ammo.fill(7);
         c.reset(&mut f).unwrap();
-        assert_eq!(c.state.ammo, [500, 0]);
+        assert_eq!(c.state.own().ammo, [500, 0]);
     }
 }

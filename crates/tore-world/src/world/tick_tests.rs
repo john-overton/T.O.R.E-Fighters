@@ -254,7 +254,7 @@ pub(super) fn mission() -> World {
     .unwrap();
     wings.apply_mission_preset(ai_wings::Preset::Free, flight.position);
     wings.apply_group_objectives(&[GroupObjective::Inherit; 6], flight.position);
-    combat.state.friendlies = wings.friendly_ids();
+    combat.state.own_mut().friendlies = wings.friendly_ids();
     wings.mirror_pose_out(&mut combat.state.targets);
     let mut airport_service = Service::new(&terrain.airport_scene).unwrap();
     airport_service.command(
@@ -518,11 +518,11 @@ fn record_tick(fp: &mut Fingerprint, world: &World, out: &TickOutput, seen: &mut
     record_player(fp, &world.cockpits[0].flight);
     let combat = &world.combat.state;
     fp.u64(combat.tick());
-    fp.int(combat.player_hp);
-    let stations = combat.configuration().stations.len();
+    fp.int(combat.own().hp);
+    let stations = combat.own().configuration().stations.len();
     fp.count(stations);
     for station in 0..stations {
-        fp.int(combat.rounds(station));
+        fp.int(combat.own().rounds(station));
     }
     fp.count(combat.projectiles.len());
     for projectile in &combat.projectiles {

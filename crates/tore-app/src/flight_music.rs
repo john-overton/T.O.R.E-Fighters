@@ -93,11 +93,12 @@ impl Observer {
         // wings every non-friendly target (range and fixture aircraft) counts
         // as the other side.
         let designated_target = combat
+            .own_view()
             .designated()
             .and_then(|id| combat.targets.iter().find(|t| t.id == id && t.hp > 0))
             .filter(|t| t.role == TargetRole::Aircraft)
             .filter(|t| {
-                wings.map_or(!combat.friendlies.contains(&t.id), |w| {
+                wings.map_or(!combat.own().friendlies.contains(&t.id), |w| {
                     w.slot(t.id).is_some_and(|slot| slot.side.is_enemy())
                 })
             })
@@ -138,10 +139,10 @@ impl Observer {
             .projectiles
             .iter()
             .filter(|p| {
-                p.incoming
+                p.incoming.is_some()
                     && p.target == Some(live::PLAYER_OWNER)
                     && !(p
-                        .weapon(combat.configuration())
+                        .weapon(combat.own().configuration())
                         .source
                         .eq_ignore_ascii_case("AIM120.JT")
                         && distance(p.position, position) > AIM120_IGNORE_FT)
@@ -262,11 +263,11 @@ mod tests {
         assert!(!later.inputs.succeeded && !later.inputs.home, "no mission");
 
         // A guided round aimed at the player selects DANGER.
-        combat.command(live::Command::Incoming, crate::combat::launcher(&flight));
+        combat.command(0, live::Command::Incoming, crate::combat::launcher(&flight));
         assert_eq!(combat.projectiles[0].target, Some(live::PLAYER_OWNER));
         assert!(step(&mut observer, &combat, &[]).inputs.danger);
         // An AIM-120 beyond 30,380 ft is not counted; inside, it is.
-        let mut aim120 = combat.configuration().stations[0].weapon.clone();
+        let mut aim120 = combat.own().configuration().stations[0].weapon.clone();
         aim120.source = "AIM120.JT".into();
         combat.projectiles[0].weapon = Some(aim120);
         combat.projectiles[0].position = [30_381., 20_000., 0.];
@@ -315,7 +316,7 @@ mod tests {
             (Some(situation::Rank::Normal), situation::Rank::Air)
         );
         assert_eq!(hit.hit_at, Some(2. * flight::DT));
-        combat.command(live::Command::Incoming, crate::combat::launcher(&flight));
+        combat.command(0, live::Command::Incoming, crate::combat::launcher(&flight));
         let inbound = music(&step(&mut observer, &combat, &[]));
         assert_eq!(inbound.inbound, [combat.projectiles[0].id]);
         assert!(inbound.inputs.danger);

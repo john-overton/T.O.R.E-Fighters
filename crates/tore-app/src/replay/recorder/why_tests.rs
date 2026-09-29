@@ -108,9 +108,14 @@ fn fly(ticks: u64, record: bool) -> (Fingerprint, Vec<tore_replay::Frame>) {
                 )
                 .unwrap();
         }
-        let events = combat
-            .state
-            .step(false, crate::combat::launcher(&player), |_, _| 0.);
+        let events = combat.state.step(
+            &[tore_sim::combat::live::OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: crate::combat::launcher(&player),
+            }],
+            |_, _| 0.,
+        );
         wings.step(&mut combat.state, &player, &world).unwrap();
         combat.advance_render(&player, Some(&wings));
         if record {
@@ -149,7 +154,7 @@ fn fly(ticks: u64, record: bool) -> (Fingerprint, Vec<tore_replay::Frame>) {
         actors,
         combat.state.projectiles.clone(),
         combat.state.targets.iter().map(|t| t.position).collect(),
-        combat.state.player_hp,
+        combat.state.own().hp,
     );
     (fingerprint, frames)
 }

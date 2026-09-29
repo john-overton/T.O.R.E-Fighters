@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 use tore_formats::{Pic, weapons::Weapon};
 use tore_sim::{
+    combat::live::OwnshipInput,
     combat::loadout::{Loadout, supported},
     models::FlightModel,
 };
@@ -857,13 +858,15 @@ pub fn validate_sources(
         );
 
         normal.reset(&mut flight)?;
-        if normal.state.ammo != load.quantities || normal.range || !normal.state.targets.is_empty()
+        if normal.state.own().ammo != load.quantities
+            || normal.range
+            || !normal.state.targets.is_empty()
         {
             return Err("normal start lost default weapons or spawned a range target".into());
         }
-        normal.state.ammo.fill(0);
+        normal.state.own_mut().ammo.fill(0);
         normal.reset(&mut flight)?;
-        if normal.state.ammo != load.quantities {
+        if normal.state.own().ammo != load.quantities {
             return Err("normal restart lost weapons".into());
         }
         normal.clean_recording = true;
@@ -871,10 +874,11 @@ pub fn validate_sources(
         if flight.payload_lbs != 0.
             || normal
                 .state
+                .own()
                 .configuration()
                 .stations
                 .iter()
-                .zip(&normal.state.ammo)
+                .zip(&normal.state.own().ammo)
                 .any(|(station, count)| !station.internal && *count != 0)
         {
             return Err("pilot-only recording gained external stores".into());
@@ -914,11 +918,18 @@ pub fn validate_sources(
         }
         let mut gun = crate::combat::Combat::new(&airframe, data, false)?;
         let gun_view = crate::combat_view::CombatView::new(&gun, data)?;
-        gun.state.armed = true;
+        gun.state.own_mut().armed = true;
         let gun_flight = airframe.start(world);
         let launcher = crate::combat::launcher(&gun_flight);
         for _ in 0..120 {
-            gun.state.step(true, launcher, |_, _| 0.);
+            gun.state.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher,
+                }],
+                |_, _| 0.,
+            );
             if !gun.state.projectiles.is_empty() {
                 break;
             }
@@ -928,10 +939,10 @@ pub fn validate_sources(
             .projectiles
             .first()
             .ok_or("imported gun failed to fire")?;
-        if !tore_sim::combat::live::is_gun(round.weapon(gun.state.configuration())) {
+        if !tore_sim::combat::live::is_gun(round.weapon(gun.state.own().configuration())) {
             return Err(format!("{id:?}: imported gun is missing shared gun behavior").into());
         }
-        let gun_station = &gun.state.configuration().stations[gun.state.selected];
+        let gun_station = &gun.state.own().configuration().stations[gun.state.own().selected];
         let pipper = tore_sim::combat::gunsight::solve(
             &gun_station.weapon,
             &launcher,
@@ -1025,15 +1036,15 @@ pub fn validate_sources(
                 let mut flight = airframe.start(world);
                 flight.fuel = candidate.fuel_lbs;
                 combat.reset(&mut flight)?;
-                if combat.state.ammo != candidate.quantities
+                if combat.state.own().ammo != candidate.quantities
                     || combat.range
-                    || (flight.payload_lbs - combat.state.payload_lbs()).abs() > 0.01
+                    || (flight.payload_lbs - combat.state.own().payload_lbs()).abs() > 0.01
                 {
                     return Err("custom loadout initialization mismatch".into());
                 }
-                combat.state.ammo.fill(0);
+                combat.state.own_mut().ammo.fill(0);
                 combat.reset(&mut flight)?;
-                if combat.state.ammo != candidate.quantities {
+                if combat.state.own().ammo != candidate.quantities {
                     return Err("restart lost accepted loadout".into());
                 }
                 alternatives += 1;
@@ -1049,7 +1060,7 @@ pub fn validate_sources(
         let mut flight = airframe.start(world);
         flight.fuel = 0.;
         combat.reset(&mut flight)?;
-        if combat.state.ammo.iter().any(|n| *n != 0) {
+        if combat.state.own().ammo.iter().any(|n| *n != 0) {
             return Err("empty loadout gained ammunition".into());
         }
         println!(
@@ -1158,16 +1169,17 @@ fn validate_removed_stores(
         for _ in 0..2 {
             combat.reset(&mut flight)?;
             combat.apply_startup_weapons();
-            if combat.state.ammo != quantities {
+            if combat.state.own().ammo != quantities {
                 return Err(format!(
                     "{:?}: removed stores came back at launch or restart: {:?} instead of {quantities:?}",
-                    airframe.profile.id, combat.state.ammo
+                    airframe.profile.id, combat.state.own().ammo
                 )
                 .into());
             }
             let listed = crate::combat_view::readout(&combat, &flight, flight.sensors, 1.).weapons;
             let carried: std::collections::BTreeSet<&str> = combat
                 .state
+                .own()
                 .configuration()
                 .stations
                 .iter()
@@ -1186,11 +1198,12 @@ fn validate_removed_stores(
                 )
                 .into());
             }
-            if combat.state.armed && quantities[combat.state.selected] == 0 {
+            if combat.state.own().armed && quantities[combat.state.own().selected] == 0 {
                 return Err("an empty station started selected".into());
             }
             let external: f64 = combat
                 .state
+                .own()
                 .configuration()
                 .stations
                 .iter()
@@ -1198,11 +1211,11 @@ fn validate_removed_stores(
                 .filter(|(s, _)| !s.internal)
                 .map(|(s, n)| f64::from(s.weapon.weight.max(0)) * f64::from(*n))
                 .sum::<f64>()
-                + f64::from(combat.state.configuration().external_equipment_lbs);
+                + f64::from(combat.state.own().configuration().external_equipment_lbs);
             if (flight.payload_lbs - external).abs() > 0.5 {
                 return Err("flight payload does not match the edited stores".into());
             }
-            combat.state.ammo.fill(1);
+            combat.state.own_mut().ammo.fill(1);
         }
     }
     Ok(())
@@ -1265,10 +1278,10 @@ fn validate_guns_only(
     let mut flight = airframe.start(world);
     for _ in 0..2 {
         combat.reset(&mut flight)?;
-        if combat.state.ammo != guns.quantities {
+        if combat.state.own().ammo != guns.quantities {
             return Err("player guns-only load lost at launch or restart".into());
         }
-        combat.state.ammo.fill(0);
+        combat.state.own_mut().ammo.fill(0);
     }
     Ok(())
 }
@@ -1281,6 +1294,7 @@ mod tests {
 
     fn fixture() -> Ordnance {
         let mut config = tore_world::test_support::combat_fixture(true)
+            .own()
             .configuration()
             .clone();
         config.stations[0].weapon.source = "AIM9M.JT".into();

@@ -571,7 +571,7 @@ mod tests {
         let actor = wings.mission.actor_mut(1).unwrap();
         actor.set_stations(simple_stations(1, 20, AI_STORE_SPEED));
         for (station, guided) in [(0, true), (1, false)] {
-            let weapon = combat_fixture(guided).configuration().stations[0]
+            let weapon = combat_fixture(guided).own().configuration().stations[0]
                 .weapon
                 .clone();
             wings.weapons.insert((1, station), weapon);

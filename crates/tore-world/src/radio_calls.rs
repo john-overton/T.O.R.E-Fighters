@@ -1087,14 +1087,14 @@ pub fn step(
         members,
         leaders: &leaders,
         targets: &state.targets,
-        friendlies: &state.friendlies,
+        friendlies: &state.own().friendlies,
     };
     // Combat's own events are the first human-flown plane's until its
     // ownships name their planes (stage B1).
     let shooter = listeners.first().map_or(PLAYER_ID, |l| l.plane);
     for event in events {
         if let live::Event::Fired(station) = event {
-            let weapon = &state.configuration().stations[*station].weapon;
+            let weapon = &state.own().configuration().stations[*station].weapon;
             // The round's own target, else the designation.
             let target = state
                 .projectiles
@@ -1102,7 +1102,7 @@ pub fn step(
                 .rev()
                 .find(|p| p.owner == live::PLAYER_OWNER && p.station == *station)
                 .and_then(|p| p.target)
-                .or(state.designated());
+                .or(state.own().designated());
             radio.release(comms, &scene, shooter, Release::of(weapon, target));
         }
     }

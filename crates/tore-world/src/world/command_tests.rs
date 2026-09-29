@@ -29,7 +29,7 @@ fn sighted() -> World {
         minimum_relative_ft: f64::NEG_INFINITY,
         maximum_relative_ft: f64::INFINITY,
     };
-    let mut config = world.combat.state.configuration().clone();
+    let mut config = world.combat.state.own().configuration().clone();
     config.sensors.radar = Some(sensors::RadarProfile {
         record: "SYNTHETIC.SEE".into(),
         search: volume(90.),
@@ -54,8 +54,8 @@ fn sighted() -> World {
     world.combat.state.targets = old.targets.clone();
     // Every aircraft is a contact worth designating, and there is
     // something to release.
-    world.combat.state.chaff = 5;
-    world.combat.state.flares = 5;
+    world.combat.state.own_mut().chaff = 5;
+    world.combat.state.own_mut().flares = 5;
     world.combat.apply_startup_weapons();
     world.order_call = OrderCall::Spoken;
     world
@@ -101,15 +101,15 @@ fn state(world: &mut World) -> String {
             "{:?}",
             (
                 combat.tick(),
-                combat.selected,
-                combat.armed,
-                combat.designated(),
-                combat.view_target().map(|target| target.id),
-                combat.chaff,
-                combat.flares,
-                combat.ammo.clone(),
-                combat.player_hp,
-                combat.payload_lbs(),
+                combat.own().selected,
+                combat.own().armed,
+                combat.own_view().designated(),
+                combat.own_view().view_target().map(|target| target.id),
+                combat.own().chaff,
+                combat.own().flares,
+                combat.own().ammo.clone(),
+                combat.own().hp,
+                combat.own().payload_lbs(),
                 combat.projectiles.len(),
             )
         ),
@@ -203,7 +203,7 @@ fn old_manual(world: &mut World, command: Live) {
     let flight = &mut world.cockpits[0].flight;
     flight
         .set_payload(
-            (world.combat.state.payload_lbs() - flight.systems.used_external_lbs()).max(0.),
+            (world.combat.state.own().payload_lbs() - flight.systems.used_external_lbs()).max(0.),
         )
         .unwrap();
 }
@@ -219,19 +219,22 @@ fn designation_commands_match_the_old_path() {
             old_combat(world, command)
         });
         if command == Live::Designate {
-            assert!(after.combat.state.designated().is_some(), "{command:?}");
+            assert!(
+                after.combat.state.own_view().designated().is_some(),
+                "{command:?}"
+            );
         }
     }
 }
 
 #[test]
 fn designation_by_identity_from_a_scope_click_matches_the_old_path() {
-    let id = warmed().combat.state.sensors.contacts()[0].id;
+    let id = warmed().combat.state.own().sensors.contacts()[0].id;
     let (_, after, _) = same_as_old(
         vec![SeatCommand::Combat(Live::DesignateTarget(id))],
         |world| old_combat(world, Live::DesignateTarget(id)),
     );
-    assert_eq!(after.combat.state.designated(), Some(id));
+    assert_eq!(after.combat.state.own_view().designated(), Some(id));
 }
 
 #[test]
@@ -254,7 +257,10 @@ fn arming_seeker_mode_and_jettison_match_the_old_path() {
             old_manual(world, command)
         });
         if command == Live::ToggleArm {
-            assert_ne!(after.combat.state.armed, warmed().combat.state.armed);
+            assert_ne!(
+                after.combat.state.own().armed,
+                warmed().combat.state.own().armed
+            );
         }
     }
 }
@@ -322,12 +328,16 @@ fn old_countermeasure(world: &mut World, chaff: bool) -> Option<String> {
     let launcher = launcher(world);
     if !launcher.alive
         || world.cockpits[0].flight.escape.is_some()
-        || world.combat.state.player_hp <= 0
+        || world.combat.state.own().hp <= 0
     {
         return None;
     }
     let count = |state: &tore_sim::combat::live::State| {
-        if chaff { state.chaff } else { state.flares }
+        if chaff {
+            state.own().chaff
+        } else {
+            state.own().flares
+        }
     };
     let before = count(&world.combat.state);
     world.combat.command(
@@ -364,7 +374,11 @@ fn chaff_and_flares_match_the_old_path_and_say_how_many_are_left() {
         assert!(matches!(&out.cues[0], Cue::Message(text) if *text == old_message));
         let left = |world: &World| {
             let state = &world.combat.state;
-            if chaff { state.chaff } else { state.flares }
+            if chaff {
+                state.own().chaff
+            } else {
+                state.own().flares
+            }
         };
         assert_eq!(left(&before), left(&after));
         assert!(left(&after) < left(&warmed()));
@@ -376,7 +390,7 @@ fn countermeasures_are_refused_for_a_destroyed_ejected_or_hitless_aircraft() {
     let refusals: [fn(&mut World); 3] = [
         |world| world.cockpits[0].flight.crashed = true,
         |world| {
-            world.combat.state.player_hp = 0;
+            world.combat.state.own_mut().hp = 0;
         },
         |world| {
             let flight = &mut world.cockpits[0].flight;
@@ -387,12 +401,18 @@ fn countermeasures_are_refused_for_a_destroyed_ejected_or_hitless_aircraft() {
         for command in [SeatCommand::ReleaseChaff, SeatCommand::ReleaseFlare] {
             let mut world = warmed();
             refuse(&mut world);
-            let (chaff, flares) = (world.combat.state.chaff, world.combat.state.flares);
+            let (chaff, flares) = (
+                world.combat.state.own().chaff,
+                world.combat.state.own().flares,
+            );
             let mut out = TickOutput::default();
             let commanded = input(&world, vec![command]);
             world.step(&[commanded], &mut out).unwrap();
             assert_eq!(
-                (world.combat.state.chaff, world.combat.state.flares),
+                (
+                    world.combat.state.own().chaff,
+                    world.combat.state.own().flares
+                ),
                 (chaff, flares)
             );
             assert_eq!(out.commanded, 0, "no message for a refused release");
@@ -467,20 +487,20 @@ fn commands_apply_in_the_order_given() {
         },
     );
     assert_eq!(out.commanded, 1);
-    assert!(after.combat.state.designated().is_some());
+    assert!(after.combat.state.own_view().designated().is_some());
 }
 
 #[test]
 fn the_step_reports_the_state_after_the_commands_and_before_the_tick() {
     let mut world = warmed();
-    let armed = world.combat.state.armed;
+    let armed = world.combat.state.own().armed;
     let tick = world.tick();
     let mut out = TickOutput::default();
     let commanded = input(&world, vec![SeatCommand::Manual(Live::ToggleArm)]);
     let mut seen = None;
     world
         .step_observed(&[commanded], &mut out, |world, out| {
-            seen = Some((world.combat.state.armed, world.tick(), out.cues.len()));
+            seen = Some((world.combat.state.own().armed, world.tick(), out.cues.len()));
             Ok(())
         })
         .unwrap();
@@ -594,7 +614,7 @@ use tore_sim::ai::wing::{Formation, PlayerOrder};
 /// The old handler for a wing order, minus the app's audio and HUD.
 fn old_order(world: &mut World, order: PlayerOrder, recipient: Option<u8>) -> String {
     let now = world.combat.state.tick() as f64 / 120.;
-    let selected = world.combat.state.designated();
+    let selected = world.combat.state.own_view().designated();
     let report = world
         .ai_wings
         .as_mut()

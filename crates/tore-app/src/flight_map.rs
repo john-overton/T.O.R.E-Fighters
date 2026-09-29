@@ -378,7 +378,7 @@ impl Map {
                 label(pixels, font, name, (x, y + 12), INK, &mut labels);
             }
         }
-        let contacts = combat.sensors.map_contacts();
+        let contacts = combat.own().sensors.map_contacts();
         for observed in contacts
             .iter()
             .filter(|c| c.airborne)
@@ -452,6 +452,7 @@ impl Map {
         // Passive noise has no measured location. Show its direction at ownship.
         if let Some((x, y)) = projection.point(state.position) {
             for emitter in combat
+                .own()
                 .emitters
                 .iter()
                 .filter(|e| e.distance_nmi.is_none() && self.filters.shows(Category::Emitters))

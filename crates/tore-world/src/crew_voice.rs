@@ -1037,13 +1037,14 @@ fn missile_would_lock(
         obscured: &|_, _| false,
     };
     state
+        .own()
         .configuration()
         .stations
         .iter()
         .enumerate()
         .any(|(i, station)| {
             let w = &station.weapon;
-            state.rounds(i) > 0
+            state.own().rounds(i) > 0
                 && matches!(w.seeker.signature, 2 | 3)
                 && !tore_sim::combat::live::is_gun(w)
                 && Profile::for_weapon(w).is_some_and(|profile| {
@@ -1088,20 +1089,21 @@ impl CrewVoice {
                 .is_some_and(|a| a.experience().level == tore_sim::ai::Experience::Ace)
         };
         let designated = if host.ownship {
-            state.designated()
+            state.own().designated()
         } else {
             None
         };
         let target = designated
-            .filter(|id| !state.friendlies.contains(id))
+            .filter(|id| !state.own().friendlies.contains(id))
             .and_then(|id| state.targets.iter().find(|t| t.id == id))
             .filter(|t| t.role == TargetRole::Aircraft || t.hp > 0);
         let gun_selected = host.ownship
-            && state.armed
+            && state.own().armed
             && state
+                .own()
                 .configuration()
                 .stations
-                .get(state.selected)
+                .get(state.own().selected)
                 .is_some_and(|s| is_gun(&s.weapon));
         let missile_would_lock = gun_selected
             && target.is_some_and(|t| {
@@ -1125,9 +1127,9 @@ impl CrewVoice {
         let incoming = state
             .projectiles
             .iter()
-            .filter(|p| host.ownship && p.incoming)
+            .filter(|p| host.ownship && p.incoming.is_some())
             .filter_map(|p| {
-                let w = p.weapon(state.configuration());
+                let w = state.weapon(p);
                 (w.seeker.signature != 0 && !is_gun(w)).then_some(Incoming {
                     id: p.id,
                     age: p.age as f64 / 120.,

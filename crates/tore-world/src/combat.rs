@@ -13,7 +13,7 @@ use tore_formats::aircraft::AircraftId;
 use tore_sim::flight;
 use tore_sim::{
     attitude::{Basis, Vector},
-    combat::live::{self, Event, Launcher},
+    combat::live::{self, Event, Launcher, OwnshipInput},
 };
 
 #[derive(Default)]
@@ -172,9 +172,28 @@ pub fn launcher(s: &flight::State) -> Launcher {
     }
 }
 impl Combat {
+    /// The aircraft the host flies: the state's only ownship.
+    pub fn own_id(&self) -> u32 {
+        self.state.own().aircraft
+    }
+    /// The combat state of the aircraft the host flies.
+    pub fn own(&self) -> &live::Ownship {
+        self.state.own()
+    }
+    pub fn own_mut(&mut self) -> &mut live::Ownship {
+        self.state.own_mut()
+    }
+    /// What the flown aircraft's cockpit shows.
+    pub fn own_view(&self) -> live::OwnshipView<'_> {
+        self.state.own_view()
+    }
     /// Player airborne startup convention: canonical gun selected and armed.
     pub fn apply_startup_weapons(&mut self) {
-        apply_startup_weapon_state(&mut self.state);
+        let (guns_only, unlimited_ammo) = (
+            self.state.cheats.guns_only,
+            self.state.cheats.unlimited_ammo,
+        );
+        apply_startup_weapon_state(self.state.own_mut(), guns_only, unlimited_ammo);
     }
     pub fn uses_normal_startup_defaults(&self) -> bool {
         !self.range && self.tape.is_none() && !self.clean_recording
@@ -302,7 +321,7 @@ impl Combat {
                 .copied()
                 .or_else(|| self.render.current_target(id).and_then(|pose| pose.devices))
         };
-        let config = self.state.configuration();
+        let config = self.state.own().configuration();
         let capacity = config.damage_capacity;
         let player_engine = Engine {
             lit: player.engine && player.fuel > 0.,
@@ -310,7 +329,7 @@ impl Combat {
             rates: player.auxiliary_rates,
             flame: player.afterburner_active()
                 && player.escape.is_none()
-                && self.state.player_hp > 0,
+                && self.state.own().hp > 0,
         };
         // Fixtures copy the player's state with their own crash flag.
         let fixture_afterburner = ownship
@@ -345,11 +364,11 @@ impl Combat {
                 devices: Some(crate::snapshot::devices(player)),
                 engine: player_engine,
                 damage: Damage {
-                    hp: self.state.player_hp,
+                    hp: self.state.own().hp,
                     initial_hp: capacity,
                     // The exact amounts the drawn fractions divide.
-                    sections: self.state.player_damage_amounts(),
-                    structural: self.state.player_damage_section(),
+                    sections: self.state.own().damage_amounts(),
+                    structural: self.state.own().damage_section(),
                 },
                 airborne: true,
                 wreck: player.wreck.as_ref().map(|wreck| wreck.phase),
@@ -394,7 +413,7 @@ impl Combat {
                 .projectiles
                 .iter()
                 .map(|p| {
-                    let weapon = p.weapon(config);
+                    let weapon = self.state.weapon(p);
                     ProjectilePose {
                         id: p.id,
                         owner: p.owner,
@@ -406,7 +425,7 @@ impl Combat {
                         previous: p.previous,
                         direction: p.direction,
                         target: p.target,
-                        incoming: p.incoming,
+                        incoming: p.incoming.is_some(),
                         speed_f8: p.speed_f8,
                     }
                 })
@@ -670,7 +689,8 @@ impl Combat {
             self.record_tape(crate::combat_tape::command_name(command), l);
         }
         self.note(CommandNote::Command(command));
-        self.state.command(command, l);
+        let aircraft = self.own_id();
+        self.state.command(aircraft, command, l);
         self.last_launcher = Some(l);
     }
     fn note(&mut self, note: CommandNote) {
@@ -721,7 +741,8 @@ impl Combat {
         }
         self.input.cancel();
         self.controller.cancel();
-        self.state.release();
+        let aircraft = self.own_id();
+        self.state.release(aircraft);
     }
     pub fn reset(&mut self, s: &mut flight::State) -> WorldResult<()> {
         self.render.restart();
@@ -731,8 +752,10 @@ impl Combat {
         self.record_tape(if self.range { "reset" } else { "reset-scene" }, l);
         self.last_launcher = Some(l);
         let weapon_rules = self.state.weapon_rules;
-        self.state = live::State::new(
-            self.state.configuration().clone(),
+        let aircraft = self.own_id();
+        self.state = live::State::for_ownship(
+            aircraft,
+            self.state.own().configuration().clone(),
             s.native.is_none() && !self.clean_recording,
         )?;
         self.state.weapon_rules = weapon_rules;
@@ -740,15 +763,15 @@ impl Combat {
             self.record_tape("compatibility-weapons", l);
         }
         if let Some(ammo) = &self.initial_ammo {
-            self.state.ammo.clone_from(ammo);
+            self.state.own_mut().ammo.clone_from(ammo);
         }
-        self.state.start_load();
+        self.state.own_mut().start_load();
         self.input = FireInput::default();
         self.controller.cancel();
-        s.set_payload(self.state.payload_lbs())?;
+        s.set_payload(self.state.own().payload_lbs())?;
         s.systems = tore_sim::aircraft_systems::Systems::new(
-            self.state.configuration().engines,
-            self.state.external_fuel_lbs(),
+            self.state.own().configuration().engines,
+            self.state.own().external_fuel_lbs(),
         );
         s.damage_fraction = 0.;
         s.damage_variant = None;
@@ -757,7 +780,8 @@ impl Combat {
         s.bay_open = false;
         s.bay_auto_open = false;
         if self.range {
-            self.state.range_target(launcher(s));
+            let aircraft = self.own_id();
+            self.state.range_target(aircraft, launcher(s));
         }
         for (index, (model, offset)) in self.dummies.iter().enumerate() {
             let fixture_position = std::array::from_fn(|i| {
@@ -808,6 +832,7 @@ impl Combat {
         raised
     }
     pub fn step(&mut self, s: &mut flight::State, world: &Terrain) -> WorldResult<Vec<Event>> {
+        let aircraft = self.own_id();
         let l = launcher(s);
         self.last_launcher = Some(l);
         self.record_tape(
@@ -819,16 +844,18 @@ impl Combat {
             l,
         );
         let mut events = Vec::new();
-        self.state.note_loaded();
+        self.state.own_mut().note_loaded();
         if s.airburst()
-            && let Some(event) = self.state.player_airburst(s.position)
+            && let Some(event) = self.state.ownship_airburst(aircraft, s.position)
         {
             events.push(event);
         }
         if s.ground_impact()
-            && let Some(event) = self
-                .state
-                .player_ground_impact(s.position, world.over_water(s.position[0], s.position[2]))
+            && let Some(event) = self.state.ownship_ground_impact(
+                aircraft,
+                s.position,
+                world.over_water(s.position[0], s.position[2]),
+            )
         {
             events.push(event);
         }
@@ -837,16 +864,19 @@ impl Combat {
         self.contrails.wind = world.wind();
         // Stop wreck emissions before advancing smoke on the impact/airburst tick.
         events.extend(self.state.step_surface(
-            self.input.held || self.controller.held,
-            l,
+            &[OwnshipInput {
+                aircraft,
+                held: self.input.held || self.controller.held,
+                launcher: l,
+            }],
             |x, z| f64::from(world.height(x as f32, z as f32)),
             |x, z| world.over_water(x, z),
         ));
         for index in 0..45 {
-            while s.systems.counts[index] < self.state.subsystem_counts[index] {
+            while s.systems.counts[index] < self.state.own().subsystem_counts[index] {
                 s.systems.hit(index, s.throttle);
                 if let Some(hardpoint) = index.checked_sub(36) {
-                    let config = self.state.configuration();
+                    let config = self.state.own().configuration();
                     if config.external_fuel_lbs[hardpoint] > 0. {
                         s.systems.fuel.external[hardpoint] = 0.;
                         s.systems.notify(format!(
@@ -860,13 +890,14 @@ impl Combat {
                         ));
                     } else {
                         s.systems.notify(
-                            if self.state.radar_failed && hardpoint == config.radar_hardpoint {
+                            if self.state.own().radar_failed && hardpoint == config.radar_hardpoint
+                            {
                                 "Radar failed"
-                            } else if self.state.visual_failed
+                            } else if self.state.own().visual_failed
                                 && hardpoint == config.visual_hardpoint
                             {
                                 "Visual sensor failed"
-                            } else if self.state.infrared_failed
+                            } else if self.state.own().infrared_failed
                                 && Some(hardpoint) == config.infrared_hardpoint
                             {
                                 "Infrared sensor failed"
@@ -884,13 +915,13 @@ impl Combat {
         }
         let scrape = s.take_belly_scrape();
         if scrape > 0. {
-            self.state.scrape_damage(scrape, &mut events);
+            self.state.scrape_damage(aircraft, scrape, &mut events);
         }
         if s.systems.fatal() {
             s.crashed = true;
         }
         if s.crashed
-            && let Some(event) = self.state.systems_destroyed()
+            && let Some(event) = self.state.systems_destroyed(aircraft)
         {
             events.push(event);
         }
@@ -914,14 +945,14 @@ impl Combat {
         if !s.crashed
             && s.engine
             && s.fuel > 0.
-            && self.state.player_hp > 0
+            && self.state.own().hp > 0
             && !s.supported_at(height)
         {
             add(0, s.position, l.basis, &self.contrail_offsets);
         }
         for target in self.state.targets.iter().filter(|t| t.airborne && t.hp > 0) {
             if let Some(id) = target.aircraft {
-                if id == self.state.configuration().aircraft {
+                if id == self.state.own().configuration().aircraft {
                     add(
                         target.id,
                         target.position,
@@ -940,31 +971,32 @@ impl Combat {
         }
         self.contrails.step([]);
         self.contrails.contrails(outlets);
-        s.set_payload((self.state.payload_lbs() - s.systems.used_external_lbs()).max(0.))?;
+        s.set_payload((self.state.own().payload_lbs() - s.systems.used_external_lbs()).max(0.))?;
         // The bays stay shut until a release asks for them.
-        s.bay_auto_open = s.bay_available() && self.state.bay_demand();
-        if self.state.radar_failed {
+        s.bay_auto_open = s.bay_available() && self.state.bay_demand(aircraft);
+        if self.state.own().radar_failed {
             s.radar = false;
         }
-        if self.state.ecm_failed {
+        if self.state.own().ecm_failed {
             s.jammer = false;
         }
         s.damage_fraction = (1.
-            - f64::from(self.state.player_hp)
-                / f64::from(self.state.configuration().damage_capacity))
+            - f64::from(self.state.own().hp)
+                / f64::from(self.state.own().configuration().damage_capacity))
         .clamp(0., 1.);
         if events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))) {
             s.systems.report_impact(s.ticks, s.damage_fraction);
         }
         s.damage_variant = self
             .state
-            .player_damage_section()
+            .own()
+            .damage_section()
             .map(|section| section as usize);
-        s.damage_regions = self.state.player_damage_regions();
-        if self.state.player_hp == 0 {
+        s.damage_regions = self.state.own().damage_regions();
+        if self.state.own().hp == 0 {
             s.crashed = true;
             if matches!(
-                self.state.player_damage_section(),
+                self.state.own().damage_section(),
                 Some(live::DamageSection::Nose | live::DamageSection::Cockpit)
             ) {
                 s.systems.kill_pilot("Pilot killed: nose or cockpit lost");
@@ -976,8 +1008,11 @@ impl Combat {
         // A station that ran dry hands the selection on, but never while the
         // trigger is held: the next store must not fire from the same press.
         if !(self.input.held || self.controller.held)
-            && self.state.armed
-            && !self.state.carries(self.state.selected)
+            && self.state.own().armed
+            && !self
+                .state
+                .own()
+                .carries(self.state.own().selected, self.state.cheats.unlimited_ammo)
         {
             self.command(live::Command::AdvanceFromEmpty, l);
         }
@@ -985,24 +1020,30 @@ impl Combat {
     }
 }
 
-pub(crate) fn apply_startup_weapon_state(state: &mut live::State) {
+pub(crate) fn apply_startup_weapon_state(
+    own: &mut live::Ownship,
+    guns_only: bool,
+    unlimited_ammo: bool,
+) {
     // The gun is the startup weapon. A gun station that carries nothing falls
     // back to the first station that does, and an aircraft with nothing
     // loaded starts on NAV, so an empty station never shows up armed.
-    let stations = &state.configuration().stations;
+    let stations = &own.configuration().stations;
     let gun = stations
         .iter()
         .position(|station| live::is_gun(&station.weapon))
-        .filter(|index| state.carries(*index));
+        .filter(|index| own.carries(*index, unlimited_ammo));
     let choice = gun.or_else(|| {
-        (0..stations.len()).find(|index| state.carries(*index) && state.station_allowed(*index))
+        (0..stations.len()).find(|index| {
+            own.carries(*index, unlimited_ammo) && own.station_allowed(*index, guns_only)
+        })
     });
     match choice {
         Some(index) => {
-            state.selected = index;
-            state.armed = true;
+            own.selected = index;
+            own.armed = true;
         }
-        None => state.armed = false,
+        None => own.armed = false,
     }
 }
 
@@ -1206,6 +1247,7 @@ pub mod fixtures {
     /// The player's gun and one missile station with a loaded shape.
     fn state() -> live::State {
         let mut config = crate::test_support::combat_fixture(false)
+            .own()
             .configuration()
             .clone();
         config.stations[0].weapon.source = "M61.JT".into();
@@ -1219,7 +1261,7 @@ pub mod fixtures {
     /// the flight it was reset with. The app's weapon-list tests use it.
     pub fn loaded(ammo: [u16; 2]) -> (Combat, flight::State) {
         let mut c = combat(vec![], vec![]);
-        let mut config = c.state.configuration().clone();
+        let mut config = c.state.own().configuration().clone();
         config.stations[0].weapon.source = AircraftId::F18.gun().into();
         c.state = live::State::new(config, true).unwrap();
         c.initial_ammo = Some(ammo.to_vec());
@@ -1334,7 +1376,7 @@ pub mod fixtures {
             motion: None,
             guidance_ticks: None,
             age: 3,
-            incoming: owner != 0,
+            incoming: (owner != 0).then_some(0),
             station,
             position,
             previous,
@@ -1694,7 +1736,7 @@ pub mod fixtures {
         use crate::snapshot::Draw;
         let player = player();
         let mut with_models = combat(types(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
-        let scene = scene(with_models.state.configuration());
+        let scene = scene(with_models.state.own().configuration());
         load(&mut with_models, &scene, true, &player);
         let snapshot = with_models.render_snapshot();
         let draw = |id| snapshot.target(id).unwrap().draw;
@@ -1734,7 +1776,7 @@ pub mod fixtures {
     fn devices_hold_once_nothing_simulates_the_aircraft() {
         let player = player();
         let mut combat = combat(types(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
-        combat.state.targets = scene(combat.state.configuration()).current;
+        combat.state.targets = scene(combat.state.own().configuration()).current;
         combat.restart_render(&player, None);
         let devices = |combat: &Combat| combat.render_snapshot().target(1).unwrap().devices;
         assert_eq!(devices(&combat), None);

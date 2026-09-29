@@ -637,7 +637,7 @@ impl TickPresenter<'_> {
             );
         }
         if let Some(recording) = &mut self.recorder {
-            let stations = &self.world.combat.state.configuration().stations;
+            let stations = &self.world.combat.state.own().configuration().stations;
             let releases: Vec<(&str, &tore_formats::weapons::Weapon)> = out
                 .releases
                 .iter()
@@ -1627,6 +1627,7 @@ impl App {
                     .world
                     .combat
                     .state
+                    .own()
                     .sensors
                     .available(self.instruments.controls().channel)
                 {
@@ -1644,6 +1645,7 @@ impl App {
                     .world
                     .combat
                     .state
+                    .own()
                     .sensors
                     .available(tore_sim::sensors::Channel::Infrared)
                 {
@@ -2841,7 +2843,7 @@ impl ApplicationHandler for App {
                                 .mission_layout
                                 .as_ref()
                                 .map_or(0., |l| l.enemy.distance_ft / mission_layout::FEET_PER_NM),
-                            self.world.combat.state.ammo,
+                            self.world.combat.state.own().ammo,
                             combat_view::readout(
                                 &self.world.combat,
                                 &self.world.cockpits[OWN].flight,
@@ -3323,9 +3325,13 @@ impl ApplicationHandler for App {
                         self.frame_time = now;
                         if let Some(audio) = &self.audio {
                             audio.seeker(
-                                self.world.combat.state.seeker_tone(combat::launcher(
-                                    &self.world.cockpits[OWN].flight,
-                                )),
+                                self.world
+                                    .combat
+                                    .state
+                                    .own_view()
+                                    .seeker_tone(combat::launcher(
+                                        &self.world.cockpits[OWN].flight,
+                                    )),
                             );
                             audio.pause_flight(self.flight_ui.frozen());
                         }
@@ -3560,6 +3566,7 @@ impl ApplicationHandler for App {
                                                 .world
                                                 .combat
                                                 .state
+                                                .own_view()
                                                 .display_target()
                                                 .map(|t| t.id)
                                         {
@@ -3682,6 +3689,7 @@ impl ApplicationHandler for App {
                                                         .world
                                                         .combat
                                                         .state
+                                                        .own_view()
                                                         .display_target()
                                                         .map(|t| t.id);
                                                 }
@@ -3707,6 +3715,7 @@ impl ApplicationHandler for App {
                                                         .world
                                                         .combat
                                                         .state
+                                                        .own_view()
                                                         .display_target()
                                                         .map(|t| t.id);
                                                 }
@@ -3866,7 +3875,7 @@ impl ApplicationHandler for App {
                                 (gyro_bank, self.flight_ui.time_scale),
                             );
                         }
-                        let target_friendly = self.world.combat.state.display_target().is_some_and(|target| {
+                        let target_friendly = self.world.combat.state.own_view().display_target().is_some_and(|target| {
                             self.world.ai_wings.as_ref().and_then(|wings| wings.slot(target.id))
                                 .is_some_and(|slot| slot.side == tore_sim::ai::launch::Side::Friendly)
                                 || self.world.terrain.airport_scene.runway(target.id).is_some_and(|runway| {
@@ -3886,7 +3895,7 @@ impl ApplicationHandler for App {
                                 &self.world.combat.state,
                                 f64::from(self.flight_canvas.hud_zoom(1.)),
                             ))
-                        .then(|| self.world.combat.state.display_target())
+                        .then(|| self.world.combat.state.own_view().display_target())
                         .flatten()
                         .and_then(|target| {
                             self.camera
@@ -3981,7 +3990,7 @@ impl ApplicationHandler for App {
                         if self.flight_view == flight_views::TARGET
                             && self.view_rig.reference == flight_views::Reference::Player
                             && !self.flight_ui.map.open
-                            && let Some(target) = self.world.combat.state.view_target()
+                            && let Some(target) = self.world.combat.state.own_view().view_target()
                         {
                             view_compass::draw(
                                 &mut self.flight_canvas,
@@ -4049,9 +4058,13 @@ impl ApplicationHandler for App {
                         self.flight_canvas.legacy_layer(&self.menu.pixels, 1.);
                         if let Some(audio) = &self.audio {
                             audio.seeker(
-                                self.world.combat.state.seeker_tone(combat::launcher(
-                                    &self.world.cockpits[OWN].flight,
-                                )),
+                                self.world
+                                    .combat
+                                    .state
+                                    .own_view()
+                                    .seeker_tone(combat::launcher(
+                                        &self.world.cockpits[OWN].flight,
+                                    )),
                             );
                             audio.pause_flight(self.flight_ui.frozen());
                             audio.flight(Some((
@@ -4498,7 +4511,7 @@ fn replay_footer(
                 report.player.kills.iter().sum::<u32>().to_string(),
             ));
         }
-        None => result.push(("kills".into(), combat.state.kills.to_string())),
+        None => result.push(("kills".into(), combat.state.own().kills.to_string())),
     }
     tore_replay::Footer {
         end_tick: combat.state.tick(),
@@ -5026,6 +5039,7 @@ impl ProbeAttacker {
     ) -> Self {
         let state = &combat.state;
         let stations: Vec<_> = state
+            .own()
             .configuration()
             .stations
             .iter()
@@ -5035,7 +5049,7 @@ impl ProbeAttacker {
                 format!(
                     "{} x{} {}..{} ft{}",
                     s.weapon.hud_name,
-                    state.rounds(i),
+                    state.own().rounds(i),
                     zone.minimum_range,
                     zone.maximum_range,
                     if probe_air_to_air(&s.weapon) {
@@ -5101,7 +5115,7 @@ impl ProbeAttacker {
         if !launcher.alive
             || flight.escape.is_some()
             || flight.systems.pilot.dead
-            || combat.state.player_hp <= 0
+            || combat.state.own().hp <= 0
         {
             self.end_burst(tick, commands);
             return;
@@ -5115,10 +5129,12 @@ impl ProbeAttacker {
                 && state.targets.iter().any(|t| t.id == id && t.hp > 0)
         };
         let current = state
+            .own_view()
             .designated()
-            .filter(|id| hostile(*id) && state.sensors.contact(*id).is_some());
+            .filter(|id| hostile(*id) && state.own().sensors.contact(*id).is_some());
         if self.fresh || current.is_none() {
             let nearest = state
+                .own()
                 .sensors
                 .contacts()
                 .iter()
@@ -5149,8 +5165,9 @@ impl ProbeAttacker {
         }
         let Some((target, contact)) = combat
             .state
+            .own_view()
             .designated()
-            .and_then(|id| Some((id, *combat.state.sensors.contact(id)?)))
+            .and_then(|id| Some((id, *combat.state.own().sensors.contact(id)?)))
         else {
             return;
         };
@@ -5167,7 +5184,7 @@ impl ProbeAttacker {
             self.end_burst(tick, commands);
             return;
         };
-        if !combat.state.armed || combat.state.selected != station {
+        if !combat.state.own().armed || combat.state.own().selected != station {
             self.end_burst(tick, commands);
             commands.push(seats::SeatCommand::CycleWeapon { forward: true });
             self.steps += 1;
@@ -5175,8 +5192,8 @@ impl ProbeAttacker {
             self.selecting = Some((station, range));
             return;
         }
-        let ready = combat.state.release_readiness == Readiness::Ready;
-        if is_gun(&combat.state.configuration().stations[station].weapon) {
+        let ready = combat.state.own().release_readiness == Readiness::Ready;
+        if is_gun(&combat.state.own().configuration().stations[station].weapon) {
             let on = ready && probe_on_pipper(&combat.state, &launcher, station, &contact);
             match self.burst {
                 Some(from) if !on || tick - from >= PROBE_BURST_TICKS => {
@@ -5215,10 +5232,10 @@ impl ProbeAttacker {
                 self.guns = true;
                 println!(
                     "t={tick} ({seconds:.1}s) attack: no {} shot ({}), changes to the gun",
-                    combat.state.configuration().stations[station]
+                    combat.state.own().configuration().stations[station]
                         .weapon
                         .hud_name,
-                    combat.state.release_readiness.label()
+                    combat.state.own().release_readiness.label()
                 );
             }
         }
@@ -5229,11 +5246,11 @@ impl ProbeAttacker {
         let Some((station, range)) = self.selecting.take() else {
             return;
         };
-        if combat.state.armed && combat.state.selected == station {
+        if combat.state.own().armed && combat.state.own().selected == station {
             println!(
                 "t={tick} ({:.1}s) attack: selects {} at {range:.0} ft",
                 tick as f64 / 120.,
-                combat.state.configuration().stations[station]
+                combat.state.own().configuration().stations[station]
                     .weapon
                     .hud_name
             );
@@ -5269,19 +5286,19 @@ impl ProbeAttacker {
         for event in events {
             match event {
                 Event::Fired(station) => {
-                    let weapon = &combat.state.configuration().stations[*station].weapon;
+                    let weapon = &combat.state.own().configuration().stations[*station].weapon;
                     if tore_sim::combat::live::is_gun(weapon) {
                         self.rounds += 1;
                         continue;
                     }
                     self.missiles += 1;
-                    let target = combat.state.designated();
+                    let target = combat.state.own_view().designated();
                     println!(
                         "t={tick} ({seconds:.1}s) attack: fires {} at {} range={:.0} ft",
                         weapon.hud_name,
                         target.map_or("-".into(), |id| probe_label(bridge, id)),
                         target
-                            .and_then(|id| combat.state.sensors.observation(id))
+                            .and_then(|id| combat.state.own().sensors.observation(id))
                             .map_or(0., |c| c.distance_ft)
                     );
                     self.shot(tick);
@@ -5365,13 +5382,13 @@ impl ProbeAttacker {
             self.missiles,
             self.bursts,
             self.rounds,
-            combat.state.hits,
-            combat.state.kills,
+            combat.state.own().hits,
+            combat.state.own().kills,
             self.hits,
             self.destroyed,
             lost(Side::Friendly),
             lost(Side::Enemy),
-            !flight.crashed && combat.state.player_hp > 0,
+            !flight.crashed && combat.state.own().hp > 0,
             self.player_damaged,
             self.ejections,
             self.attacked.len(),
@@ -5392,14 +5409,15 @@ fn probe_air_to_air(weapon: &tore_formats::weapons::Weapon) -> bool {
 /// air-to-air station, or gun, whose employment zone holds it.
 fn probe_station(state: &tore_sim::combat::live::State, range_ft: f64, gun: bool) -> Option<usize> {
     state
+        .own()
         .configuration()
         .stations
         .iter()
         .enumerate()
         .filter(|(i, s)| {
             let zone = s.weapon.seeker.zones[1];
-            state.rounds(*i) > 0
-                && state.ammo[*i] & 0x8000 == 0
+            state.own().rounds(*i) > 0
+                && state.own().ammo[*i] & 0x8000 == 0
                 && probe_air_to_air(&s.weapon)
                 && (!gun || tore_sim::combat::live::is_gun(&s.weapon))
                 && range_ft >= f64::from(zone.minimum_range)
@@ -5426,9 +5444,9 @@ fn probe_on_pipper(
         combat::{gunsight, missiles},
         sensors::Channel,
     };
-    let station = &state.configuration().stations[station];
+    let station = &state.own().configuration().stations[station];
     let radar = (contact.channel == Channel::Radar
-        && state.sensors.operating(Channel::Radar)
+        && state.own().sensors.operating(Channel::Radar)
         && launcher.radar)
         .then_some(gunsight::TargetObservation {
             position: contact.position,
@@ -5513,6 +5531,7 @@ fn inject_probe_threat(
     }
     let station = combat
         .state
+        .own()
         .configuration()
         .stations
         .iter()
@@ -5538,7 +5557,7 @@ fn inject_probe_threat(
         motion: None,
         guidance_ticks: None,
         age: 0,
-        incoming: false,
+        incoming: None,
         station,
         position: origin,
         previous: origin,
@@ -5742,7 +5761,7 @@ fn ai_probe_run(
         // A flown mission's weapon startup: the gun selected and armed in the
         // air, navigation mode on a ground start.
         combat.apply_startup_weapons();
-        combat.state.armed = parked.is_none();
+        combat.state.own_mut().armed = parked.is_none();
     }
     if let Some(ground) = &parked {
         mission_layout::place_on_runway(world, &mut flight, ground, 0)?;
@@ -5873,7 +5892,7 @@ fn ai_probe_run(
     };
     let mut attacker = script.attack.map(|attack| {
         // As a flown mission does each frame: T and Enter skip friendlies.
-        combat.state.friendlies = bridge.friendly_ids();
+        combat.state.own_mut().friendlies = bridge.friendly_ids();
         ProbeAttacker::new(attack, &combat, &bridge, script.guns)
     });
     // A mission recording of the probe: the picture is taken the way live
@@ -6139,7 +6158,7 @@ fn ai_probe_run(
         if let Some(recording) = &mut recording {
             // Write-only: every communication decision of the tick.
             recording.drain_comms(&mut mission.comms);
-            let stations = &mission.combat.state.configuration().stations;
+            let stations = &mission.combat.state.own().configuration().stations;
             let releases: Vec<(&str, &tore_formats::weapons::Weapon)> = output
                 .releases
                 .iter()
@@ -6247,7 +6266,7 @@ fn ai_probe_run(
         bridge.dropped_launches,
         bridge.threat_reports().len(),
         combat.state.projectiles.len(),
-        combat.state.player_hp,
+        combat.state.own().hp,
         combat
             .state
             .targets
@@ -8443,7 +8462,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         tape_file::replay(
             &path,
             &assets.theater_resources,
-            c.state.configuration().clone(),
+            c.state.own().configuration().clone(),
             &theater_code,
             &w,
         )?;
@@ -8705,10 +8724,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     // sets the payload and the fuel systems from it.
                     load.reset(&mut state)?;
                 } else {
-                    state.set_payload(load.state.payload_lbs())?;
+                    state.set_payload(load.state.own().payload_lbs())?;
                     state.systems = tore_sim::aircraft_systems::Systems::new(
-                        load.state.configuration().engines,
-                        load.state.external_fuel_lbs(),
+                        load.state.own().configuration().engines,
+                        load.state.own().external_fuel_lbs(),
                     );
                 }
             }
@@ -9771,7 +9790,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             let writer = tape_file::Recorder::new(
                 path,
                 &theater_resources,
-                combat.state.configuration(),
+                combat.state.own().configuration(),
                 &theater_code,
             )?;
             combat.start_tape();
@@ -9872,17 +9891,21 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         combat.refresh_render(&flight, None);
     }
     if let Some(weapon_slot) = weapon_slot {
-        if weapon_slot == 0 || weapon_slot > combat.state.ammo.len() {
+        if weapon_slot == 0 || weapon_slot > combat.state.own().ammo.len() {
             return Err("weapon slot outside this aircraft's PT loadout".into());
         }
-        while combat.state.selected != weapon_slot - 1 {
+        while combat.state.own().selected != weapon_slot - 1 {
             combat.command(
                 tore_sim::combat::live::Command::NextWeapon,
                 combat::launcher(&flight),
             );
         }
         // A station that carries nothing cannot be selected; start on NAV.
-        if !combat.state.carries(weapon_slot - 1) {
+        if !combat
+            .state
+            .own()
+            .carries(weapon_slot - 1, combat.state.cheats.unlimited_ammo)
+        {
             eprintln!("Weapon slot {weapon_slot} carries nothing; starting on NAV");
             combat.command(
                 tore_sim::combat::live::Command::SelectNav,
@@ -9894,7 +9917,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     // scene is retaken at once and each combat step ends a tick.
     if live_fire {
         // An empty station is never armed.
-        combat.state.armed = combat.state.carries(combat.state.selected);
+        let unlimited = combat.state.cheats.unlimited_ammo;
+        let own = combat.state.own_mut();
+        own.armed = own.carries(own.selected, unlimited);
         combat.command(
             tore_sim::combat::live::Command::ReplaceTarget,
             combat::launcher(&flight),
@@ -9905,7 +9930,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         combat.step(&mut flight, &world)?;
         combat.advance_render(&flight, None);
     }
-    let payload_start = combat.state.payload_lbs();
+    let payload_start = combat.state.own().payload_lbs();
     for command in combat_commands {
         combat.command(command, combat::launcher(&flight));
     }
@@ -9926,10 +9951,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             devices.flares.iter().filter(|f| f.burning()).count(),
             devices.puffs().count(),
             devices.chaff.len(),
-            combat.state.chaff,
-            combat.state.flares,
-            combat.state.configuration().ecm.chaff[0],
-            combat.state.configuration().ecm.flare[0]
+            combat.state.own().chaff,
+            combat.state.own().flares,
+            combat.state.own().configuration().ecm.chaff[0],
+            combat.state.own().configuration().ecm.flare[0]
         );
         for flare in &devices.flares {
             let p = flare.position;
@@ -9965,7 +9990,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 f64::from(world.height(x as f32, z as f32))
             });
             for event in combat.step(&mut flight, &world)? {
-                if let Some(cue) = combat::feedback(&event, combat.state.configuration()) {
+                if let Some(cue) = combat::feedback(&event, combat.state.own().configuration()) {
                     *cues.entry(format!("{cue:?}")).or_default() += 1;
                     feedback.event(cue);
                 }
@@ -9986,13 +10011,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         println!(
             "Combat probe: {} shots={} hits={} kills={} active={} ammo={:?} payload_start_lb={:.0} payload_lb={:.0} flight_payload_lb={:.0} external_fuel_lb={:.0}",
             hornet.profile.name,
-            combat.state.shots,
-            combat.state.hits,
-            combat.state.kills,
+            combat.state.own().shots,
+            combat.state.own().hits,
+            combat.state.own().kills,
             combat.state.projectiles.len(),
-            combat.state.ammo,
+            combat.state.own().ammo,
             payload_start,
-            combat.state.payload_lbs(),
+            combat.state.own().payload_lbs(),
             flight.carried_lbs(),
             flight.systems.external_lbs()
         );
@@ -10013,7 +10038,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             tore_sim::combat::live::Command::DesignateTarget(id),
             combat::launcher(&flight),
         );
-        if combat.state.designated() != Some(id) {
+        if combat.state.own_view().designated() != Some(id) {
             return Err("HUD preview target could not be observed before repositioning".into());
         }
         let body = tore_sim::attitude::Basis::new(flight.yaw, flight.pitch, flight.bank);
@@ -10040,15 +10065,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             "HUD target preview: bearing={} elevation={} display={:?} sensor={:?}",
             bearing.to_degrees(),
             elevation.to_degrees(),
-            combat.state.display_target().map(|t| t.id),
-            combat.state.designated()
+            combat.state.own_view().display_target().map(|t| t.id),
+            combat.state.own_view().designated()
         );
     }
     if let Some(fraction) = damage_preview {
         combat
             .state
             .preview_localized_damage(damage_preview_section, fraction);
-        combat.state.player_hp = (f64::from(combat.state.configuration().damage_capacity)
+        combat.state.own_mut().hp = (f64::from(combat.state.own().configuration().damage_capacity)
             * (1. - fraction))
             .round() as i32;
         for target in &mut combat.state.targets {
@@ -10163,12 +10188,17 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     let airport_nav_mode = airport_probe.map_or_else(
         || {
             (ground_start.is_some() && weapon_slot.is_none() && !live_fire)
-                || (stripped_loadout.is_some() && !combat.state.carries(combat.state.selected))
+                || (stripped_loadout.is_some()
+                    && !combat.state.own().carries(
+                        combat.state.own().selected,
+                        combat.state.cheats.unlimited_ammo,
+                    ))
         },
         |(_, aircraft, _)| aircraft.nav_mode,
     );
     if airport_nav_mode {
         combat.state.command(
+            0,
             tore_sim::combat::live::Command::SelectNav,
             combat::launcher(&flight),
         );

@@ -12,7 +12,7 @@ use crate::{
 use std::collections::BTreeMap;
 use tore_sim::{
     attitude::Basis,
-    combat::live::{self, EffectKind, Event, Launcher},
+    combat::live::{self, EffectKind, Event, Launcher, OwnshipInput},
 };
 
 /// Where two Debug dumps first differ, with a little context from each, so a
@@ -41,42 +41,61 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
     println!(
         "systems source {:?}: player capacity={} ECM={:?} weights={} repeat-limited=45",
         h.profile.id,
-        combat.state.configuration().damage_capacity,
-        combat.state.configuration().ecm,
+        combat.state.own().configuration().damage_capacity,
+        combat.state.own().configuration().ecm,
         combat
             .state
+            .own()
             .configuration()
             .system_damage
             .iter()
             .map(|v| u32::from(v & 15))
             .sum::<u32>()
     );
-    let mut damaged = live::State::new(combat.state.configuration().clone(), true)?;
+    let mut damaged = live::State::new(combat.state.own().configuration().clone(), true)?;
     // System faults are part of the check, so exercise Realistic damage.
     damaged.cheats.damage = tore_sim::cheats::Damage::Realistic;
     let l = launcher(&h.start(&world));
     // A source missile followed by gun hits exercises selection on a varied
     // damage history; a particular all-gun seed can legitimately select no fault.
-    damaged.selected = damaged
+    damaged.own_mut().selected = damaged
+        .own()
         .configuration()
         .stations
         .iter()
         .position(|s| s.weapon.source == "AGM65G.JT")
         .or_else(|| {
             damaged
+                .own()
                 .configuration()
                 .stations
                 .iter()
                 .position(|s| s.weapon.seeker.signature != 0)
         })
         .unwrap_or(0);
-    damaged.command(live::Command::Incoming, l);
+    damaged.command(0, live::Command::Incoming, l);
     let mut replica = damaged.clone();
     let mut systems = 0;
     let mut destroyed = 0;
     for _ in 0..1200 {
-        let events = damaged.step(false, l, |_, _| 0.);
-        if events != replica.step(false, l, |_, _| 0.) {
+        let events = damaged.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
+        if events
+            != replica.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            )
+        {
             return Err("source incoming damage replay diverged".into());
         }
         systems += events
@@ -94,13 +113,28 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
     // Forty gun-sized hits kill most aircraft; the A-4E's guns are weaker, so
     // keep hitting until the aircraft is destroyed.
     for _ in 0..2000 {
-        if damaged.player_hp == 0 {
+        if damaged.own().hp == 0 {
             break;
         }
-        damaged.command(live::Command::DamagePlayer, l);
-        replica.command(live::Command::DamagePlayer, l);
-        let events = damaged.step(false, l, |_, _| 0.);
-        if events != replica.step(false, l, |_, _| 0.)
+        damaged.command(0, live::Command::DamagePlayer, l);
+        replica.command(0, live::Command::DamagePlayer, l);
+        let events = damaged.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
+        if events
+            != replica.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            )
             || format!("{damaged:?}") != format!("{replica:?}")
         {
             return Err("source damage replay diverged".into());
@@ -117,24 +151,39 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
     // Different source weapons produce different damage histories. A fatal
     // missile can legitimately select no subsystem. Cover each source station
     // plus gradual gun damage without changing aircraft damage values or RNG.
-    for source in 0..combat.state.configuration().stations.len() {
+    for source in 0..combat.state.own().configuration().stations.len() {
         if systems > 0 {
             break;
         }
-        let mut gradual = live::State::new(combat.state.configuration().clone(), true)?;
+        let mut gradual = live::State::new(combat.state.own().configuration().clone(), true)?;
         gradual.cheats.damage = tore_sim::cheats::Damage::Realistic;
-        gradual.selected = source;
+        gradual.own_mut().selected = source;
         if source > 0 {
-            gradual.command(live::Command::Incoming, l);
+            gradual.command(0, live::Command::Incoming, l);
         }
         let mut replay = gradual.clone();
         for tick in 0..1240 {
             if tick >= 1200 {
-                gradual.command(live::Command::DamagePlayer, l);
-                replay.command(live::Command::DamagePlayer, l);
+                gradual.command(0, live::Command::DamagePlayer, l);
+                replay.command(0, live::Command::DamagePlayer, l);
             }
-            let events = gradual.step(false, l, |_, _| 0.);
-            if events != replay.step(false, l, |_, _| 0.)
+            let events = gradual.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
+            if events
+                != replay.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: false,
+                        launcher: l,
+                    }],
+                    |_, _| 0.,
+                )
                 || format!("{gradual:?}") != format!("{replay:?}")
             {
                 return Err("gradual source damage replay diverged".into());
@@ -147,45 +196,62 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
     }
     if (systems == 0
         && damaged
+            .own()
             .configuration()
             .stations
             .iter()
             .any(|s| s.weapon.seeker.signature != 0))
         || destroyed != 1
-        || damaged.player_hp != 0
+        || damaged.own().hp != 0
     {
-        return Err(format!("source automatic damage/destruction failed faults={systems} kills={destroyed} HP={} damage={} counts={:?} source={:?}",damaged.player_hp,damaged.player_damage,damaged.subsystem_counts,damaged.configuration().system_damage).into());
+        return Err(format!("source automatic damage/destruction failed faults={systems} kills={destroyed} HP={} damage={} counts={:?} source={:?}",damaged.own().hp,damaged.own().damage,damaged.own().subsystem_counts,damaged.own().configuration().system_damage).into());
     }
     println!(
         "systems automatic {:?}: faults={systems} destruction={destroyed} indices={:?} PASS",
-        h.profile.id, damaged.subsystem_counts
+        h.profile.id,
+        damaged.own().subsystem_counts
     );
-    for index in 0..combat.state.ammo.len() {
-        let station = &combat.state.configuration().stations[index];
+    for index in 0..combat.state.own().ammo.len() {
+        let station = &combat.state.own().configuration().stations[index];
         if !station.internal && station.weapon.seeker.signature == 0 {
             continue;
         }
         for jammer in [false, true] {
-            let mut state = live::State::new(combat.state.configuration().clone(), true)?;
-            state.selected = index;
+            let mut state = live::State::new(combat.state.own().configuration().clone(), true)?;
+            state.own_mut().selected = index;
             let mut l = launcher(&h.start(&world));
             l.jammer = jammer;
-            state.command(live::Command::Incoming, l);
+            state.command(0, live::Command::Incoming, l);
             let mut replay = state.clone();
-            let initial = state.player_hp;
-            let ammo = state.ammo.clone();
+            let initial = state.own().hp;
+            let ammo = state.own().ammo.clone();
             let mut outcome = false;
             let mut mixer = tore_input::FeedbackMixer::default();
             let mut pulses = 0;
             for _ in 0..1200 {
-                let events = state.step(false, l, |_, _| 0.);
-                if events != replay.step(false, l, |_, _| 0.)
+                let events = state.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: false,
+                        launcher: l,
+                    }],
+                    |_, _| 0.,
+                );
+                if events
+                    != replay.step(
+                        &[OwnshipInput {
+                            aircraft: 0,
+                            held: false,
+                            launcher: l,
+                        }],
+                        |_, _| 0.,
+                    )
                     || format!("{state:?}") != format!("{replay:?}")
                 {
                     return Err("incoming replay diverged".into());
                 }
                 for event in &events {
-                    if let Some(cue) = feedback(event, state.configuration()) {
+                    if let Some(cue) = feedback(event, state.own().configuration()) {
                         mixer.event(cue);
                     }
                     outcome |= matches!(event, Event::PlayerDamaged(_) | Event::Defeated(0));
@@ -197,7 +263,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                     break;
                 }
             }
-            if !outcome || state.ammo != ammo || (state.player_hp < initial && pulses == 0) {
+            if !outcome || state.own().ammo != ammo || (state.own().hp < initial && pulses == 0) {
                 return Err(format!(
                     "incoming lifecycle failed slot {} jammer={jammer}",
                     index + 1
@@ -214,7 +280,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 "systems incoming {:?} slot={} jammer={jammer} HP={initial}->{} haptic-pulses={pulses} PASS",
                 h.profile.id,
                 index + 1,
-                state.player_hp
+                state.own().hp
             );
         }
     }
@@ -223,14 +289,14 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
     // open, and the records that follow go to that file until the next slot's
     // tape replaces it, as they did when combat held the file.
     let mut recorder: Option<crate::tape_file::Recorder> = None;
-    for index in 0..combat.state.ammo.len() {
-        let station = &combat.state.configuration().stations[index];
+    for index in 0..combat.state.own().ammo.len() {
+        let station = &combat.state.own().configuration().stations[index];
         if !station.internal && station.weapon.seeker.signature == 0 {
-            ballistic_smoke(combat.state.configuration(), index)?;
+            ballistic_smoke(combat.state.own().configuration(), index)?;
             continue;
         }
         for (class, category) in [
-            combat.state.configuration().target_category,
+            combat.state.own().configuration().target_category,
             0x2000,
             0x100,
             0x400,
@@ -257,7 +323,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 recorder = Some(crate::tape_file::Recorder::new(
                     path,
                     data,
-                    combat.state.configuration(),
+                    combat.state.own().configuration(),
                     "UKR",
                 )?);
                 combat.start_tape();
@@ -279,40 +345,63 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
             observe(&mut combat, &mut flight, &world, 1)?;
             combat.command(live::Command::Designate, launcher(&flight));
             observe(&mut combat, &mut flight, &world, ACQUISITION)?;
-            let initial = combat.state.ammo[index];
+            let initial = combat.state.own().ammo[index];
             let mut negative = combat.state.clone();
             let l = launcher(&flight);
-            negative.command(live::Command::ToggleArm, l);
-            negative.step(true, l, |_, _| 0.);
-            if negative.ammo[index] != initial || negative.readiness(l) != live::Readiness::Safe {
+            negative.command(0, live::Command::ToggleArm, l);
+            negative.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
+            if negative.own().ammo[index] != initial
+                || negative.own_view().readiness(l) != live::Readiness::Safe
+            {
                 return Err("safe inhibited shot consumed ammunition".into());
             }
-            negative.command(live::Command::ToggleArm, l);
-            negative.command(live::Command::FailStation, l);
-            let mass = negative.payload_lbs();
-            negative.step(true, l, |_, _| 0.);
-            if negative.rounds(index) != initial || negative.payload_lbs() != mass {
+            negative.command(0, live::Command::ToggleArm, l);
+            negative.command(0, live::Command::FailStation, l);
+            let mass = negative.own().payload_lbs();
+            negative.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
+            if negative.own().rounds(index) != initial || negative.own().payload_lbs() != mass {
                 return Err("station failure changed ammunition/mass".into());
             }
             // A surface weapon cannot engage the practice aircraft
             // (docs/spec/missiles.md, target-role rules): the shot is refused,
             // not spent, and there is no surface target to fire it at yet.
             if tore_sim::combat::missiles::Profile::for_weapon(
-                &combat.state.configuration().stations[index].weapon,
+                &combat.state.own().configuration().stations[index].weapon,
             )
             .is_some_and(|p| p.role == tore_sim::combat::missiles::TargetRole::Surface)
             {
                 let mut refused = combat.state.clone();
-                refused.step(true, l, |_, _| 0.);
-                if refused.readiness(l) != live::Readiness::WrongTarget
-                    || refused.ammo[index] != initial
+                refused.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: true,
+                        launcher: l,
+                    }],
+                    |_, _| 0.,
+                );
+                if refused.own_view().readiness(l) != live::Readiness::WrongTarget
+                    || refused.own().ammo[index] != initial
                     || !refused.projectiles.is_empty()
                 {
                     return Err(format!(
                         "surface weapon was not refused against the aircraft target: slot={} weapon={} readiness={:?}",
                         index + 1,
-                        combat.state.configuration().stations[index].weapon.source,
-                        refused.readiness(l)
+                        combat.state.own().configuration().stations[index].weapon.source,
+                        refused.own_view().readiness(l)
                     )
                     .into());
                 }
@@ -320,7 +409,9 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                     "combat smoke {} slot={} {} class={class}: refused against aircraft target PASS",
                     h.profile.name,
                     index + 1,
-                    combat.state.configuration().stations[index].weapon.source,
+                    combat.state.own().configuration().stations[index]
+                        .weapon
+                        .source,
                 );
                 combat.cancel();
                 continue;
@@ -331,57 +422,92 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 // bare ClearDesignation may reacquire the same aircraft in
                 // boresight during this step, which is a valid launch rather
                 // than an undesignated negative case.
-                no_target.command(live::Command::ClearRange, l);
-                no_target.step(true, l, |_, _| 0.);
+                no_target.command(0, live::Command::ClearRange, l);
+                no_target.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: true,
+                        launcher: l,
+                    }],
+                    |_, _| 0.,
+                );
                 // Seeker service may validly switch a supported weapon into
                 // boresight during the step. The captured release gate, not the
                 // stale pre-service readiness, decides whether any debit was legal.
-                if no_target.release_readiness != live::Readiness::Ready
-                    && no_target.ammo[index] != initial
+                if no_target.own().release_readiness != live::Readiness::Ready
+                    && no_target.own().ammo[index] != initial
                 {
                     return Err("inhibited targetless launch consumed ammo".into());
                 }
-                let weapon = &combat.state.configuration().stations[index].weapon;
+                let weapon = &combat.state.own().configuration().stations[index].weapon;
                 let mut too_close = combat.state.clone();
-                too_close.launch_mode = tore_sim::combat::missiles::LaunchMode::Cued;
+                too_close.own_mut().launch_mode = tore_sim::combat::missiles::LaunchMode::Cued;
                 if weapon.seeker.zones[1].minimum_range > 0
-                    && combat.state.readiness(l) == live::Readiness::Ready
+                    && combat.state.own_view().readiness(l) == live::Readiness::Ready
                 {
                     // Leave enough margin for the 300 ft/s range target to
                     // advance during the observation refresh below.
                     let distance = f64::from(weapon.seeker.zones[1].minimum_range) - 100.;
                     too_close.targets[0].position =
                         std::array::from_fn(|k| l.position[k] + l.basis.forward[k] * distance);
-                    too_close.step(false, l, |_, _| 0.);
-                    let close_reason = too_close.readiness(l);
+                    too_close.step(
+                        &[OwnshipInput {
+                            aircraft: 0,
+                            held: false,
+                            launcher: l,
+                        }],
+                        |_, _| 0.,
+                    );
+                    let close_reason = too_close.own_view().readiness(l);
                     if close_reason != live::Readiness::MinimumRange {
                         return Err(format!(
                             "source minimum-range launch was not inhibited: slot={} minimum={} reason={close_reason:?} mode={:?} designated={:?}",
                             index + 1,
                             weapon.seeker.zones[1].minimum_range,
-                            too_close.launch_mode,
-                            too_close.designated()
+                            too_close.own().launch_mode,
+                            too_close.own_view().designated()
                         ).into());
                     }
-                    too_close.step(true, l, |_, _| 0.);
-                    if too_close.rounds(index) != initial {
+                    too_close.step(
+                        &[OwnshipInput {
+                            aircraft: 0,
+                            held: true,
+                            launcher: l,
+                        }],
+                        |_, _| 0.,
+                    );
+                    if too_close.own().rounds(index) != initial {
                         return Err("minimum-range inhibited shot consumed ammunition".into());
                     }
                 }
                 let mut tracking = combat.state.clone();
-                tracking.step(true, l, |_, _| 0.);
+                tracking.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: true,
+                        launcher: l,
+                    }],
+                    |_, _| 0.,
+                );
                 if tracking.projectiles.is_empty() {
                     return Err(format!(
                         "source guidance probe did not launch: slot={} weapon={} readiness={:?} ammo={} initial={initial} mode={:?}",
                         index + 1,
                         weapon.source,
-                        combat.state.readiness(l),
-                        tracking.ammo[index],
-                        tracking.launch_mode
+                        combat.state.own_view().readiness(l),
+                        tracking.own().ammo[index],
+                        tracking.own().launch_mode
                     )
                     .into());
                 }
-                tracking.step(false, Launcher { radar: false, ..l }, |_, _| 0.);
+                tracking.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: false,
+                        launcher: Launcher { radar: false, ..l },
+                    }],
+                    |_, _| 0.,
+                );
                 let loses_track = weapon.seeker.signature == 3 && weapon.flags & 0x200 != 0;
                 if tracking.projectiles.iter().any(|p| {
                     if let Some(guidance) = &p.guidance {
@@ -399,21 +525,21 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                     return Err("radar-off support and retained-identity contract failed".into());
                 }
                 let mut jettison = combat.state.clone();
-                let internal = jettison.configuration().stations[index].internal;
+                let internal = jettison.own().configuration().stations[index].internal;
                 let expected_rounds = if internal { initial } else { 0 };
-                let expected_mass = jettison.payload_lbs()
+                let expected_mass = jettison.own().payload_lbs()
                     - if internal {
                         0.
                     } else {
                         f64::from(weapon.weight.max(0)) * f64::from(initial)
                     };
-                jettison.command(live::Command::Jettison, l);
-                if jettison.rounds(index) != expected_rounds
-                    || jettison.payload_lbs() != expected_mass
+                jettison.command(0, live::Command::Jettison, l);
+                if jettison.own().rounds(index) != expected_rounds
+                    || jettison.own().payload_lbs() != expected_mass
                 {
                     return Err("source jettison mass/ammunition contract failed".into());
                 }
-                if combat.state.configuration().stations[index]
+                if combat.state.own().configuration().stations[index]
                     .weapon
                     .seeker
                     .signature
@@ -424,9 +550,16 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                     // lock is inhibited.
                     let mut radar_off = combat.state.clone();
                     let off = Launcher { radar: false, ..l };
-                    radar_off.step(true, off, |_, _| 0.);
+                    radar_off.step(
+                        &[OwnshipInput {
+                            aircraft: 0,
+                            held: true,
+                            launcher: off,
+                        }],
+                        |_, _| 0.,
+                    );
                     let profile = tore_sim::combat::missiles::Profile::for_weapon(
-                        &combat.state.configuration().stations[index].weapon,
+                        &combat.state.own().configuration().stations[index].weapon,
                     );
                     let guided_by_radar = profile.is_none_or(|p| {
                         p.guidance == tore_sim::combat::missiles::Guidance::Supported
@@ -434,16 +567,16 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                     if guided_by_radar
                         // Losing the radar track may also drop the designation,
                         // so any reason but Ready is a valid inhibit.
-                        && (radar_off.ammo[index] != initial
-                            || radar_off.readiness(off) == live::Readiness::Ready)
+                        && (radar_off.own().ammo[index] != initial
+                            || radar_off.own_view().readiness(off) == live::Readiness::Ready)
                     {
                         return Err(format!(
                             "radar-off launch was not inhibited: slot={} weapon={} ammo={} initial={initial} readiness={:?} mode={:?}",
                             index + 1,
-                            combat.state.configuration().stations[index].weapon.source,
-                            radar_off.ammo[index],
-                            radar_off.readiness(off),
-                            radar_off.launch_mode
+                            combat.state.own().configuration().stations[index].weapon.source,
+                            radar_off.own().ammo[index],
+                            radar_off.own_view().readiness(off),
+                            radar_off.own().launch_mode
                         )
                         .into());
                     }
@@ -457,14 +590,21 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                             radar_power: false,
                             ..l
                         };
-                        dumb.step(true, off, |_, _| 0.);
-                        if dumb.ammo[index] != initial - 1
+                        dumb.step(
+                            &[OwnshipInput {
+                                aircraft: 0,
+                                held: true,
+                                launcher: off,
+                            }],
+                            |_, _| 0.,
+                        );
+                        if dumb.own().ammo[index] != initial - 1
                             || dumb.projectiles.iter().any(|p| p.target.is_some())
                         {
                             return Err(format!(
                                 "radar-power-off release was not an unguided shot: slot={} ammo={} initial={initial}",
                                 index + 1,
-                                dumb.ammo[index]
+                                dumb.own().ammo[index]
                             )
                             .into());
                         }
@@ -474,7 +614,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
             // Replay the same authoritative host tick inputs in a second state.
             // Presentation/pause never calls this path and cannot advance either copy.
             let mut replay = combat.state.clone();
-            if let Some(name) = combat.state.configuration().stations[index]
+            if let Some(name) = combat.state.own().configuration().stations[index]
                 .weapon
                 .fire_sound
                 .as_deref()
@@ -507,17 +647,27 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 flight.step(&flight::PilotInput::default(), |x, z| {
                     f64::from(world.height(x as f32, z as f32))
                 });
-                let replay_events = replay.step(combat.input.held, launcher(&flight), |x, z| {
-                    f64::from(world.height(x as f32, z as f32))
-                });
+                let replay_events = replay.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: combat.input.held,
+                        launcher: launcher(&flight),
+                    }],
+                    |x, z| f64::from(world.height(x as f32, z as f32)),
+                );
                 let events = combat.step(&mut flight, &world)?;
                 // The host hands a dry station's selection on (see `step`);
                 // the second state applies the same rule from the tape.
-                if !combat.input.held && replay.armed && !replay.carries(replay.selected) {
-                    replay.command(live::Command::AdvanceFromEmpty, launcher(&flight));
+                if !combat.input.held
+                    && replay.own().armed
+                    && !replay
+                        .own()
+                        .carries(replay.own().selected, replay.cheats.unlimited_ammo)
+                {
+                    replay.command(0, live::Command::AdvanceFromEmpty, launcher(&flight));
                 }
                 if events != replay_events
-                    || combat.state.ammo != replay.ammo
+                    || combat.state.own().ammo != replay.own().ammo
                     || combat.state.projectiles != replay.projectiles
                     || combat.state.targets != replay.targets
                     || combat.state.history != replay.history
@@ -544,12 +694,12 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
             if fired == 0
                 || impacts == 0
                 || (class == 0 && destroyed != 1)
-                || combat.state.ammo[index] >= initial
+                || combat.state.own().ammo[index] >= initial
                 || combat.state.history.iter().any(|hit| {
                     hit.class != class
                         || hit.nominal
                             != i32::from(
-                                combat.state.configuration().stations[index]
+                                combat.state.own().configuration().stations[index]
                                     .weapon
                                     .damage
                                     .by_class[class],
@@ -563,7 +713,8 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                         .iter()
                         .map(|hit| hit.applied)
                         .sum::<i32>()
-                        != combat.state.configuration().hit_points - combat.state.targets[0].hp)
+                        != combat.state.own().configuration().hit_points
+                            - combat.state.targets[0].hp)
                 || (class == 0
                     && !combat
                         .state
@@ -576,10 +727,10 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 return Err(format!(
                     "combat smoke {} {} failed: fired={fired} hits={impacts} destroyed={destroyed} class={class} ammo={}->{} applied={applied} lost_hp={} wrong_class={:?}",
                     h.profile.name,
-                    combat.state.configuration().stations[index].weapon.source,
+                    combat.state.own().configuration().stations[index].weapon.source,
                     initial,
-                    combat.state.ammo[index],
-                    combat.state.configuration().hit_points - combat.state.targets[0].hp,
+                    combat.state.own().ammo[index],
+                    combat.state.own().configuration().hit_points - combat.state.targets[0].hp,
                     wrong_class.map(|hit| (hit.class, hit.nominal, hit.applied))
                 )
                 .into());
@@ -588,17 +739,19 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 "combat smoke {} slot={} {} class={class}: shots={fired} hits={impacts} destroyed={destroyed} ammo={}->{} effects={} PASS",
                 h.profile.name,
                 index + 1,
-                combat.state.configuration().stations[index].weapon.source,
+                combat.state.own().configuration().stations[index]
+                    .weapon
+                    .source,
                 initial,
-                combat.state.ammo[index],
+                combat.state.own().ammo[index],
                 combat.state.effects.len()
             );
             combat.cancel();
-            let ammo = combat.state.ammo.clone();
+            let ammo = combat.state.own().ammo.clone();
             for _ in 0..120 {
                 combat.step(&mut flight, &world)?;
             }
-            if combat.state.ammo != ammo {
+            if combat.state.own().ammo != ammo {
                 return Err("firing continued after release".into());
             }
             if let Some(path) = &tape {
@@ -606,7 +759,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 let decoded = crate::tape_file::replay_without_airports(
                     path,
                     data,
-                    combat.state.configuration().clone(),
+                    combat.state.own().configuration().clone(),
                     "UKR",
                     &world,
                 )?;
@@ -647,7 +800,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 let decoded = crate::tape_file::replay_without_airports(
                     path,
                     data,
-                    combat.state.configuration().clone(),
+                    combat.state.own().configuration().clone(),
                     "UKR",
                     &world,
                 )?;
@@ -667,7 +820,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 let decoded = crate::tape_file::replay_without_airports(
                     path,
                     data,
-                    combat.state.configuration().clone(),
+                    combat.state.own().configuration().clone(),
                     "UKR",
                     &world,
                 )?;
@@ -723,7 +876,7 @@ fn observe(
 /// same-altitude interception requirement. Does not claim blast-radius parity.
 fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> {
     let mut state = live::State::new(config.clone(), true)?;
-    state.selected = index;
+    state.own_mut().selected = index;
     let l = Launcher {
         position: [0., 500., 0.],
         basis: Basis::new(0., -0.3, 0.),
@@ -736,25 +889,54 @@ fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> 
         alive: true,
         controls: Default::default(),
     };
-    let initial = state.ammo[index];
+    let initial = state.own().ammo[index];
     let mut safe = state.clone();
-    safe.command(live::Command::ToggleArm, l);
-    safe.step(true, l, |_, _| 0.);
-    if safe.ammo[index] != initial {
+    safe.command(0, live::Command::ToggleArm, l);
+    safe.step(
+        &[OwnshipInput {
+            aircraft: 0,
+            held: true,
+            launcher: l,
+        }],
+        |_, _| 0.,
+    );
+    if safe.own().ammo[index] != initial {
         return Err("safe unguided store released".into());
     }
     let mut failed = state.clone();
-    failed.command(live::Command::FailStation, l);
-    failed.step(true, l, |_, _| 0.);
-    if failed.rounds(index) != initial {
+    failed.command(0, live::Command::FailStation, l);
+    failed.step(
+        &[OwnshipInput {
+            aircraft: 0,
+            held: true,
+            launcher: l,
+        }],
+        |_, _| 0.,
+    );
+    if failed.own().rounds(index) != initial {
         return Err("failed unguided station released".into());
     }
     let mut replay = state.clone();
     let mut ground = false;
     let mut fired = false;
     for tick in 0..7200 {
-        let events = state.step(tick == 0, l, |_, _| 0.);
-        if events != replay.step(tick == 0, l, |_, _| 0.)
+        let events = state.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: tick == 0,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
+        if events
+            != replay.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: tick == 0,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            )
             || format!("{state:?}") != format!("{replay:?}")
         {
             return Err("unguided release replay diverged".into());
@@ -767,7 +949,7 @@ fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> 
     }
     if !fired
         || !ground
-        || state.ammo[index] >= initial
+        || state.own().ammo[index] >= initial
         || state.projectiles.iter().any(|p| p.target.is_some())
     {
         return Err(format!(
@@ -776,8 +958,8 @@ fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> 
         )
         .into());
     }
-    state.command(live::Command::Jettison, l);
-    if state.rounds(index) != 0 {
+    state.command(0, live::Command::Jettison, l);
+    if state.own().rounds(index) != 0 {
         return Err("unguided jettison failed".into());
     }
     println!(

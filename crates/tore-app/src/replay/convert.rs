@@ -1314,7 +1314,7 @@ mod tests {
             } else {
                 fixture::pair(Vec::new(), Vec::new())
             };
-            let scene = fixture::scene(combat.state.configuration());
+            let scene = fixture::scene(combat.state.own().configuration());
             for ai_poses in [true, false] {
                 let mut live = fixture::snapshots(&mut combat, &scene, ai_poses, &player);
                 for (tick, snapshot) in (40..).zip(&mut live) {

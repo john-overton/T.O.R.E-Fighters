@@ -675,9 +675,9 @@ impl Target {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Projectile {
     pub id: u32,
-    /// Who fired this round. `0` is the player; any other value is an AI
-    /// actor's id. Score counters are attributed with it, so an AI aircraft
-    /// killing another AI aircraft does not credit the player.
+    /// The aircraft that fired this round: an ownship's aircraft id or an AI
+    /// actor's. Score counters are attributed with it, so an AI aircraft
+    /// killing another AI aircraft credits no ownship.
     pub owner: u32,
     /// Actor-owned weapon for AI releases; player shots use the configured station.
     pub weapon: Option<Weapon>,
@@ -685,7 +685,10 @@ pub struct Projectile {
     pub motion: Option<Motion>,
     pub guidance_ticks: Option<u64>,
     pub age: u64,
-    pub incoming: bool,
+    /// The ownship this round was aimed at when it was released, if any.
+    /// Fixed then and never updated, so a round decoyed away from it still
+    /// carries it. The hit test still reads it; ledger aim and warnings read it too.
+    pub incoming: Option<u32>,
     pub station: usize,
     pub position: Vector,
     pub previous: Vector,
@@ -846,23 +849,33 @@ struct RangeEstimate {
     favorable: Option<missiles::FiringBand>,
 }
 
+/// The combat state of one human-flown aircraft: its stores and selection, its
+/// seeker and sensors, its hit points and system faults, its countermeasures
+/// and warnings, its score. Everything only that aircraft has lives here; what
+/// every aircraft shares (projectiles, targets, effects, the ledger, the random
+/// stream, the mission settings) stays in [`State`], which holds the ownships in
+/// aircraft id order.
 #[derive(Clone, Debug)]
-pub struct State {
+pub struct Ownship {
+    /// The aircraft this is: its id in projectile owners, ledger keys and events.
+    pub aircraft: u32,
+    config: Configuration,
+    /// External stores are fitted.
+    external: bool,
     pub release_readiness: Readiness,
     pub launch_mode: LaunchMode,
     pub mounted: Seeker,
     /// Provisional bore return for HUD estimates only, never a designation or lock.
     pub bore_observation: Option<seeker::Observation>,
     mounted_key: Option<(usize, LaunchMode, Option<u32>)>,
-    pub weapon_rules: Rules,
     range_estimate: Option<RangeEstimate>,
-    config: Configuration,
     pub ammo: Vec<u16>,
     /// Stations that held something at the start of the mission. A station
     /// emptied in flight keeps its row in the weapons window; one that was
     /// never loaded has none. See `note_loaded`.
     ever_loaded: Vec<bool>,
     pub selected: usize,
+    pub armed: bool,
     pub sensors: Sensors,
     /// Easy targeting's memory of the last selection, kept after sensor
     /// loss for the HUD square only; never grants weapon support.
@@ -874,10 +887,49 @@ pub struct State {
     pub friendlies: std::collections::BTreeSet<u32>,
     /// Passive emitters received this step, for the exposure instrument.
     pub emitters: Vec<passive::Emitter>,
+    pub missile_threats: super::threats::ThreatService,
+    pub hp: i32,
+    pub damage: i32,
+    pub subsystem_counts: [u8; 45],
+    pub last_subsystem: Option<usize>,
+    pub radar_failed: bool,
+    pub visual_failed: bool,
+    pub infrared_failed: bool,
+    pub rwr_failed: bool,
+    pub ecm_failed: bool,
+    pub chaff: u8,
+    pub flares: u8,
+    localized_damage: LocalizedDamage,
+    fragment_released: bool,
+    explosion_reported: bool,
+    /// Rounds fired.
+    pub shots: u32,
+    pub hits: u32,
+    pub kills: u32,
+    pending_damage: bool,
+    /// Hit points owed to belly scrape wear that have not yet added up to one.
+    scrape_carry: f64,
+    previous_position: Option<Vector>,
+    triggers: Vec<PlayerTrigger>,
+    gun_cadence: Vec<GunCadence>,
+    /// A trigger press waiting for the weapon bay to open: the station and
+    /// the tick it was pressed.
+    bay_release: Option<(usize, u64)>,
+    /// The bay stays open until this tick after a bay release.
+    bay_hold_until: u64,
+}
+
+/// Combat: what every aircraft shares, and the [`Ownship`] of each
+/// human-flown aircraft.
+#[derive(Clone, Debug)]
+pub struct State {
+    /// The weapon rules of the mission.
+    pub weapon_rules: Rules,
+    /// Human-flown aircraft, in aircraft id order.
+    ownships: Vec<Ownship>,
     pub projectiles: Vec<Projectile>,
     pub targets: Vec<Target>,
     actor_support: BTreeMap<u32, ActorSupport>,
-    pub missile_threats: super::threats::ThreatService,
     /// Ground contact volumes keyed by stable target ID. Aircraft remain spheres.
     ground_bounds: BTreeMap<u32, crate::airport::OrientedBox>,
     pub effects: Vec<Effect>,
@@ -895,50 +947,25 @@ pub struct State {
     pub devices: super::countermeasures::Devices,
     /// Every release since the host last drained them, for recordings.
     device_log: std::collections::VecDeque<DeviceNote>,
-    /// The player's decoy rolls since the last drain, for recordings.
+    /// The ownships' decoy rolls since the last drain, for recordings.
     decoy_log: std::collections::VecDeque<DecoyRoll>,
     pub debris: Vec<super::debris::Piece>,
-    player_fragment_released: bool,
-    player_explosion_reported: bool,
-    player_localized_damage: LocalizedDamage,
-    pub shots: u32,
-    pub hits: u32,
-    pub kills: u32,
     /// Launches, outcomes and kills by shooter, for the debrief.
     pub ledger: super::ledger::Ledger,
-    pub armed: bool,
-    pub player_hp: i32,
-    pub player_damage: i32,
-    pub subsystem_counts: [u8; 45],
-    pub last_subsystem: Option<usize>,
-    pub radar_failed: bool,
-    pub visual_failed: bool,
-    pub infrared_failed: bool,
-    pub rwr_failed: bool,
-    pub ecm_failed: bool,
-    pub chaff: u8,
-    pub flares: u8,
     pub target_jammer: bool,
+    /// Combat's one random stream: damage spread, decoy and fault rolls,
+    /// jammer deception, whichever aircraft they concern.
     rng: u32,
-    pending_damage: bool,
-    /// Hit points owed to belly scrape wear that have not yet added up to one.
-    scrape_carry: f64,
-    previous_player_position: Option<Vector>,
     pub history: Vec<HitRecord>,
     strikes: Vec<Strike>,
     pub range_category: u16,
     next_target_id: u32,
-    external: bool,
+    /// The number of the next round an ownship fires; one counter for all of
+    /// them, so their projectile numbers never meet.
+    next_shot: u32,
     tick: u64,
     service_remainder: u16,
-    triggers: Vec<PlayerTrigger>,
-    gun_cadence: Vec<GunCadence>,
-    /// A trigger press waiting for the weapon bay to open: the station and
-    /// the tick it was pressed.
-    bay_release: Option<(usize, u64)>,
-    /// The bay stays open until this tick after a bay release.
-    bay_hold_until: u64,
-    /// Player session cheats, including the Damage setting.
+    /// Mission settings from the host, including the Damage setting.
     pub cheats: crate::cheats::Cheats,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -964,39 +991,84 @@ pub struct Launcher {
     /// reproduces channel, scope range and history changes.
     pub controls: sensors::Controls,
 }
-impl State {
-    pub fn player_damage_section(&self) -> Option<DamageSection> {
-        self.player_localized_damage.structural_section
+/// What one ownship is given for a combat tick: whether its trigger is held
+/// and its aircraft's launcher.
+#[derive(Clone, Copy)]
+pub struct OwnshipInput {
+    pub aircraft: u32,
+    pub held: bool,
+    pub launcher: Launcher,
+}
+/// One ownship for a step: where it is in the ownship list, its launcher, where
+/// the launcher was last step, and its hit-test target.
+struct OwnRow {
+    index: usize,
+    launcher: Launcher,
+    previous: Vector,
+    target: Target,
+}
+/// What a projectile's first contact was.
+#[derive(Clone, Copy)]
+enum Hit {
+    /// An ownship, by its place in the step's rows.
+    Ownship(usize),
+    /// A target row.
+    Target(usize),
+}
+/// The configuration whose stations a projectile without its own weapon record
+/// indexes: its owner's. A round nobody owns uses the first ownship's.
+fn owner_configuration(ships: &[Ownship], owner: u32) -> &Configuration {
+    &owner_ownship(ships, owner)
+        .expect("a projectile without a weapon needs an ownship")
+        .config
+}
+/// The weapon record of a projectile: its own, or a station of its owner's.
+fn projectile_weapon<'a>(ships: &'a [Ownship], p: &'a Projectile) -> &'a Weapon {
+    p.weapon
+        .as_ref()
+        .unwrap_or_else(|| &owner_configuration(ships, p.owner).stations[p.station].weapon)
+}
+fn owner_ownship(ships: &[Ownship], owner: u32) -> Option<&Ownship> {
+    ships
+        .iter()
+        .find(|own| own.aircraft == owner)
+        .or(ships.first())
+}
+fn view<'a>(state: &'a State, own: &'a Ownship) -> OwnshipView<'a> {
+    OwnshipView { state, own }
+}
+/// An ownship as a hit-test target, from its launcher.
+fn ownship_target(own: &Ownship, launcher: Launcher) -> Target {
+    Target {
+        aircraft: Some(own.config.aircraft),
+        role: TargetRole::Aircraft,
+        heat: Heat::Unknown,
+        radar_emitting: launcher.radar,
+        id: own.aircraft,
+        position: launcher.position,
+        velocity: launcher.velocity,
+        basis: launcher.basis,
+        configuration: sensors::Configuration::CLEAN,
+        signature: own.config.sensors.signature,
+        jammer: None,
+        jammer_active: false,
+        airborne: launcher.alive,
+        on_ground: false,
+        radius: AIRCRAFT_RADIUS_FT,
+        hp: if launcher.alive { own.hp } else { 0 },
+        initial_hp: own.config.damage_capacity,
+        fragment_offsets: own.config.fragment_offsets,
+        wreck: None,
+        wreck_power: crate::wreck::Power::default(),
+        fragment_released: own.fragment_released,
+        localized_damage: own.localized_damage.clone(),
+        faults: Default::default(),
+        category: own.config.target_category,
     }
-    pub fn player_damage_regions(&self) -> [f64; DAMAGE_SECTIONS] {
-        self.player_localized_damage
-            .fractions(self.config.damage_capacity)
-    }
-    /// The player's regional damage as whole amounts, in section order: the
-    /// exact values [`State::player_damage_regions`] divides. Read-only, for
-    /// mission recordings.
-    pub fn player_damage_amounts(&self) -> [i32; DAMAGE_SECTIONS] {
-        self.player_localized_damage.amounts
-    }
-    /// Development-only visual fixture. Gameplay damage always arrives through impacts.
-    pub fn preview_localized_damage(&mut self, section: DamageSection, fraction: f64) {
-        let fraction = fraction.clamp(0., 1.);
-        let amount = (f64::from(self.config.damage_capacity) * fraction).round() as i32;
-        self.player_localized_damage = LocalizedDamage::default();
-        self.player_localized_damage
-            .record(section, amount, self.config.damage_capacity);
-        for target in &mut self.targets {
-            let amount = (f64::from(target.initial_hp) * fraction).round() as i32;
-            target.localized_damage = LocalizedDamage::default();
-            target
-                .localized_damage
-                .record(section, amount, target.initial_hp);
-        }
-    }
-    pub fn configuration(&self) -> &Configuration {
-        &self.config
-    }
-    pub fn new(config: Configuration, external: bool) -> Result<Self> {
+}
+impl Ownship {
+    /// The combat state of `aircraft`, fresh from its stores and hit points.
+    pub fn new(aircraft: u32, config: Configuration, external: bool) -> Result<Self> {
         config.validate()?;
         let ammo: Vec<u16> = config
             .stations
@@ -1006,9 +1078,9 @@ impl State {
         let ever_loaded = ammo.iter().map(|a| a & 0x7fff != 0).collect();
         let triggers = vec![PlayerTrigger::default(); config.stations.len()];
         let gun_cadence = vec![GunCadence::default(); config.stations.len()];
-        let range_category = config.target_category;
         let sensors = Sensors::new(config.sensors.clone());
         Ok(Self {
+            aircraft,
             release_readiness: Readiness::Safe,
             launch_mode: LaunchMode::Cued,
             mounted: Seeker::default(),
@@ -1017,11 +1089,10 @@ impl State {
             hud_selection: None,
             sight_hold: None,
             friendlies: Default::default(),
-            weapon_rules: Rules::Spec,
             chaff: config.ecm.chaff[0],
             flares: config.ecm.flare[0],
-            player_hp: config.damage_capacity,
-            player_damage: 0,
+            hp: config.damage_capacity,
+            damage: 0,
             subsystem_counts: [0; 45],
             last_subsystem: None,
             radar_failed: false,
@@ -1029,55 +1100,45 @@ impl State {
             infrared_failed: false,
             rwr_failed: false,
             ecm_failed: false,
-            target_jammer: false,
-            rng: 0x46414a54,
             pending_damage: false,
             scrape_carry: 0.,
-            previous_player_position: None,
+            previous_position: None,
             external,
             range_estimate: None,
             armed: true,
-            history: vec![],
-            strikes: vec![],
-            range_category,
-            next_target_id: 1,
             config,
             ammo,
             ever_loaded,
             selected: 0,
             sensors,
             emitters: vec![],
-            projectiles: vec![],
-            targets: vec![],
-            actor_support: BTreeMap::new(),
-            missile_threats: super::threats::ThreatService::new(PLAYER_OWNER),
-            ground_bounds: BTreeMap::new(),
-            effects: vec![],
-            marks: vec![],
-            crashed: Default::default(),
-            marks_made: 0,
-            blast_rolls: Default::default(),
-            sound_events: vec![],
-            smoke: super::smoke::Smoke::default(),
-            devices: Default::default(),
-            device_log: Default::default(),
-            decoy_log: Default::default(),
-            debris: Vec::new(),
-            player_fragment_released: false,
-            player_explosion_reported: false,
-            player_localized_damage: LocalizedDamage::default(),
+            missile_threats: super::threats::ThreatService::new(aircraft),
+            fragment_released: false,
+            explosion_reported: false,
+            localized_damage: LocalizedDamage::default(),
             shots: 0,
             hits: 0,
             kills: 0,
-            ledger: Default::default(),
-            tick: 0,
-            service_remainder: 0,
             triggers,
             gun_cadence,
             bay_release: None,
             bay_hold_until: 0,
-            cheats: Default::default(),
         })
+    }
+    pub fn configuration(&self) -> &Configuration {
+        &self.config
+    }
+    pub fn damage_section(&self) -> Option<DamageSection> {
+        self.localized_damage.structural_section
+    }
+    pub fn damage_regions(&self) -> [f64; DAMAGE_SECTIONS] {
+        self.localized_damage.fractions(self.config.damage_capacity)
+    }
+    /// The regional damage as whole amounts, in section order: the exact
+    /// values [`Ownship::damage_regions`] divides. Read-only, for mission
+    /// recordings.
+    pub fn damage_amounts(&self) -> [i32; DAMAGE_SECTIONS] {
+        self.localized_damage.amounts
     }
     /// Whether the selected weapon sits behind bay doors that are not open yet.
     fn bay_waits(&self, launcher: Launcher) -> bool {
@@ -1085,8 +1146,8 @@ impl State {
     }
     /// The automatic bay request: a trigger press waiting on the doors, or the
     /// brief hold open after a bay release so the weapon clears them.
-    pub fn bay_demand(&self) -> bool {
-        self.bay_release.is_some() || self.tick < self.bay_hold_until
+    pub fn bay_demand(&self, tick: u64) -> bool {
+        self.bay_release.is_some() || tick < self.bay_hold_until
     }
     pub fn release(&mut self) {
         self.bay_release = None;
@@ -1097,98 +1158,39 @@ impl State {
             cadence.pending = 0;
         }
     }
-
-    /// Replace all non-player fire-control snapshots for the next missile step.
-    /// Player support remains sourced from this State's own sensor component.
-    pub fn set_actor_supports(&mut self, supports: impl IntoIterator<Item = ActorSupport>) {
-        self.actor_support.clear();
-        self.actor_support
-            .extend(supports.into_iter().map(|support| (support.owner, support)));
+    pub fn rounds(&self, station: usize) -> u16 {
+        self.ammo[station] & 0x7fff
     }
-
-    pub fn tick(&self) -> u64 {
-        self.tick
+    pub fn designated(&self) -> Option<u32> {
+        self.sensors.selected()
     }
-
-    /// Current permitted missile measurements for RWR and AI awareness. This
-    /// exposes seeker state and actor-owned support, never hidden target poses.
-    pub fn missile_snapshots(&self, player: Launcher) -> Vec<super::threats::MissileSnapshot> {
-        self.projectiles
+    pub fn external_fuel_lbs(&self) -> [f64; 9] {
+        if self.external {
+            self.config.external_fuel_lbs
+        } else {
+            [0.; 9]
+        }
+    }
+    pub fn payload_lbs(&self) -> f64 {
+        f64::from(if self.external {
+            self.config.external_equipment_lbs
+        } else {
+            0
+        }) + self
+            .config
+            .stations
             .iter()
-            .filter_map(|projectile| {
-                let weapon = projectile.weapon(&self.config);
-                let flight = projectile.guidance.as_ref();
-                let profile = flight
-                    .map(|flight| flight.profile)
-                    .or_else(|| missiles::Profile::for_weapon(weapon))?;
-                let target = flight
-                    .and_then(|flight| flight.seeker.target)
-                    .or(projectile.target);
-                let support = if projectile.owner == PLAYER_OWNER {
-                    target.map(|id| ActorSupport {
-                        owner: PLAYER_OWNER,
-                        observation: self.sensors.observation(id).map(|contact| {
-                            let delta = sub(contact.position, projectile.position);
-                            seeker::Observation {
-                                id,
-                                position: contact.position,
-                                velocity: contact.velocity,
-                                quality: 1.,
-                                off_axis: dot(unit(delta), projectile.direction)
-                                    .clamp(-1., 1.)
-                                    .acos(),
-                                range: missiles::length(delta),
-                            }
-                        }),
-                        supported: self.sensors.supports(id),
-                        radar_position: player.position,
-                        radar_emitting: player.radar && player.alive,
-                    })
-                } else {
-                    self.actor_support.get(&projectile.owner).copied()
-                };
-                let supported = profile.guidance == Guidance::Supported
-                    && support.is_some_and(|answer| {
-                        answer.supported
-                            && answer.radar_emitting
-                            && answer.observation.is_some_and(|o| Some(o.id) == target)
-                    });
-                let velocity = projectile.motion.map_or_else(
-                    || {
-                        projectile
-                            .direction
-                            .map(|axis| axis * f64::from(projectile.speed_f8) / 256.)
-                    },
-                    |motion| motion.velocity,
-                );
-                Some(super::threats::MissileSnapshot {
-                    id: projectile.id,
-                    owner: projectile.owner,
-                    position: projectile.position,
-                    velocity,
-                    guidance: profile.guidance,
-                    target,
-                    radar_active: flight.is_some_and(|flight| {
-                        profile.guidance == Guidance::Active
-                            && flight.enabled
-                            && flight.seeker.status != Status::Expired
-                    }),
-                    radar_acquired: flight.is_some_and(|flight| {
-                        flight.seeker.status == Status::Pitbull
-                            && flight.seeker.observation.is_some()
-                    }),
-                    supported,
-                    supporting_radar_position: supported
-                        .then(|| support.map(|answer| answer.radar_position))
-                        .flatten(),
-                    alive: true,
-                })
-            })
-            .collect()
+            .zip(&self.ammo)
+            .filter(|(s, _)| !s.internal)
+            .map(|(s, count)| f64::from(s.weapon.weight.max(0)) * f64::from(*count & 0x7fff))
+            .sum::<f64>()
     }
-    /// Player selection ring: NAV, then each configured weapon station.
-    /// Legacy range commands retain their old station-only behavior for tapes.
-    pub fn cycle_selection(&mut self, forward: bool) {
+}
+impl Ownship {
+    /// Selection ring: NAV, then each configured weapon station that carries
+    /// something (an empty station is not on the aircraft) and that Guns only
+    /// allows.
+    fn cycle_selection(&mut self, forward: bool, guns_only: bool, unlimited_ammo: bool) {
         let count = self.ammo.len();
         let current = if self.armed { self.selected + 1 } else { 0 };
         let mut next = current;
@@ -1201,7 +1203,8 @@ impl State {
             };
             if next == 0
                 || next == current
-                || (self.station_allowed(next - 1) && self.carries(next - 1))
+                || (self.station_allowed(next - 1, guns_only)
+                    && self.carries(next - 1, unlimited_ammo))
             {
                 break;
             }
@@ -1241,30 +1244,30 @@ impl State {
     /// When the selected station has run dry, move to the next station that
     /// carries something (gun then missiles in ring order), or to NAV when
     /// nothing is left. Does nothing while the selection still carries.
-    pub fn advance_from_empty(&mut self) {
-        if !self.armed || self.carries(self.selected) {
+    pub fn advance_from_empty(&mut self, guns_only: bool, unlimited_ammo: bool) {
+        if !self.armed || self.carries(self.selected, unlimited_ammo) {
             return;
         }
         let count = self.ammo.len();
         let next = (1..count)
             .map(|step| (self.selected + step) % count)
-            .find(|i| self.station_allowed(*i) && self.carries(*i));
+            .find(|i| self.station_allowed(*i, guns_only) && self.carries(*i, unlimited_ammo));
         self.set_selection(next.map_or(0, |i| i + 1));
     }
     /// Whether the guns only cheat lets this station be selected.
-    pub fn station_allowed(&self, station: usize) -> bool {
-        !self.cheats.guns_only || is_gun(&self.config.stations[station].weapon)
+    pub fn station_allowed(&self, station: usize, guns_only: bool) -> bool {
+        !guns_only || is_gun(&self.config.stations[station].weapon)
     }
     /// A station the selection ring may stop on: one that carries something
     /// (an empty station is not on the aircraft), or any station under
     /// unlimited ammunition.
-    pub fn carries(&self, station: usize) -> bool {
-        self.cheats.unlimited_ammo || self.ammo[station] & 0x7fff != 0
+    pub fn carries(&self, station: usize, unlimited_ammo: bool) -> bool {
+        unlimited_ammo || self.ammo[station] & 0x7fff != 0
     }
     /// Guns only turned on with a missile selected moves to the gun, or to
     /// NAV when the aircraft has none.
-    fn enforce_guns_only(&mut self) {
-        if !self.armed || self.station_allowed(self.selected) {
+    fn enforce_guns_only(&mut self, guns_only: bool) {
+        if !self.armed || self.station_allowed(self.selected, guns_only) {
             return;
         }
         self.release();
@@ -1272,7 +1275,7 @@ impl State {
         self.mounted = Seeker::default();
         self.mounted_key = None;
         self.launch_mode = LaunchMode::Cued;
-        match (0..self.ammo.len()).find(|i| self.station_allowed(*i)) {
+        match (0..self.ammo.len()).find(|i| self.station_allowed(*i, guns_only)) {
             Some(gun) => self.selected = gun,
             None => self.armed = false,
         }
@@ -1289,15 +1292,12 @@ impl State {
             self.launch_mode = LaunchMode::Cued;
         }
     }
-    /// T (forward) and Shift-T cycle radar contacts; friendly aircraft and
-    /// wrecks are skipped.
-    pub fn designate_next(&mut self, forward: bool) {
+    fn designate_next(&mut self, forward: bool) {
         let friendlies = &self.friendlies;
         self.sensors.cycle(forward, |id| friendlies.contains(&id));
         self.selection_changed();
     }
-    /// Enter selects the visible sensor contact nearest the nose.
-    pub fn designate_visual(&mut self, launcher: Launcher) {
+    fn designate_visual(&mut self, launcher: Launcher) {
         let friendlies = &self.friendlies;
         self.sensors
             .select_visual(launcher.position, launcher.basis, |id| {
@@ -1311,41 +1311,702 @@ impl State {
             self.launch_mode = LaunchMode::Cued;
         }
     }
+}
+/// One ownship read against the shared state: what its cockpit shows and
+/// plays. A view only reads; commands and steps go through [`State`].
+#[derive(Clone, Copy)]
+pub struct OwnshipView<'a> {
+    state: &'a State,
+    own: &'a Ownship,
+}
+impl<'a> OwnshipView<'a> {
+    pub fn ownship(&self) -> &'a Ownship {
+        self.own
+    }
     pub fn designated(&self) -> Option<u32> {
-        self.sensors.selected()
+        self.own.designated()
+    }
+    pub fn guidance_available(&self, launcher: Launcher) -> bool {
+        self.own.guidance_available(launcher)
     }
     /// The target the HUD square and target camera follow: the selection, or
     /// with Easy targeting the last selection after the sensors lose it.
-    pub fn display_target(&self) -> Option<&Target> {
-        let id = if self.cheats.easy_targeting {
-            self.designated().or(self.hud_selection)
+    pub fn display_target(&self) -> Option<&'a Target> {
+        let id = if self.state.cheats.easy_targeting {
+            self.own.designated().or(self.own.hud_selection)
         } else {
-            self.designated()
+            self.own.designated()
         }?;
-        self.targets
+        self.state
+            .targets
             .iter()
             .find(|target| target.id == id && target.hp > 0)
     }
     /// The target the flight views follow: the display target, or without
     /// Easy targeting a dropped selection the pilot can still see.
-    pub fn view_target(&self) -> Option<&Target> {
+    pub fn view_target(&self) -> Option<&'a Target> {
         self.display_target().or_else(|| {
-            let id = self.sight_hold?;
-            self.targets
+            let id = self.own.sight_hold?;
+            self.state
+                .targets
                 .iter()
                 .find(|target| target.id == id && target.hp > 0)
         })
     }
-    pub fn command(&mut self, command: Command, launcher: Launcher) {
+    pub fn readiness(&self, launcher: Launcher) -> Readiness {
+        if !launcher.alive || self.own.hp <= 0 {
+            return Readiness::LauncherLost;
+        }
+        if !self.own.armed {
+            return Readiness::Safe;
+        }
+        if self.own.ammo[self.own.selected] & 0x8000 != 0 {
+            return Readiness::StationFailed;
+        }
+        if self.own.rounds(self.own.selected) == 0 {
+            return Readiness::Empty;
+        }
+        if self.state.projectiles.len() >= MAX_PROJECTILES {
+            return Readiness::Capacity;
+        }
+        let solution = self.launch_solution(launcher);
+        // A closed bay only delays a shot: the trigger opens it, so the
+        // closed bay shows while a release waits on the doors.
+        if solution == Readiness::Ready
+            && self.own.bay_waits(launcher)
+            && self.own.bay_release.is_some()
+        {
+            return Readiness::BayClosed;
+        }
+        solution
+    }
+    fn launch_solution(&self, launcher: Launcher) -> Readiness {
+        let w = &self.own.config.stations[self.own.selected].weapon;
+        if w.seeker.signature == 0 {
+            return Readiness::Ready;
+        }
+        let profile = (self.state.weapon_rules == Rules::Spec)
+            .then(|| missiles::Profile::for_weapon(w))
+            .flatten();
+        if profile.is_some_and(|p| !p.guidance_available(launcher.radar_power)) {
+            return Readiness::Ready;
+        }
+        if profile.is_some_and(|p| p.supports_boresight())
+            && self.own.launch_mode == LaunchMode::Boresight
+        {
+            if self.own.bore_observation.is_some_and(|o| {
+                missiles::length(sub(o.position, launcher.position))
+                    < f64::from(w.seeker.zones[1].minimum_range.max(0))
+            }) {
+                return Readiness::MinimumRange;
+            }
+            return Readiness::Ready;
+        }
+        let Some(t) = self
+            .designated()
+            .and_then(|id| self.state.targets.iter().find(|t| t.id == id))
+        else {
+            return Readiness::NoTarget;
+        };
+        if profile.is_some_and(|p| !p.accepts(t)) {
+            return Readiness::WrongTarget;
+        }
+        if t.hp <= 0 {
+            return Readiness::TargetDestroyed;
+        }
+        if w.seeker.signature == 3 {
+            // Equipment state answers immediately, before the shared support
+            // result, so a failure reported between steps is not stale.
+            if self.own.radar_failed {
+                return Readiness::RadarFailed;
+            }
+            if !launcher.radar {
+                return Readiness::RadarOff;
+            }
+            // One shared support answer for this specific target. The weapon
+            // keeps its own envelope test below.
+            match self.own.sensors.support(t.id) {
+                Support::Tracked => {}
+                Support::RadarFailed => return Readiness::RadarFailed,
+                Support::RadarOff => return Readiness::RadarOff,
+                Support::Unavailable => return Readiness::NoRadar,
+                Support::SearchOnly => return Readiness::RadarSearchOnly,
+                Support::Acquiring => return Readiness::RadarAcquiring,
+                Support::TrackCoverage => return Readiness::RadarCoverage,
+                Support::NotSelected | Support::NoObservation => return Readiness::NoTarget,
+            }
+        }
+        if let Some(profile) = profile {
+            if !missiles::geometry(
+                &missiles::launch_geometry(w),
+                launcher.position,
+                launcher.basis,
+                t.position,
+                None,
+            ) {
+                let old = zone_readiness(
+                    &missiles::launch_geometry(w),
+                    launcher.position,
+                    launcher.basis.forward,
+                    t.position,
+                );
+                return if old == Readiness::Ready {
+                    Readiness::FieldOfView
+                } else {
+                    old
+                };
+            }
+            if matches!(profile.guidance, Guidance::Infrared | Guidance::Emitter)
+                && (self.own.mounted.target != Some(t.id)
+                    || self.own.mounted.status != Status::Locked)
+            {
+                return Readiness::RadarAcquiring;
+            }
+            if self.mounted_solution(launcher).is_none() {
+                return Readiness::MaximumRange;
+            }
+            return Readiness::Ready;
+        }
+        zone_readiness(
+            &w.seeker.zones[1],
+            launcher.position,
+            launcher.basis.forward,
+            t.position,
+        )
+    }
+    /// Any current observation of this object, on the selected scope channel
+    /// or visually. Channels are never collapsed into one another.
+    pub fn detects(&self, target: &Target) -> bool {
+        self.own.sensors.observation(target.id).is_some()
+    }
+    pub fn can_lock(&self, launcher: Launcher) -> bool {
+        if self.state.weapon_rules == Rules::Spec && !self.own.guidance_available(launcher) {
+            return false;
+        }
+        if self.state.weapon_rules == Rules::Spec
+            && missiles::Profile::for_weapon(&self.own.config.stations[self.own.selected].weapon)
+                .is_some_and(|p| p.independent())
+        {
+            return self.own.mounted.target == self.own.designated()
+                && self.own.mounted.target.is_some()
+                && matches!(self.own.mounted.status, Status::Locked | Status::Pitbull);
+        }
+        self.own.config.stations[self.own.selected]
+            .weapon
+            .seeker
+            .signature
+            != 0
+            && self.launch_solution(launcher) == Readiness::Ready
+    }
+
+    /// The seeker tone plays only while the seeker is actively tracking:
+    /// silence with nothing in it (John, 2026-09-23).
+    pub fn seeker_tone(&self, launcher: Launcher) -> Option<SeekerTone> {
+        let w = &self.own.config.stations[self.own.selected].weapon;
+        let profile = missiles::Profile::for_weapon(w)?;
+        if self.state.weapon_rules != Rules::Spec
+            || !self.own.guidance_available(launcher)
+            || !self.own.armed
+            || !launcher.alive
+            || self.own.hp <= 0
+            || self.own.rounds(self.own.selected) == 0
+            || self.own.ammo[self.own.selected] & 0x8000 != 0
+            || profile.guidance == Guidance::Emitter
+        {
+            return None;
+        }
+        let radar = matches!(profile.guidance, Guidance::Active | Guidance::Supported);
+        // A radar missile goes quiet with its target inside minimum range.
+        let minimum = f64::from(w.seeker.zones[1].minimum_range.max(0));
+        let too_close = |o: seeker::Observation| {
+            radar && missiles::length(sub(o.position, launcher.position)) < minimum
+        };
+        // A radar missile in boresight sounds its lock tone on the bore return,
+        // with or without a designated target (John, 2026-09-23).
+        if radar && self.own.launch_mode == LaunchMode::Boresight {
+            let o = self.own.bore_observation.filter(|o| !too_close(*o))?;
+            return Some(SeekerTone {
+                strength: 0.4 + 0.6 * o.quality.clamp(0., 1.),
+                ground: false,
+                radar,
+                locked: true,
+            });
+        }
+        let bore_ir = if self.own.launch_mode == LaunchMode::Boresight {
+            // Use the HUD's eligible return, never a stale or hidden target.
+            let observed = self.weapon_observation(launcher)?;
+            let tracked = self.own.mounted.observation?;
+            if tracked.id != observed.id {
+                return None;
+            }
+            Some(observed)
+        } else {
+            None
+        };
+        // Otherwise sound only while the mounted seeker is tracking.
+        if self.own.mounted.observation.is_none_or(too_close) {
+            return None;
+        }
+        let locked = matches!(self.own.mounted.status, Status::Locked | Status::Pitbull)
+            && bore_ir.is_none_or(|o| self.own.mounted.target == Some(o.id));
+        Some(SeekerTone {
+            strength: if radar {
+                self.own.mounted.tone()
+            } else {
+                SeekerTone::ir_strength(self.estimated_hit_percent(launcher), locked)
+            },
+            ground: !radar && w.flags & 0x10000 == 0,
+            radar,
+            locked,
+        })
+    }
+    /// Current observation used by the display, separate from launch authority.
+    pub fn weapon_observation(&self, launcher: Launcher) -> Option<seeker::Observation> {
+        if !self.own.armed
+            || (self.state.weapon_rules == Rules::Spec && !self.own.guidance_available(launcher))
+        {
+            return None;
+        }
+        if self.own.launch_mode == LaunchMode::Boresight {
+            let w = &self.own.config.stations[self.own.selected].weapon;
+            let profile = missiles::Profile::for_weapon(w)?;
+            return self.own.bore_observation.filter(|o| {
+                profile.guidance != Guidance::Infrared
+                    || (missiles::geometry(
+                        &missiles::launch_geometry(w),
+                        launcher.position,
+                        launcher.basis,
+                        o.position,
+                        None,
+                    ) && missiles::intercept(
+                        &w.movement,
+                        Motion::launch(w, launcher.velocity, launcher.position[1]),
+                        launcher.position,
+                        launcher.basis.forward,
+                        o.position,
+                        o.velocity,
+                        0,
+                        profile.guidance_ticks,
+                    )
+                    .is_some())
+            });
+        }
+        self.own.mounted.observation.or_else(|| {
+            let id = self.own.designated()?;
+            let w = &self.own.config.stations[self.own.selected].weapon;
+            if self.state.weapon_rules == Rules::Spec
+                && missiles::Profile::for_weapon(w).is_some_and(|p| {
+                    self.state
+                        .targets
+                        .iter()
+                        .find(|t| t.id == id)
+                        .is_none_or(|t| !p.accepts(t))
+                })
+            {
+                return None;
+            }
+            let contact = self.own.sensors.observation(id)?;
+            let delta = missiles::sub(contact.position, launcher.position);
+            Some(seeker::Observation {
+                id: contact.id,
+                position: contact.position,
+                velocity: contact.velocity,
+                quality: 1.,
+                range: missiles::length(delta),
+                off_axis: dot(unit(delta), launcher.basis.forward)
+                    .clamp(-1., 1.)
+                    .acos(),
+            })
+        })
+    }
+    pub fn mounted_solution(&self, launcher: Launcher) -> Option<missiles::Solution> {
+        let w = &self.own.config.stations[self.own.selected].weapon;
+        let profile = missiles::Profile::for_weapon(w)?;
+        let observed = self.weapon_observation(launcher)?;
+        missiles::intercept(
+            &w.movement,
+            Motion::launch(w, launcher.velocity, launcher.position[1]),
+            launcher.position,
+            launcher.basis.forward,
+            observed.position,
+            observed.velocity,
+            0,
+            profile.guidance_ticks,
+        )
+    }
+    pub fn estimated_max_range(&self, launcher: Launcher) -> Option<f64> {
+        let observed = self.weapon_observation(launcher)?;
+        self.own
+            .range_estimate
+            .filter(|e| {
+                e.station == self.own.selected
+                    && e.target == observed.id
+                    && e.mode == self.own.launch_mode
+            })
+            .map(|e| e.maximum)
+    }
+    pub fn favorable_firing_band(&self, launcher: Launcher) -> Option<missiles::FiringBand> {
+        let observed = self.weapon_observation(launcher)?;
+        self.own
+            .range_estimate
+            .filter(|e| {
+                e.station == self.own.selected
+                    && e.target == observed.id
+                    && e.mode == self.own.launch_mode
+            })
+            .and_then(|e| e.favorable)
+    }
+    /// Physical range validity is independent of rounded probability text.
+    pub fn in_estimated_range(&self, launcher: Launcher) -> bool {
+        let Some(o) = self.weapon_observation(launcher) else {
+            return false;
+        };
+        let min = f64::from(
+            self.own.config.stations[self.own.selected]
+                .weapon
+                .seeker
+                .zones[1]
+                .minimum_range,
+        );
+        self.readiness(launcher) == Readiness::Ready
+            && self
+                .estimated_max_range(launcher)
+                .is_some_and(|max| max > min && (min..=max).contains(&o.range))
+            && self.mounted_solution(launcher).is_some()
+    }
+    pub fn estimated_hit_percent(&self, launcher: Launcher) -> u8 {
+        let Some(observation) = self.weapon_observation(launcher) else {
+            return 0;
+        };
+        let w = &self.own.config.stations[self.own.selected].weapon;
+        let Some(profile) = missiles::Profile::for_weapon(w) else {
+            return 0;
+        };
+        let mut zone = w.seeker.zones[1];
+        zone.maximum_range = self.estimated_max_range(launcher).unwrap_or(0.).floor() as _;
+        missiles::estimated_hit_percent(
+            observation,
+            self.mounted_solution(launcher),
+            &zone,
+            profile
+                .guidance_ticks
+                .min(u64::from(w.movement.remove_t) * 30) as f64
+                / 120.,
+            (self.own.launch_mode == LaunchMode::Boresight).then(|| profile.search_cap()),
+        )
+    }
+}
+impl Ownship {
+    pub fn guidance_available(&self, launcher: Launcher) -> bool {
+        missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
+            .is_none_or(|p| p.guidance_available(launcher.radar_power))
+    }
+}
+impl State {
+    /// A state with no ownship: an AI-only scene, or a host that adds its
+    /// human-flown aircraft with [`State::add_ownship`].
+    pub fn without_ownships() -> Self {
+        Self {
+            weapon_rules: Rules::Spec,
+            ownships: Vec::new(),
+            rng: 0x46414a54,
+            target_jammer: false,
+            history: vec![],
+            strikes: vec![],
+            range_category: 0,
+            next_target_id: 1,
+            next_shot: 0,
+            projectiles: vec![],
+            targets: vec![],
+            actor_support: BTreeMap::new(),
+            ground_bounds: BTreeMap::new(),
+            effects: vec![],
+            marks: vec![],
+            crashed: Default::default(),
+            marks_made: 0,
+            blast_rolls: Default::default(),
+            sound_events: vec![],
+            smoke: super::smoke::Smoke::default(),
+            devices: Default::default(),
+            device_log: Default::default(),
+            decoy_log: Default::default(),
+            debris: Vec::new(),
+            ledger: Default::default(),
+            tick: 0,
+            service_remainder: 0,
+            cheats: Default::default(),
+        }
+    }
+    /// A state with one ownship, on aircraft 0: single player's arrangement,
+    /// and the one most tests use.
+    pub fn new(config: Configuration, external: bool) -> Result<Self> {
+        Self::for_ownship(0, config, external)
+    }
+    /// A state with one ownship, on `aircraft`.
+    pub fn for_ownship(aircraft: u32, config: Configuration, external: bool) -> Result<Self> {
+        let mut state = Self::without_ownships();
+        state.range_category = config.target_category;
+        state.add_ownship(Ownship::new(aircraft, config, external)?)?;
+        Ok(state)
+    }
+    /// Adds a human-flown aircraft, keeping the ownships in aircraft id
+    /// order. An aircraft that already has an ownship is refused.
+    pub fn add_ownship(&mut self, ownship: Ownship) -> Result<()> {
+        match self
+            .ownships
+            .binary_search_by_key(&ownship.aircraft, |o| o.aircraft)
+        {
+            Ok(_) => Err(super::invalid("aircraft already has an ownship")),
+            Err(index) => {
+                self.ownships.insert(index, ownship);
+                Ok(())
+            }
+        }
+    }
+    /// Takes an aircraft's ownship out, with its stores, damage and
+    /// countermeasures, when its human gives it back.
+    pub fn remove_ownship(&mut self, aircraft: u32) -> Option<Ownship> {
+        let index = self
+            .ownships
+            .binary_search_by_key(&aircraft, |o| o.aircraft)
+            .ok()?;
+        Some(self.ownships.remove(index))
+    }
+    /// The human-flown aircraft, in aircraft id order.
+    pub fn ownships(&self) -> &[Ownship] {
+        &self.ownships
+    }
+    pub fn ownship(&self, aircraft: u32) -> Option<&Ownship> {
+        self.ownships
+            .binary_search_by_key(&aircraft, |o| o.aircraft)
+            .ok()
+            .map(|index| &self.ownships[index])
+    }
+    pub fn ownship_mut(&mut self, aircraft: u32) -> Option<&mut Ownship> {
+        self.ownships
+            .binary_search_by_key(&aircraft, |o| o.aircraft)
+            .ok()
+            .map(|index| &mut self.ownships[index])
+    }
+    /// The ownship with the lowest aircraft id, for hosts and tests that
+    /// serve one human-flown aircraft. Panics when there is none; a host with
+    /// several asks for each by its aircraft id.
+    pub fn own(&self) -> &Ownship {
+        self.ownships.first().expect("an ownship")
+    }
+    pub fn own_mut(&mut self) -> &mut Ownship {
+        self.ownships.first_mut().expect("an ownship")
+    }
+    /// The view of [`State::own`].
+    pub fn own_view(&self) -> OwnshipView<'_> {
+        view(self, self.own())
+    }
+    /// Damage to the first ownship, through the whole hit pipeline.
+    #[cfg(test)]
+    fn damage_own(&mut self, amount: i32, events: &mut Vec<Event>) {
+        let aircraft = self.own().aircraft;
+        self.with_ownship(aircraft, |state, own| {
+            state.damage_ownship(own, amount, events)
+        });
+    }
+    /// The view of one ownship that answers what its cockpit shows.
+    pub fn view(&self, aircraft: u32) -> Option<OwnshipView<'_>> {
+        self.ownship(aircraft)
+            .map(|own| OwnshipView { state: self, own })
+    }
+    /// Runs `work` on the state with one ownship taken out of it, so the
+    /// work can change both. `None` for an aircraft without an ownship.
+    fn with_ownship<R>(
+        &mut self,
+        aircraft: u32,
+        work: impl FnOnce(&mut Self, &mut Ownship) -> R,
+    ) -> Option<R> {
+        let index = self
+            .ownships
+            .binary_search_by_key(&aircraft, |o| o.aircraft)
+            .ok()?;
+        let mut ownship = self.ownships.remove(index);
+        let result = work(self, &mut ownship);
+        self.ownships.insert(index, ownship);
+        Some(result)
+    }
+    /// The weapon a projectile carries: its own record, or a station of its
+    /// owner's ownship. A round nobody owns uses the first ownship's stations.
+    pub fn weapon<'a>(&'a self, projectile: &'a Projectile) -> &'a Weapon {
+        projectile_weapon(&self.ownships, projectile)
+    }
+    /// Development-only visual fixture. Gameplay damage always arrives through impacts.
+    pub fn preview_localized_damage(&mut self, section: DamageSection, fraction: f64) {
+        let fraction = fraction.clamp(0., 1.);
+        for own in &mut self.ownships {
+            let capacity = own.config.damage_capacity;
+            let amount = (f64::from(capacity) * fraction).round() as i32;
+            own.localized_damage = LocalizedDamage::default();
+            own.localized_damage.record(section, amount, capacity);
+        }
+        for target in &mut self.targets {
+            let amount = (f64::from(target.initial_hp) * fraction).round() as i32;
+            target.localized_damage = LocalizedDamage::default();
+            target
+                .localized_damage
+                .record(section, amount, target.initial_hp);
+        }
+    }
+    /// The bay request of one ownship.
+    pub fn bay_demand(&self, aircraft: u32) -> bool {
+        self.ownship(aircraft)
+            .is_some_and(|own| own.bay_demand(self.tick))
+    }
+    /// One ownship lets go of its trigger and drops its queued rounds.
+    pub fn release(&mut self, aircraft: u32) {
+        if let Some(own) = self.ownship_mut(aircraft) {
+            own.release();
+        }
+    }
+
+    /// Replace all fire-control snapshots of aircraft that are not ownships for
+    /// the next missile step. An ownship's support is sourced from its own
+    /// sensor component.
+    pub fn set_actor_supports(&mut self, supports: impl IntoIterator<Item = ActorSupport>) {
+        self.actor_support.clear();
+        self.actor_support
+            .extend(supports.into_iter().map(|support| (support.owner, support)));
+    }
+
+    pub fn tick(&self) -> u64 {
+        self.tick
+    }
+
+    /// Current permitted missile measurements for RWR and AI awareness. This
+    /// exposes seeker state and actor-owned support, never hidden target poses.
+    /// `launchers` gives each ownship's launcher for this tick.
+    pub fn missile_snapshots(
+        &self,
+        launchers: &[(u32, Launcher)],
+    ) -> Vec<super::threats::MissileSnapshot> {
+        self.snapshots(&self.ownships, launchers)
+    }
+    fn snapshots(
+        &self,
+        ships: &[Ownship],
+        launchers: &[(u32, Launcher)],
+    ) -> Vec<super::threats::MissileSnapshot> {
+        self.projectiles
+            .iter()
+            .filter_map(|projectile| {
+                let weapon = projectile_weapon(ships, projectile);
+                let flight = projectile.guidance.as_ref();
+                let profile = flight
+                    .map(|flight| flight.profile)
+                    .or_else(|| missiles::Profile::for_weapon(weapon))?;
+                let target = flight
+                    .and_then(|flight| flight.seeker.target)
+                    .or(projectile.target);
+                let support =
+                    if let Some(own) = ships.iter().find(|o| o.aircraft == projectile.owner) {
+                        let launcher = launchers
+                            .iter()
+                            .find(|(aircraft, _)| *aircraft == own.aircraft)
+                            .map(|(_, launcher)| launcher);
+                        target.zip(launcher).map(|(id, launcher)| ActorSupport {
+                            owner: own.aircraft,
+                            observation: own.sensors.observation(id).map(|contact| {
+                                let delta = sub(contact.position, projectile.position);
+                                seeker::Observation {
+                                    id,
+                                    position: contact.position,
+                                    velocity: contact.velocity,
+                                    quality: 1.,
+                                    off_axis: dot(unit(delta), projectile.direction)
+                                        .clamp(-1., 1.)
+                                        .acos(),
+                                    range: missiles::length(delta),
+                                }
+                            }),
+                            supported: own.sensors.supports(id),
+                            radar_position: launcher.position,
+                            radar_emitting: launcher.radar && launcher.alive,
+                        })
+                    } else {
+                        self.actor_support.get(&projectile.owner).copied()
+                    };
+                let supported = profile.guidance == Guidance::Supported
+                    && support.is_some_and(|answer| {
+                        answer.supported
+                            && answer.radar_emitting
+                            && answer.observation.is_some_and(|o| Some(o.id) == target)
+                    });
+                let velocity = projectile.motion.map_or_else(
+                    || {
+                        projectile
+                            .direction
+                            .map(|axis| axis * f64::from(projectile.speed_f8) / 256.)
+                    },
+                    |motion| motion.velocity,
+                );
+                Some(super::threats::MissileSnapshot {
+                    id: projectile.id,
+                    owner: projectile.owner,
+                    position: projectile.position,
+                    velocity,
+                    guidance: profile.guidance,
+                    target,
+                    radar_active: flight.is_some_and(|flight| {
+                        profile.guidance == Guidance::Active
+                            && flight.enabled
+                            && flight.seeker.status != Status::Expired
+                    }),
+                    radar_acquired: flight.is_some_and(|flight| {
+                        flight.seeker.status == Status::Pitbull
+                            && flight.seeker.observation.is_some()
+                    }),
+                    supported,
+                    supporting_radar_position: supported
+                        .then(|| support.map(|answer| answer.radar_position))
+                        .flatten(),
+                    alive: true,
+                })
+            })
+            .collect()
+    }
+
+    /// One ownship's selection ring: NAV, then each configured weapon station.
+    /// Legacy range commands retain their old station-only behavior for tapes.
+    pub fn cycle_selection(&mut self, aircraft: u32, forward: bool) {
+        let (guns_only, unlimited_ammo) = (self.cheats.guns_only, self.cheats.unlimited_ammo);
+        if let Some(own) = self.ownship_mut(aircraft) {
+            own.cycle_selection(forward, guns_only, unlimited_ammo);
+        }
+    }
+    /// T (forward) and Shift-T cycle radar contacts; friendly aircraft and
+    /// wrecks are skipped.
+    pub fn designate_next(&mut self, aircraft: u32, forward: bool) {
+        if let Some(own) = self.ownship_mut(aircraft) {
+            own.designate_next(forward);
+        }
+    }
+    /// Enter selects the visible sensor contact nearest the nose.
+    pub fn designate_visual(&mut self, aircraft: u32, launcher: Launcher) {
+        if let Some(own) = self.ownship_mut(aircraft) {
+            own.designate_visual(launcher);
+        }
+    }
+    /// A manual range or cockpit command for one ownship.
+    pub fn command(&mut self, aircraft: u32, command: Command, launcher: Launcher) {
+        self.with_ownship(aircraft, |state, own| {
+            state.command_of(own, command, launcher)
+        });
+    }
+    fn command_of(&mut self, own: &mut Ownship, command: Command, launcher: Launcher) {
         match command {
             Command::ClearRange => {
                 self.targets
                     .retain(|t| self.ground_bounds.contains_key(&t.id));
-                self.sensors.clear_selection();
-                self.hud_selection = None;
-                self.sight_hold = None;
-                self.bore_observation = None;
-                self.mounted = Seeker::default();
+                own.sensors.clear_selection();
+                own.hud_selection = None;
+                own.sight_hold = None;
+                own.bore_observation = None;
+                own.mounted = Seeker::default();
             }
             Command::TargetDistance(distance) => {
                 if (1..=1_000_000).contains(&distance) {
@@ -1362,9 +2023,9 @@ impl State {
             }
             Command::CompatibilityWeapons => {
                 self.weapon_rules = Rules::Compatibility;
-                self.launch_mode = LaunchMode::Cued;
-                self.bore_observation = None;
-                self.mounted = Seeker::default();
+                own.launch_mode = LaunchMode::Cued;
+                own.bore_observation = None;
+                own.mounted = Seeker::default();
             }
             Command::TargetHeat(value) => {
                 for t in self
@@ -1407,21 +2068,21 @@ impl State {
                 }
             }
             Command::Incoming => {
-                if self.projectiles.len() < MAX_PROJECTILES && self.player_hp > 0 {
-                    let w = &self.config.stations[self.selected].weapon;
+                if self.projectiles.len() < MAX_PROJECTILES && own.hp > 0 {
+                    let w = &own.config.stations[own.selected].weapon;
                     let position = std::array::from_fn(|i| {
                         launcher.position[i] + launcher.basis.forward[i] * 1800.
                     });
                     self.projectiles.push(Projectile {
-                        id: self.shots,
-                        owner: PLAYER_OWNER,
+                        id: own.shots,
+                        owner: own.aircraft,
                         weapon: None,
                         guidance: None,
                         motion: None,
                         guidance_ticks: None,
                         age: 0,
-                        incoming: true,
-                        station: self.selected,
+                        incoming: Some(own.aircraft),
+                        station: own.selected,
                         position,
                         previous: position,
                         direction: launcher.basis.forward.map(|v| -v),
@@ -1430,7 +2091,7 @@ impl State {
                             * 256,
                         launched_t: (self.tick / 30) as u16,
                         target: if w.seeker.signature != 0 {
-                            Some(0)
+                            Some(own.aircraft)
                         } else {
                             None
                         },
@@ -1440,7 +2101,7 @@ impl State {
                     });
                 }
             }
-            Command::DamagePlayer => self.pending_damage = true,
+            Command::DamagePlayer => own.pending_damage = true,
             Command::ToggleTargetJammer => {
                 self.target_jammer = !self.target_jammer;
                 for t in self
@@ -1451,118 +2112,135 @@ impl State {
                     t.jammer_active = self.target_jammer;
                 }
             }
-            Command::ReleaseChaff => self.release_countermeasure(EffectKind::Chaff, launcher),
-            Command::ReleaseFlare => self.release_countermeasure(EffectKind::Flare, launcher),
+            Command::ReleaseChaff => self.release_countermeasure(own, EffectKind::Chaff, launcher),
+            Command::ReleaseFlare => self.release_countermeasure(own, EffectKind::Flare, launcher),
             Command::ToggleSeekerMode => {
-                if self.weapon_rules == Rules::Compatibility || !self.guidance_available(launcher) {
+                if self.weapon_rules == Rules::Compatibility || !own.guidance_available(launcher) {
                     return;
                 }
-                if missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
+                if missiles::Profile::for_weapon(&own.config.stations[own.selected].weapon)
                     .is_none_or(|p| !p.supports_boresight())
                 {
                     return;
                 }
-                if self.designated().is_some()
-                    && missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
+                if own.designated().is_some()
+                    && missiles::Profile::for_weapon(&own.config.stations[own.selected].weapon)
                         .is_some_and(|p| p.guidance == Guidance::Infrared)
                 {
                     return;
                 }
-                self.launch_mode = if self.launch_mode == LaunchMode::Cued {
+                own.launch_mode = if own.launch_mode == LaunchMode::Cued {
                     LaunchMode::Boresight
                 } else {
                     LaunchMode::Cued
                 };
-                self.bore_observation = None;
-                self.mounted = Seeker::default();
-                self.mounted_key = None;
-                self.release();
+                own.bore_observation = None;
+                own.mounted = Seeker::default();
+                own.mounted_key = None;
+                own.release();
             }
-            Command::NextWeapon => self.select_next(),
-            Command::NextSelection => self.cycle_selection(true),
-            Command::PreviousSelection => self.cycle_selection(false),
-            Command::AdvanceFromEmpty => self.advance_from_empty(),
+            Command::NextWeapon => own.select_next(),
+            Command::NextSelection => {
+                own.cycle_selection(true, self.cheats.guns_only, self.cheats.unlimited_ammo)
+            }
+            Command::PreviousSelection => {
+                own.cycle_selection(false, self.cheats.guns_only, self.cheats.unlimited_ammo)
+            }
+            Command::AdvanceFromEmpty => {
+                own.advance_from_empty(self.cheats.guns_only, self.cheats.unlimited_ammo)
+            }
             Command::SelectNav => {
-                self.release();
-                self.armed = false;
-                self.bore_observation = None;
-                self.mounted = Seeker::default();
-                self.mounted_key = None;
-                self.launch_mode = LaunchMode::Cued;
+                own.release();
+                own.armed = false;
+                own.bore_observation = None;
+                own.mounted = Seeker::default();
+                own.mounted_key = None;
+                own.launch_mode = LaunchMode::Cued;
             }
-            Command::Designate => self.designate_next(true),
-            Command::DesignatePrevious => self.designate_next(false),
-            Command::DesignateVisual => self.designate_visual(launcher),
+            Command::Designate => own.designate_next(true),
+            Command::DesignatePrevious => own.designate_next(false),
+            Command::DesignateVisual => own.designate_visual(launcher),
             Command::DesignateTarget(id) => {
-                if self.sensors.designate(id) {
-                    self.hud_selection = Some(id);
+                if own.sensors.designate(id) {
+                    own.hud_selection = Some(id);
                 }
-                if self.designated().is_some() {
-                    self.launch_mode = LaunchMode::Cued;
+                if own.designated().is_some() {
+                    own.launch_mode = LaunchMode::Cued;
                 }
             }
             Command::ClearDesignation => {
-                self.sensors.clear_selection();
-                self.hud_selection = None;
-                self.sight_hold = None;
-                self.bore_observation = None;
-                self.mounted = Seeker::default();
-                self.mounted_key = None;
-                self.release();
+                own.sensors.clear_selection();
+                own.hud_selection = None;
+                own.sight_hold = None;
+                own.bore_observation = None;
+                own.mounted = Seeker::default();
+                own.mounted_key = None;
+                own.release();
             }
             Command::ToggleArm => {
-                self.armed = !self.armed;
-                self.release();
+                own.armed = !own.armed;
+                own.release();
             }
             Command::Jettison => {
-                if !self.config.stations[self.selected].internal {
-                    unload(&mut self.ammo[self.selected], 0);
-                    self.release();
+                if !own.config.stations[own.selected].internal {
+                    unload(&mut own.ammo[own.selected], 0);
+                    own.release();
                 }
             }
-            Command::ReplaceTarget => self.range_target(launcher),
+            Command::ReplaceTarget => self.range_target_of(own, launcher),
             Command::CycleClass => {
-                self.range_category = [self.config.target_category, 0x2000, 0x100, 0x400, 0x40]
+                self.range_category = [own.config.target_category, 0x2000, 0x100, 0x400, 0x40]
                     [(damage_class(self.range_category) + 1) % 5];
-                self.range_target(launcher);
+                self.range_target_of(own, launcher);
             }
             // Native equipment damage marks the station's high bit. Selecting
             // the failure manually is a test fixture, not a recovered damage roll.
             Command::FailStation => {
-                self.ammo[self.selected] |= 0x8000;
-                self.release();
+                own.ammo[own.selected] |= 0x8000;
+                own.release();
             }
         }
     }
     /// One device per press, as the retail "Chaff launched, %d left" message
-    /// reports. Each missile guiding on the player with the matching seeker
+    /// reports. Each missile guiding on the ownship with the matching seeker
     /// class rolls the B47 decoy chance (docs/spec/countermeasures.md). An
     /// empty or damaged dispenser releases nothing.
-    fn release_countermeasure(&mut self, kind: EffectKind, launcher: Launcher) {
+    fn release_countermeasure(&mut self, own: &mut Ownship, kind: EffectKind, launcher: Launcher) {
         let (count, effectiveness, signature) = match kind {
-            EffectKind::Chaff => (&mut self.chaff, self.config.ecm.chaff[1], 3),
-            _ => (&mut self.flares, self.config.ecm.flare[1], 2),
+            EffectKind::Chaff => (&mut own.chaff, own.config.ecm.chaff[1], 3),
+            _ => (&mut own.flares, own.config.ecm.flare[1], 2),
         };
-        if *count == 0 || !launcher.alive || self.player_hp <= 0 {
+        if *count == 0 || !launcher.alive || own.hp <= 0 {
             return;
         }
         if !self.cheats.unlimited_ammo {
             *count -= 1;
         }
-        self.device_released(
+        let left = *count;
+        self.note_release(
             super::countermeasures::Release {
                 position: launcher.position,
                 velocity: launcher.velocity,
                 basis: launcher.basis,
             },
             kind,
-            PLAYER_OWNER,
+            own.aircraft,
+            Some(left),
         );
         for projectile in &mut self.projectiles {
             // Lazy: an AI missile carries its own weapon and its station
-            // indexes the AI's loadout, which can be longer than the player's.
-            let weapon = projectile.weapon(&self.config);
-            let guiding = projectile.target == Some(0)
+            // indexes the AI's loadout, which can be longer than this
+            // ownship's; another ownship's round uses that ownship's stations.
+            let ships = &self.ownships;
+            let weapon = projectile.weapon.as_ref().unwrap_or_else(|| {
+                let config = if projectile.owner == own.aircraft {
+                    &own.config
+                } else {
+                    owner_configuration(ships, projectile.owner)
+                };
+                &config.stations[projectile.station].weapon
+            });
+            let guiding = projectile.target == Some(own.aircraft)
                 && weapon.seeker.signature == signature
                 && projectile.guidance.as_ref().is_none_or(|flight| {
                     flight.enabled && flight.seeker.acquired && flight.seeker.observation.is_some()
@@ -1597,114 +2275,130 @@ impl State {
             }
         }
     }
-    fn apply_player_damage(&mut self, amount: i32, events: &mut Vec<Event>) {
-        let applied = amount.max(0).min(self.player_hp);
+    fn damage_ownship(&mut self, own: &mut Ownship, amount: i32, events: &mut Vec<Event>) {
+        let applied = amount.max(0).min(own.hp);
         if applied == 0 {
             return;
         }
-        self.player_hp -= applied;
-        self.player_damage = self.player_damage.saturating_add(amount);
+        own.hp -= applied;
+        own.damage = own.damage.saturating_add(amount);
         events.push(Event::PlayerDamaged(applied));
         // Normal damage takes hit points only; system faults are Realistic.
         if self.cheats.system_damage() {
-            self.damage_systems(amount, events);
+            self.damage_systems(own, amount, events);
         }
-        if self.player_hp == 0 {
-            self.release();
+        if own.hp == 0 {
+            own.release();
             events.push(Event::PlayerDestroyed);
         }
     }
     /// Belly scrape wear from sliding on the ground with the gear not down:
-    /// `fraction` of the airframe, carried until it makes a whole hit point.
-    /// Invulnerable spares the player. `opinionated` (requested by John,
-    /// 2026-09-29; docs/spec/gear-on-the-ground.md).
-    pub fn scrape_damage(&mut self, fraction: f64, events: &mut Vec<Event>) {
-        if fraction <= 0. || self.player_hp <= 0 || self.cheats.invulnerable() {
+    /// `fraction` of the ownship's airframe, carried until it makes a whole
+    /// hit point. Invulnerable spares a human-flown aircraft. `opinionated`
+    /// (requested by John, 2026-09-29; docs/spec/gear-on-the-ground.md).
+    pub fn scrape_damage(&mut self, aircraft: u32, fraction: f64, events: &mut Vec<Event>) {
+        if fraction <= 0. || self.cheats.invulnerable() {
             return;
         }
-        self.scrape_carry += fraction * f64::from(self.config.damage_capacity);
-        let whole = self.scrape_carry.floor();
-        if whole >= 1. {
-            self.scrape_carry -= whole;
-            self.apply_player_damage(whole as i32, events);
-        }
+        self.with_ownship(aircraft, |state, own| {
+            if own.hp <= 0 {
+                return;
+            }
+            own.scrape_carry += fraction * f64::from(own.config.damage_capacity);
+            let whole = own.scrape_carry.floor();
+            if whole >= 1. {
+                own.scrape_carry -= whole;
+                state.damage_ownship(own, whole as i32, events);
+            }
+        });
     }
     /// Realistic damage: a hit may fault a subsystem, and accumulated
     /// damage brings on the faults the aircraft's thresholds call for.
-    fn damage_systems(&mut self, amount: i32, events: &mut Vec<Event>) {
+    fn damage_systems(&mut self, own: &mut Ownship, amount: i32, events: &mut Vec<Event>) {
         for index in super::systems::hit_faults(
-            &self.config.system_damage,
-            &self.subsystem_counts,
-            self.player_damage,
-            self.config.damage_capacity,
+            &own.config.system_damage,
+            &own.subsystem_counts,
+            own.damage,
+            own.config.damage_capacity,
             amount,
-            self.config.afterburner_available,
+            own.config.afterburner_available,
             |n| draw(&mut self.rng, n),
         ) {
-            self.subsystem_counts[index] += 1;
-            self.last_subsystem = Some(index);
+            own.subsystem_counts[index] += 1;
+            own.last_subsystem = Some(index);
             events.push(Event::SubsystemDamaged(index));
             let Some(h) = index.checked_sub(36) else {
                 continue;
             };
-            if let Some(Some(slot)) = self.config.hardpoint_slots.get(h) {
-                if self.rounds(*slot) > 0 {
-                    self.ammo[*slot] |= 0x8000;
+            if let Some(Some(slot)) = own.config.hardpoint_slots.get(h) {
+                if own.rounds(*slot) > 0 {
+                    own.ammo[*slot] |= 0x8000;
                 }
-            } else if h == self.config.radar_hardpoint {
-                self.radar_failed = true;
-            } else if h == self.config.visual_hardpoint {
-                self.visual_failed = true;
-            } else if Some(h) == self.config.infrared_hardpoint {
-                self.infrared_failed = true;
-            } else if Some(h) == self.config.rwr_hardpoint {
-                self.rwr_failed = true;
-            } else if h == self.config.ecm_hardpoint {
+            } else if h == own.config.radar_hardpoint {
+                own.radar_failed = true;
+            } else if h == own.config.visual_hardpoint {
+                own.visual_failed = true;
+            } else if Some(h) == own.config.infrared_hardpoint {
+                own.infrared_failed = true;
+            } else if Some(h) == own.config.rwr_hardpoint {
+                own.rwr_failed = true;
+            } else if h == own.config.ecm_hardpoint {
                 use super::systems::EcmLoss;
-                match super::systems::ecm_loss(&self.config.ecm, |n| draw(&mut self.rng, n)) {
+                match super::systems::ecm_loss(&own.config.ecm, |n| draw(&mut self.rng, n)) {
                     Some(EcmLoss::Everything) => {
-                        self.ecm_failed = true;
-                        self.chaff = 0;
-                        self.flares = 0;
+                        own.ecm_failed = true;
+                        own.chaff = 0;
+                        own.flares = 0;
                     }
-                    Some(EcmLoss::Chaff) => self.chaff = 0,
-                    Some(EcmLoss::Flares) => self.flares = 0,
+                    Some(EcmLoss::Chaff) => own.chaff = 0,
+                    Some(EcmLoss::Flares) => own.flares = 0,
                     None => {}
                 }
             }
         }
     }
-    /// Ownship subsystem lifecycle reached a fatal outcome outside a projectile hit.
-    pub fn systems_destroyed(&mut self) -> Option<Event> {
-        if self.player_hp <= 0 {
+    /// An ownship's subsystem lifecycle reached a fatal outcome outside a
+    /// projectile hit.
+    pub fn systems_destroyed(&mut self, aircraft: u32) -> Option<Event> {
+        let own = self.ownship_mut(aircraft)?;
+        if own.hp <= 0 {
             return None;
         }
-        self.player_hp = 0;
-        self.player_damage = self.player_damage.max(self.config.damage_capacity);
-        self.release();
+        own.hp = 0;
+        own.damage = own.damage.max(own.config.damage_capacity);
+        own.release();
         Some(Event::PlayerDestroyed)
     }
-    pub fn player_airburst(&mut self, position: Vector) -> Option<Event> {
-        if !self.player_explosion() {
+    /// An ownship's aircraft blew up in the air.
+    pub fn ownship_airburst(&mut self, aircraft: u32, position: Vector) -> Option<Event> {
+        if !self.ownship_explosion(aircraft) {
             return None;
         }
         self.blast(position, EffectKind::Destroyed, super::blast::AIRCRAFT);
-        Some(Event::Airburst(0))
+        Some(Event::Airburst(aircraft))
     }
-    /// The player's aircraft hit land or, with `water`, the sea.
-    pub fn player_ground_impact(&mut self, position: Vector, water: bool) -> Option<Event> {
-        if !self.player_explosion() {
+    /// An ownship's aircraft hit land or, with `water`, the sea.
+    pub fn ownship_ground_impact(
+        &mut self,
+        aircraft: u32,
+        position: Vector,
+        water: bool,
+    ) -> Option<Event> {
+        if !self.ownship_explosion(aircraft) {
             return None;
         }
-        self.aircraft_crashed(PLAYER_OWNER, position, water);
+        self.aircraft_crashed(aircraft, position, water);
         Some(Event::PlayerGroundImpact)
     }
-    fn player_explosion(&mut self) -> bool {
-        if self.player_explosion_reported {
+    fn ownship_explosion(&mut self, aircraft: u32) -> bool {
+        let Some(own) = self.ownship_mut(aircraft) else {
+            return false;
+        };
+        if own.explosion_reported {
             return false;
         }
-        self.player_explosion_reported = true;
-        self.debris.retain(|piece| piece.owner != 0);
+        own.explosion_reported = true;
+        self.debris.retain(|piece| piece.owner != aircraft);
         true
     }
     /// An aircraft reached the ground: a crash explosion, and on land a
@@ -1761,147 +2455,6 @@ impl State {
         }
         self.mark(position, MarkKind::Crater(size), ticks);
     }
-    pub fn rounds(&self, station: usize) -> u16 {
-        self.ammo[station] & 0x7fff
-    }
-    pub fn readiness(&self, launcher: Launcher) -> Readiness {
-        if !launcher.alive || self.player_hp <= 0 {
-            return Readiness::LauncherLost;
-        }
-        if !self.armed {
-            return Readiness::Safe;
-        }
-        if self.ammo[self.selected] & 0x8000 != 0 {
-            return Readiness::StationFailed;
-        }
-        if self.rounds(self.selected) == 0 {
-            return Readiness::Empty;
-        }
-        if self.projectiles.len() >= MAX_PROJECTILES {
-            return Readiness::Capacity;
-        }
-        let solution = self.launch_solution(launcher);
-        // A closed bay only delays a shot: the trigger opens it, so the
-        // closed bay shows while a release waits on the doors.
-        if solution == Readiness::Ready && self.bay_waits(launcher) && self.bay_release.is_some() {
-            return Readiness::BayClosed;
-        }
-        solution
-    }
-    fn launch_solution(&self, launcher: Launcher) -> Readiness {
-        let w = &self.config.stations[self.selected].weapon;
-        if w.seeker.signature == 0 {
-            return Readiness::Ready;
-        }
-        let profile = (self.weapon_rules == Rules::Spec)
-            .then(|| missiles::Profile::for_weapon(w))
-            .flatten();
-        if profile.is_some_and(|p| !p.guidance_available(launcher.radar_power)) {
-            return Readiness::Ready;
-        }
-        if profile.is_some_and(|p| p.supports_boresight())
-            && self.launch_mode == LaunchMode::Boresight
-        {
-            if self.bore_observation.is_some_and(|o| {
-                missiles::length(sub(o.position, launcher.position))
-                    < f64::from(w.seeker.zones[1].minimum_range.max(0))
-            }) {
-                return Readiness::MinimumRange;
-            }
-            return Readiness::Ready;
-        }
-        let Some(t) = self
-            .designated()
-            .and_then(|id| self.targets.iter().find(|t| t.id == id))
-        else {
-            return Readiness::NoTarget;
-        };
-        if profile.is_some_and(|p| !p.accepts(t)) {
-            return Readiness::WrongTarget;
-        }
-        if t.hp <= 0 {
-            return Readiness::TargetDestroyed;
-        }
-        if w.seeker.signature == 3 {
-            // Equipment state answers immediately, before the shared support
-            // result, so a failure reported between steps is not stale.
-            if self.radar_failed {
-                return Readiness::RadarFailed;
-            }
-            if !launcher.radar {
-                return Readiness::RadarOff;
-            }
-            // One shared support answer for this specific target. The weapon
-            // keeps its own envelope test below.
-            match self.sensors.support(t.id) {
-                Support::Tracked => {}
-                Support::RadarFailed => return Readiness::RadarFailed,
-                Support::RadarOff => return Readiness::RadarOff,
-                Support::Unavailable => return Readiness::NoRadar,
-                Support::SearchOnly => return Readiness::RadarSearchOnly,
-                Support::Acquiring => return Readiness::RadarAcquiring,
-                Support::TrackCoverage => return Readiness::RadarCoverage,
-                Support::NotSelected | Support::NoObservation => return Readiness::NoTarget,
-            }
-        }
-        if let Some(profile) = profile {
-            if !missiles::geometry(
-                &missiles::launch_geometry(w),
-                launcher.position,
-                launcher.basis,
-                t.position,
-                None,
-            ) {
-                let old = zone_readiness(
-                    &missiles::launch_geometry(w),
-                    launcher.position,
-                    launcher.basis.forward,
-                    t.position,
-                );
-                return if old == Readiness::Ready {
-                    Readiness::FieldOfView
-                } else {
-                    old
-                };
-            }
-            if matches!(profile.guidance, Guidance::Infrared | Guidance::Emitter)
-                && (self.mounted.target != Some(t.id) || self.mounted.status != Status::Locked)
-            {
-                return Readiness::RadarAcquiring;
-            }
-            if self.mounted_solution(launcher).is_none() {
-                return Readiness::MaximumRange;
-            }
-            return Readiness::Ready;
-        }
-        zone_readiness(
-            &w.seeker.zones[1],
-            launcher.position,
-            launcher.basis.forward,
-            t.position,
-        )
-    }
-    pub fn external_fuel_lbs(&self) -> [f64; 9] {
-        if self.external {
-            self.config.external_fuel_lbs
-        } else {
-            [0.; 9]
-        }
-    }
-    pub fn payload_lbs(&self) -> f64 {
-        f64::from(if self.external {
-            self.config.external_equipment_lbs
-        } else {
-            0
-        }) + self
-            .config
-            .stations
-            .iter()
-            .zip(&self.ammo)
-            .filter(|(s, _)| !s.internal)
-            .map(|(s, count)| f64::from(s.weapon.weight.max(0)) * f64::from(*count & 0x7fff))
-            .sum::<f64>()
-    }
     /// An explicit, non-AI range target of the selected ported aircraft. No
     /// targets are inserted into ordinary free flight or fabricated on scopes.
     /// Straight-flight mission fixture. No steering, sensors transmitting or AI.
@@ -1948,9 +2501,11 @@ impl State {
         self.targets
             .retain(|t| !self.ground_bounds.contains_key(&t.id));
         self.ground_bounds.clear();
-        self.sensors.clear_selection();
-        self.hud_selection = None;
-        self.sight_hold = None;
+        for own in &mut self.ownships {
+            own.sensors.clear_selection();
+            own.hud_selection = None;
+            own.sight_hold = None;
+        }
     }
     /// Register one imported, stationary surface object without consuming an
     /// aircraft roster index. The caller owns the explicit disjoint ID range.
@@ -2002,8 +2557,13 @@ impl State {
         self.ground_bounds.insert(id, bounds);
         Ok(())
     }
-    pub fn range_target(&mut self, launcher: Launcher) {
-        let w = &self.config.stations[self.selected].weapon;
+    /// Replaces the range's target with a fresh copy of one ownship's
+    /// aircraft ahead of it.
+    pub fn range_target(&mut self, aircraft: u32, launcher: Launcher) {
+        self.with_ownship(aircraft, |state, own| state.range_target_of(own, launcher));
+    }
+    fn range_target_of(&mut self, own: &mut Ownship, launcher: Launcher) {
+        let w = &own.config.stations[own.selected].weapon;
         let distance = if w.seeker.signature == 0 {
             900.
         } else {
@@ -2011,7 +2571,7 @@ impl State {
         };
         // Retire the previous engagement atomically. Never let an old missile
         // hit or track a replacement fixture with a reused identity.
-        self.release();
+        own.release();
         self.projectiles.clear();
         self.effects.clear();
         self.smoke = super::smoke::Smoke::default();
@@ -2029,7 +2589,7 @@ impl State {
         // signatures and ECM record. No AI or autonomous behaviour is added.
         let yaw = launcher.basis.forward[0].atan2(launcher.basis.forward[2]);
         self.targets.push(Target {
-            aircraft: Some(self.config.aircraft),
+            aircraft: Some(own.config.aircraft),
             role: TargetRole::Aircraft,
             heat: Heat::Unknown,
             radar_emitting: false,
@@ -2041,233 +2601,25 @@ impl State {
             velocity: launcher.basis.forward.map(|v| v * 300.),
             basis: Basis::new(yaw, 0., 0.),
             configuration: sensors::Configuration::CLEAN,
-            signature: self.config.sensors.signature,
-            jammer: self.config.sensors.jammer.clone(),
+            signature: own.config.sensors.signature,
+            jammer: own.config.sensors.jammer.clone(),
             jammer_active: self.target_jammer,
             airborne: true,
             on_ground: false,
             radius: AIRCRAFT_RADIUS_FT,
-            hp: self.config.hit_points,
-            initial_hp: self.config.hit_points,
-            fragment_offsets: self.config.fragment_offsets,
+            hp: own.config.hit_points,
+            initial_hp: own.config.hit_points,
+            fragment_offsets: own.config.fragment_offsets,
             wreck: None,
-            wreck_power: self.config.wreck_power,
+            wreck_power: own.config.wreck_power,
             fragment_released: false,
             localized_damage: LocalizedDamage::default(),
             faults: Default::default(),
         });
-        self.sensors.clear_selection();
-        self.hud_selection = None;
-        self.sight_hold = None;
+        own.sensors.clear_selection();
+        own.hud_selection = None;
+        own.sight_hold = None;
     }
-    /// Any current observation of this object, on the selected scope channel
-    /// or visually. Channels are never collapsed into one another.
-    pub fn detects(&self, target: &Target) -> bool {
-        self.sensors.observation(target.id).is_some()
-    }
-    pub fn guidance_available(&self, launcher: Launcher) -> bool {
-        missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
-            .is_none_or(|p| p.guidance_available(launcher.radar_power))
-    }
-    pub fn can_lock(&self, launcher: Launcher) -> bool {
-        if self.weapon_rules == Rules::Spec && !self.guidance_available(launcher) {
-            return false;
-        }
-        if self.weapon_rules == Rules::Spec
-            && missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
-                .is_some_and(|p| p.independent())
-        {
-            return self.mounted.target == self.designated()
-                && self.mounted.target.is_some()
-                && matches!(self.mounted.status, Status::Locked | Status::Pitbull);
-        }
-        self.config.stations[self.selected].weapon.seeker.signature != 0
-            && self.launch_solution(launcher) == Readiness::Ready
-    }
-
-    /// The seeker tone plays only while the seeker is actively tracking:
-    /// silence with nothing in it (John, 2026-09-23).
-    pub fn seeker_tone(&self, launcher: Launcher) -> Option<SeekerTone> {
-        let w = &self.config.stations[self.selected].weapon;
-        let profile = missiles::Profile::for_weapon(w)?;
-        if self.weapon_rules != Rules::Spec
-            || !self.guidance_available(launcher)
-            || !self.armed
-            || !launcher.alive
-            || self.player_hp <= 0
-            || self.rounds(self.selected) == 0
-            || self.ammo[self.selected] & 0x8000 != 0
-            || profile.guidance == Guidance::Emitter
-        {
-            return None;
-        }
-        let radar = matches!(profile.guidance, Guidance::Active | Guidance::Supported);
-        // A radar missile goes quiet with its target inside minimum range.
-        let minimum = f64::from(w.seeker.zones[1].minimum_range.max(0));
-        let too_close = |o: seeker::Observation| {
-            radar && missiles::length(sub(o.position, launcher.position)) < minimum
-        };
-        // A radar missile in boresight sounds its lock tone on the bore return,
-        // with or without a designated target (John, 2026-09-23).
-        if radar && self.launch_mode == LaunchMode::Boresight {
-            let o = self.bore_observation.filter(|o| !too_close(*o))?;
-            return Some(SeekerTone {
-                strength: 0.4 + 0.6 * o.quality.clamp(0., 1.),
-                ground: false,
-                radar,
-                locked: true,
-            });
-        }
-        let bore_ir = if self.launch_mode == LaunchMode::Boresight {
-            // Use the HUD's eligible return, never a stale or hidden target.
-            let observed = self.weapon_observation(launcher)?;
-            let tracked = self.mounted.observation?;
-            if tracked.id != observed.id {
-                return None;
-            }
-            Some(observed)
-        } else {
-            None
-        };
-        // Otherwise sound only while the mounted seeker is tracking.
-        if self.mounted.observation.is_none_or(too_close) {
-            return None;
-        }
-        let locked = matches!(self.mounted.status, Status::Locked | Status::Pitbull)
-            && bore_ir.is_none_or(|o| self.mounted.target == Some(o.id));
-        Some(SeekerTone {
-            strength: if radar {
-                self.mounted.tone()
-            } else {
-                SeekerTone::ir_strength(self.estimated_hit_percent(launcher), locked)
-            },
-            ground: !radar && w.flags & 0x10000 == 0,
-            radar,
-            locked,
-        })
-    }
-    /// Current observation used by the display, separate from launch authority.
-    pub fn weapon_observation(&self, launcher: Launcher) -> Option<seeker::Observation> {
-        if !self.armed || (self.weapon_rules == Rules::Spec && !self.guidance_available(launcher)) {
-            return None;
-        }
-        if self.launch_mode == LaunchMode::Boresight {
-            let w = &self.config.stations[self.selected].weapon;
-            let profile = missiles::Profile::for_weapon(w)?;
-            return self.bore_observation.filter(|o| {
-                profile.guidance != Guidance::Infrared
-                    || (missiles::geometry(
-                        &missiles::launch_geometry(w),
-                        launcher.position,
-                        launcher.basis,
-                        o.position,
-                        None,
-                    ) && missiles::intercept(
-                        &w.movement,
-                        Motion::launch(w, launcher.velocity, launcher.position[1]),
-                        launcher.position,
-                        launcher.basis.forward,
-                        o.position,
-                        o.velocity,
-                        0,
-                        profile.guidance_ticks,
-                    )
-                    .is_some())
-            });
-        }
-        self.mounted.observation.or_else(|| {
-            let id = self.designated()?;
-            let w = &self.config.stations[self.selected].weapon;
-            if self.weapon_rules == Rules::Spec
-                && missiles::Profile::for_weapon(w).is_some_and(|p| {
-                    self.targets
-                        .iter()
-                        .find(|t| t.id == id)
-                        .is_none_or(|t| !p.accepts(t))
-                })
-            {
-                return None;
-            }
-            let contact = self.sensors.observation(id)?;
-            let delta = missiles::sub(contact.position, launcher.position);
-            Some(seeker::Observation {
-                id: contact.id,
-                position: contact.position,
-                velocity: contact.velocity,
-                quality: 1.,
-                range: missiles::length(delta),
-                off_axis: dot(unit(delta), launcher.basis.forward)
-                    .clamp(-1., 1.)
-                    .acos(),
-            })
-        })
-    }
-    pub fn mounted_solution(&self, launcher: Launcher) -> Option<missiles::Solution> {
-        let w = &self.config.stations[self.selected].weapon;
-        let profile = missiles::Profile::for_weapon(w)?;
-        let observed = self.weapon_observation(launcher)?;
-        missiles::intercept(
-            &w.movement,
-            Motion::launch(w, launcher.velocity, launcher.position[1]),
-            launcher.position,
-            launcher.basis.forward,
-            observed.position,
-            observed.velocity,
-            0,
-            profile.guidance_ticks,
-        )
-    }
-    pub fn estimated_max_range(&self, launcher: Launcher) -> Option<f64> {
-        let observed = self.weapon_observation(launcher)?;
-        self.range_estimate
-            .filter(|e| {
-                e.station == self.selected && e.target == observed.id && e.mode == self.launch_mode
-            })
-            .map(|e| e.maximum)
-    }
-    pub fn favorable_firing_band(&self, launcher: Launcher) -> Option<missiles::FiringBand> {
-        let observed = self.weapon_observation(launcher)?;
-        self.range_estimate
-            .filter(|e| {
-                e.station == self.selected && e.target == observed.id && e.mode == self.launch_mode
-            })
-            .and_then(|e| e.favorable)
-    }
-    /// Physical range validity is independent of rounded probability text.
-    pub fn in_estimated_range(&self, launcher: Launcher) -> bool {
-        let Some(o) = self.weapon_observation(launcher) else {
-            return false;
-        };
-        let min =
-            f64::from(self.config.stations[self.selected].weapon.seeker.zones[1].minimum_range);
-        self.readiness(launcher) == Readiness::Ready
-            && self
-                .estimated_max_range(launcher)
-                .is_some_and(|max| max > min && (min..=max).contains(&o.range))
-            && self.mounted_solution(launcher).is_some()
-    }
-    pub fn estimated_hit_percent(&self, launcher: Launcher) -> u8 {
-        let Some(observation) = self.weapon_observation(launcher) else {
-            return 0;
-        };
-        let w = &self.config.stations[self.selected].weapon;
-        let Some(profile) = missiles::Profile::for_weapon(w) else {
-            return 0;
-        };
-        let mut zone = w.seeker.zones[1];
-        zone.maximum_range = self.estimated_max_range(launcher).unwrap_or(0.).floor() as _;
-        missiles::estimated_hit_percent(
-            observation,
-            self.mounted_solution(launcher),
-            &zone,
-            profile
-                .guidance_ticks
-                .min(u64::from(w.movement.remove_t) * 30) as f64
-                / 120.,
-            (self.launch_mode == LaunchMode::Boresight).then(|| profile.search_cap()),
-        )
-    }
-
     pub fn take_sound_events(&mut self) -> Vec<crate::acoustics::Emission> {
         std::mem::take(&mut self.sound_events)
     }
@@ -2299,13 +2651,27 @@ impl State {
 
     /// One chaff cartridge or flare leaving an aircraft: its visible device
     /// (a flare leaves as a pair) and the original's release recording, one
-    /// per device, for the player and AI alike (docs/spec/countermeasures.md).
-    /// `owner` is the releasing aircraft; [`PLAYER_OWNER`] is the player's own.
+    /// per device, for the ownships and the AI alike (docs/spec/countermeasures.md).
+    /// `owner` is the releasing aircraft.
     pub fn device_released(
         &mut self,
         release: super::countermeasures::Release,
         kind: EffectKind,
         owner: u32,
+    ) {
+        let left = self.ownship(owner).map(|own| match kind {
+            EffectKind::Chaff => own.chaff,
+            _ => own.flares,
+        });
+        self.note_release(release, kind, owner, left);
+    }
+    /// A release with the releasing ownship's devices left, when it is one.
+    fn note_release(
+        &mut self,
+        release: super::countermeasures::Release,
+        kind: EffectKind,
+        owner: u32,
+        left: Option<u8>,
     ) {
         let position = release.position;
         match kind {
@@ -2319,10 +2685,7 @@ impl State {
             release,
             number: self.devices.released(),
             tick: self.tick,
-            left: (owner == PLAYER_OWNER).then_some(match kind {
-                EffectKind::Chaff => self.chaff,
-                _ => self.flares,
-            }),
+            left,
         }));
         self.push_sound(crate::acoustics::Emission {
             kind: match kind {
@@ -2331,7 +2694,7 @@ impl State {
             },
             position,
             arrived: false,
-            own: owner == PLAYER_OWNER,
+            own: left.is_some(),
         });
     }
     fn note_devices(&mut self, note: DeviceNote) {
@@ -2394,43 +2757,61 @@ impl State {
     }
     /// Exactly one host 120 Hz tick. Pausing means NOT calling this method.
     /// The host-to-native time conversion and stage ordering are authored here.
+    /// `inputs` gives the trigger and launcher of each ownship for this tick;
+    /// an ownship with no input is not stepped.
     pub fn step(
         &mut self,
-        held: bool,
-        launcher: Launcher,
+        inputs: &[OwnshipInput],
         ground: impl Fn(f64, f64) -> f64,
     ) -> Vec<Event> {
-        self.step_surface(held, launcher, ground, |_, _| false)
+        self.step_surface(inputs, ground, |_, _| false)
     }
     /// [`Self::step`] where `water` says whether a point lies over the sea,
     /// which picks water explosions and leaves no crater there.
     pub fn step_surface(
         &mut self,
-        held: bool,
-        launcher: Launcher,
+        inputs: &[OwnshipInput],
         ground: impl Fn(f64, f64) -> f64,
         water: impl Fn(f64, f64) -> bool,
     ) -> Vec<Event> {
         let mut events = Vec::new();
-        self.enforce_guns_only();
-        if std::mem::take(&mut self.pending_damage) && self.player_hp > 0 {
-            // Explicit no-AI hit fixture uses this aircraft's gun damage. Native
-            // percent input is 100; deterministic adapter RNG is not native RNG.
-            let base = scaled_weapon_damage(
-                &self.config.stations[0].weapon,
-                i32::from(
-                    self.config.stations[0].weapon.damage.by_class
-                        [damage_class(self.config.target_category)],
-                ),
-            ) as u16;
-            let amount = super::systems::damage_amount(base, 100, draw(&mut self.rng, 40) as u8);
-            self.player_localized_damage.record(
-                DamageSection::Core,
-                amount,
-                self.config.damage_capacity,
-            );
-            self.apply_player_damage(amount, &mut events);
-            self.emit_sound(launcher.position, crate::acoustics::Kind::Impact);
+        // The ownships are worked one at a time in aircraft id order; every
+        // stage that concerns only them loops over them here.
+        let mut ships = std::mem::take(&mut self.ownships);
+        let active: Vec<(usize, OwnshipInput)> = ships
+            .iter()
+            .enumerate()
+            .filter_map(|(k, own)| {
+                inputs
+                    .iter()
+                    .find(|input| input.aircraft == own.aircraft)
+                    .map(|input| (k, *input))
+            })
+            .collect();
+        let obscured = |from: Vector, to: Vector| terrain_hit(from, to, &ground).is_some();
+        for &(k, input) in &active {
+            let own = &mut ships[k];
+            own.enforce_guns_only(self.cheats.guns_only);
+            if std::mem::take(&mut own.pending_damage) && own.hp > 0 {
+                // Explicit no-AI hit fixture uses this aircraft's gun damage. Native
+                // percent input is 100; deterministic adapter RNG is not native RNG.
+                let base = scaled_weapon_damage(
+                    &own.config.stations[0].weapon,
+                    i32::from(
+                        own.config.stations[0].weapon.damage.by_class
+                            [damage_class(own.config.target_category)],
+                    ),
+                ) as u16;
+                let amount =
+                    super::systems::damage_amount(base, 100, draw(&mut self.rng, 40) as u8);
+                own.localized_damage.record(
+                    DamageSection::Core,
+                    amount,
+                    own.config.damage_capacity,
+                );
+                self.damage_ownship(own, amount, &mut events);
+                self.emit_sound(input.launcher.position, crate::acoustics::Kind::Impact);
+            }
         }
         let now = (self.tick / 30) as u16;
         self.tick += 1;
@@ -2447,406 +2828,418 @@ impl State {
             }
         }
         self.marks.retain(|m| m.ticks > 0);
-        // Shared observations are produced before this tick's firing decision,
-        // so the scope, the target view and weapon support all agree.
-        self.sensors.controls = launcher.controls;
-        let observables: Vec<Observable> = self
-            .targets
-            .iter()
-            .map(|t| {
-                Observable {
-                    id: t.id,
-                    position: t.position,
-                    velocity: t.velocity,
-                    basis: t.basis,
-                    configuration: t.configuration,
-                    signature: t.signature,
-                    jammer: t.jammer.clone(),
-                    jammer_active: t.jammer_active,
-                    radar_emitting: t.radar_emitting,
-                    airborne: t.airborne,
-                    destroyed: t.hp <= 0,
-                }
-                .on_ground(t.on_ground)
-            })
-            .collect();
-        let observer = Observer {
-            position: launcher.position,
-            basis: launcher.basis,
-            radar_powered: launcher.radar && launcher.alive,
-            radar_failed: self.radar_failed,
-            infrared_failed: self.infrared_failed || !launcher.alive,
-            visual_failed: self.visual_failed || !launcher.alive,
-        };
-        let obscured = |from: Vector, to: Vector| terrain_hit(from, to, &ground).is_some();
-        let height = |x: f64, z: f64| ground(x, z);
-        let environment = sensors::Environment {
-            ground: &height,
-            obscured: &obscured,
-        };
-        self.sensors.keep_selection = self.cheats.easy_targeting;
-        let in_view = self.designated().or(self.sight_hold);
-        self.sensors.step(&observer, &observables, &environment);
-        if let Some(id) = self.designated() {
-            self.hud_selection = Some(id);
-        } else if !self.cheats.easy_targeting {
-            // A dropped target is gone; nothing is remembered for later.
-            self.hud_selection = None;
-        }
-        // The views keep a dropped target while it is within visual range, in
-        // any direction (John, 2026-09-28); beyond it the target is gone for good.
-        let visual_range = self
-            .sensors
-            .profiles
-            .visual
-            .as_ref()
-            .filter(|_| !observer.visual_failed)
-            .map_or(0., |visual| visual.search.maximum_ft);
-        self.sight_hold = self.designated().or(in_view.filter(|id| {
-            self.targets.iter().any(|t| {
-                t.id == *id
-                    && t.hp > 0
-                    && (0..3)
-                        .map(|i| (t.position[i] - launcher.position[i]).powi(2))
-                        .sum::<f64>()
-                        .sqrt()
-                        <= visual_range
-            })
-        }));
-        self.emitters = passive::emitters(
-            &observer,
-            &observables,
-            self.sensors.contacts(),
-            &environment,
-        );
-        self.bore_observation = None;
-        let index = self.selected;
-        let w = &self.config.stations[index].weapon;
-        if let Some(profile) =
-            missiles::Profile::for_weapon(w).filter(|_| self.weapon_rules == Rules::Spec)
-        {
-            if !profile.guidance_available(launcher.radar_power) || !profile.supports_boresight() {
-                self.launch_mode = LaunchMode::Cued;
-            }
-            if profile.guidance_available(launcher.radar_power)
-                && self.armed
-                && self.designated().is_none()
-                && profile.supports_boresight()
-            {
-                self.launch_mode = LaunchMode::Boresight;
-            }
-            if profile.guidance == Guidance::Infrared && self.designated().is_some() {
-                self.launch_mode = LaunchMode::Cued;
-            }
-            let assigned = if self.launch_mode == LaunchMode::Cued {
-                self.designated()
-            } else {
-                None
-            };
-            let key = (index, self.launch_mode, assigned);
-            if self.mounted_key != Some(key) {
-                self.mounted = Seeker::new(assigned);
-                self.mounted_key = Some(key);
-            }
-            if !profile.guidance_available(launcher.radar_power) {
-                self.mounted = Seeker {
-                    status: Status::Unguided,
-                    ..Default::default()
-                };
-                self.mounted_key = None;
-            }
-            if self.armed
-                && profile.guidance_available(launcher.radar_power)
-                && launcher.alive
-                && self.player_hp > 0
-                && self.rounds(index) > 0
-                && self.ammo[index] & 0x8000 == 0
-            {
-                let bore = self.launch_mode == LaunchMode::Boresight;
-                let cap = bore.then(|| profile.search_cap());
-                // Mounted IR may choose a stronger return. Released missiles keep identity.
-                if bore && profile.guidance == Guidance::Infrared {
-                    self.mounted.target = None;
-                    self.mounted.acquired = false;
-                    self.mounted.missing = 0;
-                }
-                let view = seeker::View {
-                    position: launcher.position,
-                    basis: launcher.basis,
-                    cap,
-                    obscured: &obscured,
-                };
-                let observations: Vec<_> = self
-                    .targets
-                    .iter()
-                    .filter(|t| t.hp > 0)
-                    .filter(|t| bore || assigned == Some(t.id))
-                    .filter_map(|t| seeker::observe(w, profile, &view, t))
-                    .filter(|o| {
-                        !bore
-                            || profile.guidance != Guidance::Active
-                            || self.config.sensors.radar.as_ref().is_some_and(|r| {
-                                o.range <= launcher.controls.range_nmi() * missiles::NMI
-                                    && o.range <= r.track.maximum_ft
-                            })
-                    })
-                    .collect();
-                if bore {
-                    self.bore_observation = observations
-                        .iter()
-                        .min_by(|a, b| seeker::compare_returns(a, b, profile))
-                        .copied();
-                }
-                if bore && profile.guidance == Guidance::Active {
-                    // The HUD estimate never pre-locks or assigns an active-radar shot.
-                    self.mounted = Seeker::default();
-                } else if self.launch_mode == LaunchMode::Cued
-                    && matches!(profile.guidance, Guidance::Active | Guidance::Supported)
-                {
-                    let supported: Vec<_> = observations
-                        .into_iter()
-                        .filter(|o| self.sensors.supports(o.id))
-                        .collect();
-                    self.mounted.step(
-                        missiles::Profile {
-                            guidance: Guidance::Supported,
-                            ..profile
-                        },
-                        &supported,
-                    );
-                } else {
-                    self.mounted.step(profile, &observations);
-                }
-            } else {
-                self.mounted = Seeker::new(assigned);
-            }
-        } else {
-            self.bore_observation = None;
-            self.mounted = Seeker::default();
-            self.mounted_key = None;
-        }
-        if let Some(o) = self.weapon_observation(launcher) {
-            if self.tick.is_multiple_of(60)
-                || self.range_estimate.is_none_or(|e| {
-                    e.station != index || e.target != o.id || e.mode != self.launch_mode
+        for &(k, input) in &active {
+            let own = &mut ships[k];
+            let (launcher, held) = (input.launcher, input.held);
+            // Shared observations are produced before this tick's firing decision,
+            // so the scope, the target view and weapon support all agree.
+            own.sensors.controls = launcher.controls;
+            let observables: Vec<Observable> = self
+                .targets
+                .iter()
+                .map(|t| {
+                    Observable {
+                        id: t.id,
+                        position: t.position,
+                        velocity: t.velocity,
+                        basis: t.basis,
+                        configuration: t.configuration,
+                        signature: t.signature,
+                        jammer: t.jammer.clone(),
+                        jammer_active: t.jammer_active,
+                        radar_emitting: t.radar_emitting,
+                        airborne: t.airborne,
+                        destroyed: t.hp <= 0,
+                    }
+                    .on_ground(t.on_ground)
                 })
+                .collect();
+            let observer = Observer {
+                position: launcher.position,
+                basis: launcher.basis,
+                radar_powered: launcher.radar && launcher.alive,
+                radar_failed: own.radar_failed,
+                infrared_failed: own.infrared_failed || !launcher.alive,
+                visual_failed: own.visual_failed || !launcher.alive,
+            };
+            let height = |x: f64, z: f64| ground(x, z);
+            let environment = sensors::Environment {
+                ground: &height,
+                obscured: &obscured,
+            };
+            own.sensors.keep_selection = self.cheats.easy_targeting;
+            let in_view = own.designated().or(own.sight_hold);
+            own.sensors.step(&observer, &observables, &environment);
+            if let Some(id) = own.designated() {
+                own.hud_selection = Some(id);
+            } else if !self.cheats.easy_targeting {
+                // A dropped target is gone; nothing is remembered for later.
+                own.hud_selection = None;
+            }
+            // The views keep a dropped target while it is within visual range, in
+            // any direction (John, 2026-09-28); beyond it the target is gone for good.
+            let visual_range = own
+                .sensors
+                .profiles
+                .visual
+                .as_ref()
+                .filter(|_| !observer.visual_failed)
+                .map_or(0., |visual| visual.search.maximum_ft);
+            own.sight_hold = own.designated().or(in_view.filter(|id| {
+                self.targets.iter().any(|t| {
+                    t.id == *id
+                        && t.hp > 0
+                        && (0..3)
+                            .map(|i| (t.position[i] - launcher.position[i]).powi(2))
+                            .sum::<f64>()
+                            .sqrt()
+                            <= visual_range
+                })
+            }));
+            own.emitters = passive::emitters(
+                &observer,
+                &observables,
+                own.sensors.contacts(),
+                &environment,
+            );
+            own.bore_observation = None;
+            let index = own.selected;
+            let w = &own.config.stations[index].weapon;
+            if let Some(profile) =
+                missiles::Profile::for_weapon(w).filter(|_| self.weapon_rules == Rules::Spec)
             {
-                self.range_estimate = missiles::Profile::for_weapon(w).map(|profile| {
-                    let maximum = missiles::maximum_range(
-                        w,
-                        launcher.position,
-                        launcher.basis.forward,
-                        launcher.velocity,
-                        o.position,
-                        o.velocity,
-                        profile.guidance_ticks,
-                    );
-                    RangeEstimate {
-                        station: index,
-                        target: o.id,
-                        mode: self.launch_mode,
-                        maximum,
-                        favorable: missiles::firing_band(
+                if !profile.guidance_available(launcher.radar_power)
+                    || !profile.supports_boresight()
+                {
+                    own.launch_mode = LaunchMode::Cued;
+                }
+                if profile.guidance_available(launcher.radar_power)
+                    && own.armed
+                    && own.designated().is_none()
+                    && profile.supports_boresight()
+                {
+                    own.launch_mode = LaunchMode::Boresight;
+                }
+                if profile.guidance == Guidance::Infrared && own.designated().is_some() {
+                    own.launch_mode = LaunchMode::Cued;
+                }
+                let assigned = if own.launch_mode == LaunchMode::Cued {
+                    own.designated()
+                } else {
+                    None
+                };
+                let key = (index, own.launch_mode, assigned);
+                if own.mounted_key != Some(key) {
+                    own.mounted = Seeker::new(assigned);
+                    own.mounted_key = Some(key);
+                }
+                if !profile.guidance_available(launcher.radar_power) {
+                    own.mounted = Seeker {
+                        status: Status::Unguided,
+                        ..Default::default()
+                    };
+                    own.mounted_key = None;
+                }
+                if own.armed
+                    && profile.guidance_available(launcher.radar_power)
+                    && launcher.alive
+                    && own.hp > 0
+                    && own.rounds(index) > 0
+                    && own.ammo[index] & 0x8000 == 0
+                {
+                    let bore = own.launch_mode == LaunchMode::Boresight;
+                    let cap = bore.then(|| profile.search_cap());
+                    // Mounted IR may choose a stronger return. Released missiles keep identity.
+                    if bore && profile.guidance == Guidance::Infrared {
+                        own.mounted.target = None;
+                        own.mounted.acquired = false;
+                        own.mounted.missing = 0;
+                    }
+                    let view = seeker::View {
+                        position: launcher.position,
+                        basis: launcher.basis,
+                        cap,
+                        obscured: &obscured,
+                    };
+                    let observations: Vec<_> = self
+                        .targets
+                        .iter()
+                        .filter(|t| t.hp > 0)
+                        .filter(|t| bore || assigned == Some(t.id))
+                        .filter_map(|t| seeker::observe(w, profile, &view, t))
+                        .filter(|o| {
+                            !bore
+                                || profile.guidance != Guidance::Active
+                                || own.config.sensors.radar.as_ref().is_some_and(|r| {
+                                    o.range <= launcher.controls.range_nmi() * missiles::NMI
+                                        && o.range <= r.track.maximum_ft
+                                })
+                        })
+                        .collect();
+                    if bore {
+                        own.bore_observation = observations
+                            .iter()
+                            .min_by(|a, b| seeker::compare_returns(a, b, profile))
+                            .copied();
+                    }
+                    if bore && profile.guidance == Guidance::Active {
+                        // The HUD estimate never pre-locks or assigns an active-radar shot.
+                        own.mounted = Seeker::default();
+                    } else if own.launch_mode == LaunchMode::Cued
+                        && matches!(profile.guidance, Guidance::Active | Guidance::Supported)
+                    {
+                        let supported: Vec<_> = observations
+                            .into_iter()
+                            .filter(|o| own.sensors.supports(o.id))
+                            .collect();
+                        own.mounted.step(
+                            missiles::Profile {
+                                guidance: Guidance::Supported,
+                                ..profile
+                            },
+                            &supported,
+                        );
+                    } else {
+                        own.mounted.step(profile, &observations);
+                    }
+                } else {
+                    own.mounted = Seeker::new(assigned);
+                }
+            } else {
+                own.bore_observation = None;
+                own.mounted = Seeker::default();
+                own.mounted_key = None;
+            }
+            if let Some(o) = view(self, own).weapon_observation(launcher) {
+                if self.tick.is_multiple_of(60)
+                    || own.range_estimate.is_none_or(|e| {
+                        e.station != index || e.target != o.id || e.mode != own.launch_mode
+                    })
+                {
+                    own.range_estimate = missiles::Profile::for_weapon(w).map(|profile| {
+                        let maximum = missiles::maximum_range(
                             w,
                             launcher.position,
-                            launcher.basis,
+                            launcher.basis.forward,
                             launcher.velocity,
-                            o,
-                            maximum,
+                            o.position,
+                            o.velocity,
                             profile.guidance_ticks,
-                            self.launch_mode == LaunchMode::Boresight,
-                        ),
-                    }
-                });
+                        );
+                        RangeEstimate {
+                            station: index,
+                            target: o.id,
+                            mode: own.launch_mode,
+                            maximum,
+                            favorable: missiles::firing_band(
+                                w,
+                                launcher.position,
+                                launcher.basis,
+                                launcher.velocity,
+                                o,
+                                maximum,
+                                profile.guidance_ticks,
+                                own.launch_mode == LaunchMode::Boresight,
+                            ),
+                        }
+                    });
+                }
+            } else {
+                own.range_estimate = None;
             }
-        } else {
-            self.range_estimate = None;
-        }
-        self.release_readiness = self.readiness(launcher);
-        let bay_waits = self.bay_waits(launcher);
-        // A pending bay release lapses if the shot is no longer wanted or the
-        // doors never open.
-        if self.bay_release.is_some_and(|(station, pressed)| {
-            station != index
-                || self.tick.saturating_sub(pressed) > BAY_RELEASE_TICKS
-                || !matches!(
-                    self.release_readiness,
-                    Readiness::Ready | Readiness::BayClosed
-                )
-        }) {
-            self.bay_release = None;
-        }
-        let allowed = self.release_readiness == Readiness::Ready && !bay_waits;
-        let station = &self.config.stations[index];
-        let w = &station.weapon;
-        let guided = w.seeker.signature != 0;
-        let gun = is_gun(w);
-        let pressed = held && launcher.alive && !self.triggers[index].was_held;
-        let polled =
-            self.triggers[index].poll(held && launcher.alive, w.flags, w.burst.game_burst_t, now);
-        if polled && bay_waits && self.release_readiness == Readiness::Ready {
-            self.bay_release = Some((index, self.tick));
-            self.release_readiness = Readiness::BayClosed;
-        }
-        let bay_open = self.bay_release.is_some() && !bay_waits;
-        if bay_open {
-            self.bay_release = None;
-        }
-        let due = polled || bay_open
+            own.release_readiness = view(self, own).readiness(launcher);
+            let bay_waits = own.bay_waits(launcher);
+            // A pending bay release lapses if the shot is no longer wanted or the
+            // doors never open.
+            if own.bay_release.is_some_and(|(station, pressed)| {
+                station != index
+                    || self.tick.saturating_sub(pressed) > BAY_RELEASE_TICKS
+                    || !matches!(
+                        own.release_readiness,
+                        Readiness::Ready | Readiness::BayClosed
+                    )
+            }) {
+                own.bay_release = None;
+            }
+            let allowed = own.release_readiness == Readiness::Ready && !bay_waits;
+            let station = &own.config.stations[index];
+            let w = &station.weapon;
+            let guided = w.seeker.signature != 0;
+            let gun = is_gun(w);
+            let pressed = held && launcher.alive && !own.triggers[index].was_held;
+            let polled = own.triggers[index].poll(
+                held && launcher.alive,
+                w.flags,
+                w.burst.game_burst_t,
+                now,
+            );
+            if polled && bay_waits && own.release_readiness == Readiness::Ready {
+                own.bay_release = Some((index, self.tick));
+                own.release_readiness = Readiness::BayClosed;
+            }
+            let bay_open = own.bay_release.is_some() && !bay_waits;
+            if bay_open {
+                own.bay_release = None;
+            }
+            let due = polled || bay_open
                 // A gun repress uses the retained physical-round deadline,
                 // not the old representative burst's quarter-second deadline.
                 || (gun && pressed);
-        let (count, debit, gun_round, tracer) = if gun {
-            let cadence = &mut self.gun_cadence[index];
-            let physical_rounds = u16::from(w.burst.game_rounds_in_burst.max(1))
-                .saturating_mul(u16::from(w.burst.actual_rounds_per_game.max(1)));
-            if due && allowed {
-                cadence.pending = cadence
-                    .pending
-                    .saturating_add(physical_rounds)
-                    .min(physical_rounds);
-                cadence.next_scaled = cadence
-                    .next_scaled
-                    .max(self.tick.saturating_mul(u64::from(physical_rounds)));
-            }
-            if !held || !launcher.alive {
-                cadence.pending = 0;
-            }
-            if !allowed && cadence.pending > 0 {
-                cadence.next_scaled = self
-                    .tick
-                    .saturating_mul(u64::from(physical_rounds))
-                    .saturating_add(u64::from(w.burst.game_burst_t.max(1)).saturating_mul(30));
-            }
-            let ready = cadence.pending > 0
-                && allowed
-                && self.tick.saturating_mul(u64::from(physical_rounds)) >= cadence.next_scaled;
-            if ready {
-                let ordinal = cadence.ordinal;
-                (
-                    1,
-                    1,
-                    Some((ordinal % u64::from(w.burst.actual_rounds_per_game.max(1))) as u8),
-                    ordinal.is_multiple_of(3),
-                )
-            } else {
-                (0, 1, None, false)
-            }
-        } else if due && allowed {
-            (
-                usize::from(w.burst.game_rounds_in_burst.max(1)).min(32),
-                u16::from(w.burst.actual_rounds_per_game),
-                None,
-                false,
-            )
-        } else {
-            (0, u16::from(w.burst.actual_rounds_per_game), None, false)
-        };
-        if count > 0 {
-            for _ in 0..count {
-                let loaded = if self.cheats.unlimited_ammo {
-                    self.rounds(index) > 0
-                } else {
-                    unload(&mut self.ammo[index], debit)
-                };
-                if self.projectiles.len() == MAX_PROJECTILES || !loaded {
-                    break;
-                }
-                let position = std::array::from_fn(|i| {
-                    launcher.position[i]
-                        + launcher.basis.right[i] * station.mount[0]
-                        + launcher.basis.up[i] * station.mount[1]
-                        + launcher.basis.forward[i] * station.mount[2]
-                });
-                let target =
-                    if self.weapon_rules == Rules::Spec && !self.guidance_available(launcher) {
-                        None
-                    } else if self.launch_mode == LaunchMode::Boresight {
-                        self.mounted.target
-                    } else {
-                        self.designated()
-                    };
-                let guidance = missiles::Profile::for_weapon(w)
-                    .filter(|_| self.weapon_rules == Rules::Spec)
-                    .map(|profile| {
-                        let mut flight =
-                            Flight::new(profile, self.launch_mode, target, launcher.position);
-                        flight.qualified_target = target.filter(|id| {
-                            self.targets
-                                .iter()
-                                .find(|t| t.id == *id)
-                                .is_some_and(|t| flight.eligible(w, t))
-                        });
-                        if self.mounted.acquired
-                            && self.mounted.target == target
-                            && (profile.guidance != Guidance::Active
-                                || self.launch_mode == LaunchMode::Boresight)
-                        {
-                            flight.seeker = self.mounted.clone();
-                        }
-                        if !profile.guidance_available(launcher.radar_power) {
-                            flight.unguided = true;
-                            flight.enabled = false;
-                            flight.seeker = Seeker::default();
-                            flight.seeker.status = Status::Unguided;
-                        }
-                        flight
-                    });
-                self.projectiles.push(Projectile {
-                    id: self.shots,
-                    owner: PLAYER_OWNER,
-                    weapon: None,
-                    guidance,
-                    guidance_ticks: (self.weapon_rules == Rules::Spec)
-                        .then(|| missiles::Profile::for_weapon(w).map(|p| p.guidance_ticks))
-                        .flatten(),
-                    motion: (self.weapon_rules == Rules::Spec
-                        && missiles::Profile::for_weapon(w).is_some())
-                    .then(|| Motion::launch(w, launcher.velocity, position[1])),
-                    age: 0,
-                    incoming: false,
-                    station: index,
-                    position,
-                    previous: position,
-                    direction: launcher.basis.forward,
-                    speed_f8: launch_speed(&w.movement, (launcher.speed_fps * 256.) as i32)
-                        .expect("validated speed limits")
-                        * 256,
-                    launched_t: now,
-                    target: if guided { target } else { None },
-                    fall: FallState::default(),
-                    gun_round,
-                    tracer,
-                });
-                if let Some(flight) = self.projectiles.last().and_then(|p| p.guidance.as_ref())
-                    && flight.profile.guidance == Guidance::Active
-                    && flight.enabled
-                {
-                    events.push(Event::SeekerActivated(self.shots));
-                    if flight.seeker.acquired {
-                        events.push(Event::Pitbull(self.shots));
-                    }
-                }
-                self.shots += 1;
-                events.push(Event::Fired(index));
-                if gun {
-                    let cadence = &mut self.gun_cadence[index];
-                    cadence.pending -= 1;
-                    cadence.ordinal = cadence.ordinal.wrapping_add(1);
+            let (count, debit, gun_round, tracer) = if gun {
+                let cadence = &mut own.gun_cadence[index];
+                let physical_rounds = u16::from(w.burst.game_rounds_in_burst.max(1))
+                    .saturating_mul(u16::from(w.burst.actual_rounds_per_game.max(1)));
+                if due && allowed {
+                    cadence.pending = cadence
+                        .pending
+                        .saturating_add(physical_rounds)
+                        .min(physical_rounds);
                     cadence.next_scaled = cadence
                         .next_scaled
+                        .max(self.tick.saturating_mul(u64::from(physical_rounds)));
+                }
+                if !held || !launcher.alive {
+                    cadence.pending = 0;
+                }
+                if !allowed && cadence.pending > 0 {
+                    cadence.next_scaled = self
+                        .tick
+                        .saturating_mul(u64::from(physical_rounds))
                         .saturating_add(u64::from(w.burst.game_burst_t.max(1)).saturating_mul(30));
                 }
+                let ready = cadence.pending > 0
+                    && allowed
+                    && self.tick.saturating_mul(u64::from(physical_rounds)) >= cadence.next_scaled;
+                if ready {
+                    let ordinal = cadence.ordinal;
+                    (
+                        1,
+                        1,
+                        Some((ordinal % u64::from(w.burst.actual_rounds_per_game.max(1))) as u8),
+                        ordinal.is_multiple_of(3),
+                    )
+                } else {
+                    (0, 1, None, false)
+                }
+            } else if due && allowed {
+                (
+                    usize::from(w.burst.game_rounds_in_burst.max(1)).min(32),
+                    u16::from(w.burst.actual_rounds_per_game),
+                    None,
+                    false,
+                )
+            } else {
+                (0, u16::from(w.burst.actual_rounds_per_game), None, false)
+            };
+            let mut fired = false;
+            if count > 0 {
+                for _ in 0..count {
+                    let loaded = if self.cheats.unlimited_ammo {
+                        own.rounds(index) > 0
+                    } else {
+                        unload(&mut own.ammo[index], debit)
+                    };
+                    if self.projectiles.len() == MAX_PROJECTILES || !loaded {
+                        break;
+                    }
+                    let position = std::array::from_fn(|i| {
+                        launcher.position[i]
+                            + launcher.basis.right[i] * station.mount[0]
+                            + launcher.basis.up[i] * station.mount[1]
+                            + launcher.basis.forward[i] * station.mount[2]
+                    });
+                    let target =
+                        if self.weapon_rules == Rules::Spec && !own.guidance_available(launcher) {
+                            None
+                        } else if own.launch_mode == LaunchMode::Boresight {
+                            own.mounted.target
+                        } else {
+                            own.designated()
+                        };
+                    let guidance = missiles::Profile::for_weapon(w)
+                        .filter(|_| self.weapon_rules == Rules::Spec)
+                        .map(|profile| {
+                            let mut flight =
+                                Flight::new(profile, own.launch_mode, target, launcher.position);
+                            flight.qualified_target = target.filter(|id| {
+                                self.targets
+                                    .iter()
+                                    .find(|t| t.id == *id)
+                                    .is_some_and(|t| flight.eligible(w, t))
+                            });
+                            if own.mounted.acquired
+                                && own.mounted.target == target
+                                && (profile.guidance != Guidance::Active
+                                    || own.launch_mode == LaunchMode::Boresight)
+                            {
+                                flight.seeker = own.mounted.clone();
+                            }
+                            if !profile.guidance_available(launcher.radar_power) {
+                                flight.unguided = true;
+                                flight.enabled = false;
+                                flight.seeker = Seeker::default();
+                                flight.seeker.status = Status::Unguided;
+                            }
+                            flight
+                        });
+                    self.projectiles.push(Projectile {
+                        id: self.next_shot,
+                        owner: own.aircraft,
+                        weapon: None,
+                        guidance,
+                        guidance_ticks: (self.weapon_rules == Rules::Spec)
+                            .then(|| missiles::Profile::for_weapon(w).map(|p| p.guidance_ticks))
+                            .flatten(),
+                        motion: (self.weapon_rules == Rules::Spec
+                            && missiles::Profile::for_weapon(w).is_some())
+                        .then(|| Motion::launch(w, launcher.velocity, position[1])),
+                        age: 0,
+                        incoming: None,
+                        station: index,
+                        position,
+                        previous: position,
+                        direction: launcher.basis.forward,
+                        speed_f8: launch_speed(&w.movement, (launcher.speed_fps * 256.) as i32)
+                            .expect("validated speed limits")
+                            * 256,
+                        launched_t: now,
+                        target: if guided { target } else { None },
+                        fall: FallState::default(),
+                        gun_round,
+                        tracer,
+                    });
+                    if let Some(flight) = self.projectiles.last().and_then(|p| p.guidance.as_ref())
+                        && flight.profile.guidance == Guidance::Active
+                        && flight.enabled
+                    {
+                        events.push(Event::SeekerActivated(self.next_shot));
+                        if flight.seeker.acquired {
+                            events.push(Event::Pitbull(self.next_shot));
+                        }
+                    }
+                    own.shots += 1;
+                    self.next_shot += 1;
+                    fired = true;
+                    events.push(Event::Fired(index));
+                    if gun {
+                        let cadence = &mut own.gun_cadence[index];
+                        cadence.pending -= 1;
+                        cadence.ordinal = cadence.ordinal.wrapping_add(1);
+                        cadence.next_scaled = cadence.next_scaled.saturating_add(
+                            u64::from(w.burst.game_burst_t.max(1)).saturating_mul(30),
+                        );
+                    }
+                }
             }
-        }
-        if events.iter().any(|e| matches!(e, Event::Fired(_))) {
-            if !station.internal && !gun {
-                self.bay_hold_until = self.tick + BAY_HOLD_TICKS;
+            if fired {
+                if !station.internal && !gun {
+                    own.bay_hold_until = self.tick + BAY_HOLD_TICKS;
+                }
+                self.effect(launcher.position, EffectKind::Launch);
+                own.bore_observation = None;
+                own.mounted = Seeker::default();
+                own.mounted_key = None;
             }
-            self.effect(launcher.position, EffectKind::Launch);
-            self.bore_observation = None;
-            self.mounted = Seeker::default();
-            self.mounted_key = None;
         }
         // Living target poses remain owned by their existing flight service.
         let old_targets: Vec<_> = self.targets.iter().map(|t| t.position).collect();
@@ -2885,46 +3278,39 @@ impl State {
         for (id, position) in crashes {
             self.aircraft_crashed(id, position, water(position[0], position[2]));
         }
-        let previous_player = self
-            .previous_player_position
-            .replace(launcher.position)
-            .unwrap_or(launcher.position);
-        let player = Target {
-            aircraft: Some(self.config.aircraft),
-            role: TargetRole::Aircraft,
-            heat: Heat::Unknown,
-            radar_emitting: launcher.radar,
-            id: 0,
-            position: launcher.position,
-            velocity: launcher.velocity,
-            basis: launcher.basis,
-            configuration: sensors::Configuration::CLEAN,
-            signature: self.config.sensors.signature,
-            jammer: None,
-            jammer_active: false,
-            airborne: launcher.alive,
-            on_ground: false,
-            radius: AIRCRAFT_RADIUS_FT,
-            hp: if launcher.alive { self.player_hp } else { 0 },
-            initial_hp: self.config.damage_capacity,
-            fragment_offsets: self.config.fragment_offsets,
-            wreck: None,
-            wreck_power: crate::wreck::Power::default(),
-            fragment_released: self.player_fragment_released,
-            localized_damage: self.player_localized_damage.clone(),
-            faults: Default::default(),
-            category: self.config.target_category,
-        };
-        let mut player_hits = Vec::new();
+        // Each ownship is a hit-test target, rebuilt every step from its launcher.
+        let rows: Vec<OwnRow> = active
+            .iter()
+            .map(|&(index, input)| {
+                let own = &mut ships[index];
+                let launcher = input.launcher;
+                let previous = own
+                    .previous_position
+                    .replace(launcher.position)
+                    .unwrap_or(launcher.position);
+                OwnRow {
+                    index,
+                    launcher,
+                    previous,
+                    target: ownship_target(own, launcher),
+                }
+            })
+            .collect();
+        let mut ownship_hits = Vec::new();
         let mut strikes = Vec::new();
         let mut impacts = Vec::new();
         let mut sources = Vec::new();
+        // Score changes, owner and whether it is a kill, applied after the loop.
+        let mut scored: Vec<(u32, bool)> = Vec::new();
+        // Jammer deception on target hits takes the first ownship's ECM record.
+        let fixture_ecm = ships.first().map(|own| own.config.ecm);
         self.projectiles.retain_mut(|p| {
             let owned = p.weapon.clone();
-            let w = owned
-                .as_ref()
-                .unwrap_or_else(|| &self.config.stations[p.station].weapon);
-            let easy = self.cheats.easy_aiming && p.owner == PLAYER_OWNER && !p.incoming;
+            let w = owned.as_ref().unwrap_or_else(|| {
+                &owner_configuration(&ships, p.owner).stations[p.station].weapon
+            });
+            let by_ownship = ships.iter().any(|o| o.aircraft == p.owner);
+            let easy = self.cheats.easy_aiming && by_ownship && p.incoming.is_none();
             let eased = (easy && !is_gun(w)).then(|| eased_weapon(w));
             let w = eased.as_ref().unwrap_or(w);
             let hitbox = if easy {
@@ -2934,16 +3320,8 @@ impl State {
             };
             if p.age == 0 {
                 p.direction = projectile_launch_direction(w, p.direction, p.id, p.owner, p.station);
-                self.ledger.launch(
-                    p.id,
-                    p.owner,
-                    if p.incoming {
-                        Some(PLAYER_OWNER)
-                    } else {
-                        p.target
-                    },
-                    ShotKind::of(w),
-                );
+                self.ledger
+                    .launch(p.id, p.owner, p.incoming.or(p.target), ShotKind::of(w));
             }
             let m = &w.movement;
             if if p.motion.is_some() {
@@ -2970,14 +3348,16 @@ impl State {
             if p.guidance.is_some() {
                 let was_active = p.guidance.as_ref().unwrap().enabled;
                 let was_acquired = p.guidance.as_ref().unwrap().seeker.acquired;
-                let actor_support = if p.owner == PLAYER_OWNER {
+                let actor_support = if let Some(row) = rows.iter().find(|r| r.target.id == p.owner)
+                {
+                    let own = &ships[row.index];
                     p.guidance
                         .as_ref()
                         .and_then(|flight| flight.seeker.target)
                         .map(|id| ActorSupport {
-                            owner: PLAYER_OWNER,
-                            supported: self.sensors.supports(id),
-                            observation: self.sensors.observation(id).map(|contact| {
+                            owner: p.owner,
+                            supported: own.sensors.supports(id),
+                            observation: own.sensors.observation(id).map(|contact| {
                                 let delta = sub(contact.position, p.position);
                                 seeker::Observation {
                                     id,
@@ -2988,17 +3368,18 @@ impl State {
                                     range: missiles::length(delta),
                                 }
                             }),
-                            radar_position: launcher.position,
-                            radar_emitting: launcher.radar && launcher.alive,
+                            radar_position: row.launcher.position,
+                            radar_emitting: row.launcher.radar && row.launcher.alive,
                         })
                 } else {
                     self.actor_support.get(&p.owner).copied()
                 };
+                let owner = p.owner;
                 guide_owned(
                     p,
                     w,
                     &self.targets,
-                    (p.owner != PLAYER_OWNER).then_some(&player),
+                    rows.iter().map(|r| &r.target).filter(|t| t.id != owner),
                     actor_support.as_ref(),
                     &obscured,
                     &ground,
@@ -3017,11 +3398,10 @@ impl State {
                     p.target = None;
                 }
                 if let Some(t) = p.target.and_then(|id| {
-                    if p.incoming && id == 0 && player.hp > 0 {
-                        Some(&player)
-                    } else {
-                        self.targets.iter().find(|t| t.id == id && t.hp > 0)
-                    }
+                    p.incoming
+                        .and_then(|_| rows.iter().find(|r| r.target.id == id && r.target.hp > 0))
+                        .map(|r| &r.target)
+                        .or_else(|| self.targets.iter().find(|t| t.id == id && t.hp > 0))
                 }) {
                     // Required illumination is specific to this missile's own
                     // target, never to whatever the cockpit has selected now.
@@ -3030,7 +3410,9 @@ impl State {
                             owner.id == p.owner && owner.hp > 0 && owner.radar_emitting
                         })
                     } else {
-                        p.incoming || self.sensors.supports(t.id)
+                        p.incoming.is_some()
+                            || owner_ownship(&ships, p.owner)
+                                .is_some_and(|own| own.sensors.supports(t.id))
                     };
                     if acquisition(w, p.position, p.direction, t.position, supported, 0)
                         && terrain_hit(p.position, t.position, &ground).is_none()
@@ -3095,27 +3477,32 @@ impl State {
                 now.wrapping_sub(p.launched_t) >= w.damage.fuze_arm_t
             };
             p.age += 1;
-            let mut first: Option<(f64, Option<usize>)> = None;
-            if armed
-                && (p.incoming || (is_gun(w) && p.owner != PLAYER_OWNER))
-                && p.guidance.as_ref().is_none_or(|f| f.eligible(w, &player))
-                && player.hp > 0
-                && let Some(at) = if is_gun(w) {
-                    let previous = std::array::from_fn(|i| {
-                        p.previous[i] + player.position[i] - previous_player[i]
-                    });
-                    LocalizedDamage::contact(previous, p.position, &player, 1.).map(|v| v.0)
-                } else {
-                    segment_sphere(
-                        sub(p.previous, previous_player),
-                        sub(p.position, player.position),
-                        player.radius + f64::from(w.damage.fuze_radius.max(0)),
-                    )
+            let mut first: Option<(f64, Option<Hit>)> = None;
+            if armed {
+                for (n, r) in rows.iter().enumerate() {
+                    let t = &r.target;
+                    if (p.incoming.is_some() || (is_gun(w) && p.owner != t.id))
+                        && p.guidance.as_ref().is_none_or(|f| f.eligible(w, t))
+                        && t.hp > 0
+                        && let Some(at) = if is_gun(w) {
+                            let previous = std::array::from_fn(|i| {
+                                p.previous[i] + t.position[i] - r.previous[i]
+                            });
+                            LocalizedDamage::contact(previous, p.position, t, 1.).map(|v| v.0)
+                        } else {
+                            segment_sphere(
+                                sub(p.previous, r.previous),
+                                sub(p.position, t.position),
+                                t.radius + f64::from(w.damage.fuze_radius.max(0)),
+                            )
+                        }
+                        && first.is_none_or(|f| at < f.0)
+                    {
+                        first = Some((at, Some(Hit::Ownship(n))));
+                    }
                 }
-            {
-                first = Some((at, Some(usize::MAX)));
             }
-            if armed && (!p.incoming || is_gun(w)) {
+            if armed && (p.incoming.is_none() || is_gun(w)) {
                 for (i, t) in self
                     .targets
                     .iter()
@@ -3146,7 +3533,7 @@ impl State {
                     if let Some(at) = at
                         && first.is_none_or(|f| at < f.0)
                     {
-                        first = Some((at, Some(i)));
+                        first = Some((at, Some(Hit::Target(i))));
                     }
                 }
             }
@@ -3160,54 +3547,58 @@ impl State {
             if let Some((at, target)) = first {
                 let position =
                     std::array::from_fn(|i| p.previous[i] + (p.position[i] - p.previous[i]) * at);
-                if target == Some(usize::MAX) {
+                if let Some(Hit::Ownship(n)) = target {
+                    let r = &rows[n];
+                    let own = &ships[r.index];
                     let deception = super::systems::deception_chance(
-                        self.config.ecm,
+                        own.config.ecm,
                         w.seeker.signature,
-                        launcher.jammer && !self.ecm_failed,
+                        r.launcher.jammer && !own.ecm_failed,
                     );
                     if deception != 0
                         && i32::from(draw(&mut self.rng, 100))
                             >= super::systems::hit_chance(100, deception)
                     {
                         self.ledger.resolve(p.id, Resolution::Jammed);
-                        events.push(Event::Defeated(0));
+                        events.push(Event::Defeated(r.target.id));
                     } else {
                         let base = projectile_damage(
                             p,
                             w,
-                            i32::from(w.damage.by_class[damage_class(self.config.target_category)]),
+                            i32::from(w.damage.by_class[damage_class(own.config.target_category)]),
                         ) as u16;
                         let amount =
                             super::systems::damage_amount(base, 100, draw(&mut self.rng, 40) as u8);
                         self.ledger
                             .resolve(p.id, Resolution::Hit(u32::try_from(amount).unwrap_or(0)));
                         let previous = std::array::from_fn(|i| {
-                            p.previous[i] + player.position[i] - previous_player[i]
+                            p.previous[i] + r.target.position[i] - r.previous[i]
                         });
                         let section =
-                            LocalizedDamage::section_segment(previous, p.position, &player);
-                        player_hits.push((amount, section, is_gun(w), p.owner, w.flags));
+                            LocalizedDamage::section_segment(previous, p.position, &r.target);
+                        ownship_hits.push((n, amount, section, is_gun(w), p.owner, w.flags));
                         impacts.push((position, EffectKind::Hit, w.effects.object_explosion, 0));
                         if !is_gun(w) {
                             events.push(Event::Jolt(Jolt {
                                 target: None,
                                 from: position,
                                 strength: f64::from(
-                                    w.damage.by_class[damage_class(self.config.target_category)],
+                                    w.damage.by_class[damage_class(own.config.target_category)],
                                 ) / 100.,
                             }));
                         }
                     }
                     return false;
                 }
-                if let Some(i) = target {
+                if let Some(Hit::Target(i)) = target {
                     let t = &mut self.targets[i];
-                    let deception = super::systems::deception_chance(
-                        self.config.ecm,
-                        w.seeker.signature,
-                        self.target_jammer && !self.ground_bounds.contains_key(&t.id),
-                    );
+                    let deception = fixture_ecm.map_or(0, |ecm| {
+                        super::systems::deception_chance(
+                            ecm,
+                            w.seeker.signature,
+                            self.target_jammer && !self.ground_bounds.contains_key(&t.id),
+                        )
+                    });
                     if deception != 0
                         && i32::from(draw(&mut self.rng, 100))
                             >= super::systems::hit_chance(100, deception)
@@ -3252,12 +3643,12 @@ impl State {
                         applied,
                         hp_after: t.hp,
                     });
-                    // Only the player's own rounds move the player's score.
-                    // An AI aircraft killing another AI aircraft still raises
-                    // the hit and destroyed events the host needs for damage,
+                    // Only an ownship's own rounds move its score. An AI
+                    // aircraft killing another AI aircraft still raises the
+                    // hit and destroyed events the host needs for damage,
                     // debris and effects.
-                    if p.owner == PLAYER_OWNER {
-                        self.hits += 1;
+                    if by_ownship {
+                        scored.push((p.owner, false));
                     }
                     self.ledger
                         .resolve(p.id, Resolution::Hit(u32::try_from(applied).unwrap_or(0)));
@@ -3276,8 +3667,8 @@ impl State {
                         destroyed: t.hp == 0,
                     });
                     if t.hp == 0 {
-                        if p.owner == PLAYER_OWNER {
-                            self.kills += 1;
+                        if by_ownship {
+                            scored.push((p.owner, true));
                         }
                         self.ledger.kill(credit);
                         events.push(Event::Destroyed(t.id));
@@ -3316,36 +3707,45 @@ impl State {
         for strike in strikes {
             self.strike(strike);
         }
+        for (owner, kill) in scored {
+            if let Some(own) = ships.iter_mut().find(|o| o.aircraft == owner) {
+                if kill {
+                    own.kills += 1;
+                } else {
+                    own.hits += 1;
+                }
+            }
+        }
         // Invulnerable: hits still show their impact effect but do no damage.
         if self.cheats.invulnerable() {
-            player_hits.clear();
+            ownship_hits.clear();
         }
-        for (amount, section, direct_gun, owner, weapon_flags) in player_hits {
-            self.player_localized_damage
-                .record(section, amount, self.config.damage_capacity);
+        for (n, amount, section, direct_gun, owner, weapon_flags) in ownship_hits {
+            let own = &mut ships[rows[n].index];
+            own.localized_damage
+                .record(section, amount, own.config.damage_capacity);
             // Normal damage takes hit points only; the pilot-kill and
             // heavy core hits belong to Realistic.
             let lethal = direct_gun && self.cheats.system_damage();
-            if lethal && section == DamageSection::Cockpit && self.player_hp > 0 {
+            if lethal && section == DamageSection::Cockpit && own.hp > 0 {
                 events.push(Event::PilotKilled);
             }
             let amount = if lethal
                 && (section == DamageSection::Cockpit
-                    || (section == DamageSection::Core
-                        && amount >= self.config.damage_capacity / 2))
+                    || (section == DamageSection::Core && amount >= own.config.damage_capacity / 2))
             {
-                self.player_hp
+                own.hp
             } else {
                 amount
             };
-            let alive = self.player_hp > 0;
-            self.apply_player_damage(amount, &mut events);
+            let alive = own.hp > 0;
+            self.damage_ownship(own, amount, &mut events);
             if alive && amount > 0 {
                 self.strike(Strike {
                     owner,
                     victim: None,
                     weapon_flags,
-                    destroyed: self.player_hp == 0,
+                    destroyed: own.hp == 0,
                 });
             }
         }
@@ -3364,16 +3764,19 @@ impl State {
                 Kind::Aircraft,
             ));
         }
-        let falling_player = self.player_hp == 0
-            && launcher.position[1] > ground(launcher.position[0], launcher.position[2]);
-        if !self.player_explosion_reported
-            && self.player_hp <= self.config.damage_capacity / 2
-            && ((launcher.alive && self.player_hp > 0) || falling_player)
-        {
-            sources.push((
-                std::array::from_fn(|i| launcher.position[i] - launcher.basis.forward[i] * 15.),
-                Kind::Aircraft,
-            ));
+        for r in &rows {
+            let (own, launcher) = (&ships[r.index], r.launcher);
+            let falling = own.hp == 0
+                && launcher.position[1] > ground(launcher.position[0], launcher.position[2]);
+            if !own.explosion_reported
+                && own.hp <= own.config.damage_capacity / 2
+                && ((launcher.alive && own.hp > 0) || falling)
+            {
+                sources.push((
+                    std::array::from_fn(|i| launcher.position[i] - launcher.basis.forward[i] * 15.),
+                    Kind::Aircraft,
+                ));
+            }
         }
         // A burning crash site's column rises from just above its fire.
         sources.extend(
@@ -3433,77 +3836,98 @@ impl State {
                 }
             }
         }
-        if self.player_hp == 0
-            && !self.player_explosion_reported
-            && self.player_localized_damage.structural_section.is_some()
-            && !self.player_fragment_released
-        {
-            self.player_fragment_released = true;
-            let variant = super::debris::damage_variant(
-                self.config.aircraft,
-                self.player_localized_damage.structural_section.unwrap() as usize,
-            );
-            if self.debris.len() < super::debris::MAX_PIECES
-                && let Some(variant) = variant
+        for r in &rows {
+            let (own, launcher) = (&mut ships[r.index], r.launcher);
+            if own.hp == 0
+                && !own.explosion_reported
+                && own.localized_damage.structural_section.is_some()
+                && !own.fragment_released
             {
-                self.debris.push(super::debris::Piece::new(
-                    0,
-                    variant,
-                    launcher.position,
-                    launcher.velocity,
-                    launcher.basis,
-                    self.config.fragment_offsets[variant],
-                ));
+                own.fragment_released = true;
+                let variant = super::debris::damage_variant(
+                    own.config.aircraft,
+                    own.localized_damage.structural_section.unwrap() as usize,
+                );
+                if self.debris.len() < super::debris::MAX_PIECES
+                    && let Some(variant) = variant
+                {
+                    self.debris.push(super::debris::Piece::new(
+                        own.aircraft,
+                        variant,
+                        launcher.position,
+                        launcher.velocity,
+                        launcher.basis,
+                        own.config.fragment_offsets[variant],
+                    ));
+                }
             }
         }
-        let snapshots = self.missile_snapshots(launcher);
-        let heading_deg = launcher.basis.forward[0]
-            .atan2(launcher.basis.forward[2])
-            .to_degrees();
-        let pitch_deg = launcher.basis.forward[1].clamp(-1., 1.).asin().to_degrees();
-        self.missile_threats.observe(
-            self.tick,
-            super::threats::Receiver {
-                id: PLAYER_OWNER,
-                position: launcher.position,
-                velocity: launcher.velocity,
-                heading_deg,
-                pitch_deg,
-                skill: crate::ai::Experience::Ace,
-                rwr_operating: launcher.alive && !self.rwr_failed,
-                visual_operating: launcher.alive && !self.visual_failed,
-                visibility_limit_ft: Some(5. * missiles::NMI),
-            },
-            &snapshots,
-            |from, to| !obscured(from, to),
-        );
-        if !self.cheats.ignore_midair_collisions {
-            self.midair_collisions(launcher, &mut events);
+        let launchers: Vec<(u32, Launcher)> =
+            rows.iter().map(|r| (r.target.id, r.launcher)).collect();
+        let snapshots = self.snapshots(&ships, &launchers);
+        for r in &rows {
+            let (own, launcher) = (&mut ships[r.index], r.launcher);
+            let heading_deg = launcher.basis.forward[0]
+                .atan2(launcher.basis.forward[2])
+                .to_degrees();
+            let pitch_deg = launcher.basis.forward[1].clamp(-1., 1.).asin().to_degrees();
+            own.missile_threats.observe(
+                self.tick,
+                super::threats::Receiver {
+                    id: own.aircraft,
+                    position: launcher.position,
+                    velocity: launcher.velocity,
+                    heading_deg,
+                    pitch_deg,
+                    skill: crate::ai::Experience::Ace,
+                    rwr_operating: launcher.alive && !own.rwr_failed,
+                    visual_operating: launcher.alive && !own.visual_failed,
+                    visibility_limit_ft: Some(5. * missiles::NMI),
+                },
+                &snapshots,
+                |from, to| !obscured(from, to),
+            );
         }
+        if !self.cheats.ignore_midair_collisions {
+            self.midair_collisions(&mut ships, &rows, &mut events);
+        }
+        self.ownships = ships;
         events
     }
     /// Aircraft whose paths came within their combined radii this tick
     /// collided. A midair collision destroys every aircraft involved,
     /// Invulnerable or not (John, 2026-09-23). No kill is credited.
-    fn midair_collisions(&mut self, launcher: Launcher, events: &mut Vec<Event>) {
-        const PLAYER: usize = usize::MAX;
-        let mut bodies: Vec<(usize, Vector, Vector, f64)> = self
+    fn midair_collisions(
+        &mut self,
+        ships: &mut [Ownship],
+        rows: &[OwnRow],
+        events: &mut Vec<Event>,
+    ) {
+        // Targets first, then the ownships in aircraft id order.
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        enum Body {
+            Target(usize),
+            Ownship(usize),
+        }
+        let mut bodies: Vec<(Body, Vector, Vector, f64)> = self
             .targets
             .iter()
             .enumerate()
             .filter(|(_, t)| t.role == TargetRole::Aircraft && t.airborne && t.hp > 0)
-            .map(|(i, t)| (i, t.position, t.velocity, t.radius))
+            .map(|(i, t)| (Body::Target(i), t.position, t.velocity, t.radius))
             .collect();
-        if launcher.alive && self.player_hp > 0 {
-            bodies.push((
-                PLAYER,
-                launcher.position,
-                launcher.velocity,
-                AIRCRAFT_RADIUS_FT,
-            ));
+        for (n, r) in rows.iter().enumerate() {
+            if r.launcher.alive && ships[r.index].hp > 0 {
+                bodies.push((
+                    Body::Ownship(n),
+                    r.launcher.position,
+                    r.launcher.velocity,
+                    AIRCRAFT_RADIUS_FT,
+                ));
+            }
         }
-        // Invulnerable spares the player; whatever it hits is still destroyed.
-        let player_spared = self.cheats.invulnerable();
+        // Invulnerable spares the ownships; whatever they hit is still destroyed.
+        let spared = self.cheats.invulnerable();
         let mut struck = std::collections::BTreeSet::new();
         let mut blasts = Vec::new();
         for (n, a) in bodies.iter().enumerate() {
@@ -3516,18 +3940,21 @@ impl State {
                 }
             }
         }
-        for index in struck {
-            if index == PLAYER && player_spared {
-                continue;
-            } else if index == PLAYER {
-                self.player_hp = 0;
-                self.player_damage = self.player_damage.max(self.config.damage_capacity);
-                self.release();
-                events.push(Event::PlayerDestroyed);
-            } else {
-                let t = &mut self.targets[index];
-                t.hp = 0;
-                events.push(Event::Destroyed(t.id));
+        for body in struck {
+            match body {
+                Body::Ownship(_) if spared => continue,
+                Body::Ownship(n) => {
+                    let own = &mut ships[rows[n].index];
+                    own.hp = 0;
+                    own.damage = own.damage.max(own.config.damage_capacity);
+                    own.release();
+                    events.push(Event::PlayerDestroyed);
+                }
+                Body::Target(index) => {
+                    let t = &mut self.targets[index];
+                    t.hp = 0;
+                    events.push(Event::Destroyed(t.id));
+                }
             }
         }
         for blast in blasts {
@@ -3864,21 +4291,42 @@ mod tests {
     fn player_wreck_keeps_smoking_until_impact_or_airburst_then_puffs_fade() {
         use super::super::smoke::Kind;
         let mut s = fixture(false);
-        s.player_hp = 0;
+        s.own_mut().hp = 0;
         let mut l = launcher();
         l.alive = false;
         for tick in 0..120 {
             l.position[1] = 5000. - f64::from(tick);
-            s.step(false, l, |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
         }
         assert_eq!(s.smoke.puffs.len(), 10);
         assert!(s.smoke.puffs.iter().all(|p| p.kind == Kind::Aircraft));
         let mut airburst = s.clone();
-        airburst.player_airburst(l.position);
-        s.player_ground_impact([l.position[0], 0., l.position[2]], false);
+        airburst.ownship_airburst(0, l.position);
+        s.ownship_ground_impact(0, [l.position[0], 0., l.position[2]], false);
         for _ in 0..120 {
-            s.step(false, l, |_, _| 0.);
-            airburst.step(false, l, |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
+            airburst.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
         }
         let wreck_puffs = |state: &State| {
             state
@@ -3903,14 +4351,28 @@ mod tests {
         assert!(s.smoke.puffs.iter().any(|p| p.kind == Kind::Burning));
         assert!(airburst.smoke.puffs.iter().all(|p| p.kind != Kind::Burning));
         for _ in 0..960 {
-            s.step(false, l, |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
         }
         assert_eq!(wreck_puffs(&s), 0);
         let mut grounded = fixture(false);
-        grounded.player_hp = 0;
+        grounded.own_mut().hp = 0;
         l.position[1] = 0.;
         for _ in 0..24 {
-            grounded.step(false, l, |_, _| 0.);
+            grounded.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
         }
         assert!(grounded.smoke.puffs.is_empty());
     }
@@ -3950,7 +4412,7 @@ mod tests {
                     let mut state = fixture(false);
                     let mut gun = super::super::gunsight::tests::weapon();
                     gun.source = "M61.JT".into();
-                    state.config.stations[0].weapon = gun.clone();
+                    state.own_mut().config.stations[0].weapon = gun.clone();
                     let mut own = launcher();
                     own.radar = false;
                     let observed = gunnery::Target {
@@ -3980,10 +4442,10 @@ mod tests {
                         position: [10000., 1000., 0.],
                         ..own
                     };
-                    state.command(Command::Incoming, player);
+                    state.command(0, Command::Incoming, player);
                     let p = &mut state.projectiles[0];
                     p.owner = 7;
-                    p.incoming = incoming;
+                    p.incoming = incoming.then_some(0);
                     p.position = own.position;
                     p.previous = own.position;
                     p.direction = own.basis.forward;
@@ -3991,7 +4453,14 @@ mod tests {
                     // also receive dispersion, already covered separately.
                     p.age = 1;
                     for _ in 0..240 {
-                        state.step(false, player, |_, _| 0.);
+                        state.step(
+                            &[OwnshipInput {
+                                aircraft: 0,
+                                held: false,
+                                launcher: player,
+                            }],
+                            |_, _| 0.,
+                        );
                     }
                     assert_eq!(state.targets[0].hp, 1000, "shooter, {velocity:?}");
                     assert_eq!(
@@ -4007,19 +4476,26 @@ mod tests {
     #[test]
     fn ai_gun_can_hit_player_even_when_aim_metadata_names_another_aircraft() {
         let mut state = fixture(false);
-        state.config.stations[0].weapon.source = "M61.JT".into();
+        state.own_mut().config.stations[0].weapon.source = "M61.JT".into();
         let own = launcher();
-        state.command(Command::Incoming, own);
+        state.command(0, Command::Incoming, own);
         let p = &mut state.projectiles[0];
         p.owner = 7;
-        p.incoming = false;
+        p.incoming = None;
         p.position = [0., 1000., 100.];
         p.previous = p.position;
-        let before = state.player_hp;
+        let before = state.own().hp;
         for _ in 0..120 {
-            state.step(false, own, |_, _| 0.);
+            state.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: own,
+                }],
+                |_, _| 0.,
+            );
         }
-        assert!(state.player_hp < before);
+        assert!(state.own().hp < before);
     }
 
     #[test]
@@ -4043,7 +4519,14 @@ mod tests {
         assert_eq!(explosions[1], blast::CRASH_WATER);
         let l = launcher();
         for _ in 0..600 {
-            s.step(false, l, |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
         }
         let column: Vec<_> = s
             .smoke
@@ -4054,7 +4537,14 @@ mod tests {
         assert_eq!(column.len(), 50);
         assert!(column.iter().all(|p| p.position[1] >= 20.));
         for _ in 600..blast::CRASH_TICKS {
-            s.step(false, l, |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
         }
         assert!(s.marks.is_empty());
     }
@@ -4070,7 +4560,14 @@ mod tests {
         assert_eq!(s.marks.len(), MAX_CRATERS);
         assert_eq!(s.marks[0].position[0], 1.);
         for _ in 0..1000 {
-            s.step(false, launcher(), |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: launcher(),
+                }],
+                |_, _| 0.,
+            );
         }
         assert_eq!(s.marks.len(), MAX_CRATERS);
         assert!(s.marks.iter().all(|m| m.kind == MarkKind::Crater(9)));
@@ -4082,9 +4579,9 @@ mod tests {
         let mut s = fixture(false);
         s.cheats.damage = damage;
         // Synthetic gun data uses the exact reviewed gun identity for contact classification.
-        s.config.stations[0].weapon.source = AircraftId::F18.gun().into();
+        s.own_mut().config.stations[0].weapon.source = AircraftId::F18.gun().into();
         let l = launcher();
-        s.command(Command::Incoming, l);
+        s.command(0, Command::Incoming, l);
         let p = s.projectiles.last_mut().unwrap();
         p.position = std::array::from_fn(|i| {
             l.position[i] + l.basis.forward[i] * 100. + l.basis.up[i] * 11.
@@ -4093,8 +4590,15 @@ mod tests {
         p.age = 1;
         let mut events = Vec::new();
         for _ in 0..120 {
-            events.extend(s.step(false, l, |_, _| 0.));
-            if s.player_hp == 0 {
+            events.extend(s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            ));
+            if s.own().hp == 0 {
                 break;
             }
         }
@@ -4105,7 +4609,7 @@ mod tests {
         let (s, events) = cockpit_gun_hit(crate::cheats::Damage::Realistic);
         assert!(events.contains(&Event::PilotKilled));
         assert!(events.contains(&Event::PlayerDestroyed));
-        assert_eq!(s.player_damage_section(), None);
+        assert_eq!(s.own().damage_section(), None);
     }
     #[test]
     fn normal_damage_cockpit_hit_takes_hit_points_without_killing_the_pilot() {
@@ -4113,7 +4617,7 @@ mod tests {
         assert!(!events.contains(&Event::PilotKilled));
         assert!(!events.contains(&Event::SubsystemDamaged(26)));
         assert!(events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))));
-        assert!(s.player_hp < s.config.damage_capacity);
+        assert!(s.own().hp < s.own().config.damage_capacity);
     }
     #[test]
     fn player_impact_explosion_cleans_up_once_and_excludes_later_airbursts() {
@@ -4127,7 +4631,7 @@ mod tests {
             [0.; 3],
         ));
         assert_eq!(
-            s.player_ground_impact([0., 0., 0.], false),
+            s.ownship_ground_impact(0, [0., 0., 0.], false),
             Some(Event::PlayerGroundImpact)
         );
         assert!(s.debris.is_empty());
@@ -4138,8 +4642,8 @@ mod tests {
                 .count(),
             1
         );
-        assert_eq!(s.player_ground_impact([0., 0., 0.], false), None);
-        assert_eq!(s.player_airburst([0., 0., 0.]), None);
+        assert_eq!(s.ownship_ground_impact(0, [0., 0., 0.], false), None);
+        assert_eq!(s.ownship_airburst(0, [0., 0., 0.]), None);
     }
     #[test]
     fn wreck_airburst_removes_target_and_fragments_without_awarding_another_kill() {
@@ -4173,7 +4677,14 @@ mod tests {
         let mut exploded = false;
         for _ in 0..240 {
             bursts += s
-                .step(false, launcher(), |_, _| 0.)
+                .step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: false,
+                        launcher: launcher(),
+                    }],
+                    |_, _| 0.,
+                )
                 .iter()
                 .filter(|e| **e == Event::Airburst(77))
                 .count();
@@ -4181,42 +4692,52 @@ mod tests {
         }
         assert_eq!(bursts, 1);
         assert!(!s.targets[0].airborne);
-        assert_eq!(s.kills, 0);
+        assert_eq!(s.own().kills, 0);
         assert!(s.debris.iter().all(|p| p.owner != 77));
         assert!(exploded);
         // An airburst leaves no crash site.
         assert!(s.marks.is_empty());
-        assert_eq!(s.player_airburst([0., 5000., 0.]), Some(Event::Airburst(0)));
-        assert_eq!(s.player_airburst([0., 5000., 0.]), None);
+        assert_eq!(
+            s.ownship_airburst(0, [0., 5000., 0.]),
+            Some(Event::Airburst(0))
+        );
+        assert_eq!(s.ownship_airburst(0, [0., 5000., 0.]), None);
     }
     #[test]
     fn heavy_enemy_hit_degrades_components_without_detaching_a_live_nose() {
         let mut s = fixture(false);
         s.cheats.damage = crate::cheats::Damage::Realistic;
-        s.config.damage_capacity = 100;
-        s.player_hp = 100;
-        s.config.system_damage = [0; 45];
+        s.own_mut().config.damage_capacity = 100;
+        s.own_mut().hp = 100;
+        s.own_mut().config.system_damage = [0; 45];
         for index in [19, 5, 14, 12] {
-            s.config.system_damage[index] = 0x11;
+            s.own_mut().config.system_damage[index] = 0x11;
         }
         let mut events = Vec::new();
         // A real incoming projectile sweeps the ownship nose. The zero seed
         // fixes the damage draw at its lower boundary for this synthetic test.
-        let raw = if is_gun(&s.config.stations[0].weapon) {
+        let raw = if is_gun(&s.own().config.stations[0].weapon) {
             345
         } else {
             115
         };
-        s.config.stations[0].weapon.damage.by_class = [raw; 5];
+        s.own_mut().config.stations[0].weapon.damage.by_class = [raw; 5];
         s.rng = 0;
-        s.command(Command::Incoming, launcher());
+        s.command(0, Command::Incoming, launcher());
         for _ in 0..720 {
-            events.extend(s.step(false, launcher(), |_, _| 0.));
-            if s.player_hp < 100 {
+            events.extend(s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: launcher(),
+                }],
+                |_, _| 0.,
+            ));
+            if s.own().hp < 100 {
                 break;
             }
         }
-        assert_eq!(s.player_hp, 8);
+        assert_eq!(s.own().hp, 8);
         let mut components = crate::aircraft_systems::Systems::default();
         for event in events {
             if let Event::SubsystemDamaged(index) = event {
@@ -4224,7 +4745,7 @@ mod tests {
             }
         }
         for index in [19, 5, 14, 12] {
-            assert_eq!(s.subsystem_counts[index], 1);
+            assert_eq!(s.own().subsystem_counts[index], 1);
         }
         assert_eq!(components.power_available(), 0.75);
         assert_eq!(components.oil_pressure(), 0.5);
@@ -4234,17 +4755,45 @@ mod tests {
         }
         assert!(components.fluids.hydraulic < 1.);
         assert!(components.engine.temperature > 0.);
-        s.step(false, launcher(), |_, _| 0.);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: launcher(),
+            }],
+            |_, _| 0.,
+        );
         assert!(s.debris.is_empty());
-        s.apply_player_damage(7, &mut Vec::new());
-        s.step(false, launcher(), |_, _| 0.);
-        assert_eq!(s.player_hp, 1);
+        s.damage_own(7, &mut Vec::new());
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: launcher(),
+            }],
+            |_, _| 0.,
+        );
+        assert_eq!(s.own().hp, 1);
         assert!(s.debris.is_empty());
-        s.apply_player_damage(1, &mut Vec::new());
-        s.step(false, launcher(), |_, _| 0.);
-        assert_eq!(s.player_hp, 0);
+        s.damage_own(1, &mut Vec::new());
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: launcher(),
+            }],
+            |_, _| 0.,
+        );
+        assert_eq!(s.own().hp, 0);
         assert_eq!(s.debris.len(), 1);
-        s.step(false, launcher(), |_, _| 0.);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: launcher(),
+            }],
+            |_, _| 0.,
+        );
         assert_eq!(s.debris.len(), 1);
     }
     #[test]
@@ -4252,55 +4801,62 @@ mod tests {
         let run = |damage| {
             let mut s = fixture(false);
             s.cheats.damage = damage;
-            s.config.system_damage = [0x1f; 45];
-            s.config.damage_capacity = 200;
-            s.player_hp = 200;
+            s.own_mut().config.system_damage = [0x1f; 45];
+            s.own_mut().config.damage_capacity = 200;
+            s.own_mut().hp = 200;
             let mut events = Vec::new();
             for _ in 0..30 {
-                s.apply_player_damage(4, &mut events);
+                s.damage_own(4, &mut events);
             }
-            assert_eq!(s.player_hp, 80);
+            assert_eq!(s.own().hp, 80);
             s
         };
         let normal = run(crate::cheats::Damage::Normal);
-        assert_eq!(normal.subsystem_counts, [0; 45]);
-        assert_eq!(normal.last_subsystem, None);
+        assert_eq!(normal.own().subsystem_counts, [0; 45]);
+        assert_eq!(normal.own().last_subsystem, None);
         let realistic = run(crate::cheats::Damage::Realistic);
-        assert!(realistic.subsystem_counts.iter().any(|n| *n > 0));
+        assert!(realistic.own().subsystem_counts.iter().any(|n| *n > 0));
     }
     #[test]
     fn rwr_damage_is_a_receiver_fault_and_systems_destruction_is_once_only() {
         let mut s = fixture(false);
         s.cheats.damage = crate::cheats::Damage::Realistic;
-        s.config.rwr_hardpoint = Some(4);
-        s.config.system_damage = [0; 45];
-        s.config.system_damage[40] = 0x1f;
-        s.player_hp = 10000;
+        s.own_mut().config.rwr_hardpoint = Some(4);
+        s.own_mut().config.system_damage = [0; 45];
+        s.own_mut().config.system_damage[40] = 0x1f;
+        s.own_mut().hp = 10000;
         let mut events = Vec::new();
         for _ in 0..30 {
-            s.apply_player_damage(4, &mut events);
+            s.damage_own(4, &mut events);
         }
-        assert_eq!(s.subsystem_counts[40], 1);
-        assert!(s.rwr_failed);
-        assert!(!s.radar_failed);
-        let reset = State::new(s.config.clone(), true).unwrap();
-        assert!(!reset.rwr_failed);
-        assert_eq!(s.systems_destroyed(), Some(Event::PlayerDestroyed));
-        assert_eq!(s.systems_destroyed(), None);
-        assert_eq!(s.player_hp, 0);
+        assert_eq!(s.own().subsystem_counts[40], 1);
+        assert!(s.own().rwr_failed);
+        assert!(!s.own().radar_failed);
+        let reset = State::new(s.own().config.clone(), true).unwrap();
+        assert!(!reset.own().rwr_failed);
+        assert_eq!(s.systems_destroyed(0), Some(Event::PlayerDestroyed));
+        assert_eq!(s.systems_destroyed(0), None);
+        assert_eq!(s.own().hp, 0);
     }
     #[test]
     fn player_selection_wraps_through_nav_and_arms_only_weapons() {
         let initial = fixture(false);
-        let mut config = initial.configuration().clone();
+        let mut config = initial.own().configuration().clone();
         config.stations.push(config.stations[0].clone());
         let mut state = State::new(config, true).unwrap();
         let l = launcher();
-        state.command(Command::SelectNav, l);
-        assert!(!state.armed);
+        state.command(0, Command::SelectNav, l);
+        assert!(!state.own().armed);
         assert!(
             !state
-                .step(true, l, |_, _| 0.)
+                .step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: true,
+                        launcher: l
+                    }],
+                    |_, _| 0.
+                )
                 .iter()
                 .any(|e| matches!(e, Event::Fired(_)))
         );
@@ -4312,8 +4868,8 @@ mod tests {
             (Command::PreviousSelection, 0, true),
             (Command::PreviousSelection, 0, false),
         ] {
-            state.command(command, l);
-            assert_eq!((state.selected, state.armed), (selected, armed));
+            state.command(0, command, l);
+            assert_eq!((state.own().selected, state.own().armed), (selected, armed));
         }
     }
 
@@ -4381,12 +4937,19 @@ mod tests {
     fn a_dropped_target_leaves_the_hud_unless_easy_targeting_keeps_it() {
         let mut state = fixture(true);
         let ownship = launcher();
-        state.range_target(ownship);
+        state.range_target(0, ownship);
         for _ in 0..120 {
-            state.step(false, ownship, |_, _| 0.);
+            state.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: ownship,
+                }],
+                |_, _| 0.,
+            );
         }
-        state.designate_next(true);
-        let id = state.designated().expect("fixture contact");
+        state.designate_next(0, true);
+        let id = state.own_view().designated().expect("fixture contact");
         state
             .targets
             .iter_mut()
@@ -4394,14 +4957,28 @@ mod tests {
             .unwrap()
             .position = [0., 1000., -5000.];
         for _ in 0..120 {
-            state.step(false, ownship, |_, _| 0.);
+            state.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: ownship,
+                }],
+                |_, _| 0.,
+            );
         }
-        assert_eq!(state.designated(), None);
-        assert!(state.display_target().is_none());
+        assert_eq!(state.own_view().designated(), None);
+        assert!(state.own_view().display_target().is_none());
         // Turning Easy targeting on later does not bring it back.
         state.cheats.easy_targeting = true;
-        state.step(false, ownship, |_, _| 0.);
-        assert!(state.display_target().is_none());
+        state.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: ownship,
+            }],
+            |_, _| 0.,
+        );
+        assert!(state.own_view().display_target().is_none());
     }
     #[test]
     fn views_keep_a_dropped_target_only_within_visual_range() {
@@ -4414,26 +4991,40 @@ mod tests {
         };
         let select = |state: &mut State| {
             for _ in 0..120 {
-                state.step(false, ownship, |_, _| 0.);
+                state.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: false,
+                        launcher: ownship,
+                    }],
+                    |_, _| 0.,
+                );
             }
-            state.designate_next(true);
-            state.designated().expect("fixture contact")
+            state.designate_next(0, true);
+            state.own_view().designated().expect("fixture contact")
         };
         let run = |state: &mut State, launcher: Launcher| {
             for _ in 0..120 {
-                state.step(false, launcher, |_, _| 0.);
+                state.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: false,
+                        launcher,
+                    }],
+                    |_, _| 0.,
+                );
             }
         };
-        state.range_target(ownship);
+        state.range_target(0, ownship);
         let id = select(&mut state);
         // Radar off: the selection and HUD square drop, the views keep it.
         run(&mut state, blind);
-        assert_eq!(state.designated(), None);
-        assert!(state.display_target().is_none());
-        assert!(state.weapon_observation(blind).is_none());
-        assert_eq!(state.view_target().map(|t| t.id), Some(id));
-        state.command(Command::ClearDesignation, blind);
-        assert!(state.view_target().is_none());
+        assert_eq!(state.own_view().designated(), None);
+        assert!(state.own_view().display_target().is_none());
+        assert!(state.own_view().weapon_observation(blind).is_none());
+        assert_eq!(state.own_view().view_target().map(|t| t.id), Some(id));
+        state.command(0, Command::ClearDesignation, blind);
+        assert!(state.own_view().view_target().is_none());
         // Behind the pilot but inside visual range it stays; past the 10 nmi
         // range it is gone, and coming back does not restore it.
         assert_eq!(select(&mut state), id);
@@ -4448,24 +5039,31 @@ mod tests {
             run(state, blind);
         };
         place(&mut state, [0., 1000., -5000.]);
-        assert_eq!(state.view_target().map(|t| t.id), Some(id));
+        assert_eq!(state.own_view().view_target().map(|t| t.id), Some(id));
         place(&mut state, [0., 1000., -70_000.]);
-        assert!(state.view_target().is_none());
+        assert!(state.own_view().view_target().is_none());
         place(&mut state, [0., 1000., 3000.]);
-        assert!(state.view_target().is_none());
+        assert!(state.own_view().view_target().is_none());
     }
     #[test]
     fn easy_targeting_keeps_the_selection_off_scope_without_weapon_support() {
         let mut state = fixture(true);
         state.cheats.easy_targeting = true;
         let ownship = launcher();
-        state.range_target(ownship);
+        state.range_target(0, ownship);
         for _ in 0..120 {
-            state.step(false, ownship, |_, _| 0.);
+            state.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: ownship,
+                }],
+                |_, _| 0.,
+            );
         }
-        state.designate_next(true);
-        let id = state.designated().expect("fixture contact");
-        assert_eq!(state.display_target().map(|t| t.id), Some(id));
+        state.designate_next(0, true);
+        let id = state.own_view().designated().expect("fixture contact");
+        assert_eq!(state.own_view().display_target().map(|t| t.id), Some(id));
         state
             .targets
             .iter_mut()
@@ -4473,26 +5071,41 @@ mod tests {
             .unwrap()
             .position = [0., 1000., -5000.];
         for _ in 0..120 {
-            state.step(false, ownship, |_, _| 0.);
+            state.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: ownship,
+                }],
+                |_, _| 0.,
+            );
         }
-        assert_eq!(state.designated(), Some(id), "radar keeps it set");
-        assert!(state.sensors.contact(id).is_none());
-        assert!(state.weapon_observation(ownship).is_none());
-        assert_eq!(state.display_target().map(|t| t.id), Some(id));
+        assert_eq!(
+            state.own_view().designated(),
+            Some(id),
+            "radar keeps it set"
+        );
+        assert!(state.own().sensors.contact(id).is_none());
+        assert!(state.own_view().weapon_observation(ownship).is_none());
+        assert_eq!(state.own_view().display_target().map(|t| t.id), Some(id));
         state.targets.iter_mut().find(|t| t.id == id).unwrap().hp = 0;
-        assert!(state.display_target().is_none());
+        assert!(state.own_view().display_target().is_none());
         state.targets.iter_mut().find(|t| t.id == id).unwrap().hp = 10;
-        state.command(Command::ClearDesignation, ownship);
-        assert!(state.display_target().is_none());
+        state.command(0, Command::ClearDesignation, ownship);
+        assert!(state.own_view().display_target().is_none());
     }
 
     #[test]
     fn guns_take_exact_integer_third_while_missiles_keep_damage() {
-        let mut gun = fixture(false).configuration().stations[0].weapon.clone();
+        let mut gun = fixture(false).own().configuration().stations[0]
+            .weapon
+            .clone();
         gun.source = "M61.JT".into();
         assert_eq!(scaled_weapon_damage(&gun, 11), 3);
         assert_eq!(scaled_weapon_damage(&gun, 2), 0);
-        let missile = fixture(true).configuration().stations[0].weapon.clone();
+        let missile = fixture(true).own().configuration().stations[0]
+            .weapon
+            .clone();
         assert_eq!(scaled_weapon_damage(&missile, 11), 11);
         let aircraft = target(1, [0.; 3], 20, 0x80);
         let mut surface = aircraft.clone();
@@ -4502,7 +5115,9 @@ mod tests {
     }
     #[test]
     fn gun_dispersion_is_bounded_normalized_symmetric_and_deterministic() {
-        let mut gun = fixture(false).configuration().stations[0].weapon.clone();
+        let mut gun = fixture(false).own().configuration().stations[0]
+            .weapon
+            .clone();
         gun.source = "M61.JT".into();
         let forward = [0., 0., 1.];
         let first = projectile_launch_direction(&gun, forward, 42, 7, 0);
@@ -4523,7 +5138,9 @@ mod tests {
         assert!(mean[1].abs() < 5e-5, "vertical bias {}", mean[1]);
         let expected_cos = (1. + GUN_DISPERSION_HALF_ANGLE.cos()) * 0.5;
         assert!((mean[2] - expected_cos).abs() < 2e-7);
-        let missile = fixture(true).configuration().stations[0].weapon.clone();
+        let missile = fixture(true).own().configuration().stations[0]
+            .weapon
+            .clone();
         assert_eq!(
             projectile_launch_direction(&missile, forward, 42, 7, 0),
             forward
@@ -4533,33 +5150,54 @@ mod tests {
     #[test]
     fn live_gun_release_applies_dispersion_once() {
         let mut s = fixture(false);
-        s.config.stations[0].weapon.source = "M61.JT".into();
+        s.own_mut().config.stations[0].weapon.source = "M61.JT".into();
         let launcher = launcher();
-        s.step(true, launcher, |_, _| 0.);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher,
+            }],
+            |_, _| 0.,
+        );
         let projectile = s.projectiles.first().expect("gun round was not released");
         let angle = dot(projectile.direction, launcher.basis.forward)
             .clamp(-1., 1.)
             .acos();
         assert!(angle > 0. && angle <= GUN_DISPERSION_HALF_ANGLE + 1e-12);
         let direction = projectile.direction;
-        s.step(false, launcher, |_, _| 0.);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher,
+            }],
+            |_, _| 0.,
+        );
         assert_eq!(s.projectiles[0].direction, direction);
     }
 
     #[test]
     fn physical_gun_rounds_are_evenly_paced_and_preserve_ammo_rate() {
         let mut s = fixture(false);
-        let w = &mut s.config.stations[0].weapon;
+        let w = &mut s.own_mut().config.stations[0].weapon;
         w.source = "M61.JT".into();
         w.burst.actual_rounds_per_game = 2;
         w.burst.game_rounds_in_burst = 4;
         w.burst.game_burst_t = 1;
-        s.ammo[0] = 1000;
+        s.own_mut().ammo[0] = 1000;
         let launcher = launcher();
         let mut fired_ticks = Vec::new();
         let mut tracers = 0;
         for tick in 0..120 {
-            let events = s.step(true, launcher, |_, _| -10000.);
+            let events = s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher,
+                }],
+                |_, _| -10000.,
+            );
             let fired = events
                 .iter()
                 .filter(|event| matches!(event, Event::Fired(0)))
@@ -4571,7 +5209,7 @@ mod tests {
             }
         }
         assert_eq!(fired_ticks.len(), 32);
-        assert_eq!(s.rounds(0), 968);
+        assert_eq!(s.own().rounds(0), 968);
         assert_eq!(tracers, 11);
         assert!(
             fired_ticks
@@ -4583,16 +5221,23 @@ mod tests {
     #[test]
     fn gun_cadence_keeps_fractional_rate_and_repress_phase() {
         let mut s = fixture(false);
-        let w = &mut s.config.stations[0].weapon;
+        let w = &mut s.own_mut().config.stations[0].weapon;
         w.source = "M61.JT".into();
         w.burst.actual_rounds_per_game = 3;
         w.burst.game_rounds_in_burst = 7;
         w.burst.game_burst_t = 2;
-        s.ammo[0] = 2000;
+        s.own_mut().ammo[0] = 2000;
         let launcher = launcher();
         let mut fired = 0;
         for _ in 0..1200 {
-            let events = s.step(true, launcher, |_, _| -10000.);
+            let events = s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher,
+                }],
+                |_, _| -10000.,
+            );
             let count = events
                 .iter()
                 .filter(|event| matches!(event, Event::Fired(0)))
@@ -4601,57 +5246,99 @@ mod tests {
             fired += count;
         }
         assert_eq!(fired, 420);
-        assert_eq!(s.rounds(0), 2000 - fired as u16);
-        assert_eq!(s.gun_cadence[0].ordinal, fired as u64);
+        assert_eq!(s.own().rounds(0), 2000 - fired as u16);
+        assert_eq!(s.own().gun_cadence[0].ordinal, fired as u64);
 
-        let before = s.shots;
-        s.release();
+        let before = s.own().shots;
+        s.release(0);
         for _ in 0..1 {
             assert!(
-                !s.step(false, launcher, |_, _| -10000.)
-                    .iter()
-                    .any(|event| matches!(event, Event::Fired(0)))
+                !s.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: false,
+                        launcher
+                    }],
+                    |_, _| -10000.
+                )
+                .iter()
+                .any(|event| matches!(event, Event::Fired(0)))
             );
         }
         let first = (0..120)
             .find(|_| {
-                s.step(true, launcher, |_, _| -10000.)
-                    .iter()
-                    .any(|event| matches!(event, Event::Fired(0)))
+                s.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: true,
+                        launcher,
+                    }],
+                    |_, _| -10000.,
+                )
+                .iter()
+                .any(|event| matches!(event, Event::Fired(0)))
             })
             .unwrap();
         assert!(first < 4);
-        assert_eq!(s.shots, before + 1);
+        assert_eq!(s.own().shots, before + 1);
 
         // A release shorter than the physical shot gap cannot accelerate fire.
         let mut s = fixture(false);
-        let w = &mut s.config.stations[0].weapon;
+        let w = &mut s.own_mut().config.stations[0].weapon;
         w.source = "M61.JT".into();
         w.burst.actual_rounds_per_game = 2;
         w.burst.game_rounds_in_burst = 4;
         w.burst.game_burst_t = 1;
         assert!(
-            s.step(true, launcher, |_, _| -10000.)
-                .contains(&Event::Fired(0))
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher
+                }],
+                |_, _| -10000.
+            )
+            .contains(&Event::Fired(0))
         );
-        s.release();
-        s.step(false, launcher, |_, _| -10000.);
+        s.release(0);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher,
+            }],
+            |_, _| -10000.,
+        );
         for _ in 0..2 {
             assert!(
-                !s.step(true, launcher, |_, _| -10000.)
-                    .contains(&Event::Fired(0))
+                !s.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: true,
+                        launcher
+                    }],
+                    |_, _| -10000.
+                )
+                .contains(&Event::Fired(0))
             );
         }
         assert!(
-            s.step(true, launcher, |_, _| -10000.)
-                .contains(&Event::Fired(0))
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher
+                }],
+                |_, _| -10000.
+            )
+            .contains(&Event::Fired(0))
         );
     }
 
     #[test]
     fn physical_round_damage_partitions_without_rounding_inflation() {
         let mut s = fixture(false);
-        let w = &mut s.config.stations[0].weapon;
+        let w = &mut s.own_mut().config.stations[0].weapon;
         w.source = "M61.JT".into();
         w.burst.actual_rounds_per_game = 2;
         let mut p = Projectile {
@@ -4662,7 +5349,7 @@ mod tests {
             motion: None,
             guidance_ticks: None,
             age: 0,
-            incoming: false,
+            incoming: None,
             station: 0,
             position: [0.; 3],
             previous: [0.; 3],
@@ -4683,12 +5370,22 @@ mod tests {
     #[test]
     fn station_cycle_discards_queued_gun_rounds() {
         let mut s = fixture(false);
-        s.config.stations[0].weapon.source = "M61.JT".into();
-        s.config.stations[0].weapon.burst.game_rounds_in_burst = 4;
-        s.step(true, launcher(), |_, _| -10000.);
-        assert!(s.gun_cadence[0].pending > 0);
-        s.select_next();
-        assert_eq!(s.gun_cadence[0].pending, 0);
+        s.own_mut().config.stations[0].weapon.source = "M61.JT".into();
+        s.own_mut().config.stations[0]
+            .weapon
+            .burst
+            .game_rounds_in_burst = 4;
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: launcher(),
+            }],
+            |_, _| -10000.,
+        );
+        assert!(s.own().gun_cadence[0].pending > 0);
+        s.own_mut().select_next();
+        assert_eq!(s.own().gun_cadence[0].pending, 0);
     }
 
     #[test]
@@ -4701,9 +5398,9 @@ mod tests {
         let launcher = launcher();
         for (number, id) in aircraft.into_iter().enumerate() {
             let mut state = fixture(false);
-            state.config.aircraft = id;
-            state.config.stations[0].weapon.source = id.gun().into();
-            let gun = &state.config.stations[0].weapon;
+            state.own_mut().config.aircraft = id;
+            state.own_mut().config.stations[0].weapon.source = id.gun().into();
+            let gun = &state.own().config.stations[0].weapon;
             assert!(is_gun(gun), "{} gun was not recognized", id.label());
             assert_eq!(scaled_weapon_damage(gun, 11), 3, "{} damage", id.label());
             let expected = projectile_launch_direction(
@@ -4731,8 +5428,15 @@ mod tests {
                 "{} dispersion angle {angle}",
                 id.label()
             );
-            state.shots = number as u32;
-            state.step(true, launcher, |_, _| 0.);
+            state.next_shot = number as u32;
+            state.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher,
+                }],
+                |_, _| 0.,
+            );
             assert_eq!(
                 state.projectiles[0].direction,
                 expected,
@@ -4740,7 +5444,9 @@ mod tests {
                 id.label()
             );
         }
-        let mut missile = fixture(true).configuration().stations[0].weapon.clone();
+        let mut missile = fixture(true).own().configuration().stations[0]
+            .weapon
+            .clone();
         missile.source = "AIM120.JT".into();
         assert!(!is_gun(&missile));
         assert_eq!(scaled_weapon_damage(&missile, 11), 11);
@@ -4752,8 +5458,8 @@ mod tests {
     #[test]
     fn live_gun_crosses_narrowphase_before_cockpit_kill_without_structural_loss() {
         let mut s = fixture(false);
-        s.config.stations[0].weapon.source = "M61.JT".into();
-        s.config.stations[0].weapon.damage.by_class[0] = 6;
+        s.own_mut().config.stations[0].weapon.source = "M61.JT".into();
+        s.own_mut().config.stations[0].weapon.damage.by_class[0] = 6;
         s.targets.clear();
         let target_position = [0., 1000., 300.];
         s.targets.push(target(9, target_position, 20, 0x80));
@@ -4766,7 +5472,7 @@ mod tests {
             motion: None,
             guidance_ticks: None,
             age: 0,
-            incoming: false,
+            incoming: None,
             station: 0,
             position,
             previous: position,
@@ -4778,7 +5484,14 @@ mod tests {
             gun_round: None,
             tracer: false,
         });
-        let events = s.step(false, launcher(), |_, _| 0.);
+        let events = s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: launcher(),
+            }],
+            |_, _| 0.,
+        );
         assert!(events.contains(&Event::Destroyed(9)));
         assert_eq!(
             s.targets[0].localized_damage.amounts[DamageSection::Cockpit as usize],
@@ -4791,7 +5504,7 @@ mod tests {
         use crate::combat::loadout::Loadout;
         use tore_formats::aircraft::Hardpoint;
         for (capacity, expected_step) in [(4, 1), (100, 1), (101, 10), (300, 10), (301, 100)] {
-            let mut configuration = fixture(true).configuration().clone();
+            let mut configuration = fixture(true).own().configuration().clone();
             configuration
                 .stations
                 .push(configuration.stations[0].clone());
@@ -4851,7 +5564,7 @@ mod tests {
     fn guns_only_removes_internal_bay_and_external_weapons_without_refilling_guns() {
         use crate::combat::loadout::Loadout;
         for aircraft in AircraftId::SELECTABLE {
-            let mut configuration = fixture(true).configuration().clone();
+            let mut configuration = fixture(true).own().configuration().clone();
             configuration.aircraft = aircraft;
             configuration.stations[0].weapon.source = "AIM120.JT".into();
             let mut bay = configuration.stations[0].clone();
@@ -4883,7 +5596,7 @@ mod tests {
     fn preflight_draft_capacity_fuel_mass_and_clone_isolation() {
         use crate::combat::loadout::Loadout;
         use tore_formats::aircraft::Hardpoint;
-        let mut config = fixture(false).configuration().clone();
+        let mut config = fixture(false).own().configuration().clone();
         config.stations[0].weapon.source = "M61.JT".into();
         let mut load = Loadout {
             aircraft: AircraftId::F18,
@@ -4981,37 +5694,40 @@ mod tests {
     fn player_chaff_decoys_only_radar_missiles_guiding_on_the_player() {
         let armed = |chance: u8| {
             let mut s = fixture(true);
-            s.config.stations[0].weapon.seeker.chaff_flare_chance = chance;
-            s.config.ecm.chaff[1] = 100;
-            s.config.ecm.flare[1] = 100;
-            s.chaff = 2;
-            s.flares = 1;
-            s.command(Command::Incoming, launcher());
+            s.own_mut().config.stations[0]
+                .weapon
+                .seeker
+                .chaff_flare_chance = chance;
+            s.own_mut().config.ecm.chaff[1] = 100;
+            s.own_mut().config.ecm.flare[1] = 100;
+            s.own_mut().chaff = 2;
+            s.own_mut().flares = 1;
+            s.command(0, Command::Incoming, launcher());
             assert_eq!(s.projectiles[0].target, Some(0));
             s
         };
         // A flare cannot decoy a radar seeker, but it is still spent.
         let mut s = armed(100);
-        s.command(Command::ReleaseFlare, launcher());
-        assert_eq!((s.chaff, s.flares), (2, 0));
+        s.command(0, Command::ReleaseFlare, launcher());
+        assert_eq!((s.own().chaff, s.own().flares), (2, 0));
         assert_eq!(s.projectiles[0].target, Some(0));
         // One flare device is shown as a pair.
         assert_eq!((s.devices.flares.len(), s.devices.chaff.len()), (2, 0));
         assert!(s.effects.is_empty());
         // Chaff at 100 x 100 percent always decoys the radar missile.
-        s.command(Command::ReleaseChaff, launcher());
-        assert_eq!(s.chaff, 1);
+        s.command(0, Command::ReleaseChaff, launcher());
+        assert_eq!(s.own().chaff, 1);
         assert_eq!(s.projectiles[0].target, None);
         assert!(s.projectiles[0].guidance.is_none());
         assert_eq!((s.devices.flares.len(), s.devices.chaff.len()), (2, 1));
         // A resistant seeker keeps guiding.
         let mut s = armed(0);
-        s.command(Command::ReleaseChaff, launcher());
-        assert_eq!((s.chaff, s.projectiles[0].target), (1, Some(0)));
+        s.command(0, Command::ReleaseChaff, launcher());
+        assert_eq!((s.own().chaff, s.projectiles[0].target), (1, Some(0)));
         // An empty dispenser releases nothing.
         let mut s = armed(100);
-        s.chaff = 0;
-        s.command(Command::ReleaseChaff, launcher());
+        s.own_mut().chaff = 0;
+        s.command(0, Command::ReleaseChaff, launcher());
         assert_eq!(
             (s.devices.chaff.len(), s.projectiles[0].target),
             (0, Some(0))
@@ -5019,21 +5735,21 @@ mod tests {
         // Unlimited ammo releases without spending.
         let mut s = armed(100);
         s.cheats.unlimited_ammo = true;
-        s.command(Command::ReleaseChaff, launcher());
-        assert_eq!((s.chaff, s.projectiles[0].target), (2, None));
+        s.command(0, Command::ReleaseChaff, launcher());
+        assert_eq!((s.own().chaff, s.projectiles[0].target), (2, None));
     }
     #[test]
     fn countermeasures_tolerate_an_ai_missile_from_a_longer_loadout() {
         let mut s = fixture(true);
-        s.config.ecm.chaff[1] = 100;
-        s.chaff = 1;
-        s.command(Command::Incoming, launcher());
+        s.own_mut().config.ecm.chaff[1] = 100;
+        s.own_mut().chaff = 1;
+        s.command(0, Command::Incoming, launcher());
         // An AI shooter's station index need not exist on the player's aircraft.
-        let weapon = s.config.stations[0].weapon.clone();
+        let weapon = s.own().config.stations[0].weapon.clone();
         s.projectiles[0].weapon = Some(weapon);
-        s.projectiles[0].station = s.config.stations.len();
-        s.command(Command::ReleaseChaff, launcher());
-        assert_eq!(s.chaff, 0);
+        s.projectiles[0].station = s.own().config.stations.len();
+        s.command(0, Command::ReleaseChaff, launcher());
+        assert_eq!(s.own().chaff, 0);
     }
     #[test]
     fn every_released_device_sounds_once_from_its_aircraft() {
@@ -5045,15 +5761,15 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let mut s = fixture(true);
-        s.chaff = 1;
-        s.flares = 1;
+        s.own_mut().chaff = 1;
+        s.own_mut().flares = 1;
         heard(&mut s);
         let at = launcher().position;
-        s.command(Command::ReleaseChaff, launcher());
-        s.command(Command::ReleaseFlare, launcher());
+        s.command(0, Command::ReleaseChaff, launcher());
+        s.command(0, Command::ReleaseFlare, launcher());
         // Empty dispensers release nothing, so nothing is heard.
-        s.command(Command::ReleaseChaff, launcher());
-        s.command(Command::ReleaseFlare, launcher());
+        s.command(0, Command::ReleaseChaff, launcher());
+        s.command(0, Command::ReleaseFlare, launcher());
         assert_eq!(
             heard(&mut s),
             [
@@ -5081,15 +5797,18 @@ mod tests {
     #[test]
     fn releases_resets_and_the_players_decoy_rolls_are_noted_for_recordings() {
         let mut s = fixture(true);
-        s.config.stations[0].weapon.seeker.chaff_flare_chance = 50;
-        s.config.ecm.chaff[1] = 100;
-        (s.chaff, s.flares) = (2, 1);
-        s.command(Command::Incoming, launcher());
+        s.own_mut().config.stations[0]
+            .weapon
+            .seeker
+            .chaff_flare_chance = 50;
+        s.own_mut().config.ecm.chaff[1] = 100;
+        (s.own_mut().chaff, s.own_mut().flares) = (2, 1);
+        s.command(0, Command::Incoming, launcher());
         let missile = s.projectiles[0].id;
-        s.command(Command::ReleaseChaff, launcher());
+        s.command(0, Command::ReleaseChaff, launcher());
         let decoyed = s.projectiles[0].target.is_none();
         // A flare cannot decoy the radar missile, so it rolls nothing.
-        s.command(Command::ReleaseFlare, launcher());
+        s.command(0, Command::ReleaseFlare, launcher());
         s.device_released(
             super::super::countermeasures::Release {
                 position: [10., 20., 30.],
@@ -5156,7 +5875,7 @@ mod tests {
         assert_eq!(roll.decoyed, roll.roll < 50);
         assert!(s.take_device_notes().is_empty() && s.take_decoy_rolls().is_empty());
         // A range reset clears the devices, and says so.
-        s.range_target(launcher());
+        s.range_target(0, launcher());
         assert_eq!(s.take_device_notes(), [DeviceNote::Cleared(0)]);
         // Bounded when nobody drains them.
         for _ in 0..MAX_RELEASE_RECORDS + 5 {
@@ -5178,14 +5897,21 @@ mod tests {
         fn run(owner: u32) -> (u32, u32, Vec<Event>) {
             let mut s = fixture(false);
             let l = launcher();
-            s.range_target(l);
+            s.range_target(0, l);
             let mut collected = Vec::new();
             let mut strikes = Vec::new();
             for _ in 0..600 {
                 for p in &mut s.projectiles {
                     p.owner = owner;
                 }
-                collected.extend(s.step(true, l, |_, _| 0.));
+                collected.extend(s.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: true,
+                        launcher: l,
+                    }],
+                    |_, _| 0.,
+                ));
                 strikes.extend(s.take_strikes());
             }
             // Every damaging hit names its owner and victim for the radio.
@@ -5212,7 +5938,7 @@ mod tests {
                     .count()
             );
             assert!(s.take_strikes().is_empty(), "draining empties the log");
-            (s.hits, s.kills, collected)
+            (s.own().hits, s.own().kills, collected)
         }
 
         let (player_hits, player_kills, player_events) = run(PLAYER_OWNER);
@@ -5244,7 +5970,7 @@ mod tests {
     #[test]
     fn mission_dummies_keep_distinct_identity_and_straight_velocity() {
         let mut s = fixture(true);
-        let mut config = s.configuration().clone();
+        let mut config = s.own().configuration().clone();
         config.hit_points = 37;
         let basis = Basis::new(0.3, 0., 0.);
         for n in 0..29 {
@@ -5262,7 +5988,7 @@ mod tests {
                 assert!((b.position[i] - a.position[i] - a.velocity[i]).abs() < 1e-7);
             }
         }
-        s.range_target(launcher());
+        s.range_target(0, launcher());
         assert_eq!(s.targets[0].id, 30);
     }
     /// Selection needs a current observation, so the shared sensors must have
@@ -5270,7 +5996,14 @@ mod tests {
     const ACQUISITION: usize = crate::sensors::track::ACQUISITION_STEPS as usize;
     fn observe(s: &mut State, l: Launcher, steps: usize) {
         for _ in 0..steps {
-            s.step(false, l, |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
         }
     }
     pub(super) fn target(id: u32, position: Vector, hp: i32, category: u16) -> Target {
@@ -5305,8 +6038,8 @@ mod tests {
     fn ground_projectile_damage_uses_object_class_and_destroys_once() {
         let mut s = fixture(false);
         s.targets.clear();
-        s.config.stations[0].weapon.source = "M61.JT".into();
-        s.config.stations[0].weapon.damage.by_class[2] = 17;
+        s.own_mut().config.stations[0].weapon.source = "M61.JT".into();
+        s.own_mut().config.stations[0].weapon.damage.by_class[2] = 17;
         let bounds = crate::airport::OrientedBox {
             center: [0., 1000., 300.],
             half: [30., 30., 30.],
@@ -5318,7 +6051,14 @@ mod tests {
         let mut destroyed = 0;
         for _ in 0..300 {
             destroyed += s
-                .step(true, launcher(), |_, _| 0.)
+                .step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: true,
+                        launcher: launcher(),
+                    }],
+                    |_, _| 0.,
+                )
                 .iter()
                 .filter(|e| **e == Event::Destroyed(0x40000000))
                 .count();
@@ -5347,10 +6087,10 @@ mod tests {
             .find(|t| t.id == 0x40000000)
             .unwrap()
             .hp = 600;
-        s.range_target(launcher());
-        s.command(Command::TargetDistance(10000), launcher());
-        s.command(Command::CycleClass, launcher());
-        s.command(Command::ClearRange, launcher());
+        s.range_target(0, launcher());
+        s.command(0, Command::TargetDistance(10000), launcher());
+        s.command(0, Command::CycleClass, launcher());
+        s.command(0, Command::ClearRange, launcher());
         assert_eq!(s.targets.len(), 1);
         let t = &s.targets[0];
         assert_eq!((t.id, t.hp, t.category), (0x40000000, 600, 0x100));
@@ -5381,54 +6121,96 @@ mod tests {
     fn source_debit_partial_last_round_empty_release_and_expiry() {
         let mut s = fixture(false);
         for _ in 0..300 {
-            s.step(true, launcher(), |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: launcher(),
+                }],
+                |_, _| 0.,
+            );
         }
-        assert_eq!(s.ammo, [0]);
-        assert_eq!(s.shots, 6);
+        assert_eq!(s.own().ammo, [0]);
+        assert_eq!(s.own().shots, 6);
         for _ in 0..600 {
-            s.step(false, launcher(), |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: launcher(),
+                }],
+                |_, _| 0.,
+            );
         }
         assert!(s.projectiles.is_empty());
         assert!(s.effects.is_empty());
         let mut s = fixture(false);
-        s.step(true, launcher(), |_, _| 0.);
-        s.release();
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: launcher(),
+            }],
+            |_, _| 0.,
+        );
+        s.release(0);
         for _ in 0..60 {
-            s.step(false, launcher(), |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: launcher(),
+                }],
+                |_, _| 0.,
+            );
         }
-        assert_eq!(s.shots, 1);
+        assert_eq!(s.own().shots, 1);
     }
     #[test]
     fn unlimited_ammo_fires_past_the_loaded_count_without_debit() {
         let mut s = fixture(false);
         s.cheats.unlimited_ammo = true;
-        let loaded = s.ammo.clone();
+        let loaded = s.own().ammo.clone();
         for _ in 0..300 {
-            s.step(true, launcher(), |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: launcher(),
+                }],
+                |_, _| 0.,
+            );
         }
-        assert_eq!(s.ammo, loaded);
-        assert!(s.shots > 6);
+        assert_eq!(s.own().ammo, loaded);
+        assert!(s.own().shots > 6);
     }
     #[test]
     fn invulnerable_cockpit_hit_neither_damages_nor_kills_the_pilot() {
         let mut s = fixture(false);
         s.cheats.damage = crate::cheats::Damage::Invulnerable;
-        s.config.stations[0].weapon.source = AircraftId::F18.gun().into();
+        s.own_mut().config.stations[0].weapon.source = AircraftId::F18.gun().into();
         let l = launcher();
-        s.command(Command::Incoming, l);
+        s.command(0, Command::Incoming, l);
         let p = s.projectiles.last_mut().unwrap();
         p.position = std::array::from_fn(|i| {
             l.position[i] + l.basis.forward[i] * 100. + l.basis.up[i] * 11.
         });
         p.previous = p.position;
         p.age = 1;
-        let hp = s.player_hp;
+        let hp = s.own().hp;
         let mut events = Vec::new();
         for _ in 0..120 {
-            events.extend(s.step(false, l, |_, _| 0.));
+            events.extend(s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            ));
         }
         assert!(s.projectiles.is_empty(), "the round still hits");
-        assert_eq!(s.player_hp, hp);
+        assert_eq!(s.own().hp, hp);
         assert!(!events.iter().any(|e| matches!(
             e,
             Event::PilotKilled | Event::PlayerDestroyed | Event::PlayerDamaged(_)
@@ -5437,52 +6219,74 @@ mod tests {
     #[test]
     fn belly_scrape_wears_hit_points_in_whole_points_and_invulnerable_spares_it() {
         let mut s = fixture(false);
-        let capacity = f64::from(s.config.damage_capacity);
+        let full = s.own().config.damage_capacity;
+        let capacity = f64::from(full);
         let mut events = Vec::new();
         // Half a hit point is carried, not lost or rounded up.
-        s.scrape_damage(0.5 / capacity, &mut events);
-        assert_eq!(s.player_hp, s.config.damage_capacity);
-        s.scrape_damage(0.5 / capacity, &mut events);
-        assert_eq!(s.player_hp, s.config.damage_capacity - 1);
+        s.scrape_damage(0, 0.5 / capacity, &mut events);
+        assert_eq!(s.own().hp, full);
+        s.scrape_damage(0, 0.5 / capacity, &mut events);
+        assert_eq!(s.own().hp, full - 1);
         assert!(matches!(events.as_slice(), [Event::PlayerDamaged(1)]));
-        s.scrape_damage(1., &mut events);
-        assert_eq!(s.player_hp, 0);
+        s.scrape_damage(0, 1., &mut events);
+        assert_eq!(s.own().hp, 0);
         assert!(events.contains(&Event::PlayerDestroyed));
         let mut spared = fixture(false);
         spared.cheats.damage = crate::cheats::Damage::Invulnerable;
-        spared.scrape_damage(1., &mut Vec::new());
-        assert_eq!(spared.player_hp, spared.config.damage_capacity);
+        spared.scrape_damage(0, 1., &mut Vec::new());
+        assert_eq!(spared.own().hp, full);
     }
     #[test]
     fn detection_launch_and_inflight_lock_loss_are_distinct() {
         let mut s = fixture(true);
         let mut l = launcher();
-        s.range_target(l);
+        s.range_target(0, l);
         observe(&mut s, l, 1);
-        s.designate_next(true);
-        assert_eq!(s.designated(), Some(1));
+        s.designate_next(0, true);
+        assert_eq!(s.own_view().designated(), Some(1));
         // Selection is immediate; the fire-control track is not.
-        assert_eq!(s.readiness(l), Readiness::RadarAcquiring);
+        assert_eq!(s.own_view().readiness(l), Readiness::RadarAcquiring);
         observe(&mut s, l, ACQUISITION - 1);
-        assert_eq!(s.sensors.acquired(), None);
+        assert_eq!(s.own().sensors.acquired(), None);
         observe(&mut s, l, 1);
-        assert_eq!(s.sensors.acquired(), Some(1));
+        assert_eq!(s.own().sensors.acquired(), Some(1));
         l.radar = false;
-        assert!(!s.can_lock(l));
-        s.step(true, l, |_, _| 0.);
-        assert_eq!(s.ammo, [11]);
+        assert!(!s.own_view().can_lock(l));
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
+        assert_eq!(s.own().ammo, [11]);
         // Radar off drops the target completely; it has to be selected again.
-        assert_eq!(s.designated(), None);
+        assert_eq!(s.own_view().designated(), None);
         l.radar = true;
         observe(&mut s, l, 1);
-        s.designate_next(true);
+        s.designate_next(0, true);
         observe(&mut s, l, 60);
-        assert!(s.can_lock(l));
-        s.step(true, l, |_, _| 0.);
-        assert_eq!(s.ammo, [9]);
+        assert!(s.own_view().can_lock(l));
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
+        assert_eq!(s.own().ammo, [9]);
         assert_eq!(s.projectiles[0].target, Some(1));
         l.radar = false;
-        s.step(false, l, |_, _| 0.);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
         assert_eq!(s.projectiles[0].target, None);
         assert!(s.projectiles[0].position[2] > 0.);
     }
@@ -5493,7 +6297,14 @@ mod tests {
         let mut kills = 0;
         let mut exploded = false;
         for _ in 0..180 {
-            for e in s.step(true, launcher(), |_, _| 0.) {
+            for e in s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: launcher(),
+                }],
+                |_, _| 0.,
+            ) {
                 if matches!(e, Event::Destroyed(7)) {
                     kills += 1;
                 }
@@ -5505,11 +6316,14 @@ mod tests {
                         .is_some_and(|b| super::super::blast::explosion(b).is_some())
             });
         }
-        assert_eq!((s.hits, s.kills, kills, s.targets[0].hp), (2, 1, 1, 0));
+        assert_eq!(
+            (s.own().hits, s.own().kills, kills, s.targets[0].hp),
+            (2, 1, 1, 0)
+        );
         assert!(exploded);
         // The debrief ledger saw the same rounds, hits, damage and kill.
         let fired = s.ledger.total(|k| k.owner == PLAYER_OWNER);
-        assert_eq!(fired.launched, s.shots);
+        assert_eq!(fired.launched, s.own().shots);
         assert_eq!((fired.hit, fired.damage), (2, 20));
         assert_eq!(
             s.ledger.kills(),
@@ -5530,9 +6344,16 @@ mod tests {
             s.targets.push(target(7, [25., 1000., 150.], 20, 0x80));
             let mut events = Vec::new();
             for _ in 0..180 {
-                events.extend(s.step(true, launcher(), |_, _| 0.));
+                events.extend(s.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: true,
+                        launcher: launcher(),
+                    }],
+                    |_, _| 0.,
+                ));
             }
-            (s.hits, events)
+            (s.own().hits, events)
         };
         assert_eq!(run(false).0, 0);
         let (hits, events) = run(true);
@@ -5547,11 +6368,18 @@ mod tests {
         let mut s = fixture(false);
         assert_eq!(s.cheats.damage, crate::cheats::Damage::Normal);
         let mut t = target(7, [0., 1000., 150.], 200, 0x80);
-        t.faults = SystemFaults::new(&s.config);
+        t.faults = SystemFaults::new(&s.own().config);
         t.faults.table = [0x1f; 45];
         s.targets.push(t);
         for _ in 0..600 {
-            s.step(true, launcher(), |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: launcher(),
+                }],
+                |_, _| 0.,
+            );
             if s.targets[0].hp <= 150 {
                 break;
             }
@@ -5560,11 +6388,11 @@ mod tests {
         assert!(t.hp > 0 && t.hp <= 150, "hp {}", t.hp);
         // A quarter of the hit points gone guarantees a control fault.
         assert!(t.faults.counts.iter().any(|n| *n > 0));
-        assert_eq!(s.subsystem_counts, [0; 45]);
+        assert_eq!(s.own().subsystem_counts, [0; 45]);
     }
     #[test]
     fn easy_aiming_missile_turns_faster_with_a_wider_cone() {
-        let w = fixture(true).config.stations[0].weapon.clone();
+        let w = fixture(true).own().config.stations[0].weapon.clone();
         let eased = eased_weapon(&w);
         assert_eq!(
             f64::from(eased.movement.powered_turn_rate),
@@ -5581,14 +6409,21 @@ mod tests {
         let mut s = fixture(false);
         s.cheats.damage = crate::cheats::Damage::Invulnerable;
         let l = launcher();
-        s.command(Command::Incoming, l);
+        s.command(0, Command::Incoming, l);
         let p = s.projectiles.last_mut().unwrap();
         p.position = std::array::from_fn(|i| l.position[i] + l.basis.forward[i] * 100.);
         p.previous = p.position;
         p.age = 1;
         let mut events = Vec::new();
         for _ in 0..120 {
-            events.extend(s.step(false, l, |_, _| 0.));
+            events.extend(s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            ));
         }
         assert!(
             events
@@ -5600,49 +6435,57 @@ mod tests {
     #[test]
     fn the_selection_ring_skips_stations_that_carry_nothing() {
         let mut s = fixture(false);
-        let mut gun = s.config.stations[0].clone();
+        let mut gun = s.own().config.stations[0].clone();
         gun.weapon.source = AircraftId::F18.gun().into();
-        s.config.stations.push(gun.clone());
-        s.config.stations.push(gun);
-        s.ammo = vec![0, 100, 0];
-        s.armed = false;
-        s.cycle_selection(true);
+        s.own_mut().config.stations.push(gun.clone());
+        s.own_mut().config.stations.push(gun);
+        s.own_mut().ammo = vec![0, 100, 0];
+        s.own_mut().armed = false;
+        s.cycle_selection(0, true);
         assert_eq!(
-            (s.armed, s.selected),
+            (s.own().armed, s.own().selected),
             (true, 1),
             "the empty station 0 is skipped"
         );
-        s.cycle_selection(true);
-        assert!(!s.armed, "station 2 is empty too, so NAV follows");
-        s.cycle_selection(false);
-        assert_eq!((s.armed, s.selected), (true, 1));
+        s.cycle_selection(0, true);
+        assert!(!s.own().armed, "station 2 is empty too, so NAV follows");
+        s.cycle_selection(0, false);
+        assert_eq!((s.own().armed, s.own().selected), (true, 1));
         // Unlimited ammunition fires past an empty station, so it stays reachable.
         s.cheats.unlimited_ammo = true;
-        s.cycle_selection(false);
-        assert_eq!((s.armed, s.selected), (true, 0));
+        s.cycle_selection(0, false);
+        assert_eq!((s.own().armed, s.own().selected), (true, 0));
     }
     #[test]
     fn guns_only_leaves_the_player_the_gun_and_nav() {
         let mut s = fixture(false);
-        let mut gun = s.config.stations[0].clone();
+        let mut gun = s.own().config.stations[0].clone();
         gun.weapon.source = AircraftId::F18.gun().into();
-        s.config.stations.push(gun);
-        s.ammo.push(100);
-        s.armed = true;
-        s.selected = 0;
+        s.own_mut().config.stations.push(gun);
+        s.own_mut().ammo.push(100);
+        s.own_mut().armed = true;
+        s.own_mut().selected = 0;
         s.cheats.guns_only = true;
-        s.enforce_guns_only();
-        assert_eq!((s.armed, s.selected), (true, 1), "moved to the gun");
-        s.cycle_selection(true);
-        assert!(!s.armed, "NAV follows the gun");
-        s.cycle_selection(true);
-        assert_eq!((s.armed, s.selected), (true, 1), "the missile is skipped");
-        s.cycle_selection(false);
-        s.cycle_selection(false);
-        assert_eq!((s.armed, s.selected), (true, 1));
+        s.own_mut().enforce_guns_only(true);
+        assert_eq!(
+            (s.own().armed, s.own().selected),
+            (true, 1),
+            "moved to the gun"
+        );
+        s.cycle_selection(0, true);
+        assert!(!s.own().armed, "NAV follows the gun");
+        s.cycle_selection(0, true);
+        assert_eq!(
+            (s.own().armed, s.own().selected),
+            (true, 1),
+            "the missile is skipped"
+        );
+        s.cycle_selection(0, false);
+        s.cycle_selection(0, false);
+        assert_eq!((s.own().armed, s.own().selected), (true, 1));
         s.cheats.guns_only = false;
-        s.cycle_selection(false);
-        assert_eq!((s.armed, s.selected), (true, 0));
+        s.cycle_selection(0, false);
+        assert_eq!((s.own().armed, s.own().selected), (true, 0));
     }
     #[test]
     fn midair_collisions_destroy_everyone_but_an_invulnerable_player_unless_ignored() {
@@ -5661,22 +6504,29 @@ mod tests {
             // A third aircraft sitting on the player.
             let on_player = target(10, [5., 1000., 5.], 20, 0x80);
             s.targets.extend([a, b, clear, on_player]);
-            let events = s.step(false, launcher(), |_, _| 0.);
+            let events = s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: launcher(),
+                }],
+                |_, _| 0.,
+            );
             (s, events)
         };
         let (s, events) = run(false, false);
         let hp: Vec<_> = s.targets.iter().map(|t| t.hp).collect();
         assert_eq!(hp, [0, 0, 20, 0]);
-        assert_eq!(s.player_hp, 0);
+        assert_eq!(s.own().hp, 0);
         assert!(events.contains(&Event::PlayerDestroyed));
         assert!(events.contains(&Event::Destroyed(7)) && events.contains(&Event::Destroyed(8)));
-        assert_eq!(s.kills, 0);
+        assert_eq!(s.own().kills, 0);
         // Invulnerable spares only the player.
         let (s, events) = run(false, true);
-        assert!(s.player_hp > 0 && !events.contains(&Event::PlayerDestroyed));
+        assert!(s.own().hp > 0 && !events.contains(&Event::PlayerDestroyed));
         assert_eq!(s.targets[3].hp, 0);
         let (s, events) = run(true, false);
-        assert!(s.targets.iter().all(|t| t.hp == 20) && s.player_hp > 0);
+        assert!(s.targets.iter().all(|t| t.hp == 20) && s.own().hp > 0);
         assert!(!events.iter().any(|e| matches!(e, Event::Destroyed(_))));
     }
     #[test]
@@ -5685,9 +6535,9 @@ mod tests {
             let mut s = fixture(false);
             s.targets.push(target(7, [0., 1000., 100000.], 100, 0x8000));
             s.targets[0].hp = 50;
-            (s.chaff, s.flares) = (1, 1);
-            s.command(Command::ReleaseFlare, launcher());
-            s.command(Command::ReleaseChaff, launcher());
+            (s.own_mut().chaff, s.own_mut().flares) = (1, 1);
+            s.command(0, Command::ReleaseFlare, launcher());
+            s.command(0, Command::ReleaseChaff, launcher());
             let mut clock = crate::flight::Clock { remainder: 0. };
             let mut tick = 0;
             for frame in 0..fps * 4 {
@@ -5697,17 +6547,25 @@ mod tests {
                     continue;
                 }
                 for _ in 0..clock.steps(1. / fps as f64) {
-                    s.step(tick < 90, launcher(), |_, _| 0.);
+                    s.step(
+                        &[OwnshipInput {
+                            aircraft: 0,
+                            held: tick < 90,
+                            launcher: launcher(),
+                        }],
+                        |_, _| 0.,
+                    );
                     tick += 1;
                 }
             }
+            let (ammo, shots) = (s.own().ammo.clone(), s.own().shots);
             (
                 tick,
-                s.ammo,
+                ammo,
                 s.projectiles,
                 s.targets,
                 s.effects,
-                s.shots,
+                shots,
                 s.smoke,
                 s.devices,
                 s.debris,
@@ -5719,51 +6577,86 @@ mod tests {
     #[test]
     fn capacity_failure_does_not_debit_and_dead_launcher_cannot_fire() {
         let mut s = fixture(false);
-        s.config.stations[0].weapon.source = "M61.JT".into();
-        s.config.stations[0].weapon.movement.remove_t = u16::MAX;
+        s.own_mut().config.stations[0].weapon.source = "M61.JT".into();
+        s.own_mut().config.stations[0].weapon.movement.remove_t = u16::MAX;
         let mut l = launcher();
         l.alive = false;
-        s.step(true, l, |_, _| 0.);
-        assert_eq!(s.shots, 0);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
+        assert_eq!(s.own().shots, 0);
         l.alive = true;
-        s.step(true, l, |_, _| 0.);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
         let p = s.projectiles[0].clone();
         s.projectiles = vec![p; MAX_PROJECTILES];
-        let ammo = s.ammo.clone();
+        let ammo = s.own().ammo.clone();
         for _ in 0..30 {
-            s.step(true, l, |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
         }
-        assert_eq!(s.ammo, ammo);
+        assert_eq!(s.own().ammo, ammo);
         s.projectiles.clear();
         for _ in 0..14 {
             assert!(
-                !s.step(true, l, |_, _| -10000.)
-                    .iter()
-                    .any(|event| matches!(event, Event::Fired(0)))
+                !s.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: true,
+                        launcher: l
+                    }],
+                    |_, _| -10000.
+                )
+                .iter()
+                .any(|event| matches!(event, Event::Fired(0)))
             );
         }
         assert!(
-            s.step(true, l, |_, _| -10000.)
-                .iter()
-                .any(|event| matches!(event, Event::Fired(0)))
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: l
+                }],
+                |_, _| -10000.
+            )
+            .iter()
+            .any(|event| matches!(event, Event::Fired(0)))
         );
-        assert_eq!(s.rounds(0), ammo[0] - 1);
+        assert_eq!(s.own().rounds(0), ammo[0] - 1);
     }
     #[test]
     fn motor_smoke_uses_powered_phase_and_aircraft_smoke_uses_health() {
         use super::super::smoke::Kind;
         let l = launcher();
         let mut s = fixture(true);
-        s.config.stations[0].weapon.movement.ignite_t = 1;
-        s.config.stations[0].weapon.movement.fuel_t = 2;
-        s.command(Command::Incoming, l);
-        s.projectiles[0].incoming = false;
+        s.own_mut().config.stations[0].weapon.movement.ignite_t = 1;
+        s.own_mut().config.stations[0].weapon.movement.fuel_t = 2;
+        s.command(0, Command::Incoming, l);
+        s.projectiles[0].incoming = None;
         s.projectiles[0].target = None;
         s.projectiles[0].position = [0., 10000., 100000.];
         s.projectiles[0].direction = [0., 0., 1.];
         // Exercise the spec vector motor, keeping this fixture far from contacts.
         s.projectiles[0].motion = Some(Motion::new(
-            &s.config.stations[0].weapon.movement,
+            &s.own().config.stations[0].weapon.movement,
             [0., 0., 1000.],
             10000.,
         ));
@@ -5790,11 +6683,18 @@ mod tests {
         s.targets[0].airborne = false;
         observe(&mut s, l, 12);
         assert_eq!(s.smoke.puffs.len(), 2);
-        s.range_target(l);
+        s.range_target(0, l);
         assert!(s.smoke.puffs.is_empty());
         let mut gun = fixture(false);
         observe(&mut gun, l, 6);
-        gun.step(true, l, |_, _| 0.);
+        gun.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
         assert!(gun.smoke.puffs.is_empty());
     }
     #[test]
@@ -5807,14 +6707,28 @@ mod tests {
             .localized_damage
             .record(DamageSection::LeftWing, 75, 100);
         s.targets[0].velocity = [30., 0., 10.];
-        s.step(false, l, |_, _| 0.);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
         assert_eq!(s.debris.len(), 1);
         assert_eq!(s.debris[0].owner, 7);
         assert_eq!(s.debris[0].velocity, s.targets[0].velocity);
         let mut impacts = 0;
         for _ in 0..300 {
             let had_piece = !s.debris.is_empty();
-            s.step(false, l, |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
             if had_piece && s.debris.is_empty() {
                 impacts += 1;
                 assert_eq!(
@@ -5830,28 +6744,48 @@ mod tests {
         assert!(s.debris.is_empty());
         assert!(s.effects.iter().all(|e| e.kind != EffectKind::DebrisImpact));
         s.targets[0].hp = 0;
-        s.step(false, l, |_, _| 0.);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
         assert!(
             s.debris.is_empty(),
             "further damage must not duplicate the same lost part"
         );
-        s.player_hp = s.config.damage_capacity / 2;
-        s.player_localized_damage.record(
-            DamageSection::Nose,
-            s.config.damage_capacity,
-            s.config.damage_capacity,
+        s.own_mut().hp = s.own().config.damage_capacity / 2;
+        let capacity = s.own().config.damage_capacity;
+        s.own_mut()
+            .localized_damage
+            .record(DamageSection::Nose, capacity, capacity);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
         );
-        s.step(false, l, |_, _| 0.);
         assert!(
             s.debris.is_empty(),
             "a live aircraft keeps catastrophic parts"
         );
-        s.player_hp = 0;
-        s.step(false, l, |_, _| 0.);
+        s.own_mut().hp = 0;
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
         assert_eq!(s.debris.len(), 1);
         assert_eq!(s.debris[0].owner, 0);
         assert_eq!(s.debris[0].velocity, l.velocity);
-        let reset = State::new(s.configuration().clone(), true).unwrap();
+        let reset = State::new(s.own().configuration().clone(), true).unwrap();
         assert!(reset.debris.is_empty());
     }
     #[test]
@@ -5876,10 +6810,17 @@ mod tests {
     fn all_damage_classes_report_nominal_applied_and_cumulative_hp() {
         for (index, category) in [0x80, 0x2000, 0x100, 0x400, 0x40].into_iter().enumerate() {
             let mut s = fixture(false);
-            s.config.stations[0].weapon.damage.by_class = [3, 7, 9, 11, 25];
+            s.own_mut().config.stations[0].weapon.damage.by_class = [3, 7, 9, 11, 25];
             s.targets.push(target(7, [0., 1000., 150.], 20, category));
             for _ in 0..180 {
-                s.step(true, launcher(), |_, _| 0.);
+                s.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: true,
+                        launcher: launcher(),
+                    }],
+                    |_, _| 0.,
+                );
             }
             assert!(s.history.iter().all(|h| h.class == index));
             assert_eq!(
@@ -5892,73 +6833,117 @@ mod tests {
     #[test]
     fn failed_station_keeps_mass_and_jettison_cannot_remove_internal_gun() {
         let mut s = fixture(true);
-        let mass = s.payload_lbs();
-        s.command(Command::FailStation, launcher());
-        assert_eq!(s.readiness(launcher()), Readiness::StationFailed);
-        assert_eq!(s.rounds(0), 11);
-        assert_eq!(s.payload_lbs(), mass);
-        s.step(true, launcher(), |_, _| 0.);
-        assert_eq!(s.shots, 0);
-        s.command(Command::Jettison, launcher());
-        assert_eq!(s.payload_lbs(), 0.);
-        assert_eq!(s.ammo[0], 0x8000); // Unloading cannot repair a failed station.
+        let mass = s.own().payload_lbs();
+        s.command(0, Command::FailStation, launcher());
+        assert_eq!(s.own_view().readiness(launcher()), Readiness::StationFailed);
+        assert_eq!(s.own().rounds(0), 11);
+        assert_eq!(s.own().payload_lbs(), mass);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: launcher(),
+            }],
+            |_, _| 0.,
+        );
+        assert_eq!(s.own().shots, 0);
+        s.command(0, Command::Jettison, launcher());
+        assert_eq!(s.own().payload_lbs(), 0.);
+        assert_eq!(s.own().ammo[0], 0x8000); // Unloading cannot repair a failed station.
         let mut gun = fixture(false);
-        gun.command(Command::Jettison, launcher());
-        assert_eq!(gun.rounds(0), 11);
+        gun.command(0, Command::Jettison, launcher());
+        assert_eq!(gun.own().rounds(0), 11);
     }
     #[test]
     fn readiness_reports_inhibits_without_ammunition_consumption() {
         let mut s = fixture(true);
         let l = launcher();
-        assert_eq!(s.readiness(l), Readiness::NoTarget);
-        s.command(Command::ToggleArm, l);
-        assert_eq!(s.readiness(l), Readiness::Safe);
-        s.step(true, l, |_, _| 0.);
-        assert_eq!(s.rounds(0), 11);
-        s.command(Command::ToggleArm, l);
-        s.range_target(l);
+        assert_eq!(s.own_view().readiness(l), Readiness::NoTarget);
+        s.command(0, Command::ToggleArm, l);
+        assert_eq!(s.own_view().readiness(l), Readiness::Safe);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
+        assert_eq!(s.own().rounds(0), 11);
+        s.command(0, Command::ToggleArm, l);
+        s.range_target(0, l);
         observe(&mut s, l, 1);
-        s.designate_next(true);
+        s.designate_next(0, true);
         observe(&mut s, l, ACQUISITION);
-        assert_eq!(s.readiness(l), Readiness::Ready);
-        let z = &mut s.config.stations[0].weapon.seeker.zones[1];
+        assert_eq!(s.own_view().readiness(l), Readiness::Ready);
+        let z = &mut s.own_mut().config.stations[0].weapon.seeker.zones[1];
         z.minimum_range = 4000;
-        assert_eq!(s.readiness(l), Readiness::MinimumRange);
-        s.config.stations[0].weapon.seeker.zones[1].minimum_range = 0;
-        s.config.stations[0].weapon.seeker.zones[1].maximum_range = 2000;
-        assert_eq!(s.readiness(l), Readiness::MaximumRange);
+        assert_eq!(s.own_view().readiness(l), Readiness::MinimumRange);
+        s.own_mut().config.stations[0].weapon.seeker.zones[1].minimum_range = 0;
+        s.own_mut().config.stations[0].weapon.seeker.zones[1].maximum_range = 2000;
+        assert_eq!(s.own_view().readiness(l), Readiness::MaximumRange);
     }
     #[test]
     fn replacement_clears_old_engagement_and_uses_fresh_identity() {
         let mut s = fixture(true);
-        s.range_target(launcher());
+        s.range_target(0, launcher());
         observe(&mut s, launcher(), 1);
-        s.designate_next(true);
+        s.designate_next(0, true);
         observe(&mut s, launcher(), ACQUISITION);
-        s.step(true, launcher(), |_, _| 0.);
-        let ammo = s.ammo.clone();
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: launcher(),
+            }],
+            |_, _| 0.,
+        );
+        let ammo = s.own().ammo.clone();
         assert!(!s.projectiles.is_empty());
-        s.range_target(launcher());
+        s.range_target(0, launcher());
         assert_eq!(s.targets[0].id, 2);
-        assert!(s.projectiles.is_empty() && s.effects.is_empty() && s.designated().is_none());
-        assert_eq!(s.ammo, ammo);
+        assert!(
+            s.projectiles.is_empty() && s.effects.is_empty() && s.own_view().designated().is_none()
+        );
+        assert_eq!(s.own().ammo, ammo);
     }
     #[test]
     fn autonomous_tracking_survives_radar_off_but_dead_target_is_retired() {
         let mut s = fixture(true);
-        s.config.stations[0].weapon.flags &= !0x200;
-        s.range_target(launcher());
+        s.own_mut().config.stations[0].weapon.flags &= !0x200;
+        s.range_target(0, launcher());
         observe(&mut s, launcher(), 1);
-        s.designate_next(true);
+        s.designate_next(0, true);
         observe(&mut s, launcher(), ACQUISITION);
-        s.step(true, launcher(), |_, _| 0.);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: launcher(),
+            }],
+            |_, _| 0.,
+        );
         let mut l = launcher();
         l.radar = false;
-        assert_eq!(s.readiness(l), Readiness::RadarOff);
-        s.step(false, l, |_, _| 0.);
+        assert_eq!(s.own_view().readiness(l), Readiness::RadarOff);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
         assert_eq!(s.projectiles[0].target, Some(1));
         s.targets[0].hp = 0;
-        let events = s.step(false, l, |_, _| 0.);
+        let events = s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
         assert_eq!(s.projectiles[0].target, None);
         assert!(events.contains(&Event::TrackLost(1)));
     }
@@ -5966,9 +6951,9 @@ mod tests {
     fn terrain_visibility_gates_designation_launch_scope_and_tracking() {
         let mut s = fixture(true);
         let l = launcher();
-        s.range_target(l);
+        s.range_target(0, l);
         observe(&mut s, l, 1);
-        s.designate_next(true);
+        s.designate_next(0, true);
         observe(&mut s, l, ACQUISITION);
         let wall = |_: f64, z: f64| {
             if (1000. ..2000.).contains(&z) {
@@ -5979,19 +6964,43 @@ mod tests {
         };
         // Masking removes the observation, so selection and the launch
         // permission end together and no round is consumed.
-        s.step(true, l, wall);
-        assert!(s.sensors.contacts().is_empty());
-        assert_eq!(s.designated(), None);
-        assert_eq!(s.readiness(l), Readiness::NoTarget);
-        assert_eq!(s.rounds(0), 11);
-        s.designate_next(true);
-        assert_eq!(s.designated(), None);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: l,
+            }],
+            wall,
+        );
+        assert!(s.own().sensors.contacts().is_empty());
+        assert_eq!(s.own_view().designated(), None);
+        assert_eq!(s.own_view().readiness(l), Readiness::NoTarget);
+        assert_eq!(s.own().rounds(0), 11);
+        s.designate_next(0, true);
+        assert_eq!(s.own_view().designated(), None);
         observe(&mut s, l, ACQUISITION + 1);
-        s.designate_next(true);
+        s.designate_next(0, true);
         observe(&mut s, l, ACQUISITION);
-        s.step(true, l, |_, _| 0.);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: true,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
         assert_eq!(s.projectiles[0].target, Some(1));
-        assert!(s.step(false, l, wall).contains(&Event::TrackLost(1)));
+        assert!(
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l
+                }],
+                wall
+            )
+            .contains(&Event::TrackLost(1))
+        );
     }
     #[test]
     fn manual_command_tape_is_identical_with_pause_and_render_cadence() {
@@ -6017,9 +7026,16 @@ mod tests {
                         _ => None,
                     };
                     if let Some(command) = command {
-                        s.command(command, l);
+                        s.command(0, command, l);
                     }
-                    s.step(tick % 30 == 0, l, |_, _| 0.);
+                    s.step(
+                        &[OwnshipInput {
+                            aircraft: 0,
+                            held: tick % 30 == 0,
+                            launcher: l,
+                        }],
+                        |_, _| 0.,
+                    );
                     tick += 1;
                 }
             }
@@ -6031,10 +7047,10 @@ mod tests {
     #[test]
     fn cycling_classes_restores_exact_source_category() {
         let mut s = fixture(false);
-        s.config.target_category = 0x8000;
-        s.range_category = s.config.target_category;
+        s.own_mut().config.target_category = 0x8000;
+        s.range_category = s.own().config.target_category;
         for _ in 0..5 {
-            s.command(Command::CycleClass, launcher());
+            s.command(0, Command::CycleClass, launcher());
         }
         assert_eq!(s.range_category, 0x8000);
         assert_eq!(s.targets[0].category, 0x8000);
@@ -6045,53 +7061,77 @@ mod tests {
         let mut s = fixture(true);
         let mut l = launcher();
         l.jammer = true;
-        s.config.ecm.radar_deception_chance = 100;
-        s.command(Command::Incoming, l);
+        s.own_mut().config.ecm.radar_deception_chance = 100;
+        s.command(0, Command::Incoming, l);
         s.projectiles[0].position = l.position;
-        let ammo = s.ammo.clone();
+        let ammo = s.own().ammo.clone();
         let mut replay = s.clone();
-        let events = s.step(false, l, |_, _| 0.);
+        let events = s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
         assert!(events.contains(&Event::Defeated(0)));
-        assert_eq!(s.player_hp, s.config.damage_capacity);
-        assert_eq!(s.ammo, ammo);
-        assert_eq!(events, replay.step(false, l, |_, _| 0.));
+        assert_eq!(s.own().hp, s.own().config.damage_capacity);
+        assert_eq!(s.own().ammo, ammo);
+        assert_eq!(
+            events,
+            replay.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l
+                }],
+                |_, _| 0.
+            )
+        );
         assert_eq!(format!("{s:?}"), format!("{replay:?}"));
-        s.ecm_failed = true; // A powered request cannot bypass equipment failure.
-        s.command(Command::Incoming, l);
+        s.own_mut().ecm_failed = true; // A powered request cannot bypass equipment failure.
+        s.command(0, Command::Incoming, l);
         s.projectiles[0].position = l.position;
-        let events = s.step(false, l, |_, _| 0.);
+        let events = s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
         assert!(events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))));
-        assert!(s.player_hp < s.config.damage_capacity);
+        assert!(s.own().hp < s.own().config.damage_capacity);
     }
     #[test]
     fn automatic_station_radar_ecm_failures_keep_mass_and_reset() {
         for index in [36, 37, 38] {
             let mut s = fixture(false);
             s.cheats.damage = crate::cheats::Damage::Realistic;
-            s.config.system_damage = [0; 45];
-            s.config.system_damage[index] = 0x1f;
-            s.config.damage_capacity = 1;
-            s.player_hp = 10000;
-            let mass = s.payload_lbs();
+            s.own_mut().config.system_damage = [0; 45];
+            s.own_mut().config.system_damage[index] = 0x1f;
+            s.own_mut().config.damage_capacity = 1;
+            s.own_mut().hp = 10000;
+            let mass = s.own().payload_lbs();
             let mut events = vec![];
             for _ in 0..30 {
-                s.apply_player_damage(4, &mut events);
+                s.damage_own(4, &mut events);
             }
-            assert_eq!(s.subsystem_counts[index], 1);
-            assert_eq!(s.last_subsystem, Some(index));
+            assert_eq!(s.own().subsystem_counts[index], 1);
+            assert_eq!(s.own().last_subsystem, Some(index));
             if index == 36 {
-                assert_ne!(s.ammo[0] & 0x8000, 0);
+                assert_ne!(s.own().ammo[0] & 0x8000, 0);
             }
             if index == 37 {
-                assert!(s.radar_failed);
+                assert!(s.own().radar_failed);
             }
             if index == 38 {
-                assert!(s.ecm_failed);
+                assert!(s.own().ecm_failed);
             }
-            assert_eq!(mass, s.payload_lbs());
-            let reset = State::new(s.config.clone(), true).unwrap();
-            assert!(!reset.radar_failed && !reset.ecm_failed);
-            assert_eq!(reset.subsystem_counts, [0; 45]);
+            assert_eq!(mass, s.own().payload_lbs());
+            let reset = State::new(s.own().config.clone(), true).unwrap();
+            assert!(!reset.own().radar_failed && !reset.own().ecm_failed);
+            assert_eq!(reset.own().subsystem_counts, [0; 45]);
         }
     }
 
@@ -6099,44 +7139,84 @@ mod tests {
     fn sequential_launches_keep_their_own_targets_under_one_cockpit_track() {
         let mut s = fixture(true);
         // Fire and forget: the weapon needs support at launch, not after it.
-        s.config.stations[0].weapon.flags &= !0x200;
+        s.own_mut().config.stations[0].weapon.flags &= !0x200;
         let l = launcher();
         s.targets.push(target(1, [400., 1000., 3000.], 20, 0x80));
         s.targets.push(target(2, [-400., 1000., 3000.], 20, 0x80));
         observe(&mut s, l, 1);
-        s.command(Command::DesignateTarget(1), l);
+        s.command(0, Command::DesignateTarget(1), l);
         observe(&mut s, l, ACQUISITION);
-        assert_eq!(s.sensors.acquired(), Some(1));
-        assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
-        s.release();
+        assert_eq!(s.own().sensors.acquired(), Some(1));
+        assert!(
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: l
+                }],
+                |_, _| 0.
+            )
+            .contains(&Event::Fired(0))
+        );
+        s.release(0);
         // Selecting the second target releases the first illumination at once.
-        s.command(Command::DesignateTarget(2), l);
-        assert_eq!(s.sensors.acquired(), None);
-        assert_eq!(s.readiness(l), Readiness::RadarAcquiring);
+        s.command(0, Command::DesignateTarget(2), l);
+        assert_eq!(s.own().sensors.acquired(), None);
+        assert_eq!(s.own_view().readiness(l), Readiness::RadarAcquiring);
         observe(&mut s, l, ACQUISITION);
-        assert_eq!(s.sensors.acquired(), Some(2));
-        assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
+        assert_eq!(s.own().sensors.acquired(), Some(2));
+        assert!(
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: l
+                }],
+                |_, _| 0.
+            )
+            .contains(&Event::Fired(0))
+        );
         let targets: Vec<_> = s.projectiles.iter().map(|p| p.target).collect();
         assert_eq!(targets, [Some(1), Some(2)]);
-        assert_eq!(s.sensors.acquired(), Some(2));
-        assert_eq!(s.designated(), Some(2));
+        assert_eq!(s.own().sensors.acquired(), Some(2));
+        assert_eq!(s.own_view().designated(), Some(2));
     }
     #[test]
     fn a_continuous_lock_weapon_loses_support_when_the_cockpit_switches_target() {
         let mut s = fixture(true);
-        assert!(s.config.stations[0].weapon.flags & 0x200 != 0);
+        assert!(s.own().config.stations[0].weapon.flags & 0x200 != 0);
         let l = launcher();
         s.targets.push(target(1, [400., 1000., 3000.], 20, 0x80));
         s.targets.push(target(2, [-400., 1000., 3000.], 20, 0x80));
         observe(&mut s, l, 1);
-        s.command(Command::DesignateTarget(1), l);
+        s.command(0, Command::DesignateTarget(1), l);
         observe(&mut s, l, ACQUISITION);
-        assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
+        assert!(
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: l
+                }],
+                |_, _| 0.
+            )
+            .contains(&Event::Fired(0))
+        );
         assert_eq!(s.projectiles[0].target, Some(1));
-        s.release();
-        s.command(Command::DesignateTarget(2), l);
+        s.release(0);
+        s.command(0, Command::DesignateTarget(2), l);
         // Designating another contact is never illumination of the first.
-        assert!(s.step(false, l, |_, _| 0.).contains(&Event::TrackLost(1)));
+        assert!(
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l
+                }],
+                |_, _| 0.
+            )
+            .contains(&Event::TrackLost(1))
+        );
         assert_eq!(s.projectiles[0].target, None);
     }
     #[test]
@@ -6147,12 +7227,12 @@ mod tests {
         s.targets.push(target(1, [0., 1000., 3000.], 20, 0x80));
         s.targets[0].on_ground = true;
         observe(&mut s, l, 1);
-        assert!(s.sensors.contact(1).is_none());
-        s.command(Command::DesignateTarget(1), l);
-        assert_eq!(s.designated(), None);
+        assert!(s.own().sensors.contact(1).is_none());
+        s.command(0, Command::DesignateTarget(1), l);
+        assert_eq!(s.own_view().designated(), None);
         s.targets[0].on_ground = false;
         observe(&mut s, l, 1);
-        assert!(s.sensors.contact(1).is_some());
+        assert!(s.own().sensors.contact(1).is_some());
     }
     #[test]
     fn a_destroyed_aircraft_stays_a_contact_until_its_wreck_reaches_the_ground() {
@@ -6160,17 +7240,24 @@ mod tests {
         let l = launcher();
         s.targets.push(target(1, [0., 1000., 3000.], 20, 0x80));
         observe(&mut s, l, 1);
-        s.command(Command::DesignateTarget(1), l);
+        s.command(0, Command::DesignateTarget(1), l);
         observe(&mut s, l, ACQUISITION);
         s.targets[0].hp = 0;
         observe(&mut s, l, 1);
         // Hit points reaching zero removes combat viability, not the return.
-        assert!(s.sensors.contact(1).is_some());
-        assert_eq!(s.designated(), Some(1));
-        assert_eq!(s.readiness(l), Readiness::TargetDestroyed);
+        assert!(s.own().sensors.contact(1).is_some());
+        assert_eq!(s.own_view().designated(), Some(1));
+        assert_eq!(s.own_view().readiness(l), Readiness::TargetDestroyed);
         assert!(s.targets[0].airborne);
         for _ in 0..1200 {
-            s.step(false, l, |_, _| 0.);
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: l,
+                }],
+                |_, _| 0.,
+            );
             if !s.targets[0].airborne {
                 break;
             }
@@ -6178,40 +7265,67 @@ mod tests {
         // A grounded wreck ends the air-to-air observation and selection on
         // the next step, since observations are produced before movement.
         assert!(!s.targets[0].airborne);
-        s.step(false, l, |_, _| 0.);
+        s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
         assert_eq!(s.targets[0].position[1], 0.);
-        assert!(s.sensors.contact(1).is_none());
-        assert_eq!(s.designated(), None);
-        assert_eq!(s.kills, 0);
+        assert!(s.own().sensors.contact(1).is_none());
+        assert_eq!(s.own_view().designated(), None);
+        assert_eq!(s.own().kills, 0);
     }
     #[test]
     fn automatic_radar_failure_inhibits_launch_and_breaks_illumination() {
         let mut s = fixture(true);
         s.cheats.damage = crate::cheats::Damage::Realistic;
         let l = launcher();
-        s.range_target(l);
+        s.range_target(0, l);
         observe(&mut s, l, 1);
-        s.designate_next(true);
+        s.designate_next(0, true);
         observe(&mut s, l, ACQUISITION);
-        let id = s.designated().expect("selected fixture target");
-        assert!(s.step(true, l, |_, _| 0.).contains(&Event::Fired(0)));
-        s.config.system_damage = [0; 45];
-        s.config.system_damage[37] = 0x1f;
-        s.config.damage_capacity = 1;
-        s.player_hp = 10000;
+        let id = s.own_view().designated().expect("selected fixture target");
+        assert!(
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: l
+                }],
+                |_, _| 0.
+            )
+            .contains(&Event::Fired(0))
+        );
+        s.own_mut().config.system_damage = [0; 45];
+        s.own_mut().config.system_damage[37] = 0x1f;
+        s.own_mut().config.damage_capacity = 1;
+        s.own_mut().hp = 10000;
         let mut events = vec![];
         for _ in 0..30 {
-            s.apply_player_damage(4, &mut events);
+            s.damage_own(4, &mut events);
         }
-        assert!(s.radar_failed);
-        assert_eq!(s.readiness(l), Readiness::RadarFailed);
-        let ammo = s.ammo.clone();
-        assert!(s.step(true, l, |_, _| 0.).contains(&Event::TrackLost(id)));
-        assert_eq!(s.ammo, ammo);
+        assert!(s.own().radar_failed);
+        assert_eq!(s.own_view().readiness(l), Readiness::RadarFailed);
+        let ammo = s.own().ammo.clone();
+        assert!(
+            s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: true,
+                    launcher: l
+                }],
+                |_, _| 0.
+            )
+            .contains(&Event::TrackLost(id))
+        );
+        assert_eq!(s.own().ammo, ammo);
     }
 
     fn guided_weapon(state: &State, source: &str, signature: u8) -> Weapon {
-        let mut weapon = state.config.stations[0].weapon.clone();
+        let mut weapon = state.own().config.stations[0].weapon.clone();
         weapon.source = source.into();
         weapon.seeker.signature = signature;
         for zone in &mut weapon.seeker.zones {
@@ -6246,7 +7360,7 @@ mod tests {
             motion: Some(Motion::new(&weapon.movement, [0., 0., 600.], position[1])),
             guidance_ticks: Some(profile.guidance_ticks),
             age: 0,
-            incoming: target == PLAYER_OWNER,
+            incoming: (target == PLAYER_OWNER).then_some(PLAYER_OWNER),
             station: 0,
             position,
             previous: position,
@@ -6288,12 +7402,19 @@ mod tests {
             radar_emitting: true,
         }]);
         for _ in 0..missiles::DWELL {
-            state.step(false, player, |_, _| 0.);
+            state.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: player,
+                }],
+                |_, _| 0.,
+            );
         }
         let flight = state.projectiles[0].guidance.as_ref().unwrap();
         assert_eq!(flight.seeker.target, Some(PLAYER_OWNER));
         assert_eq!(flight.seeker.status, Status::Pitbull);
-        assert!(state.missile_snapshots(player)[0].radar_acquired);
+        assert!(state.missile_snapshots(&[(0, player)])[0].radar_acquired);
     }
 
     #[test]
@@ -6315,7 +7436,7 @@ mod tests {
                 &mut shot,
                 &weapon,
                 std::slice::from_ref(&target),
-                None,
+                std::iter::empty(),
                 None,
                 &|_, _| false,
                 &|_, _| 0.,
@@ -6334,7 +7455,7 @@ mod tests {
                 &mut shot,
                 &weapon,
                 std::slice::from_ref(&target),
-                None,
+                std::iter::empty(),
                 Some(&support),
                 &|_, _| false,
                 &|_, _| 0.,
@@ -6348,7 +7469,7 @@ mod tests {
             &mut shot,
             &weapon,
             std::slice::from_ref(&target),
-            None,
+            std::iter::empty(),
             None,
             &|_, _| false,
             &|_, _| 0.,
@@ -6362,7 +7483,7 @@ mod tests {
                 &mut shot,
                 &weapon,
                 std::slice::from_ref(&target),
-                None,
+                std::iter::empty(),
                 Some(&support),
                 &|_, _| false,
                 &|_, _| 0.,
@@ -6422,7 +7543,7 @@ mod tests {
         projectile.guidance = None;
         projectile.motion = None;
         state.projectiles.push(projectile);
-        let snapshots = state.missile_snapshots(launcher());
+        let snapshots = state.missile_snapshots(&[(0, launcher())]);
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].guidance, missiles::Guidance::Active);
         assert!(!snapshots[0].radar_active);
@@ -6432,14 +7553,14 @@ mod tests {
     #[test]
     fn player_supported_snapshot_carries_actual_support() {
         let mut state = fixture(true);
-        state.config.stations[0].weapon = guided_weapon(&state, "R530.JT", 3);
+        state.own_mut().config.stations[0].weapon = guided_weapon(&state, "R530.JT", 3);
         let player = launcher();
-        state.range_target(player);
+        state.range_target(0, player);
         observe(&mut state, player, 1);
-        state.designate_next(true);
+        state.designate_next(0, true);
         observe(&mut state, player, ACQUISITION);
-        let id = state.designated().unwrap();
-        let contact = state.sensors.observation(id).unwrap();
+        let id = state.own_view().designated().unwrap();
+        let contact = state.own().sensors.observation(id).unwrap();
         let observation = seeker::Observation {
             id,
             position: contact.position,
@@ -6449,13 +7570,13 @@ mod tests {
             range: missiles::length(sub(contact.position, player.position)),
         };
         state.projectiles.push(owned_shot(
-            state.config.stations[0].weapon.clone(),
+            state.own().config.stations[0].weapon.clone(),
             PLAYER_OWNER,
             id,
             player.position,
             observation,
         ));
-        let snapshot = state.missile_snapshots(player)[0];
+        let snapshot = state.missile_snapshots(&[(0, player)])[0];
         assert!(snapshot.supported);
         assert_eq!(snapshot.supporting_radar_position, Some(player.position));
     }
@@ -6476,11 +7597,11 @@ fn eased_weapon(w: &Weapon) -> Weapon {
     w
 }
 
-fn guide_owned(
+fn guide_owned<'a>(
     p: &mut Projectile,
     w: &Weapon,
-    targets: &[Target],
-    player: Option<&Target>,
+    targets: &'a [Target],
+    others: impl Iterator<Item = &'a Target> + Clone,
     support: Option<&ActorSupport>,
     obscured: &dyn Fn(Vector, Vector) -> bool,
     ground: &dyn Fn(f64, f64) -> f64,
@@ -6508,7 +7629,7 @@ fn guide_owned(
         .filter(|id| {
             targets
                 .iter()
-                .chain(player)
+                .chain(others.clone())
                 .find(|t| t.id == *id)
                 .is_some_and(|t| flight.eligible(w, t))
         })
@@ -6552,7 +7673,7 @@ fn guide_owned(
         };
         let observations: Vec<_> = targets
             .iter()
-            .chain(player)
+            .chain(others)
             .filter(|t| flight.eligible(w, t))
             .filter(|t| {
                 profile.guidance != Guidance::Supported || supported.is_some_and(|o| o.id == t.id)
@@ -6639,7 +7760,15 @@ fn guide(
             radar_position: [0.; 3],
             radar_emitting: true,
         });
-    guide_owned(p, w, targets, None, support.as_ref(), obscured, &|_, _| 0.);
+    guide_owned(
+        p,
+        w,
+        targets,
+        std::iter::empty(),
+        support.as_ref(),
+        obscured,
+        &|_, _| 0.,
+    );
 }
 
 #[cfg(test)]

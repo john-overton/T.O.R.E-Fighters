@@ -295,9 +295,10 @@ impl World {
             .map_err(std::io::Error::other)?;
         // A ground start begins on NAV, and so does an aircraft with nothing
         // loaded in the selected station: an empty station is never armed.
-        cockpit.airport_nav_mode =
-            ground_airport.is_some() || !self.combat.state.carries(self.combat.state.selected);
-        self.combat.state.armed = !cockpit.airport_nav_mode;
+        let own = self.combat.own();
+        cockpit.airport_nav_mode = ground_airport.is_some()
+            || !own.carries(own.selected, self.combat.state.cheats.unlimited_ammo);
+        self.combat.own_mut().armed = !cockpit.airport_nav_mode;
         if let Some(airport) = ground_airport {
             cockpit.airport_service.command(
                 &self.terrain.airport_scene,
@@ -332,7 +333,7 @@ impl World {
             bridge.apply_group_survival(&ai.group_must_survive);
             bridge.mirror_pose_out(&mut self.combat.state.targets);
             // The designation keys skip the player's friends.
-            self.combat.state.friendlies = bridge.friendly_ids();
+            self.combat.own_mut().friendlies = bridge.friendly_ids();
             self.combat.ai_poses = !bridge.is_empty();
             ai_aircraft = Some(bridge.len());
             self.ai_wings = Some(bridge);
@@ -379,7 +380,7 @@ impl World {
             },
             combat::launcher(&self.cockpits[cockpit].flight),
         );
-        self.cockpits[cockpit].airport_nav_mode = !self.combat.state.armed;
+        self.cockpits[cockpit].airport_nav_mode = !self.combat.own().armed;
     }
 
     /// Each cockpit's input for this tick, in cockpit order: every seat that
@@ -588,7 +589,7 @@ impl World {
         }
         for event in &events {
             use tore_sim::combat::live::Event;
-            if let Some(cue) = combat::feedback(event, self.combat.state.configuration()) {
+            if let Some(cue) = combat::feedback(event, self.combat.own().configuration()) {
                 out.cues.push(Cue::Feedback(cue));
             }
             match event {
@@ -614,7 +615,7 @@ impl World {
                     own.flight.crashed = true;
                 }
                 Event::Fired(i) => {
-                    if let Some(name) = self.combat.state.configuration().stations[*i]
+                    if let Some(name) = self.combat.own().configuration().stations[*i]
                         .weapon
                         .fire_sound
                         .as_deref()
@@ -683,7 +684,7 @@ impl World {
     /// only, until each human-flown plane has its own ownship (stage B1).
     fn cockpit_alive(&self, cockpit: usize) -> bool {
         let flight = &self.cockpits[cockpit].flight;
-        !flight.crashed && (cockpit != 0 || self.combat.state.player_hp > 0)
+        !flight.crashed && (cockpit != 0 || self.combat.state.own().hp > 0)
     }
 
     /// The radio's half of a tick: the tower and crew voice of every

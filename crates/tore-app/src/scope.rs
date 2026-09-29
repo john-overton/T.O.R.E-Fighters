@@ -175,7 +175,7 @@ fn relative(basis: &Basis, from: Vector, to: Vector) -> (f64, f64) {
 }
 
 pub fn scope(state: &live::State, s: &flight::State, controls: sensors::Controls) -> Scope {
-    let sensors = &state.sensors;
+    let sensors = &state.own().sensors;
     let basis = Basis::new(s.yaw, s.pitch, s.bank);
     // Labels and the plotted scale follow the player's own controls, so they
     // never lag a step behind the switch that was just pressed. Contacts and
@@ -259,7 +259,7 @@ pub fn scope(state: &live::State, s: &flight::State, controls: sensors::Controls
 }
 
 pub fn rcs(state: &live::State, s: &flight::State, scale_nmi: f64) -> Rcs {
-    let signature = state.configuration().sensors.signature;
+    let signature = state.own().configuration().sensors.signature;
     let basis = Basis::new(s.yaw, s.pitch, s.bank);
     let configuration = sensors::Configuration {
         gear: s.gear,
@@ -269,9 +269,10 @@ pub fn rcs(state: &live::State, s: &flight::State, scale_nmi: f64) -> Rcs {
     Rcs {
         contour: signature.exposure_contour(&basis, configuration, 5.),
         emitters: state
+            .own()
             .emitters
             .iter()
-            .filter(|_| !state.rwr_failed)
+            .filter(|_| !state.own().rwr_failed)
             .map(|e| Emitter {
                 bearing_rad: e.bearing_rad,
                 distance_nmi: e.distance_nmi,

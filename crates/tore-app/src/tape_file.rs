@@ -13,7 +13,7 @@ use std::{
 };
 use tore_sim::{
     attitude::{Basis, dot},
-    combat::live::{Configuration, Launcher, State},
+    combat::live::{Configuration, Launcher, OwnshipInput, State},
     sensors::{Channel, Controls, RANGE_LADDER_NMI},
 };
 
@@ -306,16 +306,16 @@ fn replay_reader(
             }
             println!(
                 "combat replay: ticks={ticks} shots={} hits={} kills={} ammo={:?} player-hp={} damage={} subsystem={:?} visual-failed={} radar-failed={} ecm-failed={}",
-                s.shots,
-                s.hits,
-                s.kills,
-                s.ammo,
-                s.player_hp,
-                s.player_damage,
-                s.last_subsystem,
-                s.visual_failed,
-                s.radar_failed,
-                s.ecm_failed
+                s.own().shots,
+                s.own().hits,
+                s.own().kills,
+                s.own().ammo,
+                s.own().hp,
+                s.own().damage,
+                s.own().last_subsystem,
+                s.own().visual_failed,
+                s.own().radar_failed,
+                s.own().ecm_failed
             );
             if let (Some(service), Some(scene), Some(aircraft)) =
                 (&airport_service, airport_scene, last_aircraft)
@@ -361,7 +361,7 @@ fn replay_reader(
                 if action == "reset-scene" && version < 6 {
                     return Err("scene reset requires tape version6".into());
                 }
-                s = State::new(s.configuration().clone(), true)?;
+                s = State::new(s.own().configuration().clone(), true)?;
                 register_airports(&mut s, version >= 6)?;
                 if let (Some(service), Some(scene)) = (&mut airport_service, airport_scene) {
                     service.reset(scene).map_err(std::io::Error::other)?;
@@ -375,17 +375,24 @@ fn replay_reader(
                     tore_sim::combat::missiles::Rules::Spec
                 };
                 if action == "reset" {
-                    s.range_target(launcher);
+                    s.range_target(0, launcher);
                 }
                 initialized = true;
             }
-            "release" => s.release(),
+            "release" => s.release(0),
             "fire" | "tick" => {
                 // The host sets the mission wind before every step; a tape does
                 // not record it, so the replay is given the same wind.
                 s.smoke.wind = wind;
                 s.devices.wind = wind;
-                let events = s.step(action == "fire", launcher, &ground);
+                let events = s.step(
+                    &[OwnshipInput {
+                        aircraft: 0,
+                        held: action == "fire",
+                        launcher,
+                    }],
+                    &ground,
+                );
                 if let (Some(service), Some(scene)) = (&mut airport_service, airport_scene) {
                     let _ = events;
                     service.synchronize_health(
@@ -443,6 +450,7 @@ fn replay_reader(
                 );
             }
             _ => s.command(
+                0,
                 command(action).ok_or("unknown combat tape action")?,
                 launcher,
             ),
@@ -487,6 +495,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tore-tape-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let config = tore_world::test_support::combat_fixture(false)
+            .own()
             .configuration()
             .clone();
         let data = BTreeMap::new();

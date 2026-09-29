@@ -82,8 +82,8 @@ impl Warnings {
 pub fn inbound(combat: &live::State, player: [f64; 3]) -> [bool; 2] {
     [3, 2].map(|class| {
         combat.projectiles.iter().any(|p| {
-            let weapon = p.weapon(combat.configuration());
-            p.incoming
+            let weapon = p.weapon(combat.own().configuration());
+            p.incoming.is_some()
                 && p.target == Some(live::PLAYER_OWNER)
                 && weapon.seeker.signature == class
                 && !(weapon.source.eq_ignore_ascii_case("AIM120.JT")

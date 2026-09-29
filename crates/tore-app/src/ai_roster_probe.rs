@@ -85,9 +85,14 @@ pub fn roster_probe(
                 player.step(&flight::PilotInput::default(), |x, z| {
                     f64::from(world.height(x as f32, z as f32))
                 });
-                combat.step(false, combat::launcher(&player), |x, z| {
-                    f64::from(world.height(x as f32, z as f32))
-                });
+                combat.step(
+                    &[tore_sim::combat::live::OwnshipInput {
+                        aircraft: combat.own().aircraft,
+                        held: false,
+                        launcher: combat::launcher(&player),
+                    }],
+                    |x, z| f64::from(world.height(x as f32, z as f32)),
+                );
                 bridge.step(&mut combat, &player, world)?;
                 for (actor, (was_alive, mut replay)) in bridge.mission().actors().iter().zip(before)
                 {

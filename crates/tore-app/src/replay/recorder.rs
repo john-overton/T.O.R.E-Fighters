@@ -572,7 +572,7 @@ impl Recorder {
                 self.note(event);
             }
         }
-        let designated = combat.state.designated();
+        let designated = combat.state.own_view().designated();
         for note in combat.take_notes() {
             let (name, text) = match note {
                 CommandNote::Command(command) => (
@@ -593,8 +593,8 @@ impl Recorder {
         // Looked at after each tick and before the next, so a change a
         // command makes between ticks lands on the tick on screen, like
         // the command.
-        let view = combat.state.view_target().map(|t| t.id);
-        let held = view.is_some() && combat.state.display_target().map(|t| t.id) != view;
+        let view = combat.state.own_view().view_target().map(|t| t.id);
+        let held = view.is_some() && combat.state.own_view().display_target().map(|t| t.id) != view;
         if let Some(event) = view_target_event(self.view, (view, held)) {
             self.note(event);
         }
@@ -780,7 +780,7 @@ impl Recorder {
             .iter()
             .map(|p| (p.id, p))
             .collect();
-        let config = tick.combat.state.configuration();
+        let config = tick.combat.state.own().configuration();
         let mut shots = BTreeMap::new();
         for pose in &snapshot.projectiles {
             let simulated = live_shots.get(&pose.id);
@@ -850,7 +850,7 @@ impl Recorder {
         // current target, or the player's designated one.
         let intended = |owner: u32| {
             if owner == 0 {
-                tick.combat.state.designated()
+                tick.combat.state.own_view().designated()
             } else {
                 tick.wings
                     .and_then(|w| w.mission().actor(owner))
@@ -866,7 +866,7 @@ impl Recorder {
                     .with(field::WEAPON, replay::Value::Id(shot.weapon));
                 if let Some(weapon) = live_shots
                     .get(id)
-                    .map(|p| p.weapon(tick.combat.state.configuration()))
+                    .map(|p| p.weapon(tick.combat.state.own().configuration()))
                 {
                     event = event.with(
                         field::CLASS,
@@ -883,7 +883,9 @@ impl Recorder {
                             "boresight"
                         }
                         Some(_) => "cued",
-                        None if live::is_gun(p.weapon(tick.combat.state.configuration())) => "gun",
+                        None if live::is_gun(p.weapon(tick.combat.state.own().configuration())) => {
+                            "gun"
+                        }
                         None => "unguided",
                     });
                 event = event.with(field::MODE, mode);
@@ -1319,6 +1321,7 @@ impl Recorder {
         let tone = tick
             .combat
             .state
+            .own_view()
             .seeker_tone(combat::launcher(flight))
             .map(|t| {
                 let tone = Tone {
@@ -1662,7 +1665,7 @@ fn flight_data(
             controls: controls(f, tick.pilot),
             on_ground: f.supported_at(player_ground),
             alive: !f.crashed
-                && tick.combat.state.player_hp > 0
+                && tick.combat.state.own().hp > 0
                 && !f.systems.pilot.dead
                 && f.escape.is_none(),
             ejected: f.escape.is_some(),
@@ -2174,7 +2177,7 @@ mod tests {
         .unwrap();
         recorder.wait_for_writer();
         let mut combat = fixture::combat(Vec::new(), Vec::new());
-        combat.state = sighted(combat.state.configuration());
+        combat.state = sighted(combat.state.own().configuration());
         let player = fixture::player();
         combat.restart_render(&player, None);
         let snapshot = combat.render_snapshot().clone();
@@ -2185,11 +2188,18 @@ mod tests {
             radar_power: false,
             ..launcher
         };
-        combat.state.range_target(launcher);
+        combat.state.range_target(0, launcher);
         let mut number = 0;
         let mut run = |recorder: &mut Recorder, combat: &mut combat::Combat, with, ticks| {
             for _ in 0..ticks {
-                combat.state.step(false, with, |_, _| 0.);
+                combat.state.step(
+                    &[live::OwnshipInput {
+                        aircraft: 0,
+                        held: false,
+                        launcher: with,
+                    }],
+                    |_, _| 0.,
+                );
                 tick(recorder, combat, &snapshot, number, &mut ui);
                 number += 1;
             }
@@ -2198,12 +2208,19 @@ mod tests {
         let on_screen = run(&mut recorder, &mut combat, launcher, 120);
         // Between ticks the player designates the contact.
         combat.command(live::Command::Designate, launcher);
-        let id = combat.state.designated().expect("a radar contact");
+        let id = combat
+            .state
+            .own_view()
+            .designated()
+            .expect("a radar contact");
         run(&mut recorder, &mut combat, launcher, 120);
         // Radar off: the sensors drop it, the views hold it by sight.
         run(&mut recorder, &mut combat, blind, 120);
-        assert!(combat.state.display_target().is_none());
-        assert_eq!(combat.state.view_target().map(|t| t.id), Some(id));
+        assert!(combat.state.own_view().display_target().is_none());
+        assert_eq!(
+            combat.state.own_view().view_target().map(|t| t.id),
+            Some(id)
+        );
         recorder.bookmark();
         // Past visual range it is gone.
         let far = [launcher.position[0], launcher.position[1], -70_000.];
@@ -2215,7 +2232,7 @@ mod tests {
             .unwrap()
             .position = far;
         run(&mut recorder, &mut combat, blind, 30);
-        assert!(combat.state.view_target().is_none());
+        assert!(combat.state.own_view().view_target().is_none());
         let path = recorder
             .finish(&replay::Footer {
                 end_tick: number,
@@ -2425,7 +2442,8 @@ mod tests {
         combat.restart_render(&player, None);
         let snapshot = combat.render_snapshot().clone();
         let mut ui = flight_ui::FlightUi::default();
-        (combat.state.chaff, combat.state.flares) = (2, 2);
+        let own = combat.state.own_mut();
+        (own.chaff, own.flares) = (2, 2);
         tick(&mut recorder, &mut combat, &snapshot, 0, &mut ui);
         // Between ticks the player releases chaff: its entries land on the
         // tick on screen, the sound with the player's own flag.
@@ -2448,7 +2466,7 @@ mod tests {
                     .state
                     .device_released(flare, live::EffectKind::Flare, 7);
             } else {
-                combat.state.range_target(launcher);
+                combat.state.range_target(0, launcher);
             }
             let mut snapshot = snapshot.clone();
             snapshot.tick = number;
@@ -2533,7 +2551,7 @@ mod tests {
             (0..7).map(|i| (i % 3, [0.; 3])).collect(),
         );
         let player = fixture::player();
-        let scene = fixture::scene(combat.state.configuration());
+        let scene = fixture::scene(combat.state.own().configuration());
         let [previous, current] = fixture::snapshots(&mut combat, &scene, true, &player);
         let mut ui = flight_ui::FlightUi::default();
         tick(&mut recorder, &mut combat, &previous, 10, &mut ui);

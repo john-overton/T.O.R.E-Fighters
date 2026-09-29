@@ -138,7 +138,7 @@ impl Scene {
                 player.velocity,
                 Basis::new(player.yaw, player.pitch, player.bank),
             ),
-            combat.state.view_target().map(|t| t.id),
+            combat.state.own_view().view_target().map(|t| t.id),
             combat
                 .state
                 .targets
@@ -181,7 +181,9 @@ impl Scene {
                 .state
                 .projectiles
                 .iter()
-                .filter(|p| !tore_sim::combat::live::is_gun(p.weapon(combat.state.configuration())))
+                .filter(|p| {
+                    !tore_sim::combat::live::is_gun(p.weapon(combat.state.own().configuration()))
+                })
                 .map(|p| {
                     let direction = unit(p.direction, [0., 0., 1.]);
                     Shot::new(
@@ -197,7 +199,7 @@ impl Scene {
                         ),
                         p.owner,
                         p.target,
-                        p.incoming,
+                        p.incoming.is_some(),
                     )
                 })
                 .collect(),
