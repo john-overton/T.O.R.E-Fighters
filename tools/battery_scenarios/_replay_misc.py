@@ -385,7 +385,6 @@ def combat_smoke_scenarios() -> list[Scenario]:
                 args=["--combat-smoke", "--aircraft", ac, "--no-audio"],
                 timeout=300,
                 expect=[r"combat smoke .* PASS"],
-                known_failure="" if ac == "mig29" else "the smoke's expectations predate the 2026-09-28 damage and missile changes",
             )
         )
     return out

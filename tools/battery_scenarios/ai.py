@@ -283,6 +283,27 @@ def fight(f: int, e: int, *extra: str) -> list[str]:
     return ["--probe-fight", f"{f}:{e}", *extra]
 
 
+_LOOKAHEAD = "fast low flight into rising ground, fixed 1,000 ft terrain look-ahead (docs/testing/lane-ai.md, decision 7)"
+_STRIP = "1,074 ft strip, the roll runs off the end (docs/testing/lane-ai.md, decision 11)"
+
+# Failures that are understood and documented in docs/testing/lane-ai.md. Each
+# turns red when it starts to pass, so the entry gets removed with the fix.
+KNOWN_FAILURES = {
+    "ai-big-a4e-vs-f22n-researched": _LOOKAHEAD,
+    "ai-big-x31-vs-faxx-researched": _LOOKAHEAD,
+    "ai-long-15v15": _LOOKAHEAD,
+    "ai-damaged-fault04-gun": _LOOKAHEAD,
+    "ai-damaged-fault04-hit": _LOOKAHEAD,
+    "ai-fuzz-0014": _LOOKAHEAD,
+    "ai-fuzz-0028": _LOOKAHEAD,
+    "ai-fuzz-0053": _LOOKAHEAD,
+    "ai-known-f22-leader-wingman-ukr3": "wingman far below its slot in the Intercept phase (docs/testing/lane-ai.md, decision 14)",
+    "ai-theater-apa-takeoff-a3": _STRIP,
+    "ai-theater-lfa-takeoff-a3": _STRIP,
+    "ai-theater-cub-takeoff-a1": "friendly wing with no route leaves the map on a Key West ground start (docs/testing/lane-ai.md, decision 5)",
+}
+
+
 def scenarios() -> list[Scenario]:
     out: list[Scenario] = []
     attack = ["--probe-attack", "600:10"]
@@ -584,6 +605,9 @@ def scenarios() -> list[Scenario]:
     out.append(Scenario(name="ai-probe-matrix", lane="ai",
                         args=["--probe-matrix", "{work}/matrix", "--ai-probe-ticks", "360", "--separation", "1", "--no-audio"],
                         timeout=3600, check=matrix_problems))
+    for s in out:
+        if s.name in KNOWN_FAILURES:
+            s.known_failure = KNOWN_FAILURES[s.name]
     return out
 
 

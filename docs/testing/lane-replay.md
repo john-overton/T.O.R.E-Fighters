@@ -26,8 +26,8 @@ python3 tools/battery.py --scenario 'replay-keys-*' --windows 2   # key-pressing
 The whole lane is 464 scenarios (118 of them open a window) and takes about 45 minutes on the
 dev machine with five jobs and two windows, of which `replay-validate-creator` alone is about
 eight minutes. The last full run passed all of them except that scenario, which timed out under
-the old 10 minute limit and now has 30 minutes; the 13 combat-smoke scenarios pass as known
-failures. The recording, corrupt-file, option, snapshot and input scenarios are
+the old 10 minute limit and now has 30 minutes; the combat-smoke scenarios were known failures then and pass now that the
+flight lane brought the probe up to date. The recording, corrupt-file, option, snapshot and input scenarios are
 headless and take a few seconds each. Anything that opens a window goes through
 `tools/agent-run.sh` and counts against `--windows`. The import scenarios copy the local retail
 media with a copy-on-write copy (no extra disk space on btrfs) and need `gameassets/` present.
@@ -56,7 +56,7 @@ media with a copy-on-write copy (no extra disk space on btrfs) and need `gameass
 | `replay-audio-*` | Start-up with sound on and the audio device missing or wrong (`PULSE_SERVER`, `PIPEWIRE_REMOTE`, `ALSA_CONFIG_PATH` pointed nowhere), and a replay played with sound | Never a crash. A missing device is reported as `Continuing without audio` |
 | `replay-input-*`, `replay-tape-*` | `--list-inputs`, `--write-input-profile` then load it, refusing to overwrite, nine kinds of bad profile, eight kinds of bad tape, hand-made pilot input tapes replayed twice on every aircraft | Profiles that cannot load fail with a message that names the file. Tapes that cannot load exit 1 with a message. Two replays of one tape give identical results on all fourteen aircraft |
 | `replay-import-bad-*` | Eleven kinds of bad game media given to `--import` in a fresh data folder | Exit 1 with an actionable message, nothing left behind. A damaged archive names the file and says what to do |
-| `replay-combat-smoke-*` | The weapons acceptance probe on each aircraft | Known failures except the MiG-29, see below |
+| `replay-combat-smoke-*` | The weapons acceptance probe on each aircraft | All 14 aircraft pass (the flight lane fixed the probe) |
 | `replay-validate-creator` | The creator acceptance probe | Passes |
 | `replay-script-*` | Hand-flown windowed missions from `--input-script` files: a ground-start takeoff (afterburner, pulsed stick, gear and flaps up) on all 14 aircraft, the same with the tower's landing clearance, gear, flaps, hook, airbrake, afterburner and countermeasures on all 14 (hooks only on carrier types, no afterburner on the A-4E and Su-25), a held gun trigger, a missile fired at a designated target, an ejection, autopilot and NAV modes, a 6 G pull and roll, views, the pause menu and bookmarks, and all sixteen cheats on and off through the menu | The recording holds the events the keys should cause: device positions over time, exactly one chaff and one flare, launches from the player, `aircraft.ejected`, autopilot effects, three bookmarks, paired `system.cheat` events |
 | `replay-script-*-mouse` | The mouse: the Replays screen's Keep, Tacview, Debug log, Delete with confirmation and auto-delete panel; the debrief's NEXT, PREV and OK; the Escape menu's tab, row, Keyboard shortcuts, Restart and Resume | Files written and removed, settings saved, five distinct debrief pages, a restart recording pair, and every screen a real picture |
@@ -93,18 +93,8 @@ shared by the window and the script.
 
 ## Found and not fixed
 
-- **`--combat-smoke` fails on 13 of the 14 aircraft** (only the MiG-29 passes), each at a
-  different check: "radar-off launch was not inhibited" (F/A-18D, X-31, Su-27, F-22, F-22N,
-  F/A-XX; the launch does go off with the radar off because boresight and fire-and-forget
-  guidance no longer need it), "source guidance probe did not launch" (Rafale C, Su-25, MiG-23),
-  a gun kill expectation (F-14D, MiG-21), "automatic damage/destruction failed" (A-4E) and an
-  ammunition expectation (Su-35). With `TORE_COMBAT_EVIDENCE` set the F/A-18D also stops at
-  "serialized live-fire replay diverged before reset". The failures are on the checkout the
-  battery started from, so they predate this lane; they look like the probe's expectations
-  falling behind the 2026-09-28 damage rework (`cbde197`) and the missile pass (`261e8bf`), but
-  no one has decided whether the probe or the game is wrong. The probe is not in CI. The lane
-  keeps one scenario per aircraft marked as a known failure; each turns red when it starts to
-  pass, as a reminder to remove the mark.
+- **`--combat-smoke`** failed on 13 of the 14 aircraft when this lane first ran. The flight lane
+  found the probe was stale rather than the game, and fixed it; all 14 pass now.
 - **AI behaviour flags in the recordings, for the AI lane.** The summary flags `ai_flipping` (an
   AI aircraft changing activity six times in a few seconds), `track_lost_early` (a missile losing
   its track within seconds of launch) and `control_oscillation` (a pitch control reversing eight
@@ -125,9 +115,6 @@ shared by the window and the script.
 - **The airborne flag's meaning.** In a recording `airborne` means "in play" and `on_ground`
   is separate, so a parked aircraft is both. The summary now counts only the frames off the
   ground; Tacview and the log still write the flag as recorded.
-- **What `--combat-smoke` should require now:** bring it up to the current behaviour, or change
-  the game. See "Found and not fixed". (`--validate-creator` was fixed by the menus lane and its
-  known-failure marker is gone.)
 - **Retracting the gear on the runway.** A scripted takeoff pressed G at 80 kt with the wheels
   on the ground: the gear came up, the aircraft kept rolling on its "wheels" and took off with
   the gear already up, with no crash or message. No spec or doc says what the game should do

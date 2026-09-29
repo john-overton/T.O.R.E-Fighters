@@ -43,7 +43,7 @@ for size and blankness, and were also looked at by the agent that wrote them.
 | `menus-panel-*` | Instrument windows drawn on the CPU: every page (0 to 9) for every aircraft, and every panel-only systems fault (1 to 35) on the systems window |
 | `menus-window-cockpit-*`, `-view-*`, `-flight-*`, `-flight-menu-*`, `-size-*` | Real-window captures: every aircraft's cockpit at 960 by 720, all 12 flight views, the flight and paused-menu screens at 960 by 720, 1280 by 720 and 640 by 900, and six more window sizes (out-of-range sizes must be refused with a message) |
 | `menus-window-graphics-*`, `-preview-*`, `-weapons-page-*`, `-smoke-*` | Every graphics option value, the map, debug panels, weapon diagnostics, small layout, damage, ejection and chaff previews, the weapons window for stores-off loads, and smoke starts of the creator, the controls screen and free flight |
-| `menus-combat-smoke-mig29` | The combat smoke probe, for the one aircraft it still passes (see below) |
+| `menus-combat-smoke-mig29` | The combat smoke probe, for the MiG-29 (the flight lane runs it for all 14) |
 
 ### The creator probe
 
@@ -274,15 +274,8 @@ keep their letters.
 
 ## Found and not fixed
 
-- **`--combat-smoke` fails for 13 of the 14 aircraft** (only the MiG-29 passes). Its
-  radar-off check expects any radar missile to be held back, but the active AIM-120
-  keeps its own seeker and now launches in boresight; behind that, its guidance probe
-  points the Maverick at an air target, which the missile rules now reject as the wrong
-  target, and the A-4E's automatic damage check no longer holds. These are stale probe
-  assumptions from the Sep 17 missile rework, not flight defects that anyone has seen,
-  but the probe needs the weapons owner to redo it. Repro:
-  `target/debug/tore-app --aircraft f18 --combat-smoke --no-audio` (also fails on the
-  `bug-bash` base).
+- **`--combat-smoke`** failed for 13 of the 14 aircraft when this lane first ran. The flight
+  lane found the probe stale, not the game, and fixed it; all 14 pass now.
 
 ## Needs a decision
 
