@@ -1846,6 +1846,11 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     f64::from(world.height(x as f32, z as f32))
                 });
                 let events = combat.step(&mut flight, &world)?;
+                // The host hands a dry station's selection on (see `step`);
+                // the second state applies the same rule from the tape.
+                if !combat.input.held && replay.armed && !replay.carries(replay.selected) {
+                    replay.command(live::Command::AdvanceFromEmpty, launcher(&flight));
+                }
                 if events != replay_events
                     || combat.state.ammo != replay.ammo
                     || combat.state.projectiles != replay.projectiles
