@@ -144,6 +144,23 @@ def takeoff_check(work: Path, output: str) -> list[str]:
     return problems
 
 
+def takeoff_any_check(work: Path, output: str) -> list[str]:
+    events, samples = load(work)
+    took = [e["t"] for e in events if e["kind"] == "aircraft.took_off" and e.get("subject") == 0]
+    problems = []
+    if len(took) != 1:
+        return [f"expected exactly one takeoff by the player, found {len(took)}"]
+    if not 3 <= took[0] <= 30:
+        problems.append(f"the player took off at {took[0]} s, outside 3 to 30 s")
+    if count(events, "aircraft.crashed", 0):
+        problems.append("the player crashed on the takeoff")
+    if samples[-1]["pos_ft"][1] < 100:
+        problems.append("the player is still on the ground or barely off it at the end")
+    if samples[-1]["devices"]["gear"] > 0.5:
+        problems.append("the gear was not coming up after takeoff")
+    return problems
+
+
 def nav_check(work: Path, output: str) -> list[str]:
     events, samples = load(work)
     problems = []
@@ -362,8 +379,18 @@ def scenarios() -> list[Scenario]:
         build(f"systems-{ac}", "systems.txt", ["--free-flight", "--no-audio", "--aircraft", ac, "--researched-flight"], lambda work, output, ac=ac: systems_check(work, output, ac))
         for ac in AIRCRAFT
     ]
+    takeoffs = [
+        build(
+            f"takeoff-{ac}",
+            "takeoff-any.txt",
+            [*quick, "--ground-start", "1", "--aircraft", ac, "--researched-flight"],
+            takeoff_any_check,
+        )
+        for ac in AIRCRAFT
+    ]
     return [
         *every,
+        *takeoffs,
         build("systems", "systems.txt", free, systems_check),
         build("missile", "missile.txt", [*quick, "--separation", "10", "--ai-mission", "hold"], missile_check, ai=3),
         build("gun", "gun.txt", [*quick, "--separation", "10", "--ai-mission", "hold"], gun_check, ai=3),

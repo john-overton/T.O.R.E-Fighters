@@ -54,7 +54,10 @@ media with a copy-on-write copy (no extra disk space on btrfs) and need `gameass
 | `replay-audio-*` | Start-up with sound on and the audio device missing or wrong (`PULSE_SERVER`, `PIPEWIRE_REMOTE`, `ALSA_CONFIG_PATH` pointed nowhere), and a replay played with sound | Never a crash. A missing device is reported as `Continuing without audio` |
 | `replay-input-*`, `replay-tape-*` | `--list-inputs`, `--write-input-profile` then load it, refusing to overwrite, nine kinds of bad profile, eight kinds of bad tape, hand-made pilot input tapes replayed twice on every aircraft | Profiles that cannot load fail with a message that names the file. Tapes that cannot load exit 1 with a message. Two replays of one tape give identical results on all fourteen aircraft |
 | `replay-import-bad-*` | Eleven kinds of bad game media given to `--import` in a fresh data folder | Exit 1 with an actionable message, nothing left behind. A damaged archive names the file and says what to do |
-| `replay-combat-smoke-*`, `replay-validate-creator` | The weapons and creator acceptance probes | Known failures, see below |
+| `replay-combat-smoke-*` | The weapons acceptance probe on each aircraft | Known failures except the MiG-29, see below |
+| `replay-validate-creator` | The creator acceptance probe | Passes |
+| `replay-script-*` | Hand-flown windowed missions from `--input-script` files: a ground-start takeoff (afterburner, pulsed stick, gear and flaps up) on all 14 aircraft, the same with the tower's landing clearance, gear, flaps, hook, airbrake, afterburner and countermeasures on all 14 (hooks only on carrier types, no afterburner on the A-4E and Su-25), a held gun trigger, a missile fired at a designated target, an ejection, autopilot and NAV modes, a 6 G pull and roll, views, the pause menu and bookmarks, and all sixteen cheats on and off through the menu | The recording holds the events the keys should cause: device positions over time, exactly one chaff and one flare, launches from the player, `aircraft.ejected`, autopilot effects, three bookmarks, paired `system.cheat` events |
+| `replay-script-*-mouse` | The mouse: the Replays screen's Keep, Tacview, Debug log, Delete with confirmation and auto-delete panel; the debrief's NEXT, PREV and OK; the Escape menu's tab, row, Keyboard shortcuts, Restart and Resume | Files written and removed, settings saved, five distinct debrief pages, a restart recording pair, and every screen a real picture |
 
 ## Bugs found and fixed
 
@@ -77,6 +80,14 @@ media with a copy-on-write copy (no extra disk space on btrfs) and need `gameass
 | A cockpit message from the game (the ground start hint) read "someone: ..." in the transcript | A missing speaker fell back to "someone" | `b0a0007`. Cockpit messages read "cockpit". Two text golden files updated |
 | `--rate abc`, `--ids a,b`, `--from x`, `--replay-tick -5`, `--replay-speed fast`, `--replay-aircraft x` said "invalid float literal" or "invalid digit found in string" | Parser errors passed up bare | `f4e2a9d`. They name the option and what was typed |
 | `--recording-log --out FILE` and `--recording-acmi --out FOLDER` said "File exists (os error 17)" or "Is a directory" | Bare I/O errors | `cb1fd77`. They name the path and what it was used for |
+| `--recording-log --from 20 --to 10` wrote an empty log, and `--ids` with an aircraft that is not in the recording silently dropped it (round two) | Nothing checked either | Both are clear errors now (`--from 20 is later than --to 10`, `--ids names aircraft 999, which is not in the recording`) |
+| `--import notes.txt` named the file's folder, not the file (round two) | The fallback to the folder lost the chosen path | The message names the file and its folder |
+| Every remaining numeric option (about twenty: `--separation`, `--flight-zoom`, `--window-size`, `--probe-*`, `--weapon-slot` and others) gave the parser's bare message (round two) | Parse errors were passed up unchanged | All say `--option needs a number (why)`; 23 scenarios cover them |
+| `--list-inputs --no-controllers` still probed and warned about devices (round two) | The diagnostics ignored the flag | It opens no device and says so |
+
+Round two also added the `--input-script` development option (docs/DEVELOPMENT.md) so tests can
+press any key and click at any point in a windowed run; the keyboard handler is now a method
+shared by the window and the script.
 
 ## Found and not fixed
 
@@ -92,26 +103,18 @@ media with a copy-on-write copy (no extra disk space on btrfs) and need `gameass
   no one has decided whether the probe or the game is wrong. The probe is not in CI. The lane
   keeps one scenario per aircraft marked as a known failure; each turns red when it starts to
   pass, as a reminder to remove the mark.
-- **AI behaviour flags in the recordings, for the AI lane.** Across the lane's recordings the
-  summary flags `ai_flipping` (an AI aircraft changing activity six times in a few seconds, 89
-  times), `track_lost_early` (a missile losing its track within seconds of launch, 48),
-  `control_oscillation` (a pitch control reversing eight times in under a second, 5) and
-  `call_suppressed` (radio calls dropped by cooldown, 116, by design). None was investigated
-  here.
-- **`--validate-creator` fails** with "F18: damage region 3 at 0.1 has no distinct finite
-  geometry". `aircraft.rs` deliberately draws surviving aircraft intact ("Temporarily keep
-  surviving aircraft visually intact", `c6eef9d`, 2026-09-21), so the check that a damaged
-  region changes the mesh cannot hold. Also not in CI, marked as a known failure.
-- `--recording-log --from 20 --to 10` (from after to) and `--ids` with an id that is not in the
-  recording write an empty log without saying so.
-- `--import FILE.txt` names the file's folder in the "not a Fighters Anthology source" message,
-  not the file.
-- About twenty other command-line numbers (`--separation`, `--flight-zoom`, `--window-size`,
-  the probe fault and threat ticks and others) still give the parser's bare message when a word
-  is passed; only the replay, recording, `--ai-probe-ticks` and `--ground-start` options were
-  changed.
+- **AI behaviour flags in the recordings, for the AI lane.** The summary flags `ai_flipping` (an
+  AI aircraft changing activity six times in a few seconds), `track_lost_early` (a missile losing
+  its track within seconds of launch) and `control_oscillation` (a pitch control reversing eight
+  times in under a second). The scenarios and recording files that carry them are listed in
+  `.local/battery/ai-churn-flags.txt` (regenerate it from a run's `work/*/log/summary.txt`).
+  None was investigated here.
 - Running several windows at once, the head tracker warns "UDP 4242: Address already in use".
   Harmless.
+- The recording's `fuel_lb` is internal fuel only, so a flight that burns its external tanks
+  first (the default loadout) shows no fuel used in `summary.txt`.
+- No landing was flown. A key script cannot fly an approach open loop; the tower's landing
+  clearance is checked, the touchdown is not.
 
 ## Needs a decision
 
@@ -120,9 +123,14 @@ media with a copy-on-write copy (no extra disk space on btrfs) and need `gameass
 - **The airborne flag's meaning.** In a recording `airborne` means "in play" and `on_ground`
   is separate, so a parked aircraft is both. The summary now counts only the frames off the
   ground; Tacview and the log still write the flag as recorded.
-- **What the acceptance probes should require now** (`--combat-smoke`, `--validate-creator`):
-  bring them up to the current behaviour, or change the game. See "Found and not fixed".
-- **From after to** in `--recording-log`: reject it, or leave it silent.
+- **What `--combat-smoke` should require now:** bring it up to the current behaviour, or change
+  the game. See "Found and not fixed". (`--validate-creator` was fixed by the menus lane and its
+  known-failure marker is gone.)
+- **Retracting the gear on the runway.** A scripted takeoff pressed G at 80 kt with the wheels
+  on the ground: the gear came up, the aircraft kept rolling on its "wheels" and took off with
+  the gear already up, with no crash or message. No spec or doc says what the game should do
+  (retail refuses on the ground, but that is recollection, not evidence here). The scenarios
+  do not press G until the aircraft is airborne.
 
 ## Needs a human eye or ear
 
@@ -134,19 +142,15 @@ media with a copy-on-write copy (no extra disk space on btrfs) and need `gameass
   the comms panel, the Escape menu pages. The agent that ran the lane looked at the views,
   interface parts, panels, menu pages and ground-start frames and found the label overlap
   above and nothing else. Frames after that fix were not all reviewed again.
-- **Anything that needs the main menu.** The battery cannot click through the main menu, the
-  Replays screen (Keep, Delete, Tacview, auto-delete), the debrief screen or the pause menu's
-  buttons; these are covered by unit tests on synthetic recordings and by the snapshot
-  screens only. Key presses reach a flight or the viewer, so "end mission" (Ctrl+Q) is covered,
-  but Restart has no key and the debrief screen is not inspected.
-- **Cheats.** They can only be toggled through the Escape menu. The unit tests cover the menu
-  rows and the simulation; the battery does not exercise them in a live flight.
-- **Live gameplay keys.** A window on a hidden workspace gets keys, but plain letters and
-  digits had no effect while named keys (Insert, Delete, Space, F1 to F12, arrows) and Ctrl
-  combinations did, so the gear, flaps, throttle, eject and sensor keys were not exercised in a
-  real window, and no key can hold a stick. A hand-flown takeoff, landing, ejection and the
-  tower's "airborne" and "good hunting" calls after a real departure were seen only in
-  headless probes and unpiloted live flights.
+- **Anything the mouse does that a snapshot cannot show.** The Replays screen, the debrief and
+  the Escape menu are clicked through by script and checked by the files, settings and screens
+  that result, but the main menu's own buttons, the Quick Mission creator's controls and the
+  loadout screen are left to the menus lane.
+- **The viewer's keys.** The replay viewer takes its own window events, so `--input-script` keys
+  do not reach it (its mouse does); its keys are covered by the Hyprland driver, which reaches
+  named keys and Ctrl combinations only.
+- **The feel of flying.** The scripts hold a stick position for a set time; nothing judges how
+  the aircraft responds beyond G, bank, speed and events.
 - **Real controllers.** No gamepad or joystick was attached; profiles were tested as files.
 
 ## How the checks work
@@ -156,9 +160,13 @@ plain Python), and hands the work folder and the joined output to `check_work`. 
 carry `known_failure`, which reports its failure as known and fails the run once it passes.
 `_replay_checks.py` holds the Tacview, log and summary checkers (with unit tests in
 `tools/test_replay_checks.py`). `_replay_tools.py` damages recordings, builds damaged game
-media and tests captured frames. `_replay_drive.py` sends keys to a game window through
-Hyprland by process id, so nothing else on the desktop sees them. A window on a hidden
-workspace loses focus at the first key, which pauses a flight; the scenarios set
-`TORE_PERF_ACTIVE=1` with a large `TORE_PERF_FRAMES` (which keeps a timing run unpaused) and
-`TORE_RECORD_MISSIONS=1` (which makes it record). Game time then runs a little slower than the
-clock. The driver reads the game's process use before Alt+F4 so a hang shows.
+media and tests captured frames. `_replay_drive.py` sends keys to a game window through Hyprland by process id. A window on a hidden
+workspace has no focus, and the game ignores most keys without it (as it should: a focus loss
+pauses the flight and drops held controls), so only named keys and Ctrl combinations that go
+straight to the menus reached the game. That, not a defect, is why letter and digit keys did
+nothing through `hyprctl`. The hand-flown scenarios therefore use `--input-script` (see
+[DEVELOPMENT.md](../DEVELOPMENT.md#windowed-runs-from-scripts-and-agents)), which feeds keys and
+mouse events through the game's own handlers with focus assumed, and the driver stays for the
+replay viewer and for quitting with Alt+F4. The driver's scenarios set `TORE_PERF_ACTIVE=1`
+with a large `TORE_PERF_FRAMES` (which keeps a timing run unpaused) and `TORE_RECORD_MISSIONS=1`
+(which makes it record); the script ones need neither.

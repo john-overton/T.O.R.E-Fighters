@@ -584,12 +584,30 @@ Verified on Hyprland 0.56 (Lua `hyprctl dispatch`); older releases use the
 fallback `[rules] command` form. Prefer the windowless modes above where they
 answer the question.
 
-To press keys in such a window, `tools/battery_scenarios/_replay_drive.py` starts a
-game through the wrapper and sends key presses to that one window by process id
-(`hyprctl dispatch hl.dsp.send_shortcut`), then quits with Alt+F4; see the
-[replay lane](testing/lane-replay.md#how-the-checks-work) for what reaches the game
-(named keys and Ctrl combinations do; plain letters and digits did not) and the
-timing-run variables that keep a flight unpaused.
+To press keys and click in a windowed run without a person, give it `--input-script FILE`.
+The script feeds key presses and mouse events to the game through the same handlers the
+window's own events use, so letters, digits, modifiers and the mouse reach the real input path
+whether or not the window has focus (a window on a spare workspace never does, and the game
+rightly ignores most keys then). One step per line, `#` for comments:
+
+```text
+wait 1.5           seconds of wall clock
+waittick 600 [90]  until the flight has run this many 120 Hz ticks, or 90 s (default)
+key g              press and release: Shift+e, Ctrl+B, F10, Space, Escape, Enter, Up, ]
+down Up            hold a key          up Up     release it
+move 320 240       mouse to window pixels   movemenu 320 240   to the 640 by 480 menu layer
+click [left|right] press and release   press / release   hold a button
+wheel 3            wheel notches, negative for down
+snapshot out.ppm   the menu layer as drawn now (menu screens); relative paths go in $TORE_SCRIPT_OUT
+exit               quit
+```
+
+`Down` is nose up and `Up` nose down, as in the game. Set `TORE_RECORD_MISSIONS=1` to record the
+flight. The battery's hand-flown scenarios (`replay-script-*`, scripts in
+`tools/battery_scenarios/scripts/`) use it. The replay viewer takes its own events, so scripted
+keys do not reach it; its mouse events do. `tools/battery_scenarios/_replay_drive.py`, which
+sends keys to a window through Hyprland by process id, remains for the viewer and for
+quitting with Alt+F4; see the [replay lane](testing/lane-replay.md#how-the-checks-work).
 
 In PowerShell, create `.local/headless` with `New-Item -ItemType Directory -Force .local/headless`,
 set `$env:TORE_DATA_DIR` to the absolute `.local/dev-profile` path, and run the
