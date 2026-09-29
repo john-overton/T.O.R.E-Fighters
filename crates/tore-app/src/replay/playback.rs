@@ -7,8 +7,8 @@
 //! smooth.
 use crate::aircraft::Airframe;
 use crate::flight;
-use crate::render_snapshot::{self, RenderSnapshot, set_devices};
 use crate::replay::convert::{self, EFFECT_LOOKBACK_TICKS, Identities, Presentation};
+use crate::snapshot::{self, RenderSnapshot, set_devices};
 use std::sync::Arc;
 use tore_replay::{AircraftState, Frame, LAYER_CONTRAILS, PuffKind, Recording};
 use tore_sim::combat::smoke::{Kind, Puff, Smoke};
@@ -151,7 +151,7 @@ impl Playback {
     }
 
     /// The craters and fires alive at `tick`.
-    pub fn marks_at(&self, tick: u64) -> Vec<crate::render_snapshot::MarkPose> {
+    pub fn marks_at(&self, tick: u64) -> Vec<crate::snapshot::MarkPose> {
         convert::marks_at(&self.marks, tick)
     }
 
@@ -168,7 +168,7 @@ impl Playback {
             self.pair = Some((tick, previous, current));
         }
         let (_, previous, current) = self.pair.as_ref().expect("just filled");
-        render_snapshot::interpolate(previous.as_ref(), current, alpha)
+        snapshot::interpolate(previous.as_ref(), current, alpha)
     }
 
     /// Smoke and contrails alive at `tick`, rebuilt from their release ticks
@@ -339,7 +339,7 @@ mod tests {
             let picture = playback.picture(tick, 1.);
             assert_eq!(
                 picture,
-                render_snapshot::interpolate(previous.as_ref(), &exact, 1.),
+                snapshot::interpolate(previous.as_ref(), &exact, 1.),
                 "tick {tick}"
             );
             // Blending all the way lands on the tick itself.

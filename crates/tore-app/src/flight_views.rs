@@ -129,7 +129,7 @@ impl Scene {
         player: &flight::State,
         combat: &Combat,
         wings: Option<&crate::ai_wings::AiWings>,
-        presented: bool,
+        presented: Option<&crate::combat_view::CombatView>,
     ) -> Self {
         Self::from_parts(
             Body::new(
@@ -145,7 +145,10 @@ impl Scene {
                 .iter()
                 .filter(|t| t.airborne || t.hp > 0)
                 .map(|t| {
-                    let (position, angles) = combat.view_pose(t, presented);
+                    let (position, angles) = match presented {
+                        Some(view) => view.pose(combat, t),
+                        None => (t.position, t.basis.angles()),
+                    };
                     Body::new(
                         t.id,
                         position,

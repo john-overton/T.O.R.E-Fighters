@@ -4,7 +4,7 @@
 //! `--verify-render`. These read recordings of what happened; they are not
 //! the `--replay-input` and `--replay-combat` tapes, which re-simulate.
 use super::convert::{self, Identities, Presentation};
-use crate::{AppResult, render_snapshot::RenderSnapshot};
+use crate::{AppResult, snapshot::RenderSnapshot};
 use std::collections::BTreeMap;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};

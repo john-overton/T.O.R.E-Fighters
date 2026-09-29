@@ -76,6 +76,7 @@ mod scope;
 mod sim_renderer;
 mod situation;
 mod smoke_renderer;
+mod snapshot;
 mod sound_prefs;
 mod sound_screen;
 mod startup;
@@ -388,6 +389,7 @@ struct TickPresenter<'a> {
     flight_view: &'a mut u8,
     view_rig: &'a mut flight_views::Rig,
     hornet: &'a aircraft::Airframe,
+    combat_view: &'a combat_view::CombatView,
     head_look: [f32; 2],
     g_effects: &'a mut tore_sim::g_effects::GEffects,
     /// The blackout level the bounded perf run forces (`TORE_PERF_VEIL`).
@@ -561,7 +563,7 @@ impl TickPresenter<'_> {
                 &self.world.flight,
                 &self.world.combat,
                 self.world.ai_wings.as_ref(),
-                false,
+                None,
             );
             let listener_camera = self
                 .view_rig
@@ -655,7 +657,7 @@ impl TickPresenter<'_> {
             &self.world.flight,
             &self.world.combat,
             self.world.ai_wings.as_ref(),
-            false,
+            None,
         );
         let weather_view = self
             .view_rig
@@ -691,7 +693,7 @@ impl TickPresenter<'_> {
             &self.world.flight,
             &self.world.combat,
             self.world.ai_wings.as_ref(),
-            false,
+            None,
         );
         self.view_rig.observe(&scene);
         if let Ok(camera) = self.view_rig.other_camera(
@@ -705,7 +707,10 @@ impl TickPresenter<'_> {
             self.scenery
                 .step_view_weather(&self.world.terrain, &camera, speed);
         }
-        if let Some(camera) = combat_view::target_camera(&self.world.combat, &self.world.flight) {
+        if let Some(camera) = self
+            .combat_view
+            .target_camera(&self.world.combat, &self.world.flight)
+        {
             self.scenery
                 .step_view_weather(&self.world.terrain, &camera, speed);
         }
@@ -1570,7 +1575,7 @@ impl App {
                     &self.world.flight,
                     &self.world.combat,
                     self.world.ai_wings.as_ref(),
-                    false,
+                    None,
                 );
                 self.view_rig.observe(&scene);
                 let mut candidate = self.view_rig.clone();
@@ -3467,6 +3472,7 @@ impl ApplicationHandler for App {
                                 flight_view: &mut self.flight_view,
                                 view_rig: &mut self.view_rig,
                                 hornet: &self.hornet,
+                                combat_view: &self.combat_view,
                                 head_look: self.head_look,
                                 g_effects: &mut self.g_effects,
                                 perf_blackout: self.performance.veil_level(),
@@ -3490,15 +3496,16 @@ impl ApplicationHandler for App {
                             );
                             self.head_look = self.input.head_look().unwrap_or([0.; 2]);
                         }
-                        self.world
-                            .combat
-                            .present_targets(if self.flight_ui.frozen() {
+                        self.combat_view.present(
+                            &self.world.combat,
+                            if self.flight_ui.frozen() {
                                 1.0
                             } else {
                                 self.flight_clock.remainder / flight::DT
-                            });
+                            },
+                        );
                         // Everything combat draws this frame, shared by every camera.
-                        let frame = self.world.combat.presented();
+                        let frame = self.combat_view.presented(&self.world.combat);
                         let presented = if self.flight_ui.frozen() {
                             self.world.flight.clone()
                         } else {
@@ -3515,7 +3522,7 @@ impl ApplicationHandler for App {
                             &presented,
                             &self.world.combat,
                             self.world.ai_wings.as_ref(),
-                            true,
+                            Some(&self.combat_view),
                         );
                         let camera_keys = std::mem::take(&mut self.camera.keys);
                         let base =
@@ -5571,7 +5578,7 @@ fn inject_probe_threat(
 }
 
 fn verify_probe_attitudes(
-    snapshot: &render_snapshot::RenderSnapshot,
+    snapshot: &snapshot::RenderSnapshot,
     bridge: &ai_wings::AiWings,
 ) -> AppResult<()> {
     for actor in bridge.mission().actors().iter().filter(|a| a.alive()) {
@@ -8476,6 +8483,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         return Ok(Outcome::Done);
     }
     if combat_smoke {
+        // Loads the art as combat's constructor used to, so this run's log
+        // and failures are unchanged.
+        let config =
+            tore_sim::combat::live::Configuration::from_source(&hornet.profile, |name| {
+                assets.theater_resources.get(name).cloned().ok_or_else(|| {
+                    std::io::Error::other(format!("missing live-fire resource {name}"))
+                })
+            })?;
+        combat_view::CombatView::for_configuration(&config, &assets.theater_resources)?;
         combat::smoke(&hornet, &assets.theater_resources)?;
         return Ok(Outcome::Done);
     }

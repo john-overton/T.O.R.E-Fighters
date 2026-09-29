@@ -12,7 +12,7 @@
 //! objects are not aircraft: a recording keeps only their hit points.
 // The recorder uses the recording half and the replay viewer the rest.
 #![allow(dead_code)]
-use crate::render_snapshot::{
+use crate::snapshot::{
     AircraftPose, DEVICES, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
     ProjectilePose, RenderSnapshot,
 };
@@ -1031,8 +1031,11 @@ pub fn difference(live: &RenderSnapshot, replayed: &RenderSnapshot) -> Option<St
 mod tests {
     use super::*;
     use crate::combat_view::render_hash_tests as fixture;
-    use crate::render_snapshot::{aircraft_batches, combat_geometry, interpolate, pose_state};
     use crate::replay::tests::TempDir;
+    use crate::{
+        render_snapshot::{aircraft_batches, combat_geometry},
+        snapshot::{interpolate, pose_state},
+    };
     use std::path::Path;
 
     #[test]

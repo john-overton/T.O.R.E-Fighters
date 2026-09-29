@@ -3,7 +3,7 @@ use crate::{
     AppResult,
     aircraft_type::AircraftType,
     flight,
-    render_snapshot::{
+    snapshot::{
         AircraftPose, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
         ProjectilePose, RenderSnapshot,
     },
@@ -51,27 +51,28 @@ pub fn target_pose(target: &live::Target, ai_poses: bool) -> [f64; 3] {
         [target.velocity[0].atan2(target.velocity[2]), 0., 0.]
     }
 }
-/// The last two per-tick render snapshots and the frame's tick fraction.
-/// They are presentation only and never feed back into sensors or physics.
+/// The last two per-tick render snapshots. They are presentation output only
+/// and never feed back into sensors or physics, except that an aircraft whose
+/// AI stopped flying keeps the devices last drawn for it. The frame's blend of
+/// the two is the app's (`CombatView::presented`).
+#[derive(Default)]
 struct RenderHistory {
     /// The snapshot one tick earlier; none right after a restart.
     previous: Option<RenderSnapshot>,
     current: RenderSnapshot,
     /// Each target's index in `previous` and in `current`, by id.
     places: [BTreeMap<u32, usize>; 2],
-    alpha: f64,
-}
-impl Default for RenderHistory {
-    fn default() -> Self {
-        Self {
-            previous: None,
-            current: RenderSnapshot::default(),
-            places: Default::default(),
-            alpha: 1.0,
-        }
-    }
+    /// How many times the history has started over.
+    restarts: u64,
 }
 impl RenderHistory {
+    /// Forgets both snapshots, as after a reset.
+    fn restart(&mut self) {
+        *self = Self {
+            restarts: self.restarts + 1,
+            ..Self::default()
+        };
+    }
     fn places(snapshot: &RenderSnapshot) -> BTreeMap<u32, usize> {
         snapshot
             .targets
@@ -96,19 +97,11 @@ impl RenderHistory {
             .get(&id)
             .map(|&index| &self.current.targets[index])
     }
-    /// One target at the frame's tick fraction.
-    fn presented_target(&self, id: u32) -> Option<AircraftPose> {
-        let current = self.current_target(id)?;
-        let previous = self
-            .previous
+    fn previous_target(&self, id: u32) -> Option<&AircraftPose> {
+        self.previous
             .as_ref()
             .zip(self.places[0].get(&id))
-            .map(|(snapshot, &index)| &snapshot.targets[index]);
-        Some(crate::render_snapshot::blend(
-            previous,
-            current,
-            self.alpha.clamp(0., 1.),
-        ))
+            .map(|(snapshot, &index)| &snapshot.targets[index])
     }
 }
 
@@ -261,11 +254,6 @@ impl Combat {
             notes: Default::default(),
         })
     }
-    /// The frame's fraction of the way from the previous tick to the current one.
-    pub fn present_targets(&mut self, alpha: f64) {
-        self.render.alpha = alpha;
-    }
-
     /// Everything combat draws for this tick, as plain data. `wings` supplies
     /// the AI aircraft's devices and ejected pilots. An aircraft whose AI is
     /// not alive, or that has no AI, keeps the devices last drawn for it.
@@ -287,11 +275,11 @@ impl Combat {
                 model(id).map_or(Draw::Hidden, Draw::Model)
             }
         };
-        let flying: BTreeMap<u32, [f64; crate::render_snapshot::DEVICES]> = wings
+        let flying: BTreeMap<u32, [f64; crate::snapshot::DEVICES]> = wings
             .into_iter()
             .flat_map(|wings| wings.mission().actors())
             .filter(|actor| actor.alive())
-            .map(|actor| (actor.id(), crate::render_snapshot::devices(actor.flight())))
+            .map(|actor| (actor.id(), crate::snapshot::devices(actor.flight())))
             .collect();
         // AI aircraft whose afterburner is lit, for their flame lights.
         let burning: std::collections::BTreeSet<u32> = wings
@@ -347,7 +335,7 @@ impl Combat {
                 position: player.position,
                 attitude: [player.yaw, player.pitch, player.bank],
                 velocity: player.velocity,
-                devices: Some(crate::render_snapshot::devices(player)),
+                devices: Some(crate::snapshot::devices(player)),
                 engine: player_engine,
                 damage: Damage {
                     hp: self.state.player_hp,
@@ -478,7 +466,7 @@ impl Combat {
         player: &flight::State,
         wings: Option<&crate::ai_wings::AiWings>,
     ) {
-        self.render = RenderHistory::default();
+        self.render.restart();
         let current = self.snapshot(player, wings);
         self.render.set_current(current);
     }
@@ -570,18 +558,23 @@ impl Combat {
     pub fn render_snapshot(&self) -> &RenderSnapshot {
         &self.render.current
     }
-    /// The picture for this frame: the last two snapshots at the frame's tick fraction.
-    pub fn presented(&self) -> RenderSnapshot {
-        crate::render_snapshot::interpolate(
-            self.render.previous.as_ref(),
-            &self.render.current,
-            self.render.alpha,
-        )
+    /// The snapshot one tick before [`Self::render_snapshot`]; none right
+    /// after a restart.
+    pub fn previous_snapshot(&self) -> Option<&RenderSnapshot> {
+        self.render.previous.as_ref()
     }
-    /// One target at this frame's tick fraction; none when it is not in the
-    /// snapshots.
-    pub fn presented_target(&self, id: u32) -> Option<AircraftPose> {
-        self.render.presented_target(id)
+    /// How many times the render history has started over, at a reset or a
+    /// restart. A frame's tick fraction belongs to one history only.
+    pub fn render_restarts(&self) -> u64 {
+        self.render.restarts
+    }
+    /// One target in the latest snapshot.
+    pub fn current_target(&self, id: u32) -> Option<&AircraftPose> {
+        self.render.current_target(id)
+    }
+    /// One target in the snapshot before the latest.
+    pub fn previous_target(&self, id: u32) -> Option<&AircraftPose> {
+        self.render.previous_target(id)
     }
     /// The other aircraft types this mission loaded, in draw order.
     pub fn dummy_types(&self) -> &[Arc<AircraftType>] {
@@ -702,7 +695,7 @@ impl Combat {
         self.state.release();
     }
     pub fn reset(&mut self, s: &mut flight::State) -> AppResult<()> {
-        self.render = RenderHistory::default();
+        self.render.restart();
         self.contrails = Default::default();
         self.contrail_sortie = self.contrail_sortie.wrapping_add(1);
         let l = launcher(s);
@@ -966,21 +959,6 @@ impl Combat {
             self.command(live::Command::AdvanceFromEmpty, l);
         }
         Ok(events)
-    }
-    pub fn view_pose(&self, target: &live::Target, presented: bool) -> ([f64; 3], [f64; 3]) {
-        if presented {
-            self.presented_pose(target)
-        } else {
-            (target.position, target.basis.angles())
-        }
-    }
-    /// Where a target is drawn this frame; one missing from the snapshots is
-    /// drawn where it is.
-    fn presented_pose(&self, target: &live::Target) -> ([f64; 3], [f64; 3]) {
-        self.presented_target(target.id).map_or(
-            (target.position, target_pose(target, self.ai_poses)),
-            |pose| (pose.position, pose.attitude),
-        )
     }
 }
 
@@ -1900,7 +1878,7 @@ mod tests {
 #[cfg(test)]
 mod ai_pose_tests {
     use super::*;
-    use crate::render_snapshot::blend;
+    use crate::snapshot::blend;
     use tore_formats::aircraft::AircraftId;
     use tore_sim::{
         combat::missiles::{TargetRole, seeker::Heat},
@@ -2105,17 +2083,15 @@ pub(crate) mod fixtures {
     pub(crate) fn set_contrail_offsets(combat: &mut Combat, offsets: Vec<Vector>) {
         combat.contrail_offsets = offsets;
     }
-    /// Makes two snapshots the render history, drawn at `alpha`.
+    /// Makes two snapshots the render history.
     pub(crate) fn set_history(
         combat: &mut Combat,
         previous: RenderSnapshot,
         current: RenderSnapshot,
-        alpha: f64,
     ) {
         combat.render = RenderHistory::default();
         combat.render.set_current(previous);
         combat.render.advance(current);
-        combat.present_targets(alpha);
     }
 
     fn aircraft(
@@ -2502,18 +2478,12 @@ pub(crate) mod fixtures {
         })
         .collect()
     }
-    /// Presents the scene at one tick fraction, as live flight would: the
-    /// previous and current tick's snapshots, each aircraft's devices as the
-    /// AI simulated them on those ticks, and the frame's fraction.
-    pub(crate) fn load(
-        combat: &mut Combat,
-        scene: &Scene,
-        alpha: f64,
-        ai_poses: bool,
-        player: &flight::State,
-    ) {
+    /// Loads the scene as live flight would hold it: the previous and
+    /// current tick's snapshots, each aircraft's devices as the AI simulated
+    /// them on those ticks.
+    pub(crate) fn load(combat: &mut Combat, scene: &Scene, ai_poses: bool, player: &flight::State) {
         let [previous, current] = snapshots(combat, scene, ai_poses, player);
-        set_history(combat, previous, current, alpha);
+        set_history(combat, previous, current);
     }
     /// The scene's previous and current tick as live flight snapshots them,
     /// with each aircraft's devices as the AI simulated them on those ticks.
@@ -2545,11 +2515,11 @@ pub(crate) mod fixtures {
 
     #[test]
     fn snapshots_route_each_aircraft_and_piece_to_the_model_that_draws_it() {
-        use crate::render_snapshot::Draw;
+        use crate::snapshot::Draw;
         let player = player();
         let mut with_models = combat(types(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
         let scene = scene(with_models.state.configuration());
-        load(&mut with_models, &scene, 0.5, true, &player);
+        load(&mut with_models, &scene, true, &player);
         let snapshot = with_models.render_snapshot();
         let draw = |id| snapshot.target(id).unwrap().draw;
         assert_eq!(draw(1), Draw::Model(AircraftId::F18));
@@ -2577,7 +2547,7 @@ pub(crate) mod fixtures {
             ]
         );
         let mut fixture = combat(Vec::new(), Vec::new());
-        load(&mut fixture, &scene, 0.5, true, &player);
+        load(&mut fixture, &scene, true, &player);
         let snapshot = fixture.render_snapshot();
         assert!(snapshot.targets.iter().all(|t| t.draw == Draw::Ownship));
         assert!(snapshot.debris.iter().all(|p| p.draw == Draw::Ownship));
@@ -2592,7 +2562,7 @@ pub(crate) mod fixtures {
         combat.restart_render(&player, None);
         let devices = |combat: &Combat| combat.render_snapshot().target(1).unwrap().devices;
         assert_eq!(devices(&combat), None);
-        let last = [0.5; crate::render_snapshot::DEVICES];
+        let last = [0.5; crate::snapshot::DEVICES];
         combat
             .render
             .current

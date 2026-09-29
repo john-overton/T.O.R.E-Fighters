@@ -11,11 +11,12 @@ use crate::{
     AppResult,
     aircraft::Airframe,
     aircraft_type::AircraftType,
-    combat::{Combat, launcher},
+    combat::{Combat, launcher, target_pose},
     flight,
-    render_snapshot::{CombatArt, RenderSnapshot},
+    render_snapshot::CombatArt,
     scenery::Scenery,
     sim_renderer::Contact,
+    snapshot::{AircraftPose, RenderSnapshot, blend, interpolate},
     terrain::{Camera, Terrain},
 };
 use std::{collections::BTreeMap, sync::Arc};
@@ -37,20 +38,92 @@ pub struct CombatView {
     /// How many of combat's other-aircraft configurations have had their
     /// weapon shapes loaded into `art`.
     shaped: usize,
+    /// The frame's fraction of the way from the previous tick to the current
+    /// one. Combat keeps the last two snapshots; this is what blends them.
+    alpha: f64,
+    /// The render history `alpha` was set for; a restart replaces it, and the
+    /// new history shows its newest snapshot until the frame sets a fraction.
+    restarts: u64,
 }
 
 impl CombatView {
     /// The art for `combat`: the effect sheets and every weapon shape the
     /// player's stations name.
     pub fn new(combat: &Combat, data: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
+        let mut view = Self::for_configuration(combat.state.configuration(), data)?;
+        view.restarts = combat.render_restarts();
+        Ok(view)
+    }
+
+    /// The art for a player with this configuration's stations.
+    pub fn for_configuration(
+        config: &live::Configuration,
+        data: &BTreeMap<String, Vec<u8>>,
+    ) -> AppResult<Self> {
         let mut art = CombatArt::load(data)?;
-        art.add_weapon_shapes(combat.state.configuration(), data);
+        art.add_weapon_shapes(config, data);
         Ok(Self {
             art,
             models: Vec::new(),
             outlets: Vec::new(),
             shaped: 0,
+            alpha: 1.,
+            restarts: 0,
         })
+    }
+
+    /// Sets the frame's fraction of the way from the previous tick to the
+    /// current one, for everything drawn this frame.
+    pub fn present(&mut self, combat: &Combat, alpha: f64) {
+        self.alpha = alpha;
+        self.restarts = combat.render_restarts();
+    }
+
+    /// The tick fraction in force for `combat`'s current render history.
+    fn alpha(&self, combat: &Combat) -> f64 {
+        if self.restarts == combat.render_restarts() {
+            self.alpha
+        } else {
+            1.
+        }
+    }
+
+    /// The picture for this frame: the last two snapshots at the frame's
+    /// tick fraction.
+    pub fn presented(&self, combat: &Combat) -> RenderSnapshot {
+        interpolate(
+            combat.previous_snapshot(),
+            combat.render_snapshot(),
+            self.alpha(combat),
+        )
+    }
+
+    /// One target at the frame's tick fraction; none when it is not in the
+    /// snapshots.
+    pub fn presented_target(&self, combat: &Combat, id: u32) -> Option<AircraftPose> {
+        let current = combat.current_target(id)?;
+        Some(blend(
+            combat.previous_target(id),
+            current,
+            self.alpha(combat).clamp(0., 1.),
+        ))
+    }
+
+    /// Where a target is drawn this frame; one missing from the snapshots is
+    /// drawn where it is.
+    pub fn pose(&self, combat: &Combat, target: &live::Target) -> ([f64; 3], [f64; 3]) {
+        self.presented_target(combat, target.id).map_or(
+            (target.position, target_pose(target, combat.ai_poses)),
+            |pose| (pose.position, pose.attitude),
+        )
+    }
+
+    /// The target window's camera on the displayed target, at its presented
+    /// pose.
+    pub fn target_camera(&self, combat: &Combat, player: &flight::State) -> Option<Camera> {
+        let target = combat.state.display_target()?;
+        let (position, _) = self.pose(combat, target);
+        Some(crate::target_window::camera(player.position, position))
     }
 
     /// Populate all six creator wings in `combat`, retaining their sides for
@@ -114,7 +187,7 @@ impl CombatView {
         scenery: &Scenery,
     ) -> Vec<(&Airframe, Vec<f32>, Vec<Contact>)> {
         crate::render_snapshot::aircraft_batches(
-            &combat.presented(),
+            &self.presented(combat),
             &self.models,
             camera,
             world,
@@ -132,7 +205,7 @@ impl CombatView {
         scenery: &Scenery,
     ) -> crate::sim_renderer::CombatGeometry {
         crate::render_snapshot::combat_geometry(
-            &combat.presented(),
+            &self.presented(combat),
             &self.art,
             h,
             s,
@@ -168,7 +241,7 @@ impl CombatView {
                 .targets
                 .iter()
                 .filter(|pose| pose.engine.flame)
-                .filter_map(|pose| combat.presented_target(pose.id))
+                .filter_map(|pose| self.presented_target(combat, pose.id))
                 .collect(),
             ..RenderSnapshot::default()
         };
@@ -194,7 +267,7 @@ impl CombatView {
         scenery: &Scenery,
     ) -> Option<Camera> {
         let target = combat.state.display_target()?;
-        let mut camera = target_camera(combat, player)?;
+        let mut camera = self.target_camera(combat, player)?;
         if let Some(object) = combat.ground_object(target.id) {
             let bounds = object.bounds;
             let basis = Basis::new(bounds.heading, bounds.pitch, bounds.bank);
@@ -219,12 +292,9 @@ impl CombatView {
             let mut pose = player.clone();
             pose.wreck = target.wreck.clone();
             pose.crashed = target.hp <= 0;
-            let presented = combat.presented_target(target.id);
+            let presented = self.presented_target(combat, target.id);
             let (position, angles) = presented.as_ref().map_or(
-                (
-                    target.position,
-                    crate::combat::target_pose(target, combat.ai_poses),
-                ),
+                (target.position, target_pose(target, combat.ai_poses)),
                 |p| (p.position, p.attitude),
             );
             pose.position = position;
@@ -245,7 +315,7 @@ impl CombatView {
             pose.brake = 0.;
             pose.hook = 0.;
             if let Some(devices) = presented.and_then(|p| p.devices) {
-                crate::render_snapshot::set_devices(&mut pose, devices);
+                crate::snapshot::set_devices(&mut pose, devices);
             }
             let vertices = model.vertices(&pose, &camera, world, scenery);
             crate::target_window::fit(
@@ -257,13 +327,6 @@ impl CombatView {
         }
         Some(camera)
     }
-}
-
-/// The target window's camera on the displayed target, at its presented pose.
-pub fn target_camera(combat: &Combat, player: &flight::State) -> Option<Camera> {
-    let target = combat.state.display_target()?;
-    let (position, _) = combat.view_pose(target, true);
-    Some(crate::target_window::camera(player.position, position))
 }
 
 pub fn readout(
@@ -527,9 +590,8 @@ pub fn status(combat: &Combat, s: &flight::State) -> String {
 pub(crate) mod render_hash_tests {
     use super::*;
     use crate::{
-        combat::fixtures,
-        damage_art::DamageArt,
-        render_snapshot::{combat_geometry, interpolate, pose_state},
+        combat::fixtures, damage_art::DamageArt, render_snapshot::combat_geometry,
+        snapshot::pose_state,
     };
     use fixtures::load;
     pub(crate) use fixtures::{pilots, player, scene, snapshots};
@@ -775,6 +837,8 @@ pub(crate) mod render_hash_tests {
                 .collect(),
             models,
             shaped: 0,
+            alpha: 1.,
+            restarts: 0,
         }
     }
     /// A combat scene whose other aircraft are the types of `models`.
@@ -849,22 +913,26 @@ pub(crate) mod render_hash_tests {
             ),
             (crate::terrain::tests::world(), stepped),
         ];
-        let (mut with_models, with_models_view) =
+        let (mut with_models, mut with_models_view) =
             pair(models(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
-        let (mut fixture, fixture_view) = pair(Vec::new(), Vec::new());
+        let (mut fixture, mut fixture_view) = pair(Vec::new(), Vec::new());
         let scene = scene(with_models.state.configuration());
         let mut hashes = [(); 5].map(|()| Fnv::new());
         let mut drawn = [0; 3];
         for ai_poses in [true, false] {
             for alpha in [0., 0.37, 1.] {
-                load(&mut with_models, &scene, alpha, ai_poses, &player);
-                load(&mut fixture, &scene, alpha, ai_poses, &player);
+                load(&mut with_models, &scene, ai_poses, &player);
+                load(&mut fixture, &scene, ai_poses, &player);
+                with_models_view.present(&with_models, alpha);
+                fixture_view.present(&fixture, alpha);
                 for target in &scene.current {
-                    let (position, angles) = with_models.view_pose(target, true);
+                    let (position, angles) = with_models_view.pose(&with_models, target);
                     hashes[3].doubles(&position);
                     hashes[3].doubles(&angles);
                 }
-                let [modelled, fixtures] = [&with_models, &fixture].map(Combat::presented);
+                let [modelled, fixtures] =
+                    [(&with_models, &with_models_view), (&fixture, &fixture_view)]
+                        .map(|(combat, view)| view.presented(combat));
                 for (world, scenery) in &worlds {
                     for camera in cameras() {
                         for (model, vertices, contacts) in
@@ -985,7 +1053,7 @@ pub(crate) mod render_hash_tests {
         assert!(states[0].afterburner_active() && !states[4].afterburner_active());
         for s in &states {
             fixture.restart_render(s, None);
-            let snapshot = fixture.presented();
+            let snapshot = fixture_view.presented(&fixture);
             for camera in cameras() {
                 let mut expected = Vec::new();
                 for t in scene
@@ -1045,7 +1113,7 @@ pub(crate) mod render_hash_tests {
                 .contrail_offsets
                 .clone_from(offsets);
         }
-        let (mut combat, view) = pair(models, (0..7).map(|i| (i % 3, [0.; 3])).collect());
+        let (mut combat, mut view) = pair(models, (0..7).map(|i| (i % 3, [0.; 3])).collect());
         let own = vec![[-2., 0.5, -20.], [2., 0.5, -20.]];
         fixtures::set_contrail_offsets(&mut combat, own.clone());
         let scene = scene(combat.state.configuration());
@@ -1054,7 +1122,8 @@ pub(crate) mod render_hash_tests {
         for pose in &mut current.targets {
             pose.engine.flame = matches!(pose.id, 1..=3);
         }
-        fixtures::set_history(&mut combat, previous, current, 0.37);
+        fixtures::set_history(&mut combat, previous, current);
+        view.present(&combat, 0.37);
         // The lights as they were computed before the snapshots carried
         // them: each lit aircraft's presented pose and its own outlets.
         let glow = |position: Vector, [yaw, pitch, bank]: [f64; 3], offsets: &[Vector]| {
@@ -1092,7 +1161,7 @@ pub(crate) mod render_hash_tests {
                 Some(AircraftId::F14) => &outlets[2],
                 _ => &own,
             };
-            let (position, angles) = combat.view_pose(target, true);
+            let (position, angles) = view.pose(&combat, target);
             expected.extend(glow(position, angles, offsets));
         }
         let glows = view.afterburner_glows(&combat, &player);

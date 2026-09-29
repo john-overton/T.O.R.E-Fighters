@@ -1,7 +1,7 @@
 //! Original explosion, fire and crater artwork as textured sprites. The
 //! simulation owns every effect's type, place and life; the sheets, frame
 //! layouts and sizes are in docs/spec/explosions.md.
-use crate::render_snapshot::{EffectPose, MarkPose};
+use crate::snapshot::{EffectPose, MarkPose};
 use crate::terrain::Camera;
 use std::collections::BTreeMap;
 use tore_formats::Pic;

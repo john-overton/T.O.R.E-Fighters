@@ -11,7 +11,7 @@ use crate::aircraft::Airframe;
 use crate::flight;
 use crate::flight_canvas::FlightCanvas;
 use crate::flight_views::{self, Body, Reference, Rig, Scene, Shot};
-use crate::render_snapshot::{self, AircraftPose, CombatArt, RenderSnapshot};
+use crate::render_snapshot::{self, CombatArt};
 use crate::renderer::Renderer;
 use crate::replay::clock::{self, Clock, Direction};
 use crate::replay::context_menu::{self, Action, Menu, Outcome, Pickable, RightClick, Target};
@@ -25,6 +25,7 @@ use crate::replay::sound::{self, ReplaySound};
 use crate::replay::tracks::{Scanner, Tracks};
 use crate::replay::trails;
 use crate::replay::weather::WeatherTrack;
+use crate::snapshot::{self, AircraftPose, RenderSnapshot};
 use crate::{AppResult, attitude::Basis};
 use crate::{
     scenery::Scenery,
@@ -324,7 +325,7 @@ impl Label {
 /// over 100 nautical miles away, wrecks on the ground and the aircraft the
 /// camera sits in have none. `who` gives an aircraft's label and side.
 pub fn name_labels<'a>(
-    poses: impl Iterator<Item = &'a crate::render_snapshot::AircraftPose>,
+    poses: impl Iterator<Item = &'a crate::snapshot::AircraftPose>,
     camera: &Camera,
     size: [u32; 2],
     font: &tore_formats::font::Font,
@@ -478,7 +479,7 @@ fn aircraft_body(pose: &AircraftPose, sign: f64) -> Body {
 }
 
 /// The flight views' body for a weapon in flight, its velocity times `sign`.
-fn weapon_body(p: &crate::render_snapshot::ProjectilePose, sign: f64) -> Body {
+fn weapon_body(p: &crate::snapshot::ProjectilePose, sign: f64) -> Body {
     let d = p.direction;
     let speed = f64::from(p.speed_f8) / 256. * sign;
     let basis = Basis::new(d[0].atan2(d[2]), d[1].atan2(d[0].hypot(d[2])), 0.);
@@ -2174,7 +2175,7 @@ impl Viewer {
     /// The player as drawn: its pose over the airframe's start state, with
     /// the recorded load factor and the roll rate its attitudes imply.
     fn player_state(&mut self, picture: &RenderSnapshot, tick: u64) -> flight::State {
-        let mut state = render_snapshot::pose_state(&self.template, &picture.player);
+        let mut state = snapshot::pose_state(&self.template, &picture.player);
         if let Some(now) = self.playback.aircraft(tick, 0) {
             state.g = now.g;
             state.roll_rate = tick

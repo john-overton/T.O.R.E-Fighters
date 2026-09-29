@@ -542,9 +542,9 @@ pub struct Pickable {
 /// (`labels` by aircraft id) when one is drawn, and every weapon but gun
 /// rounds.
 pub fn pickables(
-    picture: &crate::render_snapshot::RenderSnapshot,
+    picture: &crate::snapshot::RenderSnapshot,
     labels: &[(u32, [f64; 4])],
-    aircraft: impl Fn(&crate::render_snapshot::AircraftPose) -> bool,
+    aircraft: impl Fn(&crate::snapshot::AircraftPose) -> bool,
 ) -> Vec<Pickable> {
     std::iter::once(&picture.player)
         .chain(&picture.targets)

@@ -35,7 +35,7 @@ use crate::{
     ai_wings::AiWings,
     combat::{self, CommandNote},
     flight, flight_ui,
-    render_snapshot::RenderSnapshot,
+    snapshot::RenderSnapshot,
     terrain,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -751,10 +751,9 @@ impl Recorder {
 
         // Aircraft: the player first, then every other aircraft in target
         // order. Ground objects keep only their hit points.
-        let aircraft: Vec<&crate::render_snapshot::AircraftPose> =
-            std::iter::once(&snapshot.player)
-                .chain(snapshot.targets.iter().filter(|p| p.aircraft.is_some()))
-                .collect();
+        let aircraft: Vec<&crate::snapshot::AircraftPose> = std::iter::once(&snapshot.player)
+            .chain(snapshot.targets.iter().filter(|p| p.aircraft.is_some()))
+            .collect();
         for pose in &aircraft {
             if !self.registered.contains(&pose.id) {
                 self.register(default_info(pose, tick.wings));
@@ -1644,7 +1643,7 @@ fn geometry(
 /// Flight data for one drawn aircraft: the player's own state, an AI
 /// aircraft's, or what a straight-flight fixture's combat target holds.
 fn flight_data(
-    pose: &crate::render_snapshot::AircraftPose,
+    pose: &crate::snapshot::AircraftPose,
     tick: &Tick<'_>,
     targets: &BTreeMap<u32, &live::Target>,
     player_ground: f64,
@@ -1726,7 +1725,7 @@ fn new_puffs(combat: &combat::Combat) -> Vec<replay::PuffSpawn> {
 
 /// An identity for an aircraft that appeared after the recording started.
 fn default_info(
-    pose: &crate::render_snapshot::AircraftPose,
+    pose: &crate::snapshot::AircraftPose,
     wings: Option<&AiWings>,
 ) -> replay::AircraftInfo {
     let slot = wings.and_then(|w| w.slot(pose.id));

@@ -808,8 +808,8 @@ impl SimRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         art: &crate::effect_renderer::Art,
-        effects: &[crate::render_snapshot::EffectPose],
-        marks: &[crate::render_snapshot::MarkPose],
+        effects: &[crate::snapshot::EffectPose],
+        marks: &[crate::snapshot::MarkPose],
     ) {
         self.effects.prepare(
             device,

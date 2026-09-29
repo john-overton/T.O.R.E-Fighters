@@ -165,7 +165,7 @@ const OTHER_THROTTLE: f64 = 0.75;
 /// The fires and other aircraft's engines in a picture, as loops. `engines`
 /// names each aircraft type's engine recordings.
 pub fn loop_sources(
-    snapshot: &crate::render_snapshot::RenderSnapshot,
+    snapshot: &crate::snapshot::RenderSnapshot,
     engines: &[(tore_formats::aircraft::AircraftId, EngineSounds)],
 ) -> Vec<LoopSource> {
     use tore_sim::combat::blast::{self, MarkKind};
@@ -256,7 +256,7 @@ pub fn spatial_sources(
 /// profile, a missile's velocity taken from its last tick of travel as
 /// live flight takes it. Presentation only, like its live twin.
 pub fn snapshot_sources(
-    snapshot: &crate::render_snapshot::RenderSnapshot,
+    snapshot: &crate::snapshot::RenderSnapshot,
 ) -> Vec<tore_sim::acoustics::Source> {
     use tore_sim::acoustics::{Source, SourceId};
     let player = &snapshot.player;

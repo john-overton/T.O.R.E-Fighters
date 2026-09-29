@@ -182,8 +182,8 @@ impl Renderer {
     pub fn effects(
         &mut self,
         art: &crate::effect_renderer::Art,
-        effects: &[crate::render_snapshot::EffectPose],
-        marks: &[crate::render_snapshot::MarkPose],
+        effects: &[crate::snapshot::EffectPose],
+        marks: &[crate::snapshot::MarkPose],
     ) {
         self.sim
             .effects(&self.device, &self.queue, art, effects, marks);
