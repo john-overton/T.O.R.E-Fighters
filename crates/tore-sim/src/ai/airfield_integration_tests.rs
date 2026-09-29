@@ -687,6 +687,40 @@ fn aircraft_meeting_head_on_both_turn_right_and_pass_clear() {
 }
 
 #[test]
+fn traffic_avoidance_sees_every_human_flown_aircraft() {
+    // The bug bash's traffic avoidance (John, 2026-09-29) with several human
+    // pilots: every human-flown aircraft is traffic. The first human flies
+    // well clear; the second meets the AI aircraft head-on and is avoided as
+    // an AI aircraft would be.
+    let mut mission = AiMission::new();
+    mission.push(hornet(1, 0, [0., 6_000., -6_000.], 0.));
+    let speed = mission.actor(1).unwrap().flight().speed;
+    let mut started = None;
+    for tick in 0..10 * 120 {
+        let t = tick as f64 / 120.;
+        let mut world = world(&mission, None);
+        let template = mission.actor(1).unwrap();
+        for (id, x, z, direction) in [(20, 50_000., -6_000., 1.), (21, 0., 6_000., -1.)] {
+            let mut o = object(template, 1);
+            o.id = id;
+            o.human_controlled = true;
+            o.position = [x, 6_000., z + direction * speed * t];
+            o.velocity = [0., 0., direction * speed];
+            o.heading_deg = if direction > 0. { 0. } else { 180. };
+            world.push(o);
+        }
+        mission
+            .step_with_surface(&world, &|x, z| surface(x, z).height, &surface, TimeOfDay(0))
+            .unwrap();
+        if let Some(heading) = mission.actor(1).unwrap().avoiding_heading_deg() {
+            started = Some(heading);
+            break;
+        }
+    }
+    assert_eq!(started.map(f64::round), Some(AVOID_TURN_DEG));
+}
+
+#[test]
 fn a_side_still_taking_off_does_not_return_to_base() {
     let mut mission = AiMission::new();
     let mut airborne = hornet(1, 0, [0., 6_000., -60_000.], 0.);

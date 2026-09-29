@@ -243,9 +243,9 @@ impl AiWings {
         self.mission.tick() as f64 / 120.
     }
 
-    /// "Friendly 1-2", or "YOU" for the player.
+    /// "Friendly 1-2", or "YOU" for a human-flown aircraft.
     pub(super) fn journal_label(&self, id: u32) -> String {
-        if id == PLAYER_ID {
+        if self.humans.iter().any(|h| h.id == id) {
             return "YOU".into();
         }
         self.slot(id)
@@ -256,7 +256,8 @@ impl AiWings {
     /// with the ordered target recorded as already reported. Returns whether
     /// the reply is the aircraft-target variant, for the journal.
     pub(super) fn engaged(&mut self, speaker: u32, target: Option<u32>) -> bool {
-        let aircraft = target.is_none_or(|t| t == PLAYER_ID || self.slot(t).is_some());
+        let aircraft =
+            target.is_none_or(|t| self.humans.iter().any(|h| h.id == t) || self.slot(t).is_some());
         self.chat(Chatter::Engage { speaker, aircraft });
         let until = self.mission.tick() + ENGAGE_BLOCK_TICKS;
         let entry = self.watch.contacts.entry(speaker).or_insert((0, None));
@@ -296,10 +297,12 @@ impl AiWings {
     }
 
     /// Read this tick's mission output and actor states into radio events.
+    /// Contact reports are measured from the first human-flown aircraft in id
+    /// order, the one listener TORE voices until the radio serves every seat.
     pub(super) fn observe_chatter(
         &mut self,
         output: &tore_sim::ai::mission::MissionOutput,
-        player: &flight::State,
+        humans: &[&HumanAircraft],
     ) {
         let tick = self.mission.tick();
         let mut events = Vec::new();
@@ -314,7 +317,8 @@ impl AiWings {
         for (speaker, launcher) in &output.launch_calls {
             events.push(Chatter::LaunchWarning {
                 speaker: *speaker,
-                by_aircraft: *launcher == PLAYER_ID || self.slot(*launcher).is_some(),
+                by_aircraft: self.humans.iter().any(|h| h.id == *launcher)
+                    || self.slot(*launcher).is_some(),
             });
         }
         for slot in &self.slots {
@@ -385,7 +389,7 @@ impl AiWings {
             let control = actor.controller().wing_settings().0;
             let advise = actor.identity().member != 0
                 && control.is_some_and(|c| c as u8 >= WingControl::Medium as u8);
-            let Some(contact) = self.contact(target, player, advise) else {
+            let Some(contact) = self.contact(target, humans, advise) else {
                 self.watch.journal.push(Entry::note(
                     tick as f64 / 120.,
                     slot.label(),
@@ -408,27 +412,30 @@ impl AiWings {
         }
     }
 
-    /// The contact report for `target`, measured from the player. `None` when
-    /// the target is not a living airborne aircraft.
-    fn contact(&self, target: u32, player: &flight::State, advise: bool) -> Option<Contact> {
+    /// The contact report for `target`, measured from the first of `humans`.
+    /// `None` when the target is not a living airborne aircraft, or when no
+    /// human listens.
+    fn contact(&self, target: u32, humans: &[&HumanAircraft], advise: bool) -> Option<Contact> {
+        let player = humans.first()?.flight;
         let flight_of = |f: &flight::State| (f.position, f.yaw.to_degrees());
-        let (position, heading, wing, aircraft) = if target == PLAYER_ID {
-            if player.crashed {
-                return None;
-            }
-            let (p, h) = flight_of(player);
-            (p, h, Some((launch::Side::Friendly, 1)), None)
-        } else {
-            let slot = self.slot(target)?;
-            let actor = self.mission.actor(target).filter(|a| a.alive())?;
-            let (p, h) = flight_of(actor.flight());
-            (
-                p,
-                h,
-                Some((slot.side, slot.wing_number)),
-                Some(slot.aircraft),
-            )
-        };
+        let (position, heading, wing, aircraft) =
+            if let Some(human) = humans.iter().find(|h| h.slot.id == target) {
+                if human.flight.crashed {
+                    return None;
+                }
+                let (p, h) = flight_of(human.flight);
+                (p, h, Some((human.slot.side, human.slot.wing + 1)), None)
+            } else {
+                let slot = self.slot(target)?;
+                let actor = self.mission.actor(target).filter(|a| a.alive())?;
+                let (p, h) = flight_of(actor.flight());
+                (
+                    p,
+                    h,
+                    Some((slot.side, slot.wing_number)),
+                    Some(slot.aircraft),
+                )
+            };
         let heading_close = |other: f64| ((other - heading + 180.).rem_euclid(360.) - 180.).abs();
         let together = |p: Vector, h: f64| {
             missiles::length(missiles::sub(p, position)) <= GROUP_RANGE_FT
@@ -446,9 +453,12 @@ impl AiWings {
                     count += u32::from(together(p, h));
                 }
             }
-            if target != PLAYER_ID && side == launch::Side::Friendly && wing == 1 {
-                let (p, h) = flight_of(player);
-                count += u32::from(!player.crashed && together(p, h));
+            for human in humans
+                .iter()
+                .filter(|h| h.slot.id != target && h.slot.side == side && h.slot.wing + 1 == wing)
+            {
+                let (p, h) = flight_of(human.flight);
+                count += u32::from(!human.flight.crashed && together(p, h));
             }
         }
         let delta = missiles::sub(position, player.position);
@@ -542,7 +552,7 @@ mod tests {
         let mut player = tore_sim::flight::State::new(&aircraft(), [0., 20000., 0.]).unwrap();
         player.yaw = 0.;
         // Enemy 3 is 40,000 ft ahead with its wingman 1,500 ft away, same heading.
-        let c = wings.contact(3, &player, true).unwrap();
+        let c = wings.contact(3, &[&human(&player)], true).unwrap();
         assert_eq!(c.count, 2);
         assert_eq!(c.hour, 12);
         assert_eq!(c.elevation, Elevation::Level);
@@ -551,7 +561,7 @@ mod tests {
         assert_eq!(c.named, Some(aircraft().name));
         assert!(c.advise);
         let far = tore_sim::flight::State::new(&aircraft(), [0., 30000., -10000.]).unwrap();
-        let c = wings.contact(3, &far, false).unwrap();
+        let c = wings.contact(3, &[&human(&far)], false).unwrap();
         assert_eq!((c.named, c.elevation, c.miles), (None, Elevation::Low, 8));
     }
 
@@ -595,7 +605,7 @@ mod tests {
             let output = wings
                 .advance(player_object(player.position), &mut targets, &flat)
                 .unwrap();
-            wings.observe_chatter(&output, &player);
+            wings.observe_chatter(&output, &[&human(&player)]);
         }
         let from_red_two = |f: fn(&Chatter) -> bool| {
             wings.chatter.iter().any(|c| {
@@ -618,7 +628,7 @@ mod tests {
         let output = wings
             .advance(player_object(player.position), &mut targets, &flat)
             .unwrap();
-        wings.observe_chatter(&output, &player);
+        wings.observe_chatter(&output, &[&human(&player)]);
         // The synthetic profile has no ejection seat flag (PLANE flags 0x10).
         assert_eq!(
             wings.chatter,
@@ -687,7 +697,7 @@ mod tests {
         let output = wings
             .advance(player_object(player.position), &mut targets, &flat)
             .unwrap();
-        wings.observe_chatter(&output, &player);
+        wings.observe_chatter(&output, &[&human(&player)]);
         assert_eq!(
             wings.mission.actor(1).unwrap().controller().target(),
             Some(3)
@@ -714,7 +724,7 @@ mod tests {
             if engaged {
                 wings.watch.engage_until.insert(1, contacts.0);
             }
-            wings.observe_chatter(&Default::default(), &player);
+            wings.observe_chatter(&Default::default(), &[&human(&player)]);
             contact_reasons(wings, 3)
         };
         assert_eq!(
@@ -767,7 +777,7 @@ mod tests {
                 let output = wings
                     .advance(player_object(player.position), &mut targets, &flat)
                     .unwrap();
-                wings.observe_chatter(&output, &player);
+                wings.observe_chatter(&output, &[&human(&player)]);
                 events.append(&mut wings.chatter);
                 lines.extend(wings.take_message());
                 if drain {

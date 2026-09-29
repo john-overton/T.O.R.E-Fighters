@@ -84,9 +84,12 @@ pub const FRIENDLY_SIDE: Side = Side(1);
 /// See [`FRIENDLY_SIDE`].
 pub const ENEMY_SIDE: Side = Side(2);
 
-/// The player's object id in every snapshot. `live::State` already reserves 0
-/// for the player (`Projectile::target == Some(0)` is the player), and dummy
-/// target ids start at 1, so actor ids and target ids are the same number.
+/// The aircraft single player flies. `live::State` already reserves 0 for the
+/// player (`Projectile::target == Some(0)` is the player), and dummy target ids
+/// start at 1, so actor ids and target ids are the same number. The AI no
+/// longer reads this: every human-flown aircraft reaches it as a
+/// [`HumanAircraft`] with its own id, and this is only the id single player's
+/// entry carries.
 pub const PLAYER_ID: u32 = 0;
 
 /// Fitted Quick Mission placement, agent choice: use B43 echelon slots at
@@ -283,6 +286,64 @@ impl Slot {
     }
 }
 
+/// Where one human-flown aircraft sits in the mission: its id and its place in
+/// a wing. The wing is the setup screen's index (0 through 2) and the member
+/// is 0 for the wing's first aircraft, as in [`ActorIdentity`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HumanSlot {
+    pub id: u32,
+    pub side: launch::Side,
+    pub wing: u8,
+    pub member: u8,
+}
+
+impl HumanSlot {
+    /// Single player: the leader of Friendly wing 1 flies aircraft 0.
+    pub const SINGLE_PLAYER: Self = Self {
+        id: PLAYER_ID,
+        side: launch::Side::Friendly,
+        wing: 0,
+        member: 0,
+    };
+}
+
+/// One human-flown aircraft as the AI sees it this tick. The host hands the AI
+/// one entry per such aircraft, in id order. The AI builds a world object with
+/// `human_controlled` set from each, where it used to build one for "the
+/// player".
+pub struct HumanAircraft<'a> {
+    pub slot: HumanSlot,
+    /// The aircraft's authoritative flight state.
+    pub flight: &'a flight::State,
+    /// Its combat hit points; zero or less means destroyed.
+    pub hit_points: i32,
+    /// What the aircraft shows to other aircraft's sensors (from its combat
+    /// configuration).
+    pub signature: sensors::SignatureProfile,
+    pub jammer: Option<sensors::JammerProfile>,
+}
+
+impl<'a> HumanAircraft<'a> {
+    pub fn new(
+        slot: HumanSlot,
+        flight: &'a flight::State,
+        hit_points: i32,
+        config: &live::Configuration,
+    ) -> Self {
+        Self {
+            slot,
+            flight,
+            hit_points,
+            signature: config.sensors.signature,
+            jammer: config.sensors.jammer.clone(),
+        }
+    }
+
+    fn alive(&self) -> bool {
+        !self.flight.crashed && self.hit_points > 0
+    }
+}
+
 /// The formation trace samples every 12 simulation ticks (10 Hz).
 const FORMATION_TRACE_EVERY: u64 = 12;
 /// The file is flushed on the first sample of each second (every 120 ticks).
@@ -329,6 +390,9 @@ pub struct AiWings {
     /// Formation trace rows waiting for the app; `None` while tracing is off.
     formation_trace: Option<FormationBatch>,
     slots: Vec<Slot>,
+    /// Every human-flown aircraft, in id order. The host refreshes it each
+    /// step ([`Self::step`]); a fresh bridge starts with single player's one.
+    humans: Vec<HumanSlot>,
     weapons: BTreeMap<(u32, u8), tore_formats::weapons::Weapon>,
     device_random: tore_sim::ai::DecisionRandom,
     device_effectiveness: BTreeMap<u32, (u8, u8)>,
@@ -435,6 +499,16 @@ fn maximum_speed(state: &flight::State) -> ScalarSpeed {
     } else {
         ScalarSpeed(tore_sim::ai::mission::FALLBACK_MAXIMUM_FPS)
     }
+}
+
+/// Each human-flown aircraft's launcher, for the ones combat keeps an ownship
+/// for, in id order: what combat's missile support reads for their shots.
+fn human_launchers(state: &live::State, humans: &[&HumanAircraft]) -> Vec<(u32, live::Launcher)> {
+    humans
+        .iter()
+        .filter(|h| state.ownship(h.slot.id).is_some())
+        .map(|h| (h.slot.id, crate::combat::launcher(h.flight)))
+        .collect()
 }
 
 /// Records the intended target of the rounds `realise` just added, so the
@@ -560,7 +634,28 @@ impl AiWings {
         resources: &BTreeMap<String, Vec<u8>>,
         airfields: &Airfields,
     ) -> WorldResult<Self> {
-        let mut bridge = Self::build_at(wings, targets, airfields, |id| {
+        Self::build_mission_for(
+            wings,
+            targets,
+            guns_only,
+            resources,
+            airfields,
+            &[HumanSlot::SINGLE_PLAYER],
+        )
+    }
+
+    /// [`build_mission`](Self::build_mission) with the mission's human-flown
+    /// aircraft named: the AI fills each wing's member numbers the humans
+    /// leave free, in order.
+    pub fn build_mission_for(
+        wings: &[WingLaunch],
+        targets: &[live::Target],
+        guns_only: bool,
+        resources: &BTreeMap<String, Vec<u8>>,
+        airfields: &Airfields,
+        humans: &[HumanSlot],
+    ) -> WorldResult<Self> {
+        let mut bridge = Self::build_for(wings, targets, airfields, humans, |id| {
             let bytes = resources
                 .get(id.pt())
                 .ok_or_else(|| format!("aircraft cache missing {}", id.pt()))?;
@@ -681,13 +776,37 @@ impl AiWings {
         wings: &[WingLaunch],
         targets: &[live::Target],
         airfields: &Airfields,
+        resolve: impl FnMut(AircraftId) -> WorldResult<(Aircraft, Option<sensors::SensorProfiles>)>,
+    ) -> WorldResult<Self> {
+        Self::build_for(
+            wings,
+            targets,
+            airfields,
+            &[HumanSlot::SINGLE_PLAYER],
+            resolve,
+        )
+    }
+
+    /// [`build_at`](Self::build_at) with the mission's human-flown aircraft
+    /// named. Each wing's AI members take the member numbers the humans in it
+    /// leave free, lowest first, so one human at member 0 of Friendly wing 1
+    /// (single player) shifts that wing's AI aircraft to members 1 and up.
+    pub fn build_for(
+        wings: &[WingLaunch],
+        targets: &[live::Target],
+        airfields: &Airfields,
+        humans: &[HumanSlot],
         mut resolve: impl FnMut(AircraftId) -> WorldResult<(Aircraft, Option<sensors::SensorProfiles>)>,
     ) -> WorldResult<Self> {
+        let mut humans = humans.to_vec();
+        humans.sort_by_key(|h| h.id);
         let mut mission = AiMission::new();
         // Opinionated host setup: level delta formations using B43's
         // alternating trailing slots, 512 ft spacing, independently per wing.
         mission.set_spacing(512, 0);
-        mission.set_external_leader(FRIENDLY_SIDE, 0, PLAYER_ID);
+        for human in humans.iter().filter(|h| h.member == 0) {
+            mission.set_external_leader(side_of(human.side), human.wing, human.id);
+        }
         let mut slots = Vec::new();
         let mut watch = chatter::Watch::default();
         let mut profiles: Vec<(AircraftId, Aircraft, Option<sensors::SensorProfiles>)> = Vec::new();
@@ -705,10 +824,19 @@ impl AiWings {
                 .find(|(id, _, _)| *id == wing.aircraft)
                 .expect("just inserted");
             watch.learn(wing.aircraft, aircraft);
+            let taken: Vec<u8> = humans
+                .iter()
+                .filter(|h| h.side == wing.wing.side && h.wing == wing.wing.index)
+                .map(|h| h.member)
+                .collect();
             for member in &wing.members {
-                // The player's wing reserves member zero for the human leader.
-                let member_index = member.member
-                    + u8::from(wing.wing.side == launch::Side::Friendly && wing.wing.index == 0);
+                // A wing with humans in it leaves their member numbers free
+                // of AI aircraft: the k-th AI member takes the k-th number no
+                // human holds.
+                let member_index = (0u8..)
+                    .filter(|number| !taken.contains(number))
+                    .nth(usize::from(member.member))
+                    .expect("member numbers are unbounded");
                 let target = targets.get(index).ok_or_else(|| {
                     format!(
                         "AI wing member {index} has no spawned target; the fixture spawner and the launch payload disagree"
@@ -732,7 +860,7 @@ impl AiWings {
                 // A ground start parks the player's wingmen on the departure
                 // runway instead of dropping them from altitude. Only the
                 // researched flight model can stand on a runway.
-                let player_wing = wing.wing.side == launch::Side::Friendly && wing.wing.index == 0;
+                let player_wing = !taken.is_empty();
                 let ground_start = match airfields.departure.as_ref().filter(|_| player_wing) {
                     Some(departure) => {
                         let order = usize::from(member_index);
@@ -833,6 +961,7 @@ impl AiWings {
             mission_preset: Preset::Free,
             formation_trace: None,
             slots,
+            humans,
             weapons: BTreeMap::new(),
             device_random: tore_sim::ai::DecisionRandom::seeded(0xdec0),
             device_effectiveness: BTreeMap::new(),
@@ -910,18 +1039,18 @@ impl AiWings {
     }
 
     /// The seeker class (2 infrared, 3 radar) of each missile lock an enemy
-    /// holds on the player: its target is the player and its weapon service
-    /// has passed the lock check with a guided store chosen, and is waiting
-    /// out the tracking delay or firing. Read-only, for the RWR warning
-    /// tones (docs/spec/rwr.md#warning-tones).
-    pub fn locks_on_player(&self) -> Vec<u8> {
+    /// holds on aircraft `id`: its target is that aircraft and its weapon
+    /// service has passed the lock check with a guided store chosen, and is
+    /// waiting out the tracking delay or firing. Read-only, for the RWR
+    /// warning tones (docs/spec/rwr.md#warning-tones).
+    pub fn locks_on(&self, id: u32) -> Vec<u8> {
         use tore_sim::ai::weapon_service::Phase;
         self.mission
             .actors()
             .iter()
             .filter(|actor| {
                 actor.alive()
-                    && actor.controller().target() == Some(PLAYER_ID)
+                    && actor.controller().target() == Some(id)
                     && matches!(
                         actor.controller().weapon_phase(),
                         Phase::Tracking | Phase::Fire
@@ -1024,12 +1153,14 @@ impl AiWings {
         }
     }
 
-    /// Friendly aircraft identities, which the player's T and Enter skip.
-    pub fn friendly_ids(&self) -> std::collections::BTreeSet<u32> {
+    /// The aircraft on `side`, AI and human alike, which that side's T and
+    /// Enter skip.
+    pub fn friendly_ids(&self, side: launch::Side) -> std::collections::BTreeSet<u32> {
         self.slots
             .iter()
-            .filter(|s| s.side == tore_sim::ai::launch::Side::Friendly)
+            .filter(|s| s.side == side)
             .map(|s| s.id)
+            .chain(self.humans.iter().filter(|h| h.side == side).map(|h| h.id))
             .collect()
     }
 
@@ -1046,12 +1177,19 @@ impl AiWings {
     /// into the targets. Next tick's straight-line integration therefore starts
     /// from the true AI pose and advances it by the true AI velocity, which is
     /// what the missile collision sweep needs.
+    ///
+    /// `humans` is one entry per human-flown aircraft, in id order. Each is a
+    /// world object in every AI decision; the RWR records, emitters and sensor
+    /// picture that reach the AI's attack evidence are the first ownship's.
     pub fn step(
         &mut self,
         state: &mut live::State,
-        player: &flight::State,
+        humans: &[HumanAircraft],
         world: &Terrain,
     ) -> WorldResult<()> {
+        let mut humans: Vec<&HumanAircraft> = humans.iter().collect();
+        humans.sort_by_key(|h| h.slot.id);
+        self.humans = humans.iter().map(|h| h.slot).collect();
         let ground = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32));
         // The decoy draws and rolls describe this step only. Clearing the
         // log never touches the generator's state.
@@ -1060,7 +1198,7 @@ impl AiWings {
         self.weapon_rules = state.weapon_rules;
         self.mission
             .set_missiles(if state.weapon_rules == Rules::Spec {
-                state.missile_snapshots(&[(PLAYER_ID, crate::combat::launcher(player))])
+                state.missile_snapshots(&human_launchers(state, &humans))
             } else {
                 Vec::new()
             });
@@ -1079,15 +1217,18 @@ impl AiWings {
                 .collect(),
         );
         self.lose_out_of_bounds(&mut state.ledger, |x, z| world.edge_distance_nm(x, z));
-        let own = state.ownship(PLAYER_ID).expect("the human's ownship");
-        let object = self.player_object(player, own.hp, own.configuration());
+        let objects = humans.iter().map(|h| Self::human_object(h)).collect();
         // Aircraft on the researched flight model roll on runways and feel
         // the wind; legacy airborne actors keep the terrain-only surface.
-        let output = self.advance_on_surface(object, &mut state.targets, &ground, &|x, z| {
+        let output = self.advance_on_surface(objects, &mut state.targets, &ground, &|x, z| {
             world.surface(x, z)
         })?;
         self.lose_uncredited(&mut state.ledger);
-        self.observe_chatter(&output, player);
+        self.observe_chatter(&output, &humans);
+        let positions: Vec<(u32, Vector)> = humans
+            .iter()
+            .map(|h| (h.slot.id, h.flight.position))
+            .collect();
         for event in &output.launches {
             if let Some(weapon) = self.weapons.get(&(event.actor, event.station.0)).cloned() {
                 if live::is_gun(&weapon)
@@ -1103,7 +1244,7 @@ impl AiWings {
                         &mut state.projectiles,
                         &weapon,
                         usize::from(event.station.0),
-                        player.position,
+                        &positions,
                         Some(ordinal),
                     );
                     aim_latest(state, emitted, event.target);
@@ -1141,7 +1282,7 @@ impl AiWings {
                         &mut state.projectiles,
                         &weapon,
                         usize::from(event.station.0),
-                        player.position,
+                        &positions,
                         None,
                     );
                     aim_latest(state, emitted, event.target);
@@ -1184,7 +1325,7 @@ impl AiWings {
                     &mut state.projectiles,
                     &weapon,
                     usize::from(station),
-                    player.position,
+                    &positions,
                     Some(pending.ordinal),
                 );
                 aim_latest(state, emitted, *target);
@@ -1276,7 +1417,7 @@ impl AiWings {
                 .take(64)
                 .collect();
         }
-        self.report_perceived_attacks(state, player, &ground);
+        self.report_perceived_attacks(state, &humans, &ground);
         self.last_output = output;
         Ok(())
     }
@@ -1285,25 +1426,34 @@ impl AiWings {
     fn report_perceived_attacks(
         &mut self,
         state: &live::State,
-        player: &flight::State,
+        humans: &[&HumanAircraft],
         ground: &dyn Fn(f64, f64) -> f64,
     ) {
         use tore_sim::ai::{awareness, engagement::ThreatReport};
         use tore_sim::combat::threats::EvidenceSource;
-        let own = state.ownship(PLAYER_ID).expect("the human's ownship");
+        // The human-flown aircraft whose ownship's records (RWR, emitters,
+        // sensor picture) reach the AI's attack evidence: the first with one.
+        let combat = humans
+            .iter()
+            .copied()
+            .find_map(|h| state.ownship(h.slot.id).map(|own| (h, own)));
+        let combat_human = combat.map(|(human, _)| human);
         let mut reports = Vec::new();
-        // The player's RWR may identify a supporting source only by a unique
-        // independently observed hostile emitter at the received bearing.
-        for record in own
-            .missile_threats
-            .records()
+        // A human-flown aircraft's RWR may identify a supporting source only
+        // by a unique independently observed hostile emitter at the received
+        // bearing. The records belong to one aircraft, so each is delivered
+        // to that aircraft and no other.
+        for record in combat
+            .iter()
+            .flat_map(|(_, own)| own.missile_threats.records())
             .filter(|r| r.targeting_receiver && !r.stale)
         {
+            let (human, own) = combat.expect("a record comes from the combat human's ownship");
             let attacker_id = if record.source == EvidenceSource::ElectronicSupported {
                 record.radar_bearing_deg.and_then(|bearing| {
                     let mut matches = own.emitters.iter().filter(|emitter| {
                         self.slot(emitter.id)
-                            .is_some_and(|slot| slot.side == launch::Side::Enemy)
+                            .is_some_and(|slot| slot.side != human.slot.side)
                             && own.sensors.observation(emitter.id).is_some()
                             && ((emitter.bearing_rad.to_degrees() - bearing + 180.)
                                 .rem_euclid(360.)
@@ -1318,13 +1468,13 @@ impl AiWings {
                 None
             };
             reports.push((
-                PLAYER_ID,
+                human.slot.id,
                 ThreatReport {
                     attacker_id,
-                    defended_id: PLAYER_ID,
+                    defended_id: human.slot.id,
                 },
                 Some(
-                    (player.yaw.to_degrees()
+                    (human.flight.yaw.to_degrees()
                         + record.radar_bearing_deg.unwrap_or(record.bearing_deg))
                     .rem_euclid(360.),
                 ),
@@ -1340,7 +1490,10 @@ impl AiWings {
             if gun && !projectile.tracer {
                 continue;
             }
-            for receiver in std::iter::once(PLAYER_ID).chain(
+            // A human without combat records of its own (none but the combat
+            // player has them yet) cannot perceive a shot, so it is not a
+            // receiver here.
+            for receiver in combat_human.map(|h| h.slot.id).into_iter().chain(
                 self.mission
                     .actors()
                     .iter()
@@ -1351,7 +1504,8 @@ impl AiWings {
                     continue;
                 }
                 let (position, velocity, heading, pitch, skill, possible_shooters, incoming) =
-                    if receiver == PLAYER_ID {
+                    if let Some((human, own)) = combat.filter(|(h, _)| h.slot.id == receiver) {
+                        let player = human.flight;
                         (
                             player.position,
                             player.velocity,
@@ -1363,7 +1517,7 @@ impl AiWings {
                                 .iter()
                                 .filter(|target| {
                                     self.slot(target.id)
-                                        .is_some_and(|slot| slot.side == launch::Side::Enemy)
+                                        .is_some_and(|slot| slot.side != human.slot.side)
                                 })
                                 .filter_map(|target| {
                                     own.sensors
@@ -1417,7 +1571,7 @@ impl AiWings {
                 if launch_sources.next().is_some() {
                     continue;
                 }
-                let gun_incoming = if gun && receiver != PLAYER_ID {
+                let gun_incoming = if gun && !humans.iter().any(|h| h.slot.id == receiver) {
                     self.mission
                         .actor(receiver)
                         .and_then(AiActor::incoming_fire_cue)
@@ -1471,19 +1625,20 @@ impl AiWings {
         targets: &mut [live::Target],
         ground: &dyn Fn(f64, f64) -> f64,
     ) -> WorldResult<tore_sim::ai::mission::MissionOutput> {
-        self.advance_on_surface(player, targets, ground, &|x, z| {
+        self.advance_on_surface(vec![player], targets, ground, &|x, z| {
             tore_sim::research::Surface::terrain(ground(x, z))
         })
     }
 
     /// The AI half of one tick, with the combat world reduced to its target
     /// rows: damage in, one world snapshot, one mission step, pose out,
-    /// activity line. `surface` is the host's full surface query, so runways
+    /// activity line. `humans` is one world object per human-flown aircraft,
+    /// in id order. `surface` is the host's full surface query, so runways
     /// are solid for aircraft that start or land on them; `terrain` is the
     /// plain terrain height that legacy-adapter aircraft keep using.
     pub fn advance_on_surface(
         &mut self,
-        player: WorldObject,
+        humans: Vec<WorldObject>,
         targets: &mut [live::Target],
         terrain: &dyn Fn(f64, f64) -> f64,
         surface: &dyn Fn(f64, f64) -> tore_sim::research::Surface,
@@ -1497,7 +1652,7 @@ impl AiWings {
             .map(AiActor::id)
             .collect();
 
-        let objects = self.snapshot(player, targets);
+        let objects = self.snapshot(humans, targets);
         // `fitted`: `TimeOfDay` is an opaque host clock the AI only orders
         // against a mission hold time, so the mission tick is used directly. It
         // is monotonic and deterministic, which is all the ordering needs.
@@ -1629,20 +1784,17 @@ impl AiWings {
         batch.flush |= tick.is_multiple_of(FORMATION_TRACE_FLUSH_EVERY);
     }
 
-    /// The player as the AI sees it: an ordinary object on the friendly side,
-    /// never a special case in the decision path.
-    pub fn player_object(
-        &self,
-        player: &flight::State,
-        player_hp: i32,
-        config: &live::Configuration,
-    ) -> WorldObject {
+    /// A human-flown aircraft as the AI sees it: an ordinary object on its
+    /// side, never a special case in the decision path. The AI never shoots
+    /// at a human of its own side and always may at one of the other.
+    pub fn human_object(human: &HumanAircraft) -> WorldObject {
+        let player = human.flight;
+        let id = human.slot.id;
+        let player_hp = human.hit_points;
         let on_ground = player.research.as_ref().is_some_and(|r| r.on_ground);
         WorldObject {
-            id: PLAYER_ID,
-            // The player is on the friendly side so friendly AI never shoots
-            // at the human and enemy AI always may.
-            side: FRIENDLY_SIDE,
+            id,
+            side: side_of(human.slot.side),
             position: player.position,
             velocity: player.velocity,
             heading_deg: player.yaw.to_degrees(),
@@ -1652,18 +1804,18 @@ impl AiWings {
             is_aircraft: true,
             is_fighter: true,
             human_controlled: true,
-            alive: !player.crashed && player_hp > 0,
+            alive: human.alive(),
             destroyed: player_hp <= 0,
             on_ground,
             observable: Some(
                 Observable {
-                    id: PLAYER_ID,
+                    id,
                     position: player.position,
                     velocity: player.velocity,
                     basis: Basis::new(player.yaw, player.pitch, player.bank),
                     configuration: sensors::Configuration::CLEAN,
-                    signature: config.sensors.signature,
-                    jammer: config.sensors.jammer.clone(),
+                    signature: human.signature,
+                    jammer: human.jammer.clone(),
                     jammer_active: player.jammer && player.engine,
                     radar_emitting: player.radar && player.engine,
                     airborne: true,
@@ -1829,10 +1981,11 @@ impl AiWings {
         actor.fail_equipment(equipment);
     }
 
-    /// One world snapshot: the player first, then every AI aircraft.
-    fn snapshot(&self, player: WorldObject, targets: &[live::Target]) -> Vec<WorldObject> {
-        let mut objects = Vec::with_capacity(self.slots.len() + 1);
-        objects.push(player);
+    /// One world snapshot: the human-flown aircraft first, in id order, then
+    /// every AI aircraft.
+    fn snapshot(&self, humans: Vec<WorldObject>, targets: &[live::Target]) -> Vec<WorldObject> {
+        let mut objects = Vec::with_capacity(self.slots.len() + humans.len());
+        objects.extend(humans);
         for slot in &self.slots {
             let Some(actor) = self.mission.actor(slot.id) else {
                 continue;
@@ -1910,7 +2063,7 @@ impl AiWings {
         projectiles: &mut Vec<live::Projectile>,
         weapon: &tore_formats::weapons::Weapon,
         station: usize,
-        player_position: Vector,
+        humans: &[(u32, Vector)],
         gun_ordinal: Option<u64>,
     ) -> u32 {
         let Some(actor) = self.mission.actor(event.actor) else {
@@ -1965,8 +2118,8 @@ impl AiWings {
         } else if actor.sensors().is_none() {
             // Sensorless synthetic fixtures explicitly supply permitted world
             // targets. Live aircraft never use this fallback.
-            if event.target == PLAYER_ID {
-                player_position
+            if let Some(&(_, position)) = humans.iter().find(|(id, _)| *id == event.target) {
+                position
             } else if let Some(other) = self.mission.actor(event.target) {
                 other.flight().position
             } else {
@@ -2011,7 +2164,10 @@ impl AiWings {
         // Compatibility keeps its existing steering; reviewed profiles use
         // the same owner-aware seeker/propulsion lifecycle as player shots.
         let launched = (self.mission.tick() / 30) as u16;
-        let incoming = (event.target == PLAYER_ID).then_some(PLAYER_ID);
+        let incoming = humans
+            .iter()
+            .any(|(id, _)| *id == event.target)
+            .then_some(event.target);
         let mut emitted = 0;
         for _ in 0..event.projectiles {
             if projectiles.len() >= MAX_PROJECTILES {
@@ -2166,7 +2322,7 @@ impl AiWings {
             let Some(target) = projectile.target else {
                 continue;
             };
-            if target == PLAYER_ID {
+            if self.humans.iter().any(|h| h.id == target) {
                 continue;
             }
             let Some(slot) = self.slot(target) else {
@@ -2191,11 +2347,10 @@ impl AiWings {
                 .ai_shots
                 .get(&projectile.id)
                 .copied()
-                .unwrap_or(PLAYER_ID);
-            let launcher_side = if launcher_id == PLAYER_ID {
-                Some(launch::Side::Friendly)
-            } else {
-                self.slot(launcher_id).map(|s| s.side)
+                .unwrap_or(projectile.owner);
+            let launcher_side = match self.humans.iter().find(|h| h.id == launcher_id) {
+                Some(human) => Some(human.side),
+                None => self.slot(launcher_id).map(|s| s.side),
             };
             let position = actor.flight().position;
             let d = [
@@ -2688,7 +2843,7 @@ mod tests {
         assert_eq!(enemy.home_runway().map(|r| r.object), Some(8));
 
         // Parked aircraft return no radar echo to anyone; airborne ones do.
-        let objects = bridge.snapshot(player_object([0., 30., 1100.]), &targets);
+        let objects = bridge.snapshot(vec![player_object([0., 30., 1100.])], &targets);
         let radar = |id: u32| {
             objects
                 .iter()
@@ -2714,7 +2869,7 @@ mod tests {
         for _ in 0..120 {
             bridge
                 .advance_on_surface(
-                    player_object([0., 30., 1100.]),
+                    vec![player_object([0., 30., 1100.])],
                     &mut targets,
                     &|_, _| 30.,
                     &surface,
@@ -2928,6 +3083,101 @@ mod tests {
         for actor in wings.mission.actors() {
             assert_eq!(actor.is_neutral(), actor.identity().side == FRIENDLY_SIDE);
         }
+    }
+
+    /// The single-player entry for a flight state, for tests.
+    pub(crate) fn human(flight: &flight::State) -> HumanAircraft<'_> {
+        static CONFIG: std::sync::OnceLock<live::Configuration> = std::sync::OnceLock::new();
+        HumanAircraft::new(
+            HumanSlot::SINGLE_PLAYER,
+            flight,
+            1000,
+            CONFIG.get_or_init(|| combat_fixture(false).own().configuration().clone()),
+        )
+    }
+
+    /// [`human`] for any slot.
+    pub(crate) fn human_at(slot: HumanSlot, flight: &flight::State) -> HumanAircraft<'_> {
+        HumanAircraft {
+            slot,
+            ..human(flight)
+        }
+    }
+
+    #[test]
+    fn every_human_aircraft_is_a_world_object_in_id_order() {
+        // Friendly wing 1 has two humans (members 0 and 1) and two AI
+        // wingmen, and a lone enemy flies against them.
+        let selections = [
+            (launch::Side::Friendly, 0u8, 2usize),
+            (launch::Side::Enemy, 0, 1),
+        ]
+        .map(|(side, index, count)| WingSelection {
+            wing: WingId::new(side, index).unwrap(),
+            aircraft: AircraftId::F18,
+            count,
+            skill_level: 1,
+        });
+        let payload = resolve_wings(&selections, None).unwrap();
+        let targets = vec![
+            target(1, [0., 20000., 0.], 0.),
+            target(2, [1500., 20000., 0.], 0.),
+            target(3, [0., 20000., 40000.], std::f64::consts::PI),
+        ];
+        let slot = |id, member| HumanSlot {
+            id,
+            side: launch::Side::Friendly,
+            wing: 0,
+            member,
+        };
+        let humans = [slot(5, 1), slot(0, 0)];
+        let wings = AiWings::build_for(&payload, &targets, &Airfields::default(), &humans, |_| {
+            Ok((aircraft(), None))
+        })
+        .unwrap();
+        // The AI fills the member numbers the humans leave free.
+        let members: Vec<_> = wings
+            .mission
+            .actors()
+            .iter()
+            .map(|a| (a.id(), a.identity().member))
+            .collect();
+        assert_eq!(members, [(1, 2), (2, 3), (3, 0)]);
+        assert_eq!(
+            wings.humans,
+            [slot(0, 0), slot(5, 1)],
+            "registered in id order"
+        );
+        assert_eq!(
+            wings.friendly_ids(launch::Side::Friendly),
+            [0, 1, 2, 5].into(),
+            "the friendly list holds every friendly aircraft, human or AI"
+        );
+        assert_eq!(
+            wings.friendly_ids(launch::Side::Enemy),
+            [3].into(),
+            "and the enemy list only the enemy"
+        );
+
+        let one = flight::State::new(&aircraft(), [0., 20000., -1000.]).unwrap();
+        let mut two = flight::State::new(&aircraft(), [500., 21000., -1000.]).unwrap();
+        two.crashed = true;
+        let objects = wings.snapshot(
+            [human_at(slot(0, 0), &one), human_at(slot(5, 1), &two)]
+                .iter()
+                .map(AiWings::human_object)
+                .collect(),
+            &targets,
+        );
+        let ids: Vec<_> = objects.iter().map(|o| (o.id, o.human_controlled)).collect();
+        assert_eq!(
+            ids,
+            [(0, true), (5, true), (1, false), (2, false), (3, false)]
+        );
+        assert!(objects[0].alive && !objects[1].alive);
+        assert_eq!(objects[1].position, [500., 21000., -1000.]);
+        // Every human is a world object on its own side.
+        assert!(objects[..2].iter().all(|o| o.side == FRIENDLY_SIDE));
     }
 
     pub(super) fn player_object(position: Vector) -> WorldObject {
@@ -3620,7 +3870,7 @@ mod tests {
             &mut combat.projectiles,
             &gun,
             1,
-            player.position,
+            &[(PLAYER_ID, player.position)],
             None,
         );
         assert_eq!(combat.projectiles.len(), 10);
@@ -3703,10 +3953,7 @@ mod tests {
             projectiles: 1,
         };
         let mut rounds = Vec::new();
-        assert_eq!(
-            wings.realise(&event, &mut rounds, &gun, 1, [0.; 3], Some(0)),
-            1
-        );
+        assert_eq!(wings.realise(&event, &mut rounds, &gun, 1, &[], Some(0)), 1);
         assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 2);
         assert_eq!(
             rounds[0].direction,
@@ -3714,47 +3961,32 @@ mod tests {
         );
         assert!(rounds[0].target.is_none() && rounds[0].tracer);
         wings.mission.actor_mut(3).unwrap().flight_mut().yaw += 0.2;
-        assert_eq!(
-            wings.realise(&event, &mut rounds, &gun, 1, [0.; 3], Some(1)),
-            0
-        );
+        assert_eq!(wings.realise(&event, &mut rounds, &gun, 1, &[], Some(1)), 0);
         assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 2);
         *wings.mission.actor_mut(3).unwrap().flight_mut() = aligned.clone();
         let mut full = vec![rounds[0].clone(); MAX_PROJECTILES];
-        assert_eq!(
-            wings.realise(&event, &mut full, &gun, 1, [0.; 3], Some(1)),
-            0
-        );
+        assert_eq!(wings.realise(&event, &mut full, &gun, 1, &[], Some(1)), 0);
         assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 2);
         wings.mission.actor_mut(3).unwrap().stations_mut()[0]
             .store
             .inhibited = true;
-        assert_eq!(
-            wings.realise(&event, &mut rounds, &gun, 1, [0.; 3], Some(1)),
-            0
-        );
+        assert_eq!(wings.realise(&event, &mut rounds, &gun, 1, &[], Some(1)), 0);
         wings.mission.actor_mut(3).unwrap().stations_mut()[0]
             .store
             .inhibited = false;
         for ordinal in 1..=2 {
             assert_eq!(
-                wings.realise(&event, &mut rounds, &gun, 1, [0.; 3], Some(ordinal)),
+                wings.realise(&event, &mut rounds, &gun, 1, &[], Some(ordinal)),
                 1
             );
         }
         assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 0);
-        assert_eq!(
-            wings.realise(&event, &mut rounds, &gun, 1, [0.; 3], Some(3)),
-            0
-        );
+        assert_eq!(wings.realise(&event, &mut rounds, &gun, 1, &[], Some(3)), 0);
         wings.mission.actor_mut(3).unwrap().stations_mut()[0]
             .store
             .rounds = Rounds::Finite(1);
         wings.mission.actor_mut(3).unwrap().set_alive(false);
-        assert_eq!(
-            wings.realise(&event, &mut rounds, &gun, 1, [0.; 3], Some(3)),
-            0
-        );
+        assert_eq!(wings.realise(&event, &mut rounds, &gun, 1, &[], Some(3)), 0);
         assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 1);
         wings.mission.actor_mut(3).unwrap().set_alive(true);
         for request in [
@@ -3776,6 +4008,55 @@ mod tests {
             }
             assert_eq!(wings.mission.actor(3).unwrap().rounds_remaining(), 1);
         }
+    }
+
+    #[test]
+    fn a_round_aimed_at_any_human_is_incoming_and_the_humans_register_each_step() {
+        let (mut wings, targets) = build(None);
+        for actor in wings.mission.actors_mut() {
+            actor.set_stations(Vec::new());
+        }
+        let mut combat = combat_fixture(false);
+        combat.targets = targets;
+        let mut gun = combat.own().configuration().stations[0].weapon.clone();
+        gun.source = "M61.JT".into();
+        gun.burst.actual_rounds_per_game = 1;
+        gun.burst.game_rounds_in_burst = 1;
+        gun.burst.game_burst_t = 1;
+        wings.weapons.insert((3, 0), gun);
+        wings.pending_guns.insert(
+            (3, 0),
+            PendingGun {
+                groups: VecDeque::from([(5, 1), (4, 1)]),
+                next_scaled: wings.mission.tick(),
+                ordinal: 0,
+            },
+        );
+        let first = flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
+        let second = flight::State::new(&aircraft(), [800., 20000., -5000.]).unwrap();
+        let slot = |id, member| HumanSlot {
+            id,
+            side: launch::Side::Friendly,
+            wing: 0,
+            member,
+        };
+        for _ in 0..70 {
+            // Handed over out of order: the bridge keeps id order.
+            wings
+                .step(
+                    &mut combat,
+                    &[human_at(slot(5, 1), &second), human_at(slot(0, 0), &first)],
+                    &world(),
+                )
+                .unwrap();
+        }
+        assert_eq!(wings.humans, [slot(0, 0), slot(5, 1)]);
+        let rounds: Vec<_> = combat.projectiles.iter().filter(|p| p.owner == 3).collect();
+        assert_eq!(
+            rounds.iter().map(|p| p.incoming).collect::<Vec<_>>(),
+            [Some(5), None],
+            "a round at the second human is incoming, one at an AI aircraft is not"
+        );
     }
 
     #[test]
@@ -3804,7 +4085,9 @@ mod tests {
         let mut release_ticks = Vec::new();
         for tick in 0..16 {
             let before = combat.projectiles.len();
-            wings.step(&mut combat, &player, &world()).unwrap();
+            wings
+                .step(&mut combat, &[human(&player)], &world())
+                .unwrap();
             let count = combat.projectiles.len() - before;
             assert!(count <= 1);
             if count == 1 {
@@ -3839,7 +4122,9 @@ mod tests {
         wings.pending_guns.get_mut(&(3, 0)).unwrap().groups = VecDeque::from([(PLAYER_ID, 2)]);
         wings.mission.actor_mut(3).unwrap().set_alive(false);
         let dropped = wings.dropped_launches;
-        wings.step(&mut combat, &player, &world()).unwrap();
+        wings
+            .step(&mut combat, &[human(&player)], &world())
+            .unwrap();
         assert!(wings.pending_guns[&(3, 0)].groups.is_empty());
         assert_eq!(wings.dropped_launches, dropped + 2);
         assert_eq!(wings.pending_guns[&(3, 0)].ordinal, 4);
@@ -3873,7 +4158,9 @@ mod tests {
                 },
             );
             let player = flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
-            wings.step(&mut combat, &player, &world()).unwrap();
+            wings
+                .step(&mut combat, &[human(&player)], &world())
+                .unwrap();
             assert_eq!(combat.projectiles.len(), 1, "{order:?}");
             let rounds = wings.mission.actor(1).unwrap().rounds_remaining();
             let dropped = wings.dropped_launches;
@@ -3881,7 +4168,9 @@ mod tests {
             assert!(report.message.contains("1 applied"), "{order:?}");
             assert!(!wings.pending_guns.contains_key(&(1, 0)));
             for _ in 0..20 {
-                wings.step(&mut combat, &player, &world()).unwrap();
+                wings
+                    .step(&mut combat, &[human(&player)], &world())
+                    .unwrap();
             }
             assert_eq!(combat.projectiles.len(), 1, "{order:?}");
             assert_eq!(wings.mission.actor(1).unwrap().rounds_remaining(), rounds);
@@ -3944,7 +4233,7 @@ mod tests {
             projectiles: 1,
         };
         assert_eq!(
-            wings.realise(&event, &mut combat.projectiles, &weapon, 0, [0.; 3], None),
+            wings.realise(&event, &mut combat.projectiles, &weapon, 0, &[], None),
             1
         );
         assert!(combat.projectiles[0].guidance.is_some());
@@ -3984,7 +4273,7 @@ mod tests {
         );
         wings.weapon_rules = Rules::Compatibility;
         let mut compatibility = Vec::new();
-        wings.realise(&event, &mut compatibility, &weapon, 0, [0.; 3], None);
+        wings.realise(&event, &mut compatibility, &weapon, 0, &[], None);
         assert!(compatibility[0].guidance.is_none());
     }
 
@@ -4012,7 +4301,7 @@ mod tests {
                 &mut combat.projectiles,
                 &weapon,
                 0,
-                [0.0; 3],
+                &[],
                 None,
             );
         }
@@ -4072,7 +4361,7 @@ mod tests {
             &mut combat.projectiles,
             &weapon,
             0,
-            [0.0; 3],
+            &[(0, [0.0; 3])],
             None,
         );
         wings
@@ -4141,7 +4430,7 @@ mod tests {
                     &mut realised,
                     weapon,
                     usize::from(event.station.0),
-                    [0.0, 20000.0, 0.0],
+                    &[(PLAYER_ID, [0.0, 20000.0, 0.0])],
                     None,
                 );
             }
@@ -4420,7 +4709,9 @@ mod tests {
         let player = flight::State::new(&aircraft(), [0., 20000., -5000.]).unwrap();
         assert!(wings.last_output().activities.is_empty());
         for _ in 0..3 {
-            wings.step(&mut combat, &player, &world()).unwrap();
+            wings
+                .step(&mut combat, &[human(&player)], &world())
+                .unwrap();
         }
         let last_tick = wings.mission.tick() - 1;
         assert_eq!(wings.last_output().activities.len(), wings.mission.len());

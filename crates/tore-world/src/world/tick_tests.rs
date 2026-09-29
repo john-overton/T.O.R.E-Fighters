@@ -254,7 +254,7 @@ pub(super) fn mission() -> World {
     .unwrap();
     wings.apply_mission_preset(ai_wings::Preset::Free, flight.position);
     wings.apply_group_objectives(&[GroupObjective::Inherit; 6], flight.position);
-    combat.state.own_mut().friendlies = wings.friendly_ids();
+    combat.state.own_mut().friendlies = wings.friendly_ids(tore_sim::ai::launch::Side::Friendly);
     wings.mirror_pose_out(&mut combat.state.targets);
     let mut airport_service = Service::new(&terrain.airport_scene).unwrap();
     airport_service.command(

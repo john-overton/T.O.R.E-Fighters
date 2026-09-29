@@ -116,7 +116,14 @@ fn fly(ticks: u64, record: bool) -> (Fingerprint, Vec<tore_replay::Frame>) {
             }],
             |_, _| 0.,
         );
-        wings.step(&mut combat.state, &player, &world).unwrap();
+        let own = combat.state.own();
+        let human = crate::ai_wings::HumanAircraft::new(
+            crate::ai_wings::HumanSlot::SINGLE_PLAYER,
+            &player,
+            own.hp,
+            own.configuration(),
+        );
+        wings.step(&mut combat.state, &[human], &world).unwrap();
         combat.advance_render(&player, Some(&wings));
         if record {
             let journal = wings.take_ai_journal();

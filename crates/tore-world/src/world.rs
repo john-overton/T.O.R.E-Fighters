@@ -333,7 +333,8 @@ impl World {
             bridge.apply_group_survival(&ai.group_must_survive);
             bridge.mirror_pose_out(&mut self.combat.state.targets);
             // The designation keys skip the player's friends.
-            self.combat.own_mut().friendlies = bridge.friendly_ids();
+            self.combat.own_mut().friendlies =
+                bridge.friendly_ids(tore_sim::ai::launch::Side::Friendly);
             self.combat.ai_poses = !bridge.is_empty();
             ai_aircraft = Some(bridge.len());
             self.ai_wings = Some(bridge);
@@ -675,7 +676,18 @@ impl World {
         let own = &self.cockpits[0];
         if let Some(mut bridge) = self.ai_wings.take() {
             bridge.report_weapon_hits(&events);
-            let stepped = bridge.step(&mut self.combat.state, &own.flight, &self.terrain);
+            let ownship = self
+                .combat
+                .state
+                .ownship(own.plane.0)
+                .ok_or("a human-flown plane needs an ownship")?;
+            let humans = [ai_wings::HumanAircraft::new(
+                ai_wings::HumanSlot::SINGLE_PLAYER,
+                &own.flight,
+                ownship.hp,
+                ownship.configuration(),
+            )];
+            let stepped = bridge.step(&mut self.combat.state, &humans, &self.terrain);
             self.combat.ai_crashes(&bridge, &self.terrain);
             for (id, message, friendly) in bridge.ejection_events.drain(..) {
                 out.cues.push(Cue::WingEjection {

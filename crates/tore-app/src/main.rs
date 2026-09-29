@@ -556,7 +556,7 @@ impl TickPresenter<'_> {
                 .world
                 .ai_wings
                 .as_ref()
-                .map_or_else(Vec::new, |w| w.locks_on_player());
+                .map_or_else(Vec::new, |w| w.locks_on(ai_wings::PLAYER_ID));
             audio.rwr(self.rwr_warnings.step(
                 self.world.combat.state.tick(),
                 rwr_tone::inbound(
@@ -5975,7 +5975,8 @@ fn ai_probe_run(
     };
     let mut attacker = script.attack.map(|attack| {
         // As a flown mission does each frame: T and Enter skip friendlies.
-        combat.state.own_mut().friendlies = bridge.friendly_ids();
+        combat.state.own_mut().friendlies =
+            bridge.friendly_ids(tore_sim::ai::launch::Side::Friendly);
         ProbeAttacker::new(attack, &combat, &bridge, script.guns)
     });
     // A mission recording of the probe: the picture is taken the way live

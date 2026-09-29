@@ -1,7 +1,12 @@
 //! The `--ai-roster-probe-ticks` command-line check: every aircraft and
 //! experience level flies a two-wing mission against imported media and prints
 //! one line each. It is an app harness, not mission state.
-use crate::{AppResult, ai_wings::AiWings, combat, terrain::Terrain};
+use crate::{
+    AppResult,
+    ai_wings::{AiWings, HumanAircraft, HumanSlot},
+    combat,
+    terrain::Terrain,
+};
 use std::collections::BTreeMap;
 use tore_formats::aircraft::{Aircraft, AircraftId};
 use tore_sim::{attitude::Basis, combat::live, flight};
@@ -99,7 +104,14 @@ pub fn roster_probe(
                     }],
                     |x, z| f64::from(world.height(x as f32, z as f32)),
                 );
-                bridge.step(&mut combat, &player, world)?;
+                let own = combat.own();
+                let human = HumanAircraft::new(
+                    HumanSlot::SINGLE_PLAYER,
+                    &player,
+                    own.hp,
+                    own.configuration(),
+                );
+                bridge.step(&mut combat, &[human], world)?;
                 for (actor, (was_alive, mut replay)) in bridge.mission().actors().iter().zip(before)
                 {
                     let bank = replay.bank;
