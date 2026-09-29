@@ -52,6 +52,7 @@ mod ordnance;
 mod pause_menu;
 mod performance;
 mod preferences;
+mod probe_invariants;
 mod quick_mission;
 mod radio_calls;
 mod rafale_animation;
@@ -5837,6 +5838,7 @@ fn ai_probe_run(
     }
     let mut encounter: std::collections::BTreeMap<u32, ProbeEncounter> = Default::default();
     let mut noted_ejections = 0;
+    let mut invariants = probe_invariants::ProbeInvariants::default();
     for tick in 0..ticks as u64 {
         let previous = recording.as_ref().map(|_| flight.clone());
         if let Some(recording) = &mut recording {
@@ -6053,6 +6055,7 @@ fn ai_probe_run(
                 .map(|c| format!("{now:.1}s {} {:?}", c.line(), c.stems)),
         );
         watch.observe(tick, &bridge, &flight, world);
+        invariants.observe(tick, &bridge, &combat, world);
     }
     watch.summary();
     println!(
@@ -6138,6 +6141,7 @@ fn ai_probe_run(
             .map(|t| t.hp)
             .collect::<Vec<_>>()
     );
+    invariants.summary(&bridge);
     if let Some(mut recording) = recording {
         recording.note(
             tore_replay::Event::new(tore_replay::vocab::kind::SYSTEM_END)
