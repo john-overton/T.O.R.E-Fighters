@@ -1968,11 +1968,7 @@ mod tests {
         (c, f)
     }
     fn listed(c: &Combat, f: &flight::State) -> Vec<(String, u32, bool)> {
-        c.readout(f, 1.)
-            .weapons
-            .into_iter()
-            .map(|(name, count, selected)| (name, count, selected))
-            .collect()
+        c.readout(f, 1.).weapons
     }
     #[test]
     fn an_emptied_station_stays_empty_and_is_not_listed() {

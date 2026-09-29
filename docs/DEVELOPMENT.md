@@ -848,8 +848,16 @@ TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --quick-missi
 `--validate-creator` needs imported media but no display/audio, and checks all
 imported aircraft's supported placements, fuel, empty stations and accepted-ammo restart.
 It first checks guns-only launch/restart across all six wings and the ordnance drag
-paths for the full selectable roster. See the [current results and unrelated damage
-assertion](baselines/ordnance-presentation.md).
+paths for the full selectable roster, then every removed-store case (each station off
+one at a time, all off, all externals off) against the flight inventory, weapons window
+and selection. After the loadouts it sweeps the whole Quick Mission creator
+(every theater layout, weather choice, player and wing aircraft, skill, wing size, group
+order, separation and start runway through the same start steps a flown mission takes),
+draws every dropdown value and popup page, and fuzzes keys and clicks on the creator and
+the Load Ordnance page. `TORE_CREATOR_STAGE=loadouts|matrix|render` runs one part.
+`--loadout none|guns` starts a flight with every store off, or every external store off,
+as the Load Ordnance page leaves them. See the [current results](baselines/ordnance-presentation.md)
+and the [menus lane](testing/lane-menus.md).
 
 Load Ordnance shows only imported weapons with connected flight support. Normal
 loading also requires compatibility with at least one aircraft station. Weapons

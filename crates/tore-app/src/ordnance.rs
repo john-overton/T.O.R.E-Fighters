@@ -1598,6 +1598,42 @@ mod tests {
         assert_eq!(ui.loadout.quantities, [2, 3, 500]);
     }
     #[test]
+    fn taking_every_store_off_by_any_route_leaves_zeros_that_still_validate() {
+        // The minus key on each station until it stops changing.
+        let mut ui = fixture();
+        for station in 0..ui.loadout.quantities.len() {
+            ui.station = station;
+            for _ in 0..40 {
+                ui.key("-");
+            }
+        }
+        assert_eq!(ui.loadout.quantities, [0, 0, 0]);
+        ui.loadout.validate().unwrap();
+        // Right-click on each station card.
+        let mut ui = fixture();
+        for station in 0..3 {
+            for _ in 0..40 {
+                ui.loadout.change(station, -1);
+            }
+        }
+        assert_eq!(ui.loadout.quantities, [0, 0, 0]);
+        // The menu's unload-everything button.
+        let mut ui = fixture();
+        ui.activate(12);
+        assert_eq!(ui.loadout.quantities, [0, 0, 0]);
+        ui.loadout.validate().unwrap();
+        // Emptied stations keep their store type (the page shows an empty
+        // box) but weigh and count nothing.
+        assert_eq!(
+            ui.loadout.configuration.stations[0].weapon.source,
+            "AIM9M.JT"
+        );
+        assert_eq!(
+            ui.loadout.total_lbs(),
+            ui.loadout.empty_lbs + ui.loadout.fuel_lbs
+        );
+    }
+    #[test]
     fn loaded_station_click_adds_exactly_one_without_replacing_or_overfilling() {
         let mut ui = fixture();
         let mut other = ui.catalog[0].clone();
