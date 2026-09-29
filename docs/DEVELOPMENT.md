@@ -641,7 +641,9 @@ every that many ticks. These are development harness options, not game behaviour
   world position in feet, heading in degrees and height above the ground. With terrain the
   `extremes:` line adds `min_agl_ft` and `under_ground_ticks`, and a `map_extent_ft:` line gives
   the map's size.
-- `--countermeasure-preview` also prints the chaff and flare counts carried against capacity.
+- `--countermeasure-preview` also prints the chaff and flare counts carried against capacity, and a
+  headless ground start prints a `loadout:` line (empty weight, fuel, carried stores, gross and
+  maximum takeoff weight).
 
 Scripted pilots fly the same manoeuvre in every aircraft. Each is a `fitted` test harness (agent
 decision, 2026-09-28):

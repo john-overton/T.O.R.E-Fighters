@@ -318,10 +318,9 @@ impl DeviceWatch {
             state.model().configuration().equipment.deployment_seconds,
             state.hook_available()
         );
-        for i in 0..4 {
+        for (i, name) in DEVICE_NAMES.iter().enumerate() {
             line += &format!(
-                " {0}_down_s={1} {0}_up_s={2}",
-                DEVICE_NAMES[i],
+                " {name}_down_s={} {name}_up_s={}",
                 show(self.down_seconds[i]),
                 show(self.up_seconds[i])
             );

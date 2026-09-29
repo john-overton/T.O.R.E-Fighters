@@ -8472,6 +8472,19 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 state.gear,
                 state.brake_out
             );
+            {
+                use tore_sim::models::FlightModel;
+                let mass = state.model().configuration().mass;
+                println!(
+                    "loadout: empty_lb={:.0} internal_fuel_lb={:.0} fuel_lb={:.0} carried_lb={:.0} gross_lb={:.0} max_takeoff_lb={:.0}",
+                    mass.empty_lbs,
+                    mass.internal_fuel_lbs,
+                    state.fuel,
+                    state.carried_lbs(),
+                    mass.empty_lbs + state.fuel + state.carried_lbs(),
+                    mass.max_takeoff_lbs
+                );
+            }
             if let Some(variant) = flight_probe::LandingVariant::from_maneuver(&maneuver) {
                 let layout = quick_mission::ground_layout(world, object, 1)?;
                 let length = world
