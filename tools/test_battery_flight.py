@@ -137,6 +137,56 @@ class SpinTests(unittest.TestCase):
         self.assertTrue(flight.check_spin_recovery("x31")(self.RECOVERED))
 
 
+class LossTests(unittest.TestCase):
+    LOST = "ticks=100 speed_kt=0.000 altitude_ft=0.000 fuel_lb=1.0 crashed=true\n"
+
+    def test_edge_short_flight_has_no_loss(self):
+        ok = "ticks=24000 speed_kt=400.0 altitude_ft=20000.0 fuel_lb=9000.0 crashed=false\nfinal_position: x=1 z=2 heading_deg=3\n" + EXTREMES
+        self.assertEqual(flight.check_edge(ok + "loss: cause=none\n"), [])
+        self.assertTrue(flight.check_edge(ok + "loss: cause=out of bounds\n"))
+
+    def test_edge_distance_is_from_the_nearest_point_of_the_rectangle(self):
+        width = 207 * 8192
+        self.assertEqual(flight._edge_nm("UKR", 1000, 1000), 0)
+        self.assertAlmostEqual(flight._edge_nm("UKR", -6076.11549 * 105, 1000), 105)
+        self.assertAlmostEqual(flight._edge_nm("UKR", width + 6076.11549 * 3, 1000), 3)
+        # Past a corner it is the straight distance to the corner.
+        self.assertAlmostEqual(flight._edge_nm("UKR", -6076.11549 * 3, -6076.11549 * 4), 5)
+
+    def test_edge_lost_needs_the_cause_and_about_105_nm(self):
+        def out(nm, cause="out of bounds", crashed="true"):
+            x = -6076.11549 * nm
+            return (
+                f"ticks=100 speed_kt=0.0 altitude_ft=0.0 fuel_lb=1.0 crashed={crashed}\n"
+                f"final_position: x={x} z=100000.0 heading_deg=3\n" + EXTREMES + f"loss: cause={cause}\n"
+            )
+
+        self.assertEqual(flight.check_edge_lost(out(106), "UKR"), [])
+        self.assertTrue(flight.check_edge_lost(out(106, cause="none"), "UKR"))
+        self.assertTrue(flight.check_edge_lost(out(80), "UKR"))
+        self.assertTrue(flight.check_edge_lost(out(106, crashed="false"), "UKR"))
+
+    def test_overspeed_loss_and_dive(self):
+        self.assertEqual(flight.check_overspeed_loss(self.LOST + "loss: cause=overspeed\n"), [])
+        self.assertTrue(flight.check_overspeed_loss(self.LOST + "loss: cause=none\n"))
+        self.assertEqual(flight.check_dive(self.LOST + EXTREMES + "loss: cause=none\n"), [])
+        fast = EXTREMES.replace("speed_over_envelope_top=0.604", "speed_over_envelope_top=1.7")
+        self.assertTrue(flight.check_dive(self.LOST + fast + "loss: cause=overspeed\n"))
+
+    def test_belly_checks(self):
+        roll = "gear_pulled=true belly_wear_percent={} gear=0.00\nticks=9000 speed_kt=4.7 altitude_ft=8.0 fuel_lb=1.0 crashed=false\n"
+        self.assertEqual(flight.check_belly_early(roll.format("27.1") + EXTREMES, "f18"), [])
+        self.assertTrue(flight.check_belly_early(roll.format("0.000") + EXTREMES, "f18"))
+        self.assertEqual(flight.check_belly_early(roll.format("0.000") + EXTREMES, "f22"), [])
+        air = "takeoff_complete=true airport_ground_ft=0\ngear_pulled=true belly_wear_percent=0.000 gear=0.55\n"
+        self.assertEqual(flight.check_belly_airborne(air + EXTREMES), [])
+        self.assertTrue(flight.check_belly_airborne(air.replace("0.000", "1.500") + EXTREMES))
+
+    def test_the_debrief_cause_suffix_still_parses(self):
+        line = "AI probe debrief: Lost Ok elapsed=10s player[Dead damage=100% kills=[] ff=0 a2a=0/0 dmg=0 gun=0/0 enemy_aam=0/0 enemy_gun=0/0 cause=overspeed] wingman[-]"
+        self.assertTrue(flight.PLAYER_LINE.search(line))
+
+
 class ScenarioListTests(unittest.TestCase):
     def test_names_are_unique_and_prefixed(self):
         names = [s.name for s in flight.scenarios()]

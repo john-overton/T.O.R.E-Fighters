@@ -161,6 +161,19 @@ def takeoff_any_check(work: Path, output: str) -> list[str]:
     return problems
 
 
+def belly_check(work: Path, output: str) -> list[str]:
+    """Gear up at about 45 knots with the wheels down: a belly slide, not a takeoff."""
+    events, samples = load(work)
+    problems = []
+    if count(events, "aircraft.took_off", 0):
+        problems.append("the player took off with the gear coming up at 45 knots")
+    if not any("belly" in (e.get("text") or "") for e in events):
+        problems.append("no belly scraping message")
+    if samples and samples[-1]["devices"]["gear"] > 0.5:
+        problems.append("the gear did not come up")
+    return problems
+
+
 def nav_check(work: Path, output: str) -> list[str]:
     events, samples = load(work)
     problems = []
@@ -396,6 +409,7 @@ def scenarios() -> list[Scenario]:
         build("gun", "gun.txt", [*quick, "--separation", "10", "--ai-mission", "hold"], gun_check, ai=3),
         build("eject", "eject.txt", free, eject_check),
         build("takeoff-and-landing-request", "takeoff.txt", [*quick, "--ground-start", "1", "--probe-wing-size", "3"], takeoff_check, tower=True),
+        build("takeoff-gear-early", "takeoff-gear-early.txt", [*quick, "--ground-start", "1", "--researched-flight"], belly_check),
         build("navigation", "nav.txt", free, nav_check),
         build("views", "views.txt", free, views_check),
         build("maneuvers", "maneuvers.txt", free, maneuvers_check),

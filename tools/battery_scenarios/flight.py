@@ -1081,10 +1081,9 @@ def waypoint_scenarios() -> list[Scenario]:
 
 
 def check_climb(output: str) -> list[str]:
-    """A full-power climb and the dive after it. Today's aircraft go well past
-    their own top speed by up to 1.95 times (see "Needs a decision" in the lane
-    page); the ceiling is enforced by the density rule in docs/FLIGHT-MODEL.md, so
-    a zoom climb carries them at most a fifth past it. These limits are today's
+    """A full-power climb and the dive after it. Overspeed loses an aircraft at
+    1.5 times its own top speed (docs/spec/overspeed.md); the ceiling is
+    enforced by the density rule in docs/FLIGHT-MODEL.md, so a zoom climb carries them at most a fifth past it. These limits are today's
     behaviour with a margin, so a change for the worse is caught; the speed limit
     is not a specification."""
     problems = extremes_problems(output, engine_off_ok=True, beyond_envelope_ok=True)
@@ -1099,7 +1098,9 @@ def check_climb(output: str) -> list[str]:
             problems.append(f"climbed to {c['max_altitude_ft']} ft, {c['over_ceiling']} of its {c['ceiling_ft']} ft ceiling")
         if float(c["max_altitude_ft"]) < 0.6 * float(c["ceiling_ft"]):
             problems.append(f"could only climb to {c['max_altitude_ft']} ft of a {c['ceiling_ft']} ft ceiling")
-        if float(e["speed_over_envelope_top"]) > 2.0:
+        # Overspeed loses the aircraft at 1.5 times its top speed
+        # (docs/spec/overspeed.md), so nothing is seen past it.
+        if float(e["speed_over_envelope_top"]) > 1.52:
             problems.append(f"reached {e['speed_over_envelope_top']} times the envelope's top speed")
     except (KeyError, ValueError):
         problems.append("no result line")
@@ -1269,16 +1270,48 @@ GRIDS = {
 }
 
 
+NAUTICAL_MILE_FT = 6076.11549
+
+
+def _edge_nm(theater: str, x: float, z: float) -> float:
+    """Distance in nautical miles from the map rectangle, 0 inside it."""
+    cols, rows = GRIDS[theater]
+    dx = max(0.0, -x, x - (cols - 1) * 8192)
+    dz = max(0.0, -z, z - (rows - 1) * 8192)
+    return (dx * dx + dz * dz) ** 0.5 / NAUTICAL_MILE_FT
+
+
 def check_edge(output: str) -> list[str]:
-    """Flying straight out over a map edge at 20,000 ft: the aircraft must keep
-    flying with finite numbers. Nothing stops it leaving the map (see "Needs a
-    decision")."""
+    """Flying straight out over a map edge at 20,000 ft for 200 seconds (well
+    inside the 100 nautical mile warning line): the aircraft must keep flying
+    with finite numbers and no loss."""
     problems = extremes_problems(output)
     n = _plain_numbers(output)
     if n.get("crashed") != "false":
         problems.append("crashed flying out over the map edge at 20,000 ft")
     if "final_position:" not in output:
         problems.append("no final position")
+    if "loss: cause=none" not in output:
+        problems.append("the short edge flight reported a loss")
+    return problems
+
+
+def check_edge_lost(output: str, theater: str) -> list[str]:
+    """Flying on out to sea, the aircraft is lost 105 nautical miles past the
+    map (docs/spec/world-edge.md): the same destroyed path as any loss, with
+    the cause out of bounds."""
+    problems = extremes_problems(output)
+    if _plain_numbers(output).get("crashed") != "true":
+        problems.append("the aircraft was not lost past the edge of the world")
+    if "loss: cause=out of bounds" not in output:
+        problems.append("the loss did not name out of bounds as the cause")
+    m = re.search(r"final_position: x=(-?[\d.]+) z=(-?[\d.]+)", output)
+    if not m:
+        return problems + ["no final position"]
+    # The wreck falls on from the loss point, so allow a few miles past 105.
+    nm = _edge_nm(theater, float(m.group(1)), float(m.group(2)))
+    if not 104.5 <= nm <= 112:
+        problems.append(f"lost {nm:.1f} nautical miles past the map, not about 105")
     return problems
 
 
@@ -1301,6 +1334,124 @@ def edge_scenarios() -> list[Scenario]:
                     timeout=180,
                 )
             )
+            out.append(
+                Scenario(
+                    name=f"flight-edge-lost-{edge}-{_theater_tag(theater)}",
+                    lane="flight",
+                    args=["--theater", theater, "--headless-flight", "150000", "--flight-start", f"{x},{z},{heading},20000", "--no-audio"],
+                    check=lambda output, theater=theater: check_edge_lost(output, theater),
+                    timeout=300,
+                )
+            )
+    return out
+
+
+def check_overspeed_loss(output: str) -> list[str]:
+    """1.6 times the top speed at 20,000 ft: lost on the first step, with the
+    cause overspeed (docs/spec/overspeed.md)."""
+    problems = []
+    if _plain_numbers(output).get("crashed") != "true":
+        problems.append("the aircraft was not lost at 1.6 times its top speed")
+    if "loss: cause=overspeed" not in output:
+        problems.append("the loss did not name overspeed as the cause")
+    return problems
+
+
+def check_dive(output: str) -> list[str]:
+    """A full afterburner dive from 40,000 ft with nobody pulling out ends on
+    the ground, or in the overspeed loss for the aircraft that reach 1.5 times
+    their top speed on the way. Never a faster one."""
+    problems = extremes_problems(output, engine_off_ok=True, beyond_envelope_ok=True)
+    e = _numbers(output, "extremes:")
+    try:
+        if float(e["speed_over_envelope_top"]) > 1.52:
+            problems.append(f"dived to {e['speed_over_envelope_top']} times the top speed, past the 1.5 loss line")
+    except (KeyError, ValueError):
+        problems.append("no result line")
+    if _plain_numbers(output).get("crashed") != "true":
+        problems.append("an unattended 60 degree dive from 40,000 ft did not end in a loss")
+    if "loss: cause=" not in output:
+        problems.append("no loss line")
+    return problems
+
+
+def overspeed_scenarios() -> list[Scenario]:
+    out = []
+    for ac in AIRCRAFT:
+        out.append(
+            Scenario(
+                name=f"flight-overspeed-loss-{ac}",
+                lane="flight",
+                args=["--headless-flight", "600", "--maneuver", "overspeed", "--aircraft", ac, "--no-audio"],
+                check=check_overspeed_loss,
+            )
+        )
+        out.append(
+            Scenario(
+                name=f"flight-overspeed-dive-{ac}",
+                lane="flight",
+                args=["--headless-flight", "9000", "--maneuver", "dive", "--aircraft", ac, "--no-audio"],
+                check=check_dive,
+            )
+        )
+    return out
+
+
+# Aircraft that stay in their lift envelope at 80 knots (stall speed at or under it
+# in the model), so a gear-up there is a normal retraction and not a belly slide.
+BELLY_FLIES = {"su27", "su25", "f22", "f22n", "faxx"}
+
+
+def check_belly_early(output: str, ac: str) -> list[str]:
+    """Gear up at 80 knots with the wheels down (docs/spec/gear-on-the-ground.md):
+    the aircraft settles on its belly, slows and wears the airframe; one whose
+    lift already carries it at that speed retracts as usual."""
+    problems = extremes_problems(output, engine_off_ok=True)
+    n = _plain_numbers(output)
+    wear = float(n.get("belly_wear_percent", "nan"))
+    if n.get("gear_pulled") != "true":
+        return problems + ["the script never pulled the gear up"]
+    if n.get("crashed") == "true":
+        problems.append("a belly slide on a runway crashed the aircraft")
+    if ac in BELLY_FLIES:
+        return problems
+    if not wear > 2.0:
+        problems.append(f"gear up at 80 knots wore the airframe by only {wear} percent")
+    return problems
+
+
+def check_belly_airborne(output: str) -> list[str]:
+    """Gear up once airborne is a normal retraction, with no scrape."""
+    problems = extremes_problems(output, engine_off_ok=True)
+    n = _plain_numbers(output)
+    if "takeoff_complete=true" not in output:
+        problems.append("did not take off")
+    if float(n.get("belly_wear_percent", "nan")) != 0.0:
+        problems.append("an airborne gear retraction scraped the belly")
+    if n.get("gear_pulled") != "true":
+        problems.append("the script never pulled the gear up")
+    return problems
+
+
+def belly_scenarios() -> list[Scenario]:
+    out = []
+    for ac in AIRCRAFT:
+        out.append(
+            Scenario(
+                name=f"flight-belly-early-{ac}",
+                lane="flight",
+                args=["--theater", "UKR", "--ground-start", "1", "--headless-flight", "9000", "--maneuver", "takeoff-gear-early", "--aircraft", ac, "--no-audio"],
+                check=lambda output, ac=ac: check_belly_early(output, ac),
+            )
+        )
+        out.append(
+            Scenario(
+                name=f"flight-belly-airborne-{ac}",
+                lane="flight",
+                args=["--theater", "UKR", "--ground-start", "1", "--headless-flight", "9000", "--maneuver", "takeoff-gear-airborne", "--aircraft", ac, "--no-audio"],
+                check=check_belly_airborne,
+            )
+        )
     return out
 
 
@@ -1412,7 +1563,7 @@ def loadout_scenarios() -> list[Scenario]:
 # ------------------------------------------------------ passive in a fight
 
 
-PLAYER_LINE = re.compile(r"^AI probe debrief: .*?player\[(\w+) damage=(\d+)% .*?enemy_aam=(\d+)/(\d+) enemy_gun=(\d+)/(\d+)\]", re.M)
+PLAYER_LINE = re.compile(r"^AI probe debrief: .*?player\[(\w+) damage=(\d+)% .*?enemy_aam=(\d+)/(\d+) enemy_gun=(\d+)/(\d+)(?: cause=[^\]]*)?\]", re.M)
 
 
 def check_passive_fight(output: str) -> list[str]:
@@ -1613,6 +1764,8 @@ def scenarios() -> list[Scenario]:
         + cheat_combat_scenarios()
         + device_scenarios()
         + edge_scenarios()
+        + overspeed_scenarios()
+        + belly_scenarios()
         + terrain_scenarios()
         + fight_scenarios()
         + attack_scenarios()

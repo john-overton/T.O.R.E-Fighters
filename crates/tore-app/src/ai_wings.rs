@@ -306,6 +306,8 @@ pub struct AiWings {
     ai_shots: BTreeMap<u32, u32>,
     /// Last observed hit points per actor, for the damage mirror.
     last_hp: BTreeMap<u32, i32>,
+    /// Hit points owed to belly scrape wear, below one whole point, by actor.
+    scrape_carry: BTreeMap<u32, f64>,
     pub ejection_events: Vec<(u32, String, bool)>,
     /// Radio events for `radio_calls`, drained by the host each tick.
     pub chatter: Vec<Chatter>,
@@ -807,6 +809,7 @@ impl AiWings {
             chatter: Vec::new(),
             watch,
             last_hp: BTreeMap::new(),
+            scrape_carry: BTreeMap::new(),
             last_activity: BTreeMap::new(),
             reports: reports::Reports::default(),
             next_projectile_id: AI_PROJECTILE_ID_BASE,
@@ -1038,6 +1041,7 @@ impl AiWings {
                 })
                 .collect(),
         );
+        self.lose_out_of_bounds(&mut state.ledger, |x, z| world.edge_distance_nm(x, z));
         let object = self.player_object(player, state.player_hp, state.configuration());
         // Aircraft on the researched flight model roll on runways and feel
         // the wind; legacy airborne actors keep the terrain-only surface.
@@ -1459,6 +1463,29 @@ impl AiWings {
             .step_with_surface(&objects, terrain, surface, now)
             .map_err(|e| e.to_string())?;
 
+        // Belly scrape wear from a gear-up slide is airframe damage with no
+        // attacker, so no kill is credited when it finishes the aircraft.
+        // `opinionated` (requested by John, 2026-09-29).
+        for slot in &self.slots {
+            let Some(actor) = self.mission.actor_mut(slot.id) else {
+                continue;
+            };
+            let scrape = actor.flight_mut().take_belly_scrape();
+            if scrape <= 0. {
+                continue;
+            }
+            let Some(target) = targets.iter_mut().find(|t| t.id == slot.id) else {
+                continue;
+            };
+            if target.hp <= 0 {
+                continue;
+            }
+            let carry = self.scrape_carry.entry(slot.id).or_insert(0.);
+            *carry += scrape * f64::from(target.initial_hp.max(1));
+            let whole = carry.floor();
+            *carry -= whole;
+            target.hp = (target.hp - whole as i32).max(0);
+        }
         for slot in &self.slots {
             let Some(actor) = self.mission.actor(slot.id) else {
                 continue;
@@ -2200,6 +2227,39 @@ impl AiWings {
         }
     }
 
+    /// An AI aircraft 105 nautical miles beyond the edge of the map is lost,
+    /// with no warning and no shooter to credit, and counts as a crash for the
+    /// debrief and the objectives (requested by John, 2026-09-29). Returns the
+    /// ids lost this call. `distance_nm` is the distance beyond the map edge.
+    pub fn lose_out_of_bounds(
+        &mut self,
+        ledger: &mut tore_sim::combat::ledger::Ledger,
+        distance_nm: impl Fn(f64, f64) -> f64,
+    ) -> Vec<u32> {
+        let lost: Vec<u32> = self
+            .mission
+            .actors()
+            .iter()
+            .filter(|a| a.alive())
+            .filter(|a| {
+                let [x, _, z] = a.flight().position;
+                distance_nm(x, z) >= crate::terrain::EDGE_DESTROY_NM
+            })
+            .map(AiActor::id)
+            .collect();
+        for id in &lost {
+            if let Some(actor) = self.mission.actor_mut(*id) {
+                let flight = actor.flight_mut();
+                flight
+                    .systems
+                    .destroy(tore_sim::aircraft_systems::LossCause::OutOfBounds);
+                flight.crashed = true;
+            }
+            ledger.lose_without_credit(*id);
+        }
+        lost
+    }
+
     /// A compact deterministic line per actor, for the headless probe.
     pub fn probe_lines(&self) -> Vec<String> {
         self.slots
@@ -2208,7 +2268,7 @@ impl AiWings {
                 let actor = self.mission.actor(slot.id)?;
                 let f = actor.flight();
                 Some(format!(
-                    "actor={} {} {:?} activity={} alive={} rounds={} x={:.1} y={:.1} z={:.1} hdg={:.1}",
+                    "actor={} {} {:?} activity={} alive={} rounds={} x={:.1} y={:.1} z={:.1} hdg={:.1}{}",
                     slot.id,
                     slot.label(),
                     slot.aircraft,
@@ -2219,6 +2279,11 @@ impl AiWings {
                     f.position[1],
                     f.position[2],
                     f.yaw.to_degrees(),
+                    // Only when lost to overspeed or the map edge.
+                    f.systems
+                        .structure
+                        .cause
+                        .map_or_else(String::new, |c| format!(" cause={}", c.label())),
                 ))
             })
             .collect()
@@ -3494,6 +3559,55 @@ pub(crate) mod tests {
         );
         assert_eq!(targets[0].hp, 0);
         assert_eq!(wings.escapees().count(), 1);
+    }
+
+    #[test]
+    fn an_ai_aircraft_105_miles_past_the_map_is_lost_and_credits_nobody() {
+        let (mut wings, mut targets) = build(None);
+        run(&mut wings, &mut targets, 10);
+        let mut ledger = tore_sim::combat::ledger::Ledger::default();
+        // Enemy 3 was hit by the player earlier.
+        ledger.damaged(tore_sim::combat::ledger::Kill {
+            owner: 0,
+            victim: 3,
+            category: 0x8000,
+            aircraft: true,
+        });
+        let far = wings.mission().actor(3).unwrap().flight().position;
+        // Everyone is inside the map except actor 3.
+        let lost = wings.lose_out_of_bounds(&mut ledger, |x, z| {
+            if (x, z) == (far[0], far[2]) {
+                105.
+            } else {
+                99.9
+            }
+        });
+        assert!(lost.is_empty() || lost == [3], "{lost:?}");
+        assert_eq!(lost, [3]);
+        assert_eq!(
+            wings
+                .mission()
+                .actor(3)
+                .unwrap()
+                .flight()
+                .systems
+                .structure
+                .cause,
+            Some(tore_sim::aircraft_systems::LossCause::OutOfBounds)
+        );
+        assert!(wings.mission().actor(2).unwrap().alive());
+        assert_eq!(ledger.credit(3), None);
+        // The next step finishes it: the target row is zero and the actor is lost.
+        run(&mut wings, &mut targets, 2);
+        assert_eq!(targets[2].hp, 0);
+        assert!(!wings.mission().actor(3).unwrap().alive());
+        // Nothing is lost twice.
+        assert!(
+            wings
+                .lose_out_of_bounds(&mut ledger, |_, _| 200.)
+                .iter()
+                .all(|id| *id != 3)
+        );
     }
 
     #[test]

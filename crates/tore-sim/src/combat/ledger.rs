@@ -110,6 +110,9 @@ pub struct Ledger {
     /// The last shooter to damage each target, credited if it is later lost
     /// another way, such as its pilot ejecting or the wreck crashing.
     last_hit: BTreeMap<u32, Kill>,
+    /// Aircraft lost with no shooter to blame (out of bounds): nobody is
+    /// credited with them, whatever hit them earlier.
+    uncredited: std::collections::BTreeSet<u32>,
     /// Outcomes since the host last drained them.
     outcomes: VecDeque<Outcome>,
 }
@@ -160,11 +163,23 @@ impl Ledger {
     }
     /// Remembers who last damaged `victim`.
     pub fn damaged(&mut self, hit: Kill) {
-        self.last_hit.insert(hit.victim, hit);
+        if !self.uncredited.contains(&hit.victim) {
+            self.last_hit.insert(hit.victim, hit);
+        }
+    }
+    /// `victim` was lost for a reason no shooter caused (it flew out of
+    /// bounds): drop any credit already given or pending for it.
+    pub fn lose_without_credit(&mut self, victim: u32) {
+        self.uncredited.insert(victim);
+        self.last_hit.remove(&victim);
+        self.kills.retain(|k| k.victim != victim);
     }
     /// The kill a lost aircraft is credited with: its recorded kill, else the
     /// last shooter to damage it.
     pub fn credit(&self, victim: u32) -> Option<Kill> {
+        if self.uncredited.contains(&victim) {
+            return None;
+        }
         self.kills
             .iter()
             .find(|k| k.victim == victim)
@@ -172,7 +187,9 @@ impl Ledger {
             .copied()
     }
     pub fn kill(&mut self, kill: Kill) {
-        if !self.kills.iter().any(|k| k.victim == kill.victim) {
+        if !self.uncredited.contains(&kill.victim)
+            && !self.kills.iter().any(|k| k.victim == kill.victim)
+        {
             self.kills.push(kill);
         }
     }
@@ -305,5 +322,27 @@ mod tests {
         assert_eq!(ledger.credit(8).map(|k| k.owner), Some(7));
         assert_eq!(ledger.credit(3), Some(kill));
         assert_eq!(ledger.credit(9), None);
+    }
+
+    #[test]
+    fn an_aircraft_lost_out_of_bounds_credits_nobody() {
+        let mut ledger = Ledger::default();
+        let hit = Kill {
+            owner: 7,
+            victim: 3,
+            category: 0x8000,
+            aircraft: true,
+        };
+        ledger.damaged(hit);
+        assert_eq!(ledger.credit(3), Some(hit));
+        ledger.kill(hit);
+        ledger.lose_without_credit(3);
+        assert_eq!(ledger.credit(3), None);
+        assert!(ledger.kills().is_empty());
+        // Later hits or kills on the wreck do not bring the credit back.
+        ledger.damaged(hit);
+        ledger.kill(hit);
+        assert_eq!(ledger.credit(3), None);
+        assert!(ledger.kills().is_empty());
     }
 }

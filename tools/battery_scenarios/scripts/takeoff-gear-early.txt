@@ -1,0 +1,16 @@
+# Ground start: brakes off, full power, gear up at about 45 knots with the wheels still down, then
+# pulse the stick back. The aircraft is too slow to fly, so it must settle on its belly and slide.
+wait 1
+key b
+key 6
+key 5
+waittick 480
+key g
+waittick 900
+down Down
+waittick 960
+up Down
+waittick 1200
+key 4
+waittick 1800
+exit

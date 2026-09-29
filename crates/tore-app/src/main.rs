@@ -200,6 +200,10 @@ struct App {
     turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng,
     /// Player blackout and redout, stepped with the simulation.
     g_effects: tore_sim::g_effects::GEffects,
+    /// Simulation second of the last OVERSPEED message, so it repeats at an interval.
+    overspeed_message_at: Option<f64>,
+    /// Simulation second of the last turn-back warning past the map edge.
+    edge_message_at: Option<f64>,
     flight_view: u8,
     view_rig: flight_views::Rig,
     flight_canvas: flight_canvas::FlightCanvas,
@@ -2135,6 +2139,8 @@ impl App {
                 self.reset_vapor();
                 self.previous_flight = self.flight.clone();
                 self.g_effects = Default::default();
+                self.overspeed_message_at = None;
+                self.edge_message_at = None;
                 self.flight_clock.remainder = 0.;
                 self.flight_view = 0;
                 self.view_rig = Default::default();
@@ -3470,6 +3476,48 @@ impl ApplicationHandler for App {
                             if let Some(level) = self.performance.veil_level() {
                                 self.g_effects.blackout = level;
                             }
+                            // Beyond the map: a turn-back warning every ten seconds from
+                            // 100 nautical miles out, and the aircraft is lost at 105
+                            // (requested by John, 2026-09-29).
+                            if !self.flight.crashed {
+                                let [x, _, z] = self.flight.position;
+                                let out = self.world.edge_distance_nm(x, z);
+                                if out >= terrain::EDGE_DESTROY_NM {
+                                    self.flight.systems.destroy(
+                                        tore_sim::aircraft_systems::LossCause::OutOfBounds,
+                                    );
+                                    self.flight.crashed = true;
+                                } else if out >= terrain::EDGE_WARNING_NM {
+                                    let now = self.flight.ticks as f64 * flight::DT;
+                                    if self
+                                        .edge_message_at
+                                        .is_none_or(|at| now - at >= 10. || now < at)
+                                    {
+                                        self.edge_message_at = Some(now);
+                                        self.flight_ui
+                                            .message("You have left the theater: turn back now");
+                                    }
+                                } else {
+                                    self.edge_message_at = None;
+                                }
+                            }
+                            // Past the top speed: a short cockpit message, repeated
+                            // every four seconds (requested by John, 2026-09-29).
+                            if !self.flight.crashed
+                                && self
+                                    .flight
+                                    .overspeed_ratio()
+                                    .is_some_and(|r| r >= flight::OVERSPEED_SHAKE_FULL)
+                            {
+                                let now = self.flight.ticks as f64 * flight::DT;
+                                if self
+                                    .overspeed_message_at
+                                    .is_none_or(|at| now - at >= 4. || now < at)
+                                {
+                                    self.overspeed_message_at = Some(now);
+                                    self.flight_ui.message("OVERSPEED");
+                                }
+                            }
                             if let Some(points) = self.hornet.streamer_points(&self.flight) {
                                 self.vapor.step(self.world.weather.ticks(), points);
                             }
@@ -3939,19 +3987,28 @@ impl ApplicationHandler for App {
                                 self.hornet.camera(&presented, 0, camera_keys)
                             }
                         };
-                        if !self.flight_ui.cheats.no_screen_shake
-                            && !presented.crashed
-                            && self.view_rig.cockpit(self.flight_view)
-                        {
+                        if !self.flight_ui.cheats.no_screen_shake && !presented.crashed {
                             let seconds =
                                 self.flight.ticks as f64 * flight::DT + self.flight_clock.remainder;
-                            let [yaw, pitch] = tore_sim::g_effects::shake(presented.g, seconds);
-                            look::apply(
-                                &mut self.camera,
-                                presented.view_position(),
-                                [yaw as f32, pitch as f32],
-                                false,
-                            );
+                            // High-G shake is the cockpit's; the overspeed shake
+                            // shakes every view (requested by John, 2026-09-29).
+                            let mut shake = if self.view_rig.cockpit(self.flight_view) {
+                                tore_sim::g_effects::shake(presented.g, seconds)
+                            } else {
+                                [0.; 2]
+                            };
+                            if let Some(ratio) = presented.overspeed_ratio() {
+                                let over = tore_sim::g_effects::overspeed_shake(ratio, seconds);
+                                shake = [shake[0] + over[0], shake[1] + over[1]];
+                            }
+                            if shake != [0.; 2] {
+                                look::apply(
+                                    &mut self.camera,
+                                    presented.view_position(),
+                                    [shake[0] as f32, shake[1] as f32],
+                                    false,
+                                );
+                            }
                         }
                         self.camera.zoom = self.flight_ui.zoom;
                         // One resolved instant per frame, shared by the main view,
@@ -4714,6 +4771,21 @@ fn build_combat(
     combat::Combat::with_loadout(hornet, resources, &load)
 }
 
+/// The map-edge rule for a probe's flight: lost 105 nautical miles beyond the
+/// theater. (The game host also warns the player from 100; see `terrain.rs`.)
+fn apply_edge_loss(flight: &mut flight::State, world: &terrain::World) {
+    if flight.crashed {
+        return;
+    }
+    let [x, _, z] = flight.position;
+    if world.edge_distance_nm(x, z) >= terrain::EDGE_DESTROY_NM {
+        flight
+            .systems
+            .destroy(tore_sim::aircraft_systems::LossCause::OutOfBounds);
+        flight.crashed = true;
+    }
+}
+
 /// The `--maneuver devices` script: each device is set down one after another,
 /// then up again, so the run shows every travel.
 fn device_schedule(tick: u64) -> Option<Vec<flight::PilotCommand>> {
@@ -4920,6 +4992,35 @@ enum ProbePilot {
     Cruise,
     Home,
     Away,
+}
+
+/// The scripted gear-up for the `takeoff-gear-early` (at 80 knots with the
+/// wheels still down, too slow to fly) and `takeoff-gear-airborne` (once 50 ft
+/// above the runway) headless takeoffs. Returns the input for that tick.
+fn gear_pull(
+    maneuver: &str,
+    state: &flight::State,
+    pulled: &mut bool,
+    keys: &flight::PilotInput,
+    world: &Option<terrain::World>,
+) -> Option<flight::PilotInput> {
+    if *pulled {
+        return None;
+    }
+    let due = match maneuver {
+        "takeoff-gear-early" => state.speed >= 80. * 1.68781,
+        "takeoff-gear-airborne" => world.as_ref().is_some_and(|w| {
+            state.position[1] - w.surface(state.position[0], state.position[2]).height > 50.
+        }),
+        _ => false,
+    };
+    if !due {
+        return None;
+    }
+    *pulled = true;
+    let mut input = keys.clone();
+    input.commands = vec![flight::PilotCommand::Set(flight::Switch::Gear, false)];
+    Some(input)
 }
 
 /// Height above the ground at which the scripted leader cleans up.
@@ -6161,6 +6262,7 @@ fn ai_probe_run(
         } else {
             flight.step(&keys, |x, z| f64::from(world.height(x as f32, z as f32)));
         }
+        apply_edge_loss(&mut flight, world);
         if verify {
             devices.push((
                 combat.state.tick(),
@@ -7873,6 +7975,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 if ![
                     "level",
                     "takeoff",
+                    "takeoff-gear-early",
+                    "takeoff-gear-airborne",
                     "pull",
                     "loop",
                     "roll",
@@ -7881,6 +7985,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "spin-recover",
                     "stall-recover",
                     "climb",
+                    "dive",
+                    "overspeed",
                     "sprint",
                     "devices",
                     "autopilot",
@@ -8680,7 +8786,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 state.burner = true;
                 keys.pitch = 1.;
             }
-            "takeoff" => {
+            "takeoff" | "takeoff-gear-early" | "takeoff-gear-airborne" => {
                 state.brake_out = false;
                 state.throttle = 1.;
                 state.burner = state
@@ -8726,6 +8832,29 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             "climb" => {
                 state.throttle = 1.;
                 state.burner = true;
+            }
+            "dive" => {
+                // A full afterburner dive from 40,000 ft: it should end in the
+                // overspeed loss for aircraft that can reach 1.5 times their top speed.
+                state.position[1] = 40_000.;
+                state.pitch = -60f64.to_radians();
+                state.throttle = 1.;
+                state.burner = true;
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
+            }
+            "overspeed" => {
+                // Level flight at 20,000 ft, but 1.6 times the top speed there:
+                // the aircraft must be lost to overspeed on the first step.
+                state.position[1] = 20_000.;
+                if let Some(ratio) = state.overspeed_ratio().filter(|r| *r > 0.) {
+                    state.speed *= 1.6 / ratio;
+                }
+                state.throttle = 1.;
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
             }
             "sprint" => {
                 // Full afterburner in level flight, altitude held by the autopilot.
@@ -8914,6 +9043,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let mut devices = (maneuver == "devices").then(|| flight_watch::DeviceWatch::new(&state));
         let mut stall_recovery =
             (maneuver == "stall-recover").then(|| flight_probe::StallRecovery::new(&state));
+        let mut gear_pulled = false;
+        let mut belly_wear = 0.;
         for tick in 0..ticks {
             let scripted;
             let keys = if let Some(probe) = spin_recovery.as_mut() {
@@ -8947,6 +9078,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 let surface = world.surface(state.position[0], state.position[2]);
                 scripted = probe.keys(&state, surface.height, surface.landable);
                 &scripted
+            } else if let Some(pull) =
+                gear_pull(&maneuver, &state, &mut gear_pulled, &keys, &replay_world)
+            {
+                scripted = pull;
+                &scripted
             } else {
                 replay_frames.as_ref().map_or(&keys, |frames| &frames[tick])
             };
@@ -8966,6 +9102,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             if let Some(error) = state.native_fault() {
                 return Err(error.into());
             }
+            belly_wear += state.take_belly_scrape();
+            if let Some(world) = &replay_world {
+                apply_edge_loss(&mut state, world);
+            }
             watch.observe(&state);
             if let Some(world) = &replay_world {
                 let ground = world.surface(state.position[0], state.position[2]).height;
@@ -8980,7 +9120,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             completed |= inverted
                 && basis.up[1] > 0.9
                 && attitude::dot(basis.forward, initial_forward) > 0.98;
-            if maneuver == "takeoff" && ground_start_airport.is_some() {
+            if maneuver.starts_with("takeoff") && ground_start_airport.is_some() {
                 let world = replay_world.as_ref().unwrap();
                 let object = ground_object(world)?.unwrap();
                 let height = world.airport_scene.runway(object).unwrap().elevation_ft;
@@ -9013,6 +9153,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.bank.to_degrees()
         );
         println!("vertical={vertical} inverted={inverted} loop_completed={completed}");
+        if maneuver.starts_with("takeoff-gear") {
+            println!(
+                "gear_pulled={gear_pulled} belly_wear_percent={:.3} gear={:.2}",
+                belly_wear * 100.,
+                state.gear
+            );
+        }
         println!(
             "departure_alert={:?} spin_direction={}",
             state.stall_alert(0.),
@@ -9034,6 +9181,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.yaw.to_degrees().rem_euclid(360.)
         );
         println!("{}", watch.report());
+        println!(
+            "loss: cause={}",
+            state
+                .systems
+                .structure
+                .cause
+                .map_or("none", |cause| cause.label())
+        );
         println!(
             "fuel_end: internal_lb={:.1} external_lb={:.1}",
             state.fuel,
@@ -10198,6 +10353,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         turbulence: probe_turbulence,
         turbulence_rng: probe_turbulence_rng,
         g_effects: Default::default(),
+        overspeed_message_at: None,
+        edge_message_at: None,
         flight_view,
         view_rig: {
             let mut rig = flight_views::Rig::default();
