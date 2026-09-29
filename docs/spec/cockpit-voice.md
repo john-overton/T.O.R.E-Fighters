@@ -332,6 +332,7 @@ Implemented:
 - The single-seat wingman: the player's wing member 1, alive, on the same
   target (or both without one) and within 15,000 ft, speaking the "you" lines
   under his radio label. TORE's player always leads Quick Mission wing 1.
+  For a plane that is not the leader, the wingman is the wing's leader.
 - G strain, "Ease up on the stick" and being sick, counted on the fixed tick.
 - Fuel calls, once each, never silenced.
 - Missile warnings one second after launch (the human-flown warning delay of
@@ -372,6 +373,16 @@ Fitted components:
   his bank.
 - **Extra wait after a G sound** is added to the later of the pending coaching
   time and now.
+
+Several seats (multiplayer, agent decisions, 2026-09-29): every human-flown
+plane has its own crew voice, built from that plane's aircraft type and spoken
+to that plane's seat, with its own pacing, fuel, G, feet wet and missile
+memory, its own channel hold and radio silence, and its own 6 second
+missile-warning limits. Its wingman is the first other member of the plane's
+own wing (the second member for a wing leader, else the leader), alive or not
+as for the single player, and only an AI-flown one coaches. Until combat has an
+ownship for every human-flown plane, a plane after the first sees no
+designation, weapon selection or incoming missile.
 
 Not implemented here: the radar link report (no supplemental radar key), the
 mission result and "almost home" lines (music and debrief work), airport and

@@ -1314,6 +1314,21 @@ flight re-forms on the new leader.
   silence is each seat's own setting; the crew's missile-warning limit is
   kept for each seat, since two crews warn separately; a call no seat hears is
   one `Unheard` journal entry.
+
+  *Built (B4 step 2).* Each `Cockpit` holds a `CrewVoice` and an
+  `AirfieldRadio`, both made for its seat and plane. `World::step_radio` runs
+  each cockpit's tower conversation, then `WingStatus` (what the AI wingmen
+  report from the airfield, decided once and handed to every cockpit in that
+  wing), then each cockpit's delivery and crew voice, then the weapon, hit and
+  wing calls, then the calls due. With one cockpit that is today's order and
+  today's rolls. The crew voice's wingman is the first other member of the
+  plane's own wing, by the roster's slot; for member 1 of a wing that is
+  today's rule, which keeps a dead wingman from being replaced by the next
+  (agent decision: the brief said "first other living member", which would
+  change single player when a two-ship leader's wingman dies in a larger
+  wing). Combat's player-only state (designation, weapon selection, incoming
+  missiles) is still the first cockpit's, so `crew_voice::Host::ownship` is false
+  for the other cockpits until B1 lands.
 - **Orders.** Alt-key orders from a seat whose aircraft leads its wing go to that
   wing, to human and AI members alike. A human wingman gets the order as text and
   the recording. Reply and request keys for human wingmen are stage E.

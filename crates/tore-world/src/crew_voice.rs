@@ -1689,6 +1689,48 @@ mod tests {
         );
     }
 
+    /// Each seat's crew voice speaks to its own seat, holds its own channel and
+    /// warns of its own missiles.
+    #[test]
+    fn a_crew_voice_speaks_to_its_own_seat_only() {
+        let (s0, s1) = (SeatId(0), SeatId(1));
+        let mut comms = Comms::with_seats(3, [s0, s1]);
+        let mut first = rio().for_seat(s0, 0);
+        let mut second = rio().for_seat(s1, 5);
+        let mut i = input();
+        i.incoming = vec![Incoming {
+            id: 1,
+            age: 1.,
+            signature: 2,
+        }];
+        // Only the first plane has a missile on it: only seat 0 hears it.
+        first.step(&i, &mut comms, &phrases());
+        i.incoming.clear();
+        second.step(&i, &mut comms, &phrases());
+        let due = comms.due(0.5);
+        assert_eq!(due.iter().map(|d| d.seat).collect::<Vec<_>>(), [s0]);
+        assert_eq!(due[0].call.origin.speaker, Some(0));
+        assert!(!comms.channel_free(s0, 1.) && comms.channel_free(s1, 1.));
+        // The other crew warns of its own missile in the same second: the
+        // 6 second limit is each crew's own.
+        i.now = 0.5;
+        i.incoming = vec![Incoming {
+            id: 2,
+            age: 1.,
+            signature: 2,
+        }];
+        second.step(&i, &mut comms, &phrases());
+        let due = comms.due(1.);
+        assert_eq!(due.iter().map(|d| d.seat).collect::<Vec<_>>(), [s1]);
+        assert_eq!(due[0].call.origin.speaker, Some(5));
+        // A plane's destruction is its own seat's scream.
+        i.crashed = true;
+        second.step(&i, &mut comms, &phrases());
+        let due = comms.due(1.);
+        assert_eq!(due.len(), 1);
+        assert_eq!((due[0].seat, due[0].call.route), (s1, comms::Route::Direct));
+    }
+
     #[test]
     fn the_player_screams_when_destroyed_unless_ejected() {
         let mut voice = CrewVoice::with(None, true);
