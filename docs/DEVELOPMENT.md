@@ -1267,8 +1267,12 @@ and peak bank for each enemy.
 
 The airborne probe retains its legacy adapter unless explicitly given
 `--probe-flight-model researched`, which enables the researched adapter for the
-scripted player and every AI actor. `legacy` selects the earlier path. These
-probe flags do not change normal game defaults or the native-table research path.
+scripted player and every AI actor. `legacy` selects the earlier path.
+`--probe-ai-flight-model standard|all-hybrid` sets the mission's AI flight model
+on its own: `standard` (the default) is single player as it is, and `all-hybrid`
+puts every AI aircraft on the researched adapter at mission start, seeded the
+same way. These probe flags do not change normal game defaults or the
+native-table research path.
 
 `--probe-threat TICK:hit|gun|aaa` adds a controlled event against the first enemy.
 `hit` removes one hit point and supplies the same victim event as weapon damage.

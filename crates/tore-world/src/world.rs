@@ -103,6 +103,8 @@ pub struct AiSetup {
     pub wings: Vec<tore_sim::ai::launch::WingLaunch>,
     pub guns_only: bool,
     pub preset: ai_wings::Preset,
+    /// The flight model of every AI aircraft, a mission setting.
+    pub flight_model: ai_wings::AiFlightModel,
     pub group_objectives: [tore_sim::ai::engagement::GroupObjective; 6],
     pub group_must_survive: [bool; 6],
 }
@@ -328,6 +330,7 @@ impl World {
                 resources,
                 &airfields,
             )?;
+            bridge.set_flight_model(ai.flight_model)?;
             bridge.apply_mission_preset(ai.preset, cockpit.flight.position);
             bridge.apply_group_objectives(&ai.group_objectives, cockpit.flight.position);
             bridge.apply_group_survival(&ai.group_must_survive);

@@ -402,6 +402,48 @@ impl ActorInsert {
     }
 }
 
+/// Which flight model the AI's aircraft fly, a mission setting.
+///
+/// *Agent decision:* `AllHybrid` seeds each aircraft as the AI probe's
+/// `--probe-flight-model researched` does (seed `1 + aircraft id`), and leaves
+/// training targets, which only drift on a straight line, as they are.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AiFlightModel {
+    /// Single player as it is: legacy, except wingmen that start on the ground
+    /// and aircraft that begin a landing, which switch to the hybrid model.
+    #[default]
+    Standard,
+    /// Every AI aircraft flies the hybrid model from mission start, so a human
+    /// taking one over never feels its handling change.
+    AllHybrid,
+}
+
+impl AiFlightModel {
+    pub const ALL: [Self; 2] = [Self::Standard, Self::AllHybrid];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::AllHybrid => "all-hybrid",
+        }
+    }
+}
+
+impl std::str::FromStr for AiFlightModel {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "standard" => Ok(Self::Standard),
+            "all-hybrid" | "all_hybrid" | "allhybrid" => Ok(Self::AllHybrid),
+            _ => Err(format!(
+                "unknown AI flight model {value:?}; expected {}",
+                Self::ALL.map(Self::name).join(", ")
+            )),
+        }
+    }
+}
+
 /// The formation trace samples every 12 simulation ticks (10 Hz).
 const FORMATION_TRACE_EVERY: u64 = 12;
 /// The file is flushed on the first sample of each second (every 120 ticks).
@@ -448,6 +490,8 @@ pub struct AiWings {
     /// Formation trace rows waiting for the app; `None` while tracing is off.
     formation_trace: Option<FormationBatch>,
     slots: Vec<Slot>,
+    /// The mission setting for the AI's flight model.
+    flight_model: AiFlightModel,
     /// The theater's airfields, kept for aircraft inserted later.
     airfields: Airfields,
     /// Every human-flown aircraft, in id order. The host refreshes it each
@@ -1032,6 +1076,7 @@ impl AiWings {
             mission_preset: Preset::Free,
             formation_trace: None,
             slots,
+            flight_model: AiFlightModel::Standard,
             airfields: airfields.clone(),
             humans,
             weapons: BTreeMap::new(),
@@ -1153,6 +1198,9 @@ impl AiWings {
             }),
         };
         let mut actor = AiActor::new(setup).map_err(|e| e.to_string())?;
+        if self.flight_model == AiFlightModel::AllHybrid && actor.flight().research.is_none() {
+            actor.flight_mut().enable_research(1 + insert.id as i32)?;
+        }
         actor.set_home_runway(home);
         if let Some(warnings) = insert.warnings {
             actor.set_missile_threats(warnings);
@@ -1216,6 +1264,33 @@ impl AiWings {
 
     pub fn slots(&self) -> &[Slot] {
         &self.slots
+    }
+
+    /// The mission's flight model for AI aircraft. `AllHybrid` puts every
+    /// AI aircraft that is not on the hybrid model yet on it, seeded as the
+    /// probe seeds its researched actors; aircraft inserted later follow it.
+    /// `Standard` leaves the aircraft as they are, so it cannot undo
+    /// `AllHybrid`. Set it once, before the mission steps.
+    pub fn set_flight_model(&mut self, model: AiFlightModel) -> WorldResult<()> {
+        self.flight_model = model;
+        if model == AiFlightModel::AllHybrid {
+            for actor in self
+                .mission
+                .actors_mut()
+                .iter_mut()
+                .filter(|a| !a.is_dummy())
+            {
+                if actor.flight().research.is_none() {
+                    let seed = 1 + actor.id() as i32;
+                    actor.flight_mut().enable_research(seed)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn flight_model(&self) -> AiFlightModel {
+        self.flight_model
     }
 
     /// Explicit headless-probe setup; normal mission adapter defaults are unchanged.
@@ -4035,6 +4110,65 @@ mod tests {
             .insert_actor(ActorInsert::from_removed(removed))
             .unwrap();
         assert_eq!(leads(&wings), [1]);
+    }
+
+    #[test]
+    fn the_flight_model_setting_puts_every_ai_aircraft_on_the_hybrid_model() {
+        let hybrid = |wings: &AiWings| -> Vec<bool> {
+            wings
+                .mission
+                .actors()
+                .iter()
+                .map(|a| a.flight().research.is_some())
+                .collect()
+        };
+        // Standard is single player as it is: legacy in the air.
+        let (mut standard, _) = led_wing(3, &[]);
+        assert_eq!(hybrid(&standard), [false; 4]);
+        standard.set_flight_model(AiFlightModel::Standard).unwrap();
+        assert_eq!(hybrid(&standard), [false; 4]);
+
+        // AllHybrid seeds each aircraft as `--probe-flight-model researched`
+        // does, so the two produce the same aircraft.
+        let (mut all, mut targets) = led_wing(3, &[]);
+        all.set_flight_model(AiFlightModel::AllHybrid).unwrap();
+        assert_eq!(hybrid(&all), [true; 4]);
+        let (mut probe, _) = led_wing(3, &[]);
+        probe.configure_probe(true, None, [0.; 3]).unwrap();
+        for id in 1..=4 {
+            assert_eq!(
+                all.mission.actor(id).unwrap().flight(),
+                probe.mission.actor(id).unwrap().flight(),
+                "aircraft {id}"
+            );
+        }
+        // It flies, and an aircraft that joins later follows the setting.
+        for _ in 0..120 {
+            fly_one_tick(&mut all, &mut targets, vec![]);
+        }
+        assert!(all.mission.actors().iter().all(|a| !a.flight().crashed));
+        let removed = all.remove_actor(2).unwrap();
+        assert!(removed.parts.flight.research.is_some());
+        let mut back = ActorInsert::from_removed(removed);
+        back.flight = flight::State::new(&aircraft(), [3000., 20000., 0.]).unwrap();
+        all.insert_actor(back).unwrap();
+        assert_eq!(hybrid(&all), [true; 4]);
+
+        // Training targets keep their straight-line flight.
+        let (mut wings, _) = led_wing(2, &[]);
+        wings.mission.actor_mut(2).unwrap().set_dummy();
+        wings.set_flight_model(AiFlightModel::AllHybrid).unwrap();
+        assert_eq!(hybrid(&wings), [true, false, true]);
+    }
+
+    #[test]
+    fn flight_model_names_round_trip_and_reject_unknown_values() {
+        for model in AiFlightModel::ALL {
+            assert_eq!(model.name().parse(), Ok(model));
+        }
+        assert_eq!("ALL_HYBRID".parse(), Ok(AiFlightModel::AllHybrid));
+        assert_eq!(AiFlightModel::default(), AiFlightModel::Standard);
+        assert!("everything-legacy".parse::<AiFlightModel>().is_err());
     }
 
     pub(super) fn player_object(position: Vector) -> WorldObject {
