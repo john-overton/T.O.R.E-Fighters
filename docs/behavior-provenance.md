@@ -109,6 +109,9 @@ Labels describe origin only. None of these is a blocker.
 | Stall control/lift attenuation | Native arithmetic | Connected in hybrid; clean-envelope reference speed and later force integration are fitted |
 | Timed warning-transition rotation (“tumble”) and stalled movement fall | Native | Tested with both PTs and imported tables; legacy/hybrid unchanged |
 | Loaded normal controls, rudder/auxiliary rates, departure→force→movement | Native translations with authored driver | Tested for both PTs; turbulence bypass and host clock/device/fuel producers are fitted |
+| Overspeed shake from 95% of top speed and loss at 1.5 times | Opinionated, requested by John 2026-09-29; numbers are agent decisions | [Overspeed](spec/overspeed.md); `flight::check_overspeed`, `g_effects::overspeed_shake`. Shake is a view offset only |
+| World edge: warning at 100 nm, loss at 105 nm past the map rectangle; AI lost without a kill | Opinionated, requested by John 2026-09-29; distances and the nearest-point measure are agent decisions | [World edge](spec/world-edge.md); `terrain::edge_distance_nm`, `Ledger::lose_without_credit` |
+| Gear retraction on the ground: belly slide, 45 ft/s^2 brake, wear from speed and time | Opinionated, requested by John 2026-09-29; numbers are agent decisions | [Gear on the ground](spec/gear-on-the-ground.md); reuses the gear-up contact of `research::contact` |
 | Ground, terrain and object contact | **Opinionated** | Reclassified 2026-09-15. Contact behaviour is authored to match what a player experiences on a runway and deck; it is no longer waiting on a recovered native producer |
 | Clean-envelope stall-entry gate | Fitted | Runtime behaviour; acceptable as shipped |
 | Response filters, trim/alignment, continuous spin coupling | Fitted | Runtime behaviour; acceptable as shipped |

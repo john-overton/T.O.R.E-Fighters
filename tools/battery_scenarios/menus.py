@@ -217,6 +217,30 @@ def scenarios() -> list[Scenario]:
             notes="Every imported string decodes without U+FFFD and is drawable in the original fonts.",
         )
     )
+    # The ILS at every airport: datum against the runway plane, the ideal path
+    # reading zero with the right signs, 52 ft over the threshold (docs/testing/ils.md).
+    out.append(
+        Scenario(
+            name="menus-validate-ils",
+            lane="menus",
+            args=["--validate-ils", "--no-audio"],
+            timeout=300,
+            expect=[r"ils-survey: 16 theaters, \d+ runway ends, glide 3 degrees, 0 problems", r"crossing_ft=52\.4"],
+            forbid=[r"PROBLEM"],
+            notes="Every airport of every base theater: ILS datum on the runway surface, ideal path reads zero.",
+        )
+    )
+    for code in ("~UKR1", "~BAL3", "~EGY5", "~FRAF"):
+        out.append(
+            Scenario(
+                name=f"menus-validate-ils-{code.strip('~').lower()}-variant",
+                lane="menus",
+                args=["--validate-ils", "--theater", code, "--no-audio"],
+                timeout=300,
+                expect=[r"ils-survey: 17 theaters, \d+ runway ends, glide 3 degrees, 0 problems"],
+                forbid=[r"PROBLEM"],
+            )
+        )
     out.append(Scenario(name="menus-validate-maps", lane="menus", args=["--validate-maps", "--no-audio"], timeout=600, expect=[r"Validated 75 retail map layouts"]))
     out.append(Scenario(name="menus-validate-weather", lane="menus", args=["--validate-weather", "--no-audio"], timeout=900, expect=[r"Weather sources validated"]))
     # `--combat-smoke` fails for the other thirteen aircraft (a stale radar-off

@@ -47,7 +47,9 @@ each and the windowed ones five to eight seconds. See "Runtime" at the end for t
 | `land-*` | 676 | The scripted approach and landing (see below): the Hornet at every airport of every base theater, every other aircraft at the first airport of every base theater, the Hornet at the first airport of every variant, all 14 with gear up (must crash for the gear), off the runway (must crash for not landing on a runway) and with no flare, and all 14 in five different winds. On runways of 5,500 ft or more: touches down, stops, no crash, no unsafe touchdown, does not leave the runway surface. |
 | `level`, `pull`, `loop`, `roll`, `stall`, `spin`, `bank-left`, `bank-right` | 336 | Every manoeuvre in every aircraft on the default, `--legacy-flight` and `--researched-flight` adapters: no non-finite value, fuel never rises, no energy from nothing, load, speed, altitude and rates within limits, no veil without G. |
 | `spinrecover-*`, `stallrecover-*` | 28 | The manual's spin and stall recovery procedures recover every aircraft that can enter a spin or stall (X-31 and the F-22 family cannot spin: their data says so). |
-| `climb-*`, `sprint-*` | 28 | How far past its own envelope an aircraft goes (see "Needs a decision"), and that full-afterburner level flight settles near the top speed. |
+| `climb-*`, `sprint-*` | 28 | How far past its own envelope an aircraft goes (never past the 1.5 times overspeed loss line), and that full-afterburner level flight settles near the top speed. |
+| `overspeed-*` | 28 | Every aircraft is lost at 1.6 times its top speed with cause overspeed, and an afterburner dive from 40,000 ft never passes 1.52 times ([overspeed](../spec/overspeed.md)). |
+| `belly-*` | 28 | Gear up at 80 knots on the roll: an aircraft too slow to fly slides on its belly and wears; gear up once airborne is a normal retraction ([gear on the ground](../spec/gear-on-the-ground.md)). |
 | `fault*` | 73 | Every system fault 0..44 on three aircraft in a pull, all 45 at once, and one after another, in every aircraft. |
 | `combatsmoke-*`, `combatevidence-*`, `missileacceptance-*` | 40 | The headless combat smoke (default slots, five damage classes, jettison, radar power, incoming missiles, jammer), the same smoke with per-slot combat tapes written and replayed to the identical state, and the missile reach probes (the F-14 and Su-35 tables are left to the slow set, below). |
 | `livefire-*`, `cheat-unlimited-ammo-*`, `cheat-damage-*`, `countermeasures-*` | about 90 | Windowed: fire every weapon slot of every aircraft (ammunition never negative or over capacity, drops by exactly what was fired, other stations untouched, surface weapons refuse the practice aircraft), Unlimited ammo, the three Damage modes, and chaff and flare counts against capacity. |
@@ -56,7 +58,7 @@ each and the windowed ones five to eight seconds. See "Runtime" at the end for t
 | `eject-*`, `ejectionpose-*` | 70 | The seat and parachute at 5,000 ft and 250 ft in every aircraft; windowed frames of the three ejection poses. |
 | `autopilot-*`, `waypoint-*`, `fuelout-*` | 42 | Heading and altitude hold from a 25 degree bank, waypoint steering, and running out of fuel. |
 | `climbout-*` | 30 | The scripted leader's takeoff, gear and flaps up, and cruise, for every aircraft alone and for a wing of five from every base theater. |
-| `edge-*`, `terrain-*` | 96 | Flying out over each of the four map edges at 20,000 ft, and a spin or roll at 90 ft over every theater. |
+| `edge-*`, `terrain-*` | 160 | Flying out over each of the four map edges at 20,000 ft for 200 s (still flying), `edge-lost-*` flying on until the aircraft is lost 105 nm past the map with cause out of bounds ([world edge](../spec/world-edge.md)), and a spin or roll at 90 ft over every theater. |
 | `weather*-*`, `hour*-*`, `groundstart-*`, `damage-*`, `bay-*` | about 250 | Windowed frames of every weather condition in every base theater, every hour of the day in three theaters, every aircraft at a ground start, and the damage and F-22 bay fixtures, each checked for a blank or flat frame. |
 | `loadout-*` | 56 | Round two: every aircraft with `--loadout none` and `--loadout guns` takes off and lands on a long runway like any other and carries less than its default load. |
 | `jettison-*` | 38 | Round two, windowed: jettisoning every station of every aircraft empties exactly that station (an internal station, for example the Su-35 slot 5, refuses and still fires), lightens the load, keeps the flight model's carried weight in step (less fuel already burned) and touches no other station. |
@@ -121,24 +123,21 @@ terrain checks. Three problems belong to other lanes and were handed on:
 
 None of these is defined in the specs, the manual text or the feature matrix, so none was changed.
 
-1. **Overspeed has no consequence.** The manual (p. 90) says the right edge of the 1 G polygon is
-   a thrust limit above 36,600 ft ("you simply can't go any faster") and a structural limit below
-   it, beyond which "air resistance begins to weaken the airframe and the wings will eventually
-   tear off". The game has no structural overspeed failure, and in the dive after a full-power
-   climb aircraft pass their own top speed: F-22 1,348 knots (1.7 times), Su-25 1.9 times, F-14,
-   MiG-29, Su-27 and X-31 1.5 to 1.6 times. The manual gives no speed or time for the wings to
-   fail, so any rule would be invented; it is left for a decision (a fitted rule such as "more
-   than 10 percent over the top speed below 36,000 ft for three seconds tears a wing off" is
-   the sort of thing needed). Level full afterburner behaves: it settles at 92 to 100 percent of
-   the top speed. The climb scenarios record the speed limit as today's behaviour (2.0 times).
-   The ceiling half of this item was fixed (see "Bugs found").
+1. **Overspeed** (decided). John asked on 2026-09-29 for a shake from 95 percent of the top speed
+   and a loss at 1.5 times it, for every aircraft, with the cause recorded
+   ([overspeed](../spec/overspeed.md), `opinionated`, numbers are agent decisions). Before it
+   aircraft passed their own top speed in the dive after a full-power climb (F-22 1.7 times,
+   Su-25 1.9 times, F-14, MiG-29, Su-27 and X-31 1.5 to 1.6 times). Level full afterburner still
+   settles at 92 to 100 percent of the top speed, and the climb and dive scenarios now expect
+   nothing past 1.52 times.
 2. **The autopilot's altitude hold outside the envelope.** Beyond the top speed the aircraft cannot
    hold 1 G and sinks; the autopilot spec says "no guaranteed hold outside the flight envelope
    is implied", so this is as written, and inside the envelope the hold now works (see "Bugs
-   found"). Nothing further to decide unless overspeed gets a rule (item 1).
-3. **The map has no edge.** The specs and the manual are silent (the flight map only says "theater edges are dark"). Aircraft fly out over all four sides of every theater, with the terrain
-   height clamped to the edge value, no boundary message and no turn-back, for at least 100,000
-   feet past the edge (`flight-edge-*`). 
+   found"). Overspeed now has a rule (item 1); the hold outside the envelope is unchanged.
+3. **The map edge** (decided). John asked on 2026-09-29 for a warning at 100 nautical miles past the map
+   and a loss at 105, AI aircraft lost without a kill ([world edge](../spec/world-edge.md),
+   `opinionated`, distances are agent decisions). The `flight-edge-*` scenarios fly 200 seconds out
+   and must stay flying; `flight-edge-lost-*` fly on until the loss.
 4. **A ground-start airport is a flat square of 5,000 to 8,000 ft a side and all of it counts as
    runway.** The footprint (`footprint_half_ft` in the `landing_start:` line, for example 2,604
    by 3,000 ft either side of the centre at UKR airport 1) is the airport shape's bounds. A

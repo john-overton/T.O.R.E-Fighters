@@ -87,6 +87,8 @@ pub struct Pilot {
     pub damage: f64,
     /// Average landing score as a percentage.
     pub landing_grade: Option<u32>,
+    /// `overspeed` or `out of bounds` when the airframe was lost that way.
+    pub cause: Option<&'static str>,
     pub kills: [u32; 10],
     pub friendly_fire: u32,
     pub air_to_air: Tally,
@@ -147,6 +149,9 @@ pub struct Airframe {
     /// Airframe damage, 0 to 1.
     pub damage: f64,
     pub landing_grade: Option<u32>,
+    /// Lost to overspeed or to leaving the map rather than to combat, a crash
+    /// or the pilot (requested by John, 2026-09-29).
+    pub cause: Option<tore_sim::aircraft_systems::LossCause>,
 }
 
 /// Host facts at mission end, gathered before the flight is torn down.
@@ -213,6 +218,7 @@ impl Ending<'_> {
                 1.
             },
             landing_grade: airframe.landing_grade,
+            cause: airframe.cause.map(|c| c.label()),
             air_to_air: own(ShotKind::AirToAir),
             air_to_ground: own(ShotKind::AirToGround),
             gun: own(ShotKind::Gun),
@@ -270,6 +276,7 @@ pub fn capture(
         ejected: pilot.ejected && !pilot.dead,
         damage: flight.damage_fraction,
         landing_grade: flight.research.as_ref().and_then(|r| r.landings.grade()),
+        cause: flight.systems.structure.cause,
     };
     let mut aircraft = Vec::new();
     let (mut wingman, mut destroy, mut protect) = (None, Vec::new(), Vec::new());
@@ -285,6 +292,7 @@ pub fn capture(
                 damage: actor.map_or(1., |a| a.flight().damage_fraction),
                 // AI aircraft do not land yet.
                 landing_grade: None,
+                cause: actor.and_then(|a| a.flight().systems.structure.cause),
             });
         }
         wingman = wings
@@ -383,7 +391,7 @@ impl Report {
     pub fn summary(&self) -> String {
         let pilot = |p: &Pilot| {
             format!(
-                "{:?} damage={:.0}% kills={:?} ff={} a2a={}/{} dmg={} gun={}/{} enemy_aam={}/{} enemy_gun={}/{}",
+                "{:?} damage={:.0}% kills={:?} ff={} a2a={}/{} dmg={} gun={}/{} enemy_aam={}/{} enemy_gun={}/{}{}",
                 p.status,
                 p.damage * 100.,
                 p.kills,
@@ -397,6 +405,7 @@ impl Report {
                 p.enemy_aam.launched,
                 p.enemy_gun.hit,
                 p.enemy_gun.launched,
+                p.cause.map_or_else(String::new, |c| format!(" cause={c}")),
             )
         };
         format!(
@@ -509,6 +518,13 @@ pub fn pages(report: &Report, text: &MissionText) -> Vec<Vec<String>> {
         }
         .into()
     }));
+    // Only when someone was lost to overspeed or the map edge, so an ordinary
+    // debrief keeps the retail rows.
+    if player.is_some_and(|p| p.cause.is_some()) || wing.is_some_and(|p| p.cause.is_some()) {
+        outcome.push(row("Cause", &|p| {
+            p.cause.map_or_else(|| "-".into(), |c| c.to_string())
+        }));
+    }
     outcome.push(row("Damage", &|p| {
         format!("{}%", (p.damage * 100.).clamp(0., 100.) as u32)
     }));
@@ -954,6 +970,7 @@ mod tests {
             ejected: false,
             damage: 1.,
             landing_grade: None,
+            cause: None,
         };
         let aircraft = [
             craft(1, true),
@@ -1019,6 +1036,7 @@ mod tests {
             ejected: false,
             damage: 0.25,
             landing_grade: None,
+            cause: None,
         }
     }
     fn ending(ledger: &Ledger) -> Ending<'_> {
@@ -1036,6 +1054,43 @@ mod tests {
             destroy: vec![10, 11],
             protect: vec![],
         }
+    }
+    #[test]
+    fn an_out_of_bounds_enemy_is_a_lost_aircraft_credited_to_nobody() {
+        use tore_sim::aircraft_systems::LossCause;
+        use tore_sim::combat::ledger::Kill;
+        let mut ledger = Ledger::default();
+        // The player had hit enemy 10 earlier, then it flew off the map.
+        ledger.damaged(Kill {
+            owner: 0,
+            victim: 10,
+            category: 0x8000,
+            aircraft: true,
+        });
+        ledger.lose_without_credit(10);
+        let mut end = ending(&ledger);
+        end.aircraft[2].cause = Some(LossCause::OutOfBounds);
+        let plain = report(&end);
+        assert_eq!(plain.player.kills, [0; 10]);
+        // The debrief keeps its retail rows when nobody's cause is set.
+        assert!(
+            !pages(&plain, &text())
+                .concat()
+                .iter()
+                .any(|l| l.starts_with("Cause"))
+        );
+        end.player.alive = false;
+        end.player.cause = Some(LossCause::Overspeed);
+        let lost = report(&end);
+        assert_eq!(lost.player.status, Status::Dead);
+        assert_eq!(lost.player.cause, Some("overspeed"));
+        assert!(lost.summary().contains("cause=overspeed"));
+        assert!(
+            pages(&lost, &text())
+                .concat()
+                .iter()
+                .any(|l| l.starts_with("Cause\toverspeed"))
+        );
     }
     #[test]
     fn a_surviving_target_or_friendly_kill_fails_the_mission() {

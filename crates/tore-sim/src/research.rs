@@ -128,6 +128,19 @@ impl Landings {
         graded
     }
 }
+/// Deceleration of a sliding belly, ft/s^2 (about 1.4 G), at full scrape. Chosen
+/// so that no fighter's thrust carries it through the slide.
+pub const BELLY_DECELERATION_FPS2: f64 = 45.;
+/// Least share of its weight that a belly below stall speed rests on the ground.
+pub const BELLY_MINIMUM_LOAD: f64 = 0.8;
+/// Share of gear retraction at which the belly counts as fully on the ground.
+pub const BELLY_FULL_RETRACTION: f64 = 0.5;
+/// Airframe wear of a belly slide, as a share of the aircraft's hit points per
+/// second: this much when barely moving, plus [`BELLY_WEAR_PER_S`] at
+/// [`BELLY_WEAR_REFERENCE_FPS`] (about 148 knots) and in proportion to speed.
+pub const BELLY_WEAR_BASE_PER_S: f64 = 0.01;
+pub const BELLY_WEAR_PER_S: f64 = 0.06;
+pub const BELLY_WEAR_REFERENCE_FPS: f64 = 250.;
 impl Research {
     pub fn new(seed: i32) -> Result<Self> {
         Ok(Self {
@@ -401,11 +414,34 @@ impl Research {
             for i in [0, 2] {
                 s.velocity[i] -= basis.right[i] * side * scrub;
             }
-            let decel = if s.brake_out {
+            // Gear not fully down on the ground: the aircraft settles on its
+            // belly. The scrape is a strong brake and it wears the airframe more
+            // the faster and longer it slides. `opinionated` (requested by John,
+            // 2026-09-29; docs/spec/gear-on-the-ground.md); the numbers are agent
+            // decisions.
+            let scrape = ((1. - s.gear) / BELLY_FULL_RETRACTION).clamp(0., 1.);
+            let belly = scrape > 0.01;
+            let mut decel = if s.brake_out {
                 tuning.brake_deceleration
             } else {
                 tuning.rolling_deceleration
             } * wheel_load;
+            if belly {
+                decel = decel.max(BELLY_DECELERATION_FPS2 * scrape * wheel_load);
+                if v > 1. {
+                    s.belly_scrape += (BELLY_WEAR_BASE_PER_S
+                        + BELLY_WEAR_PER_S * v / BELLY_WEAR_REFERENCE_FPS)
+                        * scrape
+                        * wheel_load
+                        * DT;
+                }
+                if !s.belly_reported {
+                    s.belly_reported = true;
+                    s.systems.notify("Gear up on the ground: belly scraping");
+                }
+            } else {
+                s.belly_reported = false;
+            }
             let factor = (1. - decel * DT / v.max(0.01)).max(0.);
             for i in [0, 2] {
                 s.velocity[i] *= factor;
@@ -439,6 +475,7 @@ impl Research {
                 brake_hold,
                 ground_speed_fps: v,
                 nose_settling,
+                belly,
             }));
         }
         s.position[1] = s.position[1].max(floor);

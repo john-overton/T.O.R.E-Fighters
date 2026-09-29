@@ -10,7 +10,7 @@ pub use engine::Engine;
 pub use fluids::Fluids;
 pub use fuel::Fuel;
 pub use pilot::Pilot;
-pub use structure::{RegionalEffects, Structure, regional_effects};
+pub use structure::{LossCause, RegionalEffects, Structure, regional_effects};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Systems {
@@ -92,6 +92,16 @@ impl Systems {
             fuel: Fuel::new(external),
             ..Self::default()
         }
+    }
+    /// Lose the airframe for `cause`: the structure fails (the same fatal path
+    /// as combat destruction) and the cause is kept. Once only.
+    pub fn destroy(&mut self, cause: LossCause) {
+        if self.structure.failed {
+            return;
+        }
+        self.structure.failed = true;
+        self.structure.cause = Some(cause);
+        self.notify(cause.message());
     }
     pub fn notify(&mut self, message: impl Into<String>) {
         if self.messages.len() < 64 {

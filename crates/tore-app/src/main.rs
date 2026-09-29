@@ -38,6 +38,7 @@ mod graphics;
 mod graphics_screen;
 mod hud;
 mod hud_aperture;
+mod ils_survey;
 mod input;
 mod input_catalog;
 mod input_script;
@@ -200,6 +201,10 @@ struct App {
     turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng,
     /// Player blackout and redout, stepped with the simulation.
     g_effects: tore_sim::g_effects::GEffects,
+    /// Simulation second of the last OVERSPEED message, so it repeats at an interval.
+    overspeed_message_at: Option<f64>,
+    /// Simulation second of the last turn-back warning past the map edge.
+    edge_message_at: Option<f64>,
     flight_view: u8,
     view_rig: flight_views::Rig,
     flight_canvas: flight_canvas::FlightCanvas,
@@ -426,6 +431,7 @@ fn airport_aircraft(
         supported,
         alive: !flight.crashed,
         speed_fps: flight.speed,
+        ground_clearance_ft: flight.model().configuration().equipment.ground_clearance_ft,
     }
 }
 
@@ -2135,6 +2141,8 @@ impl App {
                 self.reset_vapor();
                 self.previous_flight = self.flight.clone();
                 self.g_effects = Default::default();
+                self.overspeed_message_at = None;
+                self.edge_message_at = None;
                 self.flight_clock.remainder = 0.;
                 self.flight_view = 0;
                 self.view_rig = Default::default();
@@ -3470,6 +3478,48 @@ impl ApplicationHandler for App {
                             if let Some(level) = self.performance.veil_level() {
                                 self.g_effects.blackout = level;
                             }
+                            // Beyond the map: a turn-back warning every ten seconds from
+                            // 100 nautical miles out, and the aircraft is lost at 105
+                            // (requested by John, 2026-09-29).
+                            if !self.flight.crashed {
+                                let [x, _, z] = self.flight.position;
+                                let out = self.world.edge_distance_nm(x, z);
+                                if out >= terrain::EDGE_DESTROY_NM {
+                                    self.flight.systems.destroy(
+                                        tore_sim::aircraft_systems::LossCause::OutOfBounds,
+                                    );
+                                    self.flight.crashed = true;
+                                } else if out >= terrain::EDGE_WARNING_NM {
+                                    let now = self.flight.ticks as f64 * flight::DT;
+                                    if self
+                                        .edge_message_at
+                                        .is_none_or(|at| now - at >= 10. || now < at)
+                                    {
+                                        self.edge_message_at = Some(now);
+                                        self.flight_ui
+                                            .message("You have left the theater: turn back now");
+                                    }
+                                } else {
+                                    self.edge_message_at = None;
+                                }
+                            }
+                            // Past the top speed: a short cockpit message, repeated
+                            // every four seconds (requested by John, 2026-09-29).
+                            if !self.flight.crashed
+                                && self
+                                    .flight
+                                    .overspeed_ratio()
+                                    .is_some_and(|r| r >= flight::OVERSPEED_SHAKE_FULL)
+                            {
+                                let now = self.flight.ticks as f64 * flight::DT;
+                                if self
+                                    .overspeed_message_at
+                                    .is_none_or(|at| now - at >= 4. || now < at)
+                                {
+                                    self.overspeed_message_at = Some(now);
+                                    self.flight_ui.message("OVERSPEED");
+                                }
+                            }
                             if let Some(points) = self.hornet.streamer_points(&self.flight) {
                                 self.vapor.step(self.world.weather.ticks(), points);
                             }
@@ -3939,19 +3989,28 @@ impl ApplicationHandler for App {
                                 self.hornet.camera(&presented, 0, camera_keys)
                             }
                         };
-                        if !self.flight_ui.cheats.no_screen_shake
-                            && !presented.crashed
-                            && self.view_rig.cockpit(self.flight_view)
-                        {
+                        if !self.flight_ui.cheats.no_screen_shake && !presented.crashed {
                             let seconds =
                                 self.flight.ticks as f64 * flight::DT + self.flight_clock.remainder;
-                            let [yaw, pitch] = tore_sim::g_effects::shake(presented.g, seconds);
-                            look::apply(
-                                &mut self.camera,
-                                presented.view_position(),
-                                [yaw as f32, pitch as f32],
-                                false,
-                            );
+                            // High-G shake is the cockpit's; the overspeed shake
+                            // shakes every view (requested by John, 2026-09-29).
+                            let mut shake = if self.view_rig.cockpit(self.flight_view) {
+                                tore_sim::g_effects::shake(presented.g, seconds)
+                            } else {
+                                [0.; 2]
+                            };
+                            if let Some(ratio) = presented.overspeed_ratio() {
+                                let over = tore_sim::g_effects::overspeed_shake(ratio, seconds);
+                                shake = [shake[0] + over[0], shake[1] + over[1]];
+                            }
+                            if shake != [0.; 2] {
+                                look::apply(
+                                    &mut self.camera,
+                                    presented.view_position(),
+                                    [shake[0] as f32, shake[1] as f32],
+                                    false,
+                                );
+                            }
                         }
                         self.camera.zoom = self.flight_ui.zoom;
                         // One resolved instant per frame, shared by the main view,
@@ -4714,6 +4773,21 @@ fn build_combat(
     combat::Combat::with_loadout(hornet, resources, &load)
 }
 
+/// The map-edge rule for a probe's flight: lost 105 nautical miles beyond the
+/// theater. (The game host also warns the player from 100; see `terrain.rs`.)
+fn apply_edge_loss(flight: &mut flight::State, world: &terrain::World) {
+    if flight.crashed {
+        return;
+    }
+    let [x, _, z] = flight.position;
+    if world.edge_distance_nm(x, z) >= terrain::EDGE_DESTROY_NM {
+        flight
+            .systems
+            .destroy(tore_sim::aircraft_systems::LossCause::OutOfBounds);
+        flight.crashed = true;
+    }
+}
+
 /// The `--maneuver devices` script: each device is set down one after another,
 /// then up again, so the run shows every travel.
 fn device_schedule(tick: u64) -> Option<Vec<flight::PilotCommand>> {
@@ -4920,6 +4994,35 @@ enum ProbePilot {
     Cruise,
     Home,
     Away,
+}
+
+/// The scripted gear-up for the `takeoff-gear-early` (at 80 knots with the
+/// wheels still down, too slow to fly) and `takeoff-gear-airborne` (once 50 ft
+/// above the runway) headless takeoffs. Returns the input for that tick.
+fn gear_pull(
+    maneuver: &str,
+    state: &flight::State,
+    pulled: &mut bool,
+    keys: &flight::PilotInput,
+    world: &Option<terrain::World>,
+) -> Option<flight::PilotInput> {
+    if *pulled {
+        return None;
+    }
+    let due = match maneuver {
+        "takeoff-gear-early" => state.speed >= 80. * 1.68781,
+        "takeoff-gear-airborne" => world.as_ref().is_some_and(|w| {
+            state.position[1] - w.surface(state.position[0], state.position[2]).height > 50.
+        }),
+        _ => false,
+    };
+    if !due {
+        return None;
+    }
+    *pulled = true;
+    let mut input = keys.clone();
+    input.commands = vec![flight::PilotCommand::Set(flight::Switch::Gear, false)];
+    Some(input)
 }
 
 /// Height above the ground at which the scripted leader cleans up.
@@ -6161,6 +6264,7 @@ fn ai_probe_run(
         } else {
             flight.step(&keys, |x, z| f64::from(world.height(x as f32, z as f32)));
         }
+        apply_edge_loss(&mut flight, world);
         if verify {
             devices.push((
                 combat.state.tick(),
@@ -7270,6 +7374,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut sensor_summary = false;
     let mut validate_weather = false;
     let mut validate_maps = false;
+    let mut validate_ils = false;
     let mut validate_text = false;
     let mut weather_condition: Option<usize> = None;
     let mut airport_probe: Option<(u32, tore_sim::airport::Aircraft, Option<[f64; 2]>)> = None;
@@ -7415,6 +7520,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     supported: false,
                     alive: true,
                     speed_fps: 140.0,
+                    ground_clearance_ft: 0.,
                 }, angles));
             }
             "--record-input" => {
@@ -7873,6 +7979,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 if ![
                     "level",
                     "takeoff",
+                    "takeoff-gear-early",
+                    "takeoff-gear-airborne",
                     "pull",
                     "loop",
                     "roll",
@@ -7881,6 +7989,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "spin-recover",
                     "stall-recover",
                     "climb",
+                    "dive",
+                    "overspeed",
                     "sprint",
                     "devices",
                     "autopilot",
@@ -8049,6 +8159,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--scope-history" => scope_history = true,
             "--validate-weather" => validate_weather = true,
             "--validate-maps" => validate_maps = true,
+            "--validate-ils" => validate_ils = true,
             "--validate-text" => validate_text = true,
             "--weather-condition" => {
                 let value: usize = args
@@ -8074,7 +8185,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "Mission recordings: every flight records what happened into replays/ in the data folder; Ctrl+B marks a moment (TORE_RECORD_MISSIONS=0 turns recording off for a run). These are not the --record-input/--replay-input or --record-combat/--replay-combat tapes, which store inputs and simulate them again. --recording-info FILE describes a recording. --recording-log FILE [--out DIR] [--from SECONDS] [--to SECONDS] [--ids 0,7] [--rate HZ] writes log.jsonl and summary.txt. --recording-acmi FILE [--out FILE] [--rate HZ] [--guns] writes a Tacview .txt.acmi file. --recording-diff A B compares two recordings. --ai-probe-ticks N --record-mission NEW_PATH records a headless probe without changing its output; --verify-render then checks every recorded tick redraws the picture the probe drew. See docs/REPLAYS.md."
                 );
                 println!(
-                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display.
+                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display. --validate-ils checks the ILS alignment at every airport.
 Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, airports, ground-targets-unavailable, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
@@ -8381,6 +8492,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && !validate_creator
         && !validate_weather
         && !validate_maps
+        && !validate_ils
         && !validate_text
         && !(airport_probe.is_some() && !(smoke_test && initial_screen == Screen::Flight))
         && std::env::var_os("TORE_ENVIRONMENT_PROBE").is_none();
@@ -8557,6 +8669,25 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         return Ok(Outcome::Done);
     }
+    if validate_ils {
+        // Every base theater, and the developer variant named by --theater.
+        let mut codes: Vec<String> = tore_formats::theater::map_catalog(&assets.theater_resources)?
+            .into_iter()
+            .map(|(code, _)| code)
+            .filter(|code| !code.starts_with('~'))
+            .collect();
+        if theater_code.starts_with('~') {
+            codes.push(theater_code.clone());
+        }
+        let clearance = flight::State::new(
+            &aircraft::Airframe::load(&assets.theater_resources, aircraft_id)?.profile,
+            [0.; 3],
+        )
+        .map(|state| state.model().configuration().equipment.ground_clearance_ft)
+        .unwrap_or(0.);
+        ils_survey::run(&assets.theater_resources, &codes, clearance, 5.)?;
+        return Ok(Outcome::Done);
+    }
     if validate_maps {
         let catalog = tore_formats::theater::map_catalog(&assets.theater_resources)?;
         for (code, _) in &catalog {
@@ -8680,7 +8811,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 state.burner = true;
                 keys.pitch = 1.;
             }
-            "takeoff" => {
+            "takeoff" | "takeoff-gear-early" | "takeoff-gear-airborne" => {
                 state.brake_out = false;
                 state.throttle = 1.;
                 state.burner = state
@@ -8726,6 +8857,29 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             "climb" => {
                 state.throttle = 1.;
                 state.burner = true;
+            }
+            "dive" => {
+                // A full afterburner dive from 40,000 ft: it should end in the
+                // overspeed loss for aircraft that can reach 1.5 times their top speed.
+                state.position[1] = 40_000.;
+                state.pitch = -60f64.to_radians();
+                state.throttle = 1.;
+                state.burner = true;
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
+            }
+            "overspeed" => {
+                // Level flight at 20,000 ft, but 1.6 times the top speed there:
+                // the aircraft must be lost to overspeed on the first step.
+                state.position[1] = 20_000.;
+                if let Some(ratio) = state.overspeed_ratio().filter(|r| *r > 0.) {
+                    state.speed *= 1.6 / ratio;
+                }
+                state.throttle = 1.;
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
             }
             "sprint" => {
                 // Full afterburner in level flight, altitude held by the autopilot.
@@ -8779,6 +8933,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             None
         };
         let mut landing_probe: Option<flight_probe::Landing> = None;
+        // What the player's ILS reads along the scripted landing.
+        let mut ils_probe = ils_survey::PathRecord::default();
+        let mut ils_service: Option<tore_sim::airport::Service> = None;
         let mut state = if let Some(world) = &replay_world {
             hornet.start(world)
         } else {
@@ -8914,6 +9071,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let mut devices = (maneuver == "devices").then(|| flight_watch::DeviceWatch::new(&state));
         let mut stall_recovery =
             (maneuver == "stall-recover").then(|| flight_probe::StallRecovery::new(&state));
+        let mut gear_pulled = false;
+        let mut belly_wear = 0.;
         for tick in 0..ticks {
             let scripted;
             let keys = if let Some(probe) = spin_recovery.as_mut() {
@@ -8947,6 +9106,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 let surface = world.surface(state.position[0], state.position[2]);
                 scripted = probe.keys(&state, surface.height, surface.landable);
                 &scripted
+            } else if let Some(pull) =
+                gear_pull(&maneuver, &state, &mut gear_pulled, &keys, &replay_world)
+            {
+                scripted = pull;
+                &scripted
             } else {
                 replay_frames.as_ref().map_or(&keys, |frames| &frames[tick])
             };
@@ -8966,6 +9130,38 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             if let Some(error) = state.native_fault() {
                 return Err(error.into());
             }
+            belly_wear += state.take_belly_scrape();
+            if let Some(world) = &replay_world {
+                apply_edge_loss(&mut state, world);
+            }
+            if landing_probe.is_some()
+                && let Some(world) = &replay_world
+            {
+                let service = match &mut ils_service {
+                    Some(service) => service,
+                    None => {
+                        let mut service = tore_sim::airport::Service::new(&world.airport_scene)
+                            .map_err(std::io::Error::other)?;
+                        // The pilot selects the airport he is landing at.
+                        if let Some(object) = ground_object(world)?
+                            && let Some(runway) = world.airport_scene.runway(object)
+                        {
+                            service.command(
+                                &world.airport_scene,
+                                airport_aircraft(world, &state, true),
+                                tore_sim::airport::Command::SelectAirport(runway.airport),
+                            );
+                        }
+                        ils_service.insert(service)
+                    }
+                };
+                let ground = world.surface(state.position[0], state.position[2]).height;
+                let aircraft = airport_aircraft(world, &state, true);
+                ils_probe.observe(
+                    service.guidance(&world.airport_scene, aircraft),
+                    state.position[1] - aircraft.ground_clearance_ft - ground,
+                );
+            }
             watch.observe(&state);
             if let Some(world) = &replay_world {
                 let ground = world.surface(state.position[0], state.position[2]).height;
@@ -8980,7 +9176,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             completed |= inverted
                 && basis.up[1] > 0.9
                 && attitude::dot(basis.forward, initial_forward) > 0.98;
-            if maneuver == "takeoff" && ground_start_airport.is_some() {
+            if maneuver.starts_with("takeoff") && ground_start_airport.is_some() {
                 let world = replay_world.as_ref().unwrap();
                 let object = ground_object(world)?.unwrap();
                 let height = world.airport_scene.runway(object).unwrap().elevation_ft;
@@ -9013,6 +9209,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.bank.to_degrees()
         );
         println!("vertical={vertical} inverted={inverted} loop_completed={completed}");
+        if maneuver.starts_with("takeoff-gear") {
+            println!(
+                "gear_pulled={gear_pulled} belly_wear_percent={:.3} gear={:.2}",
+                belly_wear * 100.,
+                state.gear
+            );
+        }
         println!(
             "departure_alert={:?} spin_direction={}",
             state.stall_alert(0.),
@@ -9034,6 +9237,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.yaw.to_degrees().rem_euclid(360.)
         );
         println!("{}", watch.report());
+        println!(
+            "loss: cause={}",
+            state
+                .systems
+                .structure
+                .cause
+                .map_or("none", |cause| cause.label())
+        );
         println!(
             "fuel_end: internal_lb={:.1} external_lb={:.1}",
             state.fuel,
@@ -9062,6 +9273,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         if let Some(probe) = &landing_probe {
             println!("{}", probe.report(&state));
+            println!("{}", ils_probe.report());
         }
         if let Some(pilot) = &state.escape {
             println!(
@@ -10198,6 +10410,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         turbulence: probe_turbulence,
         turbulence_rng: probe_turbulence_rng,
         g_effects: Default::default(),
+        overspeed_message_at: None,
+        edge_message_at: None,
         flight_view,
         view_rig: {
             let mut rig = flight_views::Rig::default();

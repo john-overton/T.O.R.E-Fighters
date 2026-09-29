@@ -921,6 +921,8 @@ pub struct State {
     pub target_jammer: bool,
     rng: u32,
     pending_damage: bool,
+    /// Hit points owed to belly scrape wear that have not yet added up to one.
+    scrape_carry: f64,
     previous_player_position: Option<Vector>,
     pub history: Vec<HitRecord>,
     strikes: Vec<Strike>,
@@ -1030,6 +1032,7 @@ impl State {
             target_jammer: false,
             rng: 0x46414a54,
             pending_damage: false,
+            scrape_carry: 0.,
             previous_player_position: None,
             external,
             range_estimate: None,
@@ -1609,6 +1612,21 @@ impl State {
         if self.player_hp == 0 {
             self.release();
             events.push(Event::PlayerDestroyed);
+        }
+    }
+    /// Belly scrape wear from sliding on the ground with the gear not down:
+    /// `fraction` of the airframe, carried until it makes a whole hit point.
+    /// Invulnerable spares the player. `opinionated` (requested by John,
+    /// 2026-09-29; docs/spec/gear-on-the-ground.md).
+    pub fn scrape_damage(&mut self, fraction: f64, events: &mut Vec<Event>) {
+        if fraction <= 0. || self.player_hp <= 0 || self.cheats.invulnerable() {
+            return;
+        }
+        self.scrape_carry += fraction * f64::from(self.config.damage_capacity);
+        let whole = self.scrape_carry.floor();
+        if whole >= 1. {
+            self.scrape_carry -= whole;
+            self.apply_player_damage(whole as i32, events);
         }
     }
     /// Realistic damage: a hit may fault a subsystem, and accumulated
@@ -5415,6 +5433,25 @@ mod tests {
             e,
             Event::PilotKilled | Event::PlayerDestroyed | Event::PlayerDamaged(_)
         )));
+    }
+    #[test]
+    fn belly_scrape_wears_hit_points_in_whole_points_and_invulnerable_spares_it() {
+        let mut s = fixture(false);
+        let capacity = f64::from(s.config.damage_capacity);
+        let mut events = Vec::new();
+        // Half a hit point is carried, not lost or rounded up.
+        s.scrape_damage(0.5 / capacity, &mut events);
+        assert_eq!(s.player_hp, s.config.damage_capacity);
+        s.scrape_damage(0.5 / capacity, &mut events);
+        assert_eq!(s.player_hp, s.config.damage_capacity - 1);
+        assert!(matches!(events.as_slice(), [Event::PlayerDamaged(1)]));
+        s.scrape_damage(1., &mut events);
+        assert_eq!(s.player_hp, 0);
+        assert!(events.contains(&Event::PlayerDestroyed));
+        let mut spared = fixture(false);
+        spared.cheats.damage = crate::cheats::Damage::Invulnerable;
+        spared.scrape_damage(1., &mut Vec::new());
+        assert_eq!(spared.player_hp, spared.config.damage_capacity);
     }
     #[test]
     fn detection_launch_and_inflight_lock_loss_are_distinct() {

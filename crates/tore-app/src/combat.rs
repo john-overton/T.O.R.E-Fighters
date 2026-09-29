@@ -924,6 +924,10 @@ impl Combat {
                 }
             }
         }
+        let scrape = s.take_belly_scrape();
+        if scrape > 0. {
+            self.state.scrape_damage(scrape, &mut events);
+        }
         if s.systems.fatal() {
             s.crashed = true;
         }

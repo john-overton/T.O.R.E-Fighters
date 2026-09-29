@@ -682,14 +682,21 @@ decision, 2026-09-28):
 | --- | --- | --- |
 | `spin-recover` | Starts at 15,000 feet, holds pro-spin controls until the aircraft spins, holds the spin for four seconds, then follows the manual's recovery (stick centred then slightly forward, full opposite rudder, full throttle). Aircraft whose PT disables spins report `entered_tick=never`. | `spin_recovery:` |
 | `stall-recover` | Starts slow at 15,000 feet, pulls until the departure alert sounds, holds it three seconds, then afterburner, nose down and wings level until the alert clears. | `stall_recovery:` |
-| `land` | With `--ground-start N`: starts four miles out on a three degree slope with gear, flaps and hook down at a speed taken from the aircraft's own stall speed and landing limits, flares, closes the throttle, brakes to a stop. | `landing_start:` and `landing:` |
+| `land` | With `--ground-start N`: starts four miles out on a three degree slope with gear, flaps and hook down at a speed taken from the aircraft's own stall speed and landing limits, flares, closes the throttle, brakes to a stop. | `landing_start:`, `landing:` and `ils_probe:` (what the player's ILS read along the approach) |
 | `land-gear-up`, `land-hard`, `land-off-runway` | The same approach with the gear left up, no flare, or lined up 1,500 feet beside the runway's footprint, to check that unsafe touchdowns crash for the reason the aircraft's landing limits give. | `landing:` |
 | `climb` | Full afterburner climb holding a climb speed, then whatever the aircraft does at the top; reports the highest altitude against the 1 G envelope's ceiling. | `climb:` |
+| `dive` | A full afterburner dive from 40,000 feet at 60 degrees, nobody pulling out: ends on the ground, or in the overspeed loss for an aircraft that reaches 1.5 times its top speed first. | `extremes:` and `loss:` |
+| `overspeed` | Level at 20,000 feet at 1.6 times the top speed there: the aircraft must be lost on the first step. | `loss: cause=overspeed` |
+| `takeoff-gear-early`, `takeoff-gear-airborne` | With `--ground-start N`: the `takeoff` roll with the gear brought up at 80 knots with the wheels still down (an aircraft too slow to fly settles on its belly), or once 50 feet above the runway (a normal retraction). | `gear_pulled=`, `belly_wear_percent=` |
 | `sprint` | Full afterburner in level flight at 5,000 feet, altitude held by the autopilot. | `extremes:` |
 | `autopilot` | Starts in a 25 degree bank with heading and altitude hold engaged. | `extremes:` |
 | `waypoint` | Waypoint autopilot toward a waypoint 60,000 feet out, 60 degrees right of north. | `final_position:` |
 | `devices` | Gear, flaps, airbrake and hook down one after another, then up again. | `devices:` |
 | `eject`, `eject-low` | Shift-E twice at 5,000 feet, or at 250 feet, and the pilot's descent. | `ejection=` |
+
+Every headless flight also prints `loss: cause=...` (`none`, `overspeed` or `out of bounds`), and
+flying on out over a theater edge ends in the loss 105 nautical miles past the map
+([world edge](spec/world-edge.md)).
 
 The scripted landing floats about 1,500 feet past the aim point, so on runways under about 5,500
 feet it can overrun, and on the small airstrips (about 1,000 feet) it lands off the end. Only long
@@ -1428,7 +1435,7 @@ TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater KUR
 TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater '~UKR1' --viewer --capture-terrain .local/ukr1.ppm
 ```
 
-`--validate-maps` needs imported media but no display. It constructs every
+`--validate-ils` (imported media, no display) measures the ILS at every airport of every base theater, and of the `--theater ~CODE` variant if one is named: the datum against the runway plane, the glide path crossing the threshold, the bars reading zero with the right signs down the ideal path, and any terrain above the final 5 nm of it. See [ILS alignment](testing/ils.md). `--validate-maps` needs imported media but no display. It constructs every
 imported layout, reports source identity, placement/body counts, geometry and
 indexed artwork size, and exits with an error on construction failure. The
 other two commands need a display. Older caches require re-import for the

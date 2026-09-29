@@ -390,11 +390,24 @@ hybrid adapter turns them into the highest and lowest G it will deliver:
   ceiling but it cannot stay there.
 - Outside every row at that speed (faster than the polygon's right edge) the limit
   stays at 1 G divided by the loading divisor: the aircraft cannot hold level
-  flight. There is no structural failure for overspeed; the manual says that below about 36,000 ft, beyond
-  the structural limit, "air resistance begins to weaken the airframe and the
-  wings will eventually tear off", gives no numbers, and that is left as an open decision in the
-  [flight lane page](testing/lane-flight.md#needs-a-decision).
+  flight. Overspeed is `opinionated` (requested by John,
+  2026-09-29; the numbers are agent decisions, [overspeed](spec/overspeed.md)). The manual says that below about
+  36,000 ft, beyond the structural limit, "air resistance begins to weaken the airframe and the
+  wings will eventually tear off" and gives no numbers. Here the view shakes from 95% of the top speed
+  at the aircraft's altitude, rising to a clear maximum at 100%, and at 1.5 times the top speed
+  the aircraft (player or AI) is lost through the ordinary destroyed path with the cause `overspeed`.
+  Above the ceiling the envelope has no speed range and the rule does not apply.
 - The autopilot makes no promise outside the envelope ([autopilot](spec/autopilot.md)).
+
+### Limits of the world and the ground
+
+Two more `opinionated` rules, both requested by John on 2026-09-29 with agent-decided
+numbers: an aircraft is lost 105 nautical miles beyond the nearest point of the map,
+with a turn-back warning from 100 ([world edge](spec/world-edge.md)); and retracting
+the gear on the ground below stall speed settles the aircraft on its belly, a strong
+brake with airframe wear, while retraction at rotation speed or airborne is unchanged
+([gear on the ground](spec/gear-on-the-ground.md)). Both, like overspeed, end in the
+ordinary structural-failure or hit-point path, and a loss records its cause.
 
 ## Telemetry record
 
