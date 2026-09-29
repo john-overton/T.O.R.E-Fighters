@@ -534,7 +534,9 @@ impl Recorder {
 
     /// Opens a simulation tick: the previous frame is written, and anything
     /// noted from now on belongs to this tick. Notes that `ui` and `combat`
-    /// collected between ticks go on the previous frame first.
+    /// collected between ticks go on the previous frame first, so the live
+    /// loop calls it once the tick's commands have been applied and their
+    /// messages shown, when those notes exist.
     pub fn start_tick(
         &mut self,
         ui: Option<&mut flight_ui::FlightUi>,

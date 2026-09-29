@@ -11,13 +11,16 @@
 use crate::{
     WorldResult, ai_wings, aircraft_type, airfield_radio, combat, combat_tape, comms, crew_voice,
     mission_layout, radio_calls,
-    seats::{PlaneId, Roster, SeatCommand, SeatId, SeatInput, Slot},
+    seats::{PlaneId, Roster, SeatId, SeatInput, Slot},
     terrain,
 };
 use std::collections::BTreeMap;
 use tore_sim::models::FlightModel;
 use tore_sim::{attitude, flight};
 
+#[cfg(test)]
+mod command_tests;
+mod commands;
 #[cfg(test)]
 mod tick_tests;
 
@@ -153,6 +156,10 @@ pub enum Cue {
 #[derive(Default)]
 pub struct TickOutput {
     pub cues: Vec<Cue>,
+    /// How many of the first `cues` the command phase produced. The app runs
+    /// what belongs between the commands and the rest of the tick, such as
+    /// the mission recording's notes of them, at this point.
+    pub commanded: usize,
     /// Combat's events for the tick.
     pub events: Vec<tore_sim::combat::live::Event>,
     /// The player's weapon release sounds: the sound's name and the station.
@@ -351,14 +358,6 @@ impl World {
             .position(|cockpit| cockpit.plane == plane)
     }
 
-    /// The simulation half of the weapon selector: step the weapon selection
-    /// of the plane `seat` flies. Its NAV mode follows the arming.
-    pub fn cycle_weapon(&mut self, seat: SeatId, forward: bool) {
-        if let Some(cockpit) = self.cockpit_of(seat) {
-            self.cycle_cockpit_weapon(cockpit, forward);
-        }
-    }
-
     fn cycle_cockpit_weapon(&mut self, cockpit: usize, forward: bool) {
         self.combat.cancel();
         self.combat.command(
@@ -417,6 +416,19 @@ impl World {
     /// serve the first cockpit only (docs/ARCHITECTURE.md, "Where the code
     /// stands").
     pub fn step(&mut self, inputs: &[SeatInput], out: &mut TickOutput) -> WorldResult<()> {
+        self.step_observed(inputs, out, |_, _| Ok(()))
+    }
+
+    /// [`Self::step`], calling `commands_applied` once the command phase is
+    /// over and before the rest of the tick runs, with the world and what the
+    /// commands produced so far. A driver that reports what a command did, as
+    /// the AI probe does, reads it there; an error stops the tick.
+    pub fn step_observed(
+        &mut self,
+        inputs: &[SeatInput],
+        out: &mut TickOutput,
+        commands_applied: impl FnOnce(&mut World, &TickOutput) -> WorldResult<()>,
+    ) -> WorldResult<()> {
         *out = TickOutput::default();
         let inputs = self.cockpit_inputs(inputs)?;
         let Some(&first_input) = inputs.first() else {
@@ -426,16 +438,10 @@ impl World {
         let mut by_seat: Vec<(usize, &SeatInput)> = inputs.iter().copied().enumerate().collect();
         by_seat.sort_by_key(|(_, input)| input.seat);
         for (cockpit, input) in by_seat {
-            for &command in &input.commands {
-                match command {
-                    SeatCommand::CycleWeapon { forward } => {
-                        self.cycle_cockpit_weapon(cockpit, forward);
-                        out.cues.push(Cue::WeaponCycled);
-                    }
-                    SeatCommand::Airport(command) => self.airport_command(cockpit, command, out),
-                }
-            }
+            self.apply_seat_commands(cockpit, input, out);
         }
+        out.commanded = out.cues.len();
+        commands_applied(self, out)?;
         for (cockpit, input) in self.cockpits.iter_mut().zip(&inputs) {
             cockpit.previous_flight.clone_from(&cockpit.flight);
             cockpit

@@ -9,6 +9,7 @@
 use crate::{comms, world::AirportInput};
 use tore_sim::{
     ai::launch::{Side, WingId},
+    combat::live,
     flight::PilotInput,
 };
 
@@ -199,13 +200,43 @@ pub struct SeatInput {
     pub commands: Vec<SeatCommand>,
 }
 
-/// A command a seat gives between ticks.
+/// A command a seat gives between ticks. The step applies each one at the
+/// start of the tick, in the order given, to the plane the seat flies.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SeatCommand {
-    /// A weapon-page button: step the weapon selection forward or back.
+    /// A weapon-page button or the weapon keys: step the weapon selection
+    /// forward or back. NAV mode follows the arming.
     CycleWeapon { forward: bool },
     /// A NAV mode switch or a tower request.
     Airport(AirportInput),
+    /// A combat command exactly as combat takes it: the next, previous or
+    /// visual designation, a designation by identity from a scope click, and
+    /// the seeker mode or the release of the designation from the weapon
+    /// display.
+    Combat(live::Command),
+    /// A combat command from a key, a button or the menu: arming, the seeker
+    /// mode, clearing the designation, jettison and the range and development
+    /// commands. It lets go of the trigger first and puts the payload weight
+    /// right afterwards. Outside `--live-fire` only the arming, seeker and
+    /// designation commands take effect.
+    Manual(live::Command),
+    /// Put a new target on the range (`--live-fire` only).
+    RangeReset,
+    /// Release one chaff cartridge; refused when the aircraft is destroyed,
+    /// the pilot has ejected or it has no hit points.
+    ReleaseChaff,
+    /// Release one flare, with the same refusals as chaff.
+    ReleaseFlare,
+    /// Let go of the trigger, which many UI events do: a menu opening, a
+    /// pause, a modifier key or the window losing focus.
+    ReleaseTrigger,
+    /// The Space key. `blocked` is set when the game was paused, out of
+    /// focus or a modifier key was held: the key then only lets go.
+    TriggerKey {
+        down: bool,
+        repeat: bool,
+        blocked: bool,
+    },
 }
 
 #[cfg(test)]

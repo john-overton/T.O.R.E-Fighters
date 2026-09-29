@@ -32,6 +32,7 @@
 use super::*;
 use crate::{
     combat::fixtures,
+    seats::SeatCommand,
     test_support::{aircraft, payload, spawned, terrain as world},
 };
 use std::fmt::{self, Write as _};
@@ -209,7 +210,7 @@ const AI_ALTITUDE: f64 = 1500.;
 /// the gun's sights before each burst and an airport further on. All four AI
 /// aircraft are F/A-18D rows; the player carries the synthetic gun and missile
 /// station.
-fn mission() -> World {
+pub(super) fn mission() -> World {
     let mut terrain = world();
     terrain.airport_scene = airport();
     let mut profile = aircraft();

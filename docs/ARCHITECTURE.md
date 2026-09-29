@@ -1149,20 +1149,48 @@ flowchart TB
 
 #### Seat input
 
-The render loop builds seat 0's input from today's sources: the pilot input,
-the trigger (Space and the bound fire control), the scope controls, and every
-command that today changes combat, the airport service or the AI wings between
-ticks: weapon selection, designation, arming, seeker mode, chaff and flares,
-jettison, trigger release, weapon-page and navigation-page clicks, airport
-commands, the wing recipient and wing orders. They apply at the start of the
-next tick, in the order given. That is when they take effect today, because
-window events always arrive between frames.
+*B2 built (step 1 of 4: combat commands).* The render loop builds seat 0's input
+from today's sources: the pilot input, the trigger (Space and the bound fire
+control) and the commands given since the last tick. The app keeps them in one
+queue in the order given (`App::seat_commands`); the first tick of the next
+frame takes the whole queue, and `World::step` applies each command at the
+start of the tick to the plane the seat flies. That is when they take effect
+today, because window events always arrive between frames.
 
-Two things change timing. A command given from the menu while paused now takes
-effect on the first tick after resuming, instead of at once. And the mission
-recording must keep listing a command on the frame before the tick that applies
-it, as it does today; the step applies commands in a first phase that the
-recorder can observe before the rest of the tick runs.
+`SeatCommand` (`seats.rs`) lists them. Each is applied in
+`world/commands.rs`, in the order given, by the cockpit of the seat's plane:
+
+| Command | What the step does |
+| --- | --- |
+| `CycleWeapon` | The weapon selection steps and NAV mode follows the arming; the weapon page turns to it (`Cue::WeaponCycled`). |
+| `Airport` | A NAV mode switch or a tower request, as in B0. |
+| `Combat(command)` | Combat takes the command as it is: designation (next, previous, visual, by identity from a scope click) and the seeker mode or the designation release from the weapon display. |
+| `Manual(command)` | A key, button or menu command: arming, seeker mode, clearing the designation, jettison and the range and development commands. It lets go of the trigger, gives combat the command, and puts the payload weight right. Outside `--live-fire` only arming, seeker and designation work, and the pilot gets "Manual range command requires --live-fire". |
+| `RangeReset` | A new target on the range; "Target reset is available only with --live-fire" otherwise. |
+| `ReleaseChaff`, `ReleaseFlare` | One cartridge or flare, with the retail messages ("Chaff launched, 11 left", "Out of flares"). Refused when the aircraft is destroyed, the pilot has ejected or it has no hit points. |
+| `ReleaseTrigger` | `Combat::cancel`, which a menu opening, a pause, a modifier key or losing focus does. |
+| `TriggerKey` | The Space key going down or up, with the app's "blocked" flag (paused, out of focus or a modifier held). |
+
+The messages the commands give the pilot come back as `Cue::Message` in the
+tick's output. `TickOutput::commanded` says how many of the first cues the
+command phase made, so the app can act between the commands and the rest of
+the tick. The mission recording does: it opens the tick there
+(`Recorder::start_tick`), which first notes the commands and their messages on
+the frame before the tick, exactly where they were noted when the handlers ran
+between frames.
+`World::step_observed` also calls a closure after the command phase, for a
+driver that reports what a command did (the AI probe does).
+
+Two things change timing. A command given from the menu while paused now
+takes effect on the first tick after resuming, instead of at once. And the
+mission recording must keep listing a command on the frame before the tick that
+applies it, as it does today (done, above).
+
+*Agent decisions (B2):* a pause refuses chaff and flares in the app, since only
+the app knows about the pause. The other refusals are the tick's. The
+handlers' order is now the order given: before, weapon-page buttons ran at
+the tick and every other command ran at once, so two commands given in one
+frame could swap. The queue holds at most 256 commands.
 
 #### Combat: one ownship per human-flown aircraft
 

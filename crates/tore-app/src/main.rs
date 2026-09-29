@@ -91,6 +91,8 @@ pub(crate) use tore_world::{
 const SEAT: seats::SeatId = seats::SeatId(0);
 /// The cockpit of the plane `SEAT` flies, which the game presents.
 const OWN: usize = 0;
+/// The most commands the seat can have waiting for a tick.
+const MAX_SEAT_COMMANDS: usize = 256;
 
 use assets::Assets;
 use menu::{Action, Menu};
@@ -230,7 +232,10 @@ struct App {
     fullscreen_preference: bool,
     flight_ui: flight_ui::FlightUi,
     instruments: instruments::Instruments,
-    airport_commands: Vec<flight_ui::Command>,
+    /// The seat's commands given since the last tick, in the order given. The
+    /// next tick applies them (`World::step`), so a menu command given while
+    /// the game is paused waits for the first tick after resuming.
+    seat_commands: Vec<seats::SeatCommand>,
     theater_resources: std::collections::BTreeMap<String, Vec<u8>>,
     camera: camera::Camera,
     quick: quick_mission::QuickMission,
@@ -411,7 +416,10 @@ impl TickPresenter<'_> {
     /// native research adapter stopped the tick, which pauses the flight.
     fn present(&mut self, input: &seats::SeatInput, out: &world::TickOutput) -> bool {
         let mut weapon_cycled = false;
-        for cue in &out.cues {
+        for (index, cue) in out.cues.iter().enumerate() {
+            if index == out.commanded {
+                self.commands_applied();
+            }
             match cue {
                 world::Cue::Message(text) => self.flight_ui.message(text.clone()),
                 world::Cue::Feedback(cue) => self.input.feedback(*cue),
@@ -493,6 +501,9 @@ impl TickPresenter<'_> {
                     }
                 },
             }
+        }
+        if out.commanded >= out.cues.len() {
+            self.commands_applied();
         }
         if weapon_cycled {
             show_selected_weapon_page(self.world, self.instruments);
@@ -650,6 +661,16 @@ impl TickPresenter<'_> {
         true
     }
 
+    /// The tick's commands have been applied and their cockpit messages
+    /// shown: the mission recording notes them on the frame before the tick,
+    /// where they were given, and then opens the tick. It used to open the
+    /// tick before the step, when the commands had already been given.
+    fn commands_applied(&mut self) {
+        if let Some(recording) = &mut self.recorder {
+            recording.start_tick(Some(&mut self.flight_ui), &mut self.world.combat);
+        }
+    }
+
     /// Presentation that follows the player's flight, the weather clock and
     /// turbulence: each camera slot's weather, the view rig, blackout and
     /// redout, wing vapor and control-surface sounds.
@@ -765,6 +786,39 @@ impl App {
     }
 
     /// Restart the resolved launch environment and its authored RNG policy.
+    /// Queues a command of the seat for the next tick.
+    fn queue(&mut self, command: seats::SeatCommand) {
+        queue_command(&mut self.seat_commands, command);
+    }
+
+    /// Queues what the instrument panels asked for: weapon-page buttons and a
+    /// designation from a scope click. The simulation revalidates the
+    /// requested identity, so a click can never select a target it does not
+    /// observe.
+    fn queue_scope_commands(&mut self) {
+        for button in std::mem::take(&mut self.instruments.weapon_controls) {
+            self.queue(seats::SeatCommand::CycleWeapon {
+                forward: button == 1,
+            });
+        }
+        if let Some(id) = self.instruments.designation.take() {
+            self.queue(seats::SeatCommand::Combat(
+                tore_sim::combat::live::Command::DesignateTarget(id),
+            ));
+        }
+    }
+
+    /// Lets go of the trigger, as a menu, a pause, a modifier key or losing
+    /// focus does. In flight the next tick does it, in order with the seat's
+    /// other commands; anywhere else there is no tick to wait for.
+    fn release_trigger(&mut self) {
+        if self.screen == Screen::Flight {
+            self.queue(seats::SeatCommand::ReleaseTrigger);
+        } else {
+            self.world.combat.cancel();
+        }
+    }
+
     /// Simulation seconds of the current flight, from the fixed 120 Hz tick.
     fn sim_seconds(&self) -> f64 {
         self.world.combat.state.tick() as f64 / 120.
@@ -1208,6 +1262,7 @@ impl App {
                     let slot = slot.parse::<usize>().unwrap_or(1) - 1;
                     let button = button.parse::<usize>().unwrap_or(1) - 1;
                     if self.instruments.control(slot, button) {
+                        self.queue_scope_commands();
                         return Action::Click;
                     }
                     self.flight_ui.message("Instrument control unavailable");
@@ -1243,14 +1298,14 @@ impl App {
         }
         match command {
             Command::AirportNav => {
-                if self.airport_commands.len() < 32 {
-                    self.airport_commands.push(Command::AirportNav);
-                }
+                self.queue(seats::SeatCommand::Airport(world::AirportInput::NavMode));
                 Action::None
             }
             Command::Airport(command) => {
-                if !self.flight_ui.frozen() && self.airport_commands.len() < 32 {
-                    self.airport_commands.push(Command::Airport(command));
+                if !self.flight_ui.frozen() {
+                    self.queue(seats::SeatCommand::Airport(world::AirportInput::Command(
+                        command,
+                    )));
                 }
                 Action::None
             }
@@ -1416,114 +1471,45 @@ impl App {
                 Action::None
             }
             Command::Combat(command) => {
-                if self.world.combat.range
-                    || matches!(
-                        command,
-                        tore_sim::combat::live::Command::ToggleArm
-                            | tore_sim::combat::live::Command::ClearDesignation
-                            | tore_sim::combat::live::Command::ToggleSeekerMode
-                    )
-                {
-                    self.world.combat.cancel();
-                    self.world
-                        .combat
-                        .command(command, combat::launcher(&self.world.cockpits[OWN].flight));
-                    // Range commands can replace targets or launch a round now.
-                    if self.world.combat.range {
-                        self.world.combat.refresh_render(
-                            &self.world.cockpits[OWN].flight,
-                            self.world.ai_wings.as_ref(),
-                        );
-                    }
-                    let flight = &mut self.world.cockpits[OWN].flight;
-                    if let Err(error) = flight.set_payload(
-                        (self.world.combat.state.payload_lbs()
-                            - flight.systems.used_external_lbs())
-                        .max(0.),
-                    ) {
-                        self.flight_ui.message(error.to_string());
-                    }
-                } else {
-                    self.flight_ui
-                        .message("Manual range command requires --live-fire");
-                }
+                self.queue(seats::SeatCommand::Manual(command));
                 Action::None
             }
             Command::Chaff | Command::Flare => {
-                use tore_sim::combat::live::Command as Live;
-                let launcher = combat::launcher(&self.world.cockpits[OWN].flight);
-                if self.flight_ui.frozen()
-                    || !launcher.alive
-                    || self.world.cockpits[OWN].flight.escape.is_some()
-                    || self.world.combat.state.player_hp <= 0
-                {
-                    return Action::None;
-                }
-                let chaff = command == Command::Chaff;
-                let count = |state: &tore_sim::combat::live::State| {
-                    if chaff { state.chaff } else { state.flares }
-                };
-                let before = count(&self.world.combat.state);
-                self.world.combat.command(
-                    if chaff {
-                        Live::ReleaseChaff
+                // A paused game releases nothing. The rest of the refusals
+                // (destroyed, ejected, no hit points) are the tick's.
+                if !self.flight_ui.frozen() {
+                    self.queue(if command == Command::Chaff {
+                        seats::SeatCommand::ReleaseChaff
                     } else {
-                        Live::ReleaseFlare
-                    },
-                    launcher,
-                );
-                // The retail cockpit messages, FA.EXE string table.
-                let after = count(&self.world.combat.state);
-                self.flight_ui.message(match (chaff, before) {
-                    (true, 0) => "Out of chaff".to_string(),
-                    (false, 0) => "Out of flares".to_string(),
-                    (true, _) => format!("Chaff launched, {after} left"),
-                    (false, _) => format!("Flare launched, {after} left"),
-                });
+                        seats::SeatCommand::ReleaseFlare
+                    });
+                }
                 Action::None
             }
             Command::NextWeapon | Command::PreviousWeapon => {
-                cycle_player_weapon(
-                    &mut self.world,
-                    &mut self.instruments,
-                    command == Command::NextWeapon,
-                );
+                self.queue(seats::SeatCommand::CycleWeapon {
+                    forward: command == Command::NextWeapon,
+                });
                 Action::None
             }
             Command::Target | Command::TargetPrevious | Command::TargetVisual => {
                 use tore_sim::combat::live::Command as Live;
-                self.world.combat.command(
-                    match command {
-                        Command::Target => Live::Designate,
-                        Command::TargetPrevious => Live::DesignatePrevious,
-                        _ => Live::DesignateVisual,
-                    },
-                    combat::launcher(&self.world.cockpits[OWN].flight),
-                );
+                self.queue(seats::SeatCommand::Combat(match command {
+                    Command::Target => Live::Designate,
+                    Command::TargetPrevious => Live::DesignatePrevious,
+                    _ => Live::DesignateVisual,
+                }));
                 Action::None
             }
             Command::RangeReset => {
-                if self.world.combat.range {
-                    self.world.combat.cancel();
-                    self.world.combat.command(
-                        tore_sim::combat::live::Command::ReplaceTarget,
-                        combat::launcher(&self.world.cockpits[OWN].flight),
-                    );
-                    self.world.combat.refresh_render(
-                        &self.world.cockpits[OWN].flight,
-                        self.world.ai_wings.as_ref(),
-                    );
-                } else {
-                    self.flight_ui
-                        .message("Target reset is available only with --live-fire");
-                }
+                self.queue(seats::SeatCommand::RangeReset);
                 Action::None
             }
             Command::SoundOpen => {
                 self.flight_ui.menu = true;
                 self.input.context(true, self.focused);
                 self.camera.keys.clear();
-                self.world.combat.cancel();
+                self.release_trigger();
                 self.flight_clock.remainder = 0.;
                 self.open_sound(true);
                 Action::Click
@@ -1532,7 +1518,7 @@ impl App {
                 self.flight_ui.menu = true;
                 self.input.context(true, self.focused);
                 self.camera.keys.clear();
-                self.world.combat.cancel();
+                self.release_trigger();
                 self.flight_clock.remainder = 0.;
                 self.open_graphics("Flight paused");
                 Action::Click
@@ -1541,7 +1527,7 @@ impl App {
                 self.flight_ui.menu = true;
                 self.input.context(true, self.focused);
                 self.camera.keys.clear();
-                self.world.combat.cancel();
+                self.release_trigger();
                 self.flight_clock.remainder = 0.;
                 self.open_controls("Flight paused");
                 Action::Click
@@ -1582,6 +1568,7 @@ impl App {
             }
             Command::InstrumentControl(button) => {
                 if self.instruments.control(self.instruments.selected, button) {
+                    self.queue_scope_commands();
                     Action::Click
                 } else {
                     self.flight_ui.message("Instrument control unavailable");
@@ -2270,7 +2257,7 @@ impl App {
                         }
                     }
                 }
-                self.airport_commands.clear();
+                self.seat_commands.clear();
                 self.instruments.navigation = navigation::Navigation::default();
                 self.wing_recipient = None;
                 match restarted_flight.ai_aircraft {
@@ -2716,10 +2703,11 @@ impl App {
         }
         if self.screen == Screen::Flight && name == "Space" {
             let blocked = self.flight_ui.frozen() || !self.focused || !self.modifiers.is_empty();
-            self.world
-                .combat
-                .input
-                .space(event.pressed, event.repeat, blocked);
+            self.queue(seats::SeatCommand::TriggerKey {
+                down: event.pressed,
+                repeat: event.repeat,
+                blocked,
+            });
             if !self.flight_ui.menu {
                 return Action::None;
             }
@@ -2753,12 +2741,12 @@ impl App {
             if self.flight_ui.map.open != map_before {
                 self.flight_ui.map.cancel_press();
                 self.camera.keys.clear();
-                self.world.combat.cancel();
+                self.release_trigger();
                 self.instruments.cancel_press();
             }
             if self.flight_ui.frozen() || before != self.flight_ui.frozen() {
                 self.camera.keys.clear();
-                self.world.combat.cancel();
+                self.release_trigger();
                 self.instruments.cancel_press();
                 self.flight_clock.remainder = 0.;
                 let own = &mut self.world.cockpits[OWN];
@@ -2996,7 +2984,7 @@ impl ApplicationHandler for App {
                 self.pointer = None;
                 self.live_debug.release();
                 self.camera.keys.clear();
-                self.world.combat.cancel();
+                self.release_trigger();
                 self.modifiers = ModifiersState::empty();
                 Action::None
             }
@@ -3128,7 +3116,7 @@ impl ApplicationHandler for App {
                 self.pointer = None;
                 self.live_debug.release();
                 self.camera.keys.clear();
-                self.world.combat.cancel();
+                self.release_trigger();
                 self.modifiers = ModifiersState::empty();
                 Action::None
             }
@@ -3266,7 +3254,7 @@ impl ApplicationHandler for App {
                         state == ElementState::Pressed,
                     );
                     self.camera.keys.clear();
-                    self.world.combat.cancel();
+                    self.release_trigger();
                     self.frame_time = Instant::now();
                     self.flight_command(command)
                 } else if self.screen == Screen::Flight
@@ -3282,21 +3270,23 @@ impl ApplicationHandler for App {
                     })
                 {
                     if state == ElementState::Pressed {
-                        self.world.combat.command(
-                            if self.pointer.is_some_and(|p| {
-                                weapon_hud::release_hit(
-                                    p,
-                                    [
-                                        f64::from(renderer.window.inner_size().width),
-                                        f64::from(renderer.window.inner_size().height),
-                                    ],
-                                )
-                            }) {
-                                tore_sim::combat::live::Command::ClearDesignation
-                            } else {
-                                tore_sim::combat::live::Command::ToggleSeekerMode
-                            },
-                            combat::launcher(&self.world.cockpits[OWN].flight),
+                        queue_command(
+                            &mut self.seat_commands,
+                            seats::SeatCommand::Combat(
+                                if self.pointer.is_some_and(|p| {
+                                    weapon_hud::release_hit(
+                                        p,
+                                        [
+                                            f64::from(renderer.window.inner_size().width),
+                                            f64::from(renderer.window.inner_size().height),
+                                        ],
+                                    )
+                                }) {
+                                    tore_sim::combat::live::Command::ClearDesignation
+                                } else {
+                                    tore_sim::combat::live::Command::ToggleSeekerMode
+                                },
+                            ),
                         );
                     }
                     Action::Click
@@ -3309,14 +3299,7 @@ impl ApplicationHandler for App {
                         ],
                         state == ElementState::Pressed,
                     );
-                    // The simulation revalidates the requested identity, so a
-                    // click can never select a target it does not observe.
-                    if let Some(id) = self.instruments.designation.take() {
-                        self.world.combat.command(
-                            tore_sim::combat::live::Command::DesignateTarget(id),
-                            combat::launcher(&self.world.cockpits[OWN].flight),
-                        );
-                    }
+                    self.queue_scope_commands();
                     if hit { Action::Click } else { Action::None }
                 } else if self.screen == Screen::Viewer {
                     Action::None
@@ -3336,7 +3319,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 if !modifiers.state().is_empty() {
-                    self.world.combat.cancel();
+                    self.release_trigger();
                 }
                 if self.screen == Screen::Flight {
                     look::modifiers_changed(&mut self.camera.keys, modifiers.state());
@@ -3437,10 +3420,6 @@ impl ApplicationHandler for App {
                         }
                         let mut output = world::TickOutput::default();
                         for _ in 0..steps {
-                            if let Some(recording) = &mut self.replay_recorder {
-                                recording
-                                    .start_tick(Some(&mut self.flight_ui), &mut self.world.combat);
-                            }
                             // Navigation-page clicks become airport commands,
                             // from the state at the start of the tick.
                             self.instruments.navigation.refresh(
@@ -3450,9 +3429,12 @@ impl ApplicationHandler for App {
                             );
                             for button in std::mem::take(&mut self.instruments.navigation.pending) {
                                 if let Some(id) = self.instruments.navigation.control(button) {
-                                    self.airport_commands.push(flight_ui::Command::Airport(
-                                        tore_sim::airport::Command::SelectAirport(id),
-                                    ));
+                                    queue_command(
+                                        &mut self.seat_commands,
+                                        seats::SeatCommand::Airport(world::AirportInput::Command(
+                                            tore_sim::airport::Command::SelectAirport(id),
+                                        )),
+                                    );
                                 }
                             }
                             let (pilot, _) = self
@@ -3470,27 +3452,8 @@ impl ApplicationHandler for App {
                                     return;
                                 }
                             }
-                            // Weapon-page buttons first, then airport commands,
-                            // each in the order given.
-                            let commands = std::mem::take(&mut self.instruments.weapon_controls)
-                                .into_iter()
-                                .map(|button| seats::SeatCommand::CycleWeapon {
-                                    forward: button == 1,
-                                })
-                                .chain(std::mem::take(&mut self.airport_commands).into_iter().map(
-                                    |command| {
-                                        seats::SeatCommand::Airport(match command {
-                                            flight_ui::Command::AirportNav => {
-                                                world::AirportInput::NavMode
-                                            }
-                                            flight_ui::Command::Airport(command) => {
-                                                world::AirportInput::Command(command)
-                                            }
-                                            _ => unreachable!("only airport commands are queued"),
-                                        })
-                                    },
-                                ))
-                                .collect();
+                            // The commands given since the last tick, in order.
+                            let commands = std::mem::take(&mut self.seat_commands);
                             let input = seats::SeatInput {
                                 seat: SEAT,
                                 tick: self.world.tick(),
@@ -4358,7 +4321,7 @@ impl ApplicationHandler for App {
                 self.flight_ui
                     .message("Active controller disconnected; resume explicitly");
                 self.camera.keys.clear();
-                self.world.combat.cancel();
+                self.release_trigger();
                 self.input.context(true, self.focused);
                 self.flight_clock.remainder = 0.;
                 self.frame_time = Instant::now();
@@ -4391,7 +4354,7 @@ impl ApplicationHandler for App {
                     self.action(event_loop, result);
                     if was_frozen != self.flight_ui.frozen() {
                         self.camera.keys.clear();
-                        self.world.combat.cancel();
+                        self.release_trigger();
                         self.flight_clock.remainder = 0.;
                         let own = &mut self.world.cockpits[OWN];
                         own.previous_flight.clone_from(&own.flight);
@@ -5047,6 +5010,22 @@ const PROBE_LOCK_TICKS: u64 = 240;
 /// The scripted leader fires the gun with the target this close to the pipper.
 const PROBE_PIPPER_DEG: f64 = 2.;
 
+/// Adds a command to the seat's queue, unless the queue is full.
+fn queue_command(queue: &mut Vec<seats::SeatCommand>, command: seats::SeatCommand) {
+    if queue.len() < MAX_SEAT_COMMANDS {
+        queue.push(command);
+    }
+}
+
+/// The Space key going down or up, as the probe's leader presses it.
+fn trigger_key(down: bool) -> seats::SeatCommand {
+    seats::SeatCommand::TriggerKey {
+        down,
+        repeat: false,
+        blocked: false,
+    }
+}
+
 /// The scripted leader's own weapons for `--probe-attack`, and what the probe
 /// reports about the fight that follows.
 ///
@@ -5076,6 +5055,9 @@ struct ProbeAttacker {
     waiting: Option<(usize, u64)>,
     /// A missile press, released on the next tick.
     pressed: bool,
+    /// The station the leader has just stepped toward, and the contact's range,
+    /// to report once the step has applied the command.
+    selecting: Option<(usize, f64)>,
     /// First tick of the gun burst in progress.
     burst: Option<u64>,
     /// The leader's scope clicks, `]` presses, trigger presses, missiles,
@@ -5145,6 +5127,7 @@ impl ProbeAttacker {
             force_guns,
             waiting: None,
             pressed: false,
+            selecting: None,
             burst: None,
             clicks: 0,
             steps: 0,
@@ -5163,18 +5146,19 @@ impl ProbeAttacker {
         }
     }
 
-    /// The player's controls for this tick, applied before it as key and
-    /// mouse input is. One control per tick.
+    /// The player's controls for this tick, queued as seat commands the way a
+    /// key or a mouse click queues them. One control per tick.
     fn aim(
         &mut self,
         tick: u64,
-        combat: &mut combat::Combat,
+        combat: &combat::Combat,
         flight: &flight::State,
         bridge: &ai_wings::AiWings,
+        commands: &mut Vec<seats::SeatCommand>,
     ) {
         use tore_sim::combat::live::{Command, Readiness, is_gun};
         if std::mem::take(&mut self.pressed) {
-            combat.input.space(false, false, false);
+            commands.push(trigger_key(false));
         }
         if self.next.is_none_or(|next| tick < next) {
             return;
@@ -5185,7 +5169,7 @@ impl ProbeAttacker {
             || flight.systems.pilot.dead
             || combat.state.player_hp <= 0
         {
-            self.end_burst(tick, combat);
+            self.end_burst(tick, commands);
             return;
         }
         let seconds = tick as f64 / 120.;
@@ -5212,15 +5196,15 @@ impl ProbeAttacker {
                 })
                 .map(|c| (c.id, c.distance_ft));
             let Some((id, range)) = nearest else {
-                self.end_burst(tick, combat);
+                self.end_burst(tick, commands);
                 return;
             };
             self.fresh = false;
             if current != Some(id) {
-                self.end_burst(tick, combat);
+                self.end_burst(tick, commands);
                 self.guns = self.force_guns;
                 self.waiting = None;
-                combat.command(Command::DesignateTarget(id), launcher);
+                commands.push(seats::SeatCommand::Combat(Command::DesignateTarget(id)));
                 self.clicks += 1;
                 println!(
                     "t={tick} ({seconds:.1}s) attack: designates {} at {range:.0} ft",
@@ -5246,22 +5230,15 @@ impl ProbeAttacker {
                 .or_else(|| probe_station(&combat.state, range, false))
         };
         let Some(station) = station else {
-            self.end_burst(tick, combat);
+            self.end_burst(tick, commands);
             return;
         };
         if !combat.state.armed || combat.state.selected != station {
-            self.end_burst(tick, combat);
-            combat.cancel();
-            combat.command(Command::NextSelection, launcher);
+            self.end_burst(tick, commands);
+            commands.push(seats::SeatCommand::CycleWeapon { forward: true });
             self.steps += 1;
-            if combat.state.armed && combat.state.selected == station {
-                println!(
-                    "t={tick} ({seconds:.1}s) attack: selects {} at {range:.0} ft",
-                    combat.state.configuration().stations[station]
-                        .weapon
-                        .hud_name
-                );
-            }
+            // Reported once the command has run: see `commands_applied`.
+            self.selecting = Some((station, range));
             return;
         }
         let ready = combat.state.release_readiness == Readiness::Ready;
@@ -5269,12 +5246,12 @@ impl ProbeAttacker {
             let on = ready && probe_on_pipper(&combat.state, &launcher, station, &contact);
             match self.burst {
                 Some(from) if !on || tick - from >= PROBE_BURST_TICKS => {
-                    self.end_burst(tick, combat);
+                    self.end_burst(tick, commands);
                 }
                 Some(_) => {}
                 None if on => {
-                    combat.input.space(false, false, false);
-                    combat.input.space(true, false, false);
+                    commands.push(trigger_key(false));
+                    commands.push(trigger_key(true));
                     self.burst = Some(tick);
                     self.presses += 1;
                     println!(
@@ -5285,8 +5262,8 @@ impl ProbeAttacker {
                 None => {}
             }
         } else if ready {
-            combat.input.space(false, false, false);
-            combat.input.space(true, false, false);
+            commands.push(trigger_key(false));
+            commands.push(trigger_key(true));
             self.pressed = true;
             self.presses += 1;
         } else {
@@ -5313,10 +5290,26 @@ impl ProbeAttacker {
         }
     }
 
+    /// Reports a weapon selection once the step has applied it.
+    fn commands_applied(&mut self, tick: u64, combat: &combat::Combat) {
+        let Some((station, range)) = self.selecting.take() else {
+            return;
+        };
+        if combat.state.armed && combat.state.selected == station {
+            println!(
+                "t={tick} ({:.1}s) attack: selects {} at {range:.0} ft",
+                tick as f64 / 120.,
+                combat.state.configuration().stations[station]
+                    .weapon
+                    .hud_name
+            );
+        }
+    }
+
     /// Release a gun burst in progress; the burst counts as this attack's shot.
-    fn end_burst(&mut self, tick: u64, combat: &mut combat::Combat) {
+    fn end_burst(&mut self, tick: u64, commands: &mut Vec<seats::SeatCommand>) {
         if self.burst.take().is_some() {
-            combat.input.space(false, false, false);
+            commands.push(trigger_key(false));
             self.bursts += 1;
             self.shot(tick);
         }
@@ -5546,6 +5539,49 @@ fn probe_label(bridge: &ai_wings::AiWings, id: u32) -> String {
 
 /// Deterministic test projectile, using the selected aircraft's imported gun.
 /// AAA is a stationary ground-source firing fixture, not a ground AI actor.
+/// The wing orders the probe's script gives at `tick`, given to the wing as
+/// the player's Alt-key orders are, after the tick's commands.
+fn probe_orders(
+    tick: u64,
+    script: &ProbeScript,
+    mission: &mut world::World,
+) -> tore_world::WorldResult<()> {
+    for (at, order) in &script.orders {
+        if *at != tick {
+            continue;
+        }
+        let site = if *order == tore_sim::ai::wing::PlayerOrder::LandAtSelected {
+            match ai_wings::AiWings::landing_site(
+                &mission.terrain.airport_scene,
+                &mission.terrain.airfield_anchors,
+                &mission.cockpits[OWN].airport_service,
+            ) {
+                Ok(site) => Some(site),
+                Err(message) => {
+                    println!("t={tick} order={order:?} refused: {message}");
+                    // Journal only: refused before the wing saw it.
+                    mission.comms.record(comms::journal::Entry::order_refused(
+                        mission.combat.state.tick() as f64 / 120.,
+                        *order,
+                        message,
+                    ));
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
+        let report = mission.ai_wings.as_mut().expect(PROBE_BRIDGE).command_at(
+            *order,
+            mission.combat.state.designated(),
+            None,
+            site.as_ref(),
+        )?;
+        println!("t={tick} order={order:?} reply={:?}", report.message);
+    }
+    Ok(())
+}
+
 fn inject_probe_threat(
     kind: ProbeThreat,
     ordinal: usize,
@@ -6037,46 +6073,15 @@ fn ai_probe_run(
                 script,
             );
         }
+        let mut commands = Vec::new();
         if let Some(attacker) = &mut attacker {
             attacker.aim(
                 tick,
-                &mut mission.combat,
+                &mission.combat,
                 &mission.cockpits[OWN].flight,
                 mission.ai_wings.as_ref().expect(PROBE_BRIDGE),
+                &mut commands,
             );
-        }
-        for (at, order) in &script.orders {
-            if *at != tick {
-                continue;
-            }
-            let site = if *order == tore_sim::ai::wing::PlayerOrder::LandAtSelected {
-                match ai_wings::AiWings::landing_site(
-                    &mission.terrain.airport_scene,
-                    &mission.terrain.airfield_anchors,
-                    &mission.cockpits[OWN].airport_service,
-                ) {
-                    Ok(site) => Some(site),
-                    Err(message) => {
-                        println!("t={tick} order={order:?} refused: {message}");
-                        // Journal only: refused before the wing saw it.
-                        mission.comms.record(comms::journal::Entry::order_refused(
-                            mission.combat.state.tick() as f64 / 120.,
-                            *order,
-                            message,
-                        ));
-                        continue;
-                    }
-                }
-            } else {
-                None
-            };
-            let report = mission.ai_wings.as_mut().expect(PROBE_BRIDGE).command_at(
-                *order,
-                mission.combat.state.designated(),
-                None,
-                site.as_ref(),
-            )?;
-            println!("t={tick} order={order:?} reply={:?}", report.message);
         }
         for (ordinal, (_, threat)) in script
             .threats
@@ -6108,9 +6113,16 @@ fn ai_probe_run(
             seat: SEAT,
             tick: mission.tick(),
             pilot: keys,
+            commands,
             ..Default::default()
         };
-        let stepped = mission.step(std::slice::from_ref(&input), &mut output);
+        let stepped =
+            mission.step_observed(std::slice::from_ref(&input), &mut output, |world, _| {
+                if let Some(attacker) = &mut attacker {
+                    attacker.commands_applied(tick, &world.combat);
+                }
+                probe_orders(tick, script, world)
+            });
         if let Some(wings) = &mut mission.ai_wings {
             formation_trace::drain(&mut formation_trace, wings);
         }
@@ -10393,7 +10405,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         },
         pointer: None,
         theater_resources,
-        airport_commands: Vec::new(),
+        seat_commands: Vec::new(),
         camera,
         quick,
         screen: initial_screen,
@@ -10627,15 +10639,6 @@ fn flight_key(physical: winit::keyboard::PhysicalKey, fallback: &str) -> String 
         .into();
     }
     fallback.into()
-}
-
-fn cycle_player_weapon(
-    world: &mut world::World,
-    instruments: &mut instruments::Instruments,
-    forward: bool,
-) {
-    world.cycle_weapon(SEAT, forward);
-    show_selected_weapon_page(world, instruments);
 }
 
 /// Turns the weapon page to the selected weapon.
