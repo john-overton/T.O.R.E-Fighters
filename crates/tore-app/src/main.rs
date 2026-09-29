@@ -260,7 +260,6 @@ struct App {
     formation_trace: Option<formation_trace::FormationTrace>,
     menu: Menu,
     audio: Option<audio::Audio>,
-    wing_recipient: Option<u8>,
     renderer: Option<Renderer>,
     /// Graphics choices for the 3D view, applied to the renderer.
     graphics: graphics::Options,
@@ -435,6 +434,11 @@ impl TickPresenter<'_> {
                     }
                 }
                 world::Cue::WeaponCycled => weapon_cycled = true,
+                world::Cue::OrderVoice(stems) => {
+                    if let Some(audio) = self.audio {
+                        audio.radio(stems, true);
+                    }
+                }
                 world::Cue::Flown => self.flown(),
                 world::Cue::CombatStepped => {
                     let before = &self.world.cockpits[OWN].previous_flight;
@@ -788,7 +792,6 @@ impl App {
         Ok(())
     }
 
-    /// Restart the resolved launch environment and its authored RNG policy.
     /// Queues a command of the seat for the next tick.
     fn queue(&mut self, command: seats::SeatCommand) {
         queue_command(&mut self.seat_commands, command);
@@ -820,11 +823,6 @@ impl App {
         } else {
             self.world.combat.cancel();
         }
-    }
-
-    /// Simulation seconds of the current flight, from the fixed 120 Hz tick.
-    fn sim_seconds(&self) -> f64 {
-        self.world.combat.state.tick() as f64 / 120.
     }
 
     /// Seed after the final launch position is set, so no trail crosses a teleport.
@@ -1314,7 +1312,7 @@ impl App {
             }
             Command::WingRecipient(recipient) => {
                 if !self.flight_ui.frozen() {
-                    self.wing_recipient = recipient;
+                    self.queue(seats::SeatCommand::WingRecipient(recipient));
                     self.flight_ui.message(recipient.map_or_else(
                         || "Orders address all wingmen".to_owned(),
                         |n| format!("Orders address wingman {n}"),
@@ -1322,92 +1320,17 @@ impl App {
                 }
                 Action::None
             }
-            Command::WingFormationCycle => match &self.world.ai_wings {
-                Some(wings) => {
-                    let next = wings.next_formation(self.wing_recipient);
-                    self.flight_command(Command::Wing(tore_sim::ai::wing::PlayerOrder::Formation(
-                        next,
-                    )))
-                }
-                None => {
+            Command::WingFormationCycle => {
+                if self.world.ai_wings.is_none() {
                     self.flight_ui.message("Wing order unavailable: no AI wing");
-                    Action::None
+                } else if !self.flight_ui.frozen() {
+                    self.queue(seats::SeatCommand::WingFormationCycle);
                 }
-            },
+                Action::None
+            }
             Command::Wing(order) => {
-                if self.flight_ui.frozen() {
-                    return Action::None;
-                }
-                let selected = self.world.combat.state.designated();
-                // Land at selected airport uses the airport Shift-N selected
-                // for the tower.
-                let site = if order == tore_sim::ai::wing::PlayerOrder::LandAtSelected {
-                    match ai_wings::AiWings::landing_site(
-                        &self.world.terrain.airport_scene,
-                        &self.world.terrain.airfield_anchors,
-                        &self.world.cockpits[OWN].airport_service,
-                    ) {
-                        Ok(site) => Some(site),
-                        Err(message) if self.world.ai_wings.is_some() => {
-                            // Journal only: refused before the wing saw it.
-                            self.world
-                                .comms
-                                .record(comms::journal::Entry::order_refused(
-                                    self.sim_seconds(),
-                                    order,
-                                    message.clone(),
-                                ));
-                            self.flight_ui.message(message);
-                            return Action::None;
-                        }
-                        Err(_) => None,
-                    }
-                } else {
-                    None
-                };
-                let result = self.world.ai_wings.as_mut().map(|bridge| {
-                    bridge.command_at(order, selected, self.wing_recipient, site.as_ref())
-                });
-                match result {
-                    Some(Ok(report)) => {
-                        if let Some(audio) = &self.audio {
-                            audio.radio(&report.radio, true);
-                            // Journal only: the order voice cut off the wing
-                            // lines the mixer was still playing.
-                            self.world.comms.cut_off(
-                                seats::SeatId::default(),
-                                self.sim_seconds(),
-                                comms::journal::Reason::OrderVoice,
-                            );
-                        }
-                        if !report.radio.is_empty() {
-                            self.world
-                                .comms
-                                .spoken(seats::SeatId::default(), self.sim_seconds());
-                        }
-                        self.flight_ui.message(report.message);
-                    }
-                    Some(Err(error)) => {
-                        self.world
-                            .comms
-                            .record(comms::journal::Entry::order_refused(
-                                self.sim_seconds(),
-                                order,
-                                error.to_string(),
-                            ));
-                        self.flight_ui.message(error.to_string());
-                    }
-                    None => {
-                        let message = "Wing order unavailable: no AI wing";
-                        self.world
-                            .comms
-                            .record(comms::journal::Entry::order_refused(
-                                self.sim_seconds(),
-                                order,
-                                message,
-                            ));
-                        self.flight_ui.message(message);
-                    }
+                if !self.flight_ui.frozen() {
+                    self.queue(seats::SeatCommand::WingOrder(order));
                 }
                 Action::None
             }
@@ -2262,7 +2185,6 @@ impl App {
                 self.seat_commands.clear();
                 self.cheats_sent = None;
                 self.instruments.navigation = navigation::Navigation::default();
-                self.wing_recipient = None;
                 match restarted_flight.ai_aircraft {
                     Some(0) => self
                         .flight_ui
@@ -2334,7 +2256,7 @@ impl App {
                 }
                 self.world.ai_wings = None;
                 self.formation_trace = None;
-                self.wing_recipient = None;
+                self.world.roster.set_wing_recipient(SEAT, None);
                 self.world.combat.ai_poses = false;
                 if let Err(e) = self.finish_combat_tape() {
                     self.error = Some(e);
@@ -5042,8 +4964,8 @@ fn trigger_key(down: bool) -> seats::SeatCommand {
 /// reports about the fight that follows.
 ///
 /// `fitted` test harness (agent decision, 2026-09-26), not game behaviour. The
-/// leader uses only the player's own controls, applied between ticks as key and
-/// mouse input is: a scope click designates the nearest hostile aircraft among
+/// leader uses only the player's own controls, queued as seat commands the way
+/// key and mouse input is: a scope click designates the nearest hostile aircraft among
 /// the player's current sensor contacts, `]` steps through NAV and the
 /// stations to the chosen weapon, and Space fires. Rule: the weapon is the
 /// longest-reaching air-to-air store (missile or gun) whose employment zone
@@ -5551,49 +5473,6 @@ fn probe_label(bridge: &ai_wings::AiWings, id: u32) -> String {
 
 /// Deterministic test projectile, using the selected aircraft's imported gun.
 /// AAA is a stationary ground-source firing fixture, not a ground AI actor.
-/// The wing orders the probe's script gives at `tick`, given to the wing as
-/// the player's Alt-key orders are, after the tick's commands.
-fn probe_orders(
-    tick: u64,
-    script: &ProbeScript,
-    mission: &mut world::World,
-) -> tore_world::WorldResult<()> {
-    for (at, order) in &script.orders {
-        if *at != tick {
-            continue;
-        }
-        let site = if *order == tore_sim::ai::wing::PlayerOrder::LandAtSelected {
-            match ai_wings::AiWings::landing_site(
-                &mission.terrain.airport_scene,
-                &mission.terrain.airfield_anchors,
-                &mission.cockpits[OWN].airport_service,
-            ) {
-                Ok(site) => Some(site),
-                Err(message) => {
-                    println!("t={tick} order={order:?} refused: {message}");
-                    // Journal only: refused before the wing saw it.
-                    mission.comms.record(comms::journal::Entry::order_refused(
-                        mission.combat.state.tick() as f64 / 120.,
-                        *order,
-                        message,
-                    ));
-                    continue;
-                }
-            }
-        } else {
-            None
-        };
-        let report = mission.ai_wings.as_mut().expect(PROBE_BRIDGE).command_at(
-            *order,
-            mission.combat.state.designated(),
-            None,
-            site.as_ref(),
-        )?;
-        println!("t={tick} order={order:?} reply={:?}", report.message);
-    }
-    Ok(())
-}
-
 fn inject_probe_threat(
     kind: ProbeThreat,
     ordinal: usize,
@@ -6058,6 +5937,7 @@ fn ai_probe_run(
         wing_status: Default::default(),
         radio,
         phrases,
+        order_call: world::OrderCall::Silent,
         // The probe builds its own mission; only a restart reads the setup,
         // and the tick reads whether there is a mission for its result calls.
         setup: world::Setup {
@@ -6095,6 +5975,14 @@ fn ai_probe_run(
                 &mut commands,
             );
         }
+        // The script's wing orders, given after the leader's own controls.
+        commands.extend(
+            script
+                .orders
+                .iter()
+                .filter(|(at, _)| *at == tick)
+                .map(|(_, order)| seats::SeatCommand::WingOrder(*order)),
+        );
         for (ordinal, (_, threat)) in script
             .threats
             .iter()
@@ -6129,11 +6017,26 @@ fn ai_probe_run(
             ..Default::default()
         };
         let stepped =
-            mission.step_observed(std::slice::from_ref(&input), &mut output, |world, _| {
+            mission.step_observed(std::slice::from_ref(&input), &mut output, |world, out| {
                 if let Some(attacker) = &mut attacker {
                     attacker.commands_applied(tick, &world.combat);
                 }
-                probe_orders(tick, script, world)
+                // What became of the script's wing orders.
+                for reply in &out.orders {
+                    let order = reply.order;
+                    match &reply.outcome {
+                        world::OrderOutcome::Given { message } => {
+                            println!("t={tick} order={order:?} reply={message:?}");
+                        }
+                        world::OrderOutcome::Refused { message } => {
+                            println!("t={tick} order={order:?} refused: {message}");
+                        }
+                        world::OrderOutcome::Failed { message } => {
+                            return Err(message.clone().into());
+                        }
+                    }
+                }
+                Ok(())
             });
         if let Some(wings) = &mut mission.ai_wings {
             formation_trace::drain(&mut formation_trace, wings);
@@ -10326,6 +10229,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             ai: None,
         },
         phrases: comms::phrases(&theater_resources),
+        order_call: if audio.is_some() {
+            world::OrderCall::Heard
+        } else {
+            world::OrderCall::Spoken
+        },
         roster: seats::Roster::single_player(comms::crew(&hornet.profile), []),
         cockpits: vec![world::Cockpit {
             plane: seats::PlaneId(0),
@@ -10428,7 +10336,6 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         formation_trace: None,
         menu,
         audio,
-        wing_recipient: None,
         renderer: None,
         modifiers: ModifiersState::empty(),
         smoke_test,

@@ -9,6 +9,7 @@
 use crate::{comms, world::AirportInput};
 use tore_sim::{
     ai::launch::{Side, WingId},
+    ai::wing::PlayerOrder,
     combat::live,
     flight::PilotInput,
 };
@@ -71,6 +72,8 @@ pub struct Seat {
     /// Who the radio calls the crew of the seat's plane, when its type has a
     /// second seat.
     pub crew: Option<comms::Crew>,
+    /// The wingman the seat's orders address, `None` for the whole wing.
+    pub wing_recipient: Option<u8>,
 }
 
 /// Every plane of the mission with its pilot, in plane id order, and every
@@ -111,6 +114,7 @@ impl Roster {
                 id: seat,
                 plane: Some(PlaneId(0)),
                 crew,
+                wing_recipient: None,
             }],
         }
     }
@@ -135,6 +139,7 @@ impl Roster {
                 id: seat,
                 plane: Some(id),
                 crew,
+                wing_recipient: None,
             });
         }
         planes.extend(ai.into_iter().map(|(id, slot)| Plane {
@@ -174,6 +179,14 @@ impl Roster {
 
     pub fn seat(&self, id: SeatId) -> Option<&Seat> {
         self.seats.iter().find(|seat| seat.id == id)
+    }
+
+    /// Chooses the wingman the seat's orders address; `None` is the whole
+    /// wing.
+    pub fn set_wing_recipient(&mut self, id: SeatId, recipient: Option<u8>) {
+        if let Some(seat) = self.seats.iter_mut().find(|seat| seat.id == id) {
+            seat.wing_recipient = recipient;
+        }
     }
 
     /// The seat flying `plane`, if a human flies it.
@@ -236,6 +249,13 @@ pub enum SeatCommand {
     ReleaseTrigger,
     /// Toggle radio silence, which holds back the wing and crew calls.
     RadioSilence,
+    /// Choose the wingman the seat's orders address (`None`: the whole wing).
+    WingRecipient(Option<u8>),
+    /// An Alt-key order to the seat's wing, addressed to the wingman the seat
+    /// chose, or to all of them.
+    WingOrder(PlayerOrder),
+    /// Alt-T: order the wing into the formation after the one it flies.
+    WingFormationCycle,
     /// The Space key. `blocked` is set when the game was paused, out of
     /// focus or a modifier key was held: the key then only lets go.
     TriggerKey {

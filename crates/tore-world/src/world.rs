@@ -21,7 +21,7 @@ use tore_sim::{attitude, flight};
 #[cfg(test)]
 mod command_tests;
 mod commands;
-pub use commands::{MissionCommand, Settings};
+pub use commands::{MissionCommand, OrderCall, OrderOutcome, OrderReply, Settings};
 #[cfg(test)]
 mod tick_tests;
 
@@ -48,6 +48,9 @@ pub struct World {
     pub radio: radio_calls::Radio,
     /// Imported phrase text for composing radio lines.
     pub phrases: comms::Phrases,
+    /// What the player's order call does to the radio channel; the driver
+    /// decides.
+    pub order_call: OrderCall,
 }
 
 /// A human-flown plane's state outside combat: its flight, where the tick
@@ -150,6 +153,9 @@ pub enum Cue {
     Picture,
     /// A radio or crew line due now for a seat.
     Radio { seat: SeatId, call: comms::Call },
+    /// The player's own order call, played at once and cutting off what is
+    /// playing, though it may hold no stems.
+    OrderVoice(Vec<&'static str>),
 }
 
 /// What one tick produced. Every queue inside the world that the tick fills is
@@ -161,6 +167,8 @@ pub struct TickOutput {
     /// what belongs between the commands and the rest of the tick, such as
     /// the mission recording's notes of them, at this point.
     pub commanded: usize,
+    /// What became of each wing order given this tick.
+    pub orders: Vec<OrderReply>,
     /// Combat's events for the tick.
     pub events: Vec<tore_sim::combat::live::Event>,
     /// The player's weapon release sounds: the sound's name and the station.
@@ -430,7 +438,7 @@ impl World {
         &mut self,
         inputs: &[SeatInput],
         out: &mut TickOutput,
-        commands_applied: impl FnOnce(&mut World, &TickOutput) -> WorldResult<()>,
+        commands_applied: impl FnOnce(&World, &TickOutput) -> WorldResult<()>,
     ) -> WorldResult<()> {
         self.step_with(&[], inputs, out, commands_applied)
     }
@@ -442,7 +450,7 @@ impl World {
         mission: &[MissionCommand],
         inputs: &[SeatInput],
         out: &mut TickOutput,
-        commands_applied: impl FnOnce(&mut World, &TickOutput) -> WorldResult<()>,
+        commands_applied: impl FnOnce(&World, &TickOutput) -> WorldResult<()>,
     ) -> WorldResult<()> {
         *out = TickOutput::default();
         let inputs = self.cockpit_inputs(inputs)?;

@@ -293,6 +293,7 @@ pub(super) fn mission() -> World {
         wing_status: Default::default(),
         radio: Default::default(),
         phrases,
+        order_call: OrderCall::Silent,
         // The step never reads the setup.
         setup: Setup::default(),
     }
@@ -473,6 +474,13 @@ fn record_cue(fp: &mut Fingerprint, cue: &Cue) {
             fp.bool(*friendly);
         }
         Cue::Picture => fp.u64(8),
+        Cue::OrderVoice(stems) => {
+            fp.u64(10);
+            fp.count(stems.len());
+            for stem in stems {
+                fp.text(stem);
+            }
+        }
         Cue::Radio { call, .. } => {
             fp.u64(9);
             fp.text(&call.label);

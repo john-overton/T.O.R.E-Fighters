@@ -1149,8 +1149,8 @@ flowchart TB
 
 #### Seat input
 
-*B2 is under way (steps 1 and 2 of 4 built: combat commands, scope and
-settings).* The render loop builds seat 0's input from today's sources: the
+*B2 is under way (steps 1 to 3 of 4 built: combat commands, scope and
+settings, wing orders).* The render loop builds seat 0's input from today's sources: the
 pilot input, the trigger (Space and the bound fire control), the scope controls
 and the commands given since the last tick. The app keeps them in one
 queue in the order given (`App::seat_commands`); the first tick of the next
@@ -1170,6 +1170,8 @@ today, because window events always arrive between frames.
 | `RangeReset` | A new target on the range; "Target reset is available only with --live-fire" otherwise. |
 | `ReleaseChaff`, `ReleaseFlare` | One cartridge or flare, with the retail messages ("Chaff launched, 11 left", "Out of flares"). Refused when the aircraft is destroyed, the pilot has ejected or it has no hit points. |
 | `RadioSilence` | Toggles radio silence and tells the pilot ("Radio silence", "Radio traffic OK"). |
+| `WingRecipient` | Chooses the wingman the seat's orders address, or the whole wing. It is state of the seat (`Seat::wing_recipient`). |
+| `WingOrder`, `WingFormationCycle` | An Alt-key order goes to the AI wings with the seat's recipient and its designated target. The formation cycle reads the wing's next formation first. The pilot's own order call comes back as `Cue::OrderVoice`, the wing's report and any refusal as `Cue::Message`, and `TickOutput::orders` lists what became of each order. |
 | `ReleaseTrigger` | `Combat::cancel`, which a menu opening, a pause, a modifier key or losing focus does. |
 | `TriggerKey` | The Space key going down or up, with the app's "blocked" flag (paused, out of focus or a modifier held). |
 
@@ -1203,6 +1205,11 @@ takes effect on the first tick after resuming, instead of at once. And the
 mission recording must keep listing a command on the frame before the tick that
 applies it, as it does today (done, above).
 
+The AI still takes orders from the lead of Friendly Wing 1 whoever sends them:
+the step hands the order to `AiWings::command_at` and keeps the sender's plane
+beside it, unread, until the AI routes an order to its sender's own wing
+(slice B3).
+
 *Agent decisions (B2):*
 
 - A pause refuses chaff and flares in the app, since only the app knows about
@@ -1215,6 +1222,13 @@ applies it, as it does today (done, above).
   loop used to copy them after the handlers had run, so a command given in the
   same frame as a channel change saw the old channel; it now sees the new one.
 - The queue holds at most 256 commands.
+- The order call and the wing's reply are played after the tick that applied
+  the order, not at once. What the order does to the radio channel still
+  happens in the command phase, and `World::order_call` keeps each driver's
+  old behaviour: the live game holds the channel for the call, and cuts off
+  wing lines the mixer is still playing when a sound device exists (`Heard`,
+  the journal and clock note the cut); the AI probe never held it (`Silent`).
+  It is a stopgap until B4 gives each seat its own radio delivery.
 
 #### Combat: one ownship per human-flown aircraft
 

@@ -57,6 +57,7 @@ fn sighted() -> World {
     world.combat.state.chaff = 5;
     world.combat.state.flares = 5;
     world.combat.apply_startup_weapons();
+    world.order_call = OrderCall::Spoken;
     world
 }
 
@@ -129,8 +130,24 @@ fn state(world: &mut World) -> String {
                 (own.airport_nav_mode, own.airport_service.selected()),
                 (own.flight.sensors, own.flight.cheats, combat.cheats),
                 world.comms.radio_silence(crate::seats::SeatId(0)),
+                world
+                    .comms
+                    .channel_free(crate::seats::SeatId(0), combat.tick() as f64 / 120.),
+                world.ai_wings.as_ref().map(|wings| {
+                    wings
+                        .mission()
+                        .actors()
+                        .iter()
+                        .map(|actor| (actor.id(), actor.controller().ordered_formation()))
+                        .collect::<Vec<_>>()
+                }),
+                world
+                    .roster
+                    .seat(crate::seats::SeatId(0))
+                    .map(|seat| seat.wing_recipient),
             )
         ),
+        format!("{:?}", world.comms.journal()),
         format!("{notes:?}"),
         format!("{tape:?}"),
     ]
@@ -570,4 +587,145 @@ fn radio_silence_toggles_and_says_so() {
     );
     assert!(after.comms.radio_silence(crate::seats::SeatId(0)));
     assert!(matches!(&out.cues[0], Cue::Message(text) if text == "Radio silence"));
+}
+
+use tore_sim::ai::wing::{Formation, PlayerOrder};
+
+/// The old handler for a wing order, minus the app's audio and HUD.
+fn old_order(world: &mut World, order: PlayerOrder, recipient: Option<u8>) -> String {
+    let now = world.combat.state.tick() as f64 / 120.;
+    let selected = world.combat.state.designated();
+    let report = world
+        .ai_wings
+        .as_mut()
+        .unwrap()
+        .command_at(order, selected, recipient, None)
+        .unwrap();
+    if !report.radio.is_empty() {
+        world.comms.spoken(crate::seats::SeatId(0), now);
+    }
+    report.message
+}
+
+#[test]
+fn wing_orders_match_the_old_path_and_the_order_call_comes_back() {
+    for order in [
+        PlayerOrder::AttackOnContact,
+        PlayerOrder::EngageMyTarget,
+        PlayerOrder::Disengage,
+        PlayerOrder::Formation(Formation::ALL[1]),
+    ] {
+        let mut message = String::new();
+        let (_, _, out) = same_as_old(vec![SeatCommand::WingOrder(order)], |world| {
+            message = old_order(world, order, None)
+        });
+        assert!(
+            matches!(&out.orders[..], [OrderReply { order: o, outcome: OrderOutcome::Given { message: m } }]
+                if *o == order && *m == message),
+            "{order:?}: {:?} against {message:?}",
+            out.orders
+        );
+        assert!(matches!(out.cues[0], Cue::OrderVoice(_)));
+        assert!(matches!(&out.cues[1], Cue::Message(text) if *text == message));
+    }
+}
+
+#[test]
+fn the_wing_recipient_is_the_seats_and_addresses_its_orders() {
+    let (_, after, _) = same_as_old(
+        vec![
+            SeatCommand::WingRecipient(Some(2)),
+            SeatCommand::WingOrder(PlayerOrder::Disengage),
+        ],
+        |world| {
+            world
+                .roster
+                .set_wing_recipient(crate::seats::SeatId(0), Some(2));
+            old_order(world, PlayerOrder::Disengage, Some(2));
+        },
+    );
+    assert_eq!(
+        after
+            .roster
+            .seat(crate::seats::SeatId(0))
+            .unwrap()
+            .wing_recipient,
+        Some(2)
+    );
+}
+
+#[test]
+fn a_formation_cycle_orders_the_formation_after_the_wings_current_one() {
+    let (_, _, out) = same_as_old(vec![SeatCommand::WingFormationCycle], |world| {
+        let next = world.ai_wings.as_ref().unwrap().next_formation(None);
+        old_order(world, PlayerOrder::Formation(next), None);
+    });
+    assert!(matches!(
+        &out.orders[..],
+        [OrderReply {
+            order: PlayerOrder::Formation(_),
+            outcome: OrderOutcome::Given { .. }
+        }]
+    ));
+}
+
+#[test]
+fn a_wing_order_without_an_ai_wing_is_refused_and_journaled() {
+    let (mut world, mut out) = (warmed(), TickOutput::default());
+    world.ai_wings = None;
+    let commanded = input(
+        &world,
+        vec![
+            SeatCommand::WingOrder(PlayerOrder::Disengage),
+            SeatCommand::WingFormationCycle,
+        ],
+    );
+    world.step(&[commanded], &mut out).unwrap();
+    assert!(matches!(
+        &out.orders[..],
+        [OrderReply {
+            outcome: OrderOutcome::Refused { .. },
+            ..
+        }]
+    ));
+    assert!(
+        matches!(&out.cues[0], Cue::Message(text) if text == "Wing order unavailable: no AI wing")
+    );
+    assert!(
+        matches!(&out.cues[1], Cue::Message(text) if text == "Wing order unavailable: no AI wing")
+    );
+}
+
+#[test]
+fn land_at_selected_reports_a_refused_site_to_the_pilot_and_the_journal() {
+    let (mut world, mut out) = (warmed(), TickOutput::default());
+    let site = crate::ai_wings::AiWings::landing_site(
+        &world.terrain.airport_scene,
+        &world.terrain.airfield_anchors,
+        &world.cockpits[0].airport_service,
+    );
+    let commanded = input(
+        &world,
+        vec![SeatCommand::WingOrder(PlayerOrder::LandAtSelected)],
+    );
+    world.step(&[commanded], &mut out).unwrap();
+    match (site, &out.orders[..]) {
+        (
+            Err(message),
+            [
+                OrderReply {
+                    outcome: OrderOutcome::Refused { message: given },
+                    ..
+                },
+            ],
+        ) => {
+            assert_eq!(&message, given);
+            assert!(matches!(&out.cues[0], Cue::Message(text) if *text == message));
+            assert!(!format!("{:?}", world.comms.journal()).is_empty());
+        }
+        (Ok(_), [OrderReply { outcome, .. }]) => {
+            assert!(!matches!(outcome, OrderOutcome::Refused { .. }));
+        }
+        (site, orders) => panic!("{site:?} gave {orders:?}"),
+    }
 }
