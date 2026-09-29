@@ -690,6 +690,60 @@ pub fn render(
         }
         quick.group_objectives[group] = GroupObjective::Inherit;
     }
+    // Worst-case text: the longest labels in every row, saved as pictures when
+    // TORE_CREATOR_DUMP names a folder, for a look at overflow and overlap.
+    if let Some(folder) = std::env::var_os("TORE_CREATOR_DUMP").map(std::path::PathBuf::from) {
+        std::fs::create_dir_all(&folder)?;
+        let longest = |quick: &QuickMission, id: usize| {
+            (0..quick.values(id).len())
+                .max_by_key(|v| quick.values(id)[*v].len())
+                .unwrap_or(0)
+        };
+        for (name, theater) in [
+            ("ukraine", "UKR"),
+            ("egypt", "EGY"),
+            ("vietnam", "TVIET"),
+            ("kurile", "KURILE"),
+        ] {
+            let index = quick
+                .theater_codes
+                .iter()
+                .position(|c| c == theater)
+                .unwrap_or(0);
+            quick.apply(13, index);
+            for field in [4, 7, 10, 21, 24, 27] {
+                quick.apply(field, 5);
+                let skill = longest(&quick, field + 1);
+                quick.apply(field + 1, skill);
+                let aircraft = longest(&quick, field + 2);
+                quick.apply(field + 2, aircraft);
+            }
+            for id in [14, 15, 16, 17, 18, 19, 3, 20] {
+                let value = longest(&quick, id);
+                quick.apply(id, value);
+            }
+            quick.apply(33, 1);
+            let airport = longest(&quick, 34);
+            quick.apply(34, airport);
+            for group in 0..OBJECTIVE_COUNT {
+                let choices = QuickMission::objective_choices(group);
+                let (_, objective) = choices
+                    .iter()
+                    .max_by_key(|(label, _)| label.len())
+                    .cloned()
+                    .unwrap();
+                quick.group_objectives[group] = objective;
+                quick.group_must_survive[group] = true;
+            }
+            let mut shot = vec![0u8; WIDTH * HEIGHT * 4];
+            quick.render(&mut shot, sprites, world);
+            let mut out = format!("P6\n{WIDTH} {HEIGHT}\n255\n").into_bytes();
+            for p in shot.chunks_exact(4) {
+                out.extend_from_slice(&p[..3]);
+            }
+            std::fs::write(folder.join(format!("worst-{name}.ppm")), out)?;
+        }
+    }
     quick.help = true;
     draw(&mut quick, "help".into(), &mut problems);
     quick.help = false;
