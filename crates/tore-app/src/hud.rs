@@ -431,6 +431,32 @@ fn wind_label(wind: &tore_sim::runway_wind::Assessment) -> String {
 mod tests {
     use super::*;
     #[test]
+    fn accented_letters_draw_on_their_code_page_437_cell() {
+        // A font whose only marked cells are 'e' (0x65) and CP437 0x89, the
+        // e with a diaeresis, each a different single pixel.
+        let mut glyphs: Vec<tore_formats::font::Glyph> = (0..256)
+            .map(|_| tore_formats::font::Glyph {
+                advance: 4,
+                pixels: vec![],
+            })
+            .collect();
+        glyphs[0x65].pixels = vec![(0, 0)];
+        glyphs[0x89].pixels = vec![(2, 0)];
+        let font = tore_formats::font::Font { height: 1, glyphs };
+        let mut pixels = vec![0u8; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
+        Paint {
+            pixels: &mut pixels,
+            clip: (0, 0, 640, 480),
+            color: [255, 255, 255, 255],
+        }
+        .text(&font, "e\u{eb}", 0, 0);
+        let lit: Vec<usize> = (0..12)
+            .filter(|x| pixels[x * 4 + 3] != 0 && pixels[x * 4] == 255)
+            .collect();
+        // 'e' at x 0, then the diaeresis cell's pixel two columns into the second glyph.
+        assert_eq!(lit, [0, 4 + 2]);
+    }
+    #[test]
     fn wind_readout_distinguishes_crosswind_tailwind_and_ignored_headwind() {
         use tore_sim::runway_wind::{FEET_PER_SECOND_PER_KNOT as K, assessment};
         assert_eq!(

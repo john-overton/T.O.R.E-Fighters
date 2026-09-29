@@ -34,7 +34,7 @@ shown below the options.
 | Terrain filtering | Off, On | On |
 
 Choices are saved in `graphics-v1.conf` in the application data directory,
-beside `preferences-v1.conf`. A missing or unreadable file uses the defaults.
+beside `preferences-v1.conf`. A missing file uses the defaults quietly; an unreadable or malformed one uses them and logs a warning saying why.
 Smoke tests and captures ignore the saved file, like the other display
 preferences.
 

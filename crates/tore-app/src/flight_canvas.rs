@@ -1,5 +1,6 @@
 //! Aspect-responsive flight composition; menus keep their original 640x480 canvas.
 use crate::{aircraft::Airframe, flight::State, instruments::Instruments, menu::Sprite};
+use tore_formats::text::GlyphCodes;
 // Fifteen percent smaller than the prior 0.85 layout. Angular cues retain world alignment.
 pub const HUD_SCALE: f64 = 0.85 * 0.85;
 struct PanelCache {
@@ -318,7 +319,7 @@ impl FlightCanvas {
     }
     /// The width of `text` in `font` drawn at `scale`, in canvas pixels.
     pub fn text_width(font: &tore_formats::font::Font, text: &str, scale: f64) -> f64 {
-        text.bytes()
+        text.glyph_codes()
             .filter_map(|c| font.glyphs.get(usize::from(c)))
             .map(|g| g.advance as f64 * scale)
             .sum()
@@ -337,7 +338,7 @@ impl FlightCanvas {
     ) {
         for (offset, color) in [(0., color), (scale, [0, 0, 0])] {
             let mut pen = x + offset;
-            for c in text.bytes() {
+            for c in text.glyph_codes() {
                 let Some(glyph) = font.glyphs.get(usize::from(c)) else {
                     continue;
                 };

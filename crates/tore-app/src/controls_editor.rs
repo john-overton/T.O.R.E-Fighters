@@ -10,6 +10,7 @@ use crate::input_catalog::{self as catalog, ENTRIES, Entry, Group, Kind as Row};
 use crate::{hud::Paint, menu::Canvas};
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::font::Font;
+use tore_formats::text::GlyphCodes;
 use tore_input::profile_text::action_name;
 use tore_input::{Action, Axis, Binding, Calibration, Event, Mode, Profile};
 use tore_input_native::{Device, Kind};
@@ -299,7 +300,7 @@ fn is_hat(control: &tore_input_native::Control) -> bool {
         || (matches!(control.kind, Kind::Axis) && control.min == -1. && control.max == 1.)
 }
 pub(crate) fn text_width(font: &Font, text: &str) -> i32 {
-    text.bytes()
+    text.glyph_codes()
         .map(|c| font.glyphs[c as usize].advance as i32)
         .sum()
 }
@@ -310,12 +311,12 @@ pub(crate) fn fit(font: &Font, text: &str, width: i32) -> String {
     let advance = |c: u8| font.glyphs[c as usize].advance as i32;
     let mut out = String::new();
     let mut used = 2 * advance(b'.');
-    for c in text.bytes() {
-        used += advance(c);
+    for c in text.chars() {
+        used += advance(tore_formats::text::cp437_code(c));
         if used > width {
             break;
         }
-        out.push(c as char);
+        out.push(c);
     }
     out + ".."
 }

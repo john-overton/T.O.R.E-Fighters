@@ -7,6 +7,7 @@ use crate::{
     menu::{Action, Canvas, HEIGHT, Sprite, WIDTH, text_width},
 };
 use std::{collections::BTreeMap, time::Instant};
+use tore_formats::text::GlyphCodes;
 use tore_formats::{Pic, mission_text::MissionText};
 use tore_sim::combat::ledger::{Kill, Ledger, ShotKind, Tally};
 
@@ -846,7 +847,7 @@ impl Debrief {
 
 fn label(c: &mut Canvas, font: &Sprite, text: &str, (x, y, w): (i32, i32, i32)) {
     let height = text
-        .bytes()
+        .glyph_codes()
         .map(|b| font.glyphs[b as usize][2])
         .max()
         .unwrap_or(0) as i32;
