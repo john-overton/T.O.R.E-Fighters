@@ -240,6 +240,22 @@ def scenarios() -> list[Scenario]:
             keys="wait 1;F8;m;shift+t;Down;k;ctrl+F2;shift+Up;space;shift+l;Return;F5;m;x;bracketright;shift+m;1;F4;1;space;space;2;shift+Left;shift+m;m;v;shift+Left;comma;Up;Escape;v;shift+Right;ctrl+1;ctrl+P;g;shift+9;j;ctrl+B;Return;Return;semicolon;5;m;Insert;h;3;shift+1;ctrl+shift+i;semicolon;shift+1;shift+5;Up;F8;F5;m;alt+F1;shift+2;F4;F3",
         )
     )
+    # The first-run locate screen, with nothing to detect, quits on Alt+F4 like every other screen.
+    out.append(
+        Scenario(
+            name="replay-keys-alt-f4-on-locate-screen",
+            lane="replay",
+            args=["--version"],
+            then=[
+                Step([PY, "-c", "import os,sys; os.makedirs(sys.argv[1])", "{work}/empty"], app=False),
+                Step([PY, DRIVER, "--data", "{work}/fresh", "--cwd", "{work}/empty", "--keys", "wait 2", "--", "--no-audio"], app=False, window=True, timeout=180),
+            ],
+            check_work=lambda work, output: (
+                [] if "driver: ok" in sections(output).get(2, "") and "waiting for a choice" in sections(output).get(2, "") else ["the locate screen did not appear and quit on Alt+F4"]
+            ),
+            timeout=240,
+        )
+    )
     # The replay viewer.
     for seed in range(1, 7):
         out.append(

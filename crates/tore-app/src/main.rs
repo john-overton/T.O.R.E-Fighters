@@ -6595,6 +6595,18 @@ impl ApplicationHandler for LocateShell {
                 self.redraw();
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                // The game's quit shortcuts work here too, so the screen can
+                // be left from the keyboard where the desktop has no binding.
+                let quit_key = match &event.logical_key {
+                    Key::Named(winit::keyboard::NamedKey::F4) => self.modifiers.alt_key(),
+                    Key::Character(c) => self.modifiers.super_key() && c.eq_ignore_ascii_case("q"),
+                    _ => false,
+                };
+                if quit_key {
+                    self.outcome = ShellOutcome::Quit;
+                    event_loop.exit();
+                    return;
+                }
                 // Same window-mode toggle the game uses, before the field sees
                 // the key, so Alt-Enter never submits the locate form.
                 if self.modifiers.alt_key()

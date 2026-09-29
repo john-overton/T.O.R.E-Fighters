@@ -295,6 +295,46 @@ def import_scenarios() -> list[Scenario]:
     return out
 
 
+STATE = (
+    "import glob,hashlib,os,sys; d=sys.argv[1]; p=glob.glob(d+'/menu-*.pack'); "
+    "print('STATE', [os.path.getsize(x) for x in p], hashlib.sha1(open(d+'/media-source.txt','rb').read()).hexdigest())"
+)
+
+
+def failed_reimport_scenarios() -> list[Scenario]:
+    """A failed import into a data folder that already holds a good import must leave it alone."""
+    out = []
+    for kind in ("trunc-fa2", "empty-fa1", "exe-flip", "empty-dir", "no-exe"):
+        out.append(
+            Scenario(
+                name=f"replay-import-keeps-good-data-{kind}",
+                lane="replay",
+                args=["--version"],
+                then=[
+                    Step([PY, "-c", STATE, "{work}/data"], app=False),
+                    Step([PY, TOOLS, "media", kind, "{work}/media"], app=False),
+                    Step(["--import", "{work}/media", "--import-only", "--no-audio"], expect_exit=1, timeout=240),
+                    Step([PY, "-c", STATE, "{work}/data"], app=False),
+                    Step(["--snapshot-state", "normal", "--snapshot", "{work}/n.ppm", "--no-audio"], timeout=120),
+                ],
+                check_work=lambda work, output: check_kept(work, output),
+            )
+        )
+    return out
+
+
+def check_kept(work: Path, output: str) -> list[str]:
+    s = sections(output)
+    before, after = re.search(r"STATE .*", s.get(1, "")), re.search(r"STATE .*", s.get(4, ""))
+    problems = []
+    if not before or "[]" in before.group(0):
+        problems.append("the profile the scenario started from has no imported pack")
+    elif not after or before.group(0) != after.group(0):
+        problems.append(f"a failed import changed the existing data: {before.group(0)} -> {after.group(0) if after else 'nothing'}")
+    problems += tools.ppm_problems(str(work / "n.ppm"), min_colors=8)
+    return problems
+
+
 def check_bad_import(work: Path, output: str, message: str) -> list[str]:
     problems = []
     text = sections(output).get(2, "")
@@ -395,4 +435,4 @@ def check_bad_option(output: str, message: str) -> list[str]:
 
 
 def scenarios() -> list[Scenario]:
-    return bad_option_scenarios() + snapshot_scenarios() + diagnostics_scenarios() + audio_scenarios() + input_scenarios() + validate_scenarios() + combat_smoke_scenarios()
+    return bad_option_scenarios() + failed_reimport_scenarios() + snapshot_scenarios() + diagnostics_scenarios() + audio_scenarios() + input_scenarios() + validate_scenarios() + combat_smoke_scenarios()

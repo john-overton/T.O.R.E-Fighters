@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Drives a windowed T.O.R.E run with key presses sent through Hyprland.
 
-    _replay_drive.py --data DIR [--bin PATH] [--keys "wait 3;ctrl+P;Escape"] [--random SEED:COUNT:SET] -- GAME ARGS
+    _replay_drive.py --data DIR [--bin PATH] [--cwd DIR] [--keys "wait 3;ctrl+P;Escape"] [--random SEED:COUNT:SET] -- GAME ARGS
 
 The game is started through tools/agent-run.sh on a spare workspace. Keys go to
 that one window by its process id (found by the unique data folder in its
@@ -106,8 +106,9 @@ def main(argv: list[str]) -> int:
         return 0
     env = dict(os.environ, TORE_DATA_DIR=data, TORE_NO_ERROR_DIALOG="1", RUST_BACKTRACE="1")
     binary = opts[opts.index("--bin") + 1] if "--bin" in opts else str(ROOT / "target" / "debug" / "tore-app")
+    cwd = opts[opts.index("--cwd") + 1] if "--cwd" in opts else ROOT
     proc = subprocess.Popen(
-        [str(ROOT / "tools" / "agent-run.sh"), binary, *game], cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
+        [str(ROOT / "tools" / "agent-run.sh"), binary, *game], cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
     )
     pid = None
     for _ in range(150):
