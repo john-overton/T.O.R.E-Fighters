@@ -1272,12 +1272,13 @@ lead its wing is refused.
   same frame as a channel change saw the old channel; it now sees the new one.
 - The queue holds at most 256 commands.
 - The order call and the wing's reply are played after the tick that applied
-  the order, not at once. What the order does to the radio channel still
-  happens in the command phase, and `World::order_call` keeps each driver's
-  old behaviour: the live game holds the channel for the call, and cuts off
-  wing lines the mixer is still playing when a sound device exists (`Heard`,
-  the journal and clock note the cut); the AI probe never held it (`Silent`).
-  It is a stopgap until B4 gives each seat its own radio delivery.
+  the order, not at once. What the order does to the radio channel happens in
+  the command phase: the call cuts off the wing lines still playing on the
+  seat's channel (the journal notes the cut) and holds that channel for its
+  length, for every seat and whether or not a sound device plays it (John,
+  2026-09-29). Before, only a live game with a sound device cut off and held,
+  a live game without one only held, and the AI probe did neither; one probe
+  output and its recording changed with this rule.
 
 #### Combat: one ownship per human-flown aircraft
 
@@ -1767,6 +1768,8 @@ baselines:
 3. Lead succession.
 4. The mission result calls ("mission accomplished" and "almost home", the two
    that exist) without an audio device.
+5. The wing order call holds the radio channel whatever the audio (approved by
+   John on 2026-09-29).
 
 Presentation only, with no change to simulation or recordings: per-camera
 weather, wing vapor, blackout and redout, the view rig and control-surface

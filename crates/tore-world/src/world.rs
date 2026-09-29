@@ -28,7 +28,7 @@ mod fight_tests;
 mod handoff;
 #[cfg(test)]
 mod handoff_tests;
-pub use commands::{MissionCommand, OrderCall, OrderOutcome, OrderReply, Settings};
+pub use commands::{MissionCommand, OrderOutcome, OrderReply, Settings};
 #[cfg(test)]
 mod succession_tests;
 #[cfg(test)]
@@ -57,9 +57,6 @@ pub struct World {
     pub radio: radio_calls::Radio,
     /// Imported phrase text for composing radio lines.
     pub phrases: comms::Phrases,
-    /// What the player's order call does to the radio channel; the driver
-    /// decides.
-    pub order_call: OrderCall,
 }
 
 /// A human-flown plane's state outside combat: its flight, where the tick

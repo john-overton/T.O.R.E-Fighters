@@ -57,7 +57,6 @@ fn sighted() -> World {
     world.combat.state.own_mut().chaff = 5;
     world.combat.state.own_mut().flares = 5;
     world.combat.apply_startup_weapons();
-    world.order_call = OrderCall::Spoken;
     world
 }
 
@@ -629,6 +628,11 @@ fn old_order(world: &mut World, order: PlayerOrder, recipient: Option<u8>) -> St
         .unwrap()
         .command_at(crate::ai_wings::PLAYER_ID, order, selected, recipient, None)
         .unwrap();
+    world.comms.cut_off(
+        crate::seats::SeatId(0),
+        now,
+        crate::comms::journal::Reason::OrderVoice,
+    );
     if !report.radio.is_empty() {
         world.comms.spoken(crate::seats::SeatId(0), now);
     }

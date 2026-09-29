@@ -6068,7 +6068,6 @@ fn ai_probe_run(
         wing_status: Default::default(),
         radio,
         phrases,
-        order_call: world::OrderCall::Silent,
         // The probe builds its own mission; only a restart reads the setup,
         // and the tick reads whether there is a mission for its result calls.
         setup: world::Setup {
@@ -10377,11 +10376,6 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             ai: None,
         },
         phrases: comms::phrases(&theater_resources),
-        order_call: if audio.is_some() {
-            world::OrderCall::Heard
-        } else {
-            world::OrderCall::Spoken
-        },
         roster: seats::Roster::single_player(comms::crew(&hornet.profile), []),
         cockpits: vec![world::Cockpit {
             plane: seats::PlaneId(0),

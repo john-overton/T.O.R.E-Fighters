@@ -26,24 +26,6 @@ pub enum MissionCommand {
     GiveBack { seat: SeatId },
 }
 
-/// What the player's order call does to the radio channel. Agent decision:
-/// the driver sets it, so each keeps the behaviour it had before B2 gave
-/// orders to the step. It is a stopgap until B4 gives each seat its own radio
-/// delivery, and one place to remove when John decides the order call should
-/// hold the channel for every seat whatever the audio.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum OrderCall {
-    /// The call holds nothing: the AI probe, which never held the channel.
-    #[default]
-    Silent,
-    /// The call holds the radio channel for its length.
-    Spoken,
-    /// As `Spoken`, and the host plays it at once, cutting off the wing lines
-    /// the mixer was still playing, which the channel's journal and clock
-    /// note. A live game with a sound device.
-    Heard,
-}
-
 /// What became of a wing order the step applied.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OrderReply {
@@ -325,13 +307,13 @@ impl World {
             .map(|wings| wings.command_at(plane.0, order, selected, recipient, site.as_ref()));
         let outcome = match result {
             Some(Ok(report)) => {
-                // The order voice is played at once, and cuts off the wing
-                // lines the mixer was still playing.
-                if self.order_call == OrderCall::Heard {
-                    self.comms
-                        .cut_off(seat, now, comms::journal::Reason::OrderVoice);
-                }
-                if self.order_call != OrderCall::Silent && !report.radio.is_empty() {
+                // The order voice is played at once, cuts off the wing lines
+                // still playing and holds the seat's radio channel for its
+                // length, whether or not a sound device plays it (John,
+                // 2026-09-29).
+                self.comms
+                    .cut_off(seat, now, comms::journal::Reason::OrderVoice);
+                if !report.radio.is_empty() {
                     self.comms.spoken(seat, now);
                 }
                 out.cues.push(Cue::OrderVoice {

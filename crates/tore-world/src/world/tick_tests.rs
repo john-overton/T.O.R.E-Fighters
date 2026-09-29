@@ -293,7 +293,6 @@ pub(super) fn mission() -> World {
         wing_status: Default::default(),
         radio: Default::default(),
         phrases,
-        order_call: OrderCall::Silent,
         // The step never reads the setup.
         setup: Setup::default(),
     }
