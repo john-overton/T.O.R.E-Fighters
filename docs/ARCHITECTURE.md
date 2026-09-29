@@ -698,7 +698,7 @@ only read: the menu's camera changes go through the ordinary view commands.
 
 Design for stages A and B of the [multiplayer plan](multiplayer-plan.md#stages),
 written 2026-09-28. **Stage A is built; stage B is under way (B0
-is built).** The section is rewritten as the stages land. John approved the design on 2026-09-28 with the decisions
+and B2 are built).** The section is rewritten as the stages land. John approved the design on 2026-09-28 with the decisions
 credited to him below; every other choice is an agent decision. His decisions
 are also in the [multiplayer guide](MULTIPLAYER.md#decisions).
 
@@ -772,11 +772,14 @@ messages) is a `Cockpit`, one per human-flown plane in
 `SeatInput` from every seat that flies a plane, for the tick `World::tick`
 names, and applies each seat's commands to its own plane. The flight step,
 building contact, turbulence, the world edge and OVERSPEED rules and the
-airport service run for every cockpit in plane order; combat and the AI still
-serve the first cockpit only, with one ownship's worth of player-only fields in
-`combat::live::State`, until slices B1 and B3 land. The radio is per seat
-(slice B4, below): each seat has its own delivery queue, busy hold and radio
-silence, and each call is generated once. Every AI aircraft is an `AiActor` in
+airport service run for every cockpit in
+plane order; combat and the AI still serve the first cockpit only, with one
+ownship's worth of player-only fields in `combat::live::State`, until slices B1
+and B3 land. The radio is per seat (slice B4, below): each seat has its own
+delivery queue, busy hold and radio silence, and each call is generated once.
+B2 is built as well: everything a player does between ticks is a `SeatCommand`
+in that seat's input, applied by `world/commands.rs` at the start of the tick
+(see [seat input](#seat-input)). Every AI aircraft is an `AiActor` in
 `tore-sim::ai` plus a `live::Target` row, mirrored into each other once per
 tick. The plan's [code findings](multiplayer-plan.md#where-the-code-stands)
 describe the code before stage A.
@@ -830,9 +833,10 @@ its own. `Theater` would read better but already names the parsed T2 grid in
 `World::step` runs these in order. It is today's order with the presentation
 taken out:
 
-1. **Settings and commands.** Cheats, the scope controls and the friendly list
-   are applied. Queued weapon-page clicks, navigation-page selections and airport
-   commands run in the order they were given.
+1. **Settings and commands.** The mission's commands (the cheats) are applied,
+   then each seat's scope controls and commands, in seat order and in the order
+   given: weapon selection, designation, arming, chaff and flares, the trigger,
+   navigation-page and airport commands, radio silence and wing orders.
 2. The player's flight state at the start of the tick is kept as `previous_flight`.
 3. **Player flight.** The flight model steps with the tick's pilot input over
    the runway and terrain surface, with wind.
@@ -891,17 +895,18 @@ cloud tint, a vapor trail or the end of a blackout can differ by one tick
 
 #### Tick input and output
 
-`TickInput` (stage A, one player) holds the pilot input (`PilotInput`: stick,
-throttle and pilot commands such as gear, flaps, radar power and eject), the
-trigger level, the scope controls, the queued commands of step 1 and the
-settings in force. In A the other player commands (weapon selection keys,
-designation, chaff and flares, wing orders) still reach `World` between ticks
-through its methods, as today. Stage B turns every one of them into tick-stamped
-seat input.
+Each tick's input is one `SeatInput` per seat (built in B0 and completed in B2)
+and, for the mission, a list of `MissionCommand`s. A seat's input holds the
+pilot input (`PilotInput`: stick, throttle and pilot commands such as gear,
+flaps, radar power and eject), the trigger level, the scope controls and the
+commands given since the last tick. Every command a player gives, from weapon
+selection to wing orders, travels this way; see [seat input](#seat-input).
 
 `TickOutput` holds, in tick order: combat's events; an ordered list of cues (HUD
 lines, rumble, tower audio cues, ejection notices, delivered radio calls, each
-with the seat that hears it, and the point where the picture was taken); the player's weapon
+with the seat that hears it, and the point where the picture was taken); how
+many of those cues the command phase made (`commanded`); what became of each
+wing order (`orders`); the player's weapon
 release sounds; shot outcomes; the AI journal; sound emissions; and the native
 fault, if the tick stopped early. Every output queue inside `World` is drained
 into it each tick, whether or not anyone reads it, so the state between ticks
@@ -1103,8 +1108,8 @@ These live in `crates/tore-world/src/seats.rs` (built in B0), with `Roster`, whi
 holds the planes and seats. *Agent decision:* the design first called a plane's
 id `AircraftId`, but that name already means an aircraft type
 (`tore_formats::aircraft::AircraftId`, used about 600 times), so a mission's
-aircraft are planes. The scope controls join `SeatInput` when B2 turns every
-between-tick command into a seat command.
+aircraft are planes. The scope controls and every between-tick command joined
+`SeatInput` in B2, below.
 
 `World::step(&[SeatInput])` takes one input per seat that flies a plane, and
 refuses a missing, duplicate or wrong-tick input. Settings changes
@@ -1149,8 +1154,8 @@ flowchart TB
 
 #### Seat input
 
-*B2 is under way (steps 1 to 3 of 4 built: combat commands, scope and
-settings, wing orders).* The render loop builds seat 0's input from today's sources: the
+*B2 is built (combat commands, scope and settings, wing orders, and the
+pause and recording rules below).* The render loop builds seat 0's input from today's sources: the
 pilot input, the trigger (Space and the bound fire control), the scope controls
 and the commands given since the last tick. The app keeps them in one
 queue in the order given (`App::seat_commands`); the first tick of the next
@@ -1461,7 +1466,8 @@ applies when play resumes (stage B).
    - **B1 combat**: ownships, events with aircraft ids, the hit rule and friendly
      fire setting (`tore-sim` combat, `tore-world`'s `combat.rs`).
    - **B2 seat input**: every between-tick command becomes a seat command (the
-     world's input path and `main.rs`'s handlers).
+     world's input path and `main.rs`'s handlers). Done: see
+     [seat input](#seat-input).
    - **B3 AI**: several humans, current leaders and succession, the actor
      removal and insertion handoff needs, and the flight-model setting
      (`tore-sim` AI, `ai_wings`).

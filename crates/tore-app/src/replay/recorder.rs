@@ -2325,6 +2325,97 @@ mod tests {
         assert!(frames[0].checksum.is_some() && frames[1].checksum.is_none());
     }
 
+    /// Opens tick `number` the way the live loop's presentation does, with
+    /// `between` standing for the world's command phase and the cues it made:
+    /// they run first, and `start_tick` follows them.
+    fn tick_with_commands(
+        recorder: &mut Recorder,
+        combat: &mut combat::Combat,
+        snapshot: &RenderSnapshot,
+        number: u64,
+        ui: &mut flight_ui::FlightUi,
+        between: impl FnOnce(&mut combat::Combat, &mut flight_ui::FlightUi),
+    ) {
+        let flight = fixture::player();
+        let world = tore_world::test_support::terrain();
+        let mut snapshot = snapshot.clone();
+        snapshot.tick = number;
+        between(combat, ui);
+        recorder.start_tick(Some(ui), combat);
+        ui.message(format!("cue after the commands, tick {number}"));
+        recorder.begin(Tick {
+            snapshot: &snapshot,
+            combat,
+            flight: &flight,
+            previous: &flight,
+            pilot: &flight::PilotInput::default(),
+            wings: None,
+            world: &world,
+            events: &[],
+            outcomes: &[],
+            journal: None,
+        });
+        recorder.end(Some(ui), combat);
+    }
+
+    #[test]
+    fn commands_the_step_applies_are_noted_on_the_frame_before_their_tick() {
+        let (mut recorder, receiver) = Recorder::detached(64, &[]);
+        let mut combat = fixture::combat(Vec::new(), Vec::new());
+        let player = fixture::player();
+        combat.restart_render(&player, None);
+        let snapshot = combat.render_snapshot().clone();
+        let mut ui = flight_ui::FlightUi::default();
+        tick_with_commands(&mut recorder, &mut combat, &snapshot, 0, &mut ui, |_, _| {});
+        // Tick 1's command phase: a command and the message it gives the
+        // pilot. Both belong to tick 0's frame, where a command given between
+        // the frames was always noted; a cue that comes later in tick 1 is
+        // tick 1's.
+        tick_with_commands(
+            &mut recorder,
+            &mut combat,
+            &snapshot,
+            1,
+            &mut ui,
+            |combat, ui| {
+                combat.command(live::Command::ClearDesignation, combat::launcher(&player));
+                ui.message("Seeker mode changed");
+            },
+        );
+        tick_with_commands(&mut recorder, &mut combat, &snapshot, 2, &mut ui, |_, _| {});
+        let frames = frames(&receiver);
+        assert_eq!(frames.iter().map(|f| f.tick).collect::<Vec<_>>(), [0, 1]);
+        let of = |frame: &Frame| -> Vec<(String, String)> {
+            frame
+                .events
+                .iter()
+                .filter(|e| e.kind == kind::PLAYER_COMMAND || e.kind == kind::COMMS_HUD)
+                .map(|e| (e.kind.clone(), e.text.clone()))
+                .collect()
+        };
+        assert_eq!(
+            of(&frames[0]),
+            [
+                (
+                    kind::COMMS_HUD.to_owned(),
+                    "cue after the commands, tick 0".to_owned()
+                ),
+                (kind::COMMS_HUD.to_owned(), "Seeker mode changed".to_owned()),
+                (
+                    kind::PLAYER_COMMAND.to_owned(),
+                    "ClearDesignation".to_owned()
+                ),
+            ]
+        );
+        assert_eq!(
+            of(&frames[1]),
+            [(
+                kind::COMMS_HUD.to_owned(),
+                "cue after the commands, tick 1".to_owned()
+            )]
+        );
+    }
+
     #[test]
     fn released_chaff_and_flares_are_recorded_exactly_on_their_ticks() {
         use tore_sim::combat::countermeasures::Release;

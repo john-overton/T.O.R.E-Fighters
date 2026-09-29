@@ -92,7 +92,10 @@ the next frame starts with a `system.gap` event naming the missing ticks.
 A headless probe recording (`--record-mission`) has no frame rate to
 protect, so it waits for the writer instead and never has gaps.
 Events noted between ticks (a pause, a bookmark, a wing order) go on the
-tick that was on screen.
+tick that was on screen. The commands a player gives are applied by the next
+tick's command phase, and the recorder opens that tick only after the phase, so
+it notes them, and the cockpit messages they give, on the tick that was on
+screen.
 Headless AI probes explicitly enable real AI poses, so their recordings include
 bank and pitch instead of the old straight-flight fixture orientation.
 `--verify-render` also compares each living AI aircraft's drawn attitude with
