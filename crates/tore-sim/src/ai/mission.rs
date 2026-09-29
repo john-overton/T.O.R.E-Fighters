@@ -978,13 +978,16 @@ impl AiActor {
         .map(|r| (f64::from(r.altitude_ft), r.speed.0))
         .filter(|_| !joining);
         let wind = surface(order.runway.center[0], order.runway.center[2]).wind;
-        self.airfield = Some(super::airfield::Sequence::landing(
+        let max_takeoff_lbs = self.flight.model().configuration().mass.max_takeoff_lbs;
+        let mut sequence = super::airfield::Sequence::landing(
             order,
             self.flight.position,
             wind,
-            self.flight.model().configuration().mass.max_takeoff_lbs,
+            max_takeoff_lbs,
             route,
-        ));
+        );
+        sequence.prefer_clear_approach(wind, max_takeoff_lbs, &|x, z| surface(x, z).height);
+        self.airfield = Some(sequence);
     }
 
     /// One tick of a takeoff or landing sequence. Returns `false` when the
@@ -1070,6 +1073,21 @@ impl AiActor {
                         ground(x + vx / speed * d, z + vz / speed * d)
                     })
                     .fold(f64::MIN, f64::max)
+            },
+            // On the approach the aircraft turns at each gate, so only the
+            // ground on the way to the gate it is flying to matters.
+            terrain_to_gate_ft: match self.airfield.as_ref() {
+                Some(sequence) if phase == Phase::Approach => {
+                    let [x, _, z] = self.flight.position;
+                    let gate = sequence.gate(sequence.leg());
+                    (0..=6)
+                        .map(|i| {
+                            let f = f64::from(i) / 6.0;
+                            ground(x + (gate[0] - x) * f, z + (gate[2] - z) * f)
+                        })
+                        .fold(f64::MIN, f64::max)
+                }
+                _ => f64::MIN,
             },
             minimum_speed_fps: own.limits.minimum.0,
             approach_minimum_fps: self.approach_minimum_fps(),

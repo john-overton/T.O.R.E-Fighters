@@ -131,6 +131,9 @@ def probe_problems(
 THRESHOLD = re.compile(r"^t=\d+ \(([\d.]+)s\) THRESHOLD (\S+ \d-\d+) wheels=(-?\d+) ft", re.M)
 # An AI final crossing the threshold this low is landing short, this high
 # is landing long (the ILS path crosses it about 52 ft up).
+# Longest time from the first gate to final before a wing counts as hanging
+# at the gates (the 16 theaters' landing pairs take about 250 to 470 s).
+GATES_MAX_S = 540
 THRESHOLD_LOW_FT = 10
 THRESHOLD_HIGH_FT = 300
 
@@ -554,6 +557,23 @@ def scenarios() -> list[Scenario]:
             "--ground-start", "1", "--probe-wing-size", "2", "--maneuver", "takeoff",
             "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
             ticks=108000, timeout=2400, check=checker(ground=True, need_takeoff=True, need_landing=True)))
+    # Runway ends whose 3 degree path meets terrain in the last 5 nm
+    # (`--validate-ils` prints them as `ils-terrain:`; docs/testing/ils.md):
+    # a pair ordered to land must land without hitting the ground and must
+    # not hang at the gates (added 2026-09-29).
+    def lands_without_hanging(output: str) -> list[str]:
+        problems = checker(ground=True, need_takeoff=True, need_landing=True)(output)
+        for label, phases in re.findall(r"(\w+ \d-\d): ((?:\w+@[\d.]+s ?)+)", output):
+            times = {p.split("@")[0]: float(p.split("@")[1][:-1]) for p in phases.split()}
+            if "Approach" in times and "Final" in times and times["Final"] - times["Approach"] > GATES_MAX_S:
+                problems.append(f"{label} flew the gates for {times['Final'] - times['Approach']:.0f} s")
+        return problems
+
+    for theater, airport in (("FRA", "9"), ("KURILE", "3"), ("NSK", "6"), ("UKR", "5"), ("UKR", "6"), ("UKR", "8"), ("UKR", "12")):
+        out.append(probe(f"ils-terrain-{theater.lower()}-a{airport}", [
+            "--theater", theater, "--ground-start", airport, "--probe-wing-size", "2", "--maneuver", "takeoff",
+            "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
+            ticks=120000, timeout=2400, check=lands_without_hanging))
     for theater, airport in (("UKR", "1"), ("PGU", "2"), ("FRA", "3"), ("NSK", "5")):
         for aircraft in AIRCRAFT:
             out.append(probe(f"takeoff-{theater.lower()}-a{airport}-{aircraft}", [

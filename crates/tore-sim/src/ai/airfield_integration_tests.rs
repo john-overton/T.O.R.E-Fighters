@@ -1118,7 +1118,49 @@ fn a_critically_damaged_aircraft_on_final_still_ejects() {
 /// Regression, found at Simferopol (UKR, 2026-09-23): the straight line
 /// from the marshal to the approach gates ran through the mountains south
 /// of the field and aircraft flew into them. On the way to the runway they
-/// now keep clear of high terrain ahead, then land.
+/// now keep clear of high terrain ahead, then land. Since the 3 degree path
+/// (2026-09-29) the ridge stands above the path to the south-facing
+/// approach, so this runway without anchors is landed from the north.
+#[test]
+fn a_runway_without_anchors_is_landed_from_the_clear_side() {
+    let ridge = |_x: f64, z: f64| {
+        if (-30_000.0..=-24_000.0).contains(&z) {
+            3_000.
+        } else {
+            0.
+        }
+    };
+    let mut near = super::super::airfield::Sequence::landing(
+        LandingOrder {
+            runway: runway(),
+            reason: LandingReason::Ordered,
+        },
+        [0., 7_000., -80_000.],
+        [0.; 3],
+        40_000.,
+        None,
+    );
+    assert_eq!(near.end(), ApproachEnd::Near);
+    assert!(airfield::path_obstruction_ft(&runway(), ApproachEnd::Near, &ridge) > 1_000.);
+    assert!(airfield::path_obstruction_ft(&runway(), ApproachEnd::Far, &ridge) <= 0.);
+    near.prefer_clear_approach([0.; 3], 40_000., &ridge);
+    assert_eq!(near.end(), ApproachEnd::Far);
+    // Flat ground keeps the arrival side.
+    let mut flat = super::super::airfield::Sequence::landing(
+        LandingOrder {
+            runway: runway(),
+            reason: LandingReason::Ordered,
+        },
+        [0., 7_000., -80_000.],
+        [0.; 3],
+        40_000.,
+        None,
+    );
+    flat.prefer_clear_approach([0.; 3], 40_000., &|_, _| 0.);
+    assert_eq!(flat.end(), ApproachEnd::Near);
+}
+
+/// The ridge approach as a whole flight.
 #[test]
 fn the_approach_climbs_over_a_ridge_under_the_gates() {
     // A 3,000 ft ridge across the approach, 22,000 to 28,000 ft short of
