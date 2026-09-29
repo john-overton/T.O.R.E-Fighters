@@ -855,8 +855,9 @@ and selection. After the loadouts it sweeps the whole Quick Mission creator
 order, separation and start runway through the same start steps a flown mission takes),
 draws every dropdown value and popup page, and fuzzes keys and clicks on the creator and
 the Load Ordnance page. `TORE_CREATOR_STAGE=loadouts|matrix|render` runs one part.
-`--loadout none|guns` starts a flight with every store off, or every external store off,
-as the Load Ordnance page leaves them. See the [current results](baselines/ordnance-presentation.md)
+`--loadout none|guns` starts a flight, or a `--launch-quick-mission`, with every store off, or everything
+but the gun off, as the Load Ordnance page leaves them; the launch line prints the ammunition
+and the weapons window's list. See the [current results](baselines/ordnance-presentation.md)
 and the [menus lane](testing/lane-menus.md).
 
 Load Ordnance shows only imported weapons with connected flight support. Normal
