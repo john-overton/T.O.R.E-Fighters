@@ -258,7 +258,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Flight, debug panels shown | Left click, mouse wheel | Pin, close and filter buttons; scroll the panel under the pointer |
 | Flight | macOS Command+Q | Exit to desktop |
 | Live map open | + / - | Zoom the map |
-| Live map open | Arrow keys | Pan the map |
+| Live map open | Arrow keys, or A, S, W and Z | Pan the map (left, right, up, down for the letters) |
 | Live map open | Home | Follow the player again |
 | Live map open | Esc | Close the map |
 | Any menu | Arrow keys, Tab, Enter, Esc | Move, select and back out |
