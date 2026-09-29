@@ -1,14 +1,15 @@
-"""Lane: mission recording, replay playback, comms and audio start-up."""
+"""Lane: mission recording, replay playback, comms, audio, input and everything around flight.
+
+The scenarios live in the `_replay_*.py` modules next to this file (one per
+area) so each stays readable. See docs/testing/lane-replay.md.
+"""
+from __future__ import annotations
+
 from battery import Scenario
+from battery_scenarios import _replay_record
 
 
 def scenarios() -> list[Scenario]:
-    return [
-        Scenario(
-            name="replay-record-verify",
-            lane="replay",
-            args=["--ai-probe-ticks", "1200", "--separation", "2", "--record-mission", "{work}/a.tore-replay", "--verify-render", "--no-audio"],
-            expect=[r"AI probe totals:"],
-            outputs=["a.tore-replay"],
-        ),
-    ]
+    found: list[Scenario] = []
+    found += _replay_record.scenarios()
+    return found

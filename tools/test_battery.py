@@ -35,6 +35,30 @@ class JudgeTests(unittest.TestCase):
         self.assertTrue(self.judge(scenario(forbid=[r"dropped=[1-9]"]), "dropped=3"))
         self.assertEqual(self.judge(scenario(check=lambda o: ["custom"]), "x"), ["custom"])
 
+    def test_check_work_sees_the_work_folder_and_output(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "made.txt").write_text("x")
+            s = scenario(check_work=lambda work, out: [] if (work / "made.txt").exists() and "ok" in out else ["bad"])
+            self.assertEqual(battery.judge(s, "ok", 0, False, Path(d)), [])
+            self.assertEqual(battery.judge(s, "no", 0, False, Path(d)), ["bad"])
+
+    def test_follow_up_steps_append_their_output_and_check_exit_codes(self):
+        import argparse
+
+        with tempfile.TemporaryDirectory() as d:
+            opts = argparse.Namespace(bin="/bin/echo", timeout_scale=1.0)
+            steps = [
+                battery.Step(["one"]),
+                battery.Step(["/bin/false"], app=False, expect_exit=1),
+                battery.Step(["/bin/false"], app=False, expect_exit=None),
+                battery.Step(["/bin/false"], app=False),
+            ]
+            problems: list[str] = []
+            out = battery.run_steps(scenario(then=steps), opts, {}, Path(d), "main", problems)
+            self.assertIn("$ then 1: /bin/echo one", out)
+            self.assertIn("one", out)
+            self.assertEqual(problems, ["step 4 exit code 1, expected 0"])
+
     def test_scenario_names_are_unique_and_lanes_valid(self):
         names = [s.name for s in battery.load_scenarios()]
         self.assertEqual(len(names), len(set(names)))
