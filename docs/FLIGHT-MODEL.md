@@ -403,8 +403,10 @@ hybrid adapter turns them into the highest and lowest G it will deliver:
 
 `opinionated`, requested by John on 2026-09-29; the reference weight and the
 numbers are agent decisions ([rules](spec/takeoff-ground-contact.md#weight-scaled-stall-speed)).
-The polygon's slow edges are the aircraft's speeds at its empty weight and grow with
-the square root of its weight (fuel, stores, ordnance), in the hybrid adapter only.
+The polygon's slow edges for the 0 G to 2 G rows are the aircraft's speeds at its empty
+weight and grow with the square root of its weight (fuel, stores, ordnance), fading out at
+the 4 G row so that the G limit above about twice the stall speed is the imported one (the
+loaded-elevator divisor already carries the weight there), in the hybrid adapter only.
 The fast edge, the overspeed rule and the ceiling rules do not change; full flaps
 still take 25 percent off the 1 G stall speed; the loaded-elevator divisor stays.
 `--retail-stall-speeds` (developer switch) restores the imported speeds at every

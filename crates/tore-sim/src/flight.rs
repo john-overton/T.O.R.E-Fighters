@@ -33,6 +33,28 @@ pub fn retail_stall_speeds() -> bool {
 pub fn set_retail_stall_speeds(retail: bool) {
     RETAIL_STALL_SPEEDS.store(retail, std::sync::atomic::Ordering::Relaxed);
 }
+/// The row above which the weight scaling of the slow edges has faded out.
+pub const STALL_SCALE_FADE_G: i32 = 4;
+/// The multiplier for the slow edge of the `g` row, given the multiplier `scale`
+/// for the 1 G and 2 G rows. The rows for 2 G and under (and the 0 G and
+/// negative rows they mirror) take all of it, which sets the stall, liftoff and
+/// approach speeds. It fades linearly to nothing at the 4 G row
+/// ([`STALL_SCALE_FADE_G`], about twice the stall speed) and the rows above it are
+/// the imported ones. Weight already takes G off at every speed through the
+/// loaded-elevator divisor, so scaling the high-G edges too would count it twice
+/// and cost a fuelled fighter most of its G at combat speed: an F/A-18D at
+/// 450 knots would pull 3.8 G instead of 7.6. `opinionated` (requested by John,
+/// 2026-09-29; agent decision). `top_g` is the aircraft's highest row, so an
+/// aircraft with fewer rows fades sooner.
+pub fn row_scale(g: i32, top_g: i32, scale: f64) -> f64 {
+    let g = g.abs();
+    let end = STALL_SCALE_FADE_G.min(top_g);
+    if g <= 2 || end <= 2 {
+        return scale;
+    }
+    let share = f64::from((end - g).max(0)) / f64::from(end - 2);
+    1. + (scale - 1.) * share.clamp(0., 1.)
+}
 /// The envelope with its slow edge multiplied by `scale`: the vertices from the
 /// first (slowest, lowest) up to the highest one make the slow side of the
 /// polygon, and are moved out; the fast side stays. Each moved vertex is held
@@ -625,8 +647,11 @@ impl State {
             })
             .clone();
         let mut configuration = self.model.configuration().clone();
-        configuration.aerodynamics.envelopes =
-            raw.iter().map(|e| scale_left_edge(e, target)).collect();
+        let top = raw.iter().map(|e| e.g).max().unwrap_or(1);
+        configuration.aerodynamics.envelopes = raw
+            .iter()
+            .map(|e| scale_left_edge(e, row_scale(e.g, top, target)))
+            .collect();
         if self.model.set_configuration(configuration).is_ok() {
             self.envelope_scale = target;
         }
@@ -715,6 +740,11 @@ impl State {
                 .destroy(crate::aircraft_systems::LossCause::Overspeed);
             self.crashed = true;
         }
+    }
+    /// Adds airframe wear as a share of the hit points, as a belly slide does;
+    /// for hosts and tests that need the wear without the slide.
+    pub fn add_belly_scrape(&mut self, fraction: f64) {
+        self.belly_scrape += fraction.max(0.);
     }
     /// The airframe wear since the last call, as a share of the aircraft's hit
     /// points, for the host to take from the combat hit points.
@@ -2032,12 +2062,17 @@ mod tests {
         nudged.fuel -= 1.;
         nudged.update_stall_scale();
         assert_eq!(nudged.stall_scale(), scale);
-        // Every slow edge scales, the fast edge (top speed) does not.
+        // The low rows scale, fading out by the 4 G row; the fast edge (top
+        // speed) never does.
         for e in &heavy.model().configuration().aerodynamics.envelopes {
             let (raw_low, raw_high) = raw(&heavy, e.g);
             if let Some((low, high)) = e.speeds(1024.) {
-                assert!(low >= raw_low && low <= raw_low * scale + 1e-9);
+                let row = row_scale(e.g, 6, scale);
+                assert!(low >= raw_low && low <= (raw_low * row).min(raw_high) + 1e-9);
                 assert!((high - raw_high).abs() < 1e-9);
+                if e.g.abs() >= STALL_SCALE_FADE_G {
+                    assert_eq!(low, raw_low, "row {} is the imported one", e.g);
+                }
             }
         }
         // The legacy adapter is unchanged.
@@ -2050,6 +2085,75 @@ mod tests {
         assert_eq!(stall_scale_for(0., 100.), 0.5);
         assert_eq!(stall_scale_for(100., 0.), 1.);
         assert_eq!(stall_scale_for(100., 100.), 1.);
+    }
+    #[test]
+    fn the_weight_scale_fades_out_by_the_fourth_g_row() {
+        assert_eq!(row_scale(1, 9, 1.4), 1.4);
+        assert_eq!(row_scale(2, 9, 1.4), 1.4);
+        assert_eq!(row_scale(-2, 9, 1.4), 1.4);
+        assert!((row_scale(3, 9, 1.4) - 1.2).abs() < 1e-12);
+        assert_eq!(row_scale(4, 9, 1.4), 1.);
+        assert_eq!(row_scale(-4, 9, 1.4), 1.);
+        assert_eq!(row_scale(9, 9, 1.4), 1.);
+        // Few rows: the fade ends at the top one.
+        assert_eq!(row_scale(3, 3, 1.4), 1.);
+        assert_eq!(row_scale(1, 1, 1.4), 1.4);
+    }
+    #[test]
+    fn a_fuelled_aircraft_keeps_its_combat_speed_g_and_only_loses_it_slow() {
+        // Rows whose slow edge grows with the square root of the G, as the
+        // imported ones do: 200 sqrt(g) ft/s at sea level, up to 6 G.
+        let rows = || {
+            let mut a = profile();
+            for e in &mut a.envelopes {
+                let root = f64::from(e.g.abs().max(1)).sqrt();
+                e.points[0][0] = 200. * root;
+                e.points[1][0] = 250. * root;
+            }
+            a
+        };
+        // The G rows a full back stick can use at `speed`, fuelled and bare.
+        let rows_at = |fuelled: bool, speed: f64| {
+            let mut s = State::new(&rows(), [0., 5_000., 0.]).unwrap();
+            s.enable_research(1).unwrap();
+            let empty = s.model().configuration().mass.empty_lbs;
+            s.fuel = if fuelled { empty * 0.8 } else { 0. };
+            s.payload_lbs = 0.;
+            s.update_stall_scale();
+            s.speed = speed;
+            s.velocity = [0., 0., speed];
+            s.step(
+                &PilotInput {
+                    pitch: 1.,
+                    ..Default::default()
+                },
+                |_, _| 0.,
+            );
+            let e = s.trace().adapter.as_ref().unwrap().envelope;
+            (e.envelope_g[1], e.stall_scale)
+        };
+        let raw = State::new(&rows(), [0., 5_000., 0.]).unwrap();
+        let low = |g: i32| {
+            raw.retail_envelopes()
+                .iter()
+                .find(|e| e.g == g)
+                .unwrap()
+                .speeds(5_000.)
+                .unwrap()
+                .0
+        };
+        // At and above the top row's own speed every row is there, as imported
+        // (the weight enters only through the loaded-elevator divisor).
+        let (heavy, scale) = rows_at(true, low(6) * 1.02);
+        assert!(scale > 1.15);
+        assert_eq!(heavy, 6.);
+        assert_eq!(heavy, rows_at(false, low(6) * 1.02).0);
+        // In the middle the 4 G row and above are the imported ones too.
+        assert_eq!(rows_at(true, low(4) * 1.02).0, 4.);
+        // Slow, the weight costs G: just over the 2 G edge it is short of 2 G.
+        let slow = low(2) * 1.05;
+        assert_eq!(rows_at(false, slow).0, 2.);
+        assert_eq!(rows_at(true, slow).0, 1.);
     }
     #[test]
     fn scaling_an_envelope_moves_only_its_slow_side() {

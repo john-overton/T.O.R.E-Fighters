@@ -38,7 +38,9 @@ While the aircraft is on the ground and the gear is not fully down:
   plus 6 percent a second at 250 ft/s (148 knots), in proportion to speed, times
   the scrape and the wheel load. The player loses whole hit points from the
   combat hit points; an AI aircraft loses them from its target row. Finishing
-  the aircraft credits no kill. Invulnerable spares the player.
+  the aircraft credits no kill: an AI aircraft whose belly wear takes its hit points to
+  zero is recorded lost without credit (`Ledger::lose_without_credit`) even if a shooter had
+  damaged it earlier, and the debrief counts it as a lost aircraft. Invulnerable spares the player.
 - **Message.** `Gear up on the ground: belly scraping`, once per slide.
 
 Sparks and smoke: not added, the effects layer has no hook for ground contact.

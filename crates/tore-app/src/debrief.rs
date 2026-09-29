@@ -1093,6 +1093,34 @@ mod tests {
         );
     }
     #[test]
+    fn overspeed_belly_and_edge_losses_credit_no_kill_for_the_player_or_an_enemy() {
+        use tore_sim::aircraft_systems::LossCause;
+        use tore_sim::combat::ledger::Kill;
+        let mut ledger = Ledger::default();
+        // The player hit enemy 10 earlier, and enemy 10 had hit the player.
+        for (owner, victim) in [(0, 10), (10, 0)] {
+            ledger.damaged(Kill {
+                owner,
+                victim,
+                category: 0x8000,
+                aircraft: true,
+            });
+        }
+        // Enemy 10 is then lost to overspeed, belly wear or the map edge alike:
+        // the ledger holds no credit for it.
+        ledger.lose_without_credit(10);
+        let mut end = ending(&ledger);
+        end.aircraft[2].cause = Some(LossCause::Overspeed);
+        // The player is lost to overspeed too; a lost player is never credited
+        // to the last aircraft that hit it.
+        end.player.alive = false;
+        end.player.cause = Some(LossCause::Overspeed);
+        let report = report(&end);
+        assert_eq!(report.player.kills, [0; 10]);
+        assert_eq!(report.player.status, Status::Dead);
+        assert!(end.kills().iter().all(|k| k.victim != 10 && k.victim != 0));
+    }
+    #[test]
     fn a_surviving_target_or_friendly_kill_fails_the_mission() {
         use tore_sim::combat::ledger::{Kill, Resolution};
         let mut ledger = Ledger::default();

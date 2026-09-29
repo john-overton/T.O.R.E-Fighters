@@ -55,11 +55,21 @@ turns the rule off for the whole run.
   (empty weight, fuel, and carried stores and ammunition), so fuel burn,
   jettisoned stores and expended ordnance all change it. It is finite for any
   weight (the weight is held to a quarter of the reference at the least).
-- The scale multiplies **every slow edge** of every G row of the polygon (the
-  slow side of the outline is the vertices from the first to the highest one;
-  each moved vertex is held to the fast side at its height), because the slow
-  edge of an n G row is where the wing can lift n times the weight. The fast
-  edge (top speed, the overspeed rule) does not move. The polygons the model
+  Removing the divisor instead would put the F-22's liftoff back near 80 knots:
+  the divisor is what lifts the speed for 1 G above the flapped stall speed (97
+  against 74 knots for the F-22 at gross weight).
+- The scale multiplies the slow edges of the **low G rows**: the 0 G, 1 G and 2 G
+  rows and the negative rows they mirror take all of it (these set the stall,
+  liftoff and approach speeds), it fades linearly to nothing at the 4 G row, and
+  the rows from 4 G up are the imported ones (`row_scale`). The slow side of a
+  row's outline is the vertices from the first to the highest one; each moved
+  vertex is held to the fast side at its height. The fast edge (top speed, the
+  overspeed rule) does not move. Reason: the loaded-elevator divisor already
+  takes weight off the G an aircraft can pull at any speed, so scaling the high
+  rows as well counted the weight twice (a fuelled F/A-18D pulled 3.8 G at 450 kt
+  instead of 7.6, corrected 2026-09-29): above the speed of the 4 G row (about
+  twice the stall speed) the G limit is the imported one, and only the slow side
+  loses G to the weight. The polygons the model
   holds are rewritten when the weight has changed by a quarter of a percent, so
   the flight model, the stall warning, the autopilot, the flight envelope
   instrument and the AI all read the same speeds.

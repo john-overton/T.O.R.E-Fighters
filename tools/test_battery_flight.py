@@ -196,6 +196,12 @@ class LossTests(unittest.TestCase):
         self.assertEqual(flight.check_overspeed_invulnerable(kept), [])
         self.assertTrue(flight.check_overspeed_invulnerable(self.LOST + "loss: cause=overspeed\n"))
 
+    def test_combat_g_stays_near_the_imported_value(self):
+        line = "extremes: samples=600 non_finite=0 max_speed_kt=450.0 max_g={} min_g=1.05 min_altitude_ft=4326.6 max_altitude_ft=9207.4 max_pitch_rate_dps=17.4 max_roll_rate_dps=0.0 fuel_start_lb=11220.0 fuel_end_lb=11000.0 fuel_rise_lb=0.000 dead_stick_gain_ft=0.000 max_dead_stick_step_ft=0.0000 max_energy_rate_fps=65.0 energy_rate_over_thrust=0.192 speed_over_envelope_top=0.604 max_blackout=0.146 max_redout=0.000\n"
+        self.assertEqual(flight.check_combat_g(line.format("7.64"), "f18"), [])
+        self.assertTrue(flight.check_combat_g(line.format("5.10"), "f18"))
+        self.assertEqual(set(flight.PULL_G_RETAIL), set(flight.AIRCRAFT))
+
     def test_belly_checks(self):
         roll = "gear_pulled=true belly_wear_percent={} gear=0.00\nticks=9000 speed_kt=4.7 altitude_ft=8.0 fuel_lb=1.0 crashed=false\n"
         self.assertEqual(flight.check_belly_early(roll.format("27.1") + EXTREMES, "f18"), [])

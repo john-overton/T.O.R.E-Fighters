@@ -45,7 +45,10 @@ crashes and its wreck is handled by combat. The cause is recorded as `overspeed`
 The debrief shows it (a `Cause` row and a `cause=overspeed` suffix in the summary
 line), the mission recording carries it as the `reason` field of the destroyed
 event, and the headless flight probe prints `loss: cause=overspeed`. No kill is
-credited, because nobody shot the aircraft down.
+credited, because nobody shot the aircraft down: an AI aircraft lost to overspeed is recorded
+lost without credit (`Ledger::lose_without_credit`, the same call as the map edge) even if a
+shooter had damaged it earlier, and the debrief counts it as a lost aircraft. A player lost to
+overspeed is never credited to the last aircraft that hit it either.
 
 ## What must not fail
 
