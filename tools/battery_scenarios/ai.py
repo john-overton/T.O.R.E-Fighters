@@ -302,6 +302,7 @@ def fight(f: int, e: int, *extra: str) -> list[str]:
     return ["--probe-fight", f"{f}:{e}", *extra]
 
 
+_TOP_SPEED = "a loaded airborne AI aircraft (legacy flight model) near its top speed has less than 1 G and sinks into flat ground at full power (docs/testing/lane-ai.md, all fuzz seeds)"
 _STRIP = "1,074 ft strip, the roll runs off the end (docs/testing/lane-ai.md, decision 11)"
 
 # Failures that are understood and documented in docs/testing/lane-ai.md. Each
@@ -310,6 +311,10 @@ KNOWN_FAILURES = {
     "ai-fuzz-0028": "F-22 wingmen follow the test harness leader at 1,070 kt to the map edge (docs/testing/lane-ai.md, decision 5)",
     "ai-theater-apa-takeoff-a3": _STRIP,
     "ai-theater-lfa-takeoff-a3": _STRIP,
+    # Only with TORE_AI_FUZZ=all (checked 2026-09-29 on af5ffd4).
+    **{f"ai-fuzz-{seed:04d}": _STRIP for seed in (149, 180, 296, 309, 316, 338, 399)},
+    "ai-fuzz-0183": _TOP_SPEED,
+    "ai-fuzz-0266": _TOP_SPEED,
     "ai-theater-cub-takeoff-a1": "friendly wing with no route leaves the map on a Key West ground start (docs/testing/lane-ai.md, decision 5)",
 }
 

@@ -216,6 +216,10 @@ low-level class: `ai-big-a4e-vs-f22n-researched`, `ai-big-x31-vs-faxx-researched
 - `ai-theater-cub-takeoff-a1` (Key West, near the north edge): the airborne
   friendly wing starts on the runway heading, north, has no route and leaves
   the map after 163 s while the enemy is still alive (item 5 below).
+- With `TORE_AI_FUZZ=all` only: seeds 149, 180, 296, 309, 316, 338 and 399
+  (1,074 ft strips, as above) and seeds 183 and 266 (a loaded legacy-model
+  fighter near its top speed with less than 1 G sinks into flat ground; see
+  "Whole lane and all fuzz seeds on the merged tree").
 - Activity flapping and pitch-stick oscillation at a weapon's envelope edge,
   and mid-air collisions, are reported but allowed (see above and below);
   regression scenarios check strictly.
@@ -367,10 +371,57 @@ return-to-base and damaged scenarios passed 62 of 62, and KURILE 3 crosses
 its threshold 119 ft up and lands. In each 2 v 15 return to base, 20 minutes
 after the start 2 to 5 of the 15 winners have landed and the rest hold at
 marshal: one runway, one approach at a time, about five minutes each.
-Open, not in the lane: a pair landing at NSK 6 (Hyon Ni) flew its approach
-gates for 700 s before reaching final (the ground around the lower 3 degree
-gates keeps triggering the approach terrain hold); it was not compared with
-the 6 degree path.
+A pair landing at NSK 6 (Hyon Ni) then flew its approach gates for 700 s
+before reaching final: the approach terrain rule saw hills beyond the lower
+3 degree gates and held the heading, flying away from the gate. `5ecce00`
+counts only the ground on the way to the gate being flown to and stops the
+descent without holding the heading (fitted); Hyon Ni reaches final in
+284 s. The same commit lands a runway without anchors from its clear side
+when the ground stands above the 3 degree path to the arrival side.
+
+**Runway ends with terrain above the 3 degree path.** The ILS survey
+(`--validate-ils`, [ILS checks](ils.md)) lists seven: Amiens (FRA 9, far
+end), KURILE 3 and NSK 6 (near ends, ground 12 to 19 ft above the path at
+the threshold) and the far ends of Donets'k, Kharkiv, L'viv and
+Ivano-Frankivs'k (UKR 5, 6, 8, 12; hills about 1,900 to 2,000 ft above the
+path 13,000 to 28,000 ft out). `ai-ils-terrain-*` orders a pair to land at
+each and fails a crash, a threshold crossing below 10 ft or above 300 ft,
+or more than 540 s on the gates. All seven pass: every one lands on the
+near end, which the airports' landing anchors choose (spec-derived), so the
+AI never flies the UKR and Amiens far ends; threshold crossings 64 to 119 ft
+(KURILE 3 holds level over its high ground), 240 to 284 s from the first
+gate to final.
+
+### Whole lane and all fuzz seeds on the merged tree (2026-09-29, af5ffd4)
+
+The whole lane with all 400 fuzz seeds (`TORE_AI_FUZZ=all`) on a frozen copy
+of the merged build (bb2-ai, bb2-menus, bb3-ils and the flight agent's
+overspeed, world-edge and belly rules): 1,051 of 1,060 passed in 61 minutes
+at `--jobs 12`; the four known failures were caught as such. Outside the
+fuzz seeds nothing failed. The nine fuzz failures fall in two classes, now
+marked as known failures:
+
+- Seven ground starts on the 1,074 ft strips at Goose Green, Santiago and
+  Santa Fe (seeds 149, 180, 296, 309, 316, 338, 399; item 11): a wingman's
+  takeoff roll runs off the strip and leaves the probe's hazard open.
+- Two undamaged fighters flying straight at full power at 1,095 and
+  1,133 kt (seeds 183, an FA-XX, and 266, an F-22 on the legacy model) sank
+  steadily from about 2,800 ft into flat ground in 15 s, never pulling up.
+  They are airborne AI starts, which fly the legacy flight model, and at
+  that speed only the 1 G envelope row covers them; the legacy model divides
+  that 1 G by the loading (1 + fuel and stores over empty weight times the
+  loaded-elevator percentage), so a loaded aircraft has less than 1 G and
+  cannot hold level flight, let alone climb over the terrain floor. The
+  hybrid model keeps 1 G there (the flight agent's rule, 2026-09-29), the
+  legacy model deliberately does not. This is the remaining supersonic
+  low-level class of item 7, and it is not the look-ahead: the ground was
+  flat. Fixing it means either the same 1 G rule for the legacy model
+  (flight model, not this lane) or an AI top speed where the loaded
+  aircraft still has 1 G (a broad change to every fight); neither was made.
+
+Mid-air collisions outside the fuzz seeds: 11 (10 on the build before the
+landing work). The 400 fuzz seeds show 79, with no earlier all-seed count to
+compare.
 
 ### Fifth round (2026-09-29, review follow-ups)
 
