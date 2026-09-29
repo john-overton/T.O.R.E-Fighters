@@ -280,16 +280,17 @@ fn mission() -> World {
             airport_nav_mode: false,
             turbulence: tore_sim::turbulence::Turbulence::default(),
             turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng::seeded(1).unwrap(),
+            airfield_radio: Default::default(),
+            crew_voice: crew_voice::CrewVoice::new(&profile),
             overspeed_message_at: None,
             edge_message_at: None,
         }],
         combat,
         ai_wings: Some(wings),
         comms: comms::Comms::new(1),
-        airfield_radio: Default::default(),
+        wing_status: Default::default(),
         radio: Default::default(),
         phrases,
-        crew_voice: crew_voice::CrewVoice::new(&profile),
         // The step never reads the setup.
         setup: Setup::default(),
     }
@@ -470,7 +471,7 @@ fn record_cue(fp: &mut Fingerprint, cue: &Cue) {
             fp.bool(*friendly);
         }
         Cue::Picture => fp.u64(8),
-        Cue::Radio(call) => {
+        Cue::Radio { call, .. } => {
             fp.u64(9);
             fp.text(&call.label);
             fp.text(&call.text);
@@ -543,7 +544,7 @@ fn record_tick(fp: &mut Fingerprint, world: &World, out: &TickOutput, seen: &mut
         match cue {
             Cue::Message(_) => seen.messages += 1,
             Cue::Tower(_) => seen.tower += 1,
-            Cue::Radio(_) => seen.radio += 1,
+            Cue::Radio { .. } => seen.radio += 1,
             _ => {}
         }
     }
@@ -689,4 +690,157 @@ fn mission_tick_matches_recorded_fingerprint() {
             ),
         }
     }
+}
+
+/// The mission with a second human, seat 1, as the second member of Friendly
+/// Wing 1 beside the first cockpit's plane. The fixture's AI keeps flying that
+/// plane's actor, which still speaks for itself; only the radio is checked.
+fn two_seat_mission() -> World {
+    let mut world = mission();
+    let second = PlaneId(2);
+    let slot = Slot {
+        wing: tore_sim::ai::launch::WingId {
+            side: tore_sim::ai::launch::Side::Friendly,
+            index: 0,
+        },
+        member: 1,
+    };
+    let ai: Vec<_> = world
+        .roster
+        .planes()
+        .iter()
+        .filter(|plane| plane.id != PlaneId(0) && plane.id != second)
+        .map(|plane| (plane.id, plane.slot))
+        .collect();
+    world.roster = Roster::with_humans(
+        [
+            (
+                PlaneId(0),
+                Slot::FRIENDLY_LEAD,
+                SeatId(0),
+                Some(comms::Crew::Rio),
+            ),
+            (second, slot, SeatId(1), None),
+        ],
+        ai,
+    );
+    world
+        .comms
+        .set_seats(world.roster.seats().iter().map(|seat| seat.id));
+    let first = &world.cockpits[0];
+    let mut flight = first.flight.clone();
+    flight.position[0] += 300.;
+    let profile = crate::test_support::profile();
+    world.cockpits.push(Cockpit {
+        plane: second,
+        previous_flight: flight.clone(),
+        flight,
+        turbulence: Default::default(),
+        turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng::seeded(1).unwrap(),
+        airport_service: first.airport_service.clone(),
+        airport_nav_mode: false,
+        airfield_radio: airfield_radio::AirfieldRadio::for_seat(SeatId(1), second.0),
+        crew_voice: crew_voice::CrewVoice::new(&profile).for_seat(SeatId(1), second.0),
+        overspeed_message_at: None,
+        edge_message_at: None,
+    });
+    world
+}
+
+/// Two seats in one flight: a call the first seat makes is one call, heard by
+/// both under their own labels with one variant, while each crew voice speaks
+/// only to its own seat and each seat has its own hold.
+#[test]
+fn every_seat_hears_a_call_once_with_the_same_variant() {
+    let mut world = two_seat_mission();
+    let mut out = TickOutput::default();
+    let mut heard: Vec<(usize, SeatId, comms::Call)> = Vec::new();
+    let mut journal = Vec::new();
+    for tick in 0..TICKS {
+        match tick {
+            195 => place_drone(&mut world, DRONES[0]),
+            695 => place_drone(&mut world, DRONES[1]),
+            _ => {}
+        }
+        let mut first = script(tick);
+        first.tick = world.tick();
+        let second = SeatInput {
+            seat: SeatId(1),
+            tick: world.tick(),
+            ..SeatInput::default()
+        };
+        world.step(&[first, second], &mut out).unwrap();
+        for cue in &out.cues {
+            if let Cue::Radio { seat, call } = cue {
+                heard.push((tick, *seat, call.clone()));
+            }
+        }
+        journal.extend(world.comms.take_journal());
+    }
+    // The first seat's gun hit or release is a call to its flight: both seats hear it,
+    // the same words, each under the name that seat knows the speaker by.
+    let hit = |seat: SeatId| {
+        heard
+            .iter()
+            .find(|(_, s, call)| {
+                *s == seat
+                    && call.route == comms::Route::Radio
+                    && call.origin.speaker == Some(0)
+                    && call.origin.audience == comms::journal::Audience::Flight
+            })
+            .map(|(tick, _, call)| (*tick, call.clone()))
+    };
+    let (tick0, first) = hit(SeatId(0)).expect("seat 0 hears its own call to the flight");
+    let (tick1, second) = hit(SeatId(1)).expect("seat 1 hears its flight leader's call");
+    assert_eq!(tick0, tick1, "one call, delivered together");
+    assert_eq!(first.stems, second.stems, "one variant for both");
+    assert_eq!(
+        (first.label.as_str(), second.label.as_str()),
+        ("YOU", "Red one")
+    );
+    let entries: Vec<_> = journal
+        .iter()
+        .filter(|e| e.stems == first.stems && e.call.is_some())
+        .collect();
+    assert_eq!(entries.len(), 2, "one entry queues it and one delivers it");
+    assert_eq!(entries[0].call, entries[1].call, "one journal number");
+    assert!(entries.iter().all(|e| e.heard_by == [SeatId(0), SeatId(1)]));
+    // A crew voice speaks to its own seat: each plane's scream is its own
+    // seat's alone, and the tower's answers are the asking seat's.
+    let screams: Vec<_> = heard
+        .iter()
+        .filter(|(_, _, call)| call.route == comms::Route::Direct)
+        .map(|(_, seat, _)| *seat)
+        .collect();
+    assert_eq!(screams, [SeatId(0), SeatId(1)]);
+    assert!(
+        heard
+            .iter()
+            .filter(|(_, _, call)| call.text.contains("Field: cleared"))
+            .all(|(_, seat, _)| *seat == SeatId(0)),
+        "the first seat's tower request is answered to it"
+    );
+}
+
+/// The radio names built from the roster are the AI's own radio members, in
+/// the same order, plus the human-flown plane in Red one's place.
+#[test]
+fn radio_members_from_the_roster_match_the_ai_wings() {
+    let world = mission();
+    let wings = world.ai_wings.as_ref().unwrap();
+    let members = radio_calls::members(&world.roster, Some(wings), |_| true);
+    let ai = wings.radio_members();
+    assert_eq!(&members[..ai.len()], &ai[..]);
+    assert_eq!(members.len(), ai.len() + 1);
+    let player = &members[ai.len()];
+    assert_eq!(
+        (
+            player.id,
+            player.enemy,
+            player.flight,
+            player.position,
+            player.alive
+        ),
+        (0, false, 0, 0, true)
+    );
 }

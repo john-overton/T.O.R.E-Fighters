@@ -18,7 +18,8 @@ use crate::ai_wings::{AiWings, Chatter, Contact, FuelLevel, Member, PLAYER_ID};
 use crate::comms::journal::{
     self, Cause, Entry, Origin, Outcome, REPEAT_S, Reason, Roll, Source, Store, Test, WingReply,
 };
-use crate::comms::{self, Call, Comms, Crew, Kind, Phrase, Phrases, Route};
+use crate::comms::{self, Call, Comms, Crew, Hearer, Kind, Phrase, Phrases, Route};
+use crate::seats::{Pilot, PlaneId, Roster, SeatId};
 
 /// Flight colours, first flight first (spec-derived).
 pub const FLIGHTS: [&str; 8] = [
@@ -77,15 +78,16 @@ pub enum Audience {
     Leader,
     /// Everyone else in the speaker's flight.
     Flight,
-    /// The player alone.
-    Player,
+    /// One aircraft alone, by its id: the shooter a friendly-fire complaint
+    /// goes to.
+    Plane(u32),
 }
 impl From<Audience> for journal::Audience {
     fn from(audience: Audience) -> Self {
         match audience {
             Audience::Leader => Self::Leader,
             Audience::Flight => Self::Flight,
-            Audience::Player => Self::Player,
+            Audience::Plane(_) => Self::Player,
         }
     }
 }
@@ -155,15 +157,34 @@ pub fn label(member: &Member) -> String {
     }
 }
 
+/// One human-flown plane as the radio's listener rule sees it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Listener {
+    pub seat: SeatId,
+    /// The id of the plane the seat flies, which its own calls are made under.
+    pub plane: u32,
+    /// The radio flight number of the plane's wing, as in [`Member::flight`],
+    /// and whether that wing is on the enemy side.
+    pub flight: u8,
+    pub enemy: bool,
+    /// The plane and its pilot are alive.
+    pub alive: bool,
+    pub position: [f64; 3],
+    /// The label of the second seat of the plane's type, if it has one.
+    pub crew: Option<Crew>,
+}
+
 /// The world as the radio sees it for one tick.
 pub struct Scene<'a> {
     pub now: f64,
     pub phrases: &'a Phrases,
-    /// The player's crew voice, in a multi-crew aircraft.
-    pub crew: Option<Crew>,
-    pub player_alive: bool,
-    pub player_position: [f64; 3],
+    /// Every human-flown plane, in seat order.
+    pub listeners: &'a [Listener],
+    /// Every plane of the mission that has a radio name, human-flown ones
+    /// included.
     pub members: &'a [Member],
+    /// The plane that leads each flight, by radio flight number.
+    pub leaders: &'a [(u8, u32)],
     pub targets: &'a [live::Target],
     /// Friendly target ids; other non-AI targets are hostile.
     pub friendlies: &'a BTreeSet<u32>,
@@ -175,18 +196,20 @@ impl Scene<'_> {
     fn target(&self, id: u32) -> Option<&live::Target> {
         self.targets.iter().find(|t| t.id == id)
     }
+    /// The listener flying plane `id`, if a human does.
+    fn human(&self, id: u32) -> Option<&Listener> {
+        self.listeners.iter().find(|l| l.plane == id)
+    }
     fn enemy(&self, id: u32) -> bool {
-        if id == PLAYER_ID {
-            false
-        } else if let Some(member) = self.member(id) {
+        if let Some(member) = self.member(id) {
             member.enemy
         } else {
-            !self.friendlies.contains(&id)
+            !self.friendlies.contains(&id) && self.human(id).is_none()
         }
     }
     fn aircraft(&self, id: u32) -> bool {
-        id == PLAYER_ID
-            || self.member(id).is_some()
+        self.member(id).is_some()
+            || self.human(id).is_some()
             || self
                 .target(id)
                 .is_some_and(|t| t.role == TargetRole::Aircraft)
@@ -200,47 +223,82 @@ impl Scene<'_> {
             Attacker::Other
         }
     }
-    fn in_player_flight(&self, member: &Member) -> bool {
-        !member.enemy && member.flight == 0
+    /// The plane a strike hit. A strike names none when it hit the player,
+    /// which is the first human-flown plane until combat names its ownships
+    /// (stage B1).
+    fn victim(&self, strike: &Strike) -> u32 {
+        strike
+            .victim
+            .or_else(|| self.listeners.first().map(|l| l.plane))
+            .unwrap_or(PLAYER_ID)
     }
-    /// The listener rule: the label the player hears, or `None` when the
-    /// player is not a receiver. The player's own calls are always heard.
-    fn label(&self, speaker: u32, audience: Audience) -> Option<String> {
-        if speaker == PLAYER_ID {
+    /// Whether the plane that flies `listener` leads its flight.
+    fn leads(&self, listener: &Listener) -> bool {
+        self.leaders
+            .iter()
+            .any(|&(flight, plane)| flight == listener.flight && plane == listener.plane)
+    }
+    /// The listener rule: the label `listener` hears, or `None` when it is
+    /// not a receiver. A plane's own calls are always heard by its seat.
+    fn label(&self, listener: &Listener, speaker: u32, audience: Audience) -> Option<String> {
+        if speaker == listener.plane {
             // A call that ends up addressed to the player's own aircraft uses
             // the crew label in a multi-crew aircraft.
             let alone = !self
                 .members
                 .iter()
-                .any(|m| self.in_player_flight(m) && m.alive);
+                .any(|m| m.flight == listener.flight && m.id != listener.plane && m.alive);
             let to_self = audience != Audience::Flight || alone;
-            return Some(match (to_self, self.crew) {
+            return Some(match (to_self, listener.crew) {
                 (true, Some(crew)) => crew.label().to_string(),
                 _ => "YOU".to_string(),
             });
         }
         let member = self.member(speaker)?;
         let heard = match audience {
-            Audience::Player => true,
-            Audience::Flight | Audience::Leader => {
-                self.player_alive && self.in_player_flight(member)
+            Audience::Plane(plane) => plane == listener.plane,
+            Audience::Flight => listener.alive && member.flight == listener.flight,
+            Audience::Leader => {
+                listener.alive && member.flight == listener.flight && self.leads(listener)
             }
         };
         heard.then(|| label(member))
     }
-    /// Why [`Self::label`] found the player is not a receiver. Journal only.
-    fn unheard(&self, speaker: u32) -> Reason {
-        match self.member(speaker) {
-            None => Reason::NoRadioIdentity,
-            Some(member) if member.enemy => Reason::EnemyFlight,
-            Some(member) if !self.in_player_flight(member) => Reason::OtherFlight,
-            Some(_) => Reason::PlayerDown,
-        }
+    /// Every seat that hears `speaker`'s call to `audience`, under the label
+    /// that seat hears it by.
+    fn hearers(&self, speaker: u32, audience: Audience) -> Vec<Hearer> {
+        self.listeners
+            .iter()
+            .filter_map(|listener| {
+                self.label(listener, speaker, audience)
+                    .map(|label| Hearer::named(listener.seat, label))
+            })
+            .collect()
     }
-    /// The speaker's radio name whether or not the player hears it, for the
-    /// journal.
+    /// Why no seat heard a call from `speaker`: the most telling reason of
+    /// the seats, a downed listener before another flight before the enemy.
+    /// Journal only.
+    fn unheard(&self, speaker: u32) -> Reason {
+        let Some(member) = self.member(speaker) else {
+            return Reason::NoRadioIdentity;
+        };
+        let mut first = None;
+        for listener in self.listeners {
+            let reason = if member.enemy != listener.enemy {
+                Reason::EnemyFlight
+            } else if member.flight != listener.flight {
+                Reason::OtherFlight
+            } else {
+                return Reason::PlayerDown;
+            };
+            first.get_or_insert(reason);
+        }
+        first.unwrap_or(Reason::NoRadioIdentity)
+    }
+    /// The speaker's radio name whether or not anyone hears it, for the
+    /// journal: `YOU` for a human-flown plane.
     fn name(&self, speaker: u32) -> String {
-        if speaker == PLAYER_ID {
+        if self.human(speaker).is_some() {
             "YOU".into()
         } else {
             self.member(speaker)
@@ -449,8 +507,10 @@ pub struct Radio {
     pub heard: u32,
 }
 impl Radio {
-    /// Make a call. The listener rule decides whether the player hears it;
-    /// an unheard call is journaled and goes no further.
+    /// Make a call, once: one variant, one journal number. The listener rule
+    /// decides which seats hear it and by what label; each of them queues the
+    /// call in its own channel. A call no seat hears is journaled and goes no
+    /// further.
     #[allow(clippy::too_many_arguments)]
     fn say(
         &mut self,
@@ -465,7 +525,8 @@ impl Radio {
     ) {
         self.made += 1;
         let origin = origin.by(speaker).to(audience.into());
-        let Some(label) = scene.label(speaker, audience) else {
+        let hearers = scene.hearers(speaker, audience);
+        let Some(first) = hearers.first() else {
             comms.record(
                 Entry::note(
                     scene.now,
@@ -480,11 +541,17 @@ impl Radio {
             return;
         };
         self.heard += 1;
-        // The player's own calls are voiced when they are sent.
-        let delay = if speaker == PLAYER_ID { 0. } else { delay };
+        // A human's own calls are voiced when they are sent.
+        let delay = if scene.human(speaker).is_some() {
+            0.
+        } else {
+            delay
+        };
+        let label = first.label.clone().unwrap_or_default();
         comms.send(
             scene.now,
             Call::new(label, phrase, kind).after(delay).because(origin),
+            &hearers,
         );
     }
 
@@ -540,7 +607,7 @@ impl Radio {
     /// friendly-fire calls.
     pub fn strike(&mut self, comms: &mut Comms, scene: &Scene, strike: &Strike) {
         let shooter = strike.owner;
-        let victim = strike.victim.unwrap_or(PLAYER_ID);
+        let victim = scene.victim(strike);
         let same_side = scene.enemy(shooter) == scene.enemy(victim);
         if strike.destroyed {
             if !same_side {
@@ -553,10 +620,13 @@ impl Radio {
             if scene.aircraft(victim) {
                 self.damaged(comms, scene, victim, shooter, strike);
             }
-        } else if shooter == PLAYER_ID && victim != PLAYER_ID && scene.aircraft(victim) {
+        } else if let Some(shooter_seat) = scene.human(shooter)
+            && scene.human(victim).is_none()
+            && scene.aircraft(victim)
+        {
             let Some(range_ft) = scene
                 .target(victim)
-                .map(|t| missiles::length(missiles::sub(t.position, scene.player_position)))
+                .map(|t| missiles::length(missiles::sub(t.position, shooter_seat.position)))
             else {
                 return;
             };
@@ -570,7 +640,7 @@ impl Radio {
                         comms,
                         scene,
                         victim,
-                        Audience::Player,
+                        Audience::Plane(shooter),
                         phrase,
                         Kind::Chatter,
                         2.,
@@ -601,7 +671,7 @@ impl Radio {
         let now = scene.now;
         let unguided = strike.weapon_flags & 1 == 0;
         let cause = Cause::Hit {
-            victim: strike.victim.unwrap_or(PLAYER_ID),
+            victim: scene.victim(strike),
             guided: !unguided,
         };
         if unguided && scene.aircraft(shooter) {
@@ -911,39 +981,117 @@ impl Radio {
     }
 }
 
-/// One fixed tick of radio calls: the player's releases in `events`, every
-/// projectile hit since the last tick, and the AI's radio events.
+/// The radio names of a mission's planes, human-flown ones included: the
+/// AI's in the order of its slots, then the human-flown planes the AI has no
+/// slot for. Flights are numbered as the AI wings numbered them (the flight
+/// of Friendly Wing 1 first, then the other populated friendly wings, then the
+/// enemy wings), from the roster instead of the AI's slots, so a wing with only
+/// humans has a number too. `human_alive` says whether a human-flown plane and
+/// its pilot are alive.
+pub fn members(
+    roster: &Roster,
+    wings: Option<&AiWings>,
+    human_alive: impl Fn(PlaneId) -> bool,
+) -> Vec<Member> {
+    let mut flights: Vec<(bool, u8)> = vec![(false, 1)];
+    for plane in roster.planes() {
+        let key = (plane.slot.wing.side.is_enemy(), plane.slot.wing.index + 1);
+        if !flights.contains(&key) {
+            flights.push(key);
+        }
+    }
+    flights.sort();
+    let member = |plane: &crate::seats::Plane| {
+        let key = (plane.slot.wing.side.is_enemy(), plane.slot.wing.index + 1);
+        Member {
+            id: plane.id.0,
+            enemy: key.0,
+            flight: flights.iter().position(|f| *f == key).unwrap_or(0) as u8,
+            position: plane.slot.member,
+            alive: match plane.pilot {
+                Pilot::Human(_) => human_alive(plane.id),
+                Pilot::Ai => wings
+                    .and_then(|w| w.mission().actor(plane.id.0))
+                    .is_some_and(|actor| actor.alive()),
+            },
+        }
+    };
+    let slots = wings.map_or(&[][..], |w| w.slots());
+    let mut out: Vec<Member> = slots
+        .iter()
+        .filter_map(|slot| roster.plane(PlaneId(slot.id)))
+        .map(member)
+        .collect();
+    out.extend(
+        roster
+            .planes()
+            .iter()
+            .filter(|plane| !slots.iter().any(|slot| slot.id == plane.id.0))
+            .map(member),
+    );
+    out
+}
+
+/// The plane that leads each flight, by radio flight number: its first member
+/// (docs/ARCHITECTURE.md, "Lead succession", which moves the lead when the
+/// leader is lost).
+pub fn leaders(members: &[Member]) -> Vec<(u8, u32)> {
+    let mut leaders: Vec<(u8, u32, u8)> = Vec::new();
+    for member in members {
+        match leaders
+            .iter_mut()
+            .find(|(flight, ..)| *flight == member.flight)
+        {
+            Some(lead) if member.position < lead.2 => {
+                *lead = (member.flight, member.id, member.position)
+            }
+            Some(_) => {}
+            None => leaders.push((member.flight, member.id, member.position)),
+        }
+    }
+    leaders
+        .into_iter()
+        .map(|(flight, id, _)| (flight, id))
+        .collect()
+}
+
+/// One fixed tick of radio calls: the releases in `events`, every projectile
+/// hit since the last tick, and the AI's radio events. Each call is made
+/// once and every seat in `listeners` that hears it queues it.
 #[allow(clippy::too_many_arguments)]
 pub fn step(
     radio: &mut Radio,
     comms: &mut Comms,
     phrases: &Phrases,
-    crew: Option<Crew>,
+    listeners: &[Listener],
+    members: &[Member],
     events: &[live::Event],
     state: &mut live::State,
     wings: Option<&mut AiWings>,
-    player: &tore_sim::flight::State,
 ) {
     let strikes = state.take_strikes();
-    let (members, chatter) = match wings {
+    let chatter = match wings {
         Some(wings) => {
             // The wing's orders, reports and chatter records join the
             // channel's journal, so the host drains one journal.
             comms.record_all(wings.take_journal());
-            (wings.radio_members(), std::mem::take(&mut wings.chatter))
+            std::mem::take(&mut wings.chatter)
         }
-        None => (Vec::new(), Vec::new()),
+        None => Vec::new(),
     };
+    let leaders = leaders(members);
     let scene = Scene {
         now: state.tick() as f64 / 120.,
         phrases,
-        crew,
-        player_alive: state.player_hp > 0 && !player.crashed,
-        player_position: player.position,
-        members: &members,
+        listeners,
+        members,
+        leaders: &leaders,
         targets: &state.targets,
         friendlies: &state.friendlies,
     };
+    // Combat's own events are the first human-flown plane's until its
+    // ownships name their planes (stage B1).
+    let shooter = listeners.first().map_or(PLAYER_ID, |l| l.plane);
     for event in events {
         if let live::Event::Fired(station) = event {
             let weapon = &state.configuration().stations[*station].weapon;
@@ -955,7 +1103,7 @@ pub fn step(
                 .find(|p| p.owner == live::PLAYER_OWNER && p.station == *station)
                 .and_then(|p| p.target)
                 .or(state.designated());
-            radio.release(comms, &scene, PLAYER_ID, Release::of(weapon, target));
+            radio.release(comms, &scene, shooter, Release::of(weapon, target));
         }
     }
     for strike in &strikes {
@@ -965,7 +1113,6 @@ pub fn step(
         radio.chatter(comms, &scene, event);
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1002,9 +1149,10 @@ mod tests {
             alive: true,
         }
     }
-    /// Red two (1), Blue one (2), enemy Black one (3).
+    /// The player (0, Red one), Red two (1), Blue one (2), enemy Black one (3).
     fn members() -> Vec<Member> {
         vec![
+            member(0, false, 0, 0),
             member(1, false, 0, 1),
             member(2, false, 1, 0),
             member(3, true, 2, 0),
@@ -1017,8 +1165,22 @@ mod tests {
         t.aircraft = Some(AircraftId::Mig29);
         t
     }
+    /// A human-flown plane in `flight`, heard at seat `seat`.
+    fn listener(seat: u8, plane: u32, flight: u8) -> Listener {
+        Listener {
+            seat: SeatId(seat),
+            plane,
+            flight,
+            enemy: false,
+            alive: true,
+            position: [0.; 3],
+            crew: None,
+        }
+    }
     struct World {
         phrases: Phrases,
+        listeners: Vec<Listener>,
+        leaders: Vec<(u8, u32)>,
         members: Vec<Member>,
         targets: Vec<live::Target>,
         friendlies: BTreeSet<u32>,
@@ -1027,6 +1189,8 @@ mod tests {
         fn new() -> Self {
             Self {
                 phrases: phrases(),
+                listeners: vec![listener(0, 0, 0)],
+                leaders: vec![(0, 0), (1, 2), (2, 3)],
                 members: members(),
                 targets: vec![
                     target(1, [1000., 0., 0.]),
@@ -1040,10 +1204,9 @@ mod tests {
             Scene {
                 now,
                 phrases: &self.phrases,
-                crew: None,
-                player_alive: true,
-                player_position: [0.; 3],
+                listeners: &self.listeners,
                 members: &self.members,
+                leaders: &self.leaders,
                 targets: &self.targets,
                 friendlies: &self.friendlies,
             }
@@ -1058,7 +1221,7 @@ mod tests {
         }
     }
     fn lines(comms: &mut Comms, now: f64) -> Vec<String> {
-        comms.due(now).iter().map(Call::line).collect()
+        comms.due(now).iter().map(|d| d.call.line()).collect()
     }
     const IR: Release = Release {
         flags: 1,
@@ -1159,36 +1322,42 @@ mod tests {
     fn listeners_hear_their_own_flight_and_labels_name_the_speaker() {
         let w = World::new();
         let s = w.scene(0.);
-        assert_eq!(s.label(1, Audience::Flight).as_deref(), Some("Red two"));
-        assert_eq!(s.label(1, Audience::Leader).as_deref(), Some("Red two"));
-        assert_eq!(s.label(2, Audience::Flight), None, "another flight");
-        assert_eq!(s.label(3, Audience::Flight), None, "the enemy");
-        assert_eq!(s.label(2, Audience::Player).as_deref(), Some("Blue one"));
-        assert_eq!(s.label(PLAYER_ID, Audience::Flight).as_deref(), Some("YOU"));
+        let hears = |s: &Scene, speaker, audience| s.label(&s.listeners[0], speaker, audience);
+        assert_eq!(hears(&s, 1, Audience::Flight).as_deref(), Some("Red two"));
+        assert_eq!(hears(&s, 1, Audience::Leader).as_deref(), Some("Red two"));
+        assert_eq!(hears(&s, 2, Audience::Flight), None, "another flight");
+        assert_eq!(hears(&s, 3, Audience::Flight), None, "the enemy");
+        assert_eq!(
+            hears(&s, 2, Audience::Plane(0)).as_deref(),
+            Some("Blue one")
+        );
+        assert_eq!(hears(&s, 0, Audience::Flight).as_deref(), Some("YOU"));
+        let mut down = listener(0, 0, 0);
+        down.alive = false;
+        let listeners = [down];
         let dead = Scene {
-            player_alive: false,
+            listeners: &listeners,
             ..w.scene(0.)
         };
-        assert_eq!(dead.label(1, Audience::Leader), None);
+        assert_eq!(hears(&dead, 1, Audience::Leader), None);
         // Alone in a two-seat aircraft, the player's own call is the RIO's.
-        let alone = vec![member(2, false, 1, 0)];
+        let alone = vec![member(0, false, 0, 0), member(2, false, 1, 0)];
+        let mut rio_listener = listener(0, 0, 0);
+        rio_listener.crew = Some(Crew::Rio);
+        let listeners = [rio_listener.clone()];
         let rio = Scene {
-            crew: Some(Crew::Rio),
+            listeners: &listeners,
             members: &alone,
             ..w.scene(0.)
         };
-        assert_eq!(
-            rio.label(PLAYER_ID, Audience::Flight).as_deref(),
-            Some("RIO")
-        );
+        assert_eq!(hears(&rio, 0, Audience::Flight).as_deref(), Some("RIO"));
+        rio_listener.crew = Some(Crew::CoPilot);
+        let listeners = [rio_listener];
         let led = Scene {
-            crew: Some(Crew::CoPilot),
+            listeners: &listeners,
             ..w.scene(0.)
         };
-        assert_eq!(
-            led.label(PLAYER_ID, Audience::Flight).as_deref(),
-            Some("YOU")
-        );
+        assert_eq!(hears(&led, 0, Audience::Flight).as_deref(), Some("YOU"));
         assert_eq!(label(&member(9, true, 7, 9)), "Yellow ten");
         assert_eq!(label(&member(9, true, 8, 0)), "Flight 9 one");
     }
@@ -1402,11 +1571,11 @@ mod tests {
         assert_eq!(comms.due(0.5).len(), 1, "SAM launch after half a second");
         let replies = comms.due(2.);
         assert_eq!(replies.len(), 2, "engage and showtime after two seconds");
-        assert_eq!(replies[0].stems, ["^ENGAGE"]);
-        assert_eq!(replies[0].kind, Kind::Chatter);
-        assert_eq!(replies[1].kind, Kind::Important);
+        assert_eq!(replies[0].call.stems, ["^ENGAGE"]);
+        assert_eq!(replies[0].call.kind, Kind::Chatter);
+        assert_eq!(replies[1].call.kind, Kind::Important);
         // Radio silence drops the engage reply but never "Showtime!".
-        comms.toggle_silence();
+        comms.toggle_silence(SeatId(0));
         radio.chatter(
             &mut comms,
             &s,
@@ -1430,8 +1599,11 @@ mod tests {
             ..IR
         };
         radio.release(&mut comms, &w.scene(0.), 3, at_red_two);
+        let mut lost = listener(0, 0, 0);
+        lost.alive = false;
+        let listeners = [lost];
         let down = Scene {
-            player_alive: false,
+            listeners: &listeners,
             ..w.scene(0.)
         };
         radio.release(&mut comms, &down, 1, IR);
@@ -1568,5 +1740,51 @@ mod tests {
             );
         }
         assert!((20..60).contains(&splashes), "{splashes}");
+    }
+
+    #[test]
+    fn each_side_hears_only_its_own_flights_and_a_complaint_goes_to_the_shooter() {
+        // Seat 0 flies Red one; seat 1 flies plane 5, the enemy Black two.
+        let mut w = World::new();
+        w.members.push(member(5, true, 2, 1));
+        let mut enemy = listener(1, 5, 2);
+        enemy.enemy = true;
+        w.listeners.push(enemy);
+        let mut comms = Comms::with_seats(1, [SeatId(0), SeatId(1)]);
+        let mut radio = Radio::default();
+        let s = w.scene(0.);
+        // Red two's call goes to seat 0 alone, Black one's to seat 1 alone.
+        radio.release(&mut comms, &s, 1, IR);
+        radio.release(
+            &mut comms,
+            &s,
+            3,
+            Release {
+                target: Some(1),
+                ..IR
+            },
+        );
+        let mut seats = Vec::new();
+        for delivery in comms.due(1.) {
+            seats.push((delivery.seat, delivery.call.label));
+        }
+        assert_eq!(
+            seats,
+            [
+                (SeatId(0), "Red two".to_string()),
+                (SeatId(1), "Green one".to_string())
+            ],
+            "the other side's flight is never heard"
+        );
+        assert_eq!((radio.made, radio.heard), (2, 2));
+        // A friendly-fire complaint is addressed to the shooter's plane.
+        radio.strike(&mut comms, &s, &strike(5, Some(3), 0x80, false));
+        let complaints = comms.due(9.);
+        assert_eq!(complaints.len(), 1);
+        assert_eq!(complaints[0].seat, SeatId(1));
+        assert_eq!(complaints[0].call.label, "Green one");
+        // Each seat's busy hold is its own: only seat 1 heard the complaint.
+        assert!(!comms.channel_free(SeatId(1), 10.));
+        assert!(comms.channel_free(SeatId(0), 10.));
     }
 }

@@ -3,10 +3,17 @@
 //!
 //! Every notice queued, coalesced, pushed out, expired or cancelled is
 //! written to the channel's journal with its trigger.
+//!
+//! Each human-flown plane has an [`AirfieldRadio`] for its own side of the
+//! tower conversation: departure, approach and the notices that wait to be
+//! sent to its seat. What its wingmen report is decided once for the whole
+//! mission by [`WingStatus`], and every seat whose wing it is queues the same
+//! report.
 use crate::{
-    ai_wings::AiWings,
+    ai_wings::{AiWings, Member},
     comms::journal::{Audience, Cause, Entry, Origin, Outcome, Reason, Roll, Source, TowerEvent},
-    comms::{Call, Comms, Kind, Phrase, Phrases},
+    comms::{Call, Comms, Hearer, Kind, Phrase, Phrases},
+    seats::SeatId,
     terrain::Terrain,
 };
 use std::collections::{BTreeMap, VecDeque};
@@ -19,7 +26,9 @@ use tore_sim::{
 const INTERVAL: f64 = 3.;
 const EXPIRES: f64 = 15.;
 const RANGE_FT: f64 = 7. * 6076.12;
-const PLAYER: u32 = 0;
+/// The actor a plane's own notices are filed under in its queue, apart from
+/// its wingmen's ids.
+const PLAYER: u32 = u32::MAX;
 /// Notices waiting at most; a new one pushes out the oldest.
 const QUEUE: usize = 24;
 
@@ -51,14 +60,18 @@ struct Approach {
     landed: bool,
     welcomed: bool,
 }
+/// One human-flown plane's tower conversation and the notices waiting for its
+/// seat.
 #[derive(Default)]
 pub struct AirfieldRadio {
+    /// The seat it speaks to, and the plane that seat flies.
+    seat: SeatId,
+    plane: u32,
     departure: Departure,
     approach: Approach,
     clearance_announced: Option<u32>,
     landing_count: u32,
     landing_score: u32,
-    wing: BTreeMap<u32, (Option<Phase>, u32)>,
     pending: VecDeque<Notice>,
     next: f64,
     /// Journal entries made away from the channel (queueing, tower
@@ -113,8 +126,16 @@ fn tower(world: &Terrain, airport: u32) -> String {
         .map_or_else(|| "Tower".into(), |a| format!("{} tower", a.name))
 }
 impl AirfieldRadio {
+    /// The tower conversation of the plane with id `plane`, spoken to `seat`.
+    pub fn for_seat(seat: SeatId, plane: u32) -> Self {
+        Self {
+            seat,
+            plane,
+            ..Self::default()
+        }
+    }
     pub fn reset(&mut self, departure: Option<RunwayView>) {
-        *self = Self::default();
+        *self = Self::for_seat(self.seat, self.plane);
         self.departure.runway = departure;
     }
     /// Keep manual requests authoritative and avoid speaking clearance twice.
@@ -158,7 +179,7 @@ impl AirfieldRadio {
                 kept.push_back(notice);
             } else {
                 self.notes
-                    .push(Entry::call(at, None, &notice.call, gone(&notice)));
+                    .push(Entry::call(at, None, &notice.call, gone(&notice)).heard_by([self.seat]));
             }
         }
         self.pending = kept;
@@ -173,22 +194,28 @@ impl AirfieldRadio {
         if self.pending.len() >= QUEUE
             && let Some(oldest) = self.pending.pop_front()
         {
-            self.notes.push(Entry::call(
+            self.notes.push(
+                Entry::call(
+                    now,
+                    None,
+                    &oldest.call,
+                    Outcome::Dropped(Reason::QueueFull { limit: QUEUE }),
+                )
+                .heard_by([self.seat]),
+            );
+        }
+        self.notes.push(
+            Entry::call(
                 now,
                 None,
-                &oldest.call,
-                Outcome::Dropped(Reason::QueueFull { limit: QUEUE }),
-            ));
-        }
-        self.notes.push(Entry::call(
-            now,
-            None,
-            &call,
-            Outcome::Queued {
-                due: now,
-                expires: Some(now + EXPIRES),
-            },
-        ));
+                &call,
+                Outcome::Queued {
+                    due: now,
+                    expires: Some(now + EXPIRES),
+                },
+            )
+            .heard_by([self.seat]),
+        );
         self.pending.push_back(Notice {
             actor,
             key,
@@ -197,7 +224,8 @@ impl AirfieldRadio {
             call,
         });
     }
-    fn deliver(&mut self, now: f64, comms: &mut Comms) {
+    /// Send the next waiting notice to the seat, if the channel is free.
+    pub fn deliver(&mut self, now: f64, comms: &mut Comms) {
         self.clock = now;
         self.retain(
             now,
@@ -210,7 +238,7 @@ impl AirfieldRadio {
             },
         );
         comms.record_all(self.notes.drain(..));
-        if now < self.next || !comms.channel_free(now) {
+        if now < self.next || !comms.channel_free(self.seat, now) {
             return;
         }
         let next = self
@@ -220,18 +248,22 @@ impl AirfieldRadio {
             .unwrap_or(0);
         if let Some(mut notice) = self.pending.remove(next) {
             notice.call.origin.since = Some(notice.queued);
-            let heard = !comms.radio_silence || notice.call.kind == Kind::Important;
-            comms.send(now, notice.call);
+            let heard = !comms.radio_silence(self.seat) || notice.call.kind == Kind::Important;
+            comms.send(now, notice.call, &[Hearer::seat(self.seat)]);
             if heard {
                 // Reserve the channel now, before this tick's crew-comment
                 // producer runs. Playback will retain the same three-second hold.
-                comms.spoken(now);
+                comms.spoken(self.seat, now);
             }
             self.next = now + INTERVAL;
         }
     }
+    /// The plane's own tower conversation for one tick: departure, approach
+    /// and landing calls are queued. When the aircraft is lost the queue is
+    /// cancelled instead and this returns false, and nothing else of the
+    /// airfield radio runs for it this tick.
     #[allow(clippy::too_many_arguments)]
-    pub fn step(
+    pub fn step_player(
         &mut self,
         now: f64,
         phrases: &Phrases,
@@ -240,99 +272,42 @@ impl AirfieldRadio {
         world: &Terrain,
         service: &Service,
         wings: Option<&AiWings>,
-    ) {
+    ) -> bool {
         self.clock = now;
         if flight.crashed || flight.escape.is_some() || flight.systems.pilot.dead {
             self.invalidate();
             self.retain(now, |_| false, |_| Outcome::Cancelled(Reason::AircraftLost));
             comms.record_all(self.notes.drain(..));
-            comms.cancel_airport_because(Reason::AircraftLost);
-            return;
-        } else {
-            self.player(now, phrases, comms, flight, world, service, wings);
+            comms.cancel_airport_because(self.seat, Reason::AircraftLost);
+            return false;
         }
-        if let Some(wings) = wings {
-            let members = wings.radio_members();
-            for member in members.iter().filter(|m| !m.enemy && m.flight == 0) {
-                if !member.alive {
+        self.player(now, phrases, comms, flight, world, service, wings);
+        true
+    }
+    /// Queue what the wingmen reported this tick, or cancel what a wingman's
+    /// change or death made stale. `events` are those of this plane's wing.
+    pub fn apply_wing(&mut self, now: f64, events: &[WingEvent]) {
+        self.clock = now;
+        for event in events {
+            match event {
+                WingEvent::Down { member } => self.retain(
+                    now,
+                    |n| n.actor != *member,
+                    |_| Outcome::Cancelled(Reason::WingmanDown),
+                ),
+                WingEvent::Changed { member, report } => {
+                    // Free flight has no airfield status and invalidates pending taxi reports.
                     self.retain(
                         now,
-                        |n| n.actor != member.id,
-                        |_| Outcome::Cancelled(Reason::WingmanDown),
+                        |n| n.actor != *member,
+                        |_| Outcome::Replaced(Reason::StatusChanged),
                     );
-                    continue;
-                }
-                let Some(actor) = wings.mission().actor(member.id) else {
-                    continue;
-                };
-                let phase = actor.airfield_phase();
-                let turns = actor.airfield().map_or(0, |s| s.go_arounds());
-                let previous = self.wing.insert(member.id, (phase, turns));
-                if previous == Some((phase, turns)) {
-                    continue;
-                }
-                // Free flight has no airfield status and invalidates pending taxi reports.
-                self.retain(
-                    now,
-                    |n| n.actor != member.id,
-                    |_| Outcome::Replaced(Reason::StatusChanged),
-                );
-                let Some(sequence) = actor.airfield() else {
-                    continue;
-                };
-                let label = crate::radio_calls::label(member);
-                let tower = tower(world, sequence.runway().airport);
-                let go_around = previous.is_some_and(|(_, old)| turns > old);
-                let mut rolls = Vec::new();
-                let (text, stem) = if go_around {
-                    ("Going around", Some("^GOARND"))
-                } else {
-                    match phase {
-                        Some(Phase::Waiting) => ("Holding short for takeoff", None),
-                        Some(Phase::Taxi) => ("Taxiing to the runway", None),
-                        Some(Phase::LineUp) => ("Cleared for takeoff", {
-                            let roll = comms.roll();
-                            rolls.push(Roll::pick("takeoff call", roll, 2));
-                            Some(Comms::pick(roll, &["^TAKOFF1", "^RDYROLL"]))
-                        }),
-                        Some(Phase::TakeoffRoll) => ("Taking off", None),
-                        Some(Phase::ClimbOut) => ("Airborne", Some("^AIRBORN")),
-                        Some(Phase::Inbound) => ("Returning to base", None),
-                        Some(Phase::Marshal) => ("Holding at marshal", None),
-                        Some(Phase::Approach) => ("Cleared to land", Some("^CLRLAND")),
-                        Some(Phase::Final) => ("On final", None),
-                        Some(Phase::Rollout) => (
-                            "Landed, slowing on the runway",
-                            actor
-                                .flight()
-                                .research
-                                .as_ref()
-                                .and_then(|r| r.landings.grade())
-                                .map(|grade| if grade >= 100 { "^GDLAND" } else { "^FRLAND" }),
-                        ),
-                        Some(Phase::TaxiClear) => ("Taxiing clear", None),
-                        Some(Phase::Parked) => ("Parked", Some("^WELHOME")),
-                        None => continue,
+                    if let Some(report) = report {
+                        self.queue(now, *member, 0, report.clone());
                     }
-                };
-                let report = stem.map_or_else(
-                    || {
-                        Call::new(
-                            label.clone(),
-                            Phrase::default().raw(text, None),
-                            Kind::Chatter,
-                        )
-                    },
-                    |stem| call(phrases, &tower, stem, Some(&label), false),
-                );
-                let origin = Origin::of(Source::Tower, Cause::WingStatus { phase, go_around })
-                    .by(member.id)
-                    .to(Audience::Airport)
-                    .rolls(rolls);
-                self.queue(now, member.id, 0, report.because(origin));
+                }
             }
         }
-        self.deliver(now, comms);
     }
     #[allow(clippy::too_many_arguments)]
     fn player(
@@ -356,7 +331,7 @@ impl AirfieldRadio {
                     |_| Outcome::Cancelled(Reason::RunwayUnusable),
                 );
             } else if supported && !self.departure.cleared {
-                if !busy(wings, runway, PLAYER) {
+                if !busy(wings, runway, self.plane) {
                     self.departure.cleared = true;
                     let stem = "^TAKOFF1";
                     let clearance = call(phrases, &tower, stem, None, true)
@@ -436,7 +411,7 @@ impl AirfieldRadio {
                 return;
             }
             let tower = tower(world, runway.airport);
-            if self.clearance_announced != Some(runway.object) && !busy(wings, runway, PLAYER) {
+            if self.clearance_announced != Some(runway.object) && !busy(wings, runway, self.plane) {
                 self.clearance_announced = Some(runway.object);
                 self.queue(
                     now,
@@ -509,6 +484,143 @@ impl AirfieldRadio {
         }
     }
 }
+/// What one wingman's status report does to the queue of every seat in its
+/// wing.
+#[derive(Clone, Debug)]
+pub enum WingEvent {
+    /// The wingman is down: its waiting reports are cancelled.
+    Down { member: u32 },
+    /// The wingman's status changed: its waiting reports are replaced by
+    /// `report`, when it has a new one.
+    Changed { member: u32, report: Option<Call> },
+}
+
+/// A [`WingEvent`] and the flight (radio flight number) whose seats get it.
+#[derive(Clone, Debug)]
+pub struct WingReport {
+    pub flight: u8,
+    pub event: WingEvent,
+}
+
+/// The airfield status of the AI wingmen, watched once for the mission. A
+/// change is turned into a report once, with one variant roll, and every
+/// seat in the wingman's flight queues that same report.
+#[derive(Default)]
+pub struct WingStatus {
+    /// Each wingman's last phase and go-around count.
+    memory: BTreeMap<u32, (Option<Phase>, u32)>,
+}
+
+impl WingStatus {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// One tick. `members` are the mission's radio members; the flights in
+    /// `listening` are those with a human seat, and only their wingmen make
+    /// reports.
+    #[allow(clippy::too_many_arguments)]
+    pub fn step(
+        &mut self,
+        phrases: &Phrases,
+        comms: &mut Comms,
+        world: &Terrain,
+        wings: &AiWings,
+        members: &[Member],
+        listening: &[u8],
+    ) -> Vec<WingReport> {
+        let mut reports = Vec::new();
+        for member in members {
+            let heard = listening.contains(&member.flight);
+            if !member.alive {
+                if heard {
+                    reports.push(WingReport {
+                        flight: member.flight,
+                        event: WingEvent::Down { member: member.id },
+                    });
+                }
+                continue;
+            }
+            let Some(actor) = wings.mission().actor(member.id) else {
+                continue;
+            };
+            let phase = actor.airfield_phase();
+            let turns = actor.airfield().map_or(0, |s| s.go_arounds());
+            let previous = self.memory.insert(member.id, (phase, turns));
+            if previous == Some((phase, turns)) || !heard {
+                continue;
+            }
+            let mut change = |report| {
+                reports.push(WingReport {
+                    flight: member.flight,
+                    event: WingEvent::Changed {
+                        member: member.id,
+                        report,
+                    },
+                });
+            };
+            let Some(sequence) = actor.airfield() else {
+                change(None);
+                continue;
+            };
+            let label = crate::radio_calls::label(member);
+            let tower = tower(world, sequence.runway().airport);
+            let go_around = previous.is_some_and(|(_, old)| turns > old);
+            let mut rolls = Vec::new();
+            let (text, stem) = if go_around {
+                ("Going around", Some("^GOARND"))
+            } else {
+                match phase {
+                    Some(Phase::Waiting) => ("Holding short for takeoff", None),
+                    Some(Phase::Taxi) => ("Taxiing to the runway", None),
+                    Some(Phase::LineUp) => ("Cleared for takeoff", {
+                        let roll = comms.roll();
+                        rolls.push(Roll::pick("takeoff call", roll, 2));
+                        Some(Comms::pick(roll, &["^TAKOFF1", "^RDYROLL"]))
+                    }),
+                    Some(Phase::TakeoffRoll) => ("Taking off", None),
+                    Some(Phase::ClimbOut) => ("Airborne", Some("^AIRBORN")),
+                    Some(Phase::Inbound) => ("Returning to base", None),
+                    Some(Phase::Marshal) => ("Holding at marshal", None),
+                    Some(Phase::Approach) => ("Cleared to land", Some("^CLRLAND")),
+                    Some(Phase::Final) => ("On final", None),
+                    Some(Phase::Rollout) => (
+                        "Landed, slowing on the runway",
+                        actor
+                            .flight()
+                            .research
+                            .as_ref()
+                            .and_then(|r| r.landings.grade())
+                            .map(|grade| if grade >= 100 { "^GDLAND" } else { "^FRLAND" }),
+                    ),
+                    Some(Phase::TaxiClear) => ("Taxiing clear", None),
+                    Some(Phase::Parked) => ("Parked", Some("^WELHOME")),
+                    None => {
+                        change(None);
+                        continue;
+                    }
+                }
+            };
+            let report = stem.map_or_else(
+                || {
+                    Call::new(
+                        label.clone(),
+                        Phrase::default().raw(text, None),
+                        Kind::Chatter,
+                    )
+                },
+                |stem| call(phrases, &tower, stem, Some(&label), false),
+            );
+            let origin = Origin::of(Source::Tower, Cause::WingStatus { phase, go_around })
+                .by(member.id)
+                .to(Audience::Airport)
+                .rolls(rolls);
+            change(Some(report.because(origin)));
+        }
+        reports
+    }
+}
+
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
     (a[0] - b[0]).hypot(a[2] - b[2])
 }
@@ -615,8 +727,10 @@ mod tests {
         f: &flight::State,
         t: f64,
     ) -> Vec<Call> {
-        r.step(t, p, c, f, w, s, None);
-        c.due(t)
+        if r.step_player(t, p, c, f, w, s, None) {
+            r.deliver(t, c);
+        }
+        c.due(t).into_iter().map(|d| d.call).collect()
     }
     #[test]
     fn startup_departure_and_restart_have_clearance_without_false_landings() {
@@ -684,7 +798,7 @@ mod tests {
             "^WELBACK" | "^WELHOME"
         ));
         assert!(tick(&mut r, &mut c, &p, &w, &s, &f, 12.).is_empty());
-        r.queue(12., 0, 4, call(&p, "Fixture", "^CLRLAND", None, true));
+        r.queue(12., PLAYER, 4, call(&p, "Fixture", "^CLRLAND", None, true));
         r.reply(&Reply::Cancelled { airport: Some(7) });
         r.deliver(15., &mut c);
         assert!(c.due(15.).is_empty());
@@ -696,27 +810,27 @@ mod tests {
         let line = |text: &str, kind| Call::new("Fixture", Phrase::default().raw(text, None), kind);
         r.queue(0., 2, 0, line("Taxi", Kind::Chatter));
         r.queue(0., 2, 0, line("Airborne", Kind::Chatter));
-        r.queue(0., 0, 1, line("Clearance", Kind::Important).airport());
+        r.queue(0., PLAYER, 1, line("Clearance", Kind::Important).airport());
         r.deliver(0., &mut c);
         assert!(
-            !c.channel_free(0.),
+            !c.channel_free(SeatId::default(), 0.),
             "a delivered airport line holds off crew comments immediately"
         );
-        assert_eq!(c.due(0.)[0].text, "Clearance");
+        assert_eq!(c.due(0.)[0].call.text, "Clearance");
         r.deliver(1., &mut c);
         assert!(c.due(1.).is_empty());
         r.deliver(3., &mut c);
-        assert_eq!(c.due(3.)[0].text, "Airborne");
+        assert_eq!(c.due(3.)[0].call.text, "Airborne");
         r.queue(3., 2, 0, line("Old", Kind::Chatter));
         r.deliver(20., &mut c);
         assert!(c.due(20.).is_empty());
-        c.radio_silence = true;
+        c.toggle_silence(SeatId::default());
         r.queue(20., 2, 0, line("Silent", Kind::Chatter));
         r.deliver(20., &mut c);
         assert!(c.due(20.).is_empty());
-        r.queue(23., 0, 1, line("Important", Kind::Important).airport());
+        r.queue(23., PLAYER, 1, line("Important", Kind::Important).airport());
         r.deliver(23., &mut c);
-        assert_eq!(c.due(23.)[0].text, "Important");
+        assert_eq!(c.due(23.)[0].call.text, "Important");
     }
     #[test]
     fn tower_notices_journal_coalescing_the_full_queue_and_expiry() {
@@ -728,7 +842,7 @@ mod tests {
         r.queue(0., 2, 0, line("Airborne"));
         r.queue(0., 3, 0, line("Old"));
         r.deliver(0., &mut c);
-        assert_eq!(c.due(0.)[0].text, "Airborne");
+        assert_eq!(c.due(0.)[0].call.text, "Airborne");
         r.deliver(16., &mut c);
         for actor in 10..10 + 25 {
             r.queue(20., actor, 0, line(&format!("Status {actor}")));
@@ -818,7 +932,11 @@ mod tests {
                 ),
             ]
         );
-        assert_eq!(c.due(1.)[0].text, "Wing status", "a wingman's notice stays");
+        assert_eq!(
+            c.due(1.)[0].call.text,
+            "Wing status",
+            "a wingman's notice stays"
+        );
     }
     #[test]
     fn tower_calls_carry_their_trigger() {

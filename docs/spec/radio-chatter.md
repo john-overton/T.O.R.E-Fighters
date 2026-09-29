@@ -545,6 +545,19 @@ Everything below is **spec-derived** unless the fitted table says otherwise.
   seconds after the player's order call, which still plays at once. Attack on
   contact now says "Attack".
 
+### Several seats (multiplayer, agent decisions, 2026-09-29)
+
+A mission with more than one human has a listener for each human-flown plane,
+and the rules above are read for each one. The call is still made once, with
+one roll and the shared cooldowns, so every listener hears the same variant;
+each seat has its own queue, channel hold and radio silence. A seat hears a
+whole-flight call from another plane of its wing while its own plane is alive,
+a flight-leader call only when it flies the wing's leader, and a friendly-fire
+complaint only when it is the shooter's seat. Its own calls are voiced at once
+and read `YOU`, or the crew label when the seat is the only one in its wing.
+Every other seat hears the speaker by flight colour and position. Design:
+[architecture](../ARCHITECTURE.md#radio-orders-and-debrief-for-each-seat).
+
 ### Fitted components
 
 | Component | Rule | Known difference |

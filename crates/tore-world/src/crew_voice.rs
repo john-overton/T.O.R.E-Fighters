@@ -12,11 +12,11 @@
 //! Each line, each coaching check that finds nothing to say, each change in
 //! whether the crew may comment, and each draw of the roll is written to the
 //! channel's journal. Writing it never draws a roll.
-use crate::ai_wings::PLAYER_ID;
 use crate::comms::journal::{
     Audience, Cause, Coaching, Entry, Gate, NoSpeaker, Origin, Outcome, Reason, Roll, Source, Test,
 };
-use crate::comms::{self, Call, Comms, Crew, Elevation, Kind, Phrase, Phrases, Route};
+use crate::comms::{self, Call, Comms, Crew, Elevation, Hearer, Kind, Phrase, Phrases, Route};
+use crate::seats::SeatId;
 use std::collections::BTreeSet;
 use tore_sim::ai::route::FuelState;
 use tore_sim::attitude::{Basis, Vector, dot};
@@ -313,6 +313,9 @@ struct Speaker {
 /// Per-flight crew voice memory.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CrewVoice {
+    /// The seat this voice speaks to, and the plane it sits in.
+    seat: SeatId,
+    plane: u32,
     crew: Option<Crew>,
     fighter: bool,
     /// Earliest time of the next coaching remark.
@@ -381,6 +384,8 @@ impl CrewVoice {
     }
     fn with(crew: Option<Crew>, fighter: bool) -> Self {
         Self {
+            seat: SeatId::default(),
+            plane: 0,
             crew,
             fighter,
             next: f64::NEG_INFINITY,
@@ -397,22 +402,36 @@ impl CrewVoice {
             gate: None,
         }
     }
+    /// This voice speaks to `seat` from the plane with id `plane`, which is
+    /// how its calls are named in the journal.
+    pub fn for_seat(mut self, seat: SeatId, plane: u32) -> Self {
+        self.seat = seat;
+        self.plane = plane;
+        self
+    }
     /// The home point for fuel calls: the first position seen this flight.
     pub fn home(&mut self, position: Vector) -> Vector {
         *self.home.get_or_insert(position)
     }
 
+    /// Say `call` to this voice's own seat.
+    fn say(&self, comms: &mut Comms, now: f64, call: Call) {
+        comms.send(now, call, &[Hearer::seat(self.seat)]);
+    }
+
     /// One fixed tick. Sends any lines to `comms`.
     pub fn step(&mut self, input: &Input, comms: &mut Comms, phrases: &Phrases) {
         let now = input.now;
+        let plane = self.plane;
         if input.crashed && !self.crashed && !input.ejected {
             let roll = comms.roll();
             let stem = Comms::pick(roll, SCREAM);
             let origin = Origin::of(Source::Crew, Cause::Destroyed)
-                .by(PLAYER_ID)
+                .by(plane)
                 .to(Audience::Cockpit)
                 .rolls(vec![Roll::pick("death scream", roll, SCREAM.len())]);
-            comms.send(
+            self.say(
+                comms,
                 now,
                 Call::new("", Phrase::stem(phrases, stem), Kind::Important)
                     .direct()
@@ -430,7 +449,7 @@ impl CrewVoice {
             self.fuel_call(crew, input.fuel, comms, phrases, now);
             self.missile_warnings(crew, &input.incoming, comms, phrases, now);
         }
-        if !comms.channel_free(now) || input.doomed {
+        if !comms.channel_free(self.seat, now) || input.doomed {
             // Every delivered line shows the 3 s channel hold, so only the
             // eject warning is journaled as a gate here.
             if input.doomed {
@@ -438,7 +457,7 @@ impl CrewVoice {
             }
             return;
         }
-        if comms.radio_silence {
+        if comms.radio_silence(self.seat) {
             // The feet wet state keeps tracking so a later call is never stale.
             if input.over_water.is_some() {
                 self.wet = input.over_water;
@@ -455,7 +474,7 @@ impl CrewVoice {
             return;
         };
         self.gate(now, comms, None);
-        let speaker_id = (!speaker.wingman).then_some(PLAYER_ID);
+        let speaker_id = (!speaker.wingman).then_some(plane);
         let origin = |cause, rolls| {
             let origin = Origin::of(Source::Crew, cause)
                 .to(Audience::Cockpit)
@@ -474,7 +493,8 @@ impl CrewVoice {
                         .into_iter()
                         .chain([Roll::pick("G sound", roll, stems.len())])
                         .collect();
-                    comms.send(
+                    self.say(
+                        comms,
                         now,
                         Call::new(speaker.label, Phrase::stem(phrases, stem), Kind::Chatter)
                             .because(origin(cause, rolls)),
@@ -567,7 +587,8 @@ impl CrewVoice {
                 let stem = Comms::pick(roll, stems);
                 rolls.push(Roll::pick("the line", roll, stems.len()));
                 self.next += wait;
-                comms.send(
+                self.say(
+                    comms,
                     now,
                     Call::new(speaker.label, Phrase::stem(phrases, stem), Kind::Chatter)
                         .because(origin(coaching(self.next - now), rolls)),
@@ -575,7 +596,8 @@ impl CrewVoice {
             }
             Line::Phrase(phrase) => {
                 self.next += wait;
-                comms.send(
+                self.say(
+                    comms,
                     now,
                     Call::new(speaker.label, phrase, Kind::Chatter)
                         .because(origin(coaching(self.next - now), rolls)),
@@ -875,9 +897,10 @@ impl CrewVoice {
         if level > self.fuel_said {
             self.fuel_said = level;
             let origin = Origin::of(Source::Crew, Cause::Fuel { state: fuel })
-                .by(PLAYER_ID)
+                .by(self.plane)
                 .to(Audience::Cockpit);
-            comms.send(
+            self.say(
+                comms,
                 now,
                 Call::new(crew.label(), Phrase::stem(phrases, stem), Kind::Important)
                     .because(origin),
@@ -913,14 +936,14 @@ impl CrewVoice {
                     signature: missile.signature,
                 },
             )
-            .by(PLAYER_ID)
+            .by(self.plane)
             .to(Audience::Cockpit);
             let phrase = Phrase::stem(phrases, stem);
             match key {
                 // The missile is already marked as warned, so a warning the
                 // shared limit holds back is never called later.
-                Some(key) if !comms.cooldown(key, now, MISSILE_REPEAT) => {
-                    let remaining = comms.remaining(key, now);
+                Some(key) if !comms.seat_cooldown(self.seat, key, now, MISSILE_REPEAT) => {
+                    let remaining = comms.seat_remaining(self.seat, key, now);
                     comms.record(
                         Entry::note(
                             now,
@@ -933,7 +956,8 @@ impl CrewVoice {
                         .with_kind(Route::Radio, Kind::Important),
                     );
                 }
-                _ => comms.send(
+                _ => self.say(
+                    comms,
                     now,
                     Call::new(crew.label(), phrase, Kind::Important)
                         .after(MISSILE_CALL_DELAY)
@@ -1035,6 +1059,12 @@ pub struct Host<'a> {
     pub combat: &'a tore_sim::combat::live::State,
     pub wings: Option<&'a crate::ai_wings::AiWings>,
     pub world: &'a crate::terrain::Terrain,
+    /// Where the plane sits in its wing, for its wingman.
+    pub slot: crate::seats::Slot,
+    /// Combat's player-only state (designation, weapon selection, incoming
+    /// missiles) is this plane's. False for a human-flown plane combat has no
+    /// ownship for yet, which sees none of them (stage B1).
+    pub ownship: bool,
 }
 
 impl CrewVoice {
@@ -1057,12 +1087,17 @@ impl CrewVoice {
                 .and_then(|w| w.mission().actor(id))
                 .is_some_and(|a| a.experience().level == tore_sim::ai::Experience::Ace)
         };
-        let designated = state.designated();
+        let designated = if host.ownship {
+            state.designated()
+        } else {
+            None
+        };
         let target = designated
             .filter(|id| !state.friendlies.contains(id))
             .and_then(|id| state.targets.iter().find(|t| t.id == id))
             .filter(|t| t.role == TargetRole::Aircraft || t.hp > 0);
-        let gun_selected = state.armed
+        let gun_selected = host.ownship
+            && state.armed
             && state
                 .configuration()
                 .stations
@@ -1090,7 +1125,7 @@ impl CrewVoice {
         let incoming = state
             .projectiles
             .iter()
-            .filter(|p| p.incoming)
+            .filter(|p| host.ownship && p.incoming)
             .filter_map(|p| {
                 let w = p.weapon(state.configuration());
                 (w.seeker.signature != 0 && !is_gun(w)).then_some(Incoming {
@@ -1100,17 +1135,18 @@ impl CrewVoice {
                 })
             })
             .collect();
+        // The first other member of the plane's own wing: the wing's second
+        // member for its leader, else its leader.
+        let other = u8::from(host.slot.member == 0);
         let wingman = wings.and_then(|w| {
-            let actor = w.mission().actors().iter().find(|a| {
-                let identity = a.identity();
-                identity.side == crate::ai_wings::FRIENDLY_SIDE
-                    && identity.wing == 0
-                    && identity.member == 1
+            let slot = w.slots().iter().find(|s| {
+                s.side == host.slot.wing.side
+                    && s.wing_number == host.slot.wing.index + 1
+                    && s.member_number == other + 1
             })?;
+            let actor = w.mission().actor(slot.id)?;
             Some(Wingman {
-                label: w
-                    .slot(actor.id())
-                    .map_or_else(|| "Wingman".into(), |s| s.label()),
+                label: slot.label(),
                 alive: actor.alive(),
                 target: actor.controller().target(),
                 position: actor.flight().position,
@@ -1225,7 +1261,7 @@ mod tests {
     /// Step once and deliver, returning what was heard.
     fn run(voice: &mut CrewVoice, comms: &mut Comms, input: &Input) -> Vec<Call> {
         voice.step(input, comms, &phrases());
-        comms.due(input.now)
+        comms.due(input.now).into_iter().map(|d| d.call).collect()
     }
 
     fn rio() -> CrewVoice {
@@ -1496,7 +1532,7 @@ mod tests {
     fn fuel_calls_are_said_once_and_a_worse_state_skips_milder_ones() {
         let mut voice = rio();
         let mut comms = Comms::new(1);
-        comms.toggle_silence();
+        comms.toggle_silence(SeatId::default());
         let mut heard = Vec::new();
         for (t, fuel) in [
             FuelState::Ok,
@@ -1641,11 +1677,11 @@ mod tests {
         i.over_water = Some(true);
         let heard = run(&mut voice, &mut comms, &i);
         assert!(FEET_WET.contains(&heard[0].stems[0].as_str()));
-        comms.toggle_silence();
+        comms.toggle_silence(SeatId::default());
         i.now = 40.;
         i.over_water = Some(false);
         assert!(run(&mut voice, &mut comms, &i).is_empty());
-        comms.toggle_silence();
+        comms.toggle_silence(SeatId::default());
         i.now = 60.;
         assert!(
             run(&mut voice, &mut comms, &i).is_empty(),
@@ -1728,11 +1764,11 @@ mod tests {
         run(&mut voice, &mut comms, &i);
         i.now = 1.;
         run(&mut voice, &mut comms, &i);
-        comms.toggle_silence();
+        comms.toggle_silence(SeatId::default());
         i.now = 2.;
         i.free_flight = true;
         run(&mut voice, &mut comms, &i);
-        comms.toggle_silence();
+        comms.toggle_silence(SeatId::default());
         i.now = 3.;
         run(&mut voice, &mut comms, &i);
         i.now = 4.;
@@ -1848,7 +1884,7 @@ mod tests {
             Test::Modulo(BREAK_SELF.len() as u32),
             "the variant"
         );
-        assert_eq!(line.origin.speaker, Some(PLAYER_ID));
+        assert_eq!(line.origin.speaker, Some(0));
         assert_eq!(line.origin.audience, Audience::Cockpit);
         // With nothing to say, the check is still journaled with its rolls.
         let mut voice = rio();
@@ -1880,7 +1916,20 @@ mod tests {
             position,
             alive: true,
         };
-        let members = vec![member(1, false, 0, 1), member(3, true, 1, 0)];
+        let members = vec![
+            member(0, false, 0, 0),
+            member(1, false, 0, 1),
+            member(3, true, 1, 0),
+        ];
+        let listeners = [crate::radio_calls::Listener {
+            seat: SeatId::default(),
+            plane: 0,
+            flight: 0,
+            enemy: false,
+            alive: true,
+            position: [0., 10_000., 0.],
+            crew: Some(Crew::Rio),
+        }];
         let targets: Vec<_> = [(1, [500., 10_000., -500.]), (3, [0., 10_000., 30_000.])]
             .into_iter()
             .map(|(id, position)| {
@@ -1904,10 +1953,9 @@ mod tests {
                 let scene = Scene {
                     now,
                     phrases: &phrases,
-                    crew: Some(Crew::Rio),
-                    player_alive: true,
-                    player_position: [0., 10_000., 0.],
+                    listeners: &listeners,
                     members: &members,
+                    leaders: &[(0, 0), (1, 3)],
                     targets: &targets,
                     friendlies: &friendlies,
                 };
@@ -1921,7 +1969,7 @@ mod tests {
                     radio.release(&mut comms, &scene, 1, release);
                 }
                 if tick % 50 == 0 {
-                    let owner = if tick % 100 == 0 { 1 } else { PLAYER_ID };
+                    let owner = if tick % 100 == 0 { 1 } else { 0 };
                     let strike = Strike {
                         owner,
                         victim: Some(3),
@@ -1948,7 +1996,7 @@ mod tests {
                     comms
                         .due(now)
                         .iter()
-                        .map(|c| format!("{now:.3} {} {:?}", c.line(), c.stems)),
+                        .map(|d| format!("{now:.3} {} {:?}", d.call.line(), d.call.stems)),
                 );
                 if drain {
                     journaled += comms.take_journal().len();

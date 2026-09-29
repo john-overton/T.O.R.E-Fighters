@@ -37,18 +37,18 @@ pub struct World {
     pub ai_wings: Option<ai_wings::AiWings>,
     /// Radio and crew voice delivery; see docs/spec/radio-chatter.md.
     pub comms: comms::Comms,
-    pub airfield_radio: airfield_radio::AirfieldRadio,
+    /// What the AI wingmen report from the airfield, decided once for every
+    /// seat whose wing it is.
+    pub wing_status: airfield_radio::WingStatus,
     /// Weapon, hit, kill and wing radio calls; see radio_calls.rs.
     pub radio: radio_calls::Radio,
     /// Imported phrase text for composing radio lines.
     pub phrases: comms::Phrases,
-    /// The player's crew voice; see docs/spec/cockpit-voice.md.
-    pub crew_voice: crew_voice::CrewVoice,
 }
 
 /// A human-flown plane's state outside combat: its flight, where the tick
-/// started it, its turbulence and its conversation with the tower. An AI-flown
-/// plane keeps the same things in its AI actor.
+/// started it, its turbulence, its conversation with the tower and its crew's
+/// voice. An AI-flown plane keeps the same things in its AI actor.
 pub struct Cockpit {
     pub plane: PlaneId,
     pub flight: flight::State,
@@ -59,6 +59,11 @@ pub struct Cockpit {
     pub airport_service: tore_sim::airport::Service,
     /// NAV is selected instead of a weapon, which the tower reads.
     pub airport_nav_mode: bool,
+    /// The plane's side of the tower conversation, spoken to its seat.
+    pub airfield_radio: airfield_radio::AirfieldRadio,
+    /// The plane's crew voice, built from its aircraft type and spoken to its
+    /// seat; see docs/spec/cockpit-voice.md.
+    pub crew_voice: crew_voice::CrewVoice,
     /// Simulation second of the last OVERSPEED message, so it repeats at an interval.
     pub overspeed_message_at: Option<f64>,
     /// Simulation second of the last turn-back warning past the map edge.
@@ -136,8 +141,8 @@ pub enum Cue {
     },
     /// The tick's picture was taken: the replay recorder reads the tick here.
     Picture,
-    /// A radio or crew line due now.
-    Radio(comms::Call),
+    /// A radio or crew line due now for a seat.
+    Radio { seat: SeatId, call: comms::Call },
 }
 
 /// What one tick produced. Every queue inside the world that the tick fills is
@@ -185,7 +190,7 @@ impl World {
     ) -> WorldResult<Restarted> {
         // A fixed seed keeps headless runs deterministic.
         self.comms.restart(1);
-        self.crew_voice = crew_voice::CrewVoice::new(&aircraft.profile);
+        self.wing_status.reset();
         self.radio = Default::default();
         self.cockpits.truncate(1);
         self.reset_weather();
@@ -193,6 +198,8 @@ impl World {
             return Err("a flight needs a cockpit to restart".into());
         };
         cockpit.plane = PlaneId(0);
+        cockpit.crew_voice =
+            crew_voice::CrewVoice::new(&aircraft.profile).for_seat(SeatId::default(), 0);
         cockpit.flight = aircraft.start(&self.terrain);
         if let Some((altitude, fuel)) = self.setup.mission {
             cockpit.flight.position[1] = altitude;
@@ -205,7 +212,9 @@ impl World {
             .and(self.combat.mission_layout.clone())
             .filter(|layout| layout.ground.is_some() == self.setup.ground_start.is_some());
         let parked = layout.as_ref().and_then(|layout| layout.ground.clone());
-        self.airfield_radio.reset(parked.as_ref().map(|g| g.runway));
+        cockpit
+            .airfield_radio
+            .reset(parked.as_ref().map(|g| g.runway));
         if let Some(layout) = layout.as_ref().filter(|l| l.player_turn != 0.) {
             // Airborne: the whole scene turns so the enemy ahead stays on the
             // map.
@@ -307,6 +316,8 @@ impl World {
             comms::crew(&aircraft.profile),
             self.ai_wings.iter().flat_map(ai_planes),
         );
+        self.comms
+            .set_seats(self.roster.seats().iter().map(|seat| seat.id));
         // Draw from the placed start, including the AI's own poses.
         self.combat
             .restart_render(&cockpit.flight, self.ai_wings.as_ref());
@@ -621,50 +632,142 @@ impl World {
             .as_mut()
             .map(ai_wings::AiWings::take_ai_journal);
         out.cues.push(Cue::Picture);
-        self.airfield_radio.step(
-            self.combat.state.tick() as f64 / 120.,
-            &self.phrases,
-            &mut self.comms,
-            &own.flight,
-            &self.terrain,
-            &own.airport_service,
-            self.ai_wings.as_ref(),
-        );
-        self.crew_voice.step_host(
-            &mut self.comms,
-            &self.phrases,
-            &crew_voice::Host {
-                flight: &own.flight,
-                combat: &self.combat.state,
-                wings: self.ai_wings.as_ref(),
-                world: &self.terrain,
-            },
-        );
-        let crew = self
-            .roster
-            .seat(first_input.seat)
-            .and_then(|seat| seat.crew);
-        radio_calls::step(
-            &mut self.radio,
-            &mut self.comms,
-            &self.phrases,
-            crew,
-            &events,
-            &mut self.combat.state,
-            self.ai_wings.as_mut(),
-            &own.flight,
-        );
-        for call in self.comms.due(self.combat.state.tick() as f64 / 120.) {
-            out.cues.push(Cue::Radio(call));
-        }
+        self.step_radio(out, &events);
         out.emissions = self.combat.state.take_sound_events();
         out.events = events;
         Ok(())
     }
 
+    /// Whether the plane in `cockpit` and its pilot are alive, as the radio
+    /// hears it. Combat keeps the hit points of the first cockpit's plane
+    /// only, until each human-flown plane has its own ownship (stage B1).
+    fn cockpit_alive(&self, cockpit: usize) -> bool {
+        let flight = &self.cockpits[cockpit].flight;
+        !flight.crashed && (cockpit != 0 || self.combat.state.player_hp > 0)
+    }
+
+    /// The radio's half of a tick: the tower and crew voice of every
+    /// human-flown plane, the weapon, hit and wing calls, and the calls due
+    /// now, delivered to the seats that hear them. Each call is made once;
+    /// every seat has its own queue and busy hold.
+    fn step_radio(&mut self, out: &mut TickOutput, events: &[tore_sim::combat::live::Event]) {
+        let now = self.combat.state.tick() as f64 / 120.;
+        let members = radio_calls::members(&self.roster, self.ai_wings.as_ref(), |plane| {
+            self.cockpits
+                .iter()
+                .position(|cockpit| cockpit.plane == plane)
+                .is_some_and(|cockpit| self.cockpit_alive(cockpit))
+        });
+        let listeners: Vec<Option<radio_calls::Listener>> = self
+            .cockpits
+            .iter()
+            .enumerate()
+            .map(|(index, cockpit)| {
+                let seat = self.roster.seat(self.roster.seat_of(cockpit.plane)?)?;
+                let member = members.iter().find(|m| m.id == cockpit.plane.0)?;
+                Some(radio_calls::Listener {
+                    seat: seat.id,
+                    plane: cockpit.plane.0,
+                    flight: member.flight,
+                    enemy: member.enemy,
+                    alive: self.cockpit_alive(index),
+                    position: cockpit.flight.position,
+                    crew: seat.crew,
+                })
+            })
+            .collect();
+        // Each plane's own side of the tower conversation, then what the
+        // wingmen report, decided once and queued by every seat in the wing.
+        let mut flying = vec![false; self.cockpits.len()];
+        for (index, cockpit) in self.cockpits.iter_mut().enumerate() {
+            flying[index] = cockpit.airfield_radio.step_player(
+                now,
+                &self.phrases,
+                &mut self.comms,
+                &cockpit.flight,
+                &self.terrain,
+                &cockpit.airport_service,
+                self.ai_wings.as_ref(),
+            );
+        }
+        let listening: Vec<u8> = listeners
+            .iter()
+            .zip(&flying)
+            .filter_map(|(listener, flying)| listener.as_ref().filter(|_| *flying))
+            .map(|listener| listener.flight)
+            .collect();
+        let reports = match &self.ai_wings {
+            Some(wings) if !listening.is_empty() => self.wing_status.step(
+                &self.phrases,
+                &mut self.comms,
+                &self.terrain,
+                wings,
+                &members,
+                &listening,
+            ),
+            _ => Vec::new(),
+        };
+        for (index, cockpit) in self.cockpits.iter_mut().enumerate() {
+            let Some(listener) = &listeners[index] else {
+                continue;
+            };
+            if !flying[index] {
+                continue;
+            }
+            let mine: Vec<_> = reports
+                .iter()
+                .filter(|report| report.flight == listener.flight)
+                .map(|report| report.event.clone())
+                .collect();
+            cockpit.airfield_radio.apply_wing(now, &mine);
+            cockpit.airfield_radio.deliver(now, &mut self.comms);
+        }
+        for (index, cockpit) in self.cockpits.iter_mut().enumerate() {
+            let slot = self
+                .roster
+                .plane(cockpit.plane)
+                .map_or(Slot::FRIENDLY_LEAD, |plane| plane.slot);
+            cockpit.crew_voice.step_host(
+                &mut self.comms,
+                &self.phrases,
+                &crew_voice::Host {
+                    flight: &cockpit.flight,
+                    combat: &self.combat.state,
+                    wings: self.ai_wings.as_ref(),
+                    world: &self.terrain,
+                    slot,
+                    // Combat's player-only state is the first cockpit's until
+                    // every human-flown plane has an ownship (stage B1).
+                    ownship: index == 0,
+                },
+            );
+        }
+        let listeners: Vec<radio_calls::Listener> = listeners.into_iter().flatten().collect();
+        radio_calls::step(
+            &mut self.radio,
+            &mut self.comms,
+            &self.phrases,
+            &listeners,
+            &members,
+            events,
+            &mut self.combat.state,
+            self.ai_wings.as_mut(),
+        );
+        for delivery in self.comms.due(now) {
+            out.cues.push(Cue::Radio {
+                seat: delivery.seat,
+                call: delivery.call,
+            });
+        }
+    }
+
     /// A queued NAV mode switch or tower request for a cockpit's plane,
     /// applied at the start of the tick in the order it was given.
     fn airport_command(&mut self, cockpit: usize, command: AirportInput, out: &mut TickOutput) {
+        let seat = self
+            .roster
+            .seat_of(self.cockpits[cockpit].plane)
+            .unwrap_or_default();
         let cockpit = &mut self.cockpits[cockpit];
         match command {
             AirportInput::NavMode => {
@@ -708,9 +811,10 @@ impl World {
                         .command(&self.terrain.airport_scene, aircraft, command)
                 {
                     if let tore_sim::airport::Event::Reply(reply) = event {
-                        self.airfield_radio.reply(&reply);
-                        self.comms.cancel_airport();
-                        self.comms.spoken(self.combat.state.tick() as f64 / 120.);
+                        cockpit.airfield_radio.reply(&reply);
+                        self.comms.cancel_airport(seat);
+                        self.comms
+                            .spoken(seat, self.combat.state.tick() as f64 / 120.);
                         // Journal only: the reply printed and played.
                         self.comms.record(comms::journal::Entry::tower_reply(
                             self.combat.state.tick() as f64 / 120.,

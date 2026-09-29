@@ -772,9 +772,11 @@ messages) is a `Cockpit`, one per human-flown plane in
 `SeatInput` from every seat that flies a plane, for the tick `World::tick`
 names, and applies each seat's commands to its own plane. The flight step,
 building contact, turbulence, the world edge and OVERSPEED rules and the
-airport service run for every cockpit in plane order; combat, the AI and the radio still serve the first cockpit only,
-with one ownship's worth of player-only fields in `combat::live::State`, until
-slices B1, B3 and B4 land. Every AI aircraft is an `AiActor` in
+airport service run for every cockpit in plane order; combat and the AI still
+serve the first cockpit only, with one ownship's worth of player-only fields in
+`combat::live::State`, until slices B1 and B3 land. The radio is per seat
+(slice B4, below): each seat has its own delivery queue, busy hold and radio
+silence, and each call is generated once. Every AI aircraft is an `AiActor` in
 `tore-sim::ai` plus a `live::Target` row, mirrored into each other once per
 tick. The plan's [code findings](multiplayer-plan.md#where-the-code-stands)
 describe the code before stage A.
@@ -898,8 +900,8 @@ through its methods, as today. Stage B turns every one of them into tick-stamped
 seat input.
 
 `TickOutput` holds, in tick order: combat's events; an ordered list of cues (HUD
-lines, rumble, tower audio cues, ejection notices, delivered radio calls and
-the point where the picture was taken); the player's weapon
+lines, rumble, tower audio cues, ejection notices, delivered radio calls, each
+with the seat that hears it, and the point where the picture was taken); the player's weapon
 release sounds; shot outcomes; the AI journal; sound emissions; and the native
 fault, if the tick stopped early. Every output queue inside `World` is drained
 into it each tick, whether or not anyone reads it, so the state between ticks
@@ -1291,6 +1293,27 @@ flight re-forms on the new leader.
   flight, and each seat has its own delivery queue and busy hold. The crew voice
   and the tower run for each human-flown aircraft. With one seat this is today's
   radio.
+
+  *Built (B4 step 1).* `radio_calls::step` gets the listeners (one `Listener`
+  per human-flown plane: its seat, plane, radio flight, side, whether it is
+  alive, its position and crew label) and the radio names of every plane
+  (`radio_calls::members`, built from the roster so a human-flown plane has one
+  too). `Radio::say` rolls and words a call once, asks the listener rule for
+  each listener's label, and hands `Comms::send` the call with its hearers.
+  `Comms` holds one channel per seat (queue of at most 64, busy hold, radio
+  silence, the lines still audible for a cut-off) beside what is shared: the
+  variant stream, the cooldowns, the call numbers and the journal. `Comms::due`
+  returns `Delivery { seat, call }`, and `Cue::Radio` carries the seat, so a
+  presenter shows only its own seat's lines. The journal has one entry per
+  call, numbered once, and its `heard_by` names the seats it is about (queued,
+  dropped by radio silence, delivered). Agent decisions: a seat hears a
+  whole-flight call from any other plane of its wing while it is alive, hears a
+  flight-leader call only if it flies the wing's leader (its first member until
+  lead succession lands), and hears a friendly-fire complaint only if it is
+  the shooter's seat; a human-flown plane's own calls are voiced at once; radio
+  silence is each seat's own setting; the crew's missile-warning limit is
+  kept for each seat, since two crews warn separately; a call no seat hears is
+  one `Unheard` journal entry.
 - **Orders.** Alt-key orders from a seat whose aircraft leads its wing go to that
   wing, to human and AI members alike. A human wingman gets the order as text and
   the recording. Reply and request keys for human wingmen are stage E.

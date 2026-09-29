@@ -21,6 +21,7 @@ use tore_sim::ai::{
 
 use super::{Call, Kind, Route};
 use crate::crew_voice::Situation;
+use crate::seats::SeatId;
 use crate::situation::{Inputs, Rank};
 
 /// Entries kept between drains. A host that never drains keeps the newest
@@ -117,6 +118,10 @@ pub struct Entry {
     pub kind: Option<Kind>,
     pub origin: Origin,
     pub outcome: Outcome,
+    /// The seats whose radio this entry is about: for a call, those that
+    /// queued, heard, dropped or lost it. Empty for an entry that is not
+    /// addressed to a seat.
+    pub heard_by: Vec<SeatId>,
 }
 
 impl Entry {
@@ -132,6 +137,7 @@ impl Entry {
             kind: Some(call.kind),
             origin: call.origin.clone(),
             outcome,
+            heard_by: Vec::new(),
         }
     }
 
@@ -148,7 +154,14 @@ impl Entry {
             kind: None,
             origin,
             outcome,
+            heard_by: Vec::new(),
         }
+    }
+
+    /// The seats this entry is about.
+    pub fn heard_by(mut self, seats: impl IntoIterator<Item = SeatId>) -> Self {
+        self.heard_by = seats.into_iter().collect();
+        self
     }
 
     pub fn with_text(mut self, text: impl Into<String>) -> Self {

@@ -6,6 +6,7 @@
 //!
 //! Every decision is also written to the [`journal`], with its trigger and
 //! reason, for mission recordings. The journal is write-only.
+use crate::seats::SeatId;
 use std::collections::{BTreeMap, VecDeque};
 
 pub mod journal;
@@ -259,7 +260,37 @@ pub fn miles(phrases: &Phrases, n: u32) -> Phrase {
     }
 }
 
-/// A call waiting in the channel.
+/// One seat a call is addressed to, with the speaker's name as that seat's
+/// radio prints it: a seat hears its own voice as `YOU` (or its crew label)
+/// and another aircraft's by flight colour and position.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Hearer {
+    pub seat: SeatId,
+    /// The label this seat hears; `None` keeps the call's own.
+    pub label: Option<String>,
+}
+impl Hearer {
+    /// A seat that hears the call under the call's own label.
+    pub fn seat(seat: SeatId) -> Self {
+        Self { seat, label: None }
+    }
+    /// A seat that hears the call under `label`.
+    pub fn named(seat: SeatId, label: impl Into<String>) -> Self {
+        Self {
+            seat,
+            label: Some(label.into()),
+        }
+    }
+}
+
+/// A call that is due for one seat.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Delivery {
+    pub seat: SeatId,
+    pub call: Call,
+}
+
+/// A call waiting in a seat's queue.
 struct Pending {
     due: f64,
     /// When it was sent.
@@ -269,45 +300,106 @@ struct Pending {
     call: Call,
 }
 
-/// The channel: pending calls, the busy hold, shared cooldowns, radio silence
-/// and the per-call random roll.
-pub struct Comms {
-    pub radio_silence: bool,
+/// What each seat has of its own: its queue, its busy hold and its radio
+/// silence setting (docs/ARCHITECTURE.md, "Radio, orders and debrief for each
+/// seat").
+struct Channel {
+    seat: SeatId,
+    radio_silence: bool,
     busy_until: f64,
     pending: Vec<Pending>,
+    /// Radio-route lines delivered in the last [`BUSY_SECONDS`], which the
+    /// mixer may still be playing, for [`Comms::cut_off`]. Journal only.
+    recent: VecDeque<(f64, u64, Call)>,
+}
+impl Channel {
+    fn new(seat: SeatId) -> Self {
+        Self {
+            seat,
+            radio_silence: false,
+            busy_until: f64::NEG_INFINITY,
+            pending: Vec::new(),
+            recent: VecDeque::new(),
+        }
+    }
+}
+
+/// The radio: every call is made once, with one variant roll, one journal
+/// number and the shared cooldowns, and each seat that hears it queues it in
+/// its own channel with its own busy hold.
+pub struct Comms {
+    /// One per seat, in seat order.
+    channels: Vec<Channel>,
     cooldowns: BTreeMap<&'static str, f64>,
+    /// Cooldowns a seat's own crew keeps, apart from the shared ones.
+    seat_cooldowns: BTreeMap<(SeatId, &'static str), f64>,
     rng: u64,
     /// The last call number given out this flight.
     serial: u64,
     /// The latest simulation time the channel has seen, for entries made by
     /// methods that are not given one.
     clock: f64,
-    /// Radio-route lines delivered in the last [`BUSY_SECONDS`], which the
-    /// mixer may still be playing, for [`Self::cut_off`]. Journal only.
-    recent: VecDeque<(f64, u64, Call)>,
     journal: Journal,
 }
 impl Comms {
-    /// A deterministic channel; `seed` fixes the variant sequence.
+    /// A deterministic channel for seat 0; `seed` fixes the variant sequence.
     pub fn new(seed: u64) -> Self {
-        Self {
-            radio_silence: false,
-            busy_until: f64::NEG_INFINITY,
-            pending: Vec::new(),
+        Self::with_seats(seed, [SeatId::default()])
+    }
+    /// A deterministic channel with one queue for each of `seats`.
+    pub fn with_seats(seed: u64, seats: impl IntoIterator<Item = SeatId>) -> Self {
+        let mut comms = Self {
+            channels: Vec::new(),
             cooldowns: BTreeMap::new(),
+            seat_cooldowns: BTreeMap::new(),
             rng: seed | 1,
             serial: 0,
             clock: 0.,
-            recent: VecDeque::new(),
             journal: Journal::default(),
-        }
+        };
+        comms.set_seats(seats);
+        comms
     }
-    /// Clear everything tied to one flight. Radio silence is a player setting
-    /// and survives.
+    /// Give exactly `seats` a queue: a seat already here keeps its own, a new
+    /// one starts empty and a seat that is gone loses its queue.
+    pub fn set_seats(&mut self, seats: impl IntoIterator<Item = SeatId>) {
+        let mut wanted: Vec<SeatId> = seats.into_iter().collect();
+        wanted.sort();
+        wanted.dedup();
+        self.channels.retain(|c| wanted.contains(&c.seat));
+        for seat in wanted {
+            if !self.channels.iter().any(|c| c.seat == seat) {
+                self.channels.push(Channel::new(seat));
+            }
+        }
+        self.channels.sort_by_key(|c| c.seat);
+    }
+    /// The seats with a queue, in seat order.
+    pub fn seats(&self) -> impl Iterator<Item = SeatId> + '_ {
+        self.channels.iter().map(|c| c.seat)
+    }
+    fn channel(&self, seat: SeatId) -> Option<&Channel> {
+        self.channels.iter().find(|c| c.seat == seat)
+    }
+    fn channel_mut(&mut self, seat: SeatId) -> Option<&mut Channel> {
+        self.channels.iter_mut().find(|c| c.seat == seat)
+    }
+    /// Clear everything tied to one flight, keeping the seats. Radio silence
+    /// is a player setting and survives.
     pub fn restart(&mut self, seed: u64) {
-        let silence = self.radio_silence;
-        *self = Self::new(seed);
-        self.radio_silence = silence;
+        let silent: Vec<SeatId> = self
+            .channels
+            .iter()
+            .filter(|c| c.radio_silence)
+            .map(|c| c.seat)
+            .collect();
+        *self = Self::with_seats(
+            seed,
+            self.channels.iter().map(|c| c.seat).collect::<Vec<_>>(),
+        );
+        for channel in &mut self.channels {
+            channel.radio_silence = silent.contains(&channel.seat);
+        }
     }
     /// One roll from 0 to 99, as the original makes per call.
     pub fn roll(&mut self) -> u32 {
@@ -328,6 +420,32 @@ impl Comms {
         self.cooldowns.insert(key, now + seconds);
         true
     }
+    /// A cooldown on game time that belongs to one seat, so each crew keeps its
+    /// own: true, and restarted, when `key` is free for `seat`.
+    pub fn seat_cooldown(
+        &mut self,
+        seat: SeatId,
+        key: &'static str,
+        now: f64,
+        seconds: f64,
+    ) -> bool {
+        if self
+            .seat_cooldowns
+            .get(&(seat, key))
+            .is_some_and(|until| now < *until)
+        {
+            return false;
+        }
+        self.seat_cooldowns.insert((seat, key), now + seconds);
+        true
+    }
+    /// Seconds left on `seat`'s `key` cooldown at `now`, 0 when it is free. For
+    /// the journal only.
+    pub fn seat_remaining(&self, seat: SeatId, key: &'static str, now: f64) -> f64 {
+        self.seat_cooldowns
+            .get(&(seat, key))
+            .map_or(0., |until| (until - now).max(0.))
+    }
     /// Whether `key` is still cooling down, without starting it. For rules
     /// that check a cooldown on every call but restart it only on some.
     pub fn cooling(&self, key: &str, now: f64) -> bool {
@@ -340,126 +458,215 @@ impl Comms {
             .get(key)
             .map_or(0., |until| (until - now).max(0.))
     }
-    /// Whether no line was delivered in the last three seconds. Comment
-    /// producers wait for this; radio calls do not (native).
-    pub fn channel_free(&self, now: f64) -> bool {
-        now >= self.busy_until
+    /// Whether no line was delivered to `seat` in the last three seconds.
+    /// Comment producers wait for this; radio calls do not (native).
+    pub fn channel_free(&self, seat: SeatId, now: f64) -> bool {
+        self.channel(seat).is_none_or(|c| now >= c.busy_until)
     }
-    /// Radio silence drops chatter when it is sent, never later.
-    pub fn send(&mut self, now: f64, call: Call) {
+    /// Whether `seat` has radio silence on.
+    pub fn radio_silence(&self, seat: SeatId) -> bool {
+        self.channel(seat).is_some_and(|c| c.radio_silence)
+    }
+    /// Send a call to the seats in `hearers`. The call is one call: it takes
+    /// one journal number, and every seat that hears it queues the same words
+    /// under its own label. Radio silence drops chatter when it is sent, never
+    /// later, for the seat that has it on. The journal has one entry for the
+    /// call's queueing and one for the seats that dropped it.
+    pub fn send(&mut self, now: f64, call: Call, hearers: &[Hearer]) {
         self.clock = now;
         self.serial += 1;
         let serial = self.serial;
-        if self.radio_silence && call.kind == Kind::Chatter {
-            self.journal.push(Entry::call(
-                now,
-                Some(serial),
-                &call,
-                Outcome::Dropped(Reason::RadioSilence),
-            ));
-            return;
+        let mut silenced: Vec<(SeatId, Call)> = Vec::new();
+        let mut queued: Vec<(SeatId, Call)> = Vec::new();
+        for hearer in hearers {
+            let Some(channel) = self.channel(hearer.seat) else {
+                debug_assert!(false, "seat {} has no radio channel", hearer.seat.0);
+                continue;
+            };
+            let mut heard = call.clone();
+            if let Some(label) = &hearer.label {
+                heard.label.clone_from(label);
+            }
+            if channel.radio_silence && call.kind == Kind::Chatter {
+                silenced.push((hearer.seat, heard));
+            } else {
+                queued.push((hearer.seat, heard));
+            }
         }
-        if self.pending.len() >= PENDING_LIMIT {
-            let oldest = self.pending.remove(0);
-            self.journal.push(Entry::call(
-                now,
-                Some(oldest.serial),
-                &oldest.call,
-                Outcome::Dropped(Reason::QueueFull {
-                    limit: PENDING_LIMIT,
-                }),
-            ));
+        if let Some((_, first)) = silenced.first() {
+            self.journal.push(
+                Entry::call(
+                    now,
+                    Some(serial),
+                    first,
+                    Outcome::Dropped(Reason::RadioSilence),
+                )
+                .heard_by(silenced.iter().map(|(seat, _)| *seat)),
+            );
         }
         let due = now + call.delay;
-        self.journal.push(Entry::call(
-            now,
-            Some(serial),
-            &call,
-            Outcome::Queued { due, expires: None },
-        ));
-        self.pending.push(Pending {
-            due,
-            sent: now,
-            serial,
-            call,
-        });
-    }
-    /// Calls due by `now`, in due then send order. Each holds the channel.
-    pub fn due(&mut self, now: f64) -> Vec<Call> {
-        self.clock = now;
-        let mut ready = Vec::new();
-        let mut i = 0;
-        while i < self.pending.len() {
-            if self.pending[i].due <= now {
-                ready.push(self.pending.remove(i));
-            } else {
-                i += 1;
+        for (seat, _) in &queued {
+            let Some(channel) = self.channels.iter_mut().find(|c| c.seat == *seat) else {
+                continue;
+            };
+            if channel.pending.len() >= PENDING_LIMIT {
+                let oldest = channel.pending.remove(0);
+                self.journal.push(
+                    Entry::call(
+                        now,
+                        Some(oldest.serial),
+                        &oldest.call,
+                        Outcome::Dropped(Reason::QueueFull {
+                            limit: PENDING_LIMIT,
+                        }),
+                    )
+                    .heard_by([*seat]),
+                );
             }
         }
-        ready.sort_by(|a, b| a.due.total_cmp(&b.due));
-        if ready
-            .iter()
-            .any(|p| matches!(p.call.route, Route::Radio | Route::Airport))
-        {
-            self.busy_until = now + BUSY_SECONDS;
+        if let Some((_, first)) = queued.first() {
+            self.journal.push(
+                Entry::call(
+                    now,
+                    Some(serial),
+                    first,
+                    Outcome::Queued { due, expires: None },
+                )
+                .heard_by(queued.iter().map(|(seat, _)| *seat)),
+            );
         }
-        while self
-            .recent
-            .front()
-            .is_some_and(|(at, ..)| now - at >= BUSY_SECONDS)
-        {
-            self.recent.pop_front();
+        for (seat, heard) in queued {
+            if let Some(channel) = self.channel_mut(seat) {
+                channel.pending.push(Pending {
+                    due,
+                    sent: now,
+                    serial,
+                    call: heard,
+                });
+            }
         }
-        for p in &ready {
-            self.journal.push(Entry::call(
-                now,
-                Some(p.serial),
-                &p.call,
-                Outcome::Delivered {
-                    waited: now - p.sent,
-                },
-            ));
-            if p.call.route == Route::Radio {
-                if self.recent.len() >= 16 {
-                    self.recent.pop_front();
+    }
+    /// Send a call to every seat, each hearing it under the call's own label.
+    pub fn send_all(&mut self, now: f64, call: Call) {
+        let hearers: Vec<Hearer> = self.seats().map(Hearer::seat).collect();
+        self.send(now, call, &hearers);
+    }
+    /// Calls due by `now`, for every seat, in due then send order. Each holds
+    /// its seat's channel. The journal has one entry for each call, naming the
+    /// seats it reached.
+    pub fn due(&mut self, now: f64) -> Vec<Delivery> {
+        self.clock = now;
+        let mut ready: Vec<(SeatId, Pending)> = Vec::new();
+        for channel in &mut self.channels {
+            let mut mine = Vec::new();
+            let mut i = 0;
+            while i < channel.pending.len() {
+                if channel.pending[i].due <= now {
+                    mine.push(channel.pending.remove(i));
+                } else {
+                    i += 1;
                 }
-                self.recent.push_back((now, p.serial, p.call.clone()));
+            }
+            if mine
+                .iter()
+                .any(|p| matches!(p.call.route, Route::Radio | Route::Airport))
+            {
+                channel.busy_until = now + BUSY_SECONDS;
+            }
+            while channel
+                .recent
+                .front()
+                .is_some_and(|(at, ..)| now - at >= BUSY_SECONDS)
+            {
+                channel.recent.pop_front();
+            }
+            ready.extend(mine.into_iter().map(|p| (channel.seat, p)));
+        }
+        ready.sort_by(|(a_seat, a), (b_seat, b)| {
+            a.due
+                .total_cmp(&b.due)
+                .then(a.serial.cmp(&b.serial))
+                .then(a_seat.cmp(b_seat))
+        });
+        let mut journaled: Vec<u64> = Vec::new();
+        for (seat, p) in &ready {
+            if !journaled.contains(&p.serial) {
+                journaled.push(p.serial);
+                let seats = ready
+                    .iter()
+                    .filter(|(_, other)| other.serial == p.serial)
+                    .map(|(seat, _)| *seat);
+                self.journal.push(
+                    Entry::call(
+                        now,
+                        Some(p.serial),
+                        &p.call,
+                        Outcome::Delivered {
+                            waited: now - p.sent,
+                        },
+                    )
+                    .heard_by(seats),
+                );
+            }
+            if p.call.route == Route::Radio
+                && let Some(channel) = self.channels.iter_mut().find(|c| c.seat == *seat)
+            {
+                if channel.recent.len() >= 16 {
+                    channel.recent.pop_front();
+                }
+                channel.recent.push_back((now, p.serial, p.call.clone()));
             }
         }
-        ready.into_iter().map(|p| p.call).collect()
+        ready
+            .into_iter()
+            .map(|(seat, p)| Delivery { seat, call: p.call })
+            .collect()
     }
-    /// Lines spoken outside this channel, such as wing orders, still hold it.
-    pub fn spoken(&mut self, now: f64) {
+    /// Lines spoken outside this channel, such as wing orders, still hold
+    /// `seat`'s.
+    pub fn spoken(&mut self, seat: SeatId, now: f64) {
         self.clock = now;
-        self.busy_until = now + BUSY_SECONDS;
+        if let Some(channel) = self.channel_mut(seat) {
+            channel.busy_until = now + BUSY_SECONDS;
+        }
     }
-    /// The player's tower request was answered, so airport calls still
+    /// `seat`'s tower request was answered, so its airport calls still
     /// waiting are cancelled (the host's use). Other callers give their
     /// reason to [`Self::cancel_airport_because`].
-    pub fn cancel_airport(&mut self) {
-        self.cancel_airport_because(Reason::TowerReply);
+    pub fn cancel_airport(&mut self, seat: SeatId) {
+        self.cancel_airport_because(seat, Reason::TowerReply);
     }
-    /// Cancel every airport call still waiting, recording `reason`.
-    pub fn cancel_airport_because(&mut self, reason: Reason) {
-        let mut kept = Vec::with_capacity(self.pending.len());
-        for p in self.pending.drain(..) {
+    /// Cancel every airport call still waiting for `seat`, recording `reason`.
+    pub fn cancel_airport_because(&mut self, seat: SeatId, reason: Reason) {
+        let clock = self.clock;
+        let Some(channel) = self.channels.iter_mut().find(|c| c.seat == seat) else {
+            return;
+        };
+        let mut kept = Vec::with_capacity(channel.pending.len());
+        for p in channel.pending.drain(..) {
             if p.call.route == Route::Airport {
-                self.journal.push(Entry::call(
-                    self.clock,
-                    Some(p.serial),
-                    &p.call,
-                    Outcome::Cancelled(reason.clone()),
-                ));
+                self.journal.push(
+                    Entry::call(
+                        clock,
+                        Some(p.serial),
+                        &p.call,
+                        Outcome::Cancelled(reason.clone()),
+                    )
+                    .heard_by([seat]),
+                );
             } else {
                 kept.push(p);
             }
         }
-        self.pending = kept;
+        channel.pending = kept;
     }
-    /// Alt-S. Returns the HUD confirmation.
-    pub fn toggle_silence(&mut self) -> &'static str {
-        self.radio_silence = !self.radio_silence;
-        if self.radio_silence {
+    /// Alt-S for `seat`. Returns the HUD confirmation.
+    pub fn toggle_silence(&mut self, seat: SeatId) -> &'static str {
+        let Some(channel) = self.channel_mut(seat) else {
+            return "Radio traffic OK";
+        };
+        channel.radio_silence = !channel.radio_silence;
+        if channel.radio_silence {
             "Radio silence"
         } else {
             "Radio traffic OK"
@@ -484,21 +691,27 @@ impl Comms {
 // tick, and main.rs reports the wing order voice, which cuts wing speech off.
 impl Comms {
     /// Speech outside the channel cut off the wing and crew lines the mixer
-    /// may still be playing, such as the player's wing order voice, which
-    /// the host plays with interruption. Journal only: the lines listed are
-    /// the radio lines delivered in the last [`BUSY_SECONDS`], which the
+    /// may still be playing for `seat`, such as the player's wing order voice,
+    /// which the host plays with interruption. Journal only: the lines listed
+    /// are the radio lines delivered in the last [`BUSY_SECONDS`], which the
     /// channel hold still counts as speaking. A longer backlog in the mixer
     /// is not visible here.
-    pub fn cut_off(&mut self, now: f64, reason: Reason) {
+    pub fn cut_off(&mut self, seat: SeatId, now: f64, reason: Reason) {
         self.clock = now;
-        for (at, serial, call) in self.recent.drain(..) {
+        let Some(channel) = self.channels.iter_mut().find(|c| c.seat == seat) else {
+            return;
+        };
+        for (at, serial, call) in channel.recent.drain(..) {
             if now - at < BUSY_SECONDS {
-                self.journal.push(Entry::call(
-                    now,
-                    Some(serial),
-                    &call,
-                    Outcome::Interrupted(reason.clone()),
-                ));
+                self.journal.push(
+                    Entry::call(
+                        now,
+                        Some(serial),
+                        &call,
+                        Outcome::Interrupted(reason.clone()),
+                    )
+                    .heard_by([seat]),
+                );
             }
         }
     }
@@ -531,6 +744,12 @@ mod tests {
     }
     fn call(kind: Kind, delay: f64) -> Call {
         Call::new("Red two", Phrase::stem(&table(), "^CONTACT"), kind).after(delay)
+    }
+    const S0: SeatId = SeatId(0);
+    const S1: SeatId = SeatId(1);
+    /// Both seats and a call for each of them.
+    fn two_seats() -> Comms {
+        Comms::with_seats(1, [S0, S1])
     }
 
     #[test]
@@ -568,18 +787,18 @@ mod tests {
     #[test]
     fn delay_order_busy_hold_and_silence() {
         let mut c = Comms::new(1);
-        c.send(0., call(Kind::Chatter, 0.5));
-        c.send(0., call(Kind::Important, 0.));
+        c.send_all(0., call(Kind::Chatter, 0.5));
+        c.send_all(0., call(Kind::Important, 0.));
         let first = c.due(0.);
         assert_eq!(first.len(), 1);
-        assert_eq!(first[0].kind, Kind::Important);
-        assert!(!c.channel_free(2.9));
+        assert_eq!(first[0].call.kind, Kind::Important);
+        assert!(!c.channel_free(S0, 2.9));
         assert_eq!(c.due(0.5).len(), 1);
-        assert!(!c.channel_free(3.4));
-        assert!(c.channel_free(3.5));
-        assert_eq!(c.toggle_silence(), "Radio silence");
-        c.send(4., call(Kind::Chatter, 0.));
-        c.send(4., call(Kind::Important, 0.));
+        assert!(!c.channel_free(S0, 3.4));
+        assert!(c.channel_free(S0, 3.5));
+        assert_eq!(c.toggle_silence(S0), "Radio silence");
+        c.send_all(4., call(Kind::Chatter, 0.));
+        c.send_all(4., call(Kind::Important, 0.));
         let kept = c.due(4.);
         assert_eq!(
             kept.len(),
@@ -587,13 +806,13 @@ mod tests {
             "silence drops chatter, never important calls"
         );
         // A queued call keeps the setting in force when it was sent.
-        c.toggle_silence();
-        c.send(5., call(Kind::Chatter, 2.));
-        c.toggle_silence();
+        c.toggle_silence(S0);
+        c.send_all(5., call(Kind::Chatter, 2.));
+        c.toggle_silence(S0);
         assert_eq!(c.due(7.).len(), 1);
         c.restart(9);
-        assert!(c.radio_silence, "silence is a player setting");
-        assert!(c.channel_free(0.));
+        assert!(c.radio_silence(S0), "silence is a player setting");
+        assert!(c.channel_free(S0, 0.));
     }
 
     #[test]
@@ -620,7 +839,7 @@ mod tests {
     #[test]
     fn the_journal_follows_a_call_from_queue_to_delivery() {
         let mut c = Comms::new(1);
-        c.send(1., call(Kind::Chatter, 0.5));
+        c.send_all(1., call(Kind::Chatter, 0.5));
         assert!(c.due(1.4).is_empty());
         assert_eq!(c.due(1.5).len(), 1);
         let entries = c.take_journal();
@@ -645,9 +864,9 @@ mod tests {
     #[test]
     fn radio_silence_drops_chatter_and_the_journal_says_so() {
         let mut c = Comms::new(1);
-        c.toggle_silence();
-        c.send(0., call(Kind::Chatter, 0.));
-        c.send(0., call(Kind::Important, 0.));
+        c.toggle_silence(S0);
+        c.send_all(0., call(Kind::Chatter, 0.));
+        c.send_all(0., call(Kind::Important, 0.));
         let entries = c.take_journal();
         assert_eq!(entries[0].outcome, Outcome::Dropped(Reason::RadioSilence));
         assert_eq!(
@@ -664,7 +883,7 @@ mod tests {
     fn a_full_queue_pushes_out_the_oldest_call() {
         let mut c = Comms::new(1);
         for i in 0..=PENDING_LIMIT {
-            c.send(0., call(Kind::Chatter, 10. + i as f64));
+            c.send_all(0., call(Kind::Chatter, 10. + i as f64));
         }
         let entries = c.take_journal();
         let dropped: Vec<_> = entries
@@ -683,25 +902,93 @@ mod tests {
     #[test]
     fn cancellations_and_a_wing_order_voice_are_journaled() {
         let mut c = Comms::new(1);
-        c.send(0., call(Kind::Important, 5.).airport());
-        c.send(0., call(Kind::Chatter, 5.));
-        c.cancel_airport_because(Reason::AircraftLost);
+        c.send_all(0., call(Kind::Important, 5.).airport());
+        c.send_all(0., call(Kind::Chatter, 5.));
+        c.cancel_airport_because(S0, Reason::AircraftLost);
         let cancelled = c.take_journal().pop().unwrap();
         assert_eq!(cancelled.outcome, Outcome::Cancelled(Reason::AircraftLost));
         assert_eq!(cancelled.route, Some(Route::Airport));
         assert_eq!(c.due(5.).len(), 1, "the radio call stays");
         // A radio line 1 s old may still be playing; one 3 s old has ended,
         // and airport speech has its own queue in the mixer.
-        c.send(7., call(Kind::Chatter, 0.));
-        c.send(7., call(Kind::Chatter, 0.).airport());
+        c.send_all(7., call(Kind::Chatter, 0.));
+        c.send_all(7., call(Kind::Chatter, 0.).airport());
         c.due(7.);
         c.take_journal();
-        c.cut_off(8., Reason::OrderVoice);
+        c.cut_off(S0, 8., Reason::OrderVoice);
         let cut = c.take_journal();
         assert_eq!(cut.len(), 1, "{cut:?}");
         assert_eq!(cut[0].outcome, Outcome::Interrupted(Reason::OrderVoice));
         assert_eq!(cut[0].route, Some(Route::Radio));
-        c.cut_off(8.5, Reason::OrderVoice);
+        c.cut_off(S0, 8.5, Reason::OrderVoice);
         assert!(c.take_journal().is_empty(), "each line is cut off once");
+    }
+
+    #[test]
+    fn a_call_is_one_call_heard_by_each_seat_under_its_own_label() {
+        let mut c = two_seats();
+        let hearers = [Hearer::named(S0, "YOU"), Hearer::named(S1, "Red one")];
+        c.send(1., call(Kind::Chatter, 0.5), &hearers);
+        assert!(c.due(1.4).is_empty());
+        let due = c.due(1.5);
+        assert_eq!(due.len(), 2);
+        assert_eq!((due[0].seat, due[0].call.label.as_str()), (S0, "YOU"));
+        assert_eq!((due[1].seat, due[1].call.label.as_str()), (S1, "Red one"));
+        assert_eq!(due[0].call.stems, due[1].call.stems, "one variant");
+        let entries = c.take_journal();
+        assert_eq!(entries.len(), 2, "one entry queues it, one delivers it");
+        assert_eq!(entries[0].call, Some(1));
+        assert_eq!(entries[1].call, Some(1), "one number for both seats");
+        assert_eq!(entries[0].heard_by, [S0, S1]);
+        assert_eq!(entries[1].heard_by, [S0, S1]);
+    }
+
+    #[test]
+    fn each_seat_has_its_own_busy_hold_queue_and_silence() {
+        let mut c = two_seats();
+        c.send(0., call(Kind::Chatter, 0.), &[Hearer::seat(S0)]);
+        c.due(0.);
+        assert!(!c.channel_free(S0, 1.));
+        assert!(c.channel_free(S1, 1.), "seat 1 heard nothing");
+        c.spoken(S1, 2.);
+        assert!(c.channel_free(S0, 3.) && !c.channel_free(S1, 3.));
+        // Silence is a seat's own setting: it drops chatter for that seat only.
+        assert_eq!(c.toggle_silence(S1), "Radio silence");
+        assert!(!c.radio_silence(S0) && c.radio_silence(S1));
+        c.take_journal();
+        c.send_all(10., call(Kind::Chatter, 0.));
+        let due = c.due(10.);
+        assert_eq!(due.iter().map(|d| d.seat).collect::<Vec<_>>(), [S0]);
+        let entries = c.take_journal();
+        assert_eq!(entries[0].outcome, Outcome::Dropped(Reason::RadioSilence));
+        assert_eq!(entries[0].heard_by, [S1]);
+        assert_eq!(entries[1].heard_by, [S0]);
+        assert_eq!(entries[0].call, entries[1].call, "still one call");
+        // A full queue pushes out the oldest call of that seat only.
+        for i in 0..=PENDING_LIMIT {
+            c.send(
+                20.,
+                call(Kind::Important, 30. + i as f64),
+                &[Hearer::seat(S0)],
+            );
+        }
+        c.send(20., call(Kind::Important, 30.), &[Hearer::seat(S1)]);
+        assert_eq!(c.due(200.).len(), PENDING_LIMIT + 1);
+        // Cancelling airport speech and cutting off speech are per seat.
+        c.send_all(220., call(Kind::Important, 5.).airport());
+        c.cancel_airport(S0);
+        assert_eq!(c.due(225.).iter().map(|d| d.seat).collect::<Vec<_>>(), [S1]);
+    }
+
+    #[test]
+    fn each_crew_keeps_its_own_cooldown() {
+        let mut c = two_seats();
+        assert!(c.seat_cooldown(S0, "warn", 0., 6.));
+        assert!(!c.seat_cooldown(S0, "warn", 3., 6.));
+        assert!(c.seat_cooldown(S1, "warn", 3., 6.));
+        assert_eq!(c.seat_remaining(S0, "warn", 3.), 3.);
+        c.restart(2);
+        assert_eq!(c.seats().collect::<Vec<_>>(), [S0, S1]);
+        assert!(c.seat_cooldown(S0, "warn", 3., 6.));
     }
 }

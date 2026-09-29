@@ -473,7 +473,9 @@ impl TickPresenter<'_> {
                         audio.cancel_airport_radio();
                     }
                 }
-                world::Cue::Radio(call) => match call.route {
+                // Another seat's line is that seat's to present.
+                world::Cue::Radio { seat, .. } if *seat != input.seat => {}
+                world::Cue::Radio { call, .. } => match call.route {
                     comms::Route::Radio | comms::Route::Airport => {
                         self.flight_ui.message(call.line());
                         if let Some(audio) = self.audio {
@@ -560,9 +562,11 @@ impl TickPresenter<'_> {
             // result comes about 2 seconds after it is decided (native).
             let label = comms::crew(&self.hornet.profile).map_or("YOU", comms::Crew::label);
             for call in music.radio_calls(label, &self.world.phrases) {
-                self.world
-                    .comms
-                    .send(self.world.combat.state.tick() as f64 / 120., call);
+                self.world.comms.send(
+                    self.world.combat.state.tick() as f64 / 120.,
+                    call,
+                    &[comms::Hearer::seat(input.seat)],
+                );
             }
             // What the music's inputs asked for, and why.
             if let Some(recording) = &mut self.recorder {
@@ -1334,12 +1338,16 @@ impl App {
                             audio.radio(&report.radio, true);
                             // Journal only: the order voice cut off the wing
                             // lines the mixer was still playing.
-                            self.world
-                                .comms
-                                .cut_off(self.sim_seconds(), comms::journal::Reason::OrderVoice);
+                            self.world.comms.cut_off(
+                                seats::SeatId::default(),
+                                self.sim_seconds(),
+                                comms::journal::Reason::OrderVoice,
+                            );
                         }
                         if !report.radio.is_empty() {
-                            self.world.comms.spoken(self.sim_seconds());
+                            self.world
+                                .comms
+                                .spoken(seats::SeatId::default(), self.sim_seconds());
                         }
                         self.flight_ui.message(report.message);
                     }
@@ -1380,7 +1388,7 @@ impl App {
                 Action::None
             }
             Command::RadioSilence => {
-                let message = self.world.comms.toggle_silence();
+                let message = self.world.comms.toggle_silence(seats::SeatId::default());
                 self.flight_ui.message(message);
                 Action::None
             }
@@ -6009,16 +6017,17 @@ fn ai_probe_run(
             airport_nav_mode,
             turbulence: Default::default(),
             turbulence_rng,
+            airfield_radio,
+            crew_voice: crew_voice::CrewVoice::new(&hornet.profile),
             overspeed_message_at: None,
             edge_message_at: None,
         }],
         combat,
         ai_wings: Some(bridge),
         comms,
-        airfield_radio,
+        wing_status: Default::default(),
         radio,
         phrases,
-        crew_voice: crew_voice::CrewVoice::new(&hornet.profile),
         // The probe builds its own mission; only a restart reads the setup.
         setup: world::Setup {
             mission: None,
@@ -6211,7 +6220,7 @@ fn ai_probe_run(
                         });
                     }
                 }
-                world::Cue::Radio(call) => {
+                world::Cue::Radio { call, .. } => {
                     heard.push(format!("{now:.1}s {} {:?}", call.line(), call.stems));
                 }
                 _ => {}
@@ -10310,7 +10319,6 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             ai: None,
         },
         phrases: comms::phrases(&theater_resources),
-        crew_voice: crew_voice::CrewVoice::new(&hornet.profile),
         roster: seats::Roster::single_player(comms::crew(&hornet.profile), []),
         cockpits: vec![world::Cockpit {
             plane: seats::PlaneId(0),
@@ -10320,6 +10328,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             airport_nav_mode,
             turbulence: probe_turbulence,
             turbulence_rng: probe_turbulence_rng,
+            airfield_radio,
+            crew_voice: crew_voice::CrewVoice::new(&hornet.profile),
             overspeed_message_at: None,
             edge_message_at: None,
         }],
@@ -10327,7 +10337,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         combat,
         ai_wings: None,
         comms: comms::Comms::new(1),
-        airfield_radio,
+        wing_status: Default::default(),
         radio: Default::default(),
     };
     let mut app = App {

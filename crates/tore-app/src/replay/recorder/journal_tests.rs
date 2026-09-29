@@ -429,10 +429,10 @@ fn a_line_through_the_channel_is_heard_once_at_its_delivery() {
     let (mut recorder, _receiver) = Recorder::detached(64, &roster());
     let mut comms = crate::comms::Comms::new(1);
     let origin = Origin::of(Source::Radio, Cause::Unspecified).by(5);
-    comms.send(1., call("Blue two", "Fox two", origin));
+    comms.send_all(1., call("Blue two", "Fox two", origin));
     assert_eq!(comms.due(1.).len(), 1);
     // The player's order voice then cut it off in the mixer.
-    comms.cut_off(1.5, Reason::OrderVoice);
+    comms.cut_off(crate::seats::SeatId::default(), 1.5, Reason::OrderVoice);
     recorder.drain_comms(&mut comms);
     let outcomes: Vec<Option<&str>> = recorder
         .early

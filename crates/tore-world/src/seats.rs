@@ -114,6 +114,46 @@ impl Roster {
         }
     }
 
+    /// A roster with a human in each of `humans`' planes, one seat each in
+    /// seat order, and the AI in the planes of `ai`. For tests: the runtime
+    /// way to put a human in a plane is a handoff.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_humans(
+        humans: impl IntoIterator<Item = (PlaneId, Slot, SeatId, Option<comms::Crew>)>,
+        ai: impl IntoIterator<Item = (PlaneId, Slot)>,
+    ) -> Self {
+        let mut planes = Vec::new();
+        let mut seats = Vec::new();
+        for (id, slot, seat, crew) in humans {
+            planes.push(Plane {
+                id,
+                slot,
+                pilot: Pilot::Human(seat),
+            });
+            seats.push(Seat {
+                id: seat,
+                plane: Some(id),
+                crew,
+            });
+        }
+        planes.extend(ai.into_iter().map(|(id, slot)| Plane {
+            id,
+            slot,
+            pilot: Pilot::Ai,
+        }));
+        planes.sort_by_key(|plane| plane.id);
+        seats.sort_by_key(|seat| seat.id);
+        debug_assert!(
+            planes.windows(2).all(|pair| pair[0].id != pair[1].id),
+            "two planes share an id"
+        );
+        debug_assert!(
+            seats.windows(2).all(|pair| pair[0].id != pair[1].id),
+            "two humans share a seat"
+        );
+        Self { planes, seats }
+    }
+
     /// Every plane, in id order.
     pub fn planes(&self) -> &[Plane] {
         &self.planes
