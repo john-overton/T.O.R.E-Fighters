@@ -154,8 +154,11 @@ pub struct OwnState {
     pub limits: SpeedLimits,
     pub altitude_msl_ft: f64,
     pub agl_ft: f64,
-    /// Terrain height 1000 ft ahead, for the B44 floor.
+    /// Highest terrain along the speed-scaled look-ahead, for the B44 floor.
     pub terrain_ahead_ft: f64,
+    /// Flight-path climb that clears the look-ahead's terrain by the minimum
+    /// altitude, degrees; -90 when none is needed or not measured.
+    pub terrain_climb_deg: f64,
     /// The record's minimum-altitude value; 300 in every inspected record.
     pub minimum_altitude_ft: f64,
     pub at_ceiling: bool,
@@ -721,7 +724,16 @@ pub struct Controller {
     gun_cycles: std::collections::BTreeMap<u8, super::gunnery::Cycle>,
     gun_phase: Option<weapon_service::Phase>,
     damage_recovery: bool,
+    /// Opinionated (requested by John, 2026-09-29): the mission is over for
+    /// this aircraft and it has no runway to land on, so it flies the B48
+    /// return-to-base path home and holds there.
+    mission_complete: bool,
     gun_tracking: Option<super::gunnery::View>,
+    /// B42: after no store resolved, the tick before which a missile is not
+    /// chosen again for the motion (the nominal no-station retry).
+    missile_retry_until: Option<u64>,
+    /// B13: the tick the running 1-second gun-tracking motion started.
+    gun_tracking_since: Option<u64>,
     variation: FormationVariation,
     smooth_variation: [f64; 3],
     variation_tick: Option<u64>,
@@ -885,7 +897,10 @@ impl Controller {
             gun_cycles: Default::default(),
             gun_phase: None,
             damage_recovery: false,
+            mission_complete: false,
             gun_tracking: None,
+            missile_retry_until: None,
+            gun_tracking_since: None,
             identity,
             profile,
             experience,
@@ -947,6 +962,20 @@ impl Controller {
 
     pub fn identity(&self) -> &ActorIdentity {
         &self.identity
+    }
+
+    /// Mission return to base without a runway (see `AiMission`).
+    pub fn set_mission_complete(&mut self, complete: bool) {
+        self.mission_complete = complete;
+    }
+
+    pub fn mission_complete(&self) -> bool {
+        self.mission_complete
+    }
+
+    /// Leader succession renumbers a wing (see `AiMission`).
+    pub fn set_member(&mut self, member: u8) {
+        self.identity.member = member;
     }
 
     pub fn profile(&self) -> &BehaviorProfile {
@@ -1082,7 +1111,8 @@ impl Controller {
 
         // 2. Fuel and recovery (B48) outrank ordinary combat decisions.
         let fuel = self.fuel(frame, &mut batch);
-        let recovering = matches!(fuel, Some(FuelState::Bingo) | Some(FuelState::Critical));
+        let recovering = matches!(fuel, Some(FuelState::Bingo) | Some(FuelState::Critical))
+            || self.mission_complete;
         if let Some(fuel_trace) = self.trace.0.fuel.as_mut() {
             fuel_trace.recovering = recovering;
         }
@@ -1768,37 +1798,67 @@ impl Controller {
                     .find(|g| g.station == frame.stations[i].station)
             })
             .copied();
-        self.gun_tracking = (station.is_none() || chosen_gun.is_some())
-            .then(|| {
-                self.gun_views
-                    .iter()
-                    .find(|g| {
-                        g.target == target.map(|t| t.id)
-                            && g.target.is_some()
-                            && g.solution.is_some()
-                            && frame.stations.iter().any(|s| {
-                                s.station == g.station
-                                    && target.is_some_and(|t| {
-                                        matches!(
-                                            s.verdict(&frame.own, &t, class),
-                                            StationVerdict::Usable { .. }
-                                                | StationVerdict::OutsideEnvelope
-                                        )
-                                    })
-                                    && !s.inhibited
-                                    && !matches!(s.rounds, weapon_service::Rounds::Finite(0))
-                                    && g.solution.is_some_and(|p| {
-                                        p.range_ft >= s.minimum_range_ft
-                                            && s.maximum_range_ft.is_none_or(|m| p.range_ft <= m)
-                                    })
-                            })
-                    })
-                    .copied()
-            })
-            .flatten();
+        // B42: no suitable station waits the nominal 2 s retry. The motion
+        // honours it too: once no store resolved, gun tracking keeps the
+        // aircraft until the retry ends, rather than handing it back to the
+        // missile tactic on the next tick the missile's zone test passes.
+        // Without it a fighter at a zone edge swapped maneuvers every few
+        // ticks, its own stick input moving the zone test each time
+        // (overnight bug battery, 2026-09-29).
+        if station.is_none() && target.is_some() {
+            self.missile_retry_until =
+                Some(frame.tick + u64::from(weapon_service::NO_STATION_RETRY.quarter_count()) * 30);
+        }
+        let retrying = self
+            .missile_retry_until
+            .is_some_and(|until| frame.tick < until);
+        // B13: a timed motion runs to its deadline unless an event replaces
+        // it. Gun lead tracking is a 1-second motion, so once started it is
+        // not handed back to the missile tactic before that second is up,
+        // even if the store choice now prefers the missile (a fighter whose
+        // best store alternated between gun and missile otherwise swapped
+        // maneuvers every few ticks; overnight bug battery, 2026-09-29).
+        let tracking_held = self
+            .gun_tracking_since
+            .is_some_and(|since| frame.tick < since + GUN_TRACKING_MOTION_TICKS);
+        self.gun_tracking =
+            (station.is_none() || chosen_gun.is_some() || retrying || tracking_held)
+                .then(|| {
+                    self.gun_views
+                        .iter()
+                        .find(|g| {
+                            g.target == target.map(|t| t.id)
+                                && g.target.is_some()
+                                && g.solution.is_some()
+                                && frame.stations.iter().any(|s| {
+                                    s.station == g.station
+                                        && target.is_some_and(|t| {
+                                            matches!(
+                                                s.verdict(&frame.own, &t, class),
+                                                StationVerdict::Usable { .. }
+                                                    | StationVerdict::OutsideEnvelope
+                                            )
+                                        })
+                                        && !s.inhibited
+                                        && !matches!(s.rounds, weapon_service::Rounds::Finite(0))
+                                        && g.solution.is_some_and(|p| {
+                                            p.range_ft >= s.minimum_range_ft
+                                                && s.maximum_range_ft
+                                                    .is_none_or(|m| p.range_ft <= m)
+                                        })
+                                })
+                        })
+                        .copied()
+                })
+                .flatten();
         if self.recipient.target_order == Some(wing::TargetOrder::HoldFire) {
             self.gun_tracking = None;
         }
+        self.gun_tracking_since = match (self.gun_tracking, self.gun_tracking_since) {
+            (None, _) => None,
+            (Some(_), Some(since)) if frame.tick < since + GUN_TRACKING_MOTION_TICKS => Some(since),
+            (Some(_), _) => Some(frame.tick),
+        };
         for (id, cycle) in &mut self.gun_cycles {
             if chosen_gun.is_none_or(|g| g.station.0 != *id) {
                 cycle.advance(frame.tick, None, false, 1, 1);
@@ -3217,7 +3277,18 @@ impl Controller {
             minimum_altitude_feet: frame.own.minimum_altitude_ft,
             turn_radius_feet: radius,
         })?;
-        Ok(Some(floor.pitch_floor_deg))
+        // Opinionated (John, 2026-09-29): with the longer look-ahead the
+        // floor also asks for the climb gradient that clears the highest
+        // ground it can see, which B44's arc test alone reduces to 5 degrees
+        // at supersonic turn radii.
+        Ok(Some(
+            floor.pitch_floor_deg.max(
+                frame
+                    .own
+                    .terrain_climb_deg
+                    .min(steering::PITCH_REQUEST_LIMIT_DEG),
+            ),
+        ))
     }
 
     /// Build the steering request for a resolved intent (B44).
@@ -3242,6 +3313,9 @@ impl Controller {
         }
     }
 }
+
+/// B13: gun lead tracking is issued as a 1-second timed motion.
+const GUN_TRACKING_MOTION_TICKS: u64 = 120;
 
 /// Why the controller could not use the mission's target: the first failing
 /// test of the mission-target filter in `select_target`. Explanation only.
@@ -3363,6 +3437,7 @@ mod tests {
             altitude_msl_ft: 20000.0,
             agl_ft: 20000.0,
             terrain_ahead_ft: 0.0,
+            terrain_climb_deg: -90.0,
             minimum_altitude_ft: 300.0,
             at_ceiling: false,
             on_ground: false,

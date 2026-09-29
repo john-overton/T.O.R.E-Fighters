@@ -14,8 +14,14 @@ Opinionated, requested by John on 2026-09-21: `[` selects the previous item and
 `]` the next in a wrapping ring containing NAV and the configured weapon slots.
 Selecting a weapon arms it. NAV disarms and releases the trigger. There is no
 independent player master-arm control. Semicolon and U no longer select or arm.
-The agent retains configured station order, including empty and failed stations,
-so selection does not hide store status. Ground starts use NAV; airborne starts
+The agent retains configured station order, including failed stations, so
+selection does not hide their status. A station that carries nothing is not on
+the aircraft: the ring steps over it and the WEAPONS list leaves it out (John,
+2026-09-28, after a bug report that Mavericks taken off the loadout page were
+still listed). A station that runs dry in flight stays selected until the next
+`[` or `]`, and unlimited ammunition keeps every station reachable. Startup
+selects the gun, else the first station that carries something, else NAV, so an
+aircraft loaded with nothing starts on NAV. Ground starts use NAV; airborne starts
 retain the canonical gun, now armed. Existing headless range commands and old
 recordings keep their explicit station and arm commands for compatibility.
 
@@ -66,7 +72,15 @@ control.
 Opinionated presentation requested by John on 2026-09-21, using his supplied
 WEAPONS screenshot: list ammunition count and imported short weapon name, mark
 the selected weapon with `>`, and show live CHAFF and FLARE counts at the bottom.
-The agent groups identical source weapons and sums their remaining rounds.
+The agent groups identical source weapons and sums their remaining rounds. A
+weapon that was never loaded (taken off on the Load Ordnance page) has no row.
+One that was loaded and has run dry keeps its row at `0`, drawn dim, and can no
+longer be selected: `[`, `]` and the minus and plus buttons skip it, and when
+the selected station runs dry the selection moves on to the next loaded station
+in ring order (never while the trigger is still held), or to NAV when nothing is
+left (requested by John on 2026-09-29; the dim row is an agent choice).
+Jettisoning the selected store empties it and hands the selection on the same
+way, so a following trigger press fires the next loaded station.
 NAV has no selected-weapon marker. Six rows fit each page; the third button `P`
 wraps pages and does nothing on a single page. Minus/plus use the same selection
 ring as the bracket keys and reveal the selected weapon's page. Detailed range

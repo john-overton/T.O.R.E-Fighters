@@ -306,6 +306,11 @@ pub struct AiWings {
     ai_shots: BTreeMap<u32, u32>,
     /// Last observed hit points per actor, for the damage mirror.
     last_hp: BTreeMap<u32, i32>,
+    /// Hit points owed to belly scrape wear, below one whole point, by actor.
+    scrape_carry: BTreeMap<u32, f64>,
+    /// Aircraft lost this tick to overspeed or belly wear: no shooter earns
+    /// them (see [`AiWings::lose_uncredited`]).
+    uncredited_losses: std::collections::BTreeSet<u32>,
     pub ejection_events: Vec<(u32, String, bool)>,
     /// Radio events for `radio_calls`, drained by the host each tick.
     pub chatter: Vec<Chatter>,
@@ -314,6 +319,10 @@ pub struct AiWings {
     next_projectile_id: u32,
     weapon_rules: Rules,
     last_message_tick: u64,
+    /// The aircraft the activity line names, and a later change of that
+    /// aircraft's activity that arrived inside the interval.
+    shown_actor: Option<u32>,
+    stale_line: Option<(u32, Activity)>,
     /// Launch events that could not become a projectile, for honest reporting.
     pub dropped_launches: u32,
     /// Projectiles this bridge created.
@@ -803,11 +812,15 @@ impl AiWings {
             chatter: Vec::new(),
             watch,
             last_hp: BTreeMap::new(),
+            scrape_carry: BTreeMap::new(),
+            uncredited_losses: Default::default(),
             last_activity: BTreeMap::new(),
             reports: reports::Reports::default(),
             next_projectile_id: AI_PROJECTILE_ID_BASE,
             weapon_rules: Rules::Spec,
             last_message_tick: 0,
+            shown_actor: None,
+            stale_line: None,
             dropped_launches: 0,
             realised_launches: 0,
             threat_reports: Vec::new(),
@@ -1032,12 +1045,14 @@ impl AiWings {
                 })
                 .collect(),
         );
+        self.lose_out_of_bounds(&mut state.ledger, |x, z| world.edge_distance_nm(x, z));
         let object = self.player_object(player, state.player_hp, state.configuration());
         // Aircraft on the researched flight model roll on runways and feel
         // the wind; legacy airborne actors keep the terrain-only surface.
         let output = self.advance_on_surface(object, &mut state.targets, &ground, &|x, z| {
             world.surface(x, z)
         })?;
+        self.lose_uncredited(&mut state.ledger);
         self.observe_chatter(&output, player);
         for event in &output.launches {
             if let Some(weapon) = self.weapons.get(&(event.actor, event.station.0)).cloned() {
@@ -1453,6 +1468,33 @@ impl AiWings {
             .step_with_surface(&objects, terrain, surface, now)
             .map_err(|e| e.to_string())?;
 
+        // Belly scrape wear from a gear-up slide is airframe damage with no
+        // attacker, so no kill is credited when it finishes the aircraft.
+        // `opinionated` (requested by John, 2026-09-29).
+        for slot in &self.slots {
+            let Some(actor) = self.mission.actor_mut(slot.id) else {
+                continue;
+            };
+            let scrape = actor.flight_mut().take_belly_scrape();
+            if scrape <= 0. {
+                continue;
+            }
+            let Some(target) = targets.iter_mut().find(|t| t.id == slot.id) else {
+                continue;
+            };
+            if target.hp <= 0 {
+                continue;
+            }
+            let carry = self.scrape_carry.entry(slot.id).or_insert(0.);
+            *carry += scrape * f64::from(target.initial_hp.max(1));
+            let whole = carry.floor();
+            *carry -= whole;
+            target.hp = (target.hp - whole as i32).max(0);
+            if target.hp == 0 {
+                // The wear finished it: nobody who shot at it earlier gets it.
+                self.uncredited_losses.insert(slot.id);
+            }
+        }
         for slot in &self.slots {
             let Some(actor) = self.mission.actor(slot.id) else {
                 continue;
@@ -1477,6 +1519,11 @@ impl AiWings {
                 && let Some(target) = targets.iter_mut().find(|t| t.id == slot.id)
                 && target.hp > 0
             {
+                // Lost to the aircraft's own structure (overspeed, the map
+                // edge): no shooter caused it.
+                if actor.flight().systems.structure.cause.is_some() {
+                    self.uncredited_losses.insert(slot.id);
+                }
                 target.hp = 0;
                 target.radar_emitting = false;
                 target.jammer_active = false;
@@ -1988,10 +2035,13 @@ impl AiWings {
             .get(&event.actor)
             .copied()
             .unwrap_or((100, 100));
+        // Imported records can hold more than 100; like the player's own
+        // dispensers, a percentage above 100 counts as 100 (certain).
         let effectiveness = match event.class {
             SeekerClass::Infrared => effectiveness.0,
             SeekerClass::Radar => effectiveness.1,
-        };
+        }
+        .min(100);
         let flight = actor.flight();
         let release = tore_sim::combat::countermeasures::Release {
             position: flight.position,
@@ -2023,7 +2073,7 @@ impl AiWings {
                                 && flight.seeker.acquired
                                 && flight.seeker.observation.is_some()
                         }),
-                    decoy_susceptibility_percent: weapon.seeker.chaff_flare_chance,
+                    decoy_susceptibility_percent: weapon.seeker.chaff_flare_chance.min(100),
                 };
                 let decoy = threat::decoy_missile(
                     &missile,
@@ -2148,25 +2198,95 @@ impl AiWings {
     /// bar carries AI activity changes. Only a change into an activity
     /// [`worth_announcing`] posts, and at most one line per
     /// [`MESSAGE_INTERVAL_TICKS`].
+    ///
+    /// A held change of the aircraft the line already names is posted once
+    /// the interval allows (agent decision, 2026-09-28, overnight bug battery),
+    /// so the line never keeps saying "Defending" about an aircraft that has
+    /// since been destroyed.
     fn announce(&mut self, activities: &[(u32, Activity)]) {
         let tick = self.mission.tick();
+        let open = |last: u64| last == 0 || tick >= last + MESSAGE_INTERVAL_TICKS;
         for (id, activity) in activities {
             let changed = self.last_activity.insert(*id, *activity) != Some(*activity);
             if !changed || !worth_announcing(*activity) {
                 continue;
             }
-            if tick < self.last_message_tick + MESSAGE_INTERVAL_TICKS && self.last_message_tick > 0
-            {
+            if !open(self.last_message_tick) {
                 let remaining = self.last_message_tick + MESSAGE_INTERVAL_TICKS - tick;
                 self.activity_held(*id, *activity, remaining);
+                if self.shown_actor == Some(*id) {
+                    self.stale_line = Some((*id, *activity));
+                }
                 continue;
             }
-            let Some(slot) = self.slot(*id) else { continue };
-            let message = format!("{}: {}", slot.label(), activity.label());
-            self.activity_posted(*id, *activity);
-            self.pending_message = Some(message);
-            self.last_message_tick = tick.max(1);
+            self.post_activity(*id, *activity, tick);
         }
+        if open(self.last_message_tick)
+            && let Some((id, activity)) = self.stale_line.take()
+            && self.last_activity.get(&id) == Some(&activity)
+        {
+            self.post_activity(id, activity, tick);
+        }
+    }
+
+    fn post_activity(&mut self, id: u32, activity: Activity, tick: u64) {
+        let Some(slot) = self.slot(id) else { return };
+        let message = format!("{}: {}", slot.label(), activity.label());
+        self.activity_posted(id, activity);
+        self.pending_message = Some(message);
+        self.last_message_tick = tick.max(1);
+        self.shown_actor = Some(id);
+        if self.stale_line.is_some_and(|(stale, _)| stale != id) {
+            self.stale_line = None;
+        }
+    }
+
+    /// Records the aircraft lost this tick to overspeed or to belly scrape wear
+    /// as lost without credit, exactly like the map edge: whoever shot at them
+    /// earlier is not rewarded for a crash it did not cause (requested by John,
+    /// 2026-09-29). The debrief still counts them as lost aircraft. Returns the
+    /// ids recorded.
+    pub fn lose_uncredited(&mut self, ledger: &mut tore_sim::combat::ledger::Ledger) -> Vec<u32> {
+        let lost: Vec<u32> = std::mem::take(&mut self.uncredited_losses)
+            .into_iter()
+            .collect();
+        for id in &lost {
+            ledger.lose_without_credit(*id);
+        }
+        lost
+    }
+
+    /// An AI aircraft 105 nautical miles beyond the edge of the map is lost,
+    /// with no warning and no shooter to credit, and counts as a crash for the
+    /// debrief and the objectives (requested by John, 2026-09-29). Returns the
+    /// ids lost this call. `distance_nm` is the distance beyond the map edge.
+    pub fn lose_out_of_bounds(
+        &mut self,
+        ledger: &mut tore_sim::combat::ledger::Ledger,
+        distance_nm: impl Fn(f64, f64) -> f64,
+    ) -> Vec<u32> {
+        let lost: Vec<u32> = self
+            .mission
+            .actors()
+            .iter()
+            .filter(|a| a.alive())
+            .filter(|a| {
+                let [x, _, z] = a.flight().position;
+                distance_nm(x, z) >= crate::terrain::EDGE_DESTROY_NM
+            })
+            .map(AiActor::id)
+            .collect();
+        for id in &lost {
+            if let Some(actor) = self.mission.actor_mut(*id) {
+                let flight = actor.flight_mut();
+                flight
+                    .systems
+                    .destroy(tore_sim::aircraft_systems::LossCause::OutOfBounds);
+                flight.crashed = true;
+            }
+            ledger.lose_without_credit(*id);
+        }
+        lost
     }
 
     /// A compact deterministic line per actor, for the headless probe.
@@ -2177,7 +2297,7 @@ impl AiWings {
                 let actor = self.mission.actor(slot.id)?;
                 let f = actor.flight();
                 Some(format!(
-                    "actor={} {} {:?} activity={} alive={} rounds={} x={:.1} y={:.1} z={:.1} hdg={:.1}",
+                    "actor={} {} {:?} activity={} alive={} rounds={} x={:.1} y={:.1} z={:.1} hdg={:.1}{}",
                     slot.id,
                     slot.label(),
                     slot.aircraft,
@@ -2188,6 +2308,11 @@ impl AiWings {
                     f.position[1],
                     f.position[2],
                     f.yaw.to_degrees(),
+                    // Only when lost to overspeed or the map edge.
+                    f.systems
+                        .structure
+                        .cause
+                        .map_or_else(String::new, |c| format!(" cause={}", c.label())),
                 ))
             })
             .collect()
@@ -3466,6 +3591,106 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn an_ai_aircraft_105_miles_past_the_map_is_lost_and_credits_nobody() {
+        let (mut wings, mut targets) = build(None);
+        run(&mut wings, &mut targets, 10);
+        let mut ledger = tore_sim::combat::ledger::Ledger::default();
+        // Enemy 3 was hit by the player earlier.
+        ledger.damaged(tore_sim::combat::ledger::Kill {
+            owner: 0,
+            victim: 3,
+            category: 0x8000,
+            aircraft: true,
+        });
+        let far = wings.mission().actor(3).unwrap().flight().position;
+        // Everyone is inside the map except actor 3.
+        let lost = wings.lose_out_of_bounds(&mut ledger, |x, z| {
+            if (x, z) == (far[0], far[2]) {
+                105.
+            } else {
+                99.9
+            }
+        });
+        assert!(lost.is_empty() || lost == [3], "{lost:?}");
+        assert_eq!(lost, [3]);
+        assert_eq!(
+            wings
+                .mission()
+                .actor(3)
+                .unwrap()
+                .flight()
+                .systems
+                .structure
+                .cause,
+            Some(tore_sim::aircraft_systems::LossCause::OutOfBounds)
+        );
+        assert!(wings.mission().actor(2).unwrap().alive());
+        assert_eq!(ledger.credit(3), None);
+        // The next step finishes it: the target row is zero and the actor is lost.
+        run(&mut wings, &mut targets, 2);
+        assert_eq!(targets[2].hp, 0);
+        assert!(!wings.mission().actor(3).unwrap().alive());
+        // Nothing is lost twice.
+        assert!(
+            wings
+                .lose_out_of_bounds(&mut ledger, |_, _| 200.)
+                .iter()
+                .all(|id| *id != 3)
+        );
+    }
+
+    #[test]
+    fn an_ai_aircraft_finished_by_overspeed_or_belly_wear_credits_nobody() {
+        use tore_sim::aircraft_systems::LossCause;
+        use tore_sim::combat::ledger::{Kill, Ledger};
+        // Enemy 3 was shot at by the player earlier in every case.
+        let hit = Kill {
+            owner: 0,
+            victim: 3,
+            category: 0x8000,
+            aircraft: true,
+        };
+        for cause in [
+            Some(LossCause::Overspeed),
+            None,
+            Some(LossCause::OutOfBounds),
+        ] {
+            let (mut wings, mut targets) = build(None);
+            run(&mut wings, &mut targets, 10);
+            let mut ledger = Ledger::default();
+            ledger.damaged(hit);
+            if let Some(cause) = cause {
+                let flight = wings.mission.actor_mut(3).unwrap().flight_mut();
+                flight.systems.destroy(cause);
+                flight.crashed = true;
+            } else {
+                wings
+                    .mission
+                    .actor_mut(3)
+                    .unwrap()
+                    .flight_mut()
+                    .add_belly_scrape(1.);
+            }
+            run(&mut wings, &mut targets, 2);
+            assert_eq!(targets[2].hp, 0, "{cause:?}");
+            assert_eq!(wings.lose_uncredited(&mut ledger), [3], "{cause:?}");
+            assert_eq!(ledger.credit(3), None, "{cause:?}");
+            // Nothing is recorded twice, and the others are untouched.
+            assert!(wings.lose_uncredited(&mut ledger).is_empty());
+            assert!(targets.iter().filter(|t| t.hp == 0).count() == 1);
+        }
+        // An ordinary crash with no cause of its own still goes to the last shooter.
+        let (mut wings, mut targets) = build(None);
+        run(&mut wings, &mut targets, 10);
+        let mut ledger = Ledger::default();
+        ledger.damaged(hit);
+        wings.mission.actor_mut(3).unwrap().flight_mut().crashed = true;
+        run(&mut wings, &mut targets, 2);
+        assert!(wings.lose_uncredited(&mut ledger).is_empty());
+        assert_eq!(ledger.credit(3), Some(hit));
+    }
+
+    #[test]
     fn damage_flows_from_the_combat_world_into_the_actors() {
         let (mut wings, mut targets) = build(None);
         run(&mut wings, &mut targets, 10);
@@ -3580,6 +3805,30 @@ pub(crate) mod tests {
         assert!(wings.take_message().is_none());
         // Repeating the same activity is never a change.
         wings.announce(&[(1, Activity::Attacking)]);
+        assert!(wings.take_message().is_none());
+    }
+
+    #[test]
+    fn the_activity_line_catches_up_with_its_own_aircraft() {
+        // Battery finding (2026-09-28): the line kept saying "Defending" for
+        // an aircraft destroyed a second later, because the change was dropped.
+        let (mut wings, _) = build(None);
+        wings.announce(&[(1, Activity::Defending)]);
+        assert_eq!(
+            wings.take_message().as_deref(),
+            Some("Friendly 2-1: Defending")
+        );
+        wings.announce(&[(1, Activity::Destroyed)]);
+        assert!(wings.take_message().is_none());
+        // The interval passes (0 reads as "no line posted yet").
+        wings.last_message_tick = 0;
+        wings.announce(&[]);
+        assert_eq!(
+            wings.take_message().as_deref(),
+            Some("Friendly 2-1: Destroyed")
+        );
+        // Another aircraft's dropped change is not revived.
+        wings.announce(&[(2, Activity::Defending)]);
         assert!(wings.take_message().is_none());
     }
     #[test]
@@ -3907,6 +4156,27 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn guns_only_with_an_empty_gun_starts_on_nav_not_on_a_missile() {
+        let fixture = combat_fixture(false);
+        let mut config = fixture.configuration().clone();
+        config.stations[0].weapon.source = "M61.JT".into();
+        let mut missile = config.stations[0].clone();
+        missile.weapon.source = "AIM9M.JT".into();
+        config.stations.insert(0, missile);
+        let mut state = live::State::new(config, true).unwrap();
+        state.cheats.guns_only = true;
+        // The gun (station 1) carries nothing; the missile (station 0) does.
+        state.ammo[1] = 0;
+        assert!(state.carries(0) && !state.carries(1));
+        crate::combat::apply_startup_weapon_state(&mut state);
+        assert!(!state.armed);
+        // Without the cheat the same load starts on the loaded missile.
+        state.cheats.guns_only = false;
+        crate::combat::apply_startup_weapon_state(&mut state);
+        assert!(state.armed && state.selected == 0);
+    }
+
+    #[test]
     fn active_ai_launch_uses_owned_guidance_and_cannot_be_decoyed_before_pitbull() {
         use tore_sim::ai::{mission::DeviceEvent, weapon_service::StationId};
         let (mut wings, _) = build(None);
@@ -4023,6 +4293,48 @@ pub(crate) mod tests {
             )
         );
     }
+    #[test]
+    fn imported_decoy_chances_above_100_count_as_certain() {
+        // Battery finding (2026-09-28): an imported missile whose chaff and
+        // flare chance is above 100 stopped the whole mission with "decoy
+        // percentages exceed 100" when an AI aircraft released a flare at it.
+        use tore_sim::ai::{
+            mission::DeviceEvent,
+            weapon_service::{RequestId, StationId},
+        };
+        let (mut wings, _) = build(None);
+        let mut combat = combat_fixture(true);
+        let mut weapon = combat.configuration().stations[0].weapon.clone();
+        weapon.seeker.signature = 2;
+        weapon.seeker.chaff_flare_chance = 150;
+        wings.device_effectiveness.insert(3, (200, 100));
+        wings.realise(
+            &LaunchEvent {
+                actor: 1,
+                station: StationId(0),
+                target: 3,
+                request_id: RequestId(3),
+                projectiles: 1,
+            },
+            &mut combat.projectiles,
+            &weapon,
+            0,
+            [0.0; 3],
+            None,
+        );
+        wings
+            .realise_device(
+                &DeviceEvent {
+                    actor: 3,
+                    class: SeekerClass::Infrared,
+                    released: 1,
+                },
+                &mut combat,
+            )
+            .unwrap();
+        assert_eq!(combat.projectiles[0].target, None);
+    }
+
     #[test]
     fn finite_missile_depletion_is_followed_by_actor_owned_gun_fire() {
         use tore_sim::ai::wing::{TargetOrder, WingRequest};

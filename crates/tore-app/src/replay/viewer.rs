@@ -358,7 +358,29 @@ pub fn name_labels<'a>(
             color: trails::side_color(side),
         });
     }
+    separate_labels(&mut out, scale);
     out
+}
+
+/// Lifts a label above any label already placed that it would overprint, so
+/// aircraft that sit close together on the view each keep a readable name.
+/// Labels keep their order, so the same picture always stacks the same way.
+fn separate_labels(labels: &mut [Label], scale: f64) {
+    // Names are drawn a little taller than their measured box, so keep a gap.
+    let gap = 3. * scale.max(1.);
+    for i in 1..labels.len() {
+        for _ in 0..16 {
+            let [x, y, w, h] = labels[i].rect();
+            let blocked = labels[..i].iter().any(|other| {
+                let [ox, oy, ow, oh] = other.rect();
+                x < ox + ow && ox < x + w && y < oy + oh + gap && oy < y + h + gap
+            });
+            if !blocked {
+                break;
+            }
+            labels[i].at[1] -= labels[i].size[1] + gap;
+        }
+    }
 }
 
 /// The debug panels and the right-click menu, drawn in their own 640x480
@@ -2610,6 +2632,41 @@ impl Viewer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn labels_over_close_aircraft_are_lifted_apart() {
+        let label = |id: u32, x: f64, y: f64| Label {
+            id,
+            text: format!("A{id}"),
+            at: [x, y],
+            size: [40., 10.],
+            color: [255, 255, 255],
+        };
+        let overlaps = |a: &Label, b: &Label| {
+            let [ax, ay, aw, ah] = a.rect();
+            let [bx, by, bw, bh] = b.rect();
+            ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah
+        };
+        let mut labels = vec![
+            label(0, 100., 100.),
+            label(1, 110., 104.),
+            label(2, 100., 100.),
+            label(3, 400., 300.),
+        ];
+        separate_labels(&mut labels, 1.);
+        for i in 0..labels.len() {
+            for j in i + 1..labels.len() {
+                assert!(!overlaps(&labels[i], &labels[j]), "{i} and {j} overlap");
+            }
+        }
+        // The first label and a far one stay where they were.
+        assert_eq!(labels[0].at, [100., 100.]);
+        assert_eq!(labels[3].at, [400., 300.]);
+        // Labels that were already apart are untouched.
+        let mut apart = vec![label(0, 0., 0.), label(1, 100., 0.)];
+        separate_labels(&mut apart, 2.);
+        assert_eq!((apart[0].at, apart[1].at), ([0., 0.], [100., 0.]));
+    }
 
     #[test]
     fn hiding_the_interface_leaves_nothing_over_the_view() {

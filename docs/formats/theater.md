@@ -92,6 +92,20 @@ Rust expands six-bit RGB to eight-bit and uses **explicit DAY2 keyframe 2** for 
 
 DAY modules import `_T_HorizonProc` from `main.dll`; this build's export at `0x4aace0` is a return stub. FOG also imports `_WRFogLayerUpdate`; `0x4b4320` adjusts a field at `+0xfe` by a random -25…25 and clamps it to 217…235. This callback, its caller timing and seeded weather evolution are not implemented.
 
+## Text character set
+
+Retail text is 8-bit DOS text in code page 437. The evidence is the original
+fonts: `WIN`, `HUD` and their variants draw exactly the CP437 text characters
+above 0x7F (accented letters at 0x80 to 0xA5, the inverted marks at 0xA8 and
+0xAD, sharp s at 0xE1, micro at 0xE6, degree at 0xF8) and no box-drawing or
+Greek cells. Across every imported text resource the only byte above 0x7F is
+0x89 in `KURILE.MM`, the airport name `Ber\x89zovka`: an e with a diaeresis
+(Berëzovka). The app decodes mission layout text as CP437
+(`tore_formats::text`), holds it as Unicode, and draws it by putting each
+character back on its CP437 font cell. The bundled menu font atlases carry the
+same cells. `--validate-text` scans every imported string for U+FFFD and for
+characters the original fonts cannot draw.
+
 ## Sky, sun, moon, stars and clouds
 
 The shared extraction profile includes all of the following, preserving archive boundaries:

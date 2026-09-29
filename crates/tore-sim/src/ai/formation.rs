@@ -128,6 +128,30 @@ fn separation(p: [f64; 3], v: [f64; 3], other: &Traffic, horizon: f64) -> f64 {
     length(add(r, scale(relative, t)))
 }
 
+/// Fitted (agent decision, 2026-09-28, corrected 2026-09-29): an escape
+/// heading is scored on its real closest approach over the lookahead while it
+/// still closes on an aircraft. Only a heading that already opens from an
+/// aircraft inside the breakout margin is scored on its distance
+/// [`ESCAPE_SCORE_FROM_S`] ahead: scored from now, every opening heading ties
+/// at the present distance, the straight-ahead candidate won on its smaller
+/// offset penalty, and two wingmen breaking out side by side flew on 50 ft
+/// apart until they collided. (The first version scored every heading from
+/// 2 s, which also hid conflicts inside the first 2 s and favoured headings
+/// that cross through the other aircraft.)
+const ESCAPE_SCORE_FROM_S: f64 = 2.0;
+const ESCAPE_CLOSE_FT: f64 = 220.;
+
+fn escape_clearance(p: [f64; 3], v: [f64; 3], other: &Traffic, horizon: f64) -> f64 {
+    let r = sub(other.position, p);
+    let relative = sub(other.velocity, v);
+    let closing = dot(r, relative) < 0.;
+    if !closing && length(r) < ESCAPE_CLOSE_FT {
+        length(add(r, scale(relative, ESCAPE_SCORE_FROM_S.min(horizon))))
+    } else {
+        separation(p, v, other, horizon)
+    }
+}
+
 impl Guidance {
     fn transition(&mut self, next: Phase) {
         if next != self.phase {
@@ -460,10 +484,28 @@ impl Guidance {
                 length(desired)
             }
         };
+        let mut escape = None;
         if self.phase == Phase::Breakout {
             // Compare escape corridors against every observed aircraft. A small
             // side preference cannot outweigh clearance; never dive to escape.
             let mut best = f64::NEG_INFINITY;
+            // Fitted (agent decision, 2026-09-28): a lower-ID aircraft that is
+            // itself breaking out is predicted along its chosen escape, with
+            // the same half-and-half response blend, as repositioning aircraft
+            // already yield to lower IDs' plans. Two breakouts otherwise each
+            // assumed the other would fly straight and could turn into each
+            // other (a battery run collided two wingmen this way).
+            let traffic: Vec<Traffic> = traffic
+                .iter()
+                .filter(|t| t.id != id)
+                .map(|t| match t.planned_velocity {
+                    Some(plan) if t.id < id && t.phase == Some(Phase::Breakout) => Traffic {
+                        velocity: add(scale(t.velocity, 0.5), scale(plan, 0.5)),
+                        ..*t
+                    },
+                    _ => *t,
+                })
+                .collect();
             for offset in [0., -30., 30., -60., 60., -90., 90.] {
                 for pitch in [own.flight_path_pitch_deg.max(0.), 15.] {
                     let candidate = velocity(own.heading_deg + offset, pitch, own.speed.0);
@@ -471,13 +513,13 @@ impl Guidance {
                     let predicted = add(scale(own_velocity, 0.5), scale(candidate, 0.5));
                     let margin = traffic
                         .iter()
-                        .filter(|t| t.id != id)
-                        .map(|t| separation(own.position, predicted, t, 8.))
+                        .map(|t| escape_clearance(own.position, predicted, t, 8.))
                         .fold(10000., f64::min);
                     let score = margin - offset.abs() * 0.2 + offset * self.side * 0.05;
                     if score > best {
                         best = score;
                         aim = add(own.position, scale(candidate, 5.));
+                        escape = Some(candidate);
                     }
                 }
             }
@@ -524,7 +566,7 @@ impl Guidance {
             minimum_predicted_separation_ft: clearance,
             yielding_to,
             aim,
-            planned_velocity: None,
+            planned_velocity: escape,
         });
         Request {
             aim,
@@ -557,6 +599,7 @@ mod tests {
             altitude_msl_ft: position[1],
             agl_ft: position[1],
             terrain_ahead_ft: 0.,
+            terrain_climb_deg: -90.,
             minimum_altitude_ft: 300.,
             at_ceiling: false,
             on_ground: false,
@@ -693,6 +736,73 @@ mod tests {
             Phase::Intercept,
             "completed target interpolation is not successful capture when the aircraft drifted away"
         );
+    }
+
+    #[test]
+    fn a_breakout_predicts_a_lower_id_breakout_along_its_escape() {
+        // Battery finding (2026-09-28): two wingmen breaking out each assumed
+        // the other would fly straight, turned into each other and collided.
+        // Review finding (2026-09-29): the chosen escape must also keep its
+        // predicted separation, not cross through the other aircraft.
+        let own = own([0., 20000., 0.], 800.);
+        let own_velocity = [0., 0., 800.];
+        let escape = |peer: Traffic| {
+            let mut guidance = Guidance::default();
+            let result = guidance.step(
+                5,
+                &own,
+                leader(),
+                leader().velocity,
+                [512., 20000., -512.],
+                &[peer],
+                1. / 120.,
+            );
+            let trace = guidance.trace.unwrap();
+            assert_eq!(trace.phase, Phase::Breakout);
+            let chosen = trace.planned_velocity.expect("an escape");
+            // The same response blend the scoring assumes, both aircraft.
+            let predicted = add(scale(own_velocity, 0.5), scale(chosen, 0.5));
+            let peer_predicted = match peer.planned_velocity {
+                Some(plan) if peer.id < 5 => Traffic {
+                    velocity: add(scale(peer.velocity, 0.5), scale(plan, 0.5)),
+                    ..peer
+                },
+                _ => peer,
+            };
+            (
+                result.aim[0],
+                separation(own.position, predicted, &peer_predicted, 8.),
+            )
+        };
+        let breaking = |id, x: f64, plan: [f64; 3]| Traffic {
+            id,
+            position: [x, 20000., 0.],
+            velocity: [0., 0., 800.],
+            phase: Some(Phase::Breakout),
+            planned_velocity: Some(plan),
+        };
+        // A lower ID breaking right, across the side we are on: its escape
+        // is known, so we turn with it and keep at least the present 100 ft
+        // instead of crossing its path.
+        let (side, clearance) = escape(breaking(2, -100., [693., 0., 400.]));
+        assert!(side > 0.);
+        assert!(clearance >= 99., "predicted {clearance:.0} ft");
+        // A higher ID yields to us, so its plan is not assumed: open away.
+        let (side, clearance) = escape(breaking(7, -100., [693., 0., 400.]));
+        assert!(side > 0.);
+        assert!(clearance >= 99., "predicted {clearance:.0} ft");
+        // A peer 180 ft to the side drifting inward: open away from it rather
+        // than crossing behind it closer than it is now.
+        let drifting = Traffic {
+            id: 7,
+            position: [-180., 20000., 0.],
+            velocity: [60., 0., 800.],
+            phase: Some(Phase::Intercept),
+            planned_velocity: None,
+        };
+        let (side, clearance) = escape(drifting);
+        assert!(side > 0.);
+        assert!(clearance >= 170., "predicted {clearance:.0} ft");
     }
 
     #[test]

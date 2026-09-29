@@ -148,6 +148,7 @@ pub fn command_name(c: Command) -> String {
         Command::NextSelection => "selection-next",
         Command::PreviousSelection => "selection-previous",
         Command::SelectNav => "selection-nav",
+        Command::AdvanceFromEmpty => "selection-dry",
         Command::ToggleSeekerMode => "seeker-mode",
         Command::CompatibilityWeapons => "compatibility-weapons",
         Command::ToggleTargetRadar => "target-radar",
@@ -194,6 +195,7 @@ pub fn command(s: &str) -> Option<Command> {
         Command::NextSelection,
         Command::PreviousSelection,
         Command::SelectNav,
+        Command::AdvanceFromEmpty,
         Command::ToggleSeekerMode,
         Command::CompatibilityWeapons,
         Command::ToggleTargetRadar,
@@ -323,6 +325,31 @@ pub fn replay(
         ),
         |x, z| f64::from(world.height(x as f32, z as f32)),
         Some(&world.airport_scene),
+        world.wind(),
+    )
+}
+/// Replay a tape recorded without an airport scene, as the headless combat
+/// smoke records: the range fixture has no airfields, so a replay that added the
+/// theater's airport targets and ILS service would not match the live state.
+pub fn replay_without_airports(
+    path: &Path,
+    data: &BTreeMap<String, Vec<u8>>,
+    config: Configuration,
+    theater: &str,
+    world: &World,
+) -> AppResult<State> {
+    replay_reader(
+        std::io::BufReader::new(std::fs::File::open(path)?),
+        config.clone(),
+        &format!(
+            "tore-combat {VERSION} {:?} {} {:016x}",
+            config.aircraft,
+            theater,
+            fingerprint(data)
+        ),
+        |x, z| f64::from(world.height(x as f32, z as f32)),
+        None,
+        world.wind(),
     )
 }
 fn replay_reader(
@@ -331,6 +358,7 @@ fn replay_reader(
     header: &str,
     ground: impl Fn(f64, f64) -> f64,
     airport_scene: Option<&tore_sim::airport::Scene>,
+    wind: [f64; 3],
 ) -> AppResult<State> {
     use std::io::Read;
     let mut s = State::new(config, true)?;
@@ -452,6 +480,10 @@ fn replay_reader(
             }
             "release" => s.release(),
             "fire" | "tick" => {
+                // The host sets the mission wind before every step; a tape does
+                // not record it, so the replay is given the same wind.
+                s.smoke.wind = wind;
+                s.devices.wind = wind;
                 let events = s.step(action == "fire", launcher, &ground);
                 if let (Some(service), Some(scene)) = (&mut airport_service, airport_scene) {
                     let _ = events;
@@ -471,6 +503,7 @@ fn replay_reader(
                         supported: airport_supported,
                         alive: launcher.alive,
                         speed_fps: launcher.speed_fps,
+                        ground_clearance_ft: 0.,
                     };
                     service.step(scene, aircraft);
                     let _ = service.guidance(scene, aircraft);
@@ -503,6 +536,7 @@ fn replay_reader(
                         supported: airport_supported,
                         alive: launcher.alive,
                         speed_fps: launcher.speed_fps,
+                        ground_clearance_ft: 0.,
                     },
                     airport_command(action).unwrap(),
                 );
@@ -520,6 +554,7 @@ fn replay_reader(
             supported: airport_supported,
             alive: launcher.alive,
             speed_fps: launcher.speed_fps,
+            ground_clearance_ft: 0.,
         });
     }
     Err("combat tape record bound".into())
@@ -527,6 +562,12 @@ fn replay_reader(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_dry_station_hand_on_round_trips_through_a_tape() {
+        use tore_sim::combat::live::Command;
+        assert_eq!(command_name(Command::AdvanceFromEmpty), "selection-dry");
+        assert_eq!(command("selection-dry"), Some(Command::AdvanceFromEmpty));
+    }
     #[test]
     fn version_six_airport_commands_have_stable_bounded_names() {
         use tore_sim::airport::Command;

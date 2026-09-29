@@ -363,6 +363,65 @@ The control mapping accounts for current flap lift and low-speed G authority.
 The three player adapters stay distinct. Exact input-replay validation is
 recorded in the [AI baseline](baselines/ai-research.md).
 
+## Envelope limits and loading
+
+The aircraft's PT file holds a speed and altitude polygon for each whole G. The
+1 G polygon is the aircraft's absolute limit (manual p. 90): its left edge is the
+stall speed, its top is the ceiling and its right edge is the top speed. The
+hybrid adapter turns them into the highest and lowest G it will deliver:
+
+- The rows that hold the current speed and altitude set the range, from -1 to the
+  largest of their G.
+- **Loading divisor (fitted).** Fuel and stores make the aircraft heavier:
+  `loading = (fuel + carried weight) / empty weight` and the divisor is
+  `1 + loading * loadedElevator / 100`, with `loadedElevator` from the PT. Both
+  limits are divided by it, so a full aircraft pulls fewer G than an empty one.
+- **1 G floor (fitted, 2026-09-29).** Inside a row's polygon the upper limit never
+  falls below 1 G. Without the floor the outermost band, where only the 1 G row
+  holds, gave a loaded aircraft less than 1 G and it sank at full power near its
+  top speed or its ceiling, and an AI wingman flew into the ground. The AI's own
+  G limit (`ai/steering_adapter.rs`) applies the same floor and the same ceiling rule, so
+  it never asks for G the aircraft cannot give. Both rules are hybrid adapter rules; the
+  legacy compatibility model keeps the old limits.
+- **Above the ceiling (fitted, 2026-09-29).** Above the top of the 1 G polygon the
+  air is too thin to lift the weight (manual p. 90), so the upper limit is
+  multiplied by the ratio of the air density there to the density at the ceiling
+  (standard atmosphere, held at its 100,000 ft value above that, so the thinning stays finite). A zoom climb can carry an aircraft a little past its
+  ceiling but it cannot stay there.
+- Outside every row at that speed (faster than the polygon's right edge) the limit
+  stays at 1 G divided by the loading divisor: the aircraft cannot hold level
+  flight. Overspeed is `opinionated` (requested by John,
+  2026-09-29; the numbers are agent decisions, [overspeed](spec/overspeed.md)). The manual says that below about
+  36,000 ft, beyond the structural limit, "air resistance begins to weaken the airframe and the
+  wings will eventually tear off" and gives no numbers. Here the view shakes from 95% of the top speed
+  at the aircraft's altitude, rising to a clear maximum at 100%, and at 1.5 times the top speed
+  the aircraft (player or AI) is lost through the ordinary destroyed path with the cause `overspeed`.
+  Above the ceiling the envelope has no speed range and the rule does not apply.
+- The autopilot makes no promise outside the envelope ([autopilot](spec/autopilot.md)).
+
+### Weight-scaled stall speed
+
+`opinionated`, requested by John on 2026-09-29; the reference weight and the
+numbers are agent decisions ([rules](spec/takeoff-ground-contact.md#weight-scaled-stall-speed)).
+The polygon's slow edges for the 0 G to 2 G rows are the aircraft's speeds at its empty
+weight and grow with the square root of its weight (fuel, stores, ordnance), fading out at
+the 4 G row so that the G limit above about twice the stall speed is the imported one (the
+loaded-elevator divisor already carries the weight there), in the hybrid adapter only.
+The fast edge, the overspeed rule and the ceiling rules do not change; full flaps
+still take 25 percent off the 1 G stall speed; the loaded-elevator divisor stays.
+`--retail-stall-speeds` (developer switch) restores the imported speeds at every
+weight. It is the same rule for all fourteen aircraft: nothing is tuned per aircraft.
+
+### Limits of the world and the ground
+
+Two more `opinionated` rules, both requested by John on 2026-09-29 with agent-decided
+numbers: an aircraft is lost 105 nautical miles beyond the nearest point of the map,
+with a turn-back warning from 100 ([world edge](spec/world-edge.md)); and retracting
+the gear on the ground below stall speed settles the aircraft on its belly, a strong
+brake with airframe wear, while retraction at rotation speed or airborne is unchanged
+([gear on the ground](spec/gear-on-the-ground.md)). Both, like overspeed, end in the
+ordinary structural-failure or hit-point path, and a loss records its cause.
+
 ## Telemetry record
 
 `State::trace()` returns a `FlightTrace` (`crates/tore-sim/src/flight/trace.rs`): what
@@ -396,7 +455,7 @@ effect starts or stops ([flight-model effects](REPLAYS.md#flight-model-effects))
 | `adapter.runway_wind`, `parked_*` | Crosswind, tailwind and headwind against the weight-class limits, the fade-in with ground speed, the tire-grip fraction; parked attitude and position holds |
 | `adapter.devices` | Gear, flaps, airbrake and hook: switch, position, and whether no hydraulics or a jam blocked them |
 | `adapter.power` | Engine, fuel starvation, afterburner and why it stayed dark, throttle, fuel flow, Unlimited fuel, rated thrust, model thrust lapse, power available, thrust |
-| `adapter.envelope` | Clean and effective stall speed, flaps, top speed, missing 1 G envelope, authority, the envelope rows holding the speed and their G, loading and its divisor, Pull extra G, the low-speed ceiling ramp, final G limits, stick and stick G |
+| `adapter.envelope` | Clean and effective stall speed (weight-scaled, with the scale itself), flaps, top speed, missing 1 G envelope, authority, the envelope rows holding the speed and their G, loading and its divisor, Pull extra G, the low-speed ceiling ramp, final G limits, stick and stick G |
 | `adapter.lift` | Transonic drag percentage, flap lift, wing damage, commanded G, spin lift factor, lift target and lagged lift |
 | `adapter.departure` | Hybrid only: mode and spin direction before and after, spin drive, the spin direction rule (direction, random draw, roll rate and bank as the rule read them, entered), how a spin ended, spin rate and maximum, cleared on the ground |
 | `adapter.scaling` | Stall severity and its control and lift scaling, spin blend and control effectiveness, final control scale |

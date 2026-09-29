@@ -26,7 +26,8 @@ format is in [SETUP.ESA notes](../formats/esa-installer.md).
      source if any;
    - drag-and-drop of a folder or a file onto the window;
    - a list of detected sources, each labelled by kind (see below);
-   - **Import** and **Quit**.
+   - **Import** and **Quit**. Alt+F4 (Command-Q on macOS) also quits, as on every
+     other screen.
 
    The screen is drawn on a flat panel with the larger of the two bundled
    menu fonts, because on a first run there is no retail art on disk to draw

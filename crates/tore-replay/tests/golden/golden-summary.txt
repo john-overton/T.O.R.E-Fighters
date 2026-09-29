@@ -33,7 +33,7 @@ Shots
 Communication
 -------------
 0:00.5  RADIO   You: "Fox three, one away" [queued], trigger: radar missile release at aircraft 2
-0:00.5  HUD     someone: "Attacking" [suppressed], not heard; why: one line per 2 s, 1.5 s left
+0:00.5  HUD     cockpit: "Attacking" [suppressed], not heard; why: one line per 2 s, 1.5 s left
 0:00.5  RADIO   Enemy 2-1 [suppressed], not heard, trigger: new target you; why: contact cooldown (15 s), 3.0 s left
 0:00.5  RADIO   You: "Splash" [suppressed], not heard; why: unguided hits: one per shooter every 8 s
 0:00.5  MUSIC   situation normal -> air; why: inputs ask for Air: designated enemy inside 40000 ft
@@ -59,7 +59,7 @@ Bookmarks
   events from 0:00.0 to 0:08.0:
     0:00.0  Enemy 2-1 activity FORMATION -> ATTACKING because leader released wing
     0:00.5  RADIO You: "Fox three, one away" [queued], trigger: radar missile release at aircraft 2
-    0:00.5  HUD someone: "Attacking" [suppressed], not heard; why: one line per 2 s, 1.5 s left
+    0:00.5  HUD cockpit: "Attacking" [suppressed], not heard; why: one line per 2 s, 1.5 s left
     0:00.5  RADIO Enemy 2-1 [suppressed], not heard, trigger: new target you; why: contact cooldown (15 s), 3.0 s left
     0:00.5  RADIO You: "Splash" [suppressed], not heard; why: unguided hits: one per shooter every 8 s
     0:00.5  MUSIC situation normal -> air; why: inputs ask for Air: designated enemy inside 40000 ft

@@ -48,7 +48,7 @@ sharing are separate, still incomplete contracts.
 | B01 | Target ahead means the larger of absolute heading-to-target error and pitch-to-target error is strictly less than 90 degrees. Off-beam is that larger error, expressed in degrees. | Executable-confirmed. This is not a circular cone measured by one 3D vector angle. |
 | B02 | Target facing means its absolute horizontal bearing error toward this aircraft is at most 90 degrees. | Executable-confirmed. The evaluator uses the heading output, not the target's pitch error; equality differs from B01. |
 | B03 | Target distance is spatial separation; horizontal distance removes altitude separation. Own `alt` is height above the queried surface. | Executable-confirmed, with the existing fixed8 feet contract. Keep AGL and absolute altitude distinct. Terrain/object query eligibility is not fully recovered. |
-| B04 | Climbing is permitted by the script predicate when current speed is at least current minimum speed plus 75 ft/s (about 44 knots). Better-speed means own maximum speed exceeds the target's by at least 75 ft/s. | Executable-confirmed. AI speed is feet per second; the HUD shows the same value in knots (times 3600, divided by 6076). Minimum and maximum are the aircraft's loaded envelope limits at its current altitude, so the thresholds move with altitude and loading. |
+| B04 | Climbing is permitted by the script predicate when current speed is at least current minimum speed plus 75 ft/s (about 44 knots). Better-speed means own maximum speed exceeds the target's by at least 75 ft/s. | Executable-confirmed. AI speed is feet per second; the HUD shows the same value in knots (times 3600, divided by 6076). Minimum and maximum are the aircraft's loaded envelope limits at its current altitude, so the thresholds move with altitude and loading. Fitted (agent decision, 2026-09-29): the minimum is never below the speed at which the loaded aircraft can hold 1 G in its flap setting (`flight::State::minimum_level_speed`; the envelope rows alone reach down to the 0 G row's slow edge), and the maximum never above the fastest envelope row that still leaves 1.2 G after the loading (near the top speed only the 1 G row holds, and the legacy flight model divides it by the loading, so a loaded fighter at full power sank into flat ground). |
 | B05 | Better thrust-to-weight means the own-minus-target performance evaluator is at least 10. `corner` and `cornerSpeed` return the same aircraft query. | Executable-confirmed. The thrust-to-weight scale is not established here; do not interpret 10 as a physical ratio of ten or an invented ten-percent bonus. |
 | B06 | The fighter can distinguish human-controlled targets, fighter versus other aircraft, wing combat/approach state, and its own resolved experience. | Source use and executable accessors inspected. Human-control accessor reads the target's control flag. Network/control ownership and wing-state production remain open. |
 
@@ -341,7 +341,16 @@ lock checking, firing and reload. A valid hostile target, an available compatibl
 station, weapon-specific lock checks and an unblocked firing path precede the
 reviewed firing branch. Losing a target sends the service back toward search.
 A failed lock causes a nominal one-second retry; no suitable station causes a
-nominal two-second retry. Pre-firing service states can add half a second to a
+nominal two-second retry. The motion honours that retry as well: once no store
+resolves, gun lead tracking keeps the aircraft until the retry ends instead of
+handing it back to a missile tactic on the next tick the missile's zone test
+passes (agent decision 2026-09-29; without it a fighter at a zone edge swapped
+maneuvers every few ticks, its own stick input moving the zone test). Gun lead
+tracking is a 1-second timed motion, and by B13 a timed motion runs to its
+deadline unless an event replaces it, so a change of preferred store (gun to
+missile) does not end it before its second is up (agent decision 2026-09-29;
+a fighter whose best store alternated otherwise swapped maneuvers 30 times in
+3 seconds). Pre-firing service states can add half a second to a
 chosen delay with a 10% gate. These are eligible service times, subject to the
 clock and scheduling limits in B13, not a guaranteed time to the first shot.
 
@@ -439,6 +448,53 @@ slot point: beyond 5000 ft own maximum; 1000 to 5000 ft leader speed plus
 clamped to own minimum and maximum. The negative bands are reachable only
 through a lead-projection branch whose entry condition is open.
 
+### Leader succession
+
+**Opinionated, requested by John on 2026-09-29:** when an AI-led wing's leader
+is lost (destroyed, ejected, crashed or removed), the surviving member next in
+the wing's order becomes its leader and the others close up behind it: the
+survivors are renumbered from 0 in their old order, so their formation slots
+follow, and a wingman that was following the lost leader in to land stops as
+the wing abort does. A wing led by a human is left alone (multiplayer handles
+the general case separately). No radio call is made: the retail "You're the
+wingleader now" call is voiced only by a living previous leader
+([radio chatter](radio-chatter.md)).
+
+### Traffic avoidance
+
+**Opinionated, requested by John on 2026-09-29; the numbers are agent
+decisions:** an AI aircraft flying on its own predicts its closest approach to
+every other airborne aircraft, friend or foe. A conflict is a closest approach
+within the next 6 s that misses by less than 300 ft plus half a second of the
+closing speed (so a fast head-on pass is seen earlier and given more room).
+Against the aircraft it is attacking only a miss under 150 ft counts, since it
+closes on that aircraft on purpose. On the first conflict it takes up a heading
+30 degrees off its current one, away from the other aircraft, or to the right
+when the other is within 20 degrees of its nose (head-on, as the rules of the
+air have both aircraft turn right). It keeps its pitch and speed, holds that
+heading until 3 s after the last predicted conflict, and never changes side
+while it holds, so it does not flap. Avoidance never overrides missile or gun
+defense, an airfield sequence, or a formation procedure (station keeping, a
+join or a rejoin): wingmen in formation are kept apart by their slots.
+
+### Return to base when the mission is over
+
+**Opinionated, requested by John on 2026-09-29:** once a side has seen hostile
+aircraft and none is left alive, its AI aircraft return to base. Each airborne
+AI aircraft on that side that is not already taking off, landing, recovering
+from damage or bugged out, and has a home runway, is ordered to land there
+through the ordinary landing sequence ([AI airfield sequences](ai-airfield.md));
+its wingmen join the leader's landing as for any ordered landing. A wing with
+no home runway has its leader fly the B48 return-to-base path to its home
+position (the launch point) and hold there by flying back over it, the
+wingmen staying in formation. Nothing changes while any hostile aircraft is
+alive or any aircraft on the side is still waiting or taking off (its landing
+traffic would hold the runway), and a mission that never had a hostile
+aircraft does not end this way.
+A wing led by the player stays with the player, whose own mission may still be
+open. The AI's objectives are air objectives (patrol, intercept, escort), so
+no hostile aircraft left means they are complete.
+
 ### Normal formation variation and transitions
 
 **Opinionated, requested by John on 2026-09-18:** tighten normal vertical
@@ -512,6 +568,15 @@ The following implementation rules and thresholds are **fitted, agent-authored**
   across traffic using equal current/candidate velocity weighting to approximate
   response lag. Penalize absolute offset by 0.2 ft/degree; formation side adds
   only a 0.05 ft/degree preference. Terrain pitch protection still applies.
+  Two additions (fitted, agent decision 2026-09-28, after the bug battery saw
+  two breaking-out wingmen collide; corrected 2026-09-29 after review): a
+  heading that still closes on an aircraft is scored on its true closest
+  approach over the 8 seconds; only a heading that already opens from an
+  aircraft within 220 ft is scored on its distance 2 seconds ahead, because
+  from now every opening heading ties at the present distance; and a lower-ID
+  aircraft that is itself breaking out is predicted along its chosen escape
+  (the same half-and-half blend), as repositioning aircraft already yield to
+  lower IDs' plans.
 - Before an ordinary approach becomes an emergency, screen requested headings
   at 0, +/-15, +/-30 and +/-45 degrees against traffic over 10 seconds. Use the
   same equal current/candidate velocity weighting, cap clearance credit at
@@ -639,6 +704,21 @@ floor. A separate terrain event can replace the current command with a
 3 second climb at the aircraft's maximum climb angle (80 degrees in inspected
 records), but it is masked while motion commands run, so its delivery
 frequency is open.
+
+**Opinionated, requested by John on 2026-09-29 (numbers are agent
+decisions):** the look-ahead scales with speed. The floor looks six seconds
+of travel ahead, never less than the retail 1,000 ft, and uses the highest
+ground at up to twelve evenly spaced points along that track, so a ridge
+inside it is not skipped. It also asks at least for the flight-path climb that
+clears that ground by the minimum altitude, because B44's arc test alone
+reduces to a 5 degree climb at supersonic turn radii. Six seconds comes from
+the worst case the bug battery met: a fighter banked 90 degrees rolls level in
+2 s at the 45 degree per second cap, the pitch loop below the floor closes
+over 1 s, and at 1,800 ft/s with the 2.2 G available near the top of its
+envelope, raising the flight path 14 degrees for the steepest hillsides takes
+about 3 s more. At 440 kt the look-ahead is 4,500 ft; below 100 kt the retail
+1,000 ft applies. Before this, supersonic AI aircraft saw rising ground 0.6 s
+before hitting it.
 
 Other overrides: above its ceiling altitude the aircraft does not accept a
 climbing pitch request. On the ground it holds its entry pitch, and may pitch
@@ -977,7 +1057,9 @@ fuel reaches zero is lost. The route ends in a Land goal, so the aircraft lands
 and stays parked; the takeoff and landing sequences are specified in
 [AI airfield sequences](ai-airfield.md). With a home runway, leaders,
 singletons and wingmen of a human leader land the same way (fitted).
-Damage-triggered disengagement is open.
+Damage-triggered disengagement is open. When no hostile aircraft remains, the
+same landing and return path end the mission
+([return to base](#return-to-base-when-the-mission-is-over), opinionated).
 
 ## Implementation status
 
@@ -1147,7 +1229,21 @@ the model's current roll authority and clamp stick roll to [-1, 1].
 
 Pitch feedback requests (cos(flight-path pitch) + speed times pitch error /
 (3 seconds times 32.174)) / max(cos(bank), 0.25) G, clamped to the loaded
-negative limit and AI positive G limit. Pitch error includes the terrain floor.
+negative limit and AI positive G limit. On the researched model the AI positive
+limit is never below what that model itself gives: 1 G anywhere inside the
+1 G envelope, and its loaded low-speed ceiling (the ramp from 1 G at the
+flap-adjusted stall to the next envelope row) where that is higher (fitted,
+agent decision 2026-09-29; before this a loaded aircraft slowing on final was
+held to 1 G divided by its loading, 0.77 G for a fuelled F/A-18D, and sank
+into the ground short of the runway). Pitch error includes the terrain floor.
+When an airborne aircraft's flight path is below the terrain floor, the
+requested bank is zero while it stays below, so a steep turn cannot use the
+lift needed to climb away from the ground, and the pitch error is closed over
+1 second instead of 3, in the spirit of B44's extra pitch authority while the
+floor is active (fitted, agent decision 2026-09-28, after the bug battery saw
+undamaged AI aircraft fly into hills at full G while still turning toward a
+target, or ease into a rising hillside at 2 G; the airfield terrain correction
+already levels the wings the same way).
 Invert the model's loaded stick-to-G mapping, with low-speed authority floored
 at 0.01 only for division, and clamp pitch input to [-1, 1]. Rudder stays zero.
 For the researched model, this includes its flap-adjusted minimum speed,

@@ -143,6 +143,7 @@ pub fn write_summary(
     let names = Names::new(recording);
     let header = recording.header();
     let w = &header.world;
+    let external_fuel = header.fuel_includes_external();
 
     // One pass over every frame.
     let mut stats: BTreeMap<u32, Stats> = recording
@@ -156,7 +157,9 @@ pub fn write_summary(
         let tick = frame.tick;
         for s in &frame.aircraft {
             let st = stats.entry(s.id).or_default();
-            if s.flags.airborne {
+            // The airborne flag says the aircraft is in play, and it stays set
+            // while the aircraft is parked or rolling on the ground.
+            if s.flags.airborne && !s.flags.on_ground {
                 st.airborne += 1;
             }
             if s.flags.alive {
@@ -463,10 +466,17 @@ pub fn write_summary(
         )?;
         let fuel = match st.fuel_first {
             Some(start) => format!(
-                "fuel {} -> {} lb (used {} lb)",
+                "fuel {} -> {} lb (used {} lb{})",
                 thousands(start),
                 thousands(st.fuel_last),
-                thousands(st.fuel_used)
+                thousands(st.fuel_used),
+                // Older recordings count the internal tanks only and read as
+                // they always did.
+                if external_fuel {
+                    ", external tanks included"
+                } else {
+                    ""
+                }
             ),
             None => "fuel not recorded".into(),
         };

@@ -235,7 +235,11 @@ controller receives only the observed missile position/motion, tick and source.
 Classify a visually observed missile as incoming when measured motion is closing
 and its current straight-line closest approach is within 1,000 feet of own
 aircraft over the next 15 seconds. Use two successive visual samples to estimate
-motion; a single silhouette does not reveal its intended target. Validate these
+motion; a single silhouette does not reveal its intended target. Once judged
+incoming, a missile that is still sighted stays incoming for the same 2-second
+grace after its last incoming sample (fitted, agent decision 2026-09-28: a
+closest approach hovering at 1,000 feet otherwise flipped the judgment, and the
+aircraft's defense, on every tick). Validate these
 authored thresholds against guided crossing approaches before acceptance. Do not
 use the hidden missile target ID to grant visual knowledge. Visual-only sighting
 does not reveal seeker class or launcher identity automatically.

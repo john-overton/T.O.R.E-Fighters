@@ -6,6 +6,7 @@ use crate::{
     instruments::Instruments,
 };
 use tore_formats::font::Font;
+use tore_formats::text::GlyphCodes;
 
 /// Strip ends in layout units. On screen the strip is the middle half of the
 /// view, narrowed to clear instrument windows, still showing the same span.
@@ -170,7 +171,7 @@ impl Ink {
     }
     fn text(&mut self, font: &Font, text: &str, mut x: f64, y: f64) {
         let s = self.scale;
-        for c in text.bytes() {
+        for c in text.glyph_codes() {
             let Some(glyph) = font.glyphs.get(usize::from(c)) else {
                 continue;
             };

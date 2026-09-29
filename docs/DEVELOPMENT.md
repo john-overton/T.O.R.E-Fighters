@@ -513,6 +513,8 @@ A mission replay frame is captured the same way with `--watch-replay FILE --capt
 
 ## Headless development
 
+For many runs at once with automatic checks (menus, flight, AI fights up to 15 against 15, replays) use the battery in [testing](testing/README.md).
+
 Run from the repository root with the pinned Rust toolchain and `--locked`.
 `cargo run` uses the dev profile by default, retaining debug symbols and
 assertions; no `--dev` flag is needed. Keep runtime data separate from normal
@@ -582,6 +584,31 @@ Verified on Hyprland 0.56 (Lua `hyprctl dispatch`); older releases use the
 fallback `[rules] command` form. Prefer the windowless modes above where they
 answer the question.
 
+To press keys and click in a windowed run without a person, give it `--input-script FILE`.
+The script feeds key presses and mouse events to the game through the same handlers the
+window's own events use, so letters, digits, modifiers and the mouse reach the real input path
+whether or not the window has focus (a window on a spare workspace never does, and the game
+rightly ignores most keys then). One step per line, `#` for comments:
+
+```text
+wait 1.5           seconds of wall clock
+waittick 600 [90]  until the flight has run this many 120 Hz ticks, or 90 s (default)
+key g              press and release: Shift+e, Ctrl+B, F10, Space, Escape, Enter, Up, ]
+down Up            hold a key          up Up     release it
+move 320 240       mouse to window pixels   movemenu 320 240   to the 640 by 480 menu layer
+click [left|right] press and release   press / release   hold a button
+wheel 3            wheel notches, negative for down
+snapshot out.ppm   the menu layer as drawn now (menu screens); relative paths go in $TORE_SCRIPT_OUT
+exit               quit
+```
+
+`Down` is nose up and `Up` nose down, as in the game. Set `TORE_RECORD_MISSIONS=1` to record the
+flight. The battery's hand-flown scenarios (`replay-script-*`, scripts in
+`tools/battery_scenarios/scripts/`) use it. The replay viewer takes its own events, so scripted
+keys do not reach it; its mouse events do. `tools/battery_scenarios/_replay_drive.py`, which
+sends keys to a window through Hyprland by process id, remains for the viewer and for
+quitting with Alt+F4; see the [replay lane](testing/lane-replay.md#how-the-checks-work).
+
 In PowerShell, create `.local/headless` with `New-Item -ItemType Directory -Force .local/headless`,
 set `$env:TORE_DATA_DIR` to the absolute `.local/dev-profile` path, and run the
 same Cargo commands. Remove the environment override after the session with
@@ -615,6 +642,81 @@ Shift + arrows look around in the cockpit or orbit around the aircraft externall
 ### Loop regression probe
 
 `cargo run --locked -p tore-app -- --headless-flight 10800 --maneuver loop` starts the F/A-18D at 450 KTAS / 5,000 feet with full throttle and afterburner, then holds pull until it completes a loop or reaches the tick budget. It reports vertical/inverted/completed flags and the final state. This is an authored-adapter regression probe, not native flight-model acceptance. Use `--flight-look 0,90 --capture-flight .local/zenith.ppm` to inspect the sky directly overhead; the forward cockpit plane moves out of view naturally. [Baseline](baselines/flight-response-sky.md).
+
+### Headless flight checks
+
+Every `--headless-flight` run ends with a `final_position:` line and an `extremes:` line: sample
+count, `non_finite` (any NaN or infinite pose, speed, load or fuel), top speed, highest and
+lowest load, lowest and highest altitude, peak pitch and roll rates, fuel at the start and
+end, `fuel_rise_lb` (fuel that went up, which it never should), `dead_stick_gain_ft` (energy
+height gained above 60 feet with the engine off, which should stay at zero) and
+`energy_rate_over_thrust` (the largest one-second energy gain as a share of what full thrust
+could give, which should stay well under 1), `speed_over_envelope_top` (airspeed against the
+aircraft's own envelope top speed at that altitude) and `max_blackout` / `max_redout` (the
+pilot's G-effect veil, 0 to 1). `--flight-trace TICKS` also prints a `trace:` line
+every that many ticks. These are development harness options, not game behaviour:
+
+- `--flight-fault TICK:INDEX` (repeatable, index 0..44) applies a system fault to the player's
+  aircraft at that tick through the normal fault path and adds a `systems:` line.
+- `--flight-cheat NAME` (repeatable) turns on `extra-g`, `no-g-effects`, `no-spins`, `no-crashes`,
+  `unlimited-fuel`, `unlimited-ammo`, `invulnerable` or `realistic-damage`. It also applies to
+  `--live-fire` captures.
+- `--flight-fuel POUNDS` sets the internal fuel, to run dry on purpose.
+- `--loadout none|guns` now also applies to a headless ground start (payload and fuel systems follow
+  it), and a headless run ends with a `fuel_end:` line of internal and external fuel.
+- The `--live-fire ... --combat-probe-ticks` line now ends with `payload_start_lb`, `payload_lb`,
+  `flight_payload_lb` (what the flight model carries: the stores less the tank fuel already burned)
+  and `external_fuel_lb`, so a `--combat-command jettison` run shows the mass change.
+- `--flight-start X,Z,HEADING,AGL` starts the probe over a real theater (`--theater`), at that
+  world position in feet, heading in degrees and height above the ground. With terrain the
+  `extremes:` line adds `min_agl_ft` and `under_ground_ticks`, and a `map_extent_ft:` line gives
+  the map's size.
+- `--countermeasure-preview` also prints the chaff and flare counts carried against capacity, and a
+  headless ground start prints a `loadout:` line (empty weight, fuel, carried stores, gross and
+  maximum takeoff weight).
+
+Scripted pilots fly the same manoeuvre in every aircraft. Each is a `fitted` test harness (agent
+decision, 2026-09-28):
+
+| `--maneuver` | What it flies | Result line |
+| --- | --- | --- |
+| `spin-recover` | Starts at 15,000 feet, holds pro-spin controls until the aircraft spins, holds the spin for four seconds, then follows the manual's recovery (stick centred then slightly forward, full opposite rudder, full throttle). Aircraft whose PT disables spins report `entered_tick=never`. | `spin_recovery:` |
+| `stall-recover` | Starts slow at 15,000 feet, pulls until the departure alert sounds, holds it three seconds, then afterburner, nose down and wings level until the alert clears. | `stall_recovery:` |
+| `land` | With `--ground-start N`: starts four miles out on a three degree slope with gear, flaps and hook down at a speed taken from the aircraft's own stall speed and landing limits, flares, closes the throttle, brakes to a stop. | `landing_start:`, `landing:` and `ils_probe:` (what the player's ILS read along the approach) |
+| `land-gear-up`, `land-hard`, `land-off-runway` | The same approach with the gear left up, no flare, or lined up 1,500 feet beside the runway's footprint, to check that unsafe touchdowns crash for the reason the aircraft's landing limits give. | `landing:` |
+| `climb` | Full afterburner climb holding a climb speed, then whatever the aircraft does at the top; reports the highest altitude against the 1 G envelope's ceiling. | `climb:` |
+| `dive` | A full afterburner dive from 40,000 feet at 60 degrees, nobody pulling out: ends on the ground, or in the overspeed loss for an aircraft that reaches 1.5 times its top speed first. | `extremes:` and `loss:` |
+| `overspeed` | Level at 20,000 feet at 1.6 times the top speed there: the aircraft must be lost on the first step. | `loss: cause=overspeed` |
+| `takeoff-gear-early`, `takeoff-gear-airborne` | With `--ground-start N`: the `takeoff` roll with the gear brought up at 80 knots with the wheels still down (an aircraft too slow to fly settles on its belly), or once 50 feet above the runway (a normal retraction). | `gear_pulled=`, `belly_wear_percent=` |
+| `sprint` | Full afterburner in level flight at 5,000 feet, altitude held by the autopilot. | `extremes:` |
+| `autopilot` | Starts in a 25 degree bank with heading and altitude hold engaged. | `extremes:` |
+| `waypoint` | Waypoint autopilot toward a waypoint 60,000 feet out, 60 degrees right of north. | `final_position:` |
+| `devices` | Gear, flaps, airbrake and hook down one after another, then up again. | `devices:` |
+| `eject`, `eject-low` | Shift-E twice at 5,000 feet, or at 250 feet, and the pilot's descent. | `ejection=` |
+
+`--retail-stall-speeds` turns the [weight-scaled stall speed](spec/takeoff-ground-contact.md#weight-scaled-stall-speed)
+off for the whole run (developer switch), so the imported polygon speeds apply at every weight and old
+comparisons and fingerprints can be re-run. The default is the weight-scaled rule, hybrid adapter only.
+The `envelope:` line then shows `stall_scale=1.000`. `TORE_RETAIL_STALL_SPEEDS=1` does the same for test runs and the
+battery (for example `TORE_RETAIL_STALL_SPEEDS=1 TORE_GOLDEN_VERBOSE=1 cargo test -p tore-sim golden` prints the fingerprints without the rule).
+
+A ground-start `--maneuver takeoff` (and the `takeoff-gear-*` variants) prints an `envelope:` line
+(the aircraft's imported 1 G, 2 G and 3 G speed range in knots at the airport's altitude, the flap
+lift coefficient, the loading divisor, the imported landing limit, the weight scale now, the flapped
+stall speed and the loaded minimum speed for 1 G with full flaps, both scaled) and a `liftoff:` line (the
+tick, speed in knots, distance in feet from the start, and the rotation speed at which the nose
+first passed 1.5 degrees). See [stall and liftoff speeds](testing/lane-flight.md#stall-and-liftoff-speeds-against-the-imported-data).
+
+Every headless flight also prints `loss: cause=...` (`none`, `overspeed` or `out of bounds`), and
+flying on out over a theater edge ends in the loss 105 nautical miles past the map
+([world edge](spec/world-edge.md)).
+
+The scripted landing floats about 1,500 feet past the aim point, so on runways under about 5,500
+feet it can overrun, and on the small airstrips (about 1,000 feet) it lands off the end. Only long
+runways are expected to end with `stopped=true` and `crashed=false`. `TORE_WIND=heading,speed`
+applies to these runs. Every ground-start airport is a flat square of at least 5,000 feet a side
+(`footprint_half_ft` in `landing_start:`), and a touchdown anywhere on it counts as landing.
+See [the flight lane](testing/lane-flight.md).
 
 ## Directional cockpit checks
 
@@ -846,8 +948,17 @@ TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --quick-missi
 `--validate-creator` needs imported media but no display/audio, and checks all
 imported aircraft's supported placements, fuel, empty stations and accepted-ammo restart.
 It first checks guns-only launch/restart across all six wings and the ordnance drag
-paths for the full selectable roster. See the [current results and unrelated damage
-assertion](baselines/ordnance-presentation.md).
+paths for the full selectable roster, then every removed-store case (each station off
+one at a time, all off, all externals off) against the flight inventory, weapons window
+and selection. After the loadouts it sweeps the whole Quick Mission creator
+(every theater layout, weather choice, player and wing aircraft, skill, wing size, group
+order, separation and start runway through the same start steps a flown mission takes),
+draws every dropdown value and popup page, and fuzzes keys and clicks on the creator and
+the Load Ordnance page. `TORE_CREATOR_STAGE=loadouts|matrix|render` runs one part.
+`--loadout none|guns` starts a flight, or a `--launch-quick-mission`, with every store off, or everything
+but the gun off, as the Load Ordnance page leaves them; the launch line prints the ammunition
+and the weapons window's list. See the [current results](baselines/ordnance-presentation.md)
+and the [menus lane](testing/lane-menus.md).
 
 Load Ordnance shows only imported weapons with connected flight support. Normal
 loading also requires compatibility with at least one aircraft station. Weapons
@@ -1105,6 +1216,7 @@ or `TICK:engage-my-target`; `--probe-trace SECONDS`
 prints each wingman's airfield phase and position. `--probe-player-home FROM:UNTIL`
 flies the scripted leader gear down toward the field during that tick range.
 `--separation 200` or `300` also exercises the expanded enemy-distance choices.
+`--probe-fight FRIENDLY:ENEMY` sizes a whole battle, 1 to 15 aircraft a side filled five to a wing (the scripted leader counts as one friendly), and `--probe-friendly-aircraft ID` picks the friendly AI aircraft; `--probe-enemy-aircraft` and `--probe-enemy-skill` still choose the enemy. Fifteen against fifteen is the creator's own limit.
 The scripted leader is only a test harness and can hit terrain on a long cruise.
 [Reproduction and limits](baselines/ground-start.md#whole-wing-ground-start-2026-09-23).
 
@@ -1322,10 +1434,13 @@ The [view validation](baselines/flight-views.md) records fixtures and limitation
 
 ## Retail map detail validation
 
-The location picker includes the sixteen base maps and 59 source variants.
-`--theater '~UKR1'` selects an exact variant for the viewer, free flight,
-Quick Mission or headless flight. Shell quotes preserve the tilde. Existing
-flight adapters remain independent of map selection.
+The Quick Mission location picker offers the sixteen base maps only; the 59
+imported `~` source variants are incomplete (mostly one or two airports) and are
+not player choices since 2026-09-29. They remain a developer option for probes
+and the battery: `--theater '~UKR1'` selects an exact variant for the viewer,
+free flight, Quick Mission (where that one layout is added to the picker for the
+run) or headless flight. Shell quotes preserve the tilde. Existing flight
+adapters remain independent of map selection.
 
 ```sh
 TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --validate-maps --no-audio
@@ -1333,7 +1448,7 @@ TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater KUR
 TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater '~UKR1' --viewer --capture-terrain .local/ukr1.ppm
 ```
 
-`--validate-maps` needs imported media but no display. It constructs every
+`--validate-ils` (imported media, no display) measures the ILS at every airport of every base theater, and of the `--theater ~CODE` variant if one is named: the datum against the runway plane, the glide path crossing the threshold, the bars reading zero with the right signs down the ideal path, and any terrain above the final 5 nm of it. See [ILS alignment](testing/ils.md). `--validate-maps` needs imported media but no display. It constructs every
 imported layout, reports source identity, placement/body counts, geometry and
 indexed artwork size, and exits with an error on construction failure. The
 other two commands need a display. Older caches require re-import for the

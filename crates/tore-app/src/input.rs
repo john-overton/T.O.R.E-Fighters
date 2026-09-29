@@ -90,19 +90,36 @@ pub struct Input {
     head_center: [f64; 2],
 }
 impl Input {
+    /// The saved controls file, loaded without being asked for. A file that
+    /// cannot be read or parsed (empty and binary files included) is skipped
+    /// with a warning naming it and the reason, and the default controls are
+    /// used, like the other settings files. Saving controls writes a fresh
+    /// file over it.
+    pub fn new_automatic(path: Option<&Path>, native: bool) -> Result<Self, String> {
+        match Self::new(path, native) {
+            Err(error) if path.is_some() => {
+                log::warn!("Controls file not loaded, using the default controls: {error}");
+                Self::new(None, native)
+            }
+            other => other,
+        }
+    }
+    /// A profile named by the player (`--input-profile`), or the defaults for
+    /// `None`. A file that fails to load is an error.
     pub fn new(path: Option<&Path>, native: bool) -> Result<Self, String> {
         let mut custom = Profile {
             gamepad_defaults: path.is_none(),
             ..Profile::default()
         };
         if let Some(path) = path {
+            let failed = |e: &dyn std::fmt::Display| format!("{}: {e}.", path.display());
             let mut text = String::new();
             std::fs::File::open(path)
-                .map_err(|e| format!("{}: {e}", path.display()))?
+                .map_err(|e| failed(&e))?
                 .take(256 * 1024 + 1)
                 .read_to_string(&mut text)
-                .map_err(|e| e.to_string())?;
-            custom = Profile::parse(&text)?;
+                .map_err(|e| failed(&e))?;
+            custom = Profile::parse(&text).map_err(|e| failed(&e))?;
         }
         let profile = complete(&custom)?;
         let head = match profile.head_port {
@@ -611,11 +628,18 @@ pub fn diagnostics(
     seconds: u64,
     write_profile: Option<&Path>,
     rumble: Option<&str>,
+    native: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !(1..=300).contains(&seconds) {
         return Err("input monitor duration must be 1..300 seconds".into());
     }
-    let backend = Backend::start();
+    // --no-controllers means no device is opened, diagnostics included.
+    let backend = if native {
+        Backend::start()
+    } else {
+        println!("Device input is off (--no-controllers): no device is opened");
+        Backend::disabled()
+    };
     let start = Instant::now();
     let mut devices = BTreeMap::new();
     println!("Input diagnostics: {seconds}s; native raw values, no retail media or GPU required");
@@ -926,6 +950,31 @@ mod tests {
         );
     }
     #[test]
+    fn a_broken_profile_names_its_file_in_the_error() {
+        let dir = std::env::temp_dir().join(format!("tore-broken-profile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, body) in [
+            ("empty.conf", ""),
+            ("version.conf", "tore-input 99\n"),
+            (
+                "action.conf",
+                "tore-input 1\nbind keyboard g no-such-action press\n",
+            ),
+        ] {
+            let path = dir.join(name);
+            std::fs::write(&path, body).unwrap();
+            let error = Input::new(Some(&path), false).err().unwrap();
+            assert!(error.contains(name), "{error}");
+        }
+        assert!(
+            Input::new(Some(&dir.join("missing.conf")), false)
+                .err()
+                .unwrap()
+                .contains("missing.conf")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
     fn settings_save_reload_and_invalid_edit_preserve_previous_file() {
         let dir = std::env::temp_dir().join(format!(
             "tore-controls-{}-{}",
@@ -950,6 +999,70 @@ mod tests {
         assert!(input.save_settings(&bad).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
         assert!(input.resolver.profile.rumble);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn a_bad_profile_error_names_the_file() {
+        let dir = std::env::temp_dir().join(format!("tore-badprofile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, bytes) in [
+            ("empty.conf", &b""[..]),
+            ("wrong.conf", b"not a profile\n"),
+            ("action.conf", b"tore-input 1\nbind key:F1 nonsense press\n"),
+            ("utf8.conf", b"\xff\xfe bad"),
+        ] {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            let error = Input::new(Some(&path), false).err().unwrap();
+            assert!(error.contains(name), "{error}");
+            assert!(!error.contains("delete it"), "{error}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn a_damaged_automatic_controls_file_falls_back_to_the_defaults() {
+        let dir = std::env::temp_dir().join(format!("tore-autoprofile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let defaults = Input::new(None, false).unwrap();
+        for (i, bytes) in [
+            &b""[..],
+            b"not a profile\n",
+            b"tore-input 99\n",
+            b"tore-input 1\nbind keyboard g no-such-action press\n",
+            b"\xff\xfe\x00\x01 binary",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let saved = dir.join(format!("input-v1-{i}/input-v1.conf"));
+            std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
+            std::fs::write(&saved, bytes).unwrap();
+            // Asked for by name, the same file is an error that names it.
+            assert!(
+                Input::new(Some(&saved), false)
+                    .err()
+                    .unwrap()
+                    .contains("input-v1.conf")
+            );
+            // Loaded automatically, it gives the default controls.
+            let input = Input::new_automatic(Some(&saved), false).unwrap();
+            assert_eq!(
+                input.settings_profile().to_text().unwrap(),
+                defaults.settings_profile().to_text().unwrap()
+            );
+            assert!(input.automatic, "gamepad defaults stay on");
+        }
+        // A missing file named on purpose still fails, and a good file loads.
+        assert!(Input::new(Some(&dir.join("missing.conf")), false).is_err());
+        let good = dir.join("good.conf");
+        std::fs::write(&good, "tore-input 1\nrumble off\n").unwrap();
+        assert!(
+            !Input::new_automatic(Some(&good), false)
+                .unwrap()
+                .resolver
+                .profile
+                .rumble
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]

@@ -72,6 +72,11 @@ pub(crate) struct MediaSource {
 pub(crate) enum DetectError {
     NotFound(PathBuf),
     NotASource(PathBuf),
+    /// A file was chosen and its folder is not a source either.
+    NotASourceFile {
+        file: PathBuf,
+        folder: PathBuf,
+    },
     RawImage(PathBuf),
     Io(io::Error),
 }
@@ -83,6 +88,12 @@ impl fmt::Display for DetectError {
                 f,
                 "{} is not a Fighters Anthology source. Choose an installed game folder, or the folder of a mounted disc 1.",
                 path.display()
+            ),
+            DetectError::NotASourceFile { file, folder } => write!(
+                f,
+                "{} is a file, and its folder {} is not a Fighters Anthology source either. Choose an installed game folder, or the folder of a mounted disc 1.",
+                file.display(),
+                folder.display()
             ),
             DetectError::RawImage(path) => write!(
                 f,
@@ -230,7 +241,13 @@ impl MediaSource {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
         {
-            Some(parent) => detect_directory(parent),
+            Some(parent) => detect_directory(parent).map_err(|error| match error {
+                DetectError::NotASource(folder) => DetectError::NotASourceFile {
+                    file: path.to_path_buf(),
+                    folder,
+                },
+                other => other,
+            }),
             None => Err(DetectError::NotASource(path.to_path_buf())),
         }
     }
@@ -251,9 +268,12 @@ impl MediaSource {
                 let path = named(&files(&self.path)?, name)
                     .cloned()
                     .ok_or_else(|| format!("{}: missing {name}", self.path.display()))?;
-                Ok(Archive::open(path)?)
+                Archive::open(&path).map_err(|error| unreadable_archive(&path, name, &error))
             }
-            Kind::Disc => Ok(self.container()?.archive(name)?),
+            Kind::Disc => self
+                .container()?
+                .archive(name)
+                .map_err(|error| unreadable_archive(&self.path, name, &error)),
         }
     }
 
@@ -263,7 +283,9 @@ impl MediaSource {
     pub(crate) fn optional_archive(&self, name: &str) -> AppResult<Option<Archive>> {
         match self.kind {
             Kind::Installed => match named(&files(&self.path)?, name).cloned() {
-                Some(path) => Ok(Some(Archive::open(path)?)),
+                Some(path) => Archive::open(&path)
+                    .map(Some)
+                    .map_err(|error| unreadable_archive(&path, name, &error)),
                 None => Ok(None),
             },
             Kind::Disc => {
@@ -271,7 +293,10 @@ impl MediaSource {
                 if container.entry(name).is_none() {
                     return Ok(None);
                 }
-                Ok(Some(container.archive(name)?))
+                container
+                    .archive(name)
+                    .map(Some)
+                    .map_err(|error| unreadable_archive(&self.path, name, &error))
             }
         }
     }
@@ -300,6 +325,20 @@ impl MediaSource {
             Kind::Disc => Ok(self.container()?.read("FA.EXE", EXECUTABLE_LIMIT)?),
         }
     }
+}
+
+/// The importer's message for an archive that is present but cannot be read,
+/// naming the file and what to do, instead of the bare reader error.
+fn unreadable_archive(
+    path: &Path,
+    name: &str,
+    error: &dyn std::fmt::Display,
+) -> Box<dyn std::error::Error> {
+    format!(
+        "{name} could not be read ({error}) at {}. The file looks damaged or incomplete. Copy it again from your disc or reinstall the game, then import again.",
+        path.display()
+    )
+    .into()
 }
 
 /// Check one root and its immediate subdirectories, appending every hit.
@@ -642,6 +681,51 @@ mod tests {
             MediaSource::detect(&directory.0).unwrap_err(),
             DetectError::NotASource(_)
         ));
+    }
+
+    #[test]
+    fn a_damaged_archive_is_named_with_what_to_do() {
+        let directory = TempDir::new();
+        installed(&directory);
+        let mut damaged = ealib("TWO.DLG", b"two");
+        damaged.truncate(damaged.len() - 1);
+        directory.file("FA_2.LIB", &damaged);
+        directory.file("FA_4B.LIB", b"");
+        let source = MediaSource::detect(&directory.0).unwrap();
+        for message in [
+            source.archive("FA_2.LIB").err().unwrap().to_string(),
+            source
+                .optional_archive("FA_4B.LIB")
+                .err()
+                .unwrap()
+                .to_string(),
+        ] {
+            assert!(message.contains("could not be read"), "{message}");
+            assert!(message.contains("Copy it again"), "{message}");
+            assert!(message.contains(directory.0.to_str().unwrap()), "{message}");
+        }
+        assert!(
+            source
+                .archive("FA_2.LIB")
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("FA_2.LIB")
+        );
+    }
+
+    #[test]
+    fn a_file_that_is_not_in_a_source_is_named_with_its_folder() {
+        let directory = TempDir::new();
+        let file = directory.file("notes.txt", b"hello");
+        let message = MediaSource::detect(&file).unwrap_err().to_string();
+        assert!(message.contains("notes.txt is a file"), "{message}");
+        assert!(message.contains("its folder"), "{message}");
+        installed(&directory);
+        assert!(
+            MediaSource::detect(&file).is_ok(),
+            "a file inside a source still resolves"
+        );
     }
 
     #[test]

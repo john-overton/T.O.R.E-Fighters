@@ -651,6 +651,7 @@ fn own_state(position: [f64; 3], heading: f64, pitch: f64, bank: f64, speed: f64
         altitude_msl_ft: position[1],
         agl_ft: position[1],
         terrain_ahead_ft: 0.,
+        terrain_climb_deg: -90.,
         minimum_altitude_ft: 300.,
         at_ceiling: false,
         on_ground: false,
@@ -2395,7 +2396,9 @@ fn airfield_observed(probe: &Probe, observe: &mut dyn FnMut(&mut AiMission)) -> 
 
     // Part two: an ordered landing at the anchored airport, held briefly at
     // marshal by the player's landing priority, then approach, final,
-    // rollout and the taxi to a parking slot.
+    // rollout and the taxi to a parking slot. 400 s since the 3 degree ILS
+    // path (2026-09-29): the shallower approach takes longer than the 340 s
+    // the 6 degree path needed, and the coverage check wants the parked slot.
     let runway = anchored_runway();
     let mut mission = AiMission::new();
     mission.push(actor_at(
@@ -2414,7 +2417,7 @@ fn airfield_observed(probe: &Probe, observe: &mut dyn FnMut(&mut AiMission)) -> 
     );
     record_order_result(&mut fp, outcome);
     mission.set_priority_landing(Some(AIRPORT));
-    for tick in 0..(340 * 120u64) {
+    for tick in 0..(400 * 120u64) {
         if tick == 20 * 120 {
             mission.set_priority_landing(None);
         }

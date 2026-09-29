@@ -27,7 +27,9 @@ Both files use the same format: 256 one-byte advance widths, then a row-major
 8-bit alpha plane `256 * cell width` pixels across and one cell tall. Glyph
 `code` occupies the columns `code * cell width` onwards on every row, and its
 advance byte says how far the pen moves after it. ASCII 32 through 126 is
-populated and everything else is blank with a zero advance. There is no colour
+populated, as are the CP437 letters the original fonts draw above 0x7F (imported
+names such as the Kurile airport Berëzovka use them), and everything else is
+blank with a zero advance. There is no colour
 in the file: the app supplies a flat text colour and the stored alpha is
 coverage, so glyph edges blend with whatever is behind them.
 

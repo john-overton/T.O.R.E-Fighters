@@ -3,6 +3,7 @@ use crate::hud::Paint;
 use crate::menu::Canvas;
 use crate::pause_menu::{self, Event, Look, PauseMenu};
 use std::time::{Duration, Instant};
+use tore_formats::text::GlyphCodes;
 use tore_formats::{font::Font, ui::MenuNode};
 use tore_input::Switch;
 use tore_sim::cheats::Damage;
@@ -721,8 +722,9 @@ impl FlightUi {
                 self.zoom = (self.zoom / 1.2).max(0.5);
                 Command::None
             }
-            "," => Command::Range(-1),
-            "." => Command::Range(1),
+            // Manual pp. 21, 94, 97: comma increases the range, period decreases it.
+            "," => Command::Range(1),
+            "." => Command::Range(-1),
             "Numpad5" => Command::CenterLook,
             "F11" => {
                 self.menu = true;
@@ -854,7 +856,7 @@ pub fn draw_messages<'a>(
     for (i, line) in lines.iter().enumerate() {
         let mut x = ((w - text_width(font, line) as f64 * scale) / 2.).round();
         let y = i as f64 * line_height;
-        for ch in line.bytes() {
+        for ch in line.glyph_codes() {
             let glyph = &font.glyphs[ch as usize];
             for &(gx, gy) in &glyph.pixels {
                 let (left, up) = (x + gx as f64 * scale, y + gy as f64 * scale);
@@ -885,7 +887,7 @@ pub fn draw_messages<'a>(
     }
 }
 fn text_width(font: &Font, text: &str) -> usize {
-    text.bytes()
+    text.glyph_codes()
         .map(|ch| font.glyphs[ch as usize].advance)
         .sum()
 }
@@ -1428,6 +1430,23 @@ mod tests {
         }
     }
     #[test]
+    fn time_compression_keys_follow_the_manual() {
+        // Manual p. 80: C cycles the rates, Shift-C is slow motion, C returns
+        // from slow motion to normal speed.
+        let tree = tree();
+        let mut u = FlightUi::default();
+        let mut rates = vec![];
+        for _ in 0..5 {
+            u.key("c", false, false, false, &tree);
+            rates.push(u.time_scale);
+        }
+        assert_eq!(rates, [2., 4., 8., 1., 2.]);
+        u.activate("Slow-motion", "Shift-C");
+        assert_eq!(u.time_scale, 0.5);
+        u.key("c", false, false, false, &tree);
+        assert_eq!(u.time_scale, 1.);
+    }
+    #[test]
     fn nested_menu_keyboard_navigation_and_shortcuts() {
         let mut tree = tree();
         tree[0].children.push(MenuNode {
@@ -1506,6 +1525,9 @@ mod tests {
             ("w", false, Command::Waypoint(true)),
             ("w", true, Command::Waypoint(false)),
             ("m", false, Command::Mode),
+            // The manual (pp. 21, 94, 97): comma raises the range, period lowers it.
+            (",", false, Command::Range(1)),
+            (".", false, Command::Range(-1)),
             ("Numpad5", false, Command::CenterLook),
         ] {
             assert_eq!(ui.key(key, shift, false, false, &tree), command, "{key}");

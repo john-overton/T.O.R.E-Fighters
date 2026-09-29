@@ -257,6 +257,9 @@ pub struct AiActor {
     /// A join-the-leader landing was cancelled by order; it is not re-joined
     /// until the leader is no longer recovering (fitted, 2026-09-23).
     join_cancelled: bool,
+    /// Traffic avoidance in force: the tick it may end and the heading it
+    /// holds, in degrees.
+    avoiding: Option<(u64, f64)>,
     /// The running takeoff or landing sequence, if any.
     airfield: Option<super::airfield::Sequence>,
     /// Draws for the private return route, separate from decision draws.
@@ -323,6 +326,7 @@ impl AiActor {
             landing_order: None,
             bugged_out: false,
             join_cancelled: false,
+            avoiding: None,
             airfield: None,
             route_random: super::DecisionRandom::seeded(setup.seed ^ 0x6c61_6e64_696e_6721),
             pending_threats: Vec::new(),
@@ -448,6 +452,99 @@ impl AiActor {
 
     pub fn identity(&self) -> &ActorIdentity {
         &self.identity
+    }
+
+    /// Opinionated (requested by John, 2026-09-29; numbers are agent
+    /// decisions): an aircraft flying on its own (not in a formation
+    /// procedure, not defending against a missile or gunfire, not in an
+    /// airfield sequence) predicts its closest approach to every other
+    /// airborne aircraft, friend or foe, over [`AVOID_HORIZON_S`]. When one
+    /// comes inside [`AVOID_SEPARATION_FT`] plus [`AVOID_CLOSURE_S`] of the
+    /// closing speed, it takes up a heading [`AVOID_TURN_DEG`] away from the
+    /// other aircraft (to the right when meeting it head-on), keeping its
+    /// pitch, and holds that heading until [`AVOID_HOLD_TICKS`] after the last
+    /// predicted conflict so it does not flap. Nothing changes while no conflict is predicted.
+    fn avoid_traffic(
+        &mut self,
+        tick: u64,
+        mut intent: MotionIntent,
+        world: &[WorldObject],
+    ) -> MotionIntent {
+        let formation = self.controller.formation_trace().is_some();
+        let defending =
+            self.last_defense.is_some_and(|d| d.motion.is_some()) || self.fire_defending;
+        if formation || defending || self.airfield.is_some() || !self.alive {
+            self.avoiding = None;
+            return intent;
+        }
+        let p = self.flight.position;
+        let v = self.flight.velocity;
+        let mut conflict: Option<(f64, [f64; 3])> = None;
+        for other in world.iter().filter(|o| {
+            o.id != self.id() && o.is_aircraft && o.alive && !o.destroyed && !o.on_ground
+        }) {
+            let r: [f64; 3] = std::array::from_fn(|i| other.position[i] - p[i]);
+            let rv: [f64; 3] = std::array::from_fn(|i| other.velocity[i] - v[i]);
+            let rv2 = rv.iter().map(|x| x * x).sum::<f64>();
+            if rv2 < 1.0 {
+                continue;
+            }
+            let t = -r.iter().zip(&rv).map(|(a, b)| a * b).sum::<f64>() / rv2;
+            if !(0.0..=AVOID_HORIZON_S).contains(&t) {
+                continue;
+            }
+            let miss = (0..3)
+                .map(|i| (r[i] + rv[i] * t).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            // The aircraft it is attacking is closed on deliberately: only a
+            // near collision with it counts.
+            let safety = if self.controller.target() == Some(other.id) {
+                AVOID_TARGET_FT
+            } else {
+                AVOID_SEPARATION_FT + AVOID_CLOSURE_S * rv2.sqrt()
+            };
+            if miss < safety && conflict.is_none_or(|(best, _)| t < best) {
+                conflict = Some((t, r));
+            }
+        }
+        let heading = self.flight.yaw;
+        if let Some((_, r)) = conflict {
+            let target = match self.avoiding {
+                Some((_, target)) => target,
+                None => {
+                    // Bearing of the other aircraft off our nose, positive right.
+                    let bearing = (r[0].atan2(r[2]) - heading + std::f64::consts::PI)
+                        .rem_euclid(std::f64::consts::TAU)
+                        - std::f64::consts::PI;
+                    let side = if bearing.abs() < AVOID_HEAD_ON_DEG.to_radians() {
+                        1.0
+                    } else {
+                        -bearing.signum()
+                    };
+                    (heading.to_degrees() + side * AVOID_TURN_DEG).rem_euclid(360.0)
+                }
+            };
+            self.avoiding = Some((tick + AVOID_HOLD_TICKS, target));
+        } else if self.avoiding.is_some_and(|(until, _)| tick >= until) {
+            self.avoiding = None;
+        }
+        if let Some((_, target)) = self.avoiding {
+            intent.heading_deg = target;
+            intent.bank = super::motion::Bank::Unconstrained;
+        }
+        intent
+    }
+
+    /// The heading held to avoid other traffic, if any (for tests and traces).
+    pub fn avoiding_heading_deg(&self) -> Option<f64> {
+        self.avoiding.map(|(_, heading)| heading)
+    }
+
+    /// Leader succession renumbers a wing (see [`AiMission`]).
+    fn set_member(&mut self, member: u8) {
+        self.identity.member = member;
+        self.controller.set_member(member);
     }
 
     pub fn flight(&self) -> &flight::State {
@@ -881,13 +978,16 @@ impl AiActor {
         .map(|r| (f64::from(r.altitude_ft), r.speed.0))
         .filter(|_| !joining);
         let wind = surface(order.runway.center[0], order.runway.center[2]).wind;
-        self.airfield = Some(super::airfield::Sequence::landing(
+        let max_takeoff_lbs = self.flight.model().configuration().mass.max_takeoff_lbs;
+        let mut sequence = super::airfield::Sequence::landing(
             order,
             self.flight.position,
             wind,
-            self.flight.model().configuration().mass.max_takeoff_lbs,
+            max_takeoff_lbs,
             route,
-        ));
+        );
+        sequence.prefer_clear_approach(wind, max_takeoff_lbs, &|x, z| surface(x, z).height);
+        self.airfield = Some(sequence);
     }
 
     /// One tick of a takeoff or landing sequence. Returns `false` when the
@@ -974,7 +1074,23 @@ impl AiActor {
                     })
                     .fold(f64::MIN, f64::max)
             },
+            // On the approach the aircraft turns at each gate, so only the
+            // ground on the way to the gate it is flying to matters.
+            terrain_to_gate_ft: match self.airfield.as_ref() {
+                Some(sequence) if phase == Phase::Approach => {
+                    let [x, _, z] = self.flight.position;
+                    let gate = sequence.gate(sequence.leg());
+                    (0..=6)
+                        .map(|i| {
+                            let f = f64::from(i) / 6.0;
+                            ground(x + (gate[0] - x) * f, z + (gate[2] - z) * f)
+                        })
+                        .fold(f64::MIN, f64::max)
+                }
+                _ => f64::MIN,
+            },
             minimum_speed_fps: own.limits.minimum.0,
+            approach_minimum_fps: self.approach_minimum_fps(),
             maximum_speed_fps: own.limits.maximum.0,
             corner_speed_fps: own.limits.corner.0,
             cruise_speed_fps: super::route::cruise_speed(&own.limits).0,
@@ -1131,6 +1247,8 @@ pub struct AiMission {
     pending_attack_reports: Vec<(u32, ObservedAttack)>,
     /// Airport where the human player holds landing clearance.
     priority_landing: Option<u32>,
+    /// Sides that have seen a living hostile aircraft (mission RTB).
+    hostiles_seen: Vec<super::targeting::Side>,
     /// External leaders seen airborne, so a later touchdown reads as landing.
     airborne_seen: Vec<u32>,
     /// Write-only journal of messages between aircraft. No decision reads
@@ -1160,6 +1278,7 @@ impl AiMission {
             must_survive: Vec::new(),
             pending_attack_reports: Vec::new(),
             priority_landing: None,
+            hostiles_seen: Vec::new(),
             airborne_seen: Vec::new(),
             journal: thought::Journal::default(),
         }
@@ -1334,6 +1453,164 @@ impl AiMission {
         self.external_leaders.push((side, wing, id));
     }
 
+    /// Opinionated (requested by John, 2026-09-29): once a side has seen
+    /// hostile aircraft and none is left alive, its AI aircraft have no
+    /// mission left and return to base: each airborne AI aircraft that is not
+    /// already landing, recovering or bugged out is ordered to land at its
+    /// home runway through the ordinary landing sequence. A wing with no
+    /// home runway flies the B48 return-to-base path to its launch point and
+    /// holds there, the wingmen in formation on the leader. Nothing happens while any hostile aircraft
+    /// remains, or while any aircraft on the side is still departing. A wing
+    /// led by the player stays with the player, whose own mission may still be
+    /// open.
+    fn return_when_done(&mut self, world: &[WorldObject]) {
+        let alive_on = |side: super::targeting::Side| {
+            world
+                .iter()
+                .any(|o| o.is_aircraft && o.alive && !o.destroyed && o.side == side)
+        };
+        let mut sides: Vec<super::targeting::Side> = Vec::new();
+        for actor in &self.actors {
+            if !sides.contains(&actor.identity.side) {
+                sides.push(actor.identity.side);
+            }
+        }
+        for side in sides {
+            let hostile = |other: super::targeting::Side| other != side;
+            let hostiles_alive = world
+                .iter()
+                .any(|o| o.is_aircraft && o.alive && !o.destroyed && hostile(o.side));
+            if hostiles_alive {
+                if !self.hostiles_seen.contains(&side) {
+                    self.hostiles_seen.push(side);
+                }
+                continue;
+            }
+            // A side with aircraft still departing has only just begun.
+            let departing = self.actors.iter().any(|a| {
+                a.identity.side == side
+                    && a.alive()
+                    && a.airfield.as_ref().is_some_and(|s| s.is_departure())
+            });
+            if !self.hostiles_seen.contains(&side) || !alive_on(side) || departing {
+                continue;
+            }
+            let external = &self.external_leaders;
+            let mut ids: Vec<u32> = Vec::new();
+            for a in self.actors.iter_mut().filter(|a| {
+                a.identity.side == side
+                    && a.alive()
+                    && !a.identity.human_controlled
+                    && a.airfield.is_none()
+                    && a.landing_order.is_none()
+                    && !a.bugged_out
+                    && !a.flight.research.as_ref().is_some_and(|r| r.on_ground)
+                    && !external
+                        .iter()
+                        .any(|(s, w, _)| *s == a.identity.side && *w == a.identity.wing)
+            }) {
+                if a.home_runway.is_some() {
+                    ids.push(a.id());
+                } else if a.identity.member == 0 && !a.controller.mission_complete() {
+                    // No runway: the leader flies home and holds; its
+                    // wingmen stay in formation on it.
+                    a.controller.set_mission_complete(true);
+                }
+            }
+            for id in ids {
+                let Some(runway) = self.actor(id).and_then(|a| a.home_runway) else {
+                    continue;
+                };
+                let _ = self.order(
+                    id,
+                    super::wing::WingRequest::Land(super::airfield::LandingOrder {
+                        runway,
+                        reason: super::airfield::LandingReason::Ordered,
+                    }),
+                );
+            }
+        }
+    }
+
+    /// Opinionated (requested by John, 2026-09-29): when an AI-led wing's
+    /// leader is lost (destroyed, ejected, crashed or removed), the surviving
+    /// member next in the wing's order becomes its leader and the others
+    /// close up behind it: members are renumbered from 0 in their old order,
+    /// so formation slots follow. Lost members move out of the numbering. A
+    /// wing led by a human is left alone. No radio call: the retail
+    /// "You're the wingleader now" call is voiced only by a living previous
+    /// leader (docs/spec/radio-chatter.md).
+    fn pass_leadership(&mut self) {
+        let mut wings: Vec<(super::targeting::Side, u8)> = Vec::new();
+        for actor in &self.actors {
+            let key = (actor.identity.side, actor.identity.wing);
+            if !wings.contains(&key) {
+                wings.push(key);
+            }
+        }
+        for (side, wing) in wings {
+            if self
+                .external_leaders
+                .iter()
+                .any(|(s, w, _)| *s == side && *w == wing)
+            {
+                continue;
+            }
+            let in_wing = |a: &AiActor| a.identity.side == side && a.identity.wing == wing;
+            // Only a wing whose leader was there and is now lost; a wing
+            // that never had a leader keeps its numbering.
+            if !self
+                .actors
+                .iter()
+                .any(|a| in_wing(a) && !a.alive() && a.identity.member == 0)
+                || self
+                    .actors
+                    .iter()
+                    .any(|a| in_wing(a) && a.alive() && a.identity.member == 0)
+            {
+                continue;
+            }
+            let mut alive: Vec<(u8, usize)> = self
+                .actors
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| in_wing(a) && a.alive())
+                .map(|(i, a)| (a.identity.member, i))
+                .collect();
+            if alive.is_empty() {
+                continue;
+            }
+            alive.sort_unstable();
+            for actor in self.actors.iter_mut().filter(|a| in_wing(a) && !a.alive()) {
+                if actor.identity.member < LOST_MEMBER_BASE {
+                    let member = actor.identity.member.saturating_add(LOST_MEMBER_BASE);
+                    actor.set_member(member);
+                }
+            }
+            for (rank, (_, index)) in alive.into_iter().enumerate() {
+                let actor = &mut self.actors[index];
+                actor.set_member(rank as u8);
+                // A wingman that was following the lost leader in to land
+                // stops, as the wing abort does.
+                if actor
+                    .landing_order
+                    .is_some_and(|o| o.reason == super::airfield::LandingReason::JoinLeader)
+                    && matches!(
+                        actor.airfield_phase(),
+                        Some(
+                            super::airfield::Phase::Inbound
+                                | super::airfield::Phase::Marshal
+                                | super::airfield::Phase::Approach
+                        )
+                    )
+                {
+                    actor.landing_order = None;
+                    actor.leave_airfield();
+                }
+            }
+        }
+    }
+
     pub fn actors(&self) -> &[AiActor] {
         &self.actors
     }
@@ -1390,6 +1667,8 @@ impl AiMission {
         now: TimeOfDay,
     ) -> Result<MissionOutput> {
         let mut output = MissionOutput::default();
+        self.pass_leadership();
+        self.return_when_done(world);
         let mut delivered = Vec::new();
         for (receiver, report) in std::mem::take(&mut self.pending_attack_reports) {
             if let Some(actor) = self.actor_mut(receiver) {
@@ -2289,7 +2568,10 @@ impl AiMission {
 
         // 6. Motion through the adapter and this actor's own flight model.
         actor.adapter.set_gun_aim(batch.gun_aim);
-        actor.fly(batch.motion.as_ref(), &own, ground, surface)?;
+        let motion = batch
+            .motion
+            .map(|intent| actor.avoid_traffic(tick, intent, world));
+        actor.fly(motion.as_ref(), &own, ground, surface)?;
         Ok(())
     }
 
@@ -2483,7 +2765,8 @@ impl AiMission {
                     .find(|o| o.id == *id && o.alive && !o.destroyed)
             });
         // Wing abort (retail 0x4bc2a4): a joining wingman whose leader is
-        // neither landing nor on the ground stops landing.
+        // neither landing nor on the ground stops landing. A leader that has
+        // been destroyed is neither, so its wingmen stop following it down.
         let leader_landing = if member == 0 {
             true
         } else if let Some(leader) = external_leader {
@@ -2491,7 +2774,7 @@ impl AiMission {
         } else {
             wingmates()
                 .find(|a| a.identity.is_leader())
-                .is_none_or(|leader| {
+                .is_some_and(|leader| {
                     leader.airfield.as_ref().is_some_and(|s| !s.is_departure())
                         || leader.landing_order.is_some()
                         || leader.flight.research.as_ref().is_some_and(|r| r.on_ground)
@@ -3109,10 +3392,16 @@ impl AiActor {
     fn own_state(&self, ground: &dyn Fn(f64, f64) -> f64) -> OwnState {
         let terrain = ground(self.flight.position[0], self.flight.position[2]);
         let agl = self.flight.position[1] - terrain;
-        // Terrain 1000 ft ahead of the aircraft, for the B44 floor.
+        // Terrain ahead of the aircraft, for the B44 floor: the highest
+        // ground along the look-ahead (see [`terrain_lookahead_ft`]).
         let heading = self.flight.yaw;
-        let ahead_x = self.flight.position[0] + heading.sin() * 1000.0;
-        let ahead_z = self.flight.position[2] + heading.cos() * 1000.0;
+        let (terrain_ahead, terrain_climb) = terrain_ahead_ft(
+            self.flight.position,
+            heading,
+            terrain_lookahead_ft(self.flight.speed),
+            MINIMUM_ALTITUDE_FT,
+            ground,
+        );
         let limits = self.speed_limits();
         let (positive_g, _negative_g) = self.g_limits();
         OwnState {
@@ -3125,7 +3414,8 @@ impl AiActor {
             limits,
             altitude_msl_ft: self.flight.position[1],
             agl_ft: agl,
-            terrain_ahead_ft: ground(ahead_x, ahead_z),
+            terrain_ahead_ft: terrain_ahead,
+            terrain_climb_deg: terrain_climb,
             minimum_altitude_ft: MINIMUM_ALTITUDE_FT,
             at_ceiling: false,
             on_ground: agl <= GROUND_CONTACT_FT,
@@ -3204,6 +3494,37 @@ impl AiActor {
                 corner: ScalarSpeed(FALLBACK_CORNER_FPS),
             };
         }
+        // Fitted (agent decision, 2026-09-29, after the weight-scaled stall
+        // speeds): the lowest slow edge over every row, 0 G and negative G
+        // included, lies well under the speed at which the loaded aircraft
+        // can hold 1 G. The AI never plans to fly slower than that, in its
+        // current flap setting (`flight::State::minimum_level_speed`); on the
+        // F/A-18D the rows alone gave 114 kt against the 140 kt it needs, and
+        // finals built on it sank into the ground.
+        let level = self.flight.minimum_level_speed(altitude, self.flight.flaps);
+        if level < maximum {
+            minimum = minimum.max(level);
+        }
+        // Fitted (agent decision, 2026-09-29): nor faster than the fastest
+        // row that still leaves the loaded aircraft TOP_SPEED_G_MARGIN of
+        // lift. Near its top speed only the 1 G row covers the aircraft, and
+        // the legacy flight model divides that 1 G by the loading, so a
+        // loaded fighter at full power there sank steadily into flat ground
+        // at 1,100 kt without being able to pull up (fuzz seeds 43, 183,
+        // 266).
+        let config = self.flight.model().configuration();
+        let load = 1.0
+            + (self.flight.fuel + self.flight.payload_lbs) / config.mass.empty_lbs
+                * config.aerodynamics.loaded_elevator_percent
+                / 100.0;
+        let manoeuvring = envelopes
+            .iter()
+            .filter(|e| f64::from(e.g) / load >= TOP_SPEED_G_MARGIN)
+            .filter_map(|e| e.speeds(altitude).map(|(_, high)| high))
+            .fold(f64::NEG_INFINITY, f64::max);
+        if manoeuvring > minimum {
+            maximum = maximum.min(manoeuvring);
+        }
         if !corner.is_finite() {
             corner = minimum;
         }
@@ -3212,6 +3533,62 @@ impl AiActor {
             maximum: ScalarSpeed(maximum),
             corner: ScalarSpeed(corner.min(maximum)),
         }
+    }
+
+    /// The hybrid model's loaded low-speed positive G ceiling at `speed` with
+    /// the current flaps, as the control adapter computes it; `None` above
+    /// the ramp or for an aircraft without a 1 G envelope here.
+    fn hybrid_ramp_g(&self, speed: f64) -> Option<f64> {
+        let config = self.flight.model().configuration();
+        let altitude = self.flight.position[1];
+        let (clean_stall, _) = config
+            .aerodynamics
+            .envelopes
+            .iter()
+            .find(|e| e.g == 1)?
+            .speeds(altitude)?;
+        let stall = clean_stall * (1.0 - 0.25 * self.flight.flaps);
+        let loading = 1.0
+            + (self.flight.fuel + self.flight.carried_lbs()) / config.mass.empty_lbs
+                * config.aerodynamics.loaded_elevator_percent
+                / 100.0;
+        crate::flight::low_speed_positive_g_ceiling(config, altitude, speed, stall, false)
+            .map(|g| g / loading)
+    }
+
+    /// Fitted (agent decision, 2026-09-29): the slowest speed at which the
+    /// loaded aircraft, flaps down, still has [`APPROACH_G_MARGIN`] of lift,
+    /// so a final can arrest a sink and follow its path. Zero for an
+    /// aircraft without the hybrid model's low-speed ramp.
+    fn approach_minimum_fps(&self) -> f64 {
+        if self.flight.research.is_none() {
+            return 0.0;
+        }
+        let config = self.flight.model().configuration();
+        let altitude = self.flight.position[1];
+        let Some((clean_stall, maximum)) = config
+            .aerodynamics
+            .envelopes
+            .iter()
+            .find(|e| e.g == 1)
+            .and_then(|e| e.speeds(altitude))
+        else {
+            return 0.0;
+        };
+        let stall = clean_stall * 0.75;
+        let loading = 1.0
+            + (self.flight.fuel + self.flight.carried_lbs()) / config.mass.empty_lbs
+                * config.aerodynamics.loaded_elevator_percent
+                / 100.0;
+        let mut speed = stall;
+        while speed < maximum {
+            match crate::flight::low_speed_positive_g_ceiling(config, altitude, speed, stall, false)
+            {
+                Some(g) if g / loading < APPROACH_G_MARGIN => speed += 5.0,
+                _ => return speed,
+            }
+        }
+        maximum
     }
 
     /// The loaded G limits, already carrying the AI-only experience
@@ -3232,8 +3609,26 @@ impl AiActor {
         }
         let config = self.flight.model().configuration();
         let loading = (self.flight.fuel + self.flight.payload_lbs) / config.mass.empty_lbs;
-        let loaded = f64::from(available.max(1))
+        let mut loaded = f64::from(available.max(1))
             / (1.0 + loading * config.aerodynamics.loaded_elevator_percent / 100.0);
+        // The hybrid flight model keeps 1 G anywhere inside the 1 G envelope
+        // and ramps from 1 G at the stall to the next envelope row
+        // (docs/FLIGHT-MODEL.md, "Envelope limits and loading"), so the AI
+        // may ask for what the model gives there, as its control adapter
+        // already assumes. Before this a loaded aircraft slowing on final was
+        // held below 1 G, could not hold its path and sank into the ground.
+        if self.flight.research.is_some() {
+            if let Some(ramp) = self.hybrid_ramp_g(speed) {
+                loaded = loaded.max(ramp);
+            }
+            if envelopes.iter().any(|e| {
+                e.g == 1
+                    && e.speeds(altitude)
+                        .is_some_and(|(low, high)| speed >= low && speed <= high)
+            }) {
+                loaded = loaded.max(1.0);
+            }
+        }
         let (positive, negative) = ai_g_limits(
             self.controller.experience().level,
             loaded,
@@ -3568,6 +3963,113 @@ fn dummy_frame(own: &OwnState) -> DecisionFrame<'static> {
 }
 
 /// The record's minimum-altitude value; 300 in every inspected record (B44).
+/// Traffic avoidance (John, 2026-09-29; numbers are agent decisions): look
+/// this far ahead for a closest approach, seconds.
+const AVOID_HORIZON_S: f64 = 6.0;
+/// Miss distance that counts as a conflict, feet, plus this many seconds of
+/// the closing speed (a head-on pair at 1,000 kt closure needs about 1,150 ft).
+const AVOID_SEPARATION_FT: f64 = 300.0;
+const AVOID_CLOSURE_S: f64 = 0.5;
+/// Miss distance that counts as a conflict with the aircraft's own target.
+const AVOID_TARGET_FT: f64 = 150.0;
+/// Heading change away from the conflict, degrees: modest, not a break.
+const AVOID_TURN_DEG: f64 = 30.0;
+/// Within this many degrees of the nose the other aircraft is head-on.
+const AVOID_HEAD_ON_DEG: f64 = 20.0;
+/// An avoidance holds its side at least this long, ticks (3 s).
+const AVOID_HOLD_TICKS: u64 = 360;
+
+/// Lost wing members are renumbered from here, out of the living order.
+const LOST_MEMBER_BASE: u8 = 100;
+
+/// B44's retail terrain look-ahead, feet; the floor of the speed-scaled one.
+/// Fitted (agent decision, 2026-09-29): the loaded lift, in G, the AI keeps
+/// in hand at its planned top speed.
+pub const TOP_SPEED_G_MARGIN: f64 = 1.2;
+/// Fitted (agent decision, 2026-09-29): the loaded lift, in G, a final
+/// approach keeps in hand to arrest a sink and follow its path. 1.15 since
+/// the weight-scaled stall speeds (1.3 before, which then asked for more
+/// than the 174 kt final cap).
+pub const APPROACH_G_MARGIN: f64 = 1.15;
+pub const TERRAIN_LOOKAHEAD_MIN_FT: f64 = 1000.0;
+/// Opinionated (requested by John, 2026-09-29; number an agent decision):
+/// the terrain floor looks this many seconds of travel ahead, never less than
+/// [`TERRAIN_LOOKAHEAD_MIN_FT`]. Derivation: an AI fighter may be banked
+/// 90 degrees when the floor bites; rolling level at the 45 degree per second
+/// cap takes 2 s, the pitch loop below the floor closes over 1 s, and at a
+/// supersonic 1,800 ft/s with the 2.2 G a fighter has near the top of its
+/// envelope, raising the flight path by the 14 degrees of the steepest
+/// hillsides the battery met takes about 3 s more (angle times speed over
+/// 32.174 times 1.2 G of excess). Six seconds therefore lets it clear a
+/// rising hillside it would otherwise meet 0.6 s after seeing it; at 440 kt
+/// it is 4,500 ft, and below 100 kt the retail 1,000 ft still applies.
+pub const TERRAIN_LOOKAHEAD_S: f64 = 6.0;
+/// Ground samples along the look-ahead, at most one per this many feet.
+const TERRAIN_SAMPLE_FT: f64 = 1000.0;
+/// At most this many samples, so long look-aheads stay cheap.
+const TERRAIN_SAMPLES_MAX: f64 = 12.0;
+
+/// How far ahead the B44 terrain floor looks at this speed, feet.
+pub fn terrain_lookahead_ft(speed_fps: f64) -> f64 {
+    (speed_fps.max(0.0) * TERRAIN_LOOKAHEAD_S).max(TERRAIN_LOOKAHEAD_MIN_FT)
+}
+
+#[cfg(test)]
+mod terrain_lookahead_tests {
+    use super::*;
+
+    #[test]
+    fn the_look_ahead_scales_with_speed_and_sees_ridges_inside_it() {
+        // John, 2026-09-29: 1,000 ft at low speed, six seconds of travel fast.
+        assert_eq!(terrain_lookahead_ft(100.0), 1000.0);
+        assert_eq!(terrain_lookahead_ft(1500.0), 9000.0);
+        // A 2,000 ft ridge 4,000 ft ahead of an aircraft at 1,000 ft, flying
+        // north: seen, and the climb to clear it by 300 ft is the gradient.
+        let ridge = |_: f64, z: f64| {
+            if (3500.0..4500.0).contains(&z) {
+                2000.0
+            } else {
+                0.0
+            }
+        };
+        let (highest, climb) = terrain_ahead_ft([0.0, 1000.0, 0.0], 0.0, 9000.0, 300.0, &ridge);
+        assert_eq!(highest, 2000.0);
+        let expected = (1300.0_f64).atan2(4000.0).to_degrees();
+        assert!((climb - expected).abs() < 0.5, "{climb} vs {expected}");
+        // The retail single point 1,000 ft ahead would have seen flat ground.
+        let (near, _) = terrain_ahead_ft([0.0, 1000.0, 0.0], 0.0, 1000.0, 300.0, &ridge);
+        assert_eq!(near, 0.0);
+    }
+}
+
+/// The highest ground along `reach` feet of the horizontal track, sampled
+/// evenly and always including the end, so a ridge inside the look-ahead is
+/// not skipped; and the flight-path climb, degrees, that clears every sample
+/// by `clearance_ft` (-90 when none is needed).
+pub fn terrain_ahead_ft(
+    position: [f64; 3],
+    heading_rad: f64,
+    reach_ft: f64,
+    clearance_ft: f64,
+    ground: &dyn Fn(f64, f64) -> f64,
+) -> (f64, f64) {
+    let samples = (reach_ft / TERRAIN_SAMPLE_FT)
+        .ceil()
+        .clamp(1.0, TERRAIN_SAMPLES_MAX) as u32;
+    let mut highest = f64::NEG_INFINITY;
+    let mut climb = -90.0_f64;
+    for k in 1..=samples {
+        let d = reach_ft * f64::from(k) / f64::from(samples);
+        let h = ground(
+            position[0] + heading_rad.sin() * d,
+            position[2] + heading_rad.cos() * d,
+        );
+        highest = highest.max(h);
+        climb = climb.max((h + clearance_ft - position[1]).atan2(d).to_degrees());
+    }
+    (highest, climb)
+}
+
 pub const MINIMUM_ALTITUDE_FT: f64 = 300.0;
 /// Fitted: AGL at or below this counts as ground contact for the B44 overrides.
 pub const GROUND_CONTACT_FT: f64 = 5.0;
@@ -5528,6 +6030,7 @@ mod tests {
             altitude_msl_ft: 0.0,
             agl_ft: 0.0,
             terrain_ahead_ft: 0.0,
+            terrain_climb_deg: -90.0,
             minimum_altitude_ft: 300.0,
             at_ceiling: false,
             on_ground: false,

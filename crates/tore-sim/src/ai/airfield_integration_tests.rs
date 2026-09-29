@@ -481,6 +481,244 @@ fn ai_wingmen_join_their_leaders_landing_and_wait_their_turn() {
 }
 
 #[test]
+fn a_wingman_stops_following_a_destroyed_leader_down() {
+    // Battery finding (2026-09-28): an enemy wingman joined its damaged
+    // leader's landing and kept landing after the leader ejected. Wing abort
+    // applies when the leader is neither landing nor on the ground.
+    let mut mission = AiMission::new();
+    mission.push(hornet(1, 0, [0., 6_000., -110_000.], 0.));
+    mission.push(hornet(2, 1, [-600., 6_000., -110_600.], 0.));
+    mission.start_in_formation();
+    mission
+        .order(1, land(LandingReason::Ordered))
+        .unwrap()
+        .unwrap();
+    let mut joined = false;
+    for _ in 0..600 * 120 {
+        step(&mut mission, None);
+        let wingman = mission.actor(2).unwrap();
+        if wingman.airfield_phase().is_some()
+            && wingman.landing_order().map(|o| o.reason) == Some(LandingReason::JoinLeader)
+        {
+            joined = true;
+            break;
+        }
+    }
+    assert!(joined, "the wingman never joined the leader's landing");
+    mission.actor_mut(1).unwrap().set_alive(false);
+    step(&mut mission, None);
+    let wingman = mission.actor(2).unwrap();
+    assert!(
+        wingman.landing_order().is_none(),
+        "still joining a dead leader"
+    );
+    assert!(wingman.airfield_phase().is_none());
+}
+
+#[test]
+fn the_next_wingman_leads_when_the_leader_is_lost() {
+    // John, 2026-09-29: leader succession inside an AI-led wing.
+    let mut mission = AiMission::new();
+    mission.push(hornet(1, 0, [0., 6_000., 0.], 0.));
+    mission.push(hornet(2, 1, [-600., 6_000., -600.], 0.));
+    mission.push(hornet(3, 2, [600., 6_000., -600.], 0.));
+    mission.start_in_formation();
+    step(&mut mission, None);
+    mission.actor_mut(1).unwrap().set_alive(false);
+    step(&mut mission, None);
+    let member = |mission: &AiMission, id| mission.actor(id).unwrap().identity().member;
+    assert_eq!((member(&mission, 2), member(&mission, 3)), (0, 1));
+    assert!(
+        member(&mission, 1) >= 100,
+        "the lost leader leaves the numbering"
+    );
+    assert!(mission.actor(2).unwrap().identity().is_leader());
+    // The survivor keeps leading when a later wingman is lost.
+    mission.actor_mut(3).unwrap().set_alive(false);
+    step(&mut mission, None);
+    assert_eq!(member(&mission, 2), 0);
+}
+
+#[test]
+fn a_hybrid_aircraft_may_always_ask_for_1_g_inside_its_1_g_envelope() {
+    // Before 2026-09-29 a loaded aircraft slowing on final was held to
+    // 1 G divided by its loading and sank into the ground short of the runway.
+    let mut actor = hornet(1, 0, [0., 1_000., 0.], 0.);
+    actor.flight_mut().enable_research(1).unwrap();
+    let config = actor.flight().model().configuration().clone();
+    let one_g = config
+        .aerodynamics
+        .envelopes
+        .iter()
+        .find(|e| e.g == 1)
+        .and_then(|e| e.speeds(1_000.))
+        .unwrap();
+    let mut checked = 0;
+    let mut speed = one_g.0;
+    while speed <= one_g.1 {
+        actor.flight_mut().speed = speed;
+        let (positive, _) = actor.g_limits();
+        assert!(positive >= 1.0, "{positive:.2} G at {speed:.0} ft/s");
+        checked += 1;
+        speed += 10.;
+    }
+    assert!(checked > 5);
+    // The approach floor keeps the fitted lift margin in hand, flaps down.
+    let floor = actor.approach_minimum_fps();
+    assert!(floor > one_g.0 * 0.75, "{floor:.0}");
+    actor.flight_mut().flaps = 1.0;
+    actor.flight_mut().speed = floor;
+    assert!(actor.g_limits().0 >= APPROACH_G_MARGIN - 1e-9);
+}
+
+#[test]
+fn ai_speed_limits_stay_where_the_loaded_aircraft_can_hold_1_g() {
+    // 2026-09-29, after the weight-scaled stall speeds: finals built on the
+    // 0 G row's slow edge sank, and full power near the top speed left a
+    // loaded legacy-model fighter under 1 G.
+    for research in [false, true] {
+        let mut actor = hornet(1, 0, [0., 5_000., 0.], 0.);
+        if research {
+            actor.flight_mut().enable_research(1).unwrap();
+        }
+        let limits = actor.speed_limits();
+        let level = actor
+            .flight()
+            .minimum_level_speed(5_000., actor.flight().flaps);
+        assert!(
+            limits.minimum.0 >= level - 1e-9,
+            "{research}: {limits:?} {level}"
+        );
+        let config = actor.flight().model().configuration().clone();
+        let load = 1.0
+            + (actor.flight().fuel + actor.flight().payload_lbs) / config.mass.empty_lbs
+                * config.aerodynamics.loaded_elevator_percent
+                / 100.0;
+        let top = limits.maximum.0;
+        assert!(
+            config.aerodynamics.envelopes.iter().any(|e| {
+                f64::from(e.g) / load >= TOP_SPEED_G_MARGIN
+                    && e.speeds(5_000.)
+                        .is_some_and(|(low, high)| top >= low && top <= high)
+            }),
+            "{research}: no row with the G margin at {top}"
+        );
+    }
+}
+
+#[test]
+fn a_wing_returns_to_base_once_no_hostile_aircraft_remains() {
+    // John, 2026-09-29: mission return to base.
+    let mut mission = AiMission::new();
+    let mut leader = hornet(1, 0, [0., 6_000., -60_000.], 0.);
+    leader.set_home_runway(Some(runway()));
+    mission.push(leader);
+    let mut lone = hornet(2, 0, [0., 6_000., 60_000.], 0.);
+    lone.identity.wing = 2;
+    mission.push(lone);
+    let mut hostile = object(mission.actor(1).unwrap(), 2);
+    hostile.id = 50;
+    hostile.position = [0., 6_000., 200_000.];
+    for _ in 0..240 {
+        step(&mut mission, Some(hostile.clone()));
+    }
+    assert_eq!(mission.actor(1).unwrap().landing_order(), None);
+    assert!(!mission.actor(2).unwrap().controller.mission_complete());
+    hostile.alive = false;
+    hostile.destroyed = true;
+    step(&mut mission, Some(hostile));
+    assert_eq!(
+        mission.actor(1).unwrap().landing_order().map(|o| o.reason),
+        Some(LandingReason::Ordered)
+    );
+    assert!(
+        mission.actor(2).unwrap().controller.mission_complete(),
+        "without a runway it flies home and holds"
+    );
+}
+
+#[test]
+fn aircraft_meeting_head_on_both_turn_right_and_pass_clear() {
+    // John, 2026-09-29: traffic avoidance outside formation.
+    let mut mission = AiMission::new();
+    mission.push(hornet(1, 0, [0., 6_000., -6_000.], 0.));
+    let mut other = hornet(2, 0, [0., 6_000., 6_000.], std::f64::consts::PI);
+    other.identity.wing = 2;
+    mission.push(other);
+    let held = |mission: &AiMission, id| mission.actor(id).unwrap().avoiding_heading_deg();
+    let speed = mission.actor(1).unwrap().flight().speed;
+    // Outside the look-ahead nothing changes.
+    step(&mut mission, None);
+    assert_eq!(held(&mission, 1), None, "closing at {:.0} ft/s", 2. * speed);
+    let mut started = false;
+    for _ in 0..10 * 120 {
+        step(&mut mission, None);
+        if held(&mission, 1).is_some() {
+            started = true;
+            break;
+        }
+    }
+    assert!(started);
+    assert_eq!(held(&mission, 1).map(f64::round), Some(AVOID_TURN_DEG));
+    assert_eq!(
+        held(&mission, 2).map(f64::round),
+        Some(180. + AVOID_TURN_DEG)
+    );
+    let mut closest = f64::INFINITY;
+    let mut cleared = None;
+    for tick in 0..20 * 120 {
+        step(&mut mission, None);
+        let (a, b) = (mission.actor(1).unwrap(), mission.actor(2).unwrap());
+        let d: f64 = (0..3)
+            .map(|i| (a.flight().position[i] - b.flight().position[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        closest = closest.min(d);
+        if cleared.is_none() && held(&mission, 1).is_none() {
+            cleared = Some(tick);
+        }
+        // The held heading never flaps to the other side.
+        if let Some(h) = held(&mission, 1) {
+            assert_eq!(h.round(), AVOID_TURN_DEG);
+        }
+    }
+    assert!(closest > AVOID_SEPARATION_FT, "closest {closest:.0} ft");
+    assert!(cleared.is_some(), "the avoidance ends once clear");
+}
+
+#[test]
+fn a_side_still_taking_off_does_not_return_to_base() {
+    let mut mission = AiMission::new();
+    let mut airborne = hornet(1, 0, [0., 6_000., -60_000.], 0.);
+    airborne.set_home_runway(Some(runway()));
+    airborne.identity.wing = 2;
+    mission.push(airborne);
+    mission.push(parked(2, 1, [40., 0., -3250.]));
+    let mut hostile = object(mission.actor(1).unwrap(), 2);
+    hostile.id = 50;
+    hostile.position = [0., 6_000., 200_000.];
+    step(&mut mission, Some(hostile.clone()));
+    hostile.alive = false;
+    hostile.destroyed = true;
+    for _ in 0..120 {
+        step(&mut mission, Some(hostile.clone()));
+    }
+    assert_eq!(mission.actor(1).unwrap().landing_order(), None);
+}
+
+#[test]
+fn a_mission_without_hostile_aircraft_never_returns_to_base() {
+    let mut mission = AiMission::new();
+    let mut leader = hornet(1, 0, [0., 6_000., -60_000.], 0.);
+    leader.set_home_runway(Some(runway()));
+    mission.push(leader);
+    for _ in 0..120 {
+        step(&mut mission, None);
+    }
+    assert_eq!(mission.actor(1).unwrap().landing_order(), None);
+}
+
+#[test]
 fn a_formation_order_cancels_an_ordered_landing_in_the_early_approach() {
     let mut mission = AiMission::new();
     mission.push(hornet(1, 1, [0., 6_000., -110_000.], 0.));
@@ -883,10 +1121,11 @@ fn a_steep_sinking_final_over_the_runway_goes_around_instead_of_ejecting() {
 }
 
 /// Normal landing geometry over the runway, low and sinking, is neither an
-/// ejection nor a go-around: the aircraft flares and lands.
+/// ejection nor a go-around: the aircraft flares and lands. Normal is the
+/// 3 degree path plus some correction since 2026-09-29 (6 degrees before).
 #[test]
 fn a_low_sinking_final_over_the_runway_lands_without_ejecting() {
-    let mut mission = steep_final(400., 60., 6., -3_600., 0.);
+    let mut mission = steep_final(400., 60., 4.5, -3_600., 0.);
     assert_eq!(fly_without_ejecting(&mut mission, 120), 0);
     assert_eq!(
         mission.actor(1).unwrap().airfield_phase(),
@@ -914,7 +1153,49 @@ fn a_critically_damaged_aircraft_on_final_still_ejects() {
 /// Regression, found at Simferopol (UKR, 2026-09-23): the straight line
 /// from the marshal to the approach gates ran through the mountains south
 /// of the field and aircraft flew into them. On the way to the runway they
-/// now keep clear of high terrain ahead, then land.
+/// now keep clear of high terrain ahead, then land. Since the 3 degree path
+/// (2026-09-29) the ridge stands above the path to the south-facing
+/// approach, so this runway without anchors is landed from the north.
+#[test]
+fn a_runway_without_anchors_is_landed_from_the_clear_side() {
+    let ridge = |_x: f64, z: f64| {
+        if (-30_000.0..=-24_000.0).contains(&z) {
+            3_000.
+        } else {
+            0.
+        }
+    };
+    let mut near = super::super::airfield::Sequence::landing(
+        LandingOrder {
+            runway: runway(),
+            reason: LandingReason::Ordered,
+        },
+        [0., 7_000., -80_000.],
+        [0.; 3],
+        40_000.,
+        None,
+    );
+    assert_eq!(near.end(), ApproachEnd::Near);
+    assert!(airfield::path_obstruction_ft(&runway(), ApproachEnd::Near, &ridge) > 1_000.);
+    assert!(airfield::path_obstruction_ft(&runway(), ApproachEnd::Far, &ridge) <= 0.);
+    near.prefer_clear_approach([0.; 3], 40_000., &ridge);
+    assert_eq!(near.end(), ApproachEnd::Far);
+    // Flat ground keeps the arrival side.
+    let mut flat = super::super::airfield::Sequence::landing(
+        LandingOrder {
+            runway: runway(),
+            reason: LandingReason::Ordered,
+        },
+        [0., 7_000., -80_000.],
+        [0.; 3],
+        40_000.,
+        None,
+    );
+    flat.prefer_clear_approach([0.; 3], 40_000., &|_, _| 0.);
+    assert_eq!(flat.end(), ApproachEnd::Near);
+}
+
+/// The ridge approach as a whole flight.
 #[test]
 fn the_approach_climbs_over_a_ridge_under_the_gates() {
     // A 3,000 ft ridge across the approach, 22,000 to 28,000 ft short of

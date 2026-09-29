@@ -101,8 +101,9 @@ impl Layout {
             return Err(invalid("mission layout exceeds limit"));
         }
         // Retail layouts are ASCII control text, but some display names contain
-        // legacy code-page bytes. Lossy conversion affects display metadata only.
-        let text = String::from_utf8_lossy(bytes);
+        // DOS code page 437 bytes (the Kurile airport Berezovka has an e with a
+        // diaeresis), so the text is decoded as CP437, never lossily.
+        let text = crate::text::decode_cp437(bytes);
         if !text.starts_with("textFormat") {
             return Err(invalid("expected textFormat mission"));
         }
@@ -436,6 +437,18 @@ mod tests {
         assert_eq!(p.nationality, Some(138));
         assert_eq!(p.section.as_deref(), Some("Kiev Airport"));
         assert_eq!(p.unknown, vec![("future".into(), "inert callback".into())]);
+    }
+    #[test]
+    fn dos_code_page_names_decode_without_loss() {
+        // The Kurile airport Berezovka is stored with CP437 0x89, an e with a
+        // diaeresis; lossy UTF-8 decoding used to print it with U+FFFD.
+        let mut bytes = SAMPLE.as_bytes().to_vec();
+        let at = bytes.windows(10).position(|w| w == b"Hangar One").unwrap();
+        bytes.splice(at..at + 10, b"Ber\x89zovka".iter().copied());
+        let layout = Layout::parse("KURILE.MM", &bytes).unwrap();
+        let name = layout.placements[0].name.as_deref().unwrap();
+        assert_eq!(name, "Ber\u{eb}zovka");
+        assert!(!name.contains('\u{fffd}'));
     }
     #[test]
     fn hexadecimal_flags_retain_all_32_bits() {

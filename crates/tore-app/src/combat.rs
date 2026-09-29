@@ -155,6 +155,11 @@ pub enum CommandNote {
 /// Command notes kept between drains; the oldest are dropped first.
 const MAX_COMMAND_NOTES: usize = 64;
 
+/// Lowest airborne mission start above sea level, feet (John, 2026-09-29).
+pub const SPAWN_MIN_MSL_FT: f64 = 5000.;
+/// Lowest airborne mission start above the ground under it, feet.
+pub const SPAWN_MIN_AGL_FT: f64 = 1000.;
+
 pub fn launcher(s: &flight::State) -> Launcher {
     Launcher {
         position: s.position,
@@ -777,6 +782,7 @@ impl Combat {
         if let Some(ammo) = &self.initial_ammo {
             self.state.ammo.clone_from(ammo);
         }
+        self.state.start_load();
         self.input = FireInput::default();
         self.controller.cancel();
         s.set_payload(self.state.payload_lbs())?;
@@ -813,6 +819,34 @@ impl Combat {
         self.restart_render(s, None);
         Ok(())
     }
+    /// Opinionated (requested by John, 2026-09-29): an airborne mission
+    /// aircraft never starts inside the terrain. After [`Self::reset`] placed
+    /// the wings, any airborne aircraft lower than [`SPAWN_MIN_MSL_FT`] above
+    /// sea level or [`SPAWN_MIN_AGL_FT`] above the ground under it is raised
+    /// to the higher of the two. Runway starts are untouched. Returns how many
+    /// aircraft were raised.
+    pub fn raise_airborne_spawns(&mut self, world: &World) -> usize {
+        let Some(spawns) = self.mission_spawns.as_ref() else {
+            return 0;
+        };
+        let mut raised = 0;
+        for (index, spawn) in spawns.iter().enumerate() {
+            if spawn.runway_order.is_some() {
+                continue;
+            }
+            let Some(target) = self.state.targets.get_mut(index) else {
+                continue;
+            };
+            let [x, y, z] = target.position;
+            let floor = SPAWN_MIN_MSL_FT
+                .max(f64::from(world.height(x as f32, z as f32)) + SPAWN_MIN_AGL_FT);
+            if y < floor {
+                target.position[1] = floor;
+                raised += 1;
+            }
+        }
+        raised
+    }
     pub fn step(&mut self, s: &mut flight::State, world: &World) -> AppResult<Vec<Event>> {
         let l = launcher(s);
         self.last_launcher = Some(l);
@@ -827,6 +861,7 @@ impl Combat {
             );
         }
         let mut events = Vec::new();
+        self.state.note_loaded();
         if s.airburst()
             && let Some(event) = self.state.player_airburst(s.position)
         {
@@ -888,6 +923,10 @@ impl Combat {
                     }
                 }
             }
+        }
+        let scrape = s.take_belly_scrape();
+        if scrape > 0. {
+            self.state.scrape_damage(scrape, &mut events);
         }
         if s.systems.fatal() {
             s.crashed = true;
@@ -977,6 +1016,14 @@ impl Combat {
         }
         if events.contains(&Event::PilotKilled) {
             s.systems.kill_pilot("Pilot killed by cockpit hit");
+        }
+        // A station that ran dry hands the selection on, but never while the
+        // trigger is held: the next store must not fire from the same press.
+        if !(self.input.held || self.controller.held)
+            && self.state.armed
+            && !self.state.carries(self.state.selected)
+        {
+            self.command(live::Command::AdvanceFromEmpty, l);
         }
         Ok(events)
     }
@@ -1072,25 +1119,33 @@ impl Combat {
     }
 
     pub fn readout(&self, s: &flight::State, rcs_scale: f64) -> crate::instruments::CombatReadout {
-        let mut groups: Vec<(String, String, u32, bool)> = Vec::new();
+        // (source, name, rounds, selected, loaded at the start)
+        let mut groups: Vec<(String, String, u32, bool, bool)> = Vec::new();
         for (index, station) in self.state.configuration().stations.iter().enumerate() {
             let selected = self.state.armed && index == self.state.selected;
+            let loaded = self.state.was_loaded(index);
             if let Some(group) = groups.iter_mut().find(|g| g.0 == station.weapon.source) {
                 group.2 += u32::from(self.state.rounds(index));
                 group.3 |= selected;
+                group.4 |= loaded;
             } else {
                 groups.push((
                     station.weapon.source.clone(),
                     station.weapon.hud_name.clone(),
                     u32::from(self.state.rounds(index)),
                     selected,
+                    loaded,
                 ));
             }
         }
         crate::instruments::CombatReadout {
+            // The window lists what the aircraft was loaded with: a weapon
+            // that ran dry keeps its row at zero, but one that was never
+            // loaded (taken off on the Load Ordnance page) has none.
             weapons: groups
                 .into_iter()
-                .map(|(_, name, count, selected)| (name, count, selected))
+                .filter(|(_, _, count, selected, loaded)| *count > 0 || *selected || *loaded)
+                .map(|(_, name, count, selected, _)| (name, count, selected))
                 .collect(),
             chaff: self.state.chaff,
             flares: self.state.flares,
@@ -1304,15 +1359,24 @@ impl Combat {
 }
 
 pub(crate) fn apply_startup_weapon_state(state: &mut live::State) {
-    if let Some(index) = state
-        .configuration()
-        .stations
+    // The gun is the startup weapon. A gun station that carries nothing falls
+    // back to the first station that does, and an aircraft with nothing
+    // loaded starts on NAV, so an empty station never shows up armed.
+    let stations = &state.configuration().stations;
+    let gun = stations
         .iter()
         .position(|station| live::is_gun(&station.weapon))
-    {
-        state.selected = index;
+        .filter(|index| state.carries(*index));
+    let choice = gun.or_else(|| {
+        (0..stations.len()).find(|index| state.carries(*index) && state.station_allowed(*index))
+    });
+    match choice {
+        Some(index) => {
+            state.selected = index;
+            state.armed = true;
+        }
+        None => state.armed = false,
     }
-    state.armed = true;
 }
 
 /// Uses the same imported configuration, flight state, trigger host, movement and
@@ -1332,6 +1396,26 @@ pub fn feedback(event: &Event, config: &live::Configuration) -> Option<tore_inpu
         _ => None,
     }
 }
+/// Where two Debug dumps first differ, with a little context from each, so a
+/// failed replay comparison says which field moved.
+fn first_difference(a: &str, b: &str) -> String {
+    let at = a
+        .bytes()
+        .zip(b.bytes())
+        .position(|(x, y)| x != y)
+        .unwrap_or(a.len().min(b.len()));
+    let window = |s: &str| {
+        let from = s.floor_char_boundary(at.saturating_sub(120));
+        let to = s.floor_char_boundary((at + 120).min(s.len()));
+        s[from..to].to_owned()
+    };
+    format!(
+        "at byte {at}: replay ...{}... live ...{}...",
+        window(a),
+        window(b)
+    )
+}
+
 pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let world = World::for_theater(data, "UKR")?;
     let mut combat = Combat::new(h, data, true)?;
@@ -1388,7 +1472,12 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             break;
         }
     }
-    for _ in 0..40 {
+    // Forty gun-sized hits kill most aircraft; the A-4E's guns are weaker, so
+    // keep hitting until the aircraft is destroyed.
+    for _ in 0..2000 {
+        if damaged.player_hp == 0 {
+            break;
+        }
         damaged.command(live::Command::DamagePlayer, l);
         replica.command(live::Command::DamagePlayer, l);
         let events = damaged.step(false, l, |_, _| 0.);
@@ -1577,6 +1666,37 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             if negative.rounds(index) != initial || negative.payload_lbs() != mass {
                 return Err("station failure changed ammunition/mass".into());
             }
+            // A surface weapon cannot engage the practice aircraft
+            // (docs/spec/missiles.md, target-role rules): the shot is refused,
+            // not spent, and there is no surface target to fire it at yet.
+            if tore_sim::combat::missiles::Profile::for_weapon(
+                &combat.state.configuration().stations[index].weapon,
+            )
+            .is_some_and(|p| p.role == tore_sim::combat::missiles::TargetRole::Surface)
+            {
+                let mut refused = combat.state.clone();
+                refused.step(true, l, |_, _| 0.);
+                if refused.readiness(l) != live::Readiness::WrongTarget
+                    || refused.ammo[index] != initial
+                    || !refused.projectiles.is_empty()
+                {
+                    return Err(format!(
+                        "surface weapon was not refused against the aircraft target: slot={} weapon={} readiness={:?}",
+                        index + 1,
+                        combat.state.configuration().stations[index].weapon.source,
+                        refused.readiness(l)
+                    )
+                    .into());
+                }
+                println!(
+                    "combat smoke {} slot={} {} class={class}: refused against aircraft target PASS",
+                    h.profile.name,
+                    index + 1,
+                    combat.state.configuration().stations[index].weapon.source,
+                );
+                combat.cancel();
+                continue;
+            }
             if index != 0 {
                 let mut no_target = combat.state.clone();
                 // Remove the fixture contact as well as its designation. A
@@ -1623,7 +1743,15 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                 let mut tracking = combat.state.clone();
                 tracking.step(true, l, |_, _| 0.);
                 if tracking.projectiles.is_empty() {
-                    return Err("source guidance probe did not launch".into());
+                    return Err(format!(
+                        "source guidance probe did not launch: slot={} weapon={} readiness={:?} ammo={} initial={initial} mode={:?}",
+                        index + 1,
+                        weapon.source,
+                        combat.state.readiness(l),
+                        tracking.ammo[index],
+                        tracking.launch_mode
+                    )
+                    .into());
                 }
                 tracking.step(false, Launcher { radar: false, ..l }, |_, _| 0.);
                 let loses_track = weapon.seeker.signature == 3 && weapon.flags & 0x200 != 0;
@@ -1663,13 +1791,55 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     .signature
                     == 3
                 {
+                    // Passive channel: the switch stays on but nothing is
+                    // transmitting, so a radar weapon that needs the aircraft's
+                    // lock is inhibited.
                     let mut radar_off = combat.state.clone();
                     let off = Launcher { radar: false, ..l };
                     radar_off.step(true, off, |_, _| 0.);
-                    if radar_off.ammo[index] != initial
-                        || radar_off.readiness(off) != live::Readiness::RadarOff
+                    let profile = tore_sim::combat::missiles::Profile::for_weapon(
+                        &combat.state.configuration().stations[index].weapon,
+                    );
+                    let guided_by_radar = profile.is_none_or(|p| {
+                        p.guidance == tore_sim::combat::missiles::Guidance::Supported
+                    });
+                    if guided_by_radar
+                        // Losing the radar track may also drop the designation,
+                        // so any reason but Ready is a valid inhibit.
+                        && (radar_off.ammo[index] != initial
+                            || radar_off.readiness(off) == live::Readiness::Ready)
                     {
-                        return Err("radar-off launch was not inhibited".into());
+                        return Err(format!(
+                            "radar-off launch was not inhibited: slot={} weapon={} ammo={} initial={initial} readiness={:?} mode={:?}",
+                            index + 1,
+                            combat.state.configuration().stations[index].weapon.source,
+                            radar_off.ammo[index],
+                            radar_off.readiness(off),
+                            radar_off.launch_mode
+                        )
+                        .into());
+                    }
+                    // Power switch off: a reviewed radar missile may still be
+                    // released, permanently unguided (docs/features.md, "Uncued
+                    // launch with the onboard seeker enabled").
+                    if profile.is_some() {
+                        let mut dumb = combat.state.clone();
+                        let off = Launcher {
+                            radar: false,
+                            radar_power: false,
+                            ..l
+                        };
+                        dumb.step(true, off, |_, _| 0.);
+                        if dumb.ammo[index] != initial - 1
+                            || dumb.projectiles.iter().any(|p| p.target.is_some())
+                        {
+                            return Err(format!(
+                                "radar-power-off release was not an unguided shot: slot={} ammo={} initial={initial}",
+                                index + 1,
+                                dumb.ammo[index]
+                            )
+                            .into());
+                        }
                     }
                 }
             }
@@ -1696,6 +1866,7 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
             let mut fired = 0;
             let mut impacts = 0;
             let mut destroyed = 0;
+            let mut collided = false;
             // Pulse for missiles, hold for gun. Two shots are available in the
             // smallest source station; damage remains source class-0 per hit.
             for tick in 0..6000 {
@@ -1712,6 +1883,11 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     f64::from(world.height(x as f32, z as f32))
                 });
                 let events = combat.step(&mut flight, &world)?;
+                // The host hands a dry station's selection on (see `step`);
+                // the second state applies the same rule from the tape.
+                if !combat.input.held && replay.armed && !replay.carries(replay.selected) {
+                    replay.command(live::Command::AdvanceFromEmpty, launcher(&flight));
+                }
                 if events != replay_events
                     || combat.state.ammo != replay.ammo
                     || combat.state.projectiles != replay.projectiles
@@ -1725,6 +1901,10 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     match event {
                         Event::Fired(_) => fired += 1,
                         Event::Hit(_) => impacts += 1,
+                        // The fixture flies at the player, so a slow gun can
+                        // lose the race and the two aircraft collide; the
+                        // collision then zeroes what the rounds had not.
+                        Event::PlayerDestroyed => collided = true,
                         Event::Destroyed(_) => destroyed += 1,
                         _ => {}
                     }
@@ -1748,13 +1928,14 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                             )
                             .max(0)
                 })
-                || combat
-                    .state
-                    .history
-                    .iter()
-                    .map(|hit| hit.applied)
-                    .sum::<i32>()
-                    != combat.state.configuration().hit_points - combat.state.targets[0].hp
+                || (!collided
+                    && combat
+                        .state
+                        .history
+                        .iter()
+                        .map(|hit| hit.applied)
+                        .sum::<i32>()
+                        != combat.state.configuration().hit_points - combat.state.targets[0].hp)
                 || (class == 0
                     && !combat
                         .state
@@ -1762,10 +1943,16 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                         .iter()
                         .any(|e| e.kind == EffectKind::Destroyed))
             {
+                let applied: i32 = combat.state.history.iter().map(|hit| hit.applied).sum();
+                let wrong_class = combat.state.history.iter().find(|hit| hit.class != class);
                 return Err(format!(
-                    "combat smoke {} {} failed: fired={fired} hits={impacts} destroyed={destroyed}",
+                    "combat smoke {} {} failed: fired={fired} hits={impacts} destroyed={destroyed} class={class} ammo={}->{} applied={applied} lost_hp={} wrong_class={:?}",
                     h.profile.name,
-                    combat.state.configuration().stations[index].weapon.source
+                    combat.state.configuration().stations[index].weapon.source,
+                    initial,
+                    combat.state.ammo[index],
+                    combat.state.configuration().hit_points - combat.state.targets[0].hp,
+                    wrong_class.map(|hit| (hit.class, hit.nominal, hit.applied))
                 )
                 .into());
             }
@@ -1792,17 +1979,29 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     .as_mut()
                     .ok_or("missing smoke recorder")?
                     .flush()?;
-                let decoded = crate::combat_tape::replay(
+                let decoded = crate::combat_tape::replay_without_airports(
                     path,
                     data,
                     combat.state.configuration().clone(),
                     "UKR",
                     &world,
                 )?;
-                if format!("{decoded:?}") != format!("{:?}", combat.state) {
-                    return Err("serialized live-fire replay diverged before reset".into());
+                let (replayed, live_state) =
+                    (format!("{decoded:?}"), format!("{:?}", combat.state));
+                if replayed != live_state {
+                    return Err(format!(
+                        "serialized live-fire replay diverged before reset: {}",
+                        first_difference(&replayed, &live_state)
+                    )
+                    .into());
                 }
                 // Also replay manual state transitions, including a full reset.
+                // A slow gun can lose the race with the fixture and collide, and
+                // a tape does not record the host turning a crashed flight into
+                // a dead player, so the manual commands start from a fresh
+                // flight and a fresh combat state.
+                flight = h.start(&world);
+                combat.reset(&mut flight)?;
                 for command in [
                     live::Command::ToggleArm,
                     live::Command::ClearDesignation,
@@ -1825,28 +2024,40 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     .as_mut()
                     .ok_or("missing smoke recorder")?
                     .flush()?;
-                let decoded = crate::combat_tape::replay(
+                let decoded = crate::combat_tape::replay_without_airports(
                     path,
                     data,
                     combat.state.configuration().clone(),
                     "UKR",
                     &world,
                 )?;
-                if format!("{decoded:?}") != format!("{:?}", combat.state) {
-                    return Err("serialized manual-command replay diverged before reset".into());
+                let (replayed, live_state) =
+                    (format!("{decoded:?}"), format!("{:?}", combat.state));
+                if replayed != live_state {
+                    return Err(format!(
+                        "serialized manual-command replay diverged before reset: {}",
+                        first_difference(&replayed, &live_state)
+                    )
+                    .into());
                 }
                 combat.reset(&mut flight)?;
                 combat.step(&mut flight, &world)?;
                 combat.finish_recording()?;
-                let decoded = crate::combat_tape::replay(
+                let decoded = crate::combat_tape::replay_without_airports(
                     path,
                     data,
                     combat.state.configuration().clone(),
                     "UKR",
                     &world,
                 )?;
-                if format!("{decoded:?}") != format!("{:?}", combat.state) {
-                    return Err("serialized combat replay diverged after commands/reset".into());
+                let (replayed, live_state) =
+                    (format!("{decoded:?}"), format!("{:?}", combat.state));
+                if replayed != live_state {
+                    return Err(format!(
+                        "serialized combat replay diverged after commands/reset: {}",
+                        first_difference(&replayed, &live_state)
+                    )
+                    .into());
                 }
                 println!("serialized combat replay {} PASS", path.display());
             }
@@ -1943,6 +2154,103 @@ fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tore_formats::aircraft::AircraftId;
+    /// A player combat state with a gun and a missile, loaded as given.
+    fn loaded(ammo: [u16; 2]) -> (Combat, flight::State) {
+        let mut c = render_hash_tests::combat(vec![], vec![]);
+        let mut config = c.state.configuration().clone();
+        config.stations[0].weapon.source = AircraftId::F18.gun().into();
+        c.state = live::State::new(config, true).unwrap();
+        c.initial_ammo = Some(ammo.to_vec());
+        let mut f =
+            flight::State::new(&crate::flight::animation_tests::profile(), [0.; 3]).unwrap();
+        c.reset(&mut f).unwrap();
+        c.apply_startup_weapons();
+        (c, f)
+    }
+    fn listed(c: &Combat, f: &flight::State) -> Vec<(String, u32, bool)> {
+        c.readout(f, 1.).weapons
+    }
+    #[test]
+    fn an_emptied_station_stays_empty_and_is_not_listed() {
+        let (c, f) = loaded([500, 0]);
+        assert_eq!(
+            c.state.ammo,
+            [500, 0],
+            "a zero quantity is not the default load"
+        );
+        let list = listed(&c, &f);
+        assert_eq!(list.len(), 1, "the empty missile is not carried: {list:?}");
+        assert_eq!(list[0].1, 500);
+    }
+    #[test]
+    fn a_fully_empty_aircraft_starts_on_nav_with_nothing_listed() {
+        let (mut c, f) = loaded([0, 0]);
+        assert_eq!(c.state.ammo, [0, 0]);
+        assert!(!c.state.armed, "nothing to arm");
+        assert!(listed(&c, &f).is_empty());
+        // Cycling the selection has nowhere to go.
+        c.state.cycle_selection(true);
+        assert!(!c.state.armed);
+        c.state.cycle_selection(false);
+        assert!(!c.state.armed);
+    }
+    #[test]
+    fn the_selection_ring_skips_empty_stations_and_startup_falls_back() {
+        let (mut c, _) = loaded([0, 3]);
+        assert!(c.state.armed);
+        assert_eq!(
+            c.state.selected, 1,
+            "the empty gun is not selected at startup"
+        );
+        c.state.cycle_selection(true);
+        assert!(!c.state.armed, "NAV");
+        c.state.cycle_selection(true);
+        assert_eq!((c.state.armed, c.state.selected), (true, 1));
+    }
+    #[test]
+    fn a_station_emptied_in_flight_keeps_its_row_but_is_never_selectable() {
+        let (mut c, f) = loaded([500, 3]);
+        assert_eq!((c.state.armed, c.state.selected), (true, 0), "the gun");
+        assert_eq!(listed(&c, &f).len(), 2);
+        // The gun's last round is fired: the selection moves to the missile
+        // and the gun keeps a row at zero, greyed by the window.
+        c.state.ammo[0] = 0;
+        c.state.advance_from_empty();
+        assert_eq!((c.state.armed, c.state.selected), (true, 1));
+        let list = listed(&c, &f);
+        assert_eq!(list.len(), 2, "the dry gun is still listed: {list:?}");
+        assert_eq!((list[0].1, list[0].2), (0, false));
+        assert_eq!((list[1].1, list[1].2), (3, true));
+        // The ring skips the dry gun.
+        c.state.cycle_selection(true);
+        assert!(!c.state.armed, "NAV");
+        c.state.cycle_selection(true);
+        assert_eq!((c.state.armed, c.state.selected), (true, 1));
+        // The last missile goes too: NAV, both rows still listed.
+        c.state.ammo[1] = 0;
+        c.state.advance_from_empty();
+        assert!(!c.state.armed);
+        assert_eq!(listed(&c, &f).len(), 2);
+        c.state.cycle_selection(true);
+        assert!(!c.state.armed, "nothing left to select");
+    }
+    #[test]
+    fn a_dry_station_hands_on_only_to_an_allowed_one() {
+        let (mut c, _) = loaded([500, 3]);
+        c.state.cheats.guns_only = true;
+        c.state.ammo[0] = 0;
+        c.state.advance_from_empty();
+        assert!(!c.state.armed, "the missile is not allowed under guns only");
+    }
+    #[test]
+    fn a_restart_reloads_exactly_the_edited_quantities() {
+        let (mut c, mut f) = loaded([500, 0]);
+        c.state.ammo.fill(7);
+        c.reset(&mut f).unwrap();
+        assert_eq!(c.state.ammo, [500, 0]);
+    }
+
     #[test]
     fn fire_requires_unmodified_press_and_release_after_interruption() {
         let mut f = FireInput::default();

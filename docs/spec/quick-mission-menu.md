@@ -320,7 +320,11 @@ native research modes report that incompatibility without silently changing
 adapters. Missing or obstructed starts are rejected. Choosing ground start
 selects the airport for tower commands but does not grant landing clearance or
 announce that a landing has completed. The straight-flight fixtures
-(`--fixture-wings`) park only the player.
+(`--fixture-wings`) park only the player. Every airborne mission aircraft, friendly or enemy, is
+also raised to at least 5,000 ft above sea level and 1,000 ft above the
+ground under its own start point, whichever is higher, so no group starts
+inside the terrain (opinionated, requested by John 2026-09-29; before this,
+enemies 50 nm from Jixian or Bahawalpur started inside the mountains).
 
 Parked aircraft do not show on radar until they fly; see
 [Radar and aircraft on the ground](#radar-and-aircraft-on-the-ground). The
@@ -355,10 +359,15 @@ styling and two opposing-group discrimination.
 
 ## Retail map variants
 
-John selected retail map-detail expansion on 2026-09-23. The existing location
-picker retains its sixteen base theaters and appends 59 imported MM variants.
-Each label contains the original map identity so variants can be distinguished.
-Selecting a variant loads its scenery and airport list; choosing another map
-resets the airport selection. Nationality/target menus use the variant's base
-theater tables. Restart retains the selected layout. The renderer uses the
+John selected retail map-detail expansion on 2026-09-23, and on 2026-09-29 asked
+for the variants to be taken out of the player's list (`opinionated`, requested by
+John on 2026-09-29): the imported `~` layouts mostly have one or two airports and
+are incomplete. The location picker offers only the sixteen base theaters. The 59
+imported MM variants stay loadable as a developer option, `--theater '~CODE'`
+(see [DEVELOPMENT.md](../DEVELOPMENT.md#retail-map-detail-validation)), which
+adds that one layout to the creator for probes and the battery. A variant loads
+its scenery and airport list; nationality/target menus use the variant's base
+theater tables; restart retains the selected layout. The renderer uses the
 [static variant contract](terrain-detail.md), not a live campaign simulation.
+The creator probe checks that the list holds exactly the sixteen base theaters,
+then sweeps every layout, variants included.

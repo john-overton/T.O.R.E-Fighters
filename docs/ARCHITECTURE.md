@@ -341,7 +341,11 @@ controlled target heat/emission changes are recorded commands; seeker observatio
 and acquisition are reproduced from those inputs, the matching asset fingerprint
 and terrain. `--combat-command compatibility-weapons` explicitly selects the old
 weapon adapter. Flight adapter selection is independent. Fitted seeker synthesis
-consumes the mounted-seeker amplitude and never controls acquisition.
+consumes the mounted-seeker amplitude and never controls acquisition. A tape does
+not record the mission wind or the host turning a crashed flight into a dead
+player: a replay is given the theater's wind, so smoke and countermeasures drift
+as they did live, but a session in which the flight crashed replays with the
+player alive.
 
 `ai::damage` reads live component failures and proposes recovery and control
 restrictions. `AiActor` latches the recovery commitment, uses the existing

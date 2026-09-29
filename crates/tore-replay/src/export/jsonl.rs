@@ -129,7 +129,14 @@ fn header_line(recording: &Recording) -> String {
         .str("airspeed_fps", "feet per second")
         .str("tas_kt", "knots")
         .str("g", "load factor")
-        .str("fuel_lb", "pounds")
+        .str(
+            "fuel_lb",
+            if h.fuel_includes_external() {
+                "pounds, internal and external tanks"
+            } else {
+                "pounds"
+            },
+        )
         .str(
             "devices",
             "0 to 1, except elevator, aileron and rudder (-1 to 1) and speed (feet per second)",

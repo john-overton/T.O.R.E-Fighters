@@ -13,6 +13,7 @@ use tore_sim::ai::{
     launch::{Side, WingId, WingLaunch, WingSelection, legacy_pairs, resolve_wings},
 };
 pub mod layout;
+pub mod matrix;
 pub use layout::{EnemyAim, FEET_PER_NM, MapBounds, SEPARATION_NM};
 type Rect = (i32, i32, i32, i32);
 const POPUP: Rect = (185, 100, 270, 370);
@@ -143,51 +144,24 @@ impl QuickMission {
         for i in [6, 9, 12, 23, 26, 29] {
             draft.values[i] = selected;
         }
-        let mut theater_codes: Vec<String> = source_theaters()
+        // Only the sixteen base theaters are offered to the player. The
+        // imported `~` layout variants are incomplete (mostly one or two
+        // airports); they stay reachable for probes through `--theater ~CODE`
+        // (see `choose_theater_code`), but never appear in the list.
+        let theater_codes: Vec<String> = source_theaters()
             .iter()
             .map(|code| code.to_string())
             .collect();
         options.fields[13].truncate(16);
-        let catalog = tore_formats::theater::map_catalog(data).unwrap_or_default();
-        for (code, label) in catalog.iter().filter(|(code, _)| code.starts_with('~')) {
-            theater_codes.push(code.clone());
-            options.fields[13].push(label.clone());
-        }
-        let mut theater_catalog: Vec<String> = tore_formats::theater::THEATERS
+        let theater_catalog: Vec<String> = tore_formats::theater::THEATERS
             .iter()
             .map(|(code, _)| code.to_string())
             .collect();
-        theater_catalog.extend(
-            catalog
-                .into_iter()
-                .filter(|(code, _)| code.starts_with('~'))
-                .map(|(code, _)| code),
-        );
         let mut airport_names = Vec::new();
         let mut airport_objects = Vec::new();
         let mut definitions = BTreeMap::new();
         for code in &theater_codes {
-            let name = format!("{code}.MM");
-            let mut names = Vec::new();
-            let mut ids = Vec::new();
-            if let Some(bytes) = data.get(&name)
-                && let Ok(layout) = tore_formats::mission::Layout::parse(&name, bytes)
-            {
-                for p in layout.placements {
-                    let airport = *definitions.entry(p.object_type.clone()).or_insert_with(|| {
-                        data.get(&p.object_type)
-                            .and_then(|b| tore_formats::static_object::Definition::parse(b).ok())
-                            .is_some_and(|d| {
-                                d.main_shape.is_some()
-                                    && d.callbacks.iter().any(|c| c == "_STRIPProc")
-                            })
-                    });
-                    if airport {
-                        names.push(p.name.unwrap_or(p.object_type));
-                        ids.push(0x4000_0000 + p.key.ordinal);
-                    }
-                }
-            }
+            let (names, ids) = Self::airports_in(code, data, &mut definitions);
             airport_names.push(names);
             airport_objects.push(ids);
         }
@@ -223,6 +197,69 @@ impl QuickMission {
             shift: false,
         }
     }
+    /// The airport names and object ids of one theater layout.
+    fn airports_in(
+        code: &str,
+        data: &BTreeMap<String, Vec<u8>>,
+        definitions: &mut BTreeMap<String, bool>,
+    ) -> (Vec<String>, Vec<u32>) {
+        let name = format!("{code}.MM");
+        let mut names = Vec::new();
+        let mut ids = Vec::new();
+        if let Some(bytes) = data.get(&name)
+            && let Ok(layout) = tore_formats::mission::Layout::parse(&name, bytes)
+        {
+            for p in layout.placements {
+                let airport = *definitions.entry(p.object_type.clone()).or_insert_with(|| {
+                    data.get(&p.object_type)
+                        .and_then(|b| tore_formats::static_object::Definition::parse(b).ok())
+                        .is_some_and(|d| {
+                            d.main_shape.is_some() && d.callbacks.iter().any(|c| c == "_STRIPProc")
+                        })
+                });
+                if airport {
+                    names.push(p.name.unwrap_or(p.object_type));
+                    ids.push(0x4000_0000 + p.key.ordinal);
+                }
+            }
+        }
+        (names, ids)
+    }
+    /// Developer option: add one imported `~` layout variant (or, with
+    /// `all`, every one) after the base theaters so a probe can run the
+    /// creator on it. The player's theater list never contains them.
+    pub fn add_developer_theaters(&mut self, data: &BTreeMap<String, Vec<u8>>, only: Option<&str>) {
+        let catalog = tore_formats::theater::map_catalog(data).unwrap_or_default();
+        let mut definitions = BTreeMap::new();
+        for (code, label) in catalog
+            .into_iter()
+            .filter(|(code, _)| code.starts_with('~'))
+        {
+            if only.is_some_and(|only| only != code) || self.theater_codes.contains(&code) {
+                continue;
+            }
+            let (names, ids) = Self::airports_in(&code, data, &mut definitions);
+            self.airport_names.push(names);
+            self.airport_objects.push(ids);
+            self.theater_codes.push(code.clone());
+            self.theater_catalog.push(code);
+            self.options.fields[13].push(label);
+        }
+    }
+    /// Select a theater by code, as `--theater CODE` does. A `~` variant is
+    /// added on demand (developer option); an unknown code selects the first
+    /// theater.
+    pub fn choose_theater_code(&mut self, code: &str, data: &BTreeMap<String, Vec<u8>>) {
+        if code.starts_with('~') {
+            self.add_developer_theaters(data, Some(code));
+        }
+        let index = self
+            .theater_catalog
+            .iter()
+            .position(|c| c == code)
+            .unwrap_or(0);
+        self.theater(index);
+    }
     pub fn theater(&mut self, index: usize) {
         if self.selection != index {
             self.draft.values[34] = 0;
@@ -241,6 +278,30 @@ impl QuickMission {
         self.draft.values[3] = 0;
         self.draft.values[20] =
             [10, 33, 14, 57, 3, 41, 23, 10, 20, 37, 34, 24, 9, 2, 10, 2][self.base_theater_index()];
+    }
+    /// Every imported string the creator can show, with where it comes from,
+    /// for the `--validate-text` scan.
+    pub fn imported_strings(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for (id, list) in self.options.fields.iter().enumerate() {
+            for text in list {
+                out.push((format!("creator field {id}"), text.clone()));
+            }
+        }
+        for text in &self.aircraft_names {
+            out.push(("creator aircraft".into(), text.clone()));
+        }
+        for (theater, names) in self.theater_codes.iter().zip(&self.airport_names) {
+            for text in names {
+                out.push((format!("airport in {theater}"), text.clone()));
+            }
+        }
+        for (id, list) in self.options.targets.iter().enumerate() {
+            for text in list {
+                out.push((format!("ground target list {id}"), text.clone()));
+            }
+        }
+        out
     }
     pub fn player(&self) -> Option<AircraftId> {
         self.aircraft_files
@@ -302,7 +363,7 @@ impl QuickMission {
             .cloned()
             .unwrap_or_else(|| "Unavailable".into())
     }
-    fn objective_choices(group: usize) -> Vec<(String, GroupObjective)> {
+    pub(crate) fn objective_choices(group: usize) -> Vec<(String, GroupObjective)> {
         let side = if group < 3 {
             Side::Friendly
         } else {
@@ -622,7 +683,7 @@ impl QuickMission {
                 self.open(OBJECTIVE_BASE + group - 1);
             }
             _ => {
-                let id=name.strip_prefix("field-").and_then(|v|v.parse::<usize>().ok()).filter(|v|(3..35).contains(v)).ok_or("snapshot states: normal, aircraft, theaters, help, field-3 through field-34")?;
+                let id=name.strip_prefix("field-").and_then(|v|v.parse::<usize>().ok()).filter(|v|(3..35).contains(v)).ok_or("snapshot states: normal, aircraft, objectives, ground-start, airports, objective-1 through objective-6, theaters, help, field-3 through field-34")?;
                 self.open(id);
             }
         }
@@ -1639,6 +1700,19 @@ mod tests {
         q.theater(0);
         assert_eq!(q.theater_index(), 0);
         assert_eq!(q.draft.values[34], 0);
+    }
+    #[test]
+    fn the_player_list_has_only_base_theaters_and_a_variant_is_a_developer_addition() {
+        let mut q = setup();
+        assert_eq!(q.options.fields[13].len(), 16);
+        assert!(q.theater_codes.iter().all(|c| !c.starts_with('~')));
+        // No imported layouts in this fixture, so nothing is added; an
+        // unknown code falls back to the first theater.
+        q.choose_theater_code("~NOPE", &BTreeMap::new());
+        assert_eq!(q.theater_index(), 0);
+        assert_eq!(q.options.fields[13].len(), 16);
+        q.choose_theater_code("UKR", &BTreeMap::new());
+        assert_eq!(q.theater_codes[q.draft.values[13]], "UKR");
     }
     fn setup() -> QuickMission {
         let mut options = Options {

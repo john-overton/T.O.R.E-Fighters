@@ -633,6 +633,65 @@ fn golden_jsonl() {
 }
 
 #[test]
+fn the_summary_counts_airborne_time_only_off_the_ground() {
+    let dir = temp_dir("summary-airborne");
+    let frames: Vec<Frame> = golden_frames()
+        .into_iter()
+        .map(|mut frame| {
+            // The player is on the ground for the first 240 ticks.
+            if frame.tick < 240 {
+                frame.aircraft[0].flags.on_ground = true;
+            }
+            frame
+        })
+        .collect();
+    let recording =
+        Recording::open(write(&dir, "ground.tore-replay", &frames, &golden_footer())).unwrap();
+    let mut out = Vec::new();
+    write_summary(&recording, &SummaryOptions::default(), &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    // 481 frames at 120 a second: 241 on the ground leaves 2.0 s airborne.
+    assert!(text.contains("  airborne 0:02.0 |"), "{text}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_summary_and_units_say_when_external_tanks_are_counted() {
+    let dir = temp_dir("summary-fuel");
+    let frames = golden_frames();
+    let (aircraft, weapons) = registry();
+    let mut new = header();
+    new.extra.push((FUEL_KEY.into(), FUEL_WITH_EXTERNAL.into()));
+    assert!(new.fuel_includes_external() && !header().fuel_includes_external());
+    let mut writer = Writer::create(dir.join("new.tore-replay"), &new).unwrap();
+    for a in &aircraft {
+        writer.register_aircraft(a).unwrap();
+    }
+    for w in &weapons {
+        writer.register_weapon(w).unwrap();
+    }
+    for frame in &frames {
+        writer.push(frame).unwrap();
+    }
+    let path = writer.finish(&golden_footer()).unwrap();
+    let newer = Recording::open(path).unwrap();
+    let mut out = Vec::new();
+    write_summary(&newer, &SummaryOptions::default(), &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(text.contains("lb, external tanks included)"), "{text}");
+    // An older recording reads as it always did.
+    let older = golden_recording(&dir);
+    let mut out = Vec::new();
+    write_summary(&older, &SummaryOptions::default(), &mut out).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        text.contains("(used 10 lb)") && !text.contains("external"),
+        "{text}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn golden_summary() {
     let dir = temp_dir("golden-summary");
     let recording = golden_recording(&dir);
@@ -756,7 +815,7 @@ fn anomalies_are_found_with_their_numbers() {
                     .with(field::TO, "PATROL"),
             );
         }
-        if (2_000..2_600).contains(&tick) && tick.is_multiple_of(100) {
+        if (2_000..2_120).contains(&tick) && tick.is_multiple_of(20) {
             frame.events.push(
                 Event::new(kind::AI_TARGET)
                     .with_subject(2)
@@ -777,6 +836,27 @@ fn anomalies_are_found_with_their_numbers() {
                     .with(field::PROJECTILE, Value::Id(1 << 24))
                     .with(field::REASON, "notch"),
             ),
+            // A second shot is decoyed early: an outcome, not a suspect.
+            3_100 => frame.events.push(
+                Event::new(kind::WEAPON_LAUNCH)
+                    .with_subject(2)
+                    .with_object(0)
+                    .with(field::PROJECTILE, Value::Id((1 << 24) + 1)),
+            ),
+            3_150 => {
+                frame.events.push(
+                    Event::new(kind::WEAPON_DECOYED)
+                        .with_subject(2)
+                        .with(field::PROJECTILE, Value::Id((1 << 24) + 1)),
+                );
+                frame.events.push(
+                    Event::new(kind::WEAPON_TRACK_LOST)
+                        .with_subject(2)
+                        .with_object(0)
+                        .with(field::PROJECTILE, Value::Id((1 << 24) + 1))
+                        .with(field::REASON, "decoyed by chaff"),
+                );
+            }
             4_000 => frame.events.push(
                 Event::new(kind::COMMS_DELIVERY)
                     .with_subject(1)
@@ -881,7 +961,9 @@ fn anomalies_are_found_with_their_numbers() {
     assert_eq!(stuck[0].tick, 1_000);
     assert!(stuck[0].detail.contains("PATROL"));
     assert_eq!(find(kinds::AI_FLIPPING).len(), 1);
-    assert_eq!(find(kinds::TRACK_LOST_EARLY)[0].tick, 3_060);
+    let lost = find(kinds::TRACK_LOST_EARLY);
+    assert_eq!(lost.len(), 1, "a decoy is not an early loss: {lost:?}");
+    assert_eq!(lost[0].tick, 3_060);
     assert_eq!(find(kinds::ORDER_REJECTED)[0].tick, 4_000);
     assert_eq!(find(kinds::CALL_DROPPED)[0].tick, 4_100);
     assert_eq!(find(kinds::CALL_SUPPRESSED)[0].tick, 4_200);

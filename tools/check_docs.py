@@ -49,6 +49,7 @@ COVERED_DIRECTORIES = (
     "docs/baselines",
     "docs/research",
     "docs/spec",
+    "docs/testing",
 )
 
 # README.md and AGENTS.md already open with the parity statement in full; a

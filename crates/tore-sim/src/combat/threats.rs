@@ -94,6 +94,8 @@ struct Stored {
     visual_sample: Option<VisualSample>,
     radar_source_position: Option<Vector>,
     lost_since_tick: Option<u64>,
+    /// Last visual sample that classified the missile as incoming.
+    incoming_tick: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -294,6 +296,7 @@ impl ThreatService {
                 visual_sample: None,
                 radar_source_position,
                 lost_since_tick: None,
+                incoming_tick: None,
             },
         );
     }
@@ -318,6 +321,35 @@ impl ThreatService {
                 velocity,
             )
         });
+        // A missile judged incoming stays incoming for the lost-threat grace
+        // after its last incoming sample (fitted, agent decision 2026-09-28).
+        // Without it, a closest approach hovering at the 1,000 ft limit
+        // flipped the judgment every tick, and an AI aircraft alternated
+        // between defending and its previous task on every tick.
+        let stored = self.contacts.get(&missile.id);
+        // A missile that was already warned of as aimed at us last tick (an
+        // electronic warning that just lapsed) counts as incoming then, so
+        // the switch to visual evidence keeps the threat instead of dropping
+        // it for the one tick a first visual sample cannot judge.
+        let incoming_tick = if incoming {
+            Some(tick)
+        } else {
+            stored
+                .and_then(|stored| {
+                    stored.incoming_tick.or_else(|| {
+                        stored
+                            .record
+                            .targeting_receiver
+                            .then(|| tick.saturating_sub(1))
+                    })
+                })
+                .filter(|last| tick.saturating_sub(*last) < LOST_GRACE_TICKS)
+        };
+        let targeting = incoming_tick.is_some();
+        // Seen missiles are judged afresh: one that has stopped looking
+        // incoming (after the grace) is not remembered as aimed at us, or it
+        // would become a stale threat again the moment it left sight.
+        let was_targeting = targeting;
         let record = ThreatRecord {
             missile_id: missile.id,
             source: EvidenceSource::Visual,
@@ -326,8 +358,8 @@ impl ThreatService {
             position: Some(missile.position),
             velocity: observed_velocity,
             guidance_class: None,
-            targeting_receiver: incoming,
-            was_targeting_receiver: incoming,
+            targeting_receiver: targeting,
+            was_targeting_receiver: was_targeting,
             stale: false,
             radar_bearing_deg: None,
         };
@@ -343,6 +375,7 @@ impl ThreatService {
                 }),
                 radar_source_position: None,
                 lost_since_tick: None,
+                incoming_tick,
             },
         );
     }
@@ -383,6 +416,7 @@ impl ThreatService {
                 visual_sample: None,
                 radar_source_position: Some(missile.position),
                 lost_since_tick: None,
+                incoming_tick: None,
             },
         );
     }
@@ -565,6 +599,59 @@ mod tests {
         assert!(service.records().next().is_some());
         service.observe(241, receiver(), &[m], |_, _| true);
         assert!(service.records().next().is_none());
+    }
+
+    #[test]
+    fn a_visual_incoming_judgment_holds_through_the_grace() {
+        // Battery finding (2026-09-28): a missile passing about 1,000 ft
+        // away flipped between incoming and not incoming every tick, and the
+        // AI aircraft it threatened alternated between defending and
+        // formation flying on every tick.
+        let mut service = ThreatService::new(7);
+        let mut m = missile(Guidance::Infrared);
+        service.observe(0, receiver(), &[m], |_, _| true);
+        m.position[2] -= 1_000.0 / TICKS_PER_SECOND;
+        service.observe(1, receiver(), &[m], |_, _| true);
+        assert!(service.records().next().unwrap().targeting_receiver);
+        // Now crossing 1,200 ft to the side: not incoming on its own.
+        let mut tick = 2;
+        let mut step = |service: &mut ThreatService, tick: u64| {
+            m.position[0] = 1_200.0;
+            m.position[2] -= 1_000.0 / TICKS_PER_SECOND;
+            service.observe(tick, receiver(), &[m], |_, _| true);
+            *service.records().next().unwrap()
+        };
+        let held = step(&mut service, tick);
+        assert!(held.targeting_receiver && held.was_targeting_receiver);
+        while tick < 1 + LOST_GRACE_TICKS - 1 {
+            tick += 1;
+            assert!(step(&mut service, tick).targeting_receiver, "tick {tick}");
+        }
+        let expired = step(&mut service, 1 + LOST_GRACE_TICKS);
+        assert!(!expired.targeting_receiver);
+        // Nor is it remembered as aimed at us, so losing sight of it later
+        // does not raise a stale threat.
+        assert!(!expired.was_targeting_receiver);
+    }
+
+    #[test]
+    fn a_lapsed_warning_seen_by_eye_stays_a_threat() {
+        // Battery finding (2026-09-29): when a radar warning lapsed and the
+        // pilot could see the missile, the first visual sample could not yet
+        // judge its motion, so the threat vanished for one tick and the AI
+        // flipped from missile defense to its previous task and back.
+        let mut service = ThreatService::new(7);
+        let mut m = missile(Guidance::Supported);
+        m.supported = true;
+        m.supporting_radar_position = Some([1_000.0, 0.0, 0.0]);
+        service.observe(0, receiver(), &[m], |_, _| true);
+        assert!(service.records().next().unwrap().targeting_receiver);
+        m.supported = false;
+        m.position[2] -= 1_000.0 / TICKS_PER_SECOND;
+        service.observe(1, receiver(), &[m], |_, _| true);
+        let record = *service.records().next().unwrap();
+        assert_eq!(record.source, EvidenceSource::Visual);
+        assert!(record.targeting_receiver);
     }
 
     #[test]

@@ -104,6 +104,8 @@ pub enum Command {
     NextSelection,
     PreviousSelection,
     SelectNav,
+    /// The selected station ran dry: move to the next loaded one, or NAV.
+    AdvanceFromEmpty,
     ToggleSeekerMode,
     CompatibilityWeapons,
     TargetHeat(u8),
@@ -856,6 +858,10 @@ pub struct State {
     range_estimate: Option<RangeEstimate>,
     config: Configuration,
     pub ammo: Vec<u16>,
+    /// Stations that held something at the start of the mission. A station
+    /// emptied in flight keeps its row in the weapons window; one that was
+    /// never loaded has none. See `note_loaded`.
+    ever_loaded: Vec<bool>,
     pub selected: usize,
     pub sensors: Sensors,
     /// Easy targeting's memory of the last selection, kept after sensor
@@ -915,6 +921,8 @@ pub struct State {
     pub target_jammer: bool,
     rng: u32,
     pending_damage: bool,
+    /// Hit points owed to belly scrape wear that have not yet added up to one.
+    scrape_carry: f64,
     previous_player_position: Option<Vector>,
     pub history: Vec<HitRecord>,
     strikes: Vec<Strike>,
@@ -990,11 +998,12 @@ impl State {
     }
     pub fn new(config: Configuration, external: bool) -> Result<Self> {
         config.validate()?;
-        let ammo = config
+        let ammo: Vec<u16> = config
             .stations
             .iter()
             .map(|s| if s.internal || external { s.count } else { 0 })
             .collect();
+        let ever_loaded = ammo.iter().map(|a| a & 0x7fff != 0).collect();
         let triggers = vec![PlayerTrigger::default(); config.stations.len()];
         let gun_cadence = vec![GunCadence::default(); config.stations.len()];
         let range_category = config.target_category;
@@ -1023,6 +1032,7 @@ impl State {
             target_jammer: false,
             rng: 0x46414a54,
             pending_damage: false,
+            scrape_carry: 0.,
             previous_player_position: None,
             external,
             range_estimate: None,
@@ -1033,6 +1043,7 @@ impl State {
             next_target_id: 1,
             config,
             ammo,
+            ever_loaded,
             selected: 0,
             sensors,
             emitters: vec![],
@@ -1188,10 +1199,18 @@ impl State {
             } else {
                 (next + count) % (count + 1)
             };
-            if next == 0 || next == current || self.station_allowed(next - 1) {
+            if next == 0
+                || next == current
+                || (self.station_allowed(next - 1) && self.carries(next - 1))
+            {
                 break;
             }
         }
+        self.set_selection(next);
+    }
+    /// Move to station `next - 1`, or to NAV for 0, dropping any release in
+    /// progress and the mounted seeker.
+    fn set_selection(&mut self, next: usize) {
         self.release();
         self.bore_observation = None;
         self.mounted = Seeker::default();
@@ -1202,8 +1221,45 @@ impl State {
             self.selected = next - 1;
         }
     }
-    fn station_allowed(&self, station: usize) -> bool {
+    /// The mission's starting load is what `ammo` holds now: only those
+    /// stations count as loaded.
+    pub fn start_load(&mut self) {
+        self.ever_loaded = self.ammo.iter().map(|a| a & 0x7fff != 0).collect();
+    }
+    /// Remember which stations hold something now (every tick, so a station
+    /// that later runs dry is known to have been loaded).
+    pub fn note_loaded(&mut self) {
+        for (loaded, ammo) in self.ever_loaded.iter_mut().zip(&self.ammo) {
+            *loaded |= ammo & 0x7fff != 0;
+        }
+    }
+    /// Whether a station was loaded at the start of the mission, whatever it
+    /// holds now.
+    pub fn was_loaded(&self, station: usize) -> bool {
+        self.ever_loaded.get(station).copied().unwrap_or(false)
+    }
+    /// When the selected station has run dry, move to the next station that
+    /// carries something (gun then missiles in ring order), or to NAV when
+    /// nothing is left. Does nothing while the selection still carries.
+    pub fn advance_from_empty(&mut self) {
+        if !self.armed || self.carries(self.selected) {
+            return;
+        }
+        let count = self.ammo.len();
+        let next = (1..count)
+            .map(|step| (self.selected + step) % count)
+            .find(|i| self.station_allowed(*i) && self.carries(*i));
+        self.set_selection(next.map_or(0, |i| i + 1));
+    }
+    /// Whether the guns only cheat lets this station be selected.
+    pub fn station_allowed(&self, station: usize) -> bool {
         !self.cheats.guns_only || is_gun(&self.config.stations[station].weapon)
+    }
+    /// A station the selection ring may stop on: one that carries something
+    /// (an empty station is not on the aircraft), or any station under
+    /// unlimited ammunition.
+    pub fn carries(&self, station: usize) -> bool {
+        self.cheats.unlimited_ammo || self.ammo[station] & 0x7fff != 0
     }
     /// Guns only turned on with a missile selected moves to the gun, or to
     /// NAV when the aircraft has none.
@@ -1425,6 +1481,7 @@ impl State {
             Command::NextWeapon => self.select_next(),
             Command::NextSelection => self.cycle_selection(true),
             Command::PreviousSelection => self.cycle_selection(false),
+            Command::AdvanceFromEmpty => self.advance_from_empty(),
             Command::SelectNav => {
                 self.release();
                 self.armed = false;
@@ -1555,6 +1612,21 @@ impl State {
         if self.player_hp == 0 {
             self.release();
             events.push(Event::PlayerDestroyed);
+        }
+    }
+    /// Belly scrape wear from sliding on the ground with the gear not down:
+    /// `fraction` of the airframe, carried until it makes a whole hit point.
+    /// Invulnerable spares the player. `opinionated` (requested by John,
+    /// 2026-09-29; docs/spec/gear-on-the-ground.md).
+    pub fn scrape_damage(&mut self, fraction: f64, events: &mut Vec<Event>) {
+        if fraction <= 0. || self.player_hp <= 0 || self.cheats.invulnerable() {
+            return;
+        }
+        self.scrape_carry += fraction * f64::from(self.config.damage_capacity);
+        let whole = self.scrape_carry.floor();
+        if whole >= 1. {
+            self.scrape_carry -= whole;
+            self.apply_player_damage(whole as i32, events);
         }
     }
     /// Realistic damage: a hit may fault a subsystem, and accumulated
@@ -5363,6 +5435,25 @@ mod tests {
         )));
     }
     #[test]
+    fn belly_scrape_wears_hit_points_in_whole_points_and_invulnerable_spares_it() {
+        let mut s = fixture(false);
+        let capacity = f64::from(s.config.damage_capacity);
+        let mut events = Vec::new();
+        // Half a hit point is carried, not lost or rounded up.
+        s.scrape_damage(0.5 / capacity, &mut events);
+        assert_eq!(s.player_hp, s.config.damage_capacity);
+        s.scrape_damage(0.5 / capacity, &mut events);
+        assert_eq!(s.player_hp, s.config.damage_capacity - 1);
+        assert!(matches!(events.as_slice(), [Event::PlayerDamaged(1)]));
+        s.scrape_damage(1., &mut events);
+        assert_eq!(s.player_hp, 0);
+        assert!(events.contains(&Event::PlayerDestroyed));
+        let mut spared = fixture(false);
+        spared.cheats.damage = crate::cheats::Damage::Invulnerable;
+        spared.scrape_damage(1., &mut Vec::new());
+        assert_eq!(spared.player_hp, spared.config.damage_capacity);
+    }
+    #[test]
     fn detection_launch_and_inflight_lock_loss_are_distinct() {
         let mut s = fixture(true);
         let mut l = launcher();
@@ -5505,6 +5596,30 @@ mod tests {
                 .any(|e| matches!(e, Event::Jolt(Jolt { target: None, .. })))
         );
         assert!(!events.iter().any(|e| matches!(e, Event::PlayerDamaged(_))));
+    }
+    #[test]
+    fn the_selection_ring_skips_stations_that_carry_nothing() {
+        let mut s = fixture(false);
+        let mut gun = s.config.stations[0].clone();
+        gun.weapon.source = AircraftId::F18.gun().into();
+        s.config.stations.push(gun.clone());
+        s.config.stations.push(gun);
+        s.ammo = vec![0, 100, 0];
+        s.armed = false;
+        s.cycle_selection(true);
+        assert_eq!(
+            (s.armed, s.selected),
+            (true, 1),
+            "the empty station 0 is skipped"
+        );
+        s.cycle_selection(true);
+        assert!(!s.armed, "station 2 is empty too, so NAV follows");
+        s.cycle_selection(false);
+        assert_eq!((s.armed, s.selected), (true, 1));
+        // Unlimited ammunition fires past an empty station, so it stays reachable.
+        s.cheats.unlimited_ammo = true;
+        s.cycle_selection(false);
+        assert_eq!((s.armed, s.selected), (true, 0));
     }
     #[test]
     fn guns_only_leaves_the_player_the_gun_and_nav() {

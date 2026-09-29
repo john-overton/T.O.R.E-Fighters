@@ -1032,6 +1032,12 @@ impl World {
     }
 
     /// The mission's steady wind in world feet per second.
+    /// How far a point is beyond the edge of the theater's map rectangle, in
+    /// nautical miles, measured from the nearest point of the rectangle; zero
+    /// inside it. Terrain runs from 0 to `(cells - 1) * cell` on each axis.
+    pub fn edge_distance_nm(&self, x: f64, z: f64) -> f64 {
+        edge_distance_nm(self.theater.cols, self.theater.rows, x, z)
+    }
     pub fn wind(&self) -> [f64; 3] {
         self.weather.configuration().wind_world_fps()
     }
@@ -1294,6 +1300,23 @@ impl World {
         }
     }
 }
+/// Distance beyond the edge of a `cols` by `rows` terrain grid, in nautical
+/// miles, from the nearest point of the map rectangle (zero inside it).
+pub fn edge_distance_nm(cols: usize, rows: usize, x: f64, z: f64) -> f64 {
+    let cell = f64::from(tore_formats::theater::CELL_FEET);
+    let extent = |cells: usize| cells.saturating_sub(1) as f64 * cell;
+    let beyond = |value: f64, extent: f64| (0. - value).max(value - extent).max(0.);
+    beyond(x, extent(cols)).hypot(beyond(z, extent(rows))) / FEET_PER_NAUTICAL_MILE
+}
+
+/// Feet in a nautical mile.
+pub const FEET_PER_NAUTICAL_MILE: f64 = 6_076.115_49;
+/// The player is warned to turn back this far beyond the theater's edge, and any
+/// aircraft is lost 5 nautical miles further out. `opinionated` (requested by
+/// John, 2026-09-29); the distances and the unit are agent decisions.
+pub const EDGE_WARNING_NM: f64 = 100.;
+pub const EDGE_DESTROY_NM: f64 = 105.;
+
 pub struct Camera {
     /// 0 main, 1 rear mirror, 2 forward panel, 3 other panel, 4 target.
     pub weather_slot: usize,
@@ -1412,6 +1435,20 @@ impl Camera {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[test]
+    fn the_map_edge_distance_is_measured_from_the_nearest_point_of_the_rectangle() {
+        // 209 by 201 cells of 8,192 ft: the map runs 0..1,703,936 by 0..1,638,400.
+        let d = |x: f64, z: f64| edge_distance_nm(209, 201, x, z);
+        assert_eq!(d(0., 0.), 0.);
+        assert_eq!(d(1_703_936., 1_638_400.), 0.);
+        assert_eq!(d(800_000., 800_000.), 0.);
+        let nm = FEET_PER_NAUTICAL_MILE;
+        assert!((d(-100. * nm, 800_000.) - 100.).abs() < 1e-9);
+        assert!((d(1_703_936. + 105. * nm, 0.) - 105.).abs() < 1e-9);
+        assert!((d(800_000., 1_638_400. + 3. * nm) - 3.).abs() < 1e-9);
+        // Past a corner the nearest point is the corner: 3-4-5 miles.
+        assert!((d(-3. * nm, -4. * nm) - 5.).abs() < 1e-9);
+    }
     #[test]
     fn variant_label_does_not_move_the_inspection_camera() {
         let mut w = world();

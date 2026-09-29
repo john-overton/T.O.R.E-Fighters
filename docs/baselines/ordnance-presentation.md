@@ -53,11 +53,12 @@ restoring standard inventories, player accepted-ammunition restart, catalog
 unload/reload and compatible station transfers. This pass completes before the
 probe's unrelated flight appearance checks. Log: `.local/ordnance-fixes/creator.log`.
 
-The full creator probe does **not** pass: it stops at the unchanged assertion
-`F18: damage region 3 at 0.1 has no distinct finite geometry`. That assertion
-expects visible partial damage, conflicting with the current
-[requested intact appearance below destruction](../spec/damage-smoke.md).
-This pass does not change that damage behavior or its old assertion.
+The full creator probe passes since the bug-battery menus lane (2026-09-28). Its
+damage checks had been failing on the assertion `F18: damage region 3 at 0.1 has no
+distinct finite geometry`, which expected visible partial damage and conflicted with
+the [requested intact appearance below destruction](../spec/damage-smoke.md). The
+probe now expects a surviving aircraft to draw intact and only a destroyed one to
+show its regional body, so it matches the game. The flight behavior is unchanged.
 
 Formatting, warnings-denied Clippy, locked workspace tests/build, 70 Python tests,
 source and both debug binary asset guards, documentation headers and diff checks

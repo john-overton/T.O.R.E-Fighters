@@ -1146,6 +1146,10 @@ impl Recorder {
                 if let Some(killer) = killer {
                     event = event.with_object(killer);
                 }
+                // Lost to overspeed or the map edge, not to a weapon.
+                if let Some(cause) = flight.and_then(|f| f.systems.structure.cause) {
+                    event = event.with(field::REASON, cause.label());
+                }
                 if let Some(hit) = hit_by(id) {
                     event = event.with(field::PROJECTILE, replay::Value::Id(hit.projectile));
                     if let Some(weapon) = self.shots.get(&hit.projectile).map(|s| s.weapon) {
@@ -1273,7 +1277,13 @@ impl Recorder {
                         Event::new(kind::AIRCRAFT_CRASHED)
                             .with_subject(id)
                             .with(field::SPEED_KT, speed_kt)
-                            .with(field::REASON, "it hit the ground or a structure"),
+                            .with(
+                                field::REASON,
+                                f.systems
+                                    .structure
+                                    .cause
+                                    .map_or("it hit the ground or a structure", |c| c.label()),
+                            ),
                     );
                 }
                 watch.crashed = f.crashed;
@@ -1647,7 +1657,7 @@ fn flight_data(
         return FlightData {
             airspeed: f.speed,
             g: f.g,
-            fuel_lb: f.fuel,
+            fuel_lb: f.fuel + f.systems.external_lbs(),
             controls: controls(f, tick.pilot),
             on_ground: f.supported_at(player_ground),
             alive: !f.crashed
@@ -1664,7 +1674,7 @@ fn flight_data(
         return FlightData {
             airspeed: f.speed,
             g: f.g,
-            fuel_lb: f.fuel,
+            fuel_lb: f.fuel + f.systems.external_lbs(),
             controls: controls(f, actor.last_input()),
             on_ground: target.is_some_and(|t| t.on_ground),
             alive: actor.alive() && f.escape.is_none(),
@@ -1746,6 +1756,29 @@ fn side(side: tore_sim::ai::launch::Side) -> replay::Side {
     }
 }
 
+/// An aircraft type's name in a recording. The imported PT name, except that
+/// the F-22N and the F/A-XX borrow the F-22's PT name, so they take their own
+/// exact label and are never shown as another aircraft.
+fn type_name(
+    id: tore_formats::aircraft::AircraftId,
+    models: &[crate::aircraft::Airframe],
+    loaded: Option<&str>,
+) -> String {
+    use tore_formats::aircraft::AircraftId;
+    if matches!(id, AircraftId::F22n | AircraftId::Faxx) {
+        return id.label().to_owned();
+    }
+    loaded
+        .map(str::to_owned)
+        .or_else(|| {
+            models
+                .iter()
+                .find(|m| m.profile.id == id)
+                .map(|m| m.profile.name.clone())
+        })
+        .unwrap_or_else(|| id.label().to_owned())
+}
+
 /// Every aircraft at the start of a flight: the player, then each other
 /// aircraft the snapshot draws, named as the setup screen names them.
 pub fn roster(
@@ -1755,12 +1788,7 @@ pub fn roster(
     wings: Option<&AiWings>,
     models: &[crate::aircraft::Airframe],
 ) -> Vec<replay::AircraftInfo> {
-    let name_of = |id: tore_formats::aircraft::AircraftId| {
-        models
-            .iter()
-            .find(|m| m.profile.id == id)
-            .map_or_else(|| id.label().to_owned(), |m| m.profile.name.clone())
-    };
+    let name_of = |id: tore_formats::aircraft::AircraftId| type_name(id, models, None);
     let mut out = vec![replay::AircraftInfo {
         id: 0,
         pt: snapshot
@@ -1768,7 +1796,10 @@ pub fn roster(
             .aircraft
             .map(|a| convert::identity_key(a).to_owned())
             .unwrap_or_default(),
-        name: player_name.to_owned(),
+        name: snapshot.player.aircraft.map_or_else(
+            || player_name.to_owned(),
+            |id| type_name(id, models, Some(player_name)),
+        ),
         label: "You".into(),
         side: replay::Side::Friendly,
         wing: u16::from(player_wing),
@@ -1799,6 +1830,11 @@ pub fn header(
 ) -> replay::Header {
     extra.extend(presentation.extras());
     extra.push(("platform".into(), crate::version::target().into()));
+    // Samples count the external tanks' fuel too; older recordings do not.
+    extra.push((
+        replay::model::FUEL_KEY.into(),
+        replay::model::FUEL_WITH_EXTERNAL.into(),
+    ));
     replay::Header {
         game_version: crate::version::version().into(),
         game_commit: crate::version::commit().into(),
@@ -1815,6 +1851,18 @@ mod tests {
     use super::*;
     use crate::combat::render_hash_tests as fixture;
     use std::sync::mpsc::Receiver;
+
+    #[test]
+    fn the_f22n_and_faxx_are_never_named_as_the_f22() {
+        use tore_formats::aircraft::AircraftId;
+        assert_eq!(type_name(AircraftId::Faxx, &[], Some("F-22")), "F/A-XX");
+        assert_eq!(
+            type_name(AircraftId::F22n, &[], Some("F-22")),
+            "F-22N Raptor"
+        );
+        assert_eq!(type_name(AircraftId::F22, &[], Some("F-22")), "F-22");
+        assert_eq!(type_name(AircraftId::F18, &[], None), "F/A-18D Hornet");
+    }
 
     /// Frames waiting in the queue, oldest first; registrations are skipped.
     fn frames(receiver: &Receiver<Message>) -> Vec<Frame> {

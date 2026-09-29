@@ -28,6 +28,19 @@ fn clock(ticks: u64) -> String {
     format!("{}:{:02}.{}", tenths / 600, tenths / 10 % 60, tenths % 10)
 }
 
+fn plural_ids(ids: &[u32]) -> String {
+    ids.iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Creates a file for an export, saying which file when it cannot.
+fn create(path: &Path) -> AppResult<std::fs::File> {
+    std::fs::File::create(path)
+        .map_err(|error| format!("{}: cannot write it: {error}", path.display()).into())
+}
+
 fn open(path: &Path) -> AppResult<replay::Recording> {
     replay::Recording::open(path).map_err(|error| format!("{}: {error}", path.display()).into())
 }
@@ -167,18 +180,38 @@ pub fn info(path: &Path, out: &mut impl Write) -> AppResult<()> {
 
 /// Writes the debug log and the plain-English summary; returns the folder.
 pub fn log(path: &Path, options: &LogOptions) -> AppResult<PathBuf> {
+    if let (Some(from), Some(to)) = (options.from_s, options.to_s)
+        && from > to
+    {
+        return Err(format!("--from {from} is later than --to {to}").into());
+    }
     let recording = open(path)?;
+    if let Some(ids) = &options.ids {
+        let known: Vec<u32> = recording.aircraft().map(|a| a.id).collect();
+        if let Some(id) = ids.iter().find(|id| !known.contains(id)) {
+            return Err(format!(
+                "--ids names aircraft {id}, which is not in the recording (its aircraft are {})",
+                plural_ids(&known)
+            )
+            .into());
+        }
+    }
     let folder = options.out.clone().unwrap_or_else(|| sibling(path, "-log"));
-    std::fs::create_dir_all(&folder)?;
+    std::fs::create_dir_all(&folder).map_err(|error| {
+        format!(
+            "{}: cannot use it as the output folder: {error}",
+            folder.display()
+        )
+    })?;
     let mut jsonl = export::JsonlOptions::default().seconds(options.from_s, options.to_s);
     jsonl.ids = options.ids.clone();
     if let Some(rate) = options.rate {
         jsonl.sample_hz = rate;
     }
-    let mut file = BufWriter::new(std::fs::File::create(folder.join("log.jsonl"))?);
+    let mut file = BufWriter::new(create(&folder.join("log.jsonl"))?);
     export::write_jsonl(&recording, &jsonl, &mut file)?;
     file.flush()?;
-    let mut file = BufWriter::new(std::fs::File::create(folder.join("summary.txt"))?);
+    let mut file = BufWriter::new(create(&folder.join("summary.txt"))?);
     export::write_summary(&recording, &export::SummaryOptions::default(), &mut file)?;
     file.flush()?;
     Ok(folder)
@@ -200,7 +233,7 @@ pub fn acmi(
     if let Some(rate) = rate {
         options.sample_hz = rate;
     }
-    let mut file = BufWriter::new(std::fs::File::create(&target)?);
+    let mut file = BufWriter::new(create(&target)?);
     export::write_acmi(&recording, &options, &mut file)?;
     file.flush()?;
     Ok(target)
@@ -326,5 +359,15 @@ mod tests {
             sibling(&tore_replay::partial_path(path), "-log"),
             Path::new("/r/2026-09-26_1540_UKR_F18-log")
         );
+    }
+
+    #[test]
+    fn an_export_that_cannot_be_written_names_the_path() {
+        let dir = std::env::temp_dir().join(format!("tore-cli-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let error = create(&dir).unwrap_err().to_string();
+        assert!(error.contains(dir.to_str().unwrap()), "{error}");
+        assert!(error.contains("cannot write it"), "{error}");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

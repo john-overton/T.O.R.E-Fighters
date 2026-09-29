@@ -1,6 +1,7 @@
 //! Flight display projection. Source fonts; authored layout and symbology.
 use crate::{flight::State, menu::Canvas};
 use tore_formats::font::Font;
+use tore_formats::text::GlyphCodes;
 
 pub struct Paint<'a> {
     pub pixels: &'a mut [u8],
@@ -39,7 +40,7 @@ impl Paint<'_> {
     }
     fn readout_box(&mut self, font: &Font, text: &str, x: i32, y: i32) {
         let width = text
-            .bytes()
+            .glyph_codes()
             .map(|c| font.glyphs[c as usize].advance)
             .sum::<usize>() as i32;
         let (left, top, right, bottom) = (
@@ -56,7 +57,7 @@ impl Paint<'_> {
         self.text(font, text, x, y);
     }
     pub fn text(&mut self, font: &Font, text: &str, mut x: i32, y: i32) {
-        for ch in text.bytes() {
+        for ch in text.glyph_codes() {
             let g = &font.glyphs[ch as usize];
             for &(xx, yy) in &g.pixels {
                 self.rect(x + xx as i32, y + yy as i32, 1, 1);
@@ -67,6 +68,12 @@ impl Paint<'_> {
 }
 // Authored F-16-style bank scale requested by the user. The graduated arc
 // rotates past a fixed index, keeping full rolls readable through +/-180.
+// Right-hand status column. The time rate and BAY sit above GEAR so five labels
+// never reach the MSL caption at MSL_LABEL.
+const STATUS_LABEL_X: i32 = 388;
+const TIME_LABEL_Y: i32 = 118;
+const BAY_LABEL_Y: i32 = 129;
+const MSL_LABEL: (i32, i32) = (402, 190);
 pub const HUD_CLIP: (i32, i32, i32, i32) = (174, 96, 292, 354);
 pub const AIM_BOTTOM: i32 = 390;
 const BANK_CENTER_Y: f64 = 135.;
@@ -89,7 +96,7 @@ fn bank_scale(p: &mut Paint<'_>, font: &Font, bank: f64) {
         if major {
             let text = mark.abs().to_string();
             let width = text
-                .bytes()
+                .glyph_codes()
                 .map(|c| font.glyphs[c as usize].advance)
                 .sum::<usize>() as i32;
             let (x, y) = bank_point(angle, 239.);
@@ -216,6 +223,14 @@ fn rung_project(
         ladder_project(pitch, bank, bearing, elevation, zoom)
     }
 }
+/// `2X`, `4X`, `8X` or `1/2X`: the compression level the HUD shows.
+pub fn time_label(scale: f64) -> String {
+    if scale < 1. {
+        format!("1/{:.0}X", 1. / scale)
+    } else {
+        format!("{scale:.0}X")
+    }
+}
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
     pixels: &mut [u8],
@@ -229,7 +244,8 @@ pub fn draw(
     zoom: f32,
     ils: Option<(&tore_sim::airport::Guidance, &str, &str)>,
     wind: Option<&tore_sim::runway_wind::Assessment>,
-    gyro_bank: f64,
+    // The gyro-smoothed bank for the bank scale, and the time compression rate.
+    (gyro_bank, time_scale): (f64, f64),
 ) {
     let mut p = Paint {
         pixels,
@@ -306,7 +322,7 @@ pub fn draw(
     }
     let speed = air.map_or(s.speed / 1.68781, |d| d.true_airspeed_knots);
     p.text(font, "TAS", 211, 190);
-    p.text(font, "MSL", 402, 190);
+    p.text(font, "MSL", MSL_LABEL.0, MSL_LABEL.1);
     p.readout_box(font, &format!("{speed:.0}"), 211, 235);
     p.readout_box(font, &format!("{:.0}", s.position[1]), 405, 235);
     p.text(font, &format!("{:.1}G", s.g), 235, 164);
@@ -314,18 +330,25 @@ pub fn draw(
     if s.afterburner_active() {
         p.text(font, "AFT", 235, 150);
     }
-    for (i, (label, value)) in [
-        ("GEAR", s.gear),
-        ("FLAP", s.flaps),
-        ("BRAKE", s.brake),
-        ("HOOK", s.hook),
-    ]
-    .iter()
-    .enumerate()
-    {
-        if *value > 0.01 {
-            p.text(font, label, 388, 140 + i as i32 * 11);
+    for (label, y, value) in [
+        ("GEAR", 140, s.gear),
+        ("FLAP", 151, s.flaps),
+        ("BRAKE", 162, s.brake),
+        ("HOOK", 173, s.hook),
+        // Manual p. 79: BAY shows while the weapons bay is open.
+        (
+            "BAY",
+            BAY_LABEL_Y,
+            if s.bay_available() { s.bay } else { 0. },
+        ),
+    ] {
+        if value > 0.01 {
+            p.text(font, label, STATUS_LABEL_X, y);
         }
+    }
+    // Manual p. 80: the time compression rate shows in the upper right corner.
+    if (time_scale - 1.).abs() > 1e-9 {
+        p.text(font, &time_label(time_scale), STATUS_LABEL_X, TIME_LABEL_Y);
     }
     if !weapons && ils.is_some_and(|(guidance, _, _)| guidance.active) {
         p.text(
@@ -363,12 +386,12 @@ pub fn draw(
     if let Some((guidance, airport, runway)) = ils {
         let airport: String = airport
             .chars()
-            .filter(|c| c.is_ascii_graphic() || *c == ' ')
+            .filter(|c| tore_formats::text::is_drawn(*c))
             .take(24)
             .collect();
         let runway: String = runway
             .chars()
-            .filter(|c| c.is_ascii_graphic() || *c == ' ')
+            .filter(|c| tore_formats::text::is_drawn(*c))
             .take(16)
             .collect();
         p.text(font, &format!("ILS {airport}"), 252, 106);
@@ -429,6 +452,66 @@ fn wind_label(wind: &tore_sim::runway_wind::Assessment) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn no_status_label_overlaps_another_or_the_msl_caption() {
+        // The labels sit at fixed rows, so every pair covers every combination
+        // of shown labels. Each glyph is a solid 10 px tall cell, the height of
+        // the imported HUD11 font, so this is stricter than the real ink.
+        let (height, advance) = (10, 6);
+        let width = |text: &str| text.chars().count() as i32 * advance;
+        let mut boxes = vec![("MSL", MSL_LABEL.0, MSL_LABEL.1, width("MSL"))];
+        for (name, y) in [
+            ("1/2X", TIME_LABEL_Y),
+            ("BAY", BAY_LABEL_Y),
+            ("GEAR", 140),
+            ("FLAP", 151),
+            ("BRAKE", 162),
+            ("HOOK", 173),
+        ] {
+            boxes.push((name, STATUS_LABEL_X, y, width(name)));
+        }
+        for (i, a) in boxes.iter().enumerate() {
+            for b in &boxes[i + 1..] {
+                let apart = a.1 + a.3 <= b.1
+                    || b.1 + b.3 <= a.1
+                    || a.2 + height <= b.2
+                    || b.2 + height <= a.2;
+                assert!(apart, "{} overlaps {}", a.0, b.0);
+            }
+        }
+    }
+    #[test]
+    fn the_time_compression_label_reads_like_the_menu() {
+        assert_eq!(time_label(0.5), "1/2X");
+        assert_eq!(time_label(2.), "2X");
+        assert_eq!(time_label(8.), "8X");
+    }
+    #[test]
+    fn accented_letters_draw_on_their_code_page_437_cell() {
+        // A font whose only marked cells are 'e' (0x65) and CP437 0x89, the
+        // e with a diaeresis, each a different single pixel.
+        let mut glyphs: Vec<tore_formats::font::Glyph> = (0..256)
+            .map(|_| tore_formats::font::Glyph {
+                advance: 4,
+                pixels: vec![],
+            })
+            .collect();
+        glyphs[0x65].pixels = vec![(0, 0)];
+        glyphs[0x89].pixels = vec![(2, 0)];
+        let font = tore_formats::font::Font { height: 1, glyphs };
+        let mut pixels = vec![0u8; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
+        Paint {
+            pixels: &mut pixels,
+            clip: (0, 0, 640, 480),
+            color: [255, 255, 255, 255],
+        }
+        .text(&font, "e\u{eb}", 0, 0);
+        let lit: Vec<usize> = (0..12)
+            .filter(|x| pixels[x * 4 + 3] != 0 && pixels[x * 4] == 255)
+            .collect();
+        // 'e' at x 0, then the diaeresis cell's pixel two columns into the second glyph.
+        assert_eq!(lit, [0, 4 + 2]);
+    }
     #[test]
     fn wind_readout_distinguishes_crosswind_tailwind_and_ignored_headwind() {
         use tore_sim::runway_wind::{FEET_PER_SECOND_PER_KNOT as K, assessment};
@@ -695,7 +778,7 @@ mod tests {
                 1.,
                 None,
                 None,
-                state.bank,
+                (state.bank, 1.),
             );
             draw(
                 &mut without,
@@ -709,7 +792,7 @@ mod tests {
                 1.,
                 None,
                 None,
-                state.bank,
+                (state.bank, 1.),
             );
             let visible = (297..316).any(|x| {
                 let at = (240 * 640 + x) * 4;
@@ -750,7 +833,7 @@ mod tests {
             1.,
             None,
             None,
-            state.bank,
+            (state.bank, 1.),
         );
         draw(
             &mut without,
@@ -764,7 +847,7 @@ mod tests {
             1.,
             None,
             None,
-            state.bank,
+            (state.bank, 1.),
         );
         let horizon = project(state.pitch, 0., 0., 0., 1.).unwrap().1.round() as usize;
         let compact = ladder_project(state.pitch, 0., 0., 0., 1.)

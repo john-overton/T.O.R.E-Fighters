@@ -30,14 +30,18 @@ mod flight;
 mod flight_canvas;
 mod flight_map;
 mod flight_music;
+mod flight_probe;
 mod flight_ui;
 mod flight_views;
+mod flight_watch;
 mod graphics;
 mod graphics_screen;
 mod hud;
 mod hud_aperture;
+mod ils_survey;
 mod input;
 mod input_catalog;
+mod input_script;
 mod instruments;
 mod lens_flare;
 mod locate;
@@ -52,6 +56,7 @@ mod ordnance;
 mod pause_menu;
 mod performance;
 mod preferences;
+mod probe_invariants;
 mod quick_mission;
 mod radio_calls;
 mod rafale_animation;
@@ -96,6 +101,20 @@ use winit::{
     window::{CursorIcon, Fullscreen, Window, WindowId},
 };
 type AppResult<T> = Result<T, Box<dyn Error>>;
+
+/// A parse error for the number of a command-line option, naming the option.
+fn bad_number(option: &str, error: &dyn std::fmt::Display) -> Box<dyn Error> {
+    format!("{option} needs a number ({error})").into()
+}
+
+/// A number given to a command-line option, or an error that names the
+/// option and what was typed rather than the parser's bare message.
+fn option_number<T: std::str::FromStr>(option: &str, value: &str) -> AppResult<T> {
+    value
+        .trim()
+        .parse()
+        .map_err(|_| format!("{option} needs a number, not '{value}'").into())
+}
 /// How an interactive start opens its window. Requested by John on 2026-09-22:
 /// the game runs native borderless fullscreen by default on every platform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,6 +201,10 @@ struct App {
     turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng,
     /// Player blackout and redout, stepped with the simulation.
     g_effects: tore_sim::g_effects::GEffects,
+    /// Simulation second of the last OVERSPEED message, so it repeats at an interval.
+    overspeed_message_at: Option<f64>,
+    /// Simulation second of the last turn-back warning past the map edge.
+    edge_message_at: Option<f64>,
     flight_view: u8,
     view_rig: flight_views::Rig,
     flight_canvas: flight_canvas::FlightCanvas,
@@ -205,6 +228,9 @@ struct App {
     /// Accepted player runway start, retained independently of editor changes.
     ground_start: Option<u32>,
     launch_creator: bool,
+    /// `--loadout none|guns`: the stores the Load Ordnance page would leave, applied
+    /// to the Quick Mission's loadout before launch.
+    quick_loadout: Option<String>,
     /// Quick Mission uses AI by default. `--fixture-wings` retains the
     /// straight-flight compatibility setup.
     ai_wings_enabled: bool,
@@ -274,6 +300,8 @@ struct App {
     /// The Replays screen, open over the main menu. It stays open while the
     /// replay viewer plays one of its recordings.
     replays_screen: Option<replay::screen::Replays>,
+    /// `--input-script`: key presses and clicks fed in as if from the window.
+    script: Option<input_script::Runner>,
 }
 /// Deliver due radio and crew lines: HUD text and recordings together. The
 /// channel's journal records each delivery for the mission recording.
@@ -403,6 +431,7 @@ fn airport_aircraft(
         supported,
         alive: !flight.crashed,
         speed_fps: flight.speed,
+        ground_clearance_ft: flight.model().configuration().equipment.ground_clearance_ft,
     }
 }
 
@@ -1755,6 +1784,15 @@ impl App {
                         self.quick.ordnance =
                             Some(ordnance::Ordnance::new(load, &self.theater_resources)?);
                     }
+                    if let Some(choice) = self.quick_loadout.clone()
+                        && let Some(o) = self.quick.ordnance.as_mut()
+                    {
+                        if choice == "none" {
+                            o.loadout.quantities.fill(0);
+                        } else {
+                            o.loadout.restrict_to_guns();
+                        }
+                    }
                     let guns_only = self.quick.guns_only();
                     let o = self.quick.ordnance.as_mut().unwrap();
                     if guns_only {
@@ -1989,6 +2027,7 @@ impl App {
                     event_loop.exit();
                     return;
                 }
+                self.combat.raise_airborne_spawns(&self.world);
                 if self.combat.uses_normal_startup_defaults() {
                     self.combat.apply_startup_weapons();
                 }
@@ -2018,7 +2057,10 @@ impl App {
                     event_loop.exit();
                     return;
                 }
-                self.airport_nav_mode = ground_airport.is_some();
+                // A ground start begins on NAV, and so does an aircraft with nothing
+                // loaded in the selected station: an empty station is never armed.
+                self.airport_nav_mode = ground_airport.is_some()
+                    || !self.combat.state.carries(self.combat.state.selected);
                 self.combat.state.armed = !self.airport_nav_mode;
                 self.airport_commands.clear();
                 self.instruments.navigation = navigation::Navigation::default();
@@ -2099,6 +2141,8 @@ impl App {
                 self.reset_vapor();
                 self.previous_flight = self.flight.clone();
                 self.g_effects = Default::default();
+                self.overspeed_message_at = None;
+                self.edge_message_at = None;
                 self.flight_clock.remainder = 0.;
                 self.flight_view = 0;
                 self.view_rig = Default::default();
@@ -2112,7 +2156,7 @@ impl App {
                 saved.apply(&mut self.flight_ui, &mut self.instruments);
                 if self.ground_start.is_some() {
                     self.flight_ui
-                        .message("Ground start: B releases brakes; PageUp adds throttle.");
+                        .message("Ground start: B releases brakes; 5 sets full throttle.");
                 }
                 if let Some(notice) = layout.as_ref().and_then(|l| l.notice()) {
                     self.flight_ui.message(notice);
@@ -2225,6 +2269,370 @@ impl App {
         }
     }
 }
+impl App {
+    /// Runs the next due step of `--input-script`, if there is one.
+    fn run_script(&mut self, event_loop: &ActiveEventLoop) {
+        use input_script::Step;
+        use winit::dpi::PhysicalPosition;
+        use winit::event::{DeviceId, Modifiers, MouseScrollDelta, TouchPhase};
+        let Some(mut runner) = self.script.take() else {
+            return;
+        };
+        let Some(renderer) = &self.renderer else {
+            self.script = Some(runner);
+            return;
+        };
+        let id = renderer.window.id();
+        let viewport = renderer.viewport();
+        renderer.window.request_redraw();
+        // The script stands in for a focused player, whatever the compositor says.
+        self.focused = true;
+        let device_id = DeviceId::dummy();
+        let set_mods = |app: &mut App, runner: &mut input_script::Runner, mods: ModifiersState| {
+            if runner.mods != mods {
+                runner.mods = mods;
+                app.window_event(
+                    event_loop,
+                    id,
+                    WindowEvent::ModifiersChanged(Modifiers::from(mods)),
+                );
+            }
+        };
+        if let Some((spec, _)) = runner.release.take() {
+            let action = self.key_input(event_loop, spec.input(false));
+            self.action(event_loop, action);
+            set_mods(self, &mut runner, ModifiersState::empty());
+            self.script = Some(runner);
+            return;
+        }
+        let tick = self.combat.state.tick();
+        if let Some(step) = runner.due(tick, Instant::now()) {
+            let mouse = |app: &mut App, event: WindowEvent| app.window_event(event_loop, id, event);
+            match step {
+                Step::Wait(_) | Step::WaitTick(..) => {}
+                Step::Tap(spec) => {
+                    set_mods(self, &mut runner, spec.mods);
+                    let action = self.key_input(event_loop, spec.input(true));
+                    self.action(event_loop, action);
+                    runner.release = Some((spec, false));
+                }
+                Step::Down(spec) => {
+                    set_mods(self, &mut runner, spec.mods);
+                    let action = self.key_input(event_loop, spec.input(true));
+                    self.action(event_loop, action);
+                }
+                Step::Up(spec) => {
+                    let action = self.key_input(event_loop, spec.input(false));
+                    self.action(event_loop, action);
+                    set_mods(self, &mut runner, ModifiersState::empty());
+                }
+                Step::Move(x, y) => mouse(
+                    self,
+                    WindowEvent::CursorMoved {
+                        device_id,
+                        position: PhysicalPosition::new(x, y),
+                    },
+                ),
+                Step::MoveMenu(x, y) => {
+                    let (x, y) = (
+                        f64::from(viewport.x) + x * f64::from(viewport.width) / menu::WIDTH as f64,
+                        f64::from(viewport.y)
+                            + y * f64::from(viewport.height) / menu::HEIGHT as f64,
+                    );
+                    mouse(
+                        self,
+                        WindowEvent::CursorMoved {
+                            device_id,
+                            position: PhysicalPosition::new(x, y),
+                        },
+                    );
+                }
+                Step::Press(button) => mouse(
+                    self,
+                    WindowEvent::MouseInput {
+                        device_id,
+                        state: ElementState::Pressed,
+                        button,
+                    },
+                ),
+                Step::Release(button) => mouse(
+                    self,
+                    WindowEvent::MouseInput {
+                        device_id,
+                        state: ElementState::Released,
+                        button,
+                    },
+                ),
+                Step::Click(button) => {
+                    for state in [ElementState::Pressed, ElementState::Released] {
+                        mouse(
+                            self,
+                            WindowEvent::MouseInput {
+                                device_id,
+                                state,
+                                button,
+                            },
+                        );
+                    }
+                }
+                Step::Wheel(notches) => mouse(
+                    self,
+                    WindowEvent::MouseWheel {
+                        device_id,
+                        delta: MouseScrollDelta::LineDelta(0., notches),
+                        phase: TouchPhase::Moved,
+                    },
+                ),
+                Step::Snapshot(path) => {
+                    // A relative path lands in TORE_SCRIPT_OUT when that is set.
+                    let path = match std::env::var_os("TORE_SCRIPT_OUT") {
+                        Some(dir) if path.is_relative() => PathBuf::from(dir).join(path),
+                        _ => path,
+                    };
+                    let result = (|| -> std::io::Result<()> {
+                        use std::io::Write;
+                        if let Some(parent) = path.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        let mut file = std::fs::File::create(&path)?;
+                        write!(file, "P6\n{} {}\n255\n", menu::WIDTH, menu::HEIGHT)?;
+                        for pixel in self.menu.pixels.chunks_exact(4) {
+                            file.write_all(&pixel[..3])?;
+                        }
+                        Ok(())
+                    })();
+                    match result {
+                        Ok(()) => println!("Script snapshot: {}", path.display()),
+                        Err(error) => {
+                            self.error = Some(format!("{}: {error}", path.display()).into())
+                        }
+                    }
+                }
+                Step::Exit => {
+                    println!("Input script: exit");
+                    self.action(event_loop, Action::Exit);
+                }
+            }
+        }
+        self.script = Some(runner);
+    }
+
+    /// A key press or release, from the window or from `--input-script`.
+    /// Returns what the game should do next.
+    fn key_input(&mut self, event_loop: &ActiveEventLoop, event: input_script::KeyInput) -> Action {
+        let mut name = match &event.logical {
+            Key::Named(k) => format!("{k:?}"),
+            Key::Character(c) => c.to_ascii_lowercase(),
+            _ => String::new(),
+        };
+        if self.screen == Screen::Flight {
+            name = flight_key(event.physical, &name);
+        }
+        // Alt-Enter switches window mode on every screen, before any
+        // screen claims the key. F11 is not used: it already opens the
+        // flight keyboard help (docs/FLIGHT-CONTROLS.md).
+        if name == "Enter" && self.modifiers.alt_key() && event.pressed {
+            if !event.repeat {
+                self.toggle_fullscreen();
+            }
+            return Action::None;
+        }
+        // Exit to desktop keeps its meaning over every screen, the
+        // controls, sound and graphics screens included.
+        if event.pressed
+            && ((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
+                || (self.modifiers.alt_key() && name == "F4"))
+            && (self.controls.is_some()
+                || self.sound_screen.is_some()
+                || self.graphics_screen.is_some())
+        {
+            self.action(event_loop, Action::Exit);
+            return Action::None;
+        }
+        // The controls screen takes every key press while it is open,
+        // with the same physical key names flight uses for capture.
+        if event.pressed
+            && let Some(editor) = &mut self.controls
+        {
+            if event.repeat && editor.capturing() {
+                return Action::None;
+            }
+            // The search field takes printable text with its case;
+            // Ctrl and Alt combinations stay shortcuts.
+            if editor.typing()
+                && !self.modifiers.control_key()
+                && !self.modifiers.alt_key()
+                && let Some(text) = &event.text
+                && text.chars().any(|c| !c.is_control())
+            {
+                let result = editor.text_input(text);
+                let action = self.controls_result(result);
+                self.action(event_loop, action);
+                return Action::None;
+            }
+            let name = flight_key(event.physical, &name);
+            let result = editor.key(
+                &name,
+                self.modifiers.shift_key(),
+                self.modifiers.control_key(),
+                self.modifiers.alt_key(),
+            );
+            let action = self.controls_result(result);
+            self.action(event_loop, action);
+            return Action::None;
+        }
+        if event.pressed
+            && let Some(screen) = &mut self.sound_screen
+        {
+            let outcome = screen.key(&name, self.modifiers.shift_key());
+            let action = self.sound_result(outcome);
+            self.action(event_loop, action);
+            return Action::None;
+        }
+        if event.pressed
+            && let Some(editor) = &mut self.graphics_screen
+        {
+            let result = editor.key(&name, self.modifiers.shift_key());
+            let action = self.graphics_result(result);
+            self.action(event_loop, action);
+            return Action::None;
+        }
+        // The Replays screen takes key presses too, except the
+        // shortcuts that quit the game.
+        if event.pressed
+            && self.screen == Screen::Main
+            && !((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
+                || (self.modifiers.alt_key() && name == "F4"))
+            && let Some(screen) = &mut self.replays_screen
+        {
+            let result = screen.key(&name, self.modifiers.shift_key(), event.repeat);
+            let action = self.replays_result(result);
+            self.action(event_loop, action);
+            return Action::None;
+        }
+        if self.screen == Screen::Flight
+            && event.pressed
+            && self.flight_ui.debug_panels
+            && !self.flight_ui.menu
+            && let Some(view) = self.live_debug.key(&name, self.modifiers.shift_key())
+        {
+            if let Some(view) = view {
+                let action = self.live_view(view);
+                self.action(event_loop, action);
+            }
+            return Action::None;
+        }
+        if self.screen == Screen::Flight
+            && !(event.pressed
+                && self.flight_ui.map.open
+                && matches!(
+                    name.as_str(),
+                    "m" | "Escape"
+                        | "+"
+                        | "="
+                        | "-"
+                        | "_"
+                        | "ArrowLeft"
+                        | "ArrowRight"
+                        | "ArrowUp"
+                        | "ArrowDown"
+                        | "Home"
+                ))
+            && !(event.pressed
+                && self.flight_ui.menu
+                && matches!(
+                    name.as_str(),
+                    "Escape"
+                        | "Tab"
+                        | "ArrowUp"
+                        | "ArrowDown"
+                        | "ArrowLeft"
+                        | "ArrowRight"
+                        | "Enter"
+                        | "Space"
+                ))
+            && (if event.repeat {
+                self.input.claimed(&name)
+            } else {
+                self.input.key(&name, event.pressed, self.modifiers)
+            })
+        {
+            return Action::None;
+        }
+        if self.screen == Screen::Flight && name == "Space" {
+            let blocked = self.flight_ui.frozen() || !self.focused || !self.modifiers.is_empty();
+            self.combat
+                .input
+                .space(event.pressed, event.repeat, blocked);
+            if !self.flight_ui.menu {
+                return Action::None;
+            }
+        }
+        if matches!(self.screen, Screen::Viewer | Screen::Flight) && !event.pressed {
+            self.camera.keys.remove(&name);
+            self.camera.keys.remove(&format!("Look{name}"));
+            return Action::None;
+        }
+        if !event.pressed {
+            return Action::None;
+        }
+        if (self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
+            || (self.modifiers.alt_key() && name == "F4")
+        {
+            Action::Exit
+        } else if self.screen == Screen::Flight {
+            let map_before = self.flight_ui.map.open;
+            let before = self.flight_ui.frozen();
+            let command = if event.repeat || self.modifiers.super_key() {
+                flight_ui::Command::None
+            } else {
+                self.flight_ui.key(
+                    &name,
+                    self.modifiers.shift_key(),
+                    self.modifiers.control_key(),
+                    self.modifiers.alt_key(),
+                    &self.hornet.flight_menu,
+                )
+            };
+            if self.flight_ui.map.open != map_before {
+                self.flight_ui.map.cancel_press();
+                self.camera.keys.clear();
+                self.combat.cancel();
+                self.instruments.cancel_press();
+            }
+            if self.flight_ui.frozen() || before != self.flight_ui.frozen() {
+                self.camera.keys.clear();
+                self.combat.cancel();
+                self.instruments.cancel_press();
+                self.flight_clock.remainder = 0.;
+                self.previous_flight.clone_from(&self.flight);
+                self.frame_time = Instant::now();
+            } else if !self.flight_ui.map.open {
+                look::press(&mut self.camera.keys, &name, self.modifiers);
+            }
+            self.flight_command(command)
+        } else if self.screen == Screen::Viewer {
+            if name == "Escape" {
+                Action::Back
+            } else {
+                self.camera.keys.insert(name);
+                Action::None
+            }
+        } else if event.repeat {
+            Action::None
+        } else if self.screen == Screen::Quick {
+            self.quick.key(
+                if name == "Space" { " " } else { &name },
+                self.modifiers.shift_key(),
+            )
+        } else {
+            self.menu.state.key(
+                if name == "Space" { " " } else { &name },
+                self.modifiers.shift_key(),
+            )
+        }
+    }
+}
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.renderer.is_some() {
@@ -2329,7 +2737,7 @@ impl ApplicationHandler for App {
                         event_loop.exit();
                     } else if self.error.is_none() {
                         println!(
-                            "Quick Mission launch: ground={:?} player_position={:?} supported={} airborne_targets={} parked_targets={} enemy_nm={:.1}",
+                            "Quick Mission launch: ground={:?} player_position={:?} supported={} airborne_targets={} parked_targets={} enemy_nm={:.1} ammo={:?} listed={:?}",
                             self.ground_start,
                             self.flight.position,
                             self.flight.supported_at(
@@ -2352,9 +2760,16 @@ impl ApplicationHandler for App {
                             self.combat
                                 .mission_layout
                                 .as_ref()
-                                .map_or(0., |l| l.enemy.distance_ft / quick_mission::FEET_PER_NM)
+                                .map_or(0., |l| l.enemy.distance_ft / quick_mission::FEET_PER_NM),
+                            self.combat.state.ammo,
+                            self.combat.readout(&self.flight, 1.).weapons,
                         );
                     }
+                } else if self.screen == Screen::Flight {
+                    // A flight started straight from the command line records
+                    // itself like one started from the menu; captures, smoke
+                    // tests and timing runs have no recording library.
+                    self.start_replay_recording();
                 }
             }
             Err(error) => {
@@ -2513,7 +2928,7 @@ impl ApplicationHandler for App {
                 self.focused = true;
                 Action::None
             }
-            WindowEvent::Focused(false) => {
+            WindowEvent::Focused(false) if self.script.is_none() => {
                 self.focused = false;
                 self.input.context(true, false);
                 if self.screen == Screen::Flight {
@@ -2755,216 +3170,16 @@ impl ApplicationHandler for App {
                 self.modifiers = modifiers.state();
                 Action::None
             }
-            WindowEvent::KeyboardInput { event, .. } => {
-                let mut name = match &event.logical_key {
-                    Key::Named(k) => format!("{k:?}"),
-                    Key::Character(c) => c.to_ascii_lowercase(),
-                    _ => String::new(),
-                };
-                if self.screen == Screen::Flight {
-                    name = flight_key(event.physical_key, &name);
-                }
-                // Alt-Enter switches window mode on every screen, before any
-                // screen claims the key. F11 is not used: it already opens the
-                // flight keyboard help (docs/FLIGHT-CONTROLS.md).
-                if name == "Enter"
-                    && self.modifiers.alt_key()
-                    && event.state == ElementState::Pressed
-                {
-                    if !event.repeat {
-                        self.toggle_fullscreen();
-                    }
-                    return;
-                }
-                // The controls screen takes every key press while it is open,
-                // with the same physical key names flight uses for capture.
-                if event.state == ElementState::Pressed
-                    && let Some(editor) = &mut self.controls
-                {
-                    if event.repeat && editor.capturing() {
-                        return;
-                    }
-                    // The search field takes printable text with its case;
-                    // Ctrl and Alt combinations stay shortcuts.
-                    if editor.typing()
-                        && !self.modifiers.control_key()
-                        && !self.modifiers.alt_key()
-                        && let Some(text) = &event.text
-                        && text.chars().any(|c| !c.is_control())
-                    {
-                        let result = editor.text_input(text);
-                        let action = self.controls_result(result);
-                        self.action(event_loop, action);
-                        return;
-                    }
-                    let name = flight_key(event.physical_key, &name);
-                    let result = editor.key(
-                        &name,
-                        self.modifiers.shift_key(),
-                        self.modifiers.control_key(),
-                        self.modifiers.alt_key(),
-                    );
-                    let action = self.controls_result(result);
-                    self.action(event_loop, action);
-                    return;
-                }
-                if event.state == ElementState::Pressed
-                    && let Some(screen) = &mut self.sound_screen
-                {
-                    let outcome = screen.key(&name, self.modifiers.shift_key());
-                    let action = self.sound_result(outcome);
-                    self.action(event_loop, action);
-                    return;
-                }
-                if event.state == ElementState::Pressed
-                    && let Some(editor) = &mut self.graphics_screen
-                {
-                    let result = editor.key(&name, self.modifiers.shift_key());
-                    let action = self.graphics_result(result);
-                    self.action(event_loop, action);
-                    return;
-                }
-                // The Replays screen takes key presses too, except the
-                // shortcuts that quit the game.
-                if event.state == ElementState::Pressed
-                    && self.screen == Screen::Main
-                    && !((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
-                        || (self.modifiers.alt_key() && name == "F4"))
-                    && let Some(screen) = &mut self.replays_screen
-                {
-                    let result = screen.key(&name, self.modifiers.shift_key(), event.repeat);
-                    let action = self.replays_result(result);
-                    self.action(event_loop, action);
-                    return;
-                }
-                if self.screen == Screen::Flight
-                    && event.state == ElementState::Pressed
-                    && self.flight_ui.debug_panels
-                    && !self.flight_ui.menu
-                    && let Some(view) = self.live_debug.key(&name, self.modifiers.shift_key())
-                {
-                    if let Some(view) = view {
-                        let action = self.live_view(view);
-                        self.action(event_loop, action);
-                    }
-                    return;
-                }
-                if self.screen == Screen::Flight
-                    && !(event.state == ElementState::Pressed
-                        && self.flight_ui.map.open
-                        && matches!(
-                            name.as_str(),
-                            "m" | "Escape"
-                                | "+"
-                                | "="
-                                | "-"
-                                | "_"
-                                | "ArrowLeft"
-                                | "ArrowRight"
-                                | "ArrowUp"
-                                | "ArrowDown"
-                                | "Home"
-                        ))
-                    && (event.state == ElementState::Released
-                        || (!(self.flight_ui.menu
-                            && matches!(
-                                name.as_str(),
-                                "Escape"
-                                    | "Tab"
-                                    | "ArrowUp"
-                                    | "ArrowDown"
-                                    | "ArrowLeft"
-                                    | "ArrowRight"
-                                    | "Enter"
-                                    | "Space"
-                            ))))
-                    && (if event.repeat {
-                        self.input.claimed(&name)
-                    } else {
-                        self.input
-                            .key(&name, event.state == ElementState::Pressed, self.modifiers)
-                    })
-                {
-                    return;
-                }
-                if self.screen == Screen::Flight && name == "Space" {
-                    let blocked =
-                        self.flight_ui.frozen() || !self.focused || !self.modifiers.is_empty();
-                    self.combat.input.space(
-                        event.state == ElementState::Pressed,
-                        event.repeat,
-                        blocked,
-                    );
-                    if !self.flight_ui.menu {
-                        return;
-                    }
-                }
-                if matches!(self.screen, Screen::Viewer | Screen::Flight)
-                    && event.state == ElementState::Released
-                {
-                    self.camera.keys.remove(&name);
-                    self.camera.keys.remove(&format!("Look{name}"));
-                    return;
-                }
-                if event.state != ElementState::Pressed {
-                    return;
-                }
-                if (self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
-                    || (self.modifiers.alt_key() && name == "F4")
-                {
-                    Action::Exit
-                } else if self.screen == Screen::Flight {
-                    let map_before = self.flight_ui.map.open;
-                    let before = self.flight_ui.frozen();
-                    let command = if event.repeat || self.modifiers.super_key() {
-                        flight_ui::Command::None
-                    } else {
-                        self.flight_ui.key(
-                            &name,
-                            self.modifiers.shift_key(),
-                            self.modifiers.control_key(),
-                            self.modifiers.alt_key(),
-                            &self.hornet.flight_menu,
-                        )
-                    };
-                    if self.flight_ui.map.open != map_before {
-                        self.flight_ui.map.cancel_press();
-                        self.camera.keys.clear();
-                        self.combat.cancel();
-                        self.instruments.cancel_press();
-                    }
-                    if self.flight_ui.frozen() || before != self.flight_ui.frozen() {
-                        self.camera.keys.clear();
-                        self.combat.cancel();
-                        self.instruments.cancel_press();
-                        self.flight_clock.remainder = 0.;
-                        self.previous_flight.clone_from(&self.flight);
-                        self.frame_time = Instant::now();
-                    } else if !self.flight_ui.map.open {
-                        look::press(&mut self.camera.keys, &name, self.modifiers);
-                    }
-                    self.flight_command(command)
-                } else if self.screen == Screen::Viewer {
-                    if name == "Escape" {
-                        Action::Back
-                    } else {
-                        self.camera.keys.insert(name);
-                        Action::None
-                    }
-                } else if event.repeat {
-                    Action::None
-                } else if self.screen == Screen::Quick {
-                    self.quick.key(
-                        if name == "Space" { " " } else { &name },
-                        self.modifiers.shift_key(),
-                    )
-                } else {
-                    self.menu.state.key(
-                        if name == "Space" { " " } else { &name },
-                        self.modifiers.shift_key(),
-                    )
-                }
-            }
+            WindowEvent::KeyboardInput { event, .. } => self.key_input(
+                event_loop,
+                input_script::KeyInput {
+                    logical: event.logical_key.clone(),
+                    physical: event.physical_key,
+                    pressed: event.state == ElementState::Pressed,
+                    repeat: event.repeat,
+                    text: event.text.clone(),
+                },
+            ),
             WindowEvent::RedrawRequested => {
                 let frame_start = Instant::now();
                 let mut simulation_ms = 0.;
@@ -3262,6 +3477,48 @@ impl ApplicationHandler for App {
                             );
                             if let Some(level) = self.performance.veil_level() {
                                 self.g_effects.blackout = level;
+                            }
+                            // Beyond the map: a turn-back warning every ten seconds from
+                            // 100 nautical miles out, and the aircraft is lost at 105
+                            // (requested by John, 2026-09-29).
+                            if !self.flight.crashed {
+                                let [x, _, z] = self.flight.position;
+                                let out = self.world.edge_distance_nm(x, z);
+                                if out >= terrain::EDGE_DESTROY_NM {
+                                    self.flight.systems.destroy(
+                                        tore_sim::aircraft_systems::LossCause::OutOfBounds,
+                                    );
+                                    self.flight.crashed = true;
+                                } else if out >= terrain::EDGE_WARNING_NM {
+                                    let now = self.flight.ticks as f64 * flight::DT;
+                                    if self
+                                        .edge_message_at
+                                        .is_none_or(|at| now - at >= 10. || now < at)
+                                    {
+                                        self.edge_message_at = Some(now);
+                                        self.flight_ui
+                                            .message("You have left the theater: turn back now");
+                                    }
+                                } else {
+                                    self.edge_message_at = None;
+                                }
+                            }
+                            // Past the top speed: a short cockpit message, repeated
+                            // every four seconds (requested by John, 2026-09-29).
+                            if !self.flight.crashed
+                                && self
+                                    .flight
+                                    .overspeed_ratio()
+                                    .is_some_and(|r| r >= flight::OVERSPEED_SHAKE_FULL)
+                            {
+                                let now = self.flight.ticks as f64 * flight::DT;
+                                if self
+                                    .overspeed_message_at
+                                    .is_none_or(|at| now - at >= 4. || now < at)
+                                {
+                                    self.overspeed_message_at = Some(now);
+                                    self.flight_ui.message("OVERSPEED");
+                                }
                             }
                             if let Some(points) = self.hornet.streamer_points(&self.flight) {
                                 self.vapor.step(self.world.weather.ticks(), points);
@@ -3732,19 +3989,28 @@ impl ApplicationHandler for App {
                                 self.hornet.camera(&presented, 0, camera_keys)
                             }
                         };
-                        if !self.flight_ui.cheats.no_screen_shake
-                            && !presented.crashed
-                            && self.view_rig.cockpit(self.flight_view)
-                        {
+                        if !self.flight_ui.cheats.no_screen_shake && !presented.crashed {
                             let seconds =
                                 self.flight.ticks as f64 * flight::DT + self.flight_clock.remainder;
-                            let [yaw, pitch] = tore_sim::g_effects::shake(presented.g, seconds);
-                            look::apply(
-                                &mut self.camera,
-                                presented.view_position(),
-                                [yaw as f32, pitch as f32],
-                                false,
-                            );
+                            // High-G shake is the cockpit's; the overspeed shake
+                            // shakes every view (requested by John, 2026-09-29).
+                            let mut shake = if self.view_rig.cockpit(self.flight_view) {
+                                tore_sim::g_effects::shake(presented.g, seconds)
+                            } else {
+                                [0.; 2]
+                            };
+                            if let Some(ratio) = presented.overspeed_ratio() {
+                                let over = tore_sim::g_effects::overspeed_shake(ratio, seconds);
+                                shake = [shake[0] + over[0], shake[1] + over[1]];
+                            }
+                            if shake != [0.; 2] {
+                                look::apply(
+                                    &mut self.camera,
+                                    presented.view_position(),
+                                    [shake[0] as f32, shake[1] as f32],
+                                    false,
+                                );
+                            }
                         }
                         self.camera.zoom = self.flight_ui.zoom;
                         // One resolved instant per frame, shared by the main view,
@@ -4048,7 +4314,7 @@ impl ApplicationHandler for App {
                                 self.flight_canvas.hud_zoom(1.),
                                 ils,
                                 airport_wind(&self.world, &presented, guidance.as_ref()).as_ref(),
-                                gyro_bank,
+                                (gyro_bank, self.flight_ui.time_scale),
                             );
                         }
                         let target_friendly = self.combat.state.display_target().is_some_and(|target| {
@@ -4374,6 +4640,7 @@ impl ApplicationHandler for App {
         self.renderer = None;
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.run_script(event_loop);
         // The replay viewer shows instead of the Replays screen, which stays
         // open underneath and reads the list again when it is back.
         if self.screen != Screen::Main
@@ -4471,12 +4738,100 @@ impl ApplicationHandler for App {
             }
             self.next_frame = None;
         }
-        let next = self
+        let mut next = self
             .next_frame
             .map_or(self.input.next_poll, |n| n.min(self.input.next_poll));
+        if self.script.is_some() {
+            next = next.min(Instant::now() + Duration::from_millis(10));
+        }
         event_loop.set_control_flow(ControlFlow::WaitUntil(next));
     }
 }
+/// The combat state for a run: the PT default load (or the range's), or the Load
+/// Ordnance page's edits without the page: every store off (`none`), or every
+/// external store off with the internal gun kept (`guns`).
+fn build_combat(
+    hornet: &aircraft::Airframe,
+    resources: &std::collections::BTreeMap<String, Vec<u8>>,
+    live_fire: bool,
+    stripped: Option<&str>,
+) -> AppResult<combat::Combat> {
+    let Some(choice) = stripped else {
+        return combat::Combat::new(hornet, resources, live_fire);
+    };
+    let mut load = tore_sim::combat::loadout::Loadout::new(&hornet.profile, |name| {
+        resources
+            .get(name)
+            .cloned()
+            .ok_or_else(|| std::io::Error::other(format!("missing loadout resource {name}")))
+    })?;
+    if choice == "none" {
+        load.quantities.fill(0);
+    } else {
+        load.restrict_to_guns();
+    }
+    combat::Combat::with_loadout(hornet, resources, &load)
+}
+
+/// The map-edge rule for a probe's flight: lost 105 nautical miles beyond the
+/// theater. (The game host also warns the player from 100; see `terrain.rs`.)
+fn apply_edge_loss(flight: &mut flight::State, world: &terrain::World) {
+    if flight.crashed {
+        return;
+    }
+    let [x, _, z] = flight.position;
+    if world.edge_distance_nm(x, z) >= terrain::EDGE_DESTROY_NM {
+        flight
+            .systems
+            .destroy(tore_sim::aircraft_systems::LossCause::OutOfBounds);
+        flight.crashed = true;
+    }
+}
+
+/// The `--maneuver devices` script: each device is set down one after another,
+/// then up again, so the run shows every travel.
+fn device_schedule(tick: u64) -> Option<Vec<flight::PilotCommand>> {
+    use flight::{PilotCommand::Set, Switch::*};
+    let (device, down) = match tick {
+        120 => (Gear, true),
+        240 => (Flaps, true),
+        360 => (Airbrake, true),
+        480 => (Hook, true),
+        1800 => (Gear, false),
+        1920 => (Flaps, false),
+        2040 => (Airbrake, false),
+        2160 => (Hook, false),
+        _ => return None,
+    };
+    Some(vec![Set(device, down)])
+}
+
+/// The `--flight-cheat` names, for headless probes and live-fire captures.
+const PROBE_CHEATS: [&str; 8] = [
+    "extra-g",
+    "no-g-effects",
+    "no-spins",
+    "no-crashes",
+    "unlimited-fuel",
+    "unlimited-ammo",
+    "invulnerable",
+    "realistic-damage",
+];
+
+fn apply_probe_cheat(cheats: &mut tore_sim::cheats::Cheats, name: &str) {
+    use tore_sim::cheats::Damage;
+    match name {
+        "extra-g" => cheats.extra_g = true,
+        "no-g-effects" => cheats.no_g_effects = true,
+        "no-spins" => cheats.no_spins = true,
+        "no-crashes" => cheats.no_crashes = true,
+        "unlimited-fuel" => cheats.unlimited_fuel = true,
+        "unlimited-ammo" => cheats.unlimited_ammo = true,
+        "invulnerable" => cheats.damage = Damage::Invulnerable,
+        _ => cheats.damage = Damage::Realistic,
+    }
+}
+
 /// What the headless AI probe scripts for the human leader
 /// (`--maneuver takeoff`, `--probe-wing-size`, `--probe-wing-order`,
 /// `--probe-player-home`, `--probe-attack`). Development harness only.
@@ -4496,8 +4851,17 @@ struct ProbeScript {
     wing_size: Option<usize>,
     /// Reproduce an isolated player wing without the usual probe opponents.
     wing_only: bool,
+    /// `--probe-fight FRIENDLY:ENEMY`: total aircraft per side, 1..15 each
+    /// (the player counts as one friendly), filled five to a wing.
+    fight: Option<(usize, usize)>,
+    /// Aircraft for the friendly AI wings, overriding the creator default.
+    friendly_aircraft: Option<tore_formats::aircraft::AircraftId>,
     /// Wing orders to all wingmen at a tick.
     orders: Vec<(u64, tore_sim::ai::wing::PlayerOrder)>,
+    /// `--probe-group GROUP:CHOICE[:survive]`: a creator group objective
+    /// (group 1..6, friendly then enemy; choice index in that group's
+    /// objective list) and whether the group must survive.
+    groups: Vec<(usize, usize, bool)>,
     /// From the first tick to the second the player flies gear down over the
     /// departure airfield, the configuration that gives it landing priority.
     home: Option<(u64, u64)>,
@@ -4595,7 +4959,7 @@ impl ProbeScript {
             "engage-my-target" => PlayerOrder::EngageMyTarget,
             _ => return Err(usage.into()),
         };
-        Ok((tick.parse()?, order))
+        Ok((option_number("--probe-wing-order", tick)?, order))
     }
 
     /// `TICK` for a single attack, or `TICK:REPEAT_SECONDS`.
@@ -4630,6 +4994,35 @@ enum ProbePilot {
     Cruise,
     Home,
     Away,
+}
+
+/// The scripted gear-up for the `takeoff-gear-early` (at 80 knots with the
+/// wheels still down, too slow to fly) and `takeoff-gear-airborne` (once 50 ft
+/// above the runway) headless takeoffs. Returns the input for that tick.
+fn gear_pull(
+    maneuver: &str,
+    state: &flight::State,
+    pulled: &mut bool,
+    keys: &flight::PilotInput,
+    world: &Option<terrain::World>,
+) -> Option<flight::PilotInput> {
+    if *pulled {
+        return None;
+    }
+    let due = match maneuver {
+        "takeoff-gear-early" => state.speed >= 80. * 1.68781,
+        "takeoff-gear-airborne" => world.as_ref().is_some_and(|w| {
+            state.position[1] - w.surface(state.position[0], state.position[2]).height > 50.
+        }),
+        _ => false,
+    };
+    if !due {
+        return None;
+    }
+    *pulled = true;
+    let mut input = keys.clone();
+    input.commands = vec![flight::PilotCommand::Set(flight::Switch::Gear, false)];
+    Some(input)
 }
 
 /// Height above the ground at which the scripted leader cleans up.
@@ -4730,6 +5123,9 @@ struct ProbeWatch {
     /// Ticks between trace lines for the player's wing, 0 for none.
     trace: u64,
     go_arounds: std::collections::BTreeMap<u32, u32>,
+    /// Distance past each final's aim point last tick, to catch the
+    /// threshold crossing.
+    final_past: std::collections::BTreeMap<u32, f64>,
 }
 
 /// Aircraft on the ground closer than this are reported as touching.
@@ -4849,6 +5245,40 @@ impl ProbeWatch {
                     );
                 }
                 self.go_arounds.insert(slot.id, count);
+                // The wheel height over the threshold on final: the ILS
+                // path crosses it about 52 ft up.
+                if sequence.phase() == tore_sim::ai::airfield::Phase::Final
+                    && actor.alive()
+                    && !f.crashed
+                {
+                    let point = sequence.landing_point();
+                    let [x, y, z] = f.position;
+                    let [vx, _, vz] = f.velocity;
+                    let past = ((x - point[0]) * vx + (z - point[2]) * vz) / vx.hypot(vz).max(1.);
+                    let at = -tore_sim::airport::AIM_PAST_THRESHOLD_FT;
+                    if let Some(&before) = self.final_past.get(&slot.id)
+                        && before < at
+                        && past >= at
+                    {
+                        let clearance = actor
+                            .flight()
+                            .model()
+                            .configuration()
+                            .equipment
+                            .ground_clearance_ft;
+                        println!(
+                            "t={tick} ({seconds:.1}s) THRESHOLD {} wheels={:.0} ft (path {:.0}) kt={:.0} end={:?}",
+                            slot.label(),
+                            y - clearance - point[1],
+                            tore_sim::airport::threshold_crossing_height_ft(),
+                            f.speed * 3600. / 6076.12,
+                            sequence.landing_end()
+                        );
+                    }
+                    self.final_past.insert(slot.id, past);
+                } else {
+                    self.final_past.remove(&slot.id);
+                }
             }
             if !actor.alive() || f.crashed {
                 continue;
@@ -5617,6 +6047,41 @@ fn ai_probe_run(
             quick.draft.values[field] = index;
         }
     }
+    if let Some(friend) = script.friendly_aircraft {
+        let index = quick
+            .aircraft_files
+            .iter()
+            .position(|p| p == friend.selection_key())
+            .ok_or("probe friendly aircraft is not imported")?;
+        for field in [9, 12] {
+            quick.draft.values[field] = index;
+        }
+    }
+    if let Some((friendly, enemy)) = script.fight {
+        // Three wings of up to five a side, the creator's own limit.
+        for (fields, total) in [([4, 7, 10], friendly), ([21, 24, 27], enemy)] {
+            for (n, field) in fields.into_iter().enumerate() {
+                quick.draft.values[field] = total.saturating_sub(n * 5).min(5);
+            }
+        }
+        quick.draft.values[11] = quick.draft.values[8];
+        for field in [25, 28] {
+            quick.draft.values[field] = quick.draft.values[22];
+        }
+    }
+    for &(group, choice, survive) in &script.groups {
+        let choices = quick_mission::QuickMission::objective_choices(group);
+        let (label, objective) = choices
+            .get(choice)
+            .cloned()
+            .ok_or("--probe-group choice is outside that group's objective list")?;
+        quick.group_objectives[group] = objective;
+        quick.group_must_survive[group] = survive;
+        println!(
+            "AI probe group: {} objective={label:?} survive={survive}",
+            group + 1
+        );
+    }
     let wings = quick
         .wing_launches(enemy_skill)
         .map_err(|e| e.to_string())?;
@@ -5659,6 +6124,7 @@ fn ai_probe_run(
             std::array::from_fn(|i| basis.forward[i] * flight.speed + world.wind()[i]);
     }
     combat.reset(&mut flight)?;
+    combat.raise_airborne_spawns(world);
     if script.attack.is_some() {
         // A flown mission's weapon startup: the gun selected and armed in the
         // air, navigation mode on a ground start.
@@ -5747,11 +6213,18 @@ fn ai_probe_run(
                 world.airport_scene.vertical_pad(home.object)
             );
         }
-        let [x, _, z] = actor.flight().position;
+        let [x, y, z] = actor.flight().position;
         if !(bounds.min[0]..=bounds.max[0]).contains(&x)
             || !(bounds.min[1]..=bounds.max[1]).contains(&z)
         {
             println!("AI probe OFF-MAP start: {} x={x:.0} z={z:.0}", slot.label());
+        }
+        let ground = world.surface(x, z).height;
+        if actor.ground_start().is_none() && y < ground {
+            println!(
+                "AI probe UNDERGROUND start: {} y={y:.0} ground={ground:.0}",
+                slot.label()
+            );
         }
     }
     // The tower service the player's Shift-A would use, with the departure
@@ -5810,6 +6283,7 @@ fn ai_probe_run(
     }
     let mut encounter: std::collections::BTreeMap<u32, ProbeEncounter> = Default::default();
     let mut noted_ejections = 0;
+    let mut invariants = probe_invariants::ProbeInvariants::default();
     for tick in 0..ticks as u64 {
         let previous = recording.as_ref().map(|_| flight.clone());
         if let Some(recording) = &mut recording {
@@ -5827,6 +6301,7 @@ fn ai_probe_run(
         } else {
             flight.step(&keys, |x, z| f64::from(world.height(x as f32, z as f32)));
         }
+        apply_edge_loss(&mut flight, world);
         if verify {
             devices.push((
                 combat.state.tick(),
@@ -6026,6 +6501,7 @@ fn ai_probe_run(
                 .map(|c| format!("{now:.1}s {} {:?}", c.line(), c.stems)),
         );
         watch.observe(tick, &bridge, &flight, world);
+        invariants.observe(tick, &bridge, &combat, world);
     }
     watch.summary();
     println!(
@@ -6111,6 +6587,7 @@ fn ai_probe_run(
             .map(|t| t.hp)
             .collect::<Vec<_>>()
     );
+    invariants.summary(&bridge);
     if let Some(mut recording) = recording {
         recording.note(
             tore_replay::Event::new(tore_replay::vocab::kind::SYSTEM_END)
@@ -6542,6 +7019,18 @@ impl ApplicationHandler for LocateShell {
                 self.redraw();
             }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                // The game's quit shortcuts work here too, so the screen can
+                // be left from the keyboard where the desktop has no binding.
+                let quit_key = match &event.logical_key {
+                    Key::Named(winit::keyboard::NamedKey::F4) => self.modifiers.alt_key(),
+                    Key::Character(c) => self.modifiers.super_key() && c.eq_ignore_ascii_case("q"),
+                    _ => false,
+                };
+                if quit_key {
+                    self.outcome = ShellOutcome::Quit;
+                    event_loop.exit();
+                    return;
+                }
                 // Same window-mode toggle the game uses, before the field sees
                 // the key, so Alt-Enter never submits the locate form.
                 if self.modifiers.alt_key()
@@ -6863,6 +7352,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut ai_mission = ai_wings::Preset::Free;
     let mut combat_commands = Vec::new();
     let mut weapon_slot: Option<usize> = None;
+    let mut stripped_loadout: Option<String> = None;
     let mut input_profile = None;
     let mut native_input = true;
     let mut record_input = None;
@@ -6899,6 +7389,11 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut native_flight_trig = None;
     let mut headless_ticks = None;
     let mut flight_probe_ticks = None;
+    let mut flight_trace_ticks = 0u64;
+    let mut flight_faults: Vec<(u64, usize)> = Vec::new();
+    let mut flight_cheats: Vec<String> = Vec::new();
+    let mut flight_fuel: Option<f64> = None;
+    let mut flight_start: Option<[f64; 4]> = None;
     let mut flight_devices = None;
     let mut flight_controls = None;
     let mut flight_throttle = None;
@@ -6916,6 +7411,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut sensor_summary = false;
     let mut validate_weather = false;
     let mut validate_maps = false;
+    let mut validate_ils = false;
+    let mut validate_text = false;
     let mut weather_condition: Option<usize> = None;
     let mut airport_probe: Option<(u32, tore_sim::airport::Aircraft, Option<[f64; 2]>)> = None;
     let mut ground_start_airport: Option<u32> = None;
@@ -6931,22 +7428,50 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     // Mission replay viewer; see docs/REPLAYS.md.
     let mut watch_replay: Option<PathBuf> = None;
     let mut replay_capture: Option<PathBuf> = None;
+    let mut input_script_steps: Option<Vec<input_script::Step>> = None;
     let mut replay_options = replay::viewer::Options::default();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--no-controllers" => native_input = false,
             "--launch-quick-mission" => { launch_creator=true; initial_screen=Screen::Flight; },
             "--ground-start" => {
-                ground_start_airport=Some(args.next().ok_or("--ground-start needs an airport number")?.parse()?);
+                ground_start_airport=Some(option_number("--ground-start", &args.next().ok_or("--ground-start needs an airport number")?)?);
             }
             "--separation" => {
-                let nm: f64 = args.next().ok_or("--separation needs a distance in nautical miles")?.parse()?;
+                let nm: f64 = args.next().ok_or("--separation needs a distance in nautical miles")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !quick_mission::SEPARATION_NM.contains(&nm) {
                     return Err(format!("--separation needs one of {:?} nautical miles", quick_mission::SEPARATION_NM).into());
                 }
                 separation_nm = Some(nm);
             }
             "--probe-wing-only" => probe_script.wing_only = true,
+            "--probe-group" => {
+                let usage = "--probe-group needs GROUP:CHOICE[:survive], group 1..6";
+                let value = args.next().ok_or(usage)?;
+                let mut parts = value.split(':');
+                let group: usize = parts.next().ok_or(usage)?.parse().map_err(|_| usage)?;
+                let choice: usize = parts.next().ok_or(usage)?.parse().map_err(|_| usage)?;
+                let survive = match parts.next() {
+                    None => false,
+                    Some("survive") => true,
+                    Some(_) => return Err(usage.into()),
+                };
+                if !(1..=6).contains(&group) {
+                    return Err(usage.into());
+                }
+                probe_script.groups.push((group - 1, choice, survive));
+            }
+            "--probe-fight" => {
+                let usage = "--probe-fight needs FRIENDLY:ENEMY, each 1..15";
+                let value = args.next().ok_or(usage)?;
+                let (f, e) = value.split_once(':').ok_or(usage)?;
+                let (f, e): (usize, usize) = (f.parse().map_err(|_| usage)?, e.parse().map_err(|_| usage)?);
+                if !(1..=15).contains(&f) || !(1..=15).contains(&e) {
+                    return Err(usage.into());
+                }
+                probe_script.fight = Some((f, e));
+            }
+            "--probe-friendly-aircraft" => probe_script.friendly_aircraft = Some(tore_formats::aircraft::AircraftId::parse(&args.next().ok_or("--probe-friendly-aircraft needs an aircraft")?)?),
             "--probe-matrix" => probe_script.matrix = Some(PathBuf::from(args.next().ok_or("--probe-matrix needs a new output directory")?)),
             "--probe-enemy-aircraft" => probe_script.enemy_aircraft = Some(tore_formats::aircraft::AircraftId::parse(&args.next().ok_or("--probe-enemy-aircraft needs an aircraft")?)?),
             "--probe-enemy-skill" => probe_script.enemy_skill = Some(match args.next().ok_or("--probe-enemy-skill needs novice|average|experienced|ace")?.as_str() {
@@ -6964,19 +7489,19 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 if probe_script.threats.len() >= 64 { return Err("at most 64 controlled threats/faults per probe".into()); }
                 let value = args.next().ok_or("--probe-fault needs TICK:INDEX (0..44)")?;
                 let (tick, index) = value.split_once(':').ok_or("--probe-fault needs TICK:INDEX")?;
-                let index: usize = index.parse()?;
+                let index: usize = index.parse().map_err(|e| bad_number(&arg, &e))?;
                 if index >= 45 { return Err("fault index must be 0..44".into()); }
-                probe_script.threats.push((tick.parse()?, ProbeThreat::Fault(index)));
+                probe_script.threats.push((tick.parse().map_err(|e| bad_number(&arg, &e))?, ProbeThreat::Fault(index)));
             }
             "--probe-threat" => {
                 if probe_script.threats.len() >= 64 { return Err("at most 64 controlled threats per probe".into()); }
                 let value = args.next().ok_or("--probe-threat needs TICK:hit|gun|aaa")?;
                 let (tick, kind) = value.split_once(':').ok_or("--probe-threat needs TICK:hit|gun|aaa")?;
                 let kind = match kind { "hit" => ProbeThreat::Hit, "gun" => ProbeThreat::Gun, "aaa" => ProbeThreat::Aaa, _ => return Err("unknown probe threat".into()) };
-                probe_script.threats.push((tick.parse()?, kind));
+                probe_script.threats.push((tick.parse().map_err(|e| bad_number(&arg, &e))?, kind));
             }
             "--probe-wing-size" => {
-                let size: usize = args.next().ok_or("--probe-wing-size needs 1..5")?.parse()?;
+                let size: usize = args.next().ok_or("--probe-wing-size needs 1..5")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !(1..=5).contains(&size) {
                     return Err("--probe-wing-size needs 1..5".into());
                 }
@@ -6989,7 +7514,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 &args.next().ok_or("--probe-attack needs TICK or TICK:REPEAT_SECONDS")?,
             )?),
             "--probe-trace" => {
-                let seconds: f64 = args.next().ok_or("--probe-trace needs seconds")?.parse()?;
+                let seconds: f64 = args.next().ok_or("--probe-trace needs seconds")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !(seconds > 0. && seconds <= 3600.) {
                     return Err("--probe-trace needs 0..3600 seconds".into());
                 }
@@ -6999,7 +7524,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 let usage = "--probe-player-home needs FROM:UNTIL ticks";
                 let text = args.next().ok_or(usage)?;
                 let (from, until) = text.split_once(':').ok_or(usage)?;
-                probe_script.home = Some((from.parse()?, until.parse()?));
+                probe_script.home = Some((from.parse().map_err(|e| bad_number(&arg, &e))?, until.parse().map_err(|e| bad_number(&arg, &e))?));
             }
             "--airport-probe" => {
                 let value = args.next().ok_or("--airport-probe needs ID,X,Y,Z,NAV,GEAR[,HEADING,PITCH]")?;
@@ -7008,12 +7533,12 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     return Err("--airport-probe needs ID,X,Y,Z,NAV,GEAR[,HEADING,PITCH]".into());
                 }
                 let flag = |text: &str| match text { "0" => Ok(false), "1" => Ok(true), _ => Err("airport probe flags need 0 or 1") };
-                let position = [fields[1].parse()?, fields[2].parse()?, fields[3].parse()?];
+                let position = [fields[1].parse().map_err(|e| bad_number(&arg, &e))?, fields[2].parse().map_err(|e| bad_number(&arg, &e))?, fields[3].parse().map_err(|e| bad_number(&arg, &e))?];
                 if position.iter().any(|value: &f64| !value.is_finite()) {
                     return Err("airport probe position must be finite".into());
                 }
                 let angles = if fields.len() == 8 {
-                    let angles = [fields[6].parse::<f64>()?, fields[7].parse::<f64>()?];
+                    let angles = [fields[6].parse::<f64>().map_err(|e| bad_number(&arg, &e))?, fields[7].parse::<f64>().map_err(|e| bad_number(&arg, &e))?];
                     if !angles.iter().all(|value| value.is_finite())
                         || angles[0].abs() > 360_000.
                         || !(-90. ..=90.).contains(&angles[1])
@@ -7024,7 +7549,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 } else {
                     None
                 };
-                airport_probe = Some((fields[0].parse()?, tore_sim::airport::Aircraft {
+                airport_probe = Some((fields[0].parse().map_err(|e| bad_number(&arg, &e))?, tore_sim::airport::Aircraft {
                     position,
                     forward: [0., 0., 1.],
                     nav_mode: flag(fields[4])?,
@@ -7032,6 +7557,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     supported: false,
                     alive: true,
                     speed_fps: 140.0,
+                    ground_clearance_ft: 0.,
                 }, angles));
             }
             "--record-input" => {
@@ -7083,16 +7609,16 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 live_fire = true;
             }
             "--damage-preview-ticks" => {
-                damage_preview_ticks = args.next().ok_or("--damage-preview-ticks needs 1..7200")?.parse()?;
+                damage_preview_ticks = args.next().ok_or("--damage-preview-ticks needs 1..7200")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !(1..=7200).contains(&damage_preview_ticks) { return Err("--damage-preview-ticks needs 1..7200".into()); }
             }
             "--countermeasure-preview" => {
-                let ticks: usize = args.next().ok_or("--countermeasure-preview needs 1..7200")?.parse()?;
+                let ticks: usize = args.next().ok_or("--countermeasure-preview needs 1..7200")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !(1..=7200).contains(&ticks) { return Err("--countermeasure-preview needs 1..7200".into()); }
                 countermeasure_preview = Some(ticks);
             }
             "--damage-preview" => {
-                let fraction = args.next().ok_or("--damage-preview needs 0..1")?.parse::<f64>()?;
+                let fraction = args.next().ok_or("--damage-preview needs 0..1")?.parse::<f64>().map_err(|e| bad_number(&arg, &e))?;
                 if !fraction.is_finite() || !(0. ..=1.).contains(&fraction) { return Err("--damage-preview needs 0..1".into()); }
                 damage_preview = Some(fraction);
                 initial_screen = Screen::Flight;
@@ -7111,7 +7637,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--dummy-aircraft" => {
                 let value = args.next().ok_or("--dummy-aircraft needs ID,COUNT")?;
                 let (id, count) = value.split_once(',').ok_or("--dummy-aircraft needs ID,COUNT")?;
-                dummy_aircraft.push((tore_formats::aircraft::AircraftId::parse(id)?, count.parse::<usize>()?));
+                dummy_aircraft.push((tore_formats::aircraft::AircraftId::parse(id)?, count.parse::<usize>().map_err(|e| bad_number(&arg, &e))?));
                 initial_screen = Screen::Flight;
             }
             "--live-fire" => {
@@ -7138,20 +7664,22 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--ai-probe-ticks" | "--ai-roster-probe-ticks" => {
                 ai_roster_probe = arg == "--ai-roster-probe-ticks";
-                let ticks: usize = args
-                    .next()
-                    .ok_or("--ai-probe-ticks requires 1..216000")?
-                    .parse()?;
+                let ticks: usize = option_number(
+                    &arg,
+                    &args.next().ok_or("--ai-probe-ticks requires 1..216000")?,
+                )?;
                 if !(1..=216_000).contains(&ticks) {
-                    return Err("AI probe tick limit exceeded".into());
+                    return Err(format!("{arg} needs 1 to 216000 ticks, not {ticks}").into());
                 }
                 ai_probe = Some(ticks);
                 ai_wings_enabled = true;
             }
             "--record-mission" => {
-                record_mission = Some(PathBuf::from(
-                    args.next().ok_or("--record-mission needs a new path")?,
-                ));
+                let path = args.next().ok_or("--record-mission needs a new path")?;
+                if path.is_empty() {
+                    return Err("--record-mission needs a new path, not an empty one".into());
+                }
+                record_mission = Some(PathBuf::from(path));
             }
             "--verify-render" => verify_render = true,
             "--recording-info" => {
@@ -7181,10 +7709,12 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 ));
             }
             "--from" | "--to" => {
-                let seconds: f64 = args
-                    .next()
-                    .ok_or(format!("{arg} needs seconds of mission time"))?
-                    .parse()?;
+                let seconds: f64 = option_number(
+                    &arg,
+                    &args
+                        .next()
+                        .ok_or(format!("{arg} needs seconds of mission time"))?,
+                )?;
                 if !(seconds.is_finite() && seconds >= 0.) {
                     return Err(format!("{arg} needs seconds of mission time, 0 or more").into());
                 }
@@ -7199,15 +7729,15 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     args.next()
                         .ok_or("--ids needs aircraft ids such as 0,7")?
                         .split(',')
-                        .map(str::parse)
+                        .map(|id| option_number("--ids", id))
                         .collect::<Result<_, _>>()?,
                 );
             }
             "--rate" => {
-                let hz: f64 = args
-                    .next()
-                    .ok_or("--rate needs samples per second")?
-                    .parse()?;
+                let hz: f64 = option_number(
+                    "--rate",
+                    &args.next().ok_or("--rate needs samples per second")?,
+                )?;
                 if !(hz.is_finite() && hz > 0. && hz <= 120.) {
                     return Err("--rate needs samples per second above 0 and at most 120".into());
                 }
@@ -7219,18 +7749,25 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--combat-smoke" => {
                 combat_smoke = true;
             }
+            "--loadout" => {
+                let choice = args.next().ok_or("--loadout needs none or guns")?;
+                if !["none", "guns"].contains(&choice.as_str()) {
+                    return Err("--loadout needs none (every store off) or guns (everything but the gun off)".into());
+                }
+                stripped_loadout = Some(choice);
+            }
             "--weapon-slot" => {
                 weapon_slot = Some(
                     args.next()
                         .ok_or("--weapon-slot requires a 1-based PT weapon slot")?
-                        .parse()?,
+                        .parse().map_err(|e| bad_number(&arg, &e))?,
                 );
             }
             "--combat-probe-ticks" => {
                 let ticks: usize = args
                     .next()
                     .ok_or("--combat-probe-ticks requires 1..7200")?
-                    .parse()?;
+                    .parse().map_err(|e| bad_number(&arg, &e))?;
                 if !(1..=7200).contains(&ticks) {
                     return Err("combat probe tick limit exceeded".into());
                 }
@@ -7245,11 +7782,10 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--list-inputs" => input_seconds = Some(2),
             "--monitor-inputs" => {
-                input_seconds = Some(
-                    args.next()
-                        .ok_or("--monitor-inputs needs seconds")?
-                        .parse::<u64>()?,
-                )
+                input_seconds = Some(option_number::<u64>(
+                    "--monitor-inputs",
+                    &args.next().ok_or("--monitor-inputs needs seconds")?,
+                )?)
             }
             "--write-input-profile" => {
                 write_input_profile = Some(PathBuf::from(
@@ -7291,7 +7827,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 let (w, h) = size
                     .split_once('x')
                     .ok_or("--window-size needs WIDTHxHEIGHT")?;
-                window_size = [w.parse()?, h.parse()?];
+                window_size = [w.parse().map_err(|e| bad_number(&arg, &e))?, h.parse().map_err(|e| bad_number(&arg, &e))?];
                 window_size_flag = true;
                 if !(640..=3840).contains(&window_size[0])
                     || !(480..=2160).contains(&window_size[1])
@@ -7310,14 +7846,14 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 let page = args
                     .next()
                     .ok_or("--instrument-page needs 0..9")?
-                    .parse::<u8>()?;
+                    .parse::<u8>().map_err(|e| bad_number(&arg, &e))?;
                 if !(0..=9).contains(&page) {
                     return Err("--instrument-page needs 0..9".into());
                 }
                 instrument_page = Some(page);
             }
             "--flight-zoom" => {
-                flight_zoom = args.next().ok_or("--flight-zoom needs 0.5..4")?.parse()?;
+                flight_zoom = args.next().ok_or("--flight-zoom needs 0.5..4")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !flight_zoom.is_finite() || !(0.5..=4.).contains(&flight_zoom) {
                     return Err("--flight-zoom needs a finite value in 0.5..4".into());
                 }
@@ -7329,7 +7865,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 let (yaw, pitch) = value
                     .split_once(',')
                     .ok_or("--flight-look needs YAW,PITCH in degrees")?;
-                flight_look = [yaw.parse()?, pitch.parse()?];
+                flight_look = [yaw.parse().map_err(|e| bad_number(&arg, &e))?, pitch.parse().map_err(|e| bad_number(&arg, &e))?];
                 if flight_look.iter().any(|v| !v.is_finite() || v.abs() > 360.) {
                     return Err(
                         "flight look angles must be finite and within -360..360 degrees".into(),
@@ -7348,7 +7884,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 flight_view = args
                     .next()
                     .ok_or("--flight-view needs 0..11")?
-                    .parse::<u8>()?;
+                    .parse::<u8>().map_err(|e| bad_number(&arg, &e))?;
                 if flight_view > flight_views::MISSILE {
                     return Err("--flight-view needs 0..11".into());
                 }
@@ -7385,25 +7921,69 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 initial_screen = Screen::Flight;
             }
             "--free-flight" => initial_screen = Screen::Flight,
+            "--flight-fault" => {
+                let usage = "--flight-fault needs TICK:INDEX with a system fault index 0..44";
+                let value = args.next().ok_or(usage)?;
+                let (tick, index) = value.split_once(':').ok_or(usage)?;
+                let (tick, index): (u64, usize) = (tick.parse().map_err(|_| usage)?, index.parse().map_err(|_| usage)?);
+                if index > 44 || flight_faults.len() >= 64 {
+                    return Err(usage.into());
+                }
+                flight_faults.push((tick, index));
+            }
+            "--flight-start" => {
+                let usage = "--flight-start needs X,Z,HEADING_DEGREES,AGL_FEET (feet from the map's south-west corner)";
+                let values: Vec<f64> = args
+                    .next()
+                    .ok_or(usage)?
+                    .split(',')
+                    .map(str::parse)
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| usage)?;
+                if values.len() != 4
+                    || values.iter().any(|v| !v.is_finite())
+                    || !(10. ..=90_000.).contains(&values[3])
+                {
+                    return Err(usage.into());
+                }
+                flight_start = Some([values[0], values[1], values[2], values[3]]);
+            }
+            "--flight-fuel" => {
+                let pounds: f64 = args.next().ok_or("--flight-fuel needs internal fuel in pounds")?.parse()?;
+                if !pounds.is_finite() || !(0. ..=100_000.).contains(&pounds) {
+                    return Err("--flight-fuel needs 0..100000 pounds".into());
+                }
+                flight_fuel = Some(pounds);
+            }
+            "--flight-cheat" => {
+                let name = args.next().ok_or("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage")?;
+                if !PROBE_CHEATS.contains(&name.as_str()) {
+                    return Err("--flight-cheat needs extra-g, no-g-effects, no-spins, no-crashes, unlimited-fuel, unlimited-ammo, invulnerable or realistic-damage".into());
+                }
+                flight_cheats.push(name);
+            }
+            "--flight-trace" => {
+                flight_trace_ticks = args.next().ok_or("--flight-trace needs a tick count")?.parse()?;
+            }
             "--flight-probe-ticks" => {
                 let ticks = args
                     .next()
                     .ok_or("--flight-probe-ticks needs a tick count")?
-                    .parse::<usize>()?;
+                    .parse::<usize>().map_err(|e| bad_number(&arg, &e))?;
                 if ticks > 120 * 60 {
                     return Err("rendered flight probe limited to one minute".into());
                 }
                 flight_probe_ticks = Some(ticks);
             }
             "--flight-bay" => {
-                let value: f64 = args.next().ok_or("missing bay fraction")?.parse()?;
+                let value: f64 = args.next().ok_or("missing bay fraction")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !value.is_finite() || !(0. ..=1.).contains(&value) {
                     return Err("--flight-bay requires 0..1".into());
                 }
                 flight_bay = Some(value);
             }
             "--flight-throttle" => {
-                let value: f64 = args.next().ok_or("missing flight throttle")?.parse()?;
+                let value: f64 = args.next().ok_or("missing flight throttle")?.parse().map_err(|e| bad_number(&arg, &e))?;
                 if !value.is_finite() || !(0. ..=1.).contains(&value) { return Err("--flight-throttle requires 0..1".into()); }
                 flight_throttle = Some(value);
             }
@@ -7413,7 +7993,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     .ok_or("animation preview needs comma-separated values")?;
                 let values = raw
                     .split(',')
-                    .map(str::parse::<f64>)
+                    .map(|v| option_number::<f64>(&arg, v))
                     .collect::<Result<Vec<_>, _>>()?;
                 let devices = arg == "--flight-devices";
                 if values.len() != if devices { 5 } else { 3 }
@@ -7436,11 +8016,29 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 if ![
                     "level",
                     "takeoff",
+                    "takeoff-gear-early",
+                    "takeoff-gear-airborne",
                     "pull",
                     "loop",
                     "roll",
                     "stall",
                     "spin",
+                    "spin-recover",
+                    "stall-recover",
+                    "climb",
+                    "dive",
+                    "overspeed",
+                    "gcurve",
+                    "sprint",
+                    "devices",
+                    "autopilot",
+                    "waypoint",
+                    "eject",
+                    "eject-low",
+                    "land",
+                    "land-gear-up",
+                    "land-hard",
+                    "land-off-runway",
                     "bank-left",
                     "bank-right",
                 ]
@@ -7449,6 +8047,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     return Err("unsupported maneuver".into());
                 }
             }
+            "--retail-stall-speeds" => flight::set_retail_stall_speeds(true),
             "--native-flight-report" => native_flight_report = true,
             "--native-flight-trig" => {
                 native_flight_trig = Some(
@@ -7461,7 +8060,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 headless_ticks = Some(
                     args.next()
                         .ok_or("--headless-flight needs tick count")?
-                        .parse::<usize>()?,
+                        .parse::<usize>().map_err(|e| bad_number(&arg, &e))?,
                 )
             }
             "--systems-preview" => {
@@ -7485,24 +8084,34 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 ));
                 smoke_test = true;
             }
+            "--input-script" => {
+                let path = PathBuf::from(args.next().ok_or("--input-script needs a script file")?);
+                let text = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                input_script_steps = Some(
+                    input_script::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?,
+                );
+            }
             "--replay-tick" => {
-                replay_options.tick =
-                    Some(args.next().ok_or("--replay-tick needs a tick")?.parse()?);
+                replay_options.tick = Some(option_number(
+                    "--replay-tick",
+                    &args.next().ok_or("--replay-tick needs a tick")?,
+                )?);
             }
             "--replay-aircraft" => {
-                replay_options.aircraft = Some(
-                    args.next()
-                        .ok_or("--replay-aircraft needs an aircraft id")?
-                        .parse()?,
-                );
+                replay_options.aircraft = Some(option_number(
+                    "--replay-aircraft",
+                    &args.next().ok_or("--replay-aircraft needs an aircraft id")?,
+                )?);
             }
             "--replay-drone" => replay_options.drone = true,
             "--replay-speed" => {
-                replay_options.speed = Some(
-                    args.next()
-                        .ok_or("--replay-speed needs a speed such as 16 or -2")?
-                        .parse()?,
-                );
+                replay_options.speed = Some(option_number(
+                    "--replay-speed",
+                    &args
+                        .next()
+                        .ok_or("--replay-speed needs a speed such as 16 or -2")?,
+                )?);
             }
             "--replay-ui" => {
                 replay_options.ui = replay::viewer::Ui::parse(
@@ -7578,7 +8187,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 let nmi: f64 = args
                     .next()
                     .ok_or("--scope-range needs a recovered scope setting in nautical miles")?
-                    .parse()?;
+                    .parse().map_err(|e| bad_number(&arg, &e))?;
                 scope_range = Some(
                     tore_sim::sensors::RANGE_LADDER_NMI
                         .iter()
@@ -7589,11 +8198,13 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--scope-history" => scope_history = true,
             "--validate-weather" => validate_weather = true,
             "--validate-maps" => validate_maps = true,
+            "--validate-ils" => validate_ils = true,
+            "--validate-text" => validate_text = true,
             "--weather-condition" => {
                 let value: usize = args
                     .next()
                     .ok_or("--weather-condition needs 0..5")?
-                    .parse()?;
+                    .parse().map_err(|e| bad_number(&arg, &e))?;
                 if value >= tore_sim::environment::CONDITIONS.len() {
                     return Err("--weather-condition needs one of the six source choices".into());
                 }
@@ -7601,20 +8212,20 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Replays: --watch-replay FILE plays a mission recording (docs/REPLAYS.md). With it, --capture-replay OUT.ppm writes one GPU frame and exits (OUT.png saves the clean view as P does); --replay-tick N pauses at a tick; --flight-view 0..11 and --replay-aircraft ID choose the view; --replay-drone starts in the follow drone; --replay-speed 0.125..16 starts playing at that speed, negative for reverse; --replay-ui labels,timer,trails,comms,subtitles chooses the interface parts; --replay-panels thought,telemetry,guidance,comms,menu opens debug panels, or the right-click menu, on the selected aircraft; --replay-clean starts with the interface hidden, as H hides it; --replay-menu ?|pref|time|help|graphics|sound|controls opens the Escape menu at that page, or that screen over it; --replay-look-at aircraft:ID, ground:ID or weapon:ID starts in the object view looking at it."
                 );
                 println!(
-                    "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons."
+                    "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons.\nScripted input: --input-script FILE feeds key presses and mouse clicks to a windowed run through the window's own handlers, for tests (steps: wait, waittick, key, down, up, move, movemenu, click, press, release, wheel, snapshot, exit; see docs/DEVELOPMENT.md)."
                 );
                 println!(
                     "Mission recordings: every flight records what happened into replays/ in the data folder; Ctrl+B marks a moment (TORE_RECORD_MISSIONS=0 turns recording off for a run). These are not the --record-input/--replay-input or --record-combat/--replay-combat tapes, which store inputs and simulate them again. --recording-info FILE describes a recording. --recording-log FILE [--out DIR] [--from SECONDS] [--to SECONDS] [--ids 0,7] [--rate HZ] writes log.jsonl and summary.txt. --recording-acmi FILE [--out FILE] [--rate HZ] [--guns] writes a Tacview .txt.acmi file. --recording-diff A B compares two recordings. --ai-probe-ticks N --record-mission NEW_PATH records a headless probe without changing its output; --verify-render then checks every recorded tick redraws the picture the probe drew. See docs/REPLAYS.md."
                 );
                 println!(
-                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display.
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission: normal, aircraft, theaters, help.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
+                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display. --validate-ils checks the ILS alignment at every airport.
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --retail-stall-speeds turns the weight-scaled stall speed off, so the imported envelope's slow edges apply at every weight (developer switch). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, airports, ground-targets-unavailable, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -7670,6 +8281,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         return Err("--ai-probe-ticks is a headless probe and cannot capture or snapshot".into());
     }
     if (probe_script.enemy_aircraft.is_some()
+        || probe_script.fight.is_some()
+        || probe_script.friendly_aircraft.is_some()
         || probe_script.enemy_skill.is_some()
         || probe_script.geometry != ProbeGeometry::Head
         || probe_script.guns
@@ -7841,6 +8454,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             seconds,
             write_input_profile.as_deref(),
             test_rumble.as_deref(),
+            native_input,
         )?;
         return Ok(Outcome::Done);
     }
@@ -7917,6 +8531,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && !validate_creator
         && !validate_weather
         && !validate_maps
+        && !validate_ils
+        && !validate_text
         && !(airport_probe.is_some() && !(smoke_test && initial_screen == Screen::Flight))
         && std::env::var_os("TORE_ENVIRONMENT_PROBE").is_none();
     // Borderless fullscreen on the monitor the window would have opened on is
@@ -8019,6 +8635,96 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     };
     diagnostics::stage_done();
     if import_only {
+        return Ok(Outcome::Done);
+    }
+    if validate_text {
+        // Every imported string must decode without loss and be drawable in the
+        // original fonts. Retail text is CP437 (tore_formats::text); the only
+        // byte above 0x7F in any text is the Kurile airport's e with a diaeresis.
+        let mut problems: Vec<String> = Vec::new();
+        let mut accented = Vec::new();
+        for (name, bytes) in &assets.theater_resources {
+            if !(bytes.starts_with(b"textFormat")
+                || name.ends_with(".MT")
+                || name.ends_with(".BRF"))
+            {
+                continue;
+            }
+            for line in bytes.split(|b| *b == b'\n' || *b == 0) {
+                if line.iter().any(|b| *b >= 0x80) {
+                    let text = tore_formats::text::decode_cp437(line);
+                    accented.push(format!("{name}: {}", text.trim()));
+                    if let Some(c) = text.chars().find(|c| {
+                        *c != '\r' && !tore_formats::text::is_drawn(*c) && !c.is_control()
+                    }) {
+                        problems.push(format!(
+                            "{name}: {c:?} cannot be drawn in the original fonts: {text}"
+                        ));
+                    }
+                }
+            }
+        }
+        let quick = quick_mission::QuickMission::new(
+            aircraft_id,
+            assets.creator_options.clone(),
+            &assets.theater_resources,
+        );
+        let mut strings = quick.imported_strings();
+        for (name, bytes) in &assets.theater_resources {
+            if name.ends_with(".JT")
+                && let Ok(weapon) = tore_formats::weapons::Weapon::parse(name, bytes)
+            {
+                strings.push((format!("weapon {name}"), weapon.name));
+                strings.push((format!("weapon {name} HUD name"), weapon.hud_name));
+            }
+            if name.ends_with(".PT")
+                && let Ok(aircraft) = tore_formats::aircraft::Aircraft::parse(bytes)
+            {
+                strings.push((format!("aircraft {name}"), aircraft.name));
+            }
+        }
+        for (what, text) in &strings {
+            if text.contains('\u{fffd}') {
+                problems.push(format!("{what}: replacement character in {text:?}"));
+            }
+            if let Some(c) = text.chars().find(|c| !tore_formats::text::is_drawn(*c)) {
+                problems.push(format!("{what}: {c:?} cannot be drawn in {text:?}"));
+            }
+        }
+        for line in &accented {
+            println!("non-ASCII text: {line}");
+        }
+        println!(
+            "Scanned {} imported strings, {} lines with non-ASCII bytes, {} problems",
+            strings.len(),
+            accented.len(),
+            problems.len()
+        );
+        for problem in &problems {
+            println!("  PROBLEM {problem}");
+        }
+        if !problems.is_empty() {
+            return Err("imported text problems".into());
+        }
+        return Ok(Outcome::Done);
+    }
+    if validate_ils {
+        // Every base theater, and the developer variant named by --theater.
+        let mut codes: Vec<String> = tore_formats::theater::map_catalog(&assets.theater_resources)?
+            .into_iter()
+            .map(|(code, _)| code)
+            .filter(|code| !code.starts_with('~'))
+            .collect();
+        if theater_code.starts_with('~') {
+            codes.push(theater_code.clone());
+        }
+        let clearance = flight::State::new(
+            &aircraft::Airframe::load(&assets.theater_resources, aircraft_id)?.profile,
+            [0.; 3],
+        )
+        .map(|state| state.model().configuration().equipment.ground_clearance_ft)
+        .unwrap_or(0.);
+        ils_survey::run(&assets.theater_resources, &codes, clearance, 5.)?;
         return Ok(Outcome::Done);
     }
     if validate_maps {
@@ -8144,7 +8850,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 state.burner = true;
                 keys.pitch = 1.;
             }
-            "takeoff" => {
+            "takeoff" | "takeoff-gear-early" | "takeoff-gear-airborne" => {
                 state.brake_out = false;
                 state.throttle = 1.;
                 state.burner = state
@@ -8167,6 +8873,83 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 keys.pitch = 1.;
                 keys.yaw = 1.;
             }
+            "eject-low" => state.position[1] = 250.,
+            "waypoint" => {
+                // Waypoint 1 lies 60,000 feet away, 60 degrees right of north.
+                state.autopilot.set_navigation_target(Some(
+                    tore_sim::autopilot::NavigationTarget {
+                        number: 1,
+                        position: [51_961.5, 30_000.],
+                    },
+                ));
+                keys.commands = vec![flight::PilotCommand::Set(
+                    flight::Switch::WaypointAutopilot,
+                    true,
+                )];
+            }
+            "autopilot" => {
+                // A 25 degree bank with the heading and altitude hold engaged: it
+                // has to level the wings and hold the 5,000 feet it captured.
+                state.bank = 25f64.to_radians();
+                keys.commands = vec![flight::PilotCommand::Set(flight::Switch::Autopilot, true)];
+            }
+            "climb" => {
+                state.throttle = 1.;
+                state.burner = true;
+            }
+            "dive" => {
+                // A full afterburner dive from 40,000 ft: it should end in the
+                // overspeed loss for aircraft that can reach 1.5 times their top speed.
+                state.position[1] = 40_000.;
+                state.pitch = -60f64.to_radians();
+                state.throttle = 1.;
+                state.burner = true;
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
+            }
+            "overspeed" => {
+                // Level flight at 20,000 ft, but 1.6 times the top speed there:
+                // the aircraft must be lost to overspeed on the first step.
+                state.position[1] = 20_000.;
+                if let Some(ratio) = state.overspeed_ratio().filter(|r| *r > 0.) {
+                    state.speed *= 1.6 / ratio;
+                }
+                state.throttle = 1.;
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
+            }
+            "sprint" => {
+                // Full afterburner in level flight, altitude held by the autopilot.
+                state.throttle = 1.;
+                state.burner = true;
+                keys.commands = vec![
+                    flight::PilotCommand::Set(flight::Switch::Autopilot, true),
+                    flight::PilotCommand::Set(flight::Switch::Burner, true),
+                    flight::PilotCommand::Throttle(1.),
+                ];
+            }
+            "stall-recover" => {
+                state.position[1] = flight_probe::STALL_START_FT;
+                state.update_stall_scale();
+                // 200 knots, or 15 percent over the weight-scaled clean stall
+                // speed at that height if that is higher: a loaded aircraft's
+                // stall speed can pass 200 knots up there.
+                state.speed = flight_probe::STALL_START_FPS
+                    .max(state.clean_stall_speed().unwrap_or(0.) * 1.15);
+                state.throttle = 0.3;
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
+            }
+            "spin-recover" => {
+                state.speed = 180.;
+                state.position[1] = flight_probe::SPIN_START_FT;
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
+            }
             "stall" => {
                 state.engine = false;
                 state.pitch = 0.2;
@@ -8182,7 +8965,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         if ticks > 120 * 3600 {
             return Err("headless flight limited to one hour".into());
         }
-        let replay_world = if replay_frames.is_some() || ground_start_airport.is_some() {
+        let replay_world = if replay_frames.is_some()
+            || ground_start_airport.is_some()
+            || flight_start.is_some()
+        {
             Some(terrain::World::for_theater(
                 &assets.theater_resources,
                 &theater_code,
@@ -8190,6 +8976,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         } else {
             None
         };
+        let mut landing_probe: Option<flight_probe::Landing> = None;
+        // What the player's ILS reads along the scripted landing.
+        let mut ils_probe = ils_survey::PathRecord::default();
+        let mut ils_service: Option<tore_sim::airport::Service> = None;
         let mut state = if let Some(world) = &replay_world {
             hornet.start(world)
         } else {
@@ -8197,6 +8987,21 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         };
         if researched_flight {
             state.enable_research(1)?;
+        }
+        if let Some(world) = &replay_world {
+            let cell = f64::from(tore_formats::theater::CELL_FEET);
+            println!(
+                "map_extent_ft: x={:.0} z={:.0}",
+                (world.theater.cols - 1) as f64 * cell,
+                (world.theater.rows - 1) as f64 * cell
+            );
+            if let Some([x, z, heading, agl]) = flight_start {
+                state.position = [x, f64::from(world.height(x as f32, z as f32)) + agl, z];
+                state.yaw = heading.to_radians();
+                state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
+                    .forward
+                    .map(|v| v * state.speed);
+            }
         }
         println!(
             "flight_model={}",
@@ -8212,12 +9017,23 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             && let Some(object) = ground_object(world)?
         {
             if replay_frames.is_none() {
-                let load = combat::Combat::new(&hornet, &assets.theater_resources, false)?;
-                state.set_payload(load.state.payload_lbs())?;
-                state.systems = tore_sim::aircraft_systems::Systems::new(
-                    load.state.configuration().engines,
-                    load.state.external_fuel_lbs(),
-                );
+                let mut load = build_combat(
+                    &hornet,
+                    &assets.theater_resources,
+                    false,
+                    stripped_loadout.as_deref(),
+                )?;
+                if stripped_loadout.is_some() {
+                    // A stripped load only takes effect on a reset, which also
+                    // sets the payload and the fuel systems from it.
+                    load.reset(&mut state)?;
+                } else {
+                    state.set_payload(load.state.payload_lbs())?;
+                    state.systems = tore_sim::aircraft_systems::Systems::new(
+                        load.state.configuration().engines,
+                        load.state.external_fuel_lbs(),
+                    );
+                }
             }
             quick_mission::apply_ground_start(world, &mut state, object)?;
             println!(
@@ -8227,15 +9043,218 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 state.gear,
                 state.brake_out
             );
+            {
+                use tore_sim::models::FlightModel;
+                let mass = state.model().configuration().mass;
+                println!(
+                    "loadout: external_fuel_lb={:.0} empty_lb={:.0} internal_fuel_lb={:.0} fuel_lb={:.0} carried_lb={:.0} gross_lb={:.0} max_takeoff_lb={:.0}",
+                    state.systems.external_lbs(),
+                    mass.empty_lbs,
+                    mass.internal_fuel_lbs,
+                    state.fuel,
+                    state.carried_lbs(),
+                    mass.empty_lbs + state.fuel + state.carried_lbs(),
+                    mass.max_takeoff_lbs
+                );
+                // The imported 1 G envelope row at the airport and the figures the
+                // hybrid model derives its stall speed and lift from.
+                state.update_stall_scale();
+                let configuration = state.model().configuration();
+                let altitude = state.position[1];
+                let row = |g: i32| {
+                    state
+                        .retail_envelopes()
+                        .iter()
+                        .find(|e| e.g == g)
+                        .and_then(|e| e.speeds(altitude))
+                        .map_or_else(
+                            || "none".to_string(),
+                            |(low, high)| format!("{:.1}..{:.1}", low / 1.68781, high / 1.68781),
+                        )
+                };
+                let scale = state.stall_scale();
+                println!(
+                    "envelope: altitude_ft={altitude:.1} g1_kt={} g2_kt={} g3_kt={} flaps_lift_f8={} loaded_elevator_percent={} loading={:.3} landing_limit_kt={:.1} stall_scale={scale:.3} stall_kt={:.1} min_level_flaps_kt={:.1}",
+                    row(1),
+                    row(2),
+                    row(3),
+                    configuration.aerodynamics.flaps_lift_f8,
+                    configuration.aerodynamics.loaded_elevator_percent,
+                    (state.fuel + state.carried_lbs()) / mass.empty_lbs,
+                    f64::from(configuration.native.landing.forward_fps) / 1.68781,
+                    state.clean_stall_speed().unwrap_or(0.) * 0.75 / 1.68781,
+                    state.minimum_level_speed(altitude, 1.) / 1.68781
+                );
+            }
+            if let Some(variant) = flight_probe::LandingVariant::from_maneuver(&maneuver) {
+                let layout = quick_mission::ground_layout(world, object, 1)?;
+                let length = world
+                    .airport_scene
+                    .runway(object)
+                    .map_or(layout.runway.length_ft, |runway| runway.length_ft);
+                state.update_stall_scale();
+                let probe = flight_probe::Landing::new(
+                    &state,
+                    layout.slots[0],
+                    layout.heading,
+                    length,
+                    |x, z| world.surface(x, z).height,
+                    variant,
+                );
+                probe.place(&mut state, layout.heading);
+                landing_probe = Some(probe);
+                println!(
+                    "landing_start: position={:?} heading={:.1} runway_length_ft={length:.0} anchored={} slot={:?} runway_center={:?} runway_heading={:.1} footprint_half_ft={:?}",
+                    state.position,
+                    layout.heading.to_degrees(),
+                    layout.anchored,
+                    layout.slots[0],
+                    layout.runway.center,
+                    layout.runway.heading.to_degrees(),
+                    world
+                        .airport_scene
+                        .runway(object)
+                        .map(|runway| runway.surface.half.map(f64::round))
+                );
+            }
+        }
+        for name in &flight_cheats {
+            apply_probe_cheat(&mut state.cheats, name);
+        }
+        if let Some(pounds) = flight_fuel {
+            state.fuel = pounds;
+        }
+        if flight_probe::LandingVariant::from_maneuver(&maneuver).is_some()
+            && landing_probe.is_none()
+        {
+            return Err(
+                "--maneuver land needs --ground-start AIRPORT and the researched flight model"
+                    .into(),
+            );
         }
         let keys = setup_maneuver(&mut state);
+        if maneuver == "gcurve" {
+            // The loaded positive G limit at each speed at 5,000 feet and the
+            // aircraft's own weight: what a full back stick can pull.
+            state.position[1] = 5_000.;
+            state.update_stall_scale();
+            let raw_top = state
+                .retail_envelopes()
+                .iter()
+                .map(|e| e.g)
+                .max()
+                .unwrap_or(1);
+            let corner = state
+                .retail_envelopes()
+                .iter()
+                .find(|e| e.g == raw_top)
+                .and_then(|e| e.speeds(5_000.))
+                .map_or(0., |(low, _)| low / 1.68781);
+            println!(
+                "gcurve_header: stall_scale={:.3} top_g={raw_top} corner_kt={corner:.1}",
+                state.stall_scale()
+            );
+            for kt in (100..=750).step_by(25) {
+                let mut probe = state.clone();
+                probe.speed = f64::from(kt) * 1.68781;
+                probe.velocity = [0., 0., probe.speed];
+                probe.yaw = 0.;
+                probe.pitch = 0.;
+                probe.bank = 0.;
+                probe.throttle = 1.;
+                let pull = flight::PilotInput {
+                    pitch: 1.,
+                    ..Default::default()
+                };
+                probe.step(&pull, |_, _| 0.);
+                let limit = probe
+                    .trace()
+                    .adapter
+                    .as_ref()
+                    .map_or(0., |a| a.envelope.limits_g[1]);
+                println!("gcurve: kt={kt} limit_g={limit:.2}");
+            }
+            let mut probe = state.clone();
+            probe.speed = corner * 1.68781;
+            probe.velocity = [0., 0., probe.speed];
+            probe.step(
+                &flight::PilotInput {
+                    pitch: 1.,
+                    ..Default::default()
+                },
+                |_, _| 0.,
+            );
+            println!(
+                "gcurve_corner: limit_g={:.2}",
+                probe
+                    .trace()
+                    .adapter
+                    .as_ref()
+                    .map_or(0., |a| a.envelope.limits_g[1])
+            );
+            return Ok(Outcome::Done);
+        }
         if let Some(tables) = &native_tables {
             state.enable_native(tables.clone(), 1)?;
         }
         let initial_forward = attitude::Basis::new(state.yaw, state.pitch, state.bank).forward;
         let (mut vertical, mut inverted, mut completed) = (false, false, false);
+        let mut watch = flight_watch::FlightWatch::new(flight_trace_ticks, &state);
+        let mut spin_recovery =
+            (maneuver == "spin-recover").then(|| flight_probe::SpinRecovery::new(&state));
+        let mut climb = (maneuver == "climb").then(|| flight_probe::Climb::new(&state));
+        let mut devices = (maneuver == "devices").then(|| flight_watch::DeviceWatch::new(&state));
+        let mut stall_recovery =
+            (maneuver == "stall-recover").then(|| flight_probe::StallRecovery::new(&state));
+        let mut gear_pulled = false;
+        let mut belly_wear = 0.;
+        let mut takeoff_start: Option<attitude::Vector> = None;
+        let mut rotation: Option<f64> = None;
+        let mut liftoff: Option<(u64, f64, f64)> = None;
         for tick in 0..ticks {
-            let keys = replay_frames.as_ref().map_or(&keys, |frames| &frames[tick]);
+            let scripted;
+            let keys = if let Some(probe) = spin_recovery.as_mut() {
+                scripted = probe.keys(&state);
+                &scripted
+            } else if matches!(maneuver.as_str(), "eject" | "eject-low")
+                && (tick == 120 || tick == 140)
+            {
+                // Two presses inside the confirmation interval, as Shift-E twice.
+                scripted = flight::PilotInput {
+                    commands: vec![flight::PilotCommand::Eject],
+                    ..Default::default()
+                };
+                &scripted
+            } else if maneuver == "devices"
+                && let Some(commands) = device_schedule(tick as u64)
+            {
+                scripted = flight::PilotInput {
+                    commands,
+                    ..Default::default()
+                };
+                &scripted
+            } else if let Some(probe) = climb.as_mut() {
+                scripted = probe.keys(&state);
+                &scripted
+            } else if let Some(probe) = stall_recovery.as_mut() {
+                scripted = probe.keys(&state);
+                &scripted
+            } else if let Some(probe) = landing_probe.as_mut() {
+                let world = replay_world.as_ref().unwrap();
+                let surface = world.surface(state.position[0], state.position[2]);
+                scripted = probe.keys(&state, surface.height, surface.landable);
+                &scripted
+            } else if let Some(pull) =
+                gear_pull(&maneuver, &state, &mut gear_pulled, &keys, &replay_world)
+            {
+                scripted = pull;
+                &scripted
+            } else {
+                replay_frames.as_ref().map_or(&keys, |frames| &frames[tick])
+            };
+            for (_, index) in flight_faults.iter().filter(|(at, _)| *at == tick as u64) {
+                state.systems.hit(*index, state.throttle);
+            }
             if ground_start_airport.is_some() {
                 let world = replay_world.as_ref().unwrap();
                 state.step_surface(keys, |x, z| world.surface(x, z));
@@ -8249,13 +9268,68 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             if let Some(error) = state.native_fault() {
                 return Err(error.into());
             }
+            belly_wear += state.take_belly_scrape();
+            if takeoff_start.is_none() {
+                takeoff_start = Some(state.position);
+            }
+            let on_runway = state.research.as_ref().is_some_and(|r| r.on_ground);
+            if rotation.is_none() && on_runway && state.pitch > 1.5f64.to_radians() {
+                rotation = Some(state.speed / 1.68781);
+            }
+            if liftoff.is_none() && !on_runway && state.ticks > 1 {
+                let start = takeoff_start.unwrap_or(state.position);
+                liftoff = Some((
+                    state.ticks,
+                    state.speed / 1.68781,
+                    (state.position[0] - start[0]).hypot(state.position[2] - start[2]),
+                ));
+            }
+            if let Some(world) = &replay_world {
+                apply_edge_loss(&mut state, world);
+            }
+            if landing_probe.is_some()
+                && let Some(world) = &replay_world
+            {
+                let service = match &mut ils_service {
+                    Some(service) => service,
+                    None => {
+                        let mut service = tore_sim::airport::Service::new(&world.airport_scene)
+                            .map_err(std::io::Error::other)?;
+                        // The pilot selects the airport he is landing at.
+                        if let Some(object) = ground_object(world)?
+                            && let Some(runway) = world.airport_scene.runway(object)
+                        {
+                            service.command(
+                                &world.airport_scene,
+                                airport_aircraft(world, &state, true),
+                                tore_sim::airport::Command::SelectAirport(runway.airport),
+                            );
+                        }
+                        ils_service.insert(service)
+                    }
+                };
+                let ground = world.surface(state.position[0], state.position[2]).height;
+                let aircraft = airport_aircraft(world, &state, true);
+                ils_probe.observe(
+                    service.guidance(&world.airport_scene, aircraft),
+                    state.position[1] - aircraft.ground_clearance_ft - ground,
+                );
+            }
+            watch.observe(&state);
+            if let Some(world) = &replay_world {
+                let ground = world.surface(state.position[0], state.position[2]).height;
+                watch.observe_ground(&state, ground);
+            }
+            if let Some(devices) = devices.as_mut() {
+                devices.observe(&state);
+            }
             let basis = attitude::Basis::new(state.yaw, state.pitch, state.bank);
             vertical |= basis.forward[1] > 0.999;
             inverted |= basis.up[1] < -0.9;
             completed |= inverted
                 && basis.up[1] > 0.9
                 && attitude::dot(basis.forward, initial_forward) > 0.98;
-            if maneuver == "takeoff" && ground_start_airport.is_some() {
+            if maneuver.starts_with("takeoff") && ground_start_airport.is_some() {
                 let world = replay_world.as_ref().unwrap();
                 let object = ground_object(world)?.unwrap();
                 let height = world.airport_scene.runway(object).unwrap().elevation_ft;
@@ -8265,6 +9339,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 }
             }
             if maneuver == "loop" && completed {
+                break;
+            }
+            if spin_recovery.as_ref().is_some_and(|probe| probe.finished())
+                || stall_recovery
+                    .as_ref()
+                    .is_some_and(|probe| probe.finished())
+                || climb.as_ref().is_some_and(|probe| probe.finished(&state))
+                || landing_probe.as_ref().is_some_and(|probe| probe.finished())
+            {
                 break;
             }
         }
@@ -8279,6 +9362,22 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.bank.to_degrees()
         );
         println!("vertical={vertical} inverted={inverted} loop_completed={completed}");
+        if maneuver.starts_with("takeoff") {
+            match liftoff {
+                Some((tick, speed, distance)) => println!(
+                    "liftoff: tick={tick} speed_kt={speed:.1} distance_ft={distance:.0} rotation_kt={}",
+                    rotation.map_or("none".into(), |r| format!("{r:.1}"))
+                ),
+                None => println!("liftoff: none"),
+            }
+        }
+        if maneuver.starts_with("takeoff-gear") {
+            println!(
+                "gear_pulled={gear_pulled} belly_wear_percent={:.3} gear={:.2}",
+                belly_wear * 100.,
+                state.gear
+            );
+        }
         println!(
             "departure_alert={:?} spin_direction={}",
             state.stall_alert(0.),
@@ -8293,6 +9392,51 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.fuel,
             state.crashed
         );
+        println!(
+            "final_position: x={:.0} z={:.0} heading_deg={:.1}",
+            state.position[0],
+            state.position[2],
+            state.yaw.to_degrees().rem_euclid(360.)
+        );
+        println!("{}", watch.report());
+        println!(
+            "loss: cause={}",
+            state
+                .systems
+                .structure
+                .cause
+                .map_or("none", |cause| cause.label())
+        );
+        println!(
+            "fuel_end: internal_lb={:.1} external_lb={:.1}",
+            state.fuel,
+            state.systems.external_lbs()
+        );
+        if !flight_faults.is_empty() {
+            println!(
+                "systems: fatal={} pilot_dead={} engine={} {}",
+                state.systems.fatal(),
+                state.systems.pilot.dead,
+                state.engine,
+                state.systems.summary(state.damage_fraction)
+            );
+        }
+        if let Some(probe) = &spin_recovery {
+            println!("{}", probe.report(&state));
+        }
+        if let Some(probe) = &climb {
+            println!("{}", probe.report(&state));
+        }
+        if let Some(devices) = &devices {
+            println!("{}", devices.report(&state));
+        }
+        if let Some(probe) = &stall_recovery {
+            println!("{}", probe.report(&state));
+        }
+        if let Some(probe) = &landing_probe {
+            println!("{}", probe.report(&state));
+            println!("{}", ils_probe.report());
+        }
         if let Some(pilot) = &state.escape {
             println!(
                 "ejection={:?} pilot_alive={} pilot_position={:?}",
@@ -8379,7 +9523,34 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         );
     }
     if validate_creator {
-        ordnance::validate_sources(&assets.theater_resources, &world)?;
+        // TORE_CREATOR_STAGE=loadouts|matrix|render (render includes the input fuzz) runs one part of the probe.
+        let stage = std::env::var("TORE_CREATOR_STAGE").unwrap_or_default();
+        let wanted = |name: &str| stage.is_empty() || stage == name;
+        if wanted("loadouts") {
+            ordnance::validate_sources(&assets.theater_resources, &world)?;
+        }
+        if wanted("matrix") {
+            quick_mission::matrix::validate(
+                &assets.theater_resources,
+                assets.creator_options.clone(),
+            )?;
+        }
+        if wanted("menu") {
+            quick_mission::matrix::flight_menu_table(&assets.theater_resources)?;
+        }
+        if wanted("render") {
+            let resources = assets.theater_resources.clone();
+            let options = assets.creator_options.clone();
+            let mut menu = Menu::new(assets, Some("CHOOSEV"))?;
+            quick_mission::matrix::render(
+                &resources,
+                options.clone(),
+                &menu.quick_sprites,
+                &world,
+            )?;
+            quick_mission::matrix::fuzz(&resources, options, &menu.quick_sprites, &world)?;
+            quick_mission::matrix::fuzz_screens(&resources, &mut menu)?;
+        }
         return Ok(Outcome::Done);
     }
     if validate_weather {
@@ -8453,12 +9624,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 &theater_resources,
             );
             quick.ai_mission = ai_mission;
-            let selection = world
-                .catalog
-                .iter()
-                .position(|(code, _)| code == &theater_code)
-                .unwrap_or(0);
-            quick.theater(selection);
+            quick.choose_theater_code(&theater_code, &theater_resources);
             if let Some(object) = ground_start {
                 quick.choose_ground_runway(object)?;
             }
@@ -8607,15 +9773,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         camera.pitch = values[4].to_radians();
         camera.roll = values.get(5).copied().unwrap_or(0.).to_radians();
     }
-    let selection = world
-        .catalog
-        .iter()
-        .position(|(code, _)| code == &theater_code)
-        .unwrap_or(0);
     let mut quick =
         quick_mission::QuickMission::new(aircraft_id, creator_options.clone(), &theater_resources);
     quick.ai_mission = ai_mission;
-    quick.theater(selection);
+    quick.choose_theater_code(&theater_code, &theater_resources);
     if let Some(object) = ground_start {
         quick.choose_ground_runway(object)?;
     }
@@ -8675,7 +9836,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                                     creator_options.clone(),
                                     &theater_resources,
                                 );
-                                setup.theater(selection);
+                                setup.choose_theater_code(&theater_code, &theater_resources);
                                 setup.draft.values[17] = quick.draft.values[17];
                                 let name =
                                     probe_case_name(player, enemy, skill, geometry, researched);
@@ -8908,7 +10069,18 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     // Headless probes and captures have no instrument panel to read, so the
     // command line supplies the same sensor controls a player would set.
     flight.sensors = sensor_controls(sensor_channel, scope_range, scope_history);
-    let mut combat = combat::Combat::new(&hornet, &theater_resources, live_fire)?;
+    if stripped_loadout.is_some() && live_fire {
+        return Err(
+            "--loadout cannot be combined with --live-fire, which starts the PT-default range"
+                .into(),
+        );
+    }
+    let mut combat = build_combat(
+        &hornet,
+        &theater_resources,
+        live_fire,
+        stripped_loadout.as_deref(),
+    )?;
     combat.add_airport_targets(&world.airport_scene)?;
     if let Some(ref path) = record_combat {
         combat.recorder = Some(combat_tape::Recorder::new(
@@ -8926,6 +10098,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     combat.mission_dummies(&dummy_aircraft, 5280., &theater_resources)?;
     combat.reset(&mut flight)?;
+    for name in &flight_cheats {
+        apply_probe_cheat(&mut flight.cheats, name);
+        apply_probe_cheat(&mut combat.state.cheats, name);
+    }
     let normal_startup_defaults = !live_fire
         && record_input.is_none()
         && replay_frames.is_none()
@@ -9011,11 +10187,20 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 combat::launcher(&flight),
             );
         }
+        // A station that carries nothing cannot be selected; start on NAV.
+        if !combat.state.carries(weapon_slot - 1) {
+            eprintln!("Weapon slot {weapon_slot} carries nothing; starting on NAV");
+            combat.command(
+                tore_sim::combat::live::Command::SelectNav,
+                combat::launcher(&flight),
+            );
+        }
     }
     // Scripted setup keeps the render history as live flight does: a changed
     // scene is retaken at once and each combat step ends a tick.
     if live_fire {
-        combat.state.armed = true;
+        // An empty station is never armed.
+        combat.state.armed = combat.state.carries(combat.state.selected);
         combat.command(
             tore_sim::combat::live::Command::ReplaceTarget,
             combat::launcher(&flight),
@@ -9026,6 +10211,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         combat.step(&mut flight, &world)?;
         combat.advance_render(&flight, None);
     }
+    let payload_start = combat.state.payload_lbs();
     for command in combat_commands {
         combat.command(command, combat::launcher(&flight));
     }
@@ -9041,11 +10227,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         let devices = &combat.state.devices;
         println!(
-            "Countermeasure preview: ticks={ticks} flares={} burning={} puffs={} chaff={}",
+            "Countermeasure preview: ticks={ticks} flares={} burning={} puffs={} chaff={} carried_chaff={} carried_flares={} capacity_chaff={} capacity_flares={}",
             devices.flares.len(),
             devices.flares.iter().filter(|f| f.burning()).count(),
             devices.puffs().count(),
-            devices.chaff.len()
+            devices.chaff.len(),
+            combat.state.chaff,
+            combat.state.flares,
+            combat.state.configuration().ecm.chaff[0],
+            combat.state.configuration().ecm.flare[0]
         );
         for flare in &devices.flares {
             let p = flare.position;
@@ -9100,13 +10290,17 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         );
         combat.cancel();
         println!(
-            "Combat probe: {} shots={} hits={} kills={} active={} ammo={:?}",
+            "Combat probe: {} shots={} hits={} kills={} active={} ammo={:?} payload_start_lb={:.0} payload_lb={:.0} flight_payload_lb={:.0} external_fuel_lb={:.0}",
             hornet.profile.name,
             combat.state.shots,
             combat.state.hits,
             combat.state.kills,
             combat.state.projectiles.len(),
-            combat.state.ammo
+            combat.state.ammo,
+            payload_start,
+            combat.state.payload_lbs(),
+            flight.carried_lbs(),
+            flight.systems.external_lbs()
         );
     }
     if let Some([bearing, elevation, range]) = hud_target_preview {
@@ -9226,6 +10420,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     // The first frame draws the prepared scene, ejected pilot included.
     combat.refresh_render(&flight, None);
+    // The saved controls file loads without being asked for; a damaged one
+    // falls back to the default controls with a warning. A file named with
+    // `--input-profile` is what the player asked for and fails loudly.
+    let explicit_input_profile = input_profile.is_some();
     if input_profile.is_none() {
         let default = assets::data_directory()?.join("input-v1.conf");
         if default.exists() {
@@ -9269,7 +10467,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     let mut airport_service =
         tore_sim::airport::Service::new(&world.airport_scene).map_err(std::io::Error::other)?;
     let airport_nav_mode = airport_probe.map_or_else(
-        || ground_start.is_some() && weapon_slot.is_none() && !live_fire,
+        || {
+            (ground_start.is_some() && weapon_slot.is_none() && !live_fire)
+                || (stripped_loadout.is_some() && !combat.state.carries(combat.state.selected))
+        },
         |(_, aircraft, _)| aircraft.nav_mode,
     );
     if airport_nav_mode {
@@ -9316,7 +10517,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         None => None,
     };
     diagnostics::stage("controller and input initialization");
-    let input = input::Input::new(input_profile.as_deref(), native_input)?;
+    let input = if explicit_input_profile {
+        input::Input::new(input_profile.as_deref(), native_input)?
+    } else {
+        input::Input::new_automatic(input_profile.as_deref(), native_input)?
+    };
     diagnostics::stage_done();
     diagnostics::stage("application state construction");
     let mut airfield_radio = airfield_radio::AirfieldRadio::default();
@@ -9325,6 +10530,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         mission: None,
         ground_start,
         launch_creator,
+        quick_loadout: stripped_loadout.clone(),
         ai_wings_enabled: !fixture_wings,
         enemy_skill,
         ai_wings: None,
@@ -9366,6 +10572,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         turbulence: probe_turbulence,
         turbulence_rng: probe_turbulence_rng,
         g_effects: Default::default(),
+        overspeed_message_at: None,
+        edge_message_at: None,
         flight_view,
         view_rig: {
             let mut rig = flight_views::Rig::default();
@@ -9437,6 +10645,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         replay_recorder: None,
         live_debug: Default::default(),
         replays_screen: None,
+        script: input_script_steps.map(input_script::Runner::new),
     };
     app.live_debug.requests = flight_panels;
     diagnostics::stage_done();
@@ -9664,6 +10873,15 @@ mod startup_tests {
 
     fn path(text: &str) -> Option<PathBuf> {
         Some(PathBuf::from(text))
+    }
+
+    #[test]
+    fn a_bad_option_number_names_the_option_and_the_text() {
+        assert_eq!(option_number::<u64>("--replay-tick", " 12 ").unwrap(), 12);
+        assert_eq!(option_number::<f64>("--rate", "2.5").unwrap(), 2.5);
+        let error = option_number::<u64>("--replay-tick", "-5").unwrap_err();
+        assert_eq!(error.to_string(), "--replay-tick needs a number, not '-5'");
+        assert!(option_number::<f64>("--rate", "abc").is_err());
     }
 
     #[test]

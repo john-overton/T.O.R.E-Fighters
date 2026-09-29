@@ -829,8 +829,9 @@ pub fn validate_sources(
         combat.reset(&mut airframe.start(world))?;
         validate_guns_only(&load, &airframe, &combat.state.targets, data, world)?;
         validate_dragging(&load, data)?;
+        validate_removed_stores(&load, &airframe, data, world)?;
         println!(
-            "{}: guns-only across all six wings, player/wing restart, standard loads and ordnance dragging passed",
+            "{}: guns-only across all six wings, player/wing restart, standard loads, ordnance dragging and removed stores passed",
             id.label()
         );
     }
@@ -890,15 +891,21 @@ pub fn validate_sources(
         let intact = airframe.vertices(&flight, &camera, world);
         // Exercise the shared effects against every imported mesh and gun,
         // including variants, rather than inferring coverage from F/A-18D.
+        // A surviving aircraft is drawn intact (damage still drives flight and
+        // systems); only a destroyed one shows its regional body variant.
         for region in [3usize, 4, 5] {
-            for fraction in [0.1, 0.4, 0.8] {
+            for fraction in [0.1, 0.4, 0.8, 1.0] {
                 flight.damage_fraction = fraction;
-                flight.damage_variant = (fraction >= 0.75).then_some(region);
+                flight.damage_variant = (fraction >= 1.).then_some(region);
                 flight.damage_regions = [0.; tore_sim::combat::live::DAMAGE_SECTIONS];
                 flight.damage_regions[region] = fraction;
                 let mesh = airframe.vertices(&flight, &camera, world);
-                if mesh.is_empty() || mesh.iter().any(|v| !v.is_finite()) || mesh == intact {
-                    return Err(format!("{id:?}: damage region {region} at {fraction} has no distinct finite geometry").into());
+                let distinct = mesh != intact;
+                if mesh.is_empty()
+                    || mesh.iter().any(|v| !v.is_finite())
+                    || distinct != (fraction >= 1.)
+                {
+                    return Err(format!("{id:?}: damage region {region} at {fraction} has no finite geometry, or a survivor changed shape, or the wreck did not").into());
                 }
             }
         }
@@ -939,10 +946,11 @@ pub fn validate_sources(
         if !tracer.vertices.chunks_exact(10).any(|v| v[5] == -8.) {
             return Err(format!("{id:?}: imported gun has no luminous tracer geometry").into());
         }
-        flight.damage_fraction = 0.8;
+        // Only a destroyed aircraft draws its damaged body (survivors stay intact).
+        flight.damage_fraction = 1.;
         flight.damage_variant = Some(tore_sim::combat::live::DamageSection::LeftWing as usize);
         flight.damage_regions = [0.; tore_sim::combat::live::DAMAGE_SECTIONS];
-        flight.damage_regions[tore_sim::combat::live::DamageSection::LeftWing as usize] = 0.8;
+        flight.damage_regions[tore_sim::combat::live::DamageSection::LeftWing as usize] = 1.;
         let damaged = airframe.vertices(&flight, &camera, world);
         let fragment = airframe.fragment_vertices(&flight, &camera, world);
         if tore_sim::combat::debris::damage_variant(
@@ -1103,6 +1111,92 @@ fn validate_dragging(load: &Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppRes
             || ui.loadout.quantities[source] + ui.loadout.quantities[target] != before
         {
             return Err("station transfer did not conserve imported ammunition".into());
+        }
+    }
+    Ok(())
+}
+
+/// What the aircraft carries in flight must be exactly what the page holds: a
+/// store taken off stays off (never turned back into the default load) at
+/// launch and restart, every station one at a time and all of them at once.
+fn validate_removed_stores(
+    load: &Loadout,
+    airframe: &crate::aircraft::Airframe,
+    data: &BTreeMap<String, Vec<u8>>,
+    world: &crate::terrain::World,
+) -> AppResult<()> {
+    let stations = load.quantities.len();
+    let mut cases: Vec<Vec<u16>> = (0..stations)
+        .map(|removed| {
+            let mut q = load.quantities.clone();
+            q[removed] = 0;
+            q
+        })
+        .collect();
+    cases.push(vec![0; stations]);
+    // Everything but the internal guns, the usual "strip the stores" edit.
+    cases.push(
+        load.configuration
+            .stations
+            .iter()
+            .zip(&load.quantities)
+            .map(|(s, n)| if s.internal { *n } else { 0 })
+            .collect(),
+    );
+    for quantities in cases {
+        let mut edited = load.clone();
+        edited.quantities = quantities.clone();
+        edited.validate()?;
+        let mut combat = crate::combat::Combat::with_loadout(airframe, data, &edited)?;
+        let mut flight = airframe.start(world);
+        for _ in 0..2 {
+            combat.reset(&mut flight)?;
+            combat.apply_startup_weapons();
+            if combat.state.ammo != quantities {
+                return Err(format!(
+                    "{:?}: removed stores came back at launch or restart: {:?} instead of {quantities:?}",
+                    airframe.profile.id, combat.state.ammo
+                )
+                .into());
+            }
+            let listed = combat.readout(&flight, 1.).weapons;
+            let carried: std::collections::BTreeSet<&str> = combat
+                .state
+                .configuration()
+                .stations
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| quantities[*i] > 0)
+                .map(|(_, s)| s.weapon.hud_name.as_str())
+                .collect();
+            if listed.iter().any(|(name, count, selected)| {
+                !carried.contains(name.as_str()) && (*count > 0 || *selected)
+            }) || listed.iter().map(|(_, count, _)| *count).sum::<u32>()
+                != quantities.iter().map(|n| u32::from(*n)).sum::<u32>()
+            {
+                return Err(format!(
+                    "{:?}: the weapons window lists {listed:?} for {quantities:?}",
+                    airframe.profile.id
+                )
+                .into());
+            }
+            if combat.state.armed && quantities[combat.state.selected] == 0 {
+                return Err("an empty station started selected".into());
+            }
+            let external: f64 = combat
+                .state
+                .configuration()
+                .stations
+                .iter()
+                .zip(&quantities)
+                .filter(|(s, _)| !s.internal)
+                .map(|(s, n)| f64::from(s.weapon.weight.max(0)) * f64::from(*n))
+                .sum::<f64>()
+                + f64::from(combat.state.configuration().external_equipment_lbs);
+            if (flight.payload_lbs - external).abs() > 0.5 {
+                return Err("flight payload does not match the edited stores".into());
+            }
+            combat.state.ammo.fill(1);
         }
     }
     Ok(())
@@ -1502,6 +1596,42 @@ mod tests {
         ui.right(true);
         ui.right(false);
         assert_eq!(ui.loadout.quantities, [2, 3, 500]);
+    }
+    #[test]
+    fn taking_every_store_off_by_any_route_leaves_zeros_that_still_validate() {
+        // The minus key on each station until it stops changing.
+        let mut ui = fixture();
+        for station in 0..ui.loadout.quantities.len() {
+            ui.station = station;
+            for _ in 0..40 {
+                ui.key("-");
+            }
+        }
+        assert_eq!(ui.loadout.quantities, [0, 0, 0]);
+        ui.loadout.validate().unwrap();
+        // Right-click on each station card.
+        let mut ui = fixture();
+        for station in 0..3 {
+            for _ in 0..40 {
+                ui.loadout.change(station, -1);
+            }
+        }
+        assert_eq!(ui.loadout.quantities, [0, 0, 0]);
+        // The menu's unload-everything button.
+        let mut ui = fixture();
+        ui.activate(12);
+        assert_eq!(ui.loadout.quantities, [0, 0, 0]);
+        ui.loadout.validate().unwrap();
+        // Emptied stations keep their store type (the page shows an empty
+        // box) but weigh and count nothing.
+        assert_eq!(
+            ui.loadout.configuration.stations[0].weapon.source,
+            "AIM9M.JT"
+        );
+        assert_eq!(
+            ui.loadout.total_lbs(),
+            ui.loadout.empty_lbs + ui.loadout.fuel_lbs
+        );
     }
     #[test]
     fn loaded_station_click_adds_exactly_one_without_replacing_or_overfilling() {

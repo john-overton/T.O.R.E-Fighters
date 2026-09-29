@@ -87,7 +87,7 @@ menu can allow.
 | I / M | Infrared / HARM seeker on or off | Confirmed |
 | J | Jammer on or off | Confirmed |
 | Y | Radar history | Confirmed |
-| , / . | Radar range down / up | Inferred; direction from the manual |
+| , / . | Radar range up / down | Manual pp. 21, 94, 97: comma increases, period decreases (corrected 2026-09-29; the game had them reversed) |
 | U | IFF interrogation of the target | Confirmed |
 | N | Force the HUD into navigation mode (`NAV`, or `ILS` near a landing aid), hiding weapon cues; off, the HUD follows the selected weapon | Confirmed |
 | W / Shift+W | Next / previous waypoint, wrapping at the ends; nothing without a waypoint list | Confirmed |

@@ -312,8 +312,12 @@ pub enum BurnerBlock {
 /// Stall and top speed, control authority and the G limits.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct EnvelopeTrace {
-    /// Stall speed of the aircraft's 1 G envelope at this altitude, ft/s.
+    /// Stall speed of the aircraft's 1 G envelope at this altitude, ft/s,
+    /// scaled for the aircraft's weight (`stall_scale`).
     pub clean_stall_fps: f64,
+    /// Multiplier on the imported envelope's left edges for the weight now
+    /// (1 for the legacy adapter and with `--retail-stall-speeds`).
+    pub stall_scale: f64,
     /// Stall speed the step used, ft/s. The hybrid adapter multiplies the
     /// clean value by 1 - 0.25 x flaps.
     pub stall_fps: f64,
@@ -684,6 +688,8 @@ pub struct Rolling {
     pub ground_speed_fps: f64,
     /// Elevator at or below neutral, so the nose settled toward the runway.
     pub nose_settling: bool,
+    /// The gear is not fully down on the ground: the belly is scraping.
+    pub belly: bool,
 }
 
 /// A graded landing.

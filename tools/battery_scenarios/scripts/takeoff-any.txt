@@ -1,0 +1,34 @@
+# Ground start on any aircraft: brakes off, full power, pulse the stick back from 7.5 s until airborne (the weight-scaled stall speed
+# gives liftoff at 100 to 160 knots, up to 16 s of roll), gear and flaps up once airborne, then level off.
+wait 1
+key b
+key 6
+key 5
+waittick 480
+key 6
+waittick 900
+down Down
+waittick 1020
+up Down
+waittick 1140
+down Down
+waittick 1260
+up Down
+waittick 1380
+down Down
+waittick 1500
+up Down
+waittick 1620
+down Down
+waittick 1740
+up Down
+waittick 1860
+down Down
+waittick 1980
+up Down
+waittick 2000
+key g
+waittick 2150
+key f
+waittick 2640
+exit
