@@ -2781,6 +2781,18 @@ impl ApplicationHandler for App {
                     }
                     return;
                 }
+                // Exit to desktop keeps its meaning over every screen, the
+                // controls, sound and graphics screens included.
+                if event.state == ElementState::Pressed
+                    && ((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
+                        || (self.modifiers.alt_key() && name == "F4"))
+                    && (self.controls.is_some()
+                        || self.sound_screen.is_some()
+                        || self.graphics_screen.is_some())
+                {
+                    self.action(event_loop, Action::Exit);
+                    return;
+                }
                 // The controls screen takes every key press while it is open,
                 // with the same physical key names flight uses for capture.
                 if event.state == ElementState::Pressed
