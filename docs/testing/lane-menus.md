@@ -125,10 +125,12 @@ imported haze tables and consistent with them:
   start, and fades within a runway length.
 - Athens (Greece) and Stanley (Falklands) airport pavement is pure white in daylight
   (grey at night); every other airport paving is grey or brown.
-One genuine defect: **the HUD was unreadable over fog and cloud.** HUD green has a
-luminance contrast of 1.04 to 1.08 to one against fog and cloud (1.3 over clear sky),
-so it was told apart by hue alone. Each HUD pixel now casts a soft dark shadow one
-pixel down and right (`hud::shadow`, fitted, see the HUD spec; one call to remove).
+One finding for John to decide: **the HUD is hard to read over fog and cloud.** HUD
+green has a luminance contrast of 1.04 to 1.08 to one against fog and cloud (1.3 over
+clear sky), so it is told apart by hue alone. The lane tried a soft dark shadow one
+pixel down and right of each HUD pixel (commit 78e62e1, fitted). That is a visual
+design change, so the parent reverted it on the `bug-bash` branch; cherry-pick 78e62e1
+to get it back.
 
 **Feature claim audit.** 44 claims from the menu, creator, briefing, preference,
 ordnance and HUD rows of `docs/features.md` and their specs were checked against the
