@@ -157,7 +157,8 @@ Exit: side-by-side comparison against retail screenshots recorded in the baselin
 
 ### 1b. Original terrain
 
-Sixteen base theaters and 59 retail variants are selectable with original T2
+Sixteen base theaters are selectable (59 retail variants load through the
+developer option `--theater ~CODE`) with original T2
 heights, named/numbered artwork, weather and visible static objects. The expansion
 below replaces the initial two-theater preview target; dynamic source behavior
 remains explicitly bounded. No real-elevation pipeline
@@ -179,8 +180,8 @@ usable source coverage without adding invented scenery or new terrain geometry.
 
 Implemented in the separate retail-terrain worktree:
 
-- All sixteen base theaters and 59 retail MM variants are imported and offered
-  in the existing location picker, with their own airport lists. Variant scenes
+- All sixteen base theaters and 59 retail MM variants are imported; the picker
+  offers the base theaters, the variants are a developer option (`--theater ~CODE`). Variant scenes
   preserve their source identity and use the documented fitted composition rule.
 - Kurile's 236 named images, both source resolutions, numbered artwork and
   original land fallback pictures render with live weather palettes and water
@@ -210,7 +211,7 @@ fixtures are committed.
 
 Construct and render every imported layout. Inspect matched close and distant
 views of Kurile coast, Ukraine land/cities, Pakistan high ground and desert/river
-scenes. Check the variant picker and ground-start identity. Record frame-time
+scenes. Check the `--theater ~CODE` variant option and ground-start identity. Record frame-time
 comparisons using the same camera/settings and state their scope. Run the
 repository checks and display smoke after rebasing. [Measured validation](baselines/retail-terrain-review.md#implementation-validation)
 records actual results and platform limits. Retail side-by-side comparison is

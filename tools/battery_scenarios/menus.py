@@ -283,13 +283,17 @@ def scenarios() -> list[Scenario]:
                     check=menu_picture(),
                 )
             )
-    # The creator on every theater layout.
+    # The creator on every base theater, with its theater popup open. The
+    # imported `~` layout variants are not offered to players; `--theater ~CODE`
+    # still opens the creator on one as a developer option, so each is checked
+    # on the plain setup page.
     for code in THEATERS + VARIANT_THEATERS:
+        variant = code.startswith("~")
         out.append(
             Scenario(
-                name=f"menus-snap-quick-theater-{code.strip('~').lower()}{'-variant' if code.startswith('~') else ''}",
+                name=f"menus-snap-quick-{'devtheater' if variant else 'theater'}-{code.strip('~').lower()}",
                 lane="menus",
-                args=["--theater", code, "--quick-mission", "--snapshot", "{work}/shot.ppm", "--snapshot-state", "theaters", "--no-audio"],
+                args=["--theater", code, "--quick-mission", "--snapshot", "{work}/shot.ppm", "--snapshot-state", "normal" if variant else "theaters", "--no-audio"],
                 timeout=120,
                 expect=[r"(Menu|Locate) preview:"],
                 check=menu_picture(),

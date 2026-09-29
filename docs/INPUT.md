@@ -324,9 +324,14 @@ Settings load at startup and can be edited in the [controls screen](#the-control
 Profiles use UTF-8 text, `#` comments and whitespace-separated tokens. The first
 non-comment line must be `tore-input 1`. Limits: 256 KiB, 1,024 bindings and 64
 aliases. Unknown actions, incompatible modes, invalid calibration and duplicate
-aliases fail with the file's path and a line number. A damaged `input-v1.conf`, which
-loads without being asked for, stops the start with that message and says to fix or
-delete the file. Identity/control tokens contain no whitespace.
+aliases fail with the file's path and a line number. A profile named with
+`--input-profile` that fails to load stops the start with that message, because the
+player asked for that file. A damaged `input-v1.conf`, which loads without being
+asked for, does not: the game starts with the default controls and the session log
+warns `Controls file not loaded, using the default controls: PATH: REASON.`, as for
+the other settings files (empty and binary files included; requested by John on
+2026-09-29). The controls screen's next save writes a fresh `input-v1.conf` over it.
+Identity/control tokens contain no whitespace.
 
 Example (replace the identity with the monitor's exact device ID):
 

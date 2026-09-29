@@ -90,22 +90,29 @@ pub struct Input {
     head_center: [f64; 2],
 }
 impl Input {
+    /// The saved controls file, loaded without being asked for. A file that
+    /// cannot be read or parsed (empty and binary files included) is skipped
+    /// with a warning naming it and the reason, and the default controls are
+    /// used, like the other settings files. Saving controls writes a fresh
+    /// file over it.
+    pub fn new_automatic(path: Option<&Path>, native: bool) -> Result<Self, String> {
+        match Self::new(path, native) {
+            Err(error) if path.is_some() => {
+                log::warn!("Controls file not loaded, using the default controls: {error}");
+                Self::new(None, native)
+            }
+            other => other,
+        }
+    }
+    /// A profile named by the player (`--input-profile`), or the defaults for
+    /// `None`. A file that fails to load is an error.
     pub fn new(path: Option<&Path>, native: bool) -> Result<Self, String> {
         let mut custom = Profile {
             gamepad_defaults: path.is_none(),
             ..Profile::default()
         };
         if let Some(path) = path {
-            // The saved controls file loads without being asked for, so a damaged
-            // one also says how to get going again.
-            let failed = |e: &dyn std::fmt::Display| {
-                let hint = if path.file_name().is_some_and(|n| n == "input-v1.conf") {
-                    " Fix the file, or delete it to go back to the default controls."
-                } else {
-                    ""
-                };
-                format!("{}: {e}.{hint}", path.display())
-            };
+            let failed = |e: &dyn std::fmt::Display| format!("{}: {e}.", path.display());
             let mut text = String::new();
             std::fs::File::open(path)
                 .map_err(|e| failed(&e))?
@@ -1010,12 +1017,51 @@ mod tests {
             assert!(error.contains(name), "{error}");
             assert!(!error.contains("delete it"), "{error}");
         }
-        let saved = dir.join("input-v1.conf");
-        std::fs::write(&saved, b"not a profile\n").unwrap();
-        let error = Input::new(Some(&saved), false).err().unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn a_damaged_automatic_controls_file_falls_back_to_the_defaults() {
+        let dir = std::env::temp_dir().join(format!("tore-autoprofile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let defaults = Input::new(None, false).unwrap();
+        for (i, bytes) in [
+            &b""[..],
+            b"not a profile\n",
+            b"tore-input 99\n",
+            b"tore-input 1\nbind keyboard g no-such-action press\n",
+            b"\xff\xfe\x00\x01 binary",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let saved = dir.join(format!("input-v1-{i}/input-v1.conf"));
+            std::fs::create_dir_all(saved.parent().unwrap()).unwrap();
+            std::fs::write(&saved, bytes).unwrap();
+            // Asked for by name, the same file is an error that names it.
+            assert!(
+                Input::new(Some(&saved), false)
+                    .err()
+                    .unwrap()
+                    .contains("input-v1.conf")
+            );
+            // Loaded automatically, it gives the default controls.
+            let input = Input::new_automatic(Some(&saved), false).unwrap();
+            assert_eq!(
+                input.settings_profile().to_text().unwrap(),
+                defaults.settings_profile().to_text().unwrap()
+            );
+            assert!(input.automatic, "gamepad defaults stay on");
+        }
+        // A missing file named on purpose still fails, and a good file loads.
+        assert!(Input::new(Some(&dir.join("missing.conf")), false).is_err());
+        let good = dir.join("good.conf");
+        std::fs::write(&good, "tore-input 1\nrumble off\n").unwrap();
         assert!(
-            error.contains("delete it to go back to the default controls"),
-            "{error}"
+            !Input::new_automatic(Some(&good), false)
+                .unwrap()
+                .resolver
+                .profile
+                .rumble
         );
         std::fs::remove_dir_all(dir).unwrap();
     }

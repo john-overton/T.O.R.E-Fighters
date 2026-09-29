@@ -676,7 +676,8 @@ def check_jettison(ac: str, slot: int):
         ammo = [int(v) for v in m.group(2).split(",")]
         start, payload, flight_payload = (int(m.group(i)) for i in (3, 4, 5))
         problems = []
-        if payload == start and ammo[slot - 1] == capacity[slot - 1] - shots:
+        jettisoned = not (payload == start and ammo[slot - 1] == capacity[slot - 1] - shots)
+        if not jettisoned:
             # An internal station (for example the Su-35's slot 5) cannot be
             # jettisoned: the load does not change and it still fires normally.
             if shots == 0 and (ac, slot) not in REFUSED_SLOTS:
@@ -684,16 +685,23 @@ def check_jettison(ac: str, slot: int):
         else:
             if ammo[slot - 1] != 0:
                 problems.append(f"station {slot} still holds {ammo[slot - 1]} after a jettison")
-            if shots != 0:
-                problems.append(f"{shots} shots left a jettisoned station")
             if not payload < start:
                 problems.append(f"jettison did not lighten the load: {start} -> {payload} lb")
         # The flight model carries the store weight less the fuel already used.
         if not payload - 30 <= flight_payload <= payload:
             problems.append(f"flight carries {flight_payload} lb but the stores weigh {payload} lb")
-        for index, (left, cap) in enumerate(zip(ammo, capacity)):
-            if index != slot - 1 and left != cap:
-                problems.append(f"station {index + 1} changed ({cap}->{left}) when station {slot} was jettisoned")
+        others = [(index, left, cap) for index, (left, cap) in enumerate(zip(ammo, capacity)) if index != slot - 1]
+        if jettisoned:
+            # The emptied station cannot be selected, so the selection moves on
+            # to the next loaded station and the probe's shots come from there:
+            # every shot is accounted for by other stations' ammunition.
+            used = sum(cap - left for _, left, cap in others)
+            if used != shots:
+                problems.append(f"{shots} shots but the other stations used {used} after station {slot} was jettisoned")
+        else:
+            for index, left, cap in others:
+                if left != cap:
+                    problems.append(f"station {index + 1} changed ({cap}->{left}) when station {slot} was jettisoned")
         return problems
 
     return check

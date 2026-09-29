@@ -1647,7 +1647,7 @@ fn flight_data(
         return FlightData {
             airspeed: f.speed,
             g: f.g,
-            fuel_lb: f.fuel,
+            fuel_lb: f.fuel + f.systems.external_lbs(),
             controls: controls(f, tick.pilot),
             on_ground: f.supported_at(player_ground),
             alive: !f.crashed
@@ -1664,7 +1664,7 @@ fn flight_data(
         return FlightData {
             airspeed: f.speed,
             g: f.g,
-            fuel_lb: f.fuel,
+            fuel_lb: f.fuel + f.systems.external_lbs(),
             controls: controls(f, actor.last_input()),
             on_ground: target.is_some_and(|t| t.on_ground),
             alive: actor.alive() && f.escape.is_none(),
@@ -1820,6 +1820,11 @@ pub fn header(
 ) -> replay::Header {
     extra.extend(presentation.extras());
     extra.push(("platform".into(), crate::version::target().into()));
+    // Samples count the external tanks' fuel too; older recordings do not.
+    extra.push((
+        replay::model::FUEL_KEY.into(),
+        replay::model::FUEL_WITH_EXTERNAL.into(),
+    ));
     replay::Header {
         game_version: crate::version::version().into(),
         game_commit: crate::version::commit().into(),

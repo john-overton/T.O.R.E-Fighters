@@ -9248,12 +9248,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 &theater_resources,
             );
             quick.ai_mission = ai_mission;
-            let selection = world
-                .catalog
-                .iter()
-                .position(|(code, _)| code == &theater_code)
-                .unwrap_or(0);
-            quick.theater(selection);
+            quick.choose_theater_code(&theater_code, &theater_resources);
             if let Some(object) = ground_start {
                 quick.choose_ground_runway(object)?;
             }
@@ -9402,15 +9397,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         camera.pitch = values[4].to_radians();
         camera.roll = values.get(5).copied().unwrap_or(0.).to_radians();
     }
-    let selection = world
-        .catalog
-        .iter()
-        .position(|(code, _)| code == &theater_code)
-        .unwrap_or(0);
     let mut quick =
         quick_mission::QuickMission::new(aircraft_id, creator_options.clone(), &theater_resources);
     quick.ai_mission = ai_mission;
-    quick.theater(selection);
+    quick.choose_theater_code(&theater_code, &theater_resources);
     if let Some(object) = ground_start {
         quick.choose_ground_runway(object)?;
     }
@@ -9470,7 +9460,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                                     creator_options.clone(),
                                     &theater_resources,
                                 );
-                                setup.theater(selection);
+                                setup.choose_theater_code(&theater_code, &theater_resources);
                                 setup.draft.values[17] = quick.draft.values[17];
                                 let name =
                                     probe_case_name(player, enemy, skill, geometry, researched);
@@ -9821,11 +9811,20 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 combat::launcher(&flight),
             );
         }
+        // A station that carries nothing cannot be selected; start on NAV.
+        if !combat.state.carries(weapon_slot - 1) {
+            eprintln!("Weapon slot {weapon_slot} carries nothing; starting on NAV");
+            combat.command(
+                tore_sim::combat::live::Command::SelectNav,
+                combat::launcher(&flight),
+            );
+        }
     }
     // Scripted setup keeps the render history as live flight does: a changed
     // scene is retaken at once and each combat step ends a tick.
     if live_fire {
-        combat.state.armed = true;
+        // An empty station is never armed.
+        combat.state.armed = combat.state.carries(combat.state.selected);
         combat.command(
             tore_sim::combat::live::Command::ReplaceTarget,
             combat::launcher(&flight),
@@ -10045,6 +10044,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     // The first frame draws the prepared scene, ejected pilot included.
     combat.refresh_render(&flight, None);
+    // The saved controls file loads without being asked for; a damaged one
+    // falls back to the default controls with a warning. A file named with
+    // `--input-profile` is what the player asked for and fails loudly.
+    let explicit_input_profile = input_profile.is_some();
     if input_profile.is_none() {
         let default = assets::data_directory()?.join("input-v1.conf");
         if default.exists() {
@@ -10138,7 +10141,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         None => None,
     };
     diagnostics::stage("controller and input initialization");
-    let input = input::Input::new(input_profile.as_deref(), native_input)?;
+    let input = if explicit_input_profile {
+        input::Input::new(input_profile.as_deref(), native_input)?
+    } else {
+        input::Input::new_automatic(input_profile.as_deref(), native_input)?
+    };
     diagnostics::stage_done();
     diagnostics::stage("application state construction");
     let mut airfield_radio = airfield_radio::AirfieldRadio::default();

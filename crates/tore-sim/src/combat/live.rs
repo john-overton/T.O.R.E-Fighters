@@ -104,6 +104,8 @@ pub enum Command {
     NextSelection,
     PreviousSelection,
     SelectNav,
+    /// The selected station ran dry: move to the next loaded one, or NAV.
+    AdvanceFromEmpty,
     ToggleSeekerMode,
     CompatibilityWeapons,
     TargetHeat(u8),
@@ -856,6 +858,10 @@ pub struct State {
     range_estimate: Option<RangeEstimate>,
     config: Configuration,
     pub ammo: Vec<u16>,
+    /// Stations that held something at the start of the mission. A station
+    /// emptied in flight keeps its row in the weapons window; one that was
+    /// never loaded has none. See `note_loaded`.
+    ever_loaded: Vec<bool>,
     pub selected: usize,
     pub sensors: Sensors,
     /// Easy targeting's memory of the last selection, kept after sensor
@@ -990,11 +996,12 @@ impl State {
     }
     pub fn new(config: Configuration, external: bool) -> Result<Self> {
         config.validate()?;
-        let ammo = config
+        let ammo: Vec<u16> = config
             .stations
             .iter()
             .map(|s| if s.internal || external { s.count } else { 0 })
             .collect();
+        let ever_loaded = ammo.iter().map(|a| a & 0x7fff != 0).collect();
         let triggers = vec![PlayerTrigger::default(); config.stations.len()];
         let gun_cadence = vec![GunCadence::default(); config.stations.len()];
         let range_category = config.target_category;
@@ -1033,6 +1040,7 @@ impl State {
             next_target_id: 1,
             config,
             ammo,
+            ever_loaded,
             selected: 0,
             sensors,
             emitters: vec![],
@@ -1195,6 +1203,11 @@ impl State {
                 break;
             }
         }
+        self.set_selection(next);
+    }
+    /// Move to station `next - 1`, or to NAV for 0, dropping any release in
+    /// progress and the mounted seeker.
+    fn set_selection(&mut self, next: usize) {
         self.release();
         self.bore_observation = None;
         self.mounted = Seeker::default();
@@ -1204,6 +1217,36 @@ impl State {
         if self.armed {
             self.selected = next - 1;
         }
+    }
+    /// The mission's starting load is what `ammo` holds now: only those
+    /// stations count as loaded.
+    pub fn start_load(&mut self) {
+        self.ever_loaded = self.ammo.iter().map(|a| a & 0x7fff != 0).collect();
+    }
+    /// Remember which stations hold something now (every tick, so a station
+    /// that later runs dry is known to have been loaded).
+    pub fn note_loaded(&mut self) {
+        for (loaded, ammo) in self.ever_loaded.iter_mut().zip(&self.ammo) {
+            *loaded |= ammo & 0x7fff != 0;
+        }
+    }
+    /// Whether a station was loaded at the start of the mission, whatever it
+    /// holds now.
+    pub fn was_loaded(&self, station: usize) -> bool {
+        self.ever_loaded.get(station).copied().unwrap_or(false)
+    }
+    /// When the selected station has run dry, move to the next station that
+    /// carries something (gun then missiles in ring order), or to NAV when
+    /// nothing is left. Does nothing while the selection still carries.
+    pub fn advance_from_empty(&mut self) {
+        if !self.armed || self.carries(self.selected) {
+            return;
+        }
+        let count = self.ammo.len();
+        let next = (1..count)
+            .map(|step| (self.selected + step) % count)
+            .find(|i| self.station_allowed(*i) && self.carries(*i));
+        self.set_selection(next.map_or(0, |i| i + 1));
     }
     /// Whether the guns only cheat lets this station be selected.
     pub fn station_allowed(&self, station: usize) -> bool {
@@ -1435,6 +1478,7 @@ impl State {
             Command::NextWeapon => self.select_next(),
             Command::NextSelection => self.cycle_selection(true),
             Command::PreviousSelection => self.cycle_selection(false),
+            Command::AdvanceFromEmpty => self.advance_from_empty(),
             Command::SelectNav => {
                 self.release();
                 self.armed = false;

@@ -135,6 +135,7 @@ SETTINGS_FILES = {
     "graphics": ("graphics-v1.conf", "Graphics options not loaded"),
     "sound": ("sound-v1.conf", "Sound settings not loaded"),
     "replays": ("replays-v1.conf", "replays-v1.conf unreadable"),
+    "input": ("input-v1.conf", "Controls file not loaded"),
 }
 
 
@@ -157,24 +158,26 @@ def settings_scenarios() -> list[Scenario]:
                 timeout=240,
             )
         )
-    code = "import sys; open(sys.argv[1] + '/input-v1.conf', 'wb').write(b'not a profile\\n')"
-    out.append(
-        Scenario(
-            name="replay-settings-corrupt-input",
-            lane="replay",
-            args=["--version"],
-            then=[
-                Step([PY, "-c", code, "{work}/data"], app=False),
-                Step([PY, DRIVER, "--data", "{work}/data", "--keys", "wait 1", "--", "--free-flight", "--no-audio"], app=False, window=True, expect_exit=None, timeout=180),
-            ],
-            check_work=lambda work, output: (
-                []
-                if "input-v1.conf" in sections(output).get(2, "") and "delete it to go back to the default controls" in sections(output).get(2, "") and "panicked" not in output
-                else ["a damaged input-v1.conf did not give a message that names the file and says how to recover"]
-            ),
-            timeout=240,
+    # The automatic controls file falls back like the others, whatever is in it;
+    # an empty file and a plain wrong header as well as the binary one above.
+    for variant, body in (("empty", "b''"), ("wrong-header", "b'not a profile\\n'")):
+        code = f"import sys; open(sys.argv[1] + '/input-v1.conf', 'wb').write({body})"
+        out.append(
+            Scenario(
+                name=f"replay-settings-corrupt-input-{variant}",
+                lane="replay",
+                args=["--version"],
+                then=[
+                    Step([PY, "-c", code, "{work}/data"], app=False),
+                    Step([PY, DRIVER, "--data", "{work}/data", "--keys", "wait 2", "--", "--free-flight", "--no-audio"], app=False, window=True, timeout=180),
+                    Step([PY, "-c", "import glob,sys; t=''.join(open(f,errors='replace').read() for f in sorted(glob.glob(sys.argv[1]+'/logs/*.log'))); print(t)", "{work}/data"], app=False),
+                ],
+                check_work=lambda work, output: check_settings(output, "Controls file not loaded") + (
+                    [] if "input-v1.conf" in sections(output).get(3, "") else ["the warning does not name input-v1.conf"]
+                ),
+                timeout=240,
+            )
         )
-    )
     return out
 
 

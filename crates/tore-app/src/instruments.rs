@@ -1105,7 +1105,14 @@ impl Instruments {
                         c.weapons.iter().skip(page * 6).take(6).enumerate()
                     {
                         let y = 5 + row as i32 * 14;
-                        let colour = if *selected { BRIGHT } else { GREEN };
+                        // A station that ran dry stays listed, greyed.
+                        let colour = if *selected {
+                            BRIGHT
+                        } else if *count == 0 {
+                            DIM
+                        } else {
+                            GREEN
+                        };
                         if *selected {
                             r.text(f, ">", 5, y, colour);
                         }

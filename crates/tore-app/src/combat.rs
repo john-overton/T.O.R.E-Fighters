@@ -777,6 +777,7 @@ impl Combat {
         if let Some(ammo) = &self.initial_ammo {
             self.state.ammo.clone_from(ammo);
         }
+        self.state.start_load();
         self.input = FireInput::default();
         self.controller.cancel();
         s.set_payload(self.state.payload_lbs())?;
@@ -827,6 +828,7 @@ impl Combat {
             );
         }
         let mut events = Vec::new();
+        self.state.note_loaded();
         if s.airburst()
             && let Some(event) = self.state.player_airburst(s.position)
         {
@@ -978,6 +980,14 @@ impl Combat {
         if events.contains(&Event::PilotKilled) {
             s.systems.kill_pilot("Pilot killed by cockpit hit");
         }
+        // A station that ran dry hands the selection on, but never while the
+        // trigger is held: the next store must not fire from the same press.
+        if !(self.input.held || self.controller.held)
+            && self.state.armed
+            && !self.state.carries(self.state.selected)
+        {
+            self.command(live::Command::AdvanceFromEmpty, l);
+        }
         Ok(events)
     }
     pub fn view_pose(&self, target: &live::Target, presented: bool) -> ([f64; 3], [f64; 3]) {
@@ -1072,28 +1082,33 @@ impl Combat {
     }
 
     pub fn readout(&self, s: &flight::State, rcs_scale: f64) -> crate::instruments::CombatReadout {
-        let mut groups: Vec<(String, String, u32, bool)> = Vec::new();
+        // (source, name, rounds, selected, loaded at the start)
+        let mut groups: Vec<(String, String, u32, bool, bool)> = Vec::new();
         for (index, station) in self.state.configuration().stations.iter().enumerate() {
             let selected = self.state.armed && index == self.state.selected;
+            let loaded = self.state.was_loaded(index);
             if let Some(group) = groups.iter_mut().find(|g| g.0 == station.weapon.source) {
                 group.2 += u32::from(self.state.rounds(index));
                 group.3 |= selected;
+                group.4 |= loaded;
             } else {
                 groups.push((
                     station.weapon.source.clone(),
                     station.weapon.hud_name.clone(),
                     u32::from(self.state.rounds(index)),
                     selected,
+                    loaded,
                 ));
             }
         }
         crate::instruments::CombatReadout {
-            // The window lists what the aircraft carries: a weapon with no
-            // rounds left, or never loaded, is not listed unless selected.
+            // The window lists what the aircraft was loaded with: a weapon
+            // that ran dry keeps its row at zero, but one that was never
+            // loaded (taken off on the Load Ordnance page) has none.
             weapons: groups
                 .into_iter()
-                .filter(|(_, _, count, selected)| *count > 0 || *selected)
-                .map(|(_, name, count, selected)| (name, count, selected))
+                .filter(|(_, _, count, selected, loaded)| *count > 0 || *selected || *loaded)
+                .map(|(_, name, count, selected, _)| (name, count, selected))
                 .collect(),
             chaff: self.state.chaff,
             flares: self.state.flares,
@@ -1831,6 +1846,11 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     f64::from(world.height(x as f32, z as f32))
                 });
                 let events = combat.step(&mut flight, &world)?;
+                // The host hands a dry station's selection on (see `step`);
+                // the second state applies the same rule from the tape.
+                if !combat.input.held && replay.armed && !replay.carries(replay.selected) {
+                    replay.command(live::Command::AdvanceFromEmpty, launcher(&flight));
+                }
                 if events != replay_events
                     || combat.state.ammo != replay.ammo
                     || combat.state.projectiles != replay.projectiles
@@ -2150,6 +2170,41 @@ mod tests {
         assert!(!c.state.armed, "NAV");
         c.state.cycle_selection(true);
         assert_eq!((c.state.armed, c.state.selected), (true, 1));
+    }
+    #[test]
+    fn a_station_emptied_in_flight_keeps_its_row_but_is_never_selectable() {
+        let (mut c, f) = loaded([500, 3]);
+        assert_eq!((c.state.armed, c.state.selected), (true, 0), "the gun");
+        assert_eq!(listed(&c, &f).len(), 2);
+        // The gun's last round is fired: the selection moves to the missile
+        // and the gun keeps a row at zero, greyed by the window.
+        c.state.ammo[0] = 0;
+        c.state.advance_from_empty();
+        assert_eq!((c.state.armed, c.state.selected), (true, 1));
+        let list = listed(&c, &f);
+        assert_eq!(list.len(), 2, "the dry gun is still listed: {list:?}");
+        assert_eq!((list[0].1, list[0].2), (0, false));
+        assert_eq!((list[1].1, list[1].2), (3, true));
+        // The ring skips the dry gun.
+        c.state.cycle_selection(true);
+        assert!(!c.state.armed, "NAV");
+        c.state.cycle_selection(true);
+        assert_eq!((c.state.armed, c.state.selected), (true, 1));
+        // The last missile goes too: NAV, both rows still listed.
+        c.state.ammo[1] = 0;
+        c.state.advance_from_empty();
+        assert!(!c.state.armed);
+        assert_eq!(listed(&c, &f).len(), 2);
+        c.state.cycle_selection(true);
+        assert!(!c.state.armed, "nothing left to select");
+    }
+    #[test]
+    fn a_dry_station_hands_on_only_to_an_allowed_one() {
+        let (mut c, _) = loaded([500, 3]);
+        c.state.cheats.guns_only = true;
+        c.state.ammo[0] = 0;
+        c.state.advance_from_empty();
+        assert!(!c.state.armed, "the missile is not allowed under guns only");
     }
     #[test]
     fn a_restart_reloads_exactly_the_edited_quantities() {

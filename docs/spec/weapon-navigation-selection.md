@@ -73,7 +73,14 @@ Opinionated presentation requested by John on 2026-09-21, using his supplied
 WEAPONS screenshot: list ammunition count and imported short weapon name, mark
 the selected weapon with `>`, and show live CHAFF and FLARE counts at the bottom.
 The agent groups identical source weapons and sums their remaining rounds. A
-group with no rounds is not listed, unless it is the selected one.
+weapon that was never loaded (taken off on the Load Ordnance page) has no row.
+One that was loaded and has run dry keeps its row at `0`, drawn dim, and can no
+longer be selected: `[`, `]` and the minus and plus buttons skip it, and when
+the selected station runs dry the selection moves on to the next loaded station
+in ring order (never while the trigger is still held), or to NAV when nothing is
+left (requested by John on 2026-09-29; the dim row is an agent choice).
+Jettisoning the selected store empties it and hands the selection on the same
+way, so a following trigger press fires the next loaded station.
 NAV has no selected-weapon marker. Six rows fit each page; the third button `P`
 wraps pages and does nothing on a single page. Minus/plus use the same selection
 ring as the bracket keys and reveal the selected weapon's page. Detailed range

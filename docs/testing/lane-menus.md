@@ -150,11 +150,11 @@ reading 1 to 6); the damage row said twelve aircraft (fourteen are selectable);
 `--help` listed four of the creator's thirty-odd snapshot states; the graphics spec said
 an unreadable settings file was silent.
 
-**Corrupt controls file.** `docs/INPUT.md` says a bad profile "fails with a line
-number", and no document says the automatic `input-v1.conf` must fall back. The
-behaviour is documented as failing, so it stays as it is; the round one change made the
-error name the file. It is no longer an open decision, only a note that an empty or
-binary file has no line number to report.
+**Corrupt controls file.** Decided by John on 2026-09-29: a damaged automatic
+`input-v1.conf` falls back to the default controls with a warning that names the file
+and the reason, like the other settings files; a file named with `--input-profile`
+still fails loudly ([INPUT.md](../INPUT.md)). Round three built it; the replay lane
+checks it (`replay-settings-corrupt-input*`).
 
 ## Manual audit (round three, 2026-09-29)
 
@@ -179,7 +179,7 @@ prints every in-flight menu item with what it does), a unit test, or the code pa
 | Creator: wing size 0 to 5 (player wing never 0), up to three enemy wings | 19, 20 | OK | matrix sweep, `menus-snap-quick-field-4` |
 | Creator: skill Ace, Experienced, Average, Novice (plus Dummy) | 19 | OK | `menus-snap-quick-field-5` |
 | Creator: aircraft list is the supported imported aircraft | 19 | DIFFERS | 14 exact identities (John, 2026-09-16), not the 26 retail choices |
-| Creator: location list of 16 theaters | 19 | OK | `menus-snap-quick-theaters`; the imported layout variants are listed after them |
+| Creator: location list of 16 theaters | 19 | OK | `menus-snap-quick-theater-*`; the imported layout variants are no longer listed (they load with `--theater ~CODE`, checked by `menus-snap-quick-devtheater-*` and the matrix probe) |
 | Creator: altitude 5,000 to 40,000 ft | 19 | OK | field 14 popup: 5,000, 10,000, 20,000, 40,000 |
 | Creator: weather Dawn, Clear, Cloudy, Overcast, Foggy, Sunset, Night | 19 | DIFFERS | six choices; Overcast is dropped as a duplicate of Cloudy ([quick-mission.md](../formats/quick-mission.md)) |
 | Creator: situation Advantage, Neutral, Disadvantage | 19 | NOT IMPLEMENTED | the row is shown; the mission ignores it ([spec](../spec/quick-mission-menu.md)) |
@@ -200,7 +200,7 @@ prints every in-flight menu item with what it does), a unit test, or the code pa
 | Load Ordnance: Fly and Select Plane buttons | 16 | OK | Fly starts the mission, Select Plane returns to the creator |
 | Debrief: clipboard pages, right and left click, arrow keys, OK | 17 | OK | `menus-snap-quick-debrief*`, `debrief::key` |
 | Mission brief and map screens (single missions) | 14, 15 | NOT IMPLEMENTED | Play Single Mission is not available |
-| In-flight menu bar: ? (End mission, Exit to Windows) | 332 | OK | probe: `End` and `Exit` |
+| In-flight menu bar: ? (End mission, Exit to Windows) | 332 | OK | probe: `End` and `Exit`; shown as Exit to Desktop |
 | Control menu: Keyboard | 332 | OK | opens the controls screen |
 | Control menu: joystick types, rudder pedals, throttle stick, HAT | 332 | NOT IMPLEMENTED | probe; the controls screen binds any device instead |
 | Pref: Graphics, Sound, Time (Paused, Slow-motion, 1x to 8x), HUD pitch ladder, Dim and Brighten HUD, Show cockpit, Large windows | 332 | OK | probe: each opens its screen or toggles |
@@ -235,7 +235,7 @@ prints every in-flight menu item with what it does), a unit test, or the code pa
 | Cockpit toggle (Backspace) | 77 | OK | probe ("BS", `Show cockpit?`) |
 | Wingman orders Alt-1 to Alt-9, E, R, P, D, B, T, C, H, V | 159 | OK | `docs/INPUT.md` table, `flight_ui` order key test |
 | Wingman Alt-W (engage every target of the target's class) and Alt-F (attack on contact, IR targeting) | 159 | DIFFERS | Alt-W is attack on contact here and Alt-F reports "unavailable" ([INPUT.md](../INPUT.md), documented) |
-| Pre-flight ? menu labelled Exit to Windows | 12 | DIFFERS | main menu and creator say Exit to Desktop; the in-flight menu keeps Exit to Windows |
+| ? menu labelled Exit to Windows | 12 | DIFFERS | every menu shows Exit to Desktop (John, 2026-09-29): the main menu, creator, debrief, the flight and replay Esc menus and the shortcut help; only the imported row label behind them stays retail (`pause_menu::display_label`) |
 | In-flight map: Shift-M toggles, +/- zoom, scroll | 102, 202 | OK | the manual's "A S W Z" and "W Z A S" are its typeface's arrow-key symbols (the same symbols name pitch, roll and Shift-panning, which the catalog binds to the arrows), so the arrows scroll |
 | In-flight map: Show menu classes (planes, SAM, AAA, ships, airports, vehicles, other), SAM ranges, 5 nmi grid | 201, 328 | DIFFERS | category toggles are Aircraft, Airfields, Buildings, Surface, Emitters; no SAM ranges or grid yet ([map spec](../spec/flight-map.md)) |
 | In-flight map pauses the flight | 334 | DIFFERS | the flight keeps running under the map (`map_shortcut_pan_and_escape_do_not_pause_or_switch_sensors`) |
@@ -277,35 +277,42 @@ keep their letters.
 - **`--combat-smoke`** failed for 13 of the 14 aircraft when this lane first ran. The flight
   lane found the probe stale, not the game, and fixed it; all 14 pass now.
 
+## Round four (2026-09-29, John's decisions)
+
+- **Theater list.** The creator offers the sixteen base theaters only. The 59 imported
+  `~` layout variants (mostly one or two airports, incomplete) load only through
+  `--theater ~CODE`, which adds that layout for the run; the matrix probe checks the
+  list holds exactly the sixteen and still sweeps every layout, and `menus-snap-quick-devtheater-*`
+  opens the creator on each variant. This retires the "ground start on nine layouts with
+  no airports" note for players; those layouts are all variants.
+- **Stations that ran dry.** A station emptied in flight cannot be selected (ring, buttons
+  and `--weapon-slot` refuse it), hands the selection to the next loaded station or NAV
+  (not while the trigger is held), and keeps a dim `0` row in the WEAPONS window. A station
+  taken off on the Load Ordnance page has no row at all, as fixed in round one.
+- **Exit to Desktop** everywhere it is shown, including the flight menu's shortcut help.
+- **Damaged `input-v1.conf`** falls back to the default controls with a logged warning;
+  `--input-profile` still fails loudly.
+- **Recorded fuel** includes the external tanks (`fuel=internal and external tanks` in the
+  header; older recordings unchanged).
+- Closed by John, left as they are: the creator's Enter key and the rear-view mirrors
+  menu row.
+
 ## Needs a decision
 
 - **Su-35 wingtip station.** The imported Su-35 marks its wingtip AA-11B station as
   internal, so the Load Ordnance page prints it as `2 (max 2)` (no "loaded"), its weight
   is left out of the payload, and the Guns only rule treats it as a weapon to strip. The
   data says so; nobody has checked whether the retail game does the same.
-- **Ground start on a theater with no airports.** Nine theater layouts have no imported
-  runway (`~FRAF`, `~GREF`, `~IRAF`, `~KURILE`, `~NSKF`, `~PGUF`, `~TVIET`, `~UKRF`,
-  `~WTAF`). The creator lets Start be set to Ground there (the Airport row reads
-  Unavailable) and refuses at Fly with "No imported runways are available in this
-  theater. Choose Airborne." Whether the creator should block the choice earlier is not
-  defined.
-- **Runways where a lone aircraft is obstructed.** Greece runway 13 and `~BALF` runway 0
-  refuse even a single player ("The runway start is obstructed"); about a dozen more
-  (for example Greece 12, 15 and 16 and Taiwan 13) refuse only a wing of two or more.
-  This is the documented rule (obstructed starts are
-  refused), listed here in case the scenery is wrong rather than the check.
+- **Ground start on a variant layout with no airports** (developer option only). Nine
+  `~` layouts have no imported runway; the creator refuses at Fly with "No imported
+  runways are available in this theater. Choose Airborne."
+- **Runways where a lone aircraft is obstructed.** Greece runway 13 refuses even a single
+  player ("The runway start is obstructed"); about a dozen more (for example Greece 12, 15
+  and 16) refuse only a wing of two or more. This is the documented rule (obstructed
+  starts are refused), listed here in case the scenery is wrong rather than the check.
 - **Creator rows that change nothing yet.** The situation row (neutral, friendly,
   hostile) and both nationality rows are presentation only; the mission does not use
   them ([creator spec](../spec/quick-mission-menu.md)).
-- **HUD line for a dry station.** After the last round is fired, the station stays
-  selected and the HUD reads `0 M61`, the weapons window still lists it, until the next
-  `[` or `]`. Retail behaviour here is not recorded.
-
-- **Enter in the creator.** The manual says Enter accepts the whole form (OK); here Enter
-  activates the focused field and OK is a button. Either is workable, the choice is a
-  design decision.
-- **Rear-view mirrors menu row.** The mirrors are always on; the retail toggle row shows
-  "not implemented yet".
 
 ## Needs a human eye or ear
 

@@ -48,7 +48,18 @@ impl Default for Header {
     }
 }
 
+/// The header extra that says what a sample's `fuel_lb` adds up. Recordings
+/// made before 2026-09-29 have no such entry and count the internal tanks only.
+pub const FUEL_KEY: &str = "fuel";
+/// The `fuel` extra of a recording whose fuel includes the external tanks.
+pub const FUEL_WITH_EXTERNAL: &str = "internal and external tanks";
+
 impl Header {
+    /// Whether `fuel_lb` includes the external tanks (new recordings) or only
+    /// the internal fuel (older ones).
+    pub fn fuel_includes_external(&self) -> bool {
+        self.extra(FUEL_KEY) == Some(FUEL_WITH_EXTERNAL)
+    }
     /// The first extra value stored under `key`.
     pub fn extra(&self, key: &str) -> Option<&str> {
         self.extra
