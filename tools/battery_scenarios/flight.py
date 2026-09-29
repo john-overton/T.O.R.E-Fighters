@@ -226,9 +226,27 @@ def _landing(output: str) -> tuple[dict, float]:
     return landing, float(start.group(1)) if start else 0.0
 
 
+def ils_problems(output: str) -> list[str]:
+    """The player's ILS read along a scripted approach that flew its glide path:
+    it must be active and stay near the bars (the pilot script is not perfect,
+    and a crosswind lets it drift a little)."""
+    m = re.search(r"ils_probe: samples=(\d+) active=(\d+)(?: max_abs_glide_deg=([\d.]+) max_abs_localizer_deg=([\d.]+))?", output)
+    if not m:
+        return []
+    if int(m.group(2)) == 0:
+        return ["the ILS never became active on the approach"]
+    glide, localizer = float(m.group(3)), float(m.group(4))
+    problems = []
+    if glide > 0.8:
+        problems.append(f"the flown approach strayed {glide} degrees from the ILS glide path")
+    if localizer > 1.5:
+        problems.append(f"the flown approach strayed {localizer} degrees from the localizer")
+    return problems
+
+
 def check_landing(output: str, overrun_ok_ft: float = 0.0) -> list[str]:
     """`overrun_ok_ft` allows a longer roll (a tailwind landing)."""
-    problems = extremes_problems(output)
+    problems = extremes_problems(output) + ils_problems(output)
     landing, length = _landing(output)
     if not landing:
         return problems + ["no landing: line"]

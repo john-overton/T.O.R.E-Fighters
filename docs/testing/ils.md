@@ -1,5 +1,13 @@
 # ILS alignment and glide angle
 
+> **T.O.R.E: Tasteful Opinionated Reverse Engineered.**
+> The thing being reverse engineered is the *experience*, not the executable. We
+> trace what a player does and what the game does back, down to the numbers they
+> would notice. How the original code achieved it is history: useful evidence,
+> never a blueprint. If a sentence below reads like an instruction to reproduce
+> the original's internals, it is out of date.
+> <!-- tore-header v2 -->
+
 Findings from the 2026-09-29 check requested by John, who noticed that the ILS was
 not quite aligned for altitude at the airports and that the approach felt shallow.
 The command is `tore-app --validate-ils` (add `--theater '~CODE'` to include one
@@ -30,7 +38,7 @@ to 300 ft, and the bars were read with 10 to 100 ft displacements each way.
   5,500 ft). The survey prints them as `ils-terrain:` lines and does not fail.
 - **The path was wrong in two ways, both fixed.**
   1. The glide error used the height of the aircraft's origin, not its wheels, and
-     the origin sits 8 to 14 ft above the wheels (F/A-18: 8.5). Following the bars
+     the origin sits several feet above the wheels (about 8 ft for the Hornet). Following the bars
      to zero put the wheels that far under the runway plane: at 800 ft out the bar
      read +0.6 degrees on a wheel-perfect path, and a pilot who centred it touched
      down short of the threshold. The wheel height is now used
@@ -40,8 +48,8 @@ to 300 ft, and the bars were read with 10 to 100 ft displacements each way.
      ("The aircraft should touch down approximately a quarter down the length of the
      runway", p. 68) aim past it. The aim point is now the touchdown zone, 1,000 ft
      past the threshold on the runway plane, so the path crosses the threshold
-     **52.4 ft** up at every airport (the same as the aim point's height offset of
-     0 plus 1,000 ft times tan 3 degrees). The landing probe already aimed there.
+     **52.4 ft** up at every airport (1,000 ft times tan 3 degrees). The landing probe
+     already aimed there.
 - **Signs and centring are correct.** High reads positive, and the HUD draws
   `y = 240 + normalized * 30`, so the dots go to the bottom of the HUD when too
   high and to the top when too low, as the manual says (p. 66). Right of the
