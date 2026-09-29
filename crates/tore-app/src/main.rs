@@ -2368,8 +2368,16 @@ impl App {
                     },
                 ),
                 Step::Snapshot(path) => {
+                    // A relative path lands in TORE_SCRIPT_OUT when that is set.
+                    let path = match std::env::var_os("TORE_SCRIPT_OUT") {
+                        Some(dir) if path.is_relative() => PathBuf::from(dir).join(path),
+                        _ => path,
+                    };
                     let result = (|| -> std::io::Result<()> {
                         use std::io::Write;
+                        if let Some(parent) = path.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
                         let mut file = std::fs::File::create(&path)?;
                         write!(file, "P6\n{} {}\n255\n", menu::WIDTH, menu::HEIGHT)?;
                         for pixel in self.menu.pixels.chunks_exact(4) {

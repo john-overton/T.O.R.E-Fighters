@@ -181,6 +181,134 @@ def cheats_check(work: Path, output: str) -> list[str]:
     return problems
 
 
+def info_of(path: Path) -> str:
+    import os
+    import subprocess
+
+    binary = Path(__file__).resolve().parents[2] / "target" / "debug" / "tore-app"
+    env = dict(os.environ, TORE_NO_ERROR_DIALOG="1")
+    return subprocess.run([str(binary), "--recording-info", str(path)], capture_output=True, text=True, env=env).stdout
+
+
+def pause_menu_mouse_check(work: Path, output: str) -> list[str]:
+    # A flight started in the same minute gets -2 after its stem, which sorts before the dot.
+    files = sorted((work / "data" / "replays").glob("*.tore-replay"), key=lambda p: p.stem.endswith("-2"))
+    problems = []
+    if len(files) != 2:
+        return [f"expected two recordings (the restart starts a new one), found {len(files)}"]
+    first, second = (info_of(f) for f in files)
+    if "end=restart" not in first:
+        problems.append("the first recording does not end with the restart")
+    if "system.restart" not in second:
+        problems.append("the second recording does not begin with a restart event")
+    for text in (first, second):
+        if "finished normally" not in text or "Problem " in text:
+            problems.append("a recording is not finished normally")
+    if "system.cheat" not in first:
+        problems.append("the mouse click on the Cheat tab's Unlimited ammo row changed no cheat")
+    return problems
+
+
+def snapshots(work: Path) -> dict[str, Path]:
+    return {p.stem: p for p in sorted((work / "shots").glob("*.ppm"))}
+
+
+def debrief_mouse_check(work: Path, output: str) -> list[str]:
+    from battery_scenarios import _replay_tools as tools
+
+    shots = snapshots(work)
+    names = ["page1", "page2", "page3", "page4", "page5", "back4", "creator"]
+    problems = [f"no snapshot {n}" for n in names if n not in shots]
+    if problems:
+        return problems
+    digest = {n: shots[n].read_bytes() for n in names}
+    for n in names:
+        problems += tools.ppm_problems(str(shots[n]), min_colors=8)
+    pages = [digest[f"page{i}"] for i in range(1, 6)]
+    if len(set(pages)) != 5:
+        problems.append("the five debrief pages are not all different: NEXT did not page")
+    if digest["back4"] != digest["page4"]:
+        problems.append("PREV did not return to page 4")
+    if digest["creator"] in pages:
+        problems.append("OK did not leave the debrief")
+    return problems
+
+
+def replays_mouse_check(work: Path, output: str) -> list[str]:
+    from battery_scenarios import _replay_tools as tools
+
+    problems = []
+    shots = snapshots(work)
+    for n in ("list", "confirm", "after-delete", "panel", "final"):
+        if n not in shots:
+            problems.append(f"no snapshot {n}")
+        else:
+            problems += tools.ppm_problems(str(shots[n]), min_colors=8)
+    folder = work / "data" / "replays"
+    names = sorted(p.name for p in folder.iterdir())
+    conf = (work / "data" / "replays-v1.conf").read_text()
+    if "2026-09-18_1200_UKR_F18.tore-replay" in names:
+        problems.append("Delete and its confirmation did not remove the recording")
+    if "2026-09-18_1200_UKR_F18.txt.acmi" not in names:
+        problems.append("the Tacview button wrote no file")
+    if "2026-09-18_1200_UKR_F18-log" not in names:
+        problems.append("the Debug log button wrote no folder")
+    if "keep 2026-09-17_1200_UKR_F18.tore-replay" not in conf:
+        problems.append("the Keep button did not mark the selected recording")
+    if "auto-delete off" not in conf or "rule older-than" not in conf:
+        problems.append("the auto-delete panel's choices were not saved")
+    for n in ("2026-09-10_1200_UKR_F18.tore-replay", "2026-09-11_1200_UKR_F18.tore-replay", "notes.txt"):
+        if n not in names:
+            problems.append(f"{n} should be untouched")
+    if list(shots).count("confirm") and shots["confirm"].read_bytes() == shots["list"].read_bytes():
+        problems.append("the Delete button did not open the confirmation")
+    return problems
+
+
+def mouse_scenarios() -> list[Scenario]:
+    from battery import Step
+    from battery_scenarios import _replay_tools as tools
+
+    out = []
+    out.append(
+        Scenario(
+            name="replay-script-pause-menu-mouse",
+            lane="replay",
+            args=["--free-flight", "--no-audio", "--input-script", str(SCRIPTS / "pause-menu-mouse.txt")],
+            window=True,
+            timeout=240,
+            env={"TORE_RECORD_MISSIONS": "1"},
+            check_work=pause_menu_mouse_check,
+        )
+    )
+    out.append(
+        Scenario(
+            name="replay-script-debrief-mouse",
+            lane="replay",
+            args=["--launch-quick-mission", "--separation", "2", "--no-audio", "--input-script", str(SCRIPTS / "debrief.txt")],
+            window=True,
+            timeout=240,
+            env={"TORE_SCRIPT_OUT": "{work}/shots"},
+            check_work=debrief_mouse_check,
+        )
+    )
+    out.append(
+        Scenario(
+            name="replay-script-replays-screen-mouse",
+            lane="replay",
+            args=["--ai-probe-ticks", "600", "--separation", "2", "--probe-attack", "100:5", "--record-mission", "{work}/src.tore-replay", "--no-audio"],
+            env={"TORE_SCRIPT_OUT": "{work}/shots"},
+            then=[
+                Step(["python3", tools.__file__, "seed", "{work}/data", "{work}/src.tore-replay"], app=False),
+                Step(["--no-audio", "--input-script", str(SCRIPTS / "replays-screen.txt")], window=True, timeout=200),
+            ],
+            check_work=replays_mouse_check,
+            timeout=300,
+        )
+    )
+    return out
+
+
 def scenarios() -> list[Scenario]:
     free = ["--free-flight", "--no-audio"]
     quick = ["--launch-quick-mission", "--no-audio"]
@@ -204,4 +332,5 @@ def scenarios() -> list[Scenario]:
         build("views", "views.txt", free, views_check),
         build("pause-menu-bookmarks", "pause.txt", free, pause_check),
         build("cheats", "cheats.txt", free, cheats_check),
+        *mouse_scenarios(),
     ]

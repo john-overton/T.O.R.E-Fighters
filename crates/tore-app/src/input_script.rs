@@ -19,7 +19,8 @@
 //! press [left|right]    hold a mouse button
 //! release [left|right]
 //! wheel 3               wheel notches, negative for down
-//! snapshot out.ppm      the menu layer as it is drawn now (menu screens)
+//! snapshot out.ppm      the menu layer as it is drawn now (menu screens); a relative path
+//!                       goes in the folder named by TORE_SCRIPT_OUT when that is set
 //! exit                  quit
 //! ```
 use std::path::PathBuf;
