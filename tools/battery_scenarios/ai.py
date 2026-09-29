@@ -24,6 +24,8 @@ SKILLS = ["novice", "average", "experienced", "ace"]
 MISSIONS = ["free", "cap", "intercept", "escort", "self-defense", "hold"]
 GEOMETRIES = ["head", "side", "rear"]
 ADAPTERS = ["legacy", "researched"]
+# Base theaters (--validate-maps lists them); every one has airports 1 and 3.
+THEATERS = ["APA", "BAL", "CUB", "EGY", "FRA", "GRE", "IRA", "KURILE", "LFA", "NSK", "PGU", "SPA", "TVIET", "UKR", "VLA", "WTA"]
 # Known-good airport for ground starts in the default theater (Ukraine).
 GROUND_AIRPORT = "2"
 
@@ -408,6 +410,31 @@ def scenarios() -> list[Scenario]:
                      ticks=6000, notes="undamaged F-14 flew into the ground turning at 72 degrees of bank (fixed 2026-09-28)"))
     out.append(probe("regress-terrain-f18-hill", fight(1, 1, "--separation", "10", *attack), ticks=24000,
                      notes="undamaged F/A-18D eased into a hillside at 2 G (fixed 2026-09-28)"))
+
+    # 15. Other theaters: fights, ground starts, takeoff and landing, and
+    # every aircraft's ground-start takeoff at a few airports.
+    for theater in THEATERS:
+        where = ["--theater", theater]
+        out.append(probe(f"theater-{theater.lower()}-fight-4v4", where + fight(4, 4, "--separation", "5", *attack)))
+        out.append(probe(f"theater-{theater.lower()}-fight-8v8-noattack", where + fight(8, 8, "--separation", "10"), ticks=9600))
+        for airport in ("1", "3"):
+            out.append(probe(f"theater-{theater.lower()}-takeoff-a{airport}", where + [
+                "--ground-start", airport, "--probe-wing-size", "3", "--maneuver", "takeoff", "--separation", "50"],
+                ticks=24000, timeout=1800, check=checker(ground=True, need_takeoff=True)))
+        out.append(probe(f"theater-{theater.lower()}-land-pair", where + [
+            "--ground-start", "1", "--probe-wing-size", "2", "--maneuver", "takeoff",
+            "--probe-wing-order", "12000:land-selected", "--separation", "200", "--probe-wing-only"],
+            ticks=108000, timeout=2400, check=checker(ground=True, need_takeoff=True, need_landing=True)))
+    for theater, airport in (("UKR", "1"), ("PGU", "2"), ("FRA", "3"), ("NSK", "5")):
+        for aircraft in AIRCRAFT:
+            out.append(probe(f"takeoff-{theater.lower()}-a{airport}-{aircraft}", [
+                "--theater", theater, "--ground-start", airport, "--aircraft", aircraft,
+                "--probe-friendly-aircraft", aircraft, "--probe-wing-size", "2", "--maneuver", "takeoff",
+                "--separation", "100", "--probe-wing-only"],
+                ticks=18000, timeout=1800, check=checker(ground=True, need_takeoff=True)))
+    for theater in ("PGU", "VLA"):
+        out.append(probe(f"long-15v15-{theater.lower()}", ["--theater", theater, *fight(15, 15, "--separation", "20", *attack)],
+                         ticks=216000, timeout=3600, check=checker(allow_anomalies=("outside the world",))))
 
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
