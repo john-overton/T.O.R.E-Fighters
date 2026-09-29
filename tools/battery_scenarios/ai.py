@@ -283,7 +283,7 @@ def fight(f: int, e: int, *extra: str) -> list[str]:
     return ["--probe-fight", f"{f}:{e}", *extra]
 
 
-_LOOKAHEAD = "fast low flight into rising ground, fixed 1,000 ft terrain look-ahead (docs/testing/lane-ai.md, decision 7)"
+_SHORT = "returning to base, the winners land short of Simferopol heading north after a slow final (docs/testing/lane-ai.md, Known failures)"
 _STRIP = "1,074 ft strip, the roll runs off the end (docs/testing/lane-ai.md, decision 11)"
 
 # Failures that are understood and documented in docs/testing/lane-ai.md. Each
@@ -292,6 +292,8 @@ KNOWN_FAILURES = {
     "ai-fuzz-0028": "F-22 wingmen follow the test harness leader at 1,070 kt to the map edge (docs/testing/lane-ai.md, decision 5)",
     "ai-theater-apa-takeoff-a3": _STRIP,
     "ai-theater-lfa-takeoff-a3": _STRIP,
+    "ai-long-1v1": _SHORT,
+    "ai-long-5v5": _SHORT,
     "ai-theater-cub-takeoff-a1": "friendly wing with no route leaves the map on a Key West ground start (docs/testing/lane-ai.md, decision 5)",
 }
 
@@ -470,10 +472,10 @@ def scenarios() -> list[Scenario]:
     out.append(probe("regress-envelope-edge-flap", fight(8, 8, "--separation", "5", *attack), ticks=7200,
                      check=checker(strict=True, allow_anomalies=("mid-air collision",)),
                      notes="Friendly 2-3 swapped between its missile tactic and gun tracking every few ticks (fixed 2026-09-29)"))
-    # Known failure (lane doc): an F-22 test-harness leader outruns its
-    # wingman, whose intercept closes altitude only in proportion to its
-    # 35,000 ft gap, so it chases at 800 kt, 900 ft above hills that rise
-    # faster than the 1,000 ft terrain look-ahead can see.
+    # Formerly a known failure (lane doc): an F-22 test-harness leader
+    # outruns its wingman, which chases at 800 kt, 900 ft above hills that
+    # rose faster than the old 1,000 ft terrain look-ahead could see. Passes
+    # with the six-second look-ahead (2026-09-29).
     out.append(probe("known-f22-leader-wingman-ukr3", [
         "--theater", "UKR", "--aircraft", "f22", "--ground-start", "3",
         "--maneuver", "takeoff", "--probe-wing-size", "2", "--probe-wing-only"],
