@@ -519,10 +519,6 @@ impl FlightUi {
                         | "ArrowRight"
                         | "ArrowUp"
                         | "ArrowDown"
-                        | "a"
-                        | "s"
-                        | "w"
-                        | "z"
                         | "Home"
                 )
             {
@@ -1130,14 +1126,6 @@ mod tests {
         assert!(ui.map.open);
         assert!(!ui.frozen());
         assert_eq!(ui.key("ArrowUp", false, false, false, &[]), Command::None);
-        // Manual p. 202: A, S, W and Z scroll the map; they must not reach flight.
-        for key in ["a", "s", "w", "z"] {
-            assert_eq!(
-                ui.key(key, false, false, false, &[]),
-                Command::None,
-                "{key}"
-            );
-        }
         assert_eq!(ui.key("Escape", false, false, false, &[]), Command::Click);
         assert!(!ui.map.open);
         assert!(!ui.menu);

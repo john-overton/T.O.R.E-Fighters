@@ -236,7 +236,7 @@ prints every in-flight menu item with what it does), a unit test, or the code pa
 | Wingman orders Alt-1 to Alt-9, E, R, P, D, B, T, C, H, V | 159 | OK | `docs/INPUT.md` table, `flight_ui` order key test |
 | Wingman Alt-W (engage every target of the target's class) and Alt-F (attack on contact, IR targeting) | 159 | DIFFERS | Alt-W is attack on contact here and Alt-F reports "unavailable" ([INPUT.md](../INPUT.md), documented) |
 | Pre-flight ? menu labelled Exit to Windows | 12 | DIFFERS | main menu and creator say Exit to Desktop; the in-flight menu keeps Exit to Windows |
-| In-flight map: Shift-M toggles, +/- zoom, scroll with A, S, W, Z | 102, 202 | FIXED | the map took only the arrow keys and A toggled the autopilot; now both scroll (`aswz_scroll_the_map_like_the_arrows`) |
+| In-flight map: Shift-M toggles, +/- zoom, scroll | 102, 202 | OK | the manual's "A S W Z" and "W Z A S" are its typeface's arrow-key symbols (the same symbols name pitch, roll and Shift-panning, which the catalog binds to the arrows), so the arrows scroll |
 | In-flight map: Show menu classes (planes, SAM, AAA, ships, airports, vehicles, other), SAM ranges, 5 nmi grid | 201, 328 | DIFFERS | category toggles are Aircraft, Airfields, Buildings, Surface, Emitters; no SAM ranges or grid yet ([map spec](../spec/flight-map.md)) |
 | In-flight map pauses the flight | 334 | DIFFERS | the flight keeps running under the map (`map_shortcut_pan_and_escape_do_not_pause_or_switch_sensors`) |
 | Keys: 1 to 8 throttle, A autopilot, B brakes, F flaps, G gear, H hook, O bay, [ ] weapons, R radar, I IR, T targets, Enter visual target, W and Shift-W waypoints, Insert and Delete countermeasures, Shift-1 to 0 windows, Ctrl-P pause, Shift-E twice | 60 to 104 | OK | `docs/CONTROLS.md` row by row, `flight_ui` key test |
@@ -249,7 +249,7 @@ entries either have a match arm in the app's named-action table in `main.rs` or 
 the one arm that returns nothing on purpose is the retired `master-arm`. Against the manual's key boxes
 one key was wrong: comma and period, reversed. Documented differences that stay: Z and X
 are extra rudder keys here (the manual uses them for vectored thrust nozzles); Shift and
-arrows pan the view (manual p. 104 has the same, the ASWZ note is the joystick path);
+arrows pan the view (manual p. 104: its "ASWZ" is the arrow-key symbols);
 Ctrl and arrows (thrust vectoring), Ctrl-R, M for HARM and the wing sweep keys have no
 binding, as FLIGHT-CONTROLS.md says.
 

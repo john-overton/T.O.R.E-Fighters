@@ -616,7 +616,7 @@ overrides remain rejected. [Acceptance and human test notes](baselines/takeoff-a
 The original Map filter menu is omitted by request. Shift-M shows known runways
 and current aircraft detections. Right-side buttons toggle Aircraft, Airfields,
 Buildings, Surface and Emitters. Buildings start off; the other categories start
-on. Unknown contacts use placeholders. Plus/minus zoom, arrows (or A, S, W, Z) pan and Home follows the player. Flight
+on. Unknown contacts use placeholders. Plus/minus zoom, arrows pan and Home follows the player. Flight
 continues; map pointer input cannot operate the covered instruments.
 `--flight-map --capture-flight PATH` captures this view. Map projection,
 identification and surface detection are fitted rules in the [map spec](spec/flight-map.md).
