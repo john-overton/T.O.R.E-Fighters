@@ -192,7 +192,7 @@ impl Data for LiveData<'_> {
         let who = self.name(subject);
         let here = self.roster.info.contains_key(&subject);
         if !self.recording {
-            return "Mission recording is off (TORE_RECORD_MISSIONS=0), and the panels show what it records.".into();
+            return "Mission recording is off in this run (captures, smoke tests, timing runs, a direct --free-flight start and TORE_RECORD_MISSIONS=0 do not record), and the panels show what it records.".into();
         }
         match kind {
             Kind::Thought if subject == 0 => {

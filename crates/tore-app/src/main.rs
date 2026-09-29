@@ -2355,6 +2355,11 @@ impl ApplicationHandler for App {
                                 .map_or(0., |l| l.enemy.distance_ft / quick_mission::FEET_PER_NM)
                         );
                     }
+                } else if self.screen == Screen::Flight {
+                    // A flight started straight from the command line records
+                    // itself like one started from the menu; captures, smoke
+                    // tests and timing runs have no recording library.
+                    self.start_replay_recording();
                 }
             }
             Err(error) => {
