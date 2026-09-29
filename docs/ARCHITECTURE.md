@@ -710,8 +710,8 @@ only read: the menu's camera changes go through the ordinary view commands.
 ## Mission core and seats
 
 Design for stages A and B of the [multiplayer plan](multiplayer-plan.md#stages),
-written 2026-09-28. **Stage A is built; stage B is under way (B0
-and B2 are built).** The section is rewritten as the stages land. John approved the design on 2026-09-28 with the decisions
+written 2026-09-28. **Stages A and B are built.** The section is rewritten as
+the stages land. John approved the design on 2026-09-28 with the decisions
 credited to him below; every other choice is an agent decision. His decisions
 are also in the [multiplayer guide](MULTIPLAYER.md#decisions).
 
@@ -1735,7 +1735,11 @@ the ground and aircraft that begin a landing. `AllHybrid`, for every multiplayer
 mission (John, 2026-09-28), puts every AI aircraft on the hybrid model at mission
 start, seeded as the AI probe's `--probe-flight-model researched` does, so a
 human taking over an AI aircraft never feels its handling change. AI air combat
-on the hybrid model is checked with AI probe runs against the legacy baselines.
+on the hybrid model was checked with 336 AI probe runs against the legacy model
+(B7): the same enemy aircraft lost, one more friendly AI aircraft lost (23
+against 22) and one round fewer fired (911 against 912) over 168 encounters on
+each, and no encounter differs by more than one aircraft or one round. See
+[the comparison](baselines/ai-hybrid-2026-09-29.md).
 
 *Built (B3).* `ai_wings::AiFlightModel` is the setting: `AiSetup::flight_model`
 in `world.rs` (single player passes `Standard`) and the probe's
@@ -1748,7 +1752,8 @@ drift on a straight line, stay as they are, and `Standard` cannot undo
 recordings identical (those already on the researched model, and the wing-only
 ground start) and changes 31: the seven ground starts differ by fractions of a
 knot in wings other than the player's, and the 24 air fights diverge from the
-first tick with small shifts in launches and hits. The full comparison is B7's.
+first tick with small shifts in launches and hits. The full comparison is the B7
+one linked above.
 
 #### Single-player guarantee
 
@@ -1787,7 +1792,28 @@ applies when play resumes (stage B).
    - **B5 debrief and recorder**: both for a chosen seat.
 3. **B6** (lead): handoff, with its tests. Done: see [handoff between the AI
    and a human](#handoff-between-the-ai-and-a-human).
-4. **B7**: a headless test with two humans in each of two wings flying through a
-   fight, succession tests with a human and an AI lead, and the hybrid probe
-   comparison. B7a is built: every seat-specific tick output names its seat (see
-   [tick input and output](#tick-input-and-output)).
+4. **B7**: the tests that close stage B. Done. B7a: every seat-specific tick
+   output names its seat (see [tick input and output](#tick-input-and-output)).
+   B7b, in `crates/tore-world/src/world/`, on the crowded mission of `crowd.rs`
+   (two humans and two AI wingmen in each of two wings, the humans handed their
+   planes through the handoff):
+   - `fight_tests.rs` flies the four seats through a 3,000 tick fight with
+     scripted stick, radar and gun bursts. It shows the run repeats exactly (a
+     digest of every plane, ownship, AI row and the radio journal), every
+     human's sensors see the other humans, ownships hit ownships of either side
+     (friendly fire on, and a setting that spares a shooter's own side) and AI
+     aircraft, the AI wingmen fly on their human leader, also once the friendly
+     lead is shot down and passes to the other human, each seat hears only its
+     own radio and gets its own HUD lines, and each seat's debrief inputs
+     (`ai_wings::outcome`) name its own plane.
+   - `succession_tests.rs` covers an AI leader shot down (the next AI member
+     leads that tick, the flight re-forms, nothing is said), a human leader shot
+     down or ejected with a human wingman (that seat alone hears "You're the
+     Wingleader now" five seconds later, voiced by the previous leader when the
+     pilot ejected alive and a text line when not) and a human leader shot down
+     with only AI wingmen (the first living AI member leads).
+   - The hybrid probe comparison is
+     [ai-hybrid-2026-09-29](baselines/ai-hybrid-2026-09-29.md).
+   - The fight test found one bug, fixed in its own commit: a hit by one ownship on
+     another never reached the ledger (see [hit tests and friendly
+     fire](#hit-tests-and-friendly-fire)).
