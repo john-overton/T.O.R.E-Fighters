@@ -5237,9 +5237,9 @@ impl ProbeAttacker {
         }
     }
 
-    /// After the AI step: perceived attacks, releases, missile defence and
-    /// ejections.
-    fn observe(&mut self, tick: u64, bridge: &mut ai_wings::AiWings) {
+    /// After the tick: perceived attacks, releases, missile defence and the
+    /// ejections the tick reported.
+    fn observe(&mut self, tick: u64, bridge: &ai_wings::AiWings, ejections: &[&str]) {
         let seconds = tick as f64 / 120.;
         for slot in bridge.slots() {
             let Some(actor) = bridge.mission().actor(slot.id) else {
@@ -5274,7 +5274,7 @@ impl ProbeAttacker {
                 );
             }
         }
-        for (_, message, _) in bridge.ejection_events.drain(..) {
+        for message in ejections {
             println!("t={tick} ({seconds:.1}s) {message}");
             self.ejections += 1;
         }
@@ -5532,13 +5532,19 @@ fn probe_case_name(
     )
 }
 
+/// The probe builds its AI bridge even when it holds no aircraft.
+const PROBE_BRIDGE: &str = "the probe always builds its AI bridge";
+
 /// Deterministic headless AI probe (`--ai-probe-ticks`).
 ///
 /// It builds the same chain a flown Quick Mission builds: the existing spawner
 /// places the wings, `Combat::reset` puts them in the world, and the AI bridge
 /// takes over from the targets it finds. Probe-only geometry, adapter and
 /// threat overrides are explicit and recorded; normal mission defaults stay
-/// separate. Headless weather/audio limitations are recorded in the header.
+/// separate. Each tick is `World::step`, the live game's whole tick, driven
+/// by the scripted pilot and attack; the probe presents what it needs from the
+/// tick's output, in the live order. It has no audio, HUD or rumble, and the
+/// header says so. Returns the terrain, so a matrix reuses it.
 ///
 /// `opinionated` (agent decision, 2026-09-17): the probe overwrites four setup
 /// fields so both sides always have aircraft. Rule: the default draft populates
@@ -5552,12 +5558,18 @@ fn ai_probe_run(
     quick: &mut quick_mission::QuickMission,
     hornet: &aircraft::Airframe,
     resources: &std::collections::BTreeMap<String, Vec<u8>>,
-    world: &terrain::Terrain,
+    mut terrain: terrain::Terrain,
     enemy_skill: Option<tore_sim::ai::experience::EnemySkillOverride>,
     ai_mission: ai_wings::Preset,
     script: &ProbeScript,
     record: Option<&ProbeRecord>,
-) -> AppResult<()> {
+) -> AppResult<terrain::Terrain> {
+    // A flight starts on a fresh weather clock, as `reset_weather` gives a
+    // flown one, so a terrain reused by the next matrix case starts clean.
+    terrain.weather =
+        tore_sim::environment::Environment::new(terrain.weather.configuration().clone());
+    // The setup reads the terrain; the mission owns it once the loop starts.
+    let world = &terrain;
     quick.draft.values[7] = if script.wing_only { 0 } else { 2 };
     quick.draft.values[8] = 1;
     quick.draft.values[21] = if script.wing_only { 0 } else { 2 };
@@ -5698,9 +5710,8 @@ fn ai_probe_run(
         hornet.profile.name,
         bridge.len()
     );
-    // Radio calls are observed, never fed back, so the probe is unchanged.
-    let mut comms = comms::Comms::new(1);
-    let mut radio = radio_calls::Radio::default();
+    let comms = comms::Comms::new(1);
+    let radio = radio_calls::Radio::default();
     let mut airfield_radio = airfield_radio::AirfieldRadio::default();
     airfield_radio.reset(parked.as_ref().map(|g| g.runway));
     let phrases = comms::phrases(resources);
@@ -5766,10 +5777,13 @@ fn ai_probe_run(
     // priority go through the same rules as a flown mission.
     let mut service =
         tore_sim::airport::Service::new(&world.airport_scene).map_err(std::io::Error::other)?;
+    // As a flown ground start sets it: navigation mode is on until the pilot
+    // arms a weapon.
+    let airport_nav_mode = parked.is_some();
     if let Some(ground) = &parked {
         service.command(
             &world.airport_scene,
-            airport_aircraft(world, &flight, false),
+            airport_aircraft(world, &flight, airport_nav_mode),
             tore_sim::airport::Command::SelectAirport(ground.airport),
         );
     }
@@ -5816,71 +5830,79 @@ fn ai_probe_run(
         pictures.push(combat.render_snapshot().clone());
     }
     let mut encounter: std::collections::BTreeMap<u32, ProbeEncounter> = Default::default();
-    let mut noted_ejections = 0;
+    // The same seed the live game gives its turbulence when a flight starts.
+    let mut turbulence_rng = tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?;
+    turbulence_rng.reseed_word(1);
+    // The probe runs the live game's whole tick; only the presentation is its
+    // own, below. It has no audio, HUD or rumble, so those cues are ignored.
+    let flight_researched = flight.research.is_some();
+    let mut mission = world::World {
+        terrain,
+        previous_flight: flight.clone(),
+        flight,
+        combat,
+        ai_wings: Some(bridge),
+        airport_service: service,
+        airport_nav_mode,
+        turbulence: Default::default(),
+        turbulence_rng,
+        comms,
+        airfield_radio,
+        radio,
+        phrases,
+        crew_voice: crew_voice::CrewVoice::new(&hornet.profile),
+        overspeed_message_at: None,
+        edge_message_at: None,
+        // The probe builds its own mission; only a restart reads the setup.
+        setup: world::Setup {
+            mission: None,
+            ground_start: parked.as_ref().map(|ground| ground.object),
+            researched_flight: flight_researched,
+            native_tables: None,
+            ai: None,
+        },
+    };
+    let mut output = world::TickOutput::default();
     let mut invariants = probe_invariants::ProbeInvariants::default();
     for tick in 0..ticks as u64 {
-        let previous = recording.as_ref().map(|_| flight.clone());
         if let Some(recording) = &mut recording {
-            recording.start_tick(None, &mut combat);
+            recording.start_tick(None, &mut mission.combat);
         }
         let mut keys = flight::PilotInput::default();
         if scripted {
-            pilot.fly(tick, &mut flight, &mut keys, world, parked.as_ref(), script);
+            pilot.fly(
+                tick,
+                &mut mission.flight,
+                &mut keys,
+                &mission.terrain,
+                parked.as_ref(),
+                script,
+            );
         }
         if let Some(attacker) = &mut attacker {
-            attacker.aim(tick, &mut combat, &flight, &bridge);
+            attacker.aim(
+                tick,
+                &mut mission.combat,
+                &mission.flight,
+                mission.ai_wings.as_ref().expect(PROBE_BRIDGE),
+            );
         }
-        if parked.is_some() {
-            flight.step_surface(&keys, |x, z| world.surface(x, z));
-        } else {
-            flight.step(&keys, |x, z| f64::from(world.height(x as f32, z as f32)));
-        }
-        apply_edge_loss(&mut flight, world);
-        if verify {
-            devices.push((
-                combat.state.tick(),
-                replay::devices::digest(&combat.state.devices),
-            ));
-        }
-        let events = combat.step(&mut flight, world)?;
-        if let Some(attacker) = &mut attacker {
-            attacker.events(tick, &events, &combat, &bridge);
-            // What a flown mission does with the same events.
-            for event in &events {
-                use tore_sim::combat::live::Event;
-                match event {
-                    Event::Jolt(jolt) => match jolt.target {
-                        None => flight.jolt_from(jolt.from, jolt.strength),
-                        Some(id) => bridge.jolt(id, jolt.from, jolt.strength),
-                    },
-                    Event::PlayerDestroyed => flight.crashed = true,
-                    _ => {}
-                }
-            }
-        }
-        let [x, _, z] = flight.position;
-        bridge.update_player_landing(
-            &world.airport_scene,
-            &service,
-            &flight,
-            world.surface(x, z).height,
-        );
         for (at, order) in &script.orders {
             if *at != tick {
                 continue;
             }
             let site = if *order == tore_sim::ai::wing::PlayerOrder::LandAtSelected {
                 match ai_wings::AiWings::landing_site(
-                    &world.airport_scene,
-                    &world.airfield_anchors,
-                    &service,
+                    &mission.terrain.airport_scene,
+                    &mission.terrain.airfield_anchors,
+                    &mission.airport_service,
                 ) {
                     Ok(site) => Some(site),
                     Err(message) => {
                         println!("t={tick} order={order:?} refused: {message}");
                         // Journal only: refused before the wing saw it.
-                        comms.record(comms::journal::Entry::order_refused(
-                            combat.state.tick() as f64 / 120.,
+                        mission.comms.record(comms::journal::Entry::order_refused(
+                            mission.combat.state.tick() as f64 / 120.,
                             *order,
                             message,
                         ));
@@ -5890,8 +5912,12 @@ fn ai_probe_run(
             } else {
                 None
             };
-            let report =
-                bridge.command_at(*order, combat.state.designated(), None, site.as_ref())?;
+            let report = mission.ai_wings.as_mut().expect(PROBE_BRIDGE).command_at(
+                *order,
+                mission.combat.state.designated(),
+                None,
+                site.as_ref(),
+            )?;
             println!("t={tick} order={order:?} reply={:?}", report.message);
         }
         for (ordinal, (_, threat)) in script
@@ -5900,7 +5926,13 @@ fn ai_probe_run(
             .enumerate()
             .filter(|(_, (at, _))| *at == tick)
         {
-            inject_probe_threat(*threat, ordinal, &mut bridge, &mut combat, world)?;
+            inject_probe_threat(
+                *threat,
+                ordinal,
+                mission.ai_wings.as_mut().expect(PROBE_BRIDGE),
+                &mut mission.combat,
+                &mission.terrain,
+            )?;
             if let Some(recording) = &mut recording {
                 recording.note(
                     tore_replay::Event::new(tore_replay::vocab::kind::SYSTEM_NOTE)
@@ -5908,135 +5940,146 @@ fn ai_probe_run(
                 );
             }
         }
-        bridge.report_weapon_hits(&events);
-        bridge.step(&mut combat.state, &flight, world)?;
-        for actor in bridge
-            .mission()
-            .actors()
-            .iter()
-            .filter(|a| a.identity().side == ai_wings::ENEMY_SIDE)
-        {
-            let stats = encounter.entry(actor.id()).or_default();
-            if actor
-                .awareness()
-                .current_observations()
-                .any(|s| s.target.id == 0 && s.source_ticks.visual == Some(tick))
-            {
-                stats.visual.get_or_insert(tick);
-            }
-            if !actor.is_neutral() {
-                stats.engage.get_or_insert(tick);
-            }
-            if actor.trace().fire.selected {
-                stats.defense.get_or_insert(tick);
-            }
-            stats.bank = stats.bank.max(actor.flight().bank.to_degrees().abs());
+        if verify {
+            devices.push((
+                mission.combat.state.tick(),
+                replay::devices::digest(&mission.combat.state.devices),
+            ));
         }
-        if script.trace_ticks > 0 && tick % script.trace_ticks == 0 {
-            for actor in bridge
-                .mission()
-                .actors()
-                .iter()
-                .filter(|a| a.identity().side != ai_wings::FRIENDLY_SIDE)
-            {
-                let seen = actor
-                    .awareness()
-                    .current_observations()
-                    .find(|s| s.target.id == 0);
-                println!(
-                    "AI perception: tick={tick} actor={} player_sources={:?} neutral={} target={:?} activity={:?} fire={:?}",
-                    actor.id(),
-                    seen.map(|s| s.source_ticks),
-                    actor.is_neutral(),
-                    actor.controller().target(),
-                    actor.activity(),
-                    actor.incoming_fire_cue()
-                );
+        let input = world::TickInput {
+            pilot: keys,
+            fire: false,
+            weapon_cycles: Vec::new(),
+            airport: Vec::new(),
+            crew: comms::crew(&hornet.profile),
+        };
+        mission.step(&input, &mut output)?;
+        if let Some(error) = &output.fault {
+            return Err(error.clone().into());
+        }
+        // Present the tick in the order the live game does.
+        let now = mission.combat.state.tick() as f64 / 120.;
+        let mut ejected = Vec::new();
+        for cue in &output.cues {
+            match cue {
+                world::Cue::WingEjection {
+                    id,
+                    message,
+                    friendly,
+                } => {
+                    if let Some(recording) = &mut recording {
+                        recording.wing_ejection(*id, message, *friendly);
+                    }
+                    ejected.push(message.as_str());
+                }
+                world::Cue::Picture => {
+                    let bridge = mission.ai_wings.as_ref().expect(PROBE_BRIDGE);
+                    if let Some(attacker) = &mut attacker {
+                        attacker.events(tick, &output.events, &mission.combat, bridge);
+                    }
+                    for actor in bridge
+                        .mission()
+                        .actors()
+                        .iter()
+                        .filter(|a| a.identity().side == ai_wings::ENEMY_SIDE)
+                    {
+                        let stats = encounter.entry(actor.id()).or_default();
+                        if actor
+                            .awareness()
+                            .current_observations()
+                            .any(|s| s.target.id == 0 && s.source_ticks.visual == Some(tick))
+                        {
+                            stats.visual.get_or_insert(tick);
+                        }
+                        if !actor.is_neutral() {
+                            stats.engage.get_or_insert(tick);
+                        }
+                        if actor.trace().fire.selected {
+                            stats.defense.get_or_insert(tick);
+                        }
+                        stats.bank = stats.bank.max(actor.flight().bank.to_degrees().abs());
+                    }
+                    if script.trace_ticks > 0 && tick % script.trace_ticks == 0 {
+                        for actor in bridge
+                            .mission()
+                            .actors()
+                            .iter()
+                            .filter(|a| a.identity().side != ai_wings::FRIENDLY_SIDE)
+                        {
+                            let seen = actor
+                                .awareness()
+                                .current_observations()
+                                .find(|s| s.target.id == 0);
+                            println!(
+                                "AI perception: tick={tick} actor={} player_sources={:?} neutral={} target={:?} activity={:?} fire={:?}",
+                                actor.id(),
+                                seen.map(|s| s.source_ticks),
+                                actor.is_neutral(),
+                                actor.controller().target(),
+                                actor.activity(),
+                                actor.incoming_fire_cue()
+                            );
+                        }
+                    }
+                    if let Some(attacker) = &mut attacker {
+                        attacker.observe(tick, bridge, &ejected);
+                    }
+                    if let Some(recording) = &mut recording {
+                        if verify {
+                            verify_probe_attitudes(mission.combat.render_snapshot(), bridge)?;
+                        }
+                        recording.begin(replay::recorder::Tick {
+                            snapshot: mission.combat.render_snapshot(),
+                            combat: &mission.combat,
+                            flight: &mission.flight,
+                            previous: &mission.previous_flight,
+                            pilot: &input.pilot,
+                            wings: Some(bridge),
+                            world: &mission.terrain,
+                            events: &output.events,
+                            outcomes: &output.outcomes,
+                            journal: output.journal.as_ref(),
+                        });
+                    }
+                }
+                world::Cue::Radio(call) => {
+                    heard.push(format!("{now:.1}s {} {:?}", call.line(), call.stems));
+                }
+                _ => {}
             }
         }
-        combat.ai_crashes(&bridge, world);
-        if let Some(recording) = &mut recording {
-            for (id, message, friendly) in bridge.ejection_events.iter().skip(noted_ejections) {
-                recording.wing_ejection(*id, message, *friendly);
-            }
-        }
-        if let Some(attacker) = &mut attacker {
-            attacker.observe(tick, &mut bridge);
-        }
-        noted_ejections = bridge.ejection_events.len();
-        if let (Some(recording), Some(previous)) = (&mut recording, &previous) {
-            combat.advance_render(&flight, Some(&bridge));
-            if verify {
-                verify_probe_attitudes(combat.render_snapshot(), &bridge)?;
-            }
-            let outcomes = combat.state.ledger.take_outcomes();
-            // Write-only: draining the AI's messages changes nothing.
-            let journal = bridge.take_ai_journal();
-            recording.begin(replay::recorder::Tick {
-                snapshot: combat.render_snapshot(),
-                combat: &combat,
-                flight: &flight,
-                previous,
-                pilot: &keys,
-                wings: Some(&bridge),
-                world,
-                events: &events,
-                outcomes: &outcomes,
-                journal: Some(&journal),
-            });
-        }
-        let now = combat.state.tick() as f64 / 120.;
-        airfield_radio.step(
-            now,
-            &phrases,
-            &mut comms,
-            &flight,
-            world,
-            &service,
-            Some(&bridge),
-        );
-        let crew = comms::crew(&hornet.profile);
-        let state = &mut combat.state;
-        radio_calls::step(
-            &mut radio,
-            &mut comms,
-            &phrases,
-            crew,
-            &events,
-            state,
-            Some(&mut bridge),
-            &flight,
-        );
-        let due = comms.due(now);
         if let Some(recording) = &mut recording {
             // Write-only: every communication decision of the tick.
-            recording.drain_comms(&mut comms);
-            // Sounds are drained only when recording; nothing else reads them.
-            let emissions = combat.state.take_sound_events();
-            let stations = &combat.state.configuration().stations;
-            let releases: Vec<(&str, &tore_formats::weapons::Weapon)> = events
+            recording.drain_comms(&mut mission.comms);
+            let stations = &mission.combat.state.configuration().stations;
+            let releases: Vec<(&str, &tore_formats::weapons::Weapon)> = output
+                .releases
                 .iter()
-                .filter_map(|event| match event {
-                    tore_sim::combat::live::Event::Fired(i) => {
-                        let weapon = &stations[*i].weapon;
-                        Some((weapon.fire_sound.as_deref()?, weapon))
-                    }
-                    _ => None,
-                })
+                .map(|(name, i)| (name.as_str(), &stations[*i].weapon))
                 .collect();
-            recording.sounds(&emissions, &releases);
-            recording.end(None, &mut combat);
+            recording.sounds(&output.emissions, &releases);
+            recording.end(None, &mut mission.combat);
             if verify {
-                pictures.push(combat.render_snapshot().clone());
+                pictures.push(mission.combat.render_snapshot().clone());
             }
         }
-        heard.extend(
-            due.iter()
-                .map(|c| format!("{now:.1}s {} {:?}", c.line(), c.stems)),
+        watch.observe(
+            tick,
+            mission.ai_wings.as_ref().expect(PROBE_BRIDGE),
+            &mission.flight,
+            &mission.terrain,
         );
-        watch.observe(tick, &bridge, &flight, world);
-        invariants.observe(tick, &bridge, &combat, world);
+        invariants.observe(
+            tick,
+            mission.ai_wings.as_ref().expect(PROBE_BRIDGE),
+            &mission.combat,
+            &mission.terrain,
+        );
     }
+    let world = &mission.terrain;
+    let flight = &mission.flight;
+    let combat = &mission.combat;
+    let bridge = mission.ai_wings.as_ref().expect(PROBE_BRIDGE);
     watch.summary();
     println!(
         "player crashed={} gear={} x={:.1} y={:.1} z={:.1} hdg={:.1}",
@@ -6075,14 +6118,17 @@ fn ai_probe_run(
             );
         }
     }
-    let report = debrief::capture(&combat, &flight, Some(&bridge));
+    let report = debrief::capture(combat, flight, Some(bridge));
     println!("AI probe debrief: {}", report.summary());
-    println!("AI probe radio: calls={} heard={}", radio.made, radio.heard);
+    println!(
+        "AI probe radio: calls={} heard={}",
+        mission.radio.made, mission.radio.heard
+    );
     for line in heard.iter().take(40) {
         println!("  {line}");
     }
     if let Some(attacker) = &attacker {
-        attacker.summary(&combat, &flight, &bridge);
+        attacker.summary(combat, flight, bridge);
     }
     // A single number that changes if any actor's path changes, so two runs can
     // be compared without diffing every coordinate.
@@ -6121,14 +6167,14 @@ fn ai_probe_run(
             .map(|t| t.hp)
             .collect::<Vec<_>>()
     );
-    invariants.summary(&bridge);
+    invariants.summary(bridge);
     if let Some(mut recording) = recording {
         recording.note(
             tore_replay::Event::new(tore_replay::vocab::kind::SYSTEM_END)
                 .with(tore_replay::vocab::field::REASON, "probe finished"),
         );
         let path = recording
-            .finish(&replay_footer(&combat, Some(&report), "probe finished"))
+            .finish(&replay_footer(combat, Some(&report), "probe finished"))
             .ok_or("the mission recording could not be finished; see the session log")?;
         if verify {
             devices.push((
@@ -6139,7 +6185,7 @@ fn ai_probe_run(
             println!("AI probe {}", verification.line());
         }
     }
-    Ok(())
+    Ok(mission.terrain)
 }
 
 /// Starts `--record-mission` for an AI probe, with the probe's settings and
@@ -6161,8 +6207,7 @@ fn start_probe_recording(
     let mut extra = vec![
         (
             "probe".to_owned(),
-            "headless AI probe: no weather stepping, crew voice, music or cockpit messages"
-                .to_owned(),
+            "headless AI probe on the full mission tick: no audio, music, HUD or rumble".to_owned(),
         ),
         ("probe.ticks".into(), ticks.to_string()),
         (
@@ -9387,12 +9432,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                                     path: directory.join(format!("{name}.tore-replay")),
                                     verify: verify_render,
                                 };
-                                ai_probe_run(
+                                world = ai_probe_run(
                                     ticks,
                                     &mut setup,
                                     &airframe,
                                     &theater_resources,
-                                    &world,
+                                    world,
                                     None,
                                     ai_mission,
                                     &script,
@@ -9410,7 +9455,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             &mut quick,
             &hornet,
             &theater_resources,
-            &world,
+            world,
             enemy_skill,
             ai_mission,
             &probe_script,

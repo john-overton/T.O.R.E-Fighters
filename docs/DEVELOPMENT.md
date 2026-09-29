@@ -1207,6 +1207,17 @@ heading/bank rates, and
 reports sensor fit, stores, launches and dropped launches. This is separate
 from synthetic tests and is not a retail comparison or visual acceptance.
 The shorter `--ai-probe-ticks N` retains the Quick Mission bridge probe.
+It runs the live game's whole mission tick (`World::step`, see
+[Mission core and seats](ARCHITECTURE.md#mission-core-and-seats)), driven by
+the scripted pilot, attack, wing orders and threat fixtures instead of a
+player. Compared with the reduced probe it replaced, it now steps the weather
+clock, turbulence on the scripted player, building contact, the airport
+service, the crew voice, the jolts and destruction of a hit without needing the
+attack script, and the runway surface with wind for airborne flight. The
+scripted player's world-edge loss is the tick's, checked after turbulence. Wing
+orders and threat fixtures land at the start of their tick. It has no audio,
+HUD or rumble. Its numbers changed once for this in the commit that switched
+it; probe outputs from before that commit are not comparable with later ones.
 For ground operations, combine it with `--ground-start AIRPORT`,
 `--probe-wing-size 1..5` and `--maneuver takeoff`. Add `--probe-wing-only`
 to omit the other wings. Those two wing options also apply to
@@ -1295,7 +1306,7 @@ TORE_DATA_DIR="$PWD/.local/dev-profile" cargo run --locked -p tore-app -- \
   --record-mission .local/headless/attack.tore-replay --verify-render --no-audio
 ```
 
-The probe's own output is unchanged by recording; `--verify-render` adds one
+Recording does not change the probe's output; `--verify-render` adds one
 line saying whether every recorded tick rebuilds the picture the probe drew,
 within the format's precision, and the released chaff and flares exactly. Then read the recording back without media:
 
