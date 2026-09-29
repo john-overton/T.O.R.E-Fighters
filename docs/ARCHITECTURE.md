@@ -1493,14 +1493,23 @@ flight re-forms on the new leader.
 - A `LeadershipChange` in the mission output (wing, new leader, previous leader,
   whether the previous leader's pilot is alive: ejected and unhurt) becomes a
   `Chatter::Leadership` event, and the radio journals it (`Cause::Leadership`).
-  It speaks nothing yet: B4 turns it into "You're the Wingleader now".
+  For an AI new leader that is all there is.
 
-The new leader will hear "You're the Wingleader now" (`^WNGLDR`, already
+A human new leader hears "You're the Wingleader now" (`^WNGLDR`, already
 imported) five seconds later, spoken by the previous leader if that pilot is
 still alive, for example after ejecting (retail: "voiced only when the previous
 leader is still alive to send it"). Otherwise a HUD line only (*agent
 proposal*; retail's triggers are unknown, see the
 [radio chatter spec](spec/radio-chatter.md#youre-the-wingleader-now)).
+*Built (B4 step 4).* `Radio::chatter` turns B3's `Chatter::Leadership` into
+the call when `scene.human(new leader)` is a listener: a call to that seat
+alone (`Audience::Plane`), five seconds later even if the previous leader is
+human, important, voiced by the previous leader or, when that pilot is dead,
+text only under the label `Flight`. When the AI takes the lead the existing
+"now leads the wing" note is all there is (no call, no unheard entry), so
+single player, where a human never becomes the new leader, is unchanged.
+`radio_calls::leaders` reads the AI mission's current leader (`wing_leader`)
+for the flight-leader audience.
 
 Single player gained the same succession (John, 2026-09-28): when the player is
 shot down, the first living wingman leads the rest, and when an AI leader dies

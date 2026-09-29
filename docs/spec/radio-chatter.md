@@ -348,9 +348,15 @@ destroyed or its pilot ejects (John, 2026-09-28: to the lowest-numbered living
 human in the flight, else the lowest-numbered living AI member; see
 [lead succession](../ARCHITECTURE.md#lead-succession)) and raises a leadership
 event with the wing, the new leader, the previous leader and whether the
-previous leader's pilot is alive. The event is journaled. The call itself, five
-seconds later to the new leader, is not voiced yet (*agent decision*, stage B4
-wires it).
+previous leader's pilot is alive. The event is journaled. *Agent decisions,
+2026-09-29:* the call is made only when a human flies the new leader, and goes
+to that seat alone, five seconds after the change, as an important call. It is
+voiced by the previous leader (labelled like any wingmate) when that pilot is
+alive. When the pilot is not, the words print as a HUD line labelled `Flight`
+with no recording (the HUD-only case is an agent proposal, not retail's). When
+the AI takes the lead nothing is said and only the journal's "now leads the
+wing" note is written, so single player, where a human never becomes the new
+leader, does not change.
 
 ### Friendly-fire complaints
 
@@ -590,9 +596,10 @@ Every other seat hears the speaker by flight colour and position. Design:
 ### Not implemented, and why
 
 - **Waypoint calls.** Quick Mission flights have no waypoint routes yet.
-- **"You're the Wingleader now".** The AI raises the leadership event and the
-  journal records it, but no call is voiced yet. The situations that pass
-  leadership in the original are unknown.
+- **"You're the Wingleader now" in the original's own situations.** The
+  situations that pass leadership in the original are unknown; TORE sends the
+  call only when the lead passes by its own succession rule, and only to a
+  human-flown new leader (see the section above and the multiplayer notes).
 - **AWACS report.** Its trigger is unknown.
 - **Vietnam voice set.** No Quick Mission speaker is North or South
   Vietnamese yet, and the per-event `#` mapping is only partly read.

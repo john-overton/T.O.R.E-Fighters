@@ -1137,3 +1137,67 @@ fn the_ai_is_handed_every_human_flown_plane_with_its_place_in_its_wing() {
         assert!(friends.contains(&0) && friends.contains(&50), "{friends:?}");
     }
 }
+
+/// A human wingman takes the lead: the previous leader is alive to say it, and
+/// only the new leader's seat hears "You're the Wingleader now", five seconds
+/// after the change.
+#[test]
+fn a_human_wingman_who_takes_the_lead_hears_the_call() {
+    let mut world = two_seat_mission();
+    let mut out = TickOutput::default();
+    let mut heard = Vec::new();
+    for tick in 0..900 {
+        if tick == 100 {
+            world
+                .ai_wings
+                .as_mut()
+                .unwrap()
+                .chatter
+                .push(ai_wings::Chatter::Leadership {
+                    speaker: 1,
+                    side: tore_sim::ai::launch::Side::Friendly,
+                    wing_number: 1,
+                    leader: 2,
+                    previous_pilot_alive: true,
+                });
+        }
+        let inputs = [SeatId(0), SeatId(1)].map(|seat| SeatInput {
+            seat,
+            tick: world.tick(),
+            ..SeatInput::default()
+        });
+        world.step(&inputs, &mut out).unwrap();
+        for cue in &out.cues {
+            if let Cue::Radio { seat, call } = cue
+                && call.stems.first().is_some_and(|stem| stem == "^WNGLDR")
+            {
+                heard.push((tick, *seat, call.clone()));
+            }
+        }
+    }
+    assert_eq!(heard.len(), 1, "{heard:?}");
+    let (tick, seat, call) = &heard[0];
+    assert_eq!(*seat, SeatId(1));
+    assert!((100 + 600..100 + 603).contains(tick), "tick {tick}");
+    assert_eq!(call.kind, comms::Kind::Important);
+}
+
+/// The radio's flight leaders are the AI mission's current leaders.
+#[test]
+fn radio_leaders_are_the_ai_missions_current_leaders() {
+    let world = mission();
+    let wings = world.ai_wings.as_ref().unwrap();
+    let members = radio_calls::members(&world.roster, Some(wings), |_| true);
+    let leaders = radio_calls::leaders(&world.roster, &members, Some(wings));
+    assert!(
+        leaders.contains(&(0, 0)),
+        "Red one leads the first flight: {leaders:?}"
+    );
+    for (flight, leader) in &leaders {
+        assert!(
+            members
+                .iter()
+                .any(|m| m.id == *leader && m.flight == *flight)
+        );
+    }
+}

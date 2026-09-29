@@ -833,6 +833,54 @@ impl Radio {
         );
     }
 
+    /// "You're the Wingleader now": five seconds after the lead changed, to
+    /// the new leader when a human flies it, in the previous leader's voice if
+    /// that pilot is alive to say it, else as a HUD line alone (agent
+    /// proposal, docs/spec/radio-chatter.md). When the AI takes the lead nobody
+    /// hears anything, and nothing is journaled beyond the change itself.
+    fn wingleader(
+        &mut self,
+        comms: &mut Comms,
+        scene: &Scene,
+        previous: u32,
+        leader: u32,
+        previous_pilot_alive: bool,
+        cause: Cause,
+    ) {
+        let Some(listener) = scene.human(leader) else {
+            return;
+        };
+        let origin = Origin::of(Source::Radio, cause)
+            .by(previous)
+            .to(journal::Audience::Player);
+        let (label, phrase) = if previous_pilot_alive {
+            (
+                scene.label(listener, previous, Audience::Plane(leader)),
+                Phrase::stem(scene.phrases, "^WNGLDR"),
+            )
+        } else {
+            // Nobody is left to say it: the words print with no voice.
+            let text = Phrase::stem(scene.phrases, "^WNGLDR").text;
+            (
+                Some("Flight".to_string()),
+                Phrase::default().raw(&text, None),
+            )
+        };
+        self.made += 1;
+        let Some(label) = label else {
+            return;
+        };
+        self.heard += 1;
+        // Not silenced, and after five seconds whoever says it.
+        comms.send(
+            scene.now,
+            Call::new(&label, phrase, Kind::Important)
+                .after(5.)
+                .because(origin),
+            &[Hearer::named(listener.seat, label)],
+        );
+    }
+
     /// One AI radio event.
     pub fn chatter(&mut self, comms: &mut Comms, scene: &Scene, event: &Chatter) {
         let p = |stem: &str| Phrase::stem(scene.phrases, stem);
@@ -948,22 +996,32 @@ impl Radio {
                     .rolls(rolls),
                 );
             }
-            // Journal only until the radio speaks it (B4).
             Chatter::Leadership {
                 speaker,
                 leader,
                 previous_pilot_alive,
                 ..
-            } => comms.record(Entry::note(
-                scene.now,
-                scene.name(*speaker),
-                radio(Cause::Leadership {
+            } => {
+                let cause = Cause::Leadership {
                     new: *leader,
                     previous: *speaker,
                     previous_pilot_alive: *previous_pilot_alive,
-                }),
-                Outcome::Noted,
-            )),
+                };
+                comms.record(Entry::note(
+                    scene.now,
+                    scene.name(*speaker),
+                    radio(cause.clone()),
+                    Outcome::Noted,
+                ));
+                self.wingleader(
+                    comms,
+                    scene,
+                    *speaker,
+                    *leader,
+                    *previous_pilot_alive,
+                    cause,
+                );
+            }
             Chatter::Fuel { speaker, level } => {
                 let stem = match level {
                     FuelLevel::Joker => "^JOKER",
@@ -1039,10 +1097,10 @@ pub fn members(
     out
 }
 
-/// The plane that leads each flight, by radio flight number: its first member
-/// (docs/ARCHITECTURE.md, "Lead succession", which moves the lead when the
-/// leader is lost).
-pub fn leaders(members: &[Member]) -> Vec<(u8, u32)> {
+/// The plane that leads each flight, by radio flight number: the AI mission's
+/// current leader of the wing (docs/ARCHITECTURE.md, "Lead succession"), or the
+/// wing's first member where the AI names none, as with no AI wings.
+pub fn leaders(roster: &Roster, members: &[Member], wings: Option<&AiWings>) -> Vec<(u8, u32)> {
     let mut leaders: Vec<(u8, u32, u8)> = Vec::new();
     for member in members {
         match leaders
@@ -1058,7 +1116,21 @@ pub fn leaders(members: &[Member]) -> Vec<(u8, u32)> {
     }
     leaders
         .into_iter()
-        .map(|(flight, id, _)| (flight, id))
+        .map(|(flight, first, _)| {
+            let current = members
+                .iter()
+                .find(|m| m.flight == flight)
+                .and_then(|m| roster.plane(PlaneId(m.id)))
+                .and_then(|plane| {
+                    let side = if plane.slot.wing.side.is_enemy() {
+                        crate::ai_wings::ENEMY_SIDE
+                    } else {
+                        crate::ai_wings::FRIENDLY_SIDE
+                    };
+                    wings?.mission().wing_leader(side, plane.slot.wing.index)
+                });
+            (flight, current.unwrap_or(first))
+        })
         .collect()
 }
 
@@ -1072,6 +1144,7 @@ pub fn step(
     phrases: &Phrases,
     listeners: &[Listener],
     members: &[Member],
+    leaders: &[(u8, u32)],
     events: &[live::Event],
     state: &mut live::State,
     wings: Option<&mut AiWings>,
@@ -1086,13 +1159,12 @@ pub fn step(
         }
         None => Vec::new(),
     };
-    let leaders = leaders(members);
     let scene = Scene {
         now: state.tick() as f64 / 120.,
         phrases,
         listeners,
         members,
-        leaders: &leaders,
+        leaders,
         targets: &state.targets,
         friendlies: &state.own().friendlies,
     };
@@ -1782,5 +1854,48 @@ mod tests {
         // Each seat's busy hold is its own: only seat 1 heard the complaint.
         assert!(!comms.channel_free(SeatId(1), 10.));
         assert!(comms.channel_free(SeatId(0), 10.));
+    }
+
+    #[test]
+    fn a_human_new_leader_hears_the_wingleader_call_after_five_seconds() {
+        // Seat 1 flies plane 5, a Red wingman; Red two (1) led and is gone.
+        let mut w = World::new();
+        w.members.push(member(5, false, 0, 2));
+        w.listeners.push(listener(1, 5, 0));
+        let mut comms = Comms::with_seats(1, [SeatId(0), SeatId(1)]);
+        let mut radio = Radio::default();
+        let change = |leader, alive| Chatter::Leadership {
+            speaker: 1,
+            side: tore_sim::ai::launch::Side::Friendly,
+            wing_number: 1,
+            leader,
+            previous_pilot_alive: alive,
+        };
+        let mut p = phrases();
+        p.insert("^WNGLDR".into(), "You're the Wingleader now".into());
+        w.phrases = p;
+        // The previous leader is alive: its voice, five seconds later, to seat 1.
+        radio.chatter(&mut comms, &w.scene(10.), &change(5, true));
+        assert!(comms.due(14.9).is_empty());
+        let due = comms.due(15.);
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].seat, SeatId(1));
+        assert_eq!(due[0].call.label, "Red two");
+        assert_eq!(due[0].call.stems, ["^WNGLDR"]);
+        assert_eq!(due[0].call.kind, Kind::Important);
+        // Its pilot is gone: the words print, with no recording.
+        radio.chatter(&mut comms, &w.scene(20.), &change(5, false));
+        let due = comms.due(25.);
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].seat, SeatId(1));
+        assert_eq!(due[0].call.line(), "Flight: 'You're the Wingleader now'");
+        assert!(due[0].call.stems.is_empty());
+        // The AI taking the lead is a note in the journal and nothing else.
+        comms.take_journal();
+        radio.chatter(&mut comms, &w.scene(30.), &change(2, true));
+        assert!(comms.due(40.).is_empty());
+        let journal = comms.take_journal();
+        assert_eq!(journal.len(), 1, "{journal:?}");
+        assert_eq!(journal[0].outcome, Outcome::Noted);
     }
 }

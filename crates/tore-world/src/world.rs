@@ -865,12 +865,14 @@ impl World {
             );
         }
         let listeners: Vec<radio_calls::Listener> = listeners.into_iter().flatten().collect();
+        let leaders = radio_calls::leaders(&self.roster, &members, self.ai_wings.as_ref());
         radio_calls::step(
             &mut self.radio,
             &mut self.comms,
             &self.phrases,
             &listeners,
             &members,
+            &leaders,
             events,
             &mut self.combat.state,
             self.ai_wings.as_mut(),
