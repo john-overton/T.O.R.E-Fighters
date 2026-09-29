@@ -49,12 +49,14 @@ adapter has no ground contact of this kind and is unchanged. Only the researched
 
 ## What it looks like
 
-An F/A-18D pulled to gear up at 80 knots on the runway with full afterburner
-slows to about 5 knots (thrust against belly friction) and loses 27 percent of its
-airframe in 75 seconds; a MiG-29 or X-31 with more thrust than the friction
-creeps up in speed, wears more than its whole airframe and, in the game, is lost.
-The Su-27, Su-25 and F-22 family stay within their lift envelope at 80 knots in
-the model, so retraction there is normal. A gear-up 50 feet above the runway
+With the [weight-scaled stall speed](takeoff-ground-contact.md#weight-scaled-stall-speed)
+every aircraft is below its stall speed at 80 knots. An F/A-18D pulled to gear up at 80
+knots on the runway with full afterburner slows to about 5 knots (thrust against belly
+friction) and loses 26 percent of its airframe in 75 seconds; the Su-27 (88 percent) and
+Su-25 (15 percent) belly-slide too, where before the change they flew on; a MiG-29 or X-31
+with more thrust than the friction creeps up in speed, wears more than its whole airframe
+and, in the game, is lost. The F-22 family's thrust carries it through the slide to its
+liftoff speed of about 99 knots with 1 percent wear. A gear-up 50 feet above the runway
 is normal for every aircraft.
 
 ## Tests

@@ -399,6 +399,17 @@ hybrid adapter turns them into the highest and lowest G it will deliver:
   Above the ceiling the envelope has no speed range and the rule does not apply.
 - The autopilot makes no promise outside the envelope ([autopilot](spec/autopilot.md)).
 
+### Weight-scaled stall speed
+
+`opinionated`, requested by John on 2026-09-29; the reference weight and the
+numbers are agent decisions ([rules](spec/takeoff-ground-contact.md#weight-scaled-stall-speed)).
+The polygon's slow edges are the aircraft's speeds at its empty weight and grow with
+the square root of its weight (fuel, stores, ordnance), in the hybrid adapter only.
+The fast edge, the overspeed rule and the ceiling rules do not change; full flaps
+still take 25 percent off the 1 G stall speed; the loaded-elevator divisor stays.
+`--retail-stall-speeds` (developer switch) restores the imported speeds at every
+weight. It is the same rule for all fourteen aircraft: nothing is tuned per aircraft.
+
 ### Limits of the world and the ground
 
 Two more `opinionated` rules, both requested by John on 2026-09-29 with agent-decided
@@ -442,7 +453,7 @@ effect starts or stops ([flight-model effects](REPLAYS.md#flight-model-effects))
 | `adapter.runway_wind`, `parked_*` | Crosswind, tailwind and headwind against the weight-class limits, the fade-in with ground speed, the tire-grip fraction; parked attitude and position holds |
 | `adapter.devices` | Gear, flaps, airbrake and hook: switch, position, and whether no hydraulics or a jam blocked them |
 | `adapter.power` | Engine, fuel starvation, afterburner and why it stayed dark, throttle, fuel flow, Unlimited fuel, rated thrust, model thrust lapse, power available, thrust |
-| `adapter.envelope` | Clean and effective stall speed, flaps, top speed, missing 1 G envelope, authority, the envelope rows holding the speed and their G, loading and its divisor, Pull extra G, the low-speed ceiling ramp, final G limits, stick and stick G |
+| `adapter.envelope` | Clean and effective stall speed (weight-scaled, with the scale itself), flaps, top speed, missing 1 G envelope, authority, the envelope rows holding the speed and their G, loading and its divisor, Pull extra G, the low-speed ceiling ramp, final G limits, stick and stick G |
 | `adapter.lift` | Transonic drag percentage, flap lift, wing damage, commanded G, spin lift factor, lift target and lagged lift |
 | `adapter.departure` | Hybrid only: mode and spin direction before and after, spin drive, the spin direction rule (direction, random draw, roll rate and bank as the rule read them, entered), how a spin ended, spin rate and maximum, cleared on the ground |
 | `adapter.scaling` | Stall severity and its control and lift scaling, spin blend and control effectiveness, final control scale |

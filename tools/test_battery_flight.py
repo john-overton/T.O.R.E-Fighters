@@ -15,8 +15,8 @@ EXTREMES = (
 TAKEOFF = (
     "loadout: empty_lb=23050 internal_fuel_lb=11220 fuel_lb=11220 carried_lb=7568 gross_lb=41838 max_takeoff_lb=49224\n"
     "takeoff_complete=true airport_ground_ft=0\n"
-    "envelope: altitude_ft=8.0 g1_kt=118.5..705.1 g2_kt=154.1..693.3 g3_kt=198.5..681.4 loading=0.8\n"
-    "liftoff: tick=978 speed_kt=111.9 distance_ft=780 rotation_kt=103.1\n"
+    "envelope: altitude_ft=8.0 g1_kt=118.5..705.1 g2_kt=154.1..693.3 g3_kt=198.5..681.4 loading=0.8 landing_limit_kt=195.5 stall_scale=1.347 stall_kt=119.7 min_level_flaps_kt=148.4\n"
+    "liftoff: tick=1305 speed_kt=147.0 distance_ft=1376 rotation_kt=103.1\n"
     "ticks=1617 speed_kt=162.436 altitude_ft=100.306 fuel_lb=11220.000 crashed=false\n" + EXTREMES
 )
 LANDING = (
@@ -63,12 +63,20 @@ class TakeoffAndLandingTests(unittest.TestCase):
         self.assertEqual(flight.check_takeoff(TAKEOFF), [])
 
     def test_liftoff_band(self):
-        env = "envelope: altitude_ft=8.0 g1_kt=118.5..705.1 g2_kt=154.1..693.3 g3_kt=198.5..681.4 loading=0.8\n"
-        ok = env + "liftoff: tick=978 speed_kt=111.9 distance_ft=780 rotation_kt=103.1\n"
+        env = "envelope: altitude_ft=8.0 g1_kt=118.5..705.1 g2_kt=154.1..693.3 g3_kt=198.5..681.4 loading=0.8 landing_limit_kt=195.5 stall_scale=1.347 stall_kt=119.7 min_level_flaps_kt=148.4\n"
+        ok = env + "liftoff: tick=1305 speed_kt=147.0 distance_ft=1376 rotation_kt=103.1\n"
         self.assertEqual(flight.liftoff_problems(ok), [])
-        self.assertTrue(flight.liftoff_problems(ok.replace("speed_kt=111.9", "speed_kt=60.0")))
-        self.assertTrue(flight.liftoff_problems(ok.replace("speed_kt=111.9", "speed_kt=200.0")))
+        self.assertTrue(flight.liftoff_problems(ok.replace("speed_kt=147.0", "speed_kt=60.0")))
+        self.assertTrue(flight.liftoff_problems(ok.replace("speed_kt=147.0", "speed_kt=200.0")))
+        self.assertTrue(flight.liftoff_problems(ok.replace("speed_kt=147.0", "speed_kt=125.0")))
         self.assertTrue(flight.liftoff_problems("liftoff: none\n"))
+
+    def test_speed_targets_and_recorded_deviations(self):
+        self.assertIsNone(flight._in_target(140, (135, 150), None))
+        self.assertIsNone(flight._in_target(97, (125, 140), 97.0))
+        self.assertTrue(flight._in_target(97, (125, 140), None))
+        self.assertTrue(flight._in_target(110, (125, 140), 97.0))
+        self.assertEqual(set(flight.APPROACH_TARGET) | {"x31"}, set(flight.AIRCRAFT))
 
     def test_overweight_and_stuck(self):
         text = TAKEOFF.replace("gross_lb=41838", "gross_lb=50000")

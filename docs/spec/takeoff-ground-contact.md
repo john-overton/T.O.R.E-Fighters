@@ -33,7 +33,51 @@ original control flow. The legacy and restricted research adapters remain distin
 Unknown: measured retail A-4 takeoff distance/time and configuration, ground
 rotation response, wheel-unloading thresholds, and the source meaning of any
 intermediate flap setting. No real-aircraft flight manual values or variant
-substitutions are used to fill those gaps.
+substitutions are used to fill those gaps, with one explicit exception: the
+weight-scaled stall speed below, which John requested on 2026-09-29.
+
+## Weight-scaled stall speed
+
+`opinionated`, requested by John on 2026-09-29 after the F-22, Su-27 and Su-25
+lifted off at 78, 97 and 73 knots; the reference weight and every number here
+are agent decisions. This is a deliberate departure from the retail polygon data,
+made because real fighters need markedly more speed to fly when loaded. Hybrid
+adapter only; the legacy adapter is unchanged, and `--retail-stall-speeds`
+turns the rule off for the whole run.
+
+- The imported envelope polygon keeps its meaning as the aircraft's speed limits
+  **at its reference weight**, which is its **empty weight** (no fuel, no
+  stores). The reference is taken from the game's own data: the imported
+  loaded-elevator percentage takes away G in proportion to fuel and stores
+  divided by the empty weight, so the polygon is the aircraft with a loading of
+  zero.
+- The scale is `sqrt(W / W_ref)`, with `W` the aircraft's instantaneous weight
+  (empty weight, fuel, and carried stores and ammunition), so fuel burn,
+  jettisoned stores and expended ordnance all change it. It is finite for any
+  weight (the weight is held to a quarter of the reference at the least).
+- The scale multiplies **every slow edge** of every G row of the polygon (the
+  slow side of the outline is the vertices from the first to the highest one;
+  each moved vertex is held to the fast side at its height), because the slow
+  edge of an n G row is where the wing can lift n times the weight. The fast
+  edge (top speed, the overspeed rule) does not move. The polygons the model
+  holds are rewritten when the weight has changed by a quarter of a percent, so
+  the flight model, the stall warning, the autopilot, the flight envelope
+  instrument and the AI all read the same speeds.
+- Full flaps still lower the 1 G reference by 25 percent, and the ramp to the next
+  G row, the loaded-elevator divisor and the 1 G floor and ceiling rules are
+  unchanged. The divisor stays: it limits the G the loaded aircraft can pull at
+  any speed, the scaling moves where the wing runs out of lift. The two together
+  make a loaded aircraft need a little more than the scaled stall speed to hold
+  1 G, which is the speed the model takes off at.
+- The belly rule calls an aircraft not in its lift envelope when it is below its
+  scaled clean stall speed.
+
+Results at the default loadout, sea level, full flaps and afterburner, and against
+John's figures for the three aircraft he named, are in the
+[flight lane page](../testing/lane-flight.md#weight-scaled-stall-speed-2026-09-29).
+One reference weight cannot bring every aircraft within 10 percent of the
+published figures: the F-22 family, Su-25, MiG-21 and MiG-23 stay low because
+their imported polygons are; see there.
 
 ## Hybrid flap and lift rules
 

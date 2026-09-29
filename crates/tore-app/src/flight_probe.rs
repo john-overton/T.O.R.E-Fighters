@@ -174,6 +174,17 @@ pub const LANDING_START_FT: f64 = 4. * 6076.;
 pub const AIM_PAST_THRESHOLD_FT: f64 = tore_sim::airport::AIM_PAST_THRESHOLD_FT;
 /// Height above the wheels' support plane where the probe starts the flare.
 const FLARE_HEIGHT_FT: f64 = 30.;
+/// The weight-scaled stall speed leaves a loaded aircraft little G at approach
+/// speed (the ramp to the next G row starts at its scaled edge), so the probe's
+/// flare starts higher, as a heavy aircraft's would.
+const LOADED_FLARE_HEIGHT_FT: f64 = 60.;
+fn flare_height() -> f64 {
+    if flight::retail_stall_speeds() {
+        FLARE_HEIGHT_FT
+    } else {
+        LOADED_FLARE_HEIGHT_FT
+    }
+}
 /// Ticks after touchdown the rollout may take before the probe gives up.
 const ROLLOUT_LIMIT: u64 = 120 * 240;
 
@@ -276,6 +287,11 @@ impl Landing {
         let limits = c.native.landing;
         // Clean 1 g stall speed at sea level, and a margin. With flaps the
         // model lowers the stall speed a quarter, so this is conservative.
+        // The weight-scaled stall speed at the fuel and stores the aircraft
+        // carries as the approach starts. With the flaps down as they are on
+        // final the approach is 1.3 times that flapped speed, and never under
+        // 1.05 times the loaded minimum speed for 1 G. `--retail-stall-speeds`
+        // keeps the earlier rule, 1.3 times the polygon edge.
         let stall = c
             .aerodynamics
             .envelopes
@@ -283,9 +299,15 @@ impl Landing {
             .find(|e| e.g == 1)
             .and_then(|e| e.speeds(0.))
             .map_or(200., |(low, _)| low);
-        let approach = (stall * 1.3)
-            .min(f64::from(limits.forward_fps) * 0.85)
-            .max(stall * 1.1);
+        let approach = if flight::retail_stall_speeds() {
+            (stall * 1.3)
+                .min(f64::from(limits.forward_fps) * 0.85)
+                .max(stall * 1.1)
+        } else {
+            (stall * 0.75 * 1.3)
+                .max(state.minimum_level_speed(0., 1.) * 1.05)
+                .min(f64::from(limits.forward_fps) * 0.85)
+        };
         Self {
             aim: [aim_x, aim_height(aim_x, aim_z), aim_z],
             dir,
@@ -468,9 +490,9 @@ impl Landing {
                 let mut vs_cmd =
                     -forward_speed * GLIDE_SLOPE_DEG.to_radians().tan() + 0.08 * path_err;
                 let mut speed_cmd = self.approach_fps;
-                if agl < FLARE_HEIGHT_FT && self.variant == LandingVariant::Hard {
+                if agl < flare_height() && self.variant == LandingVariant::Hard {
                     vs_cmd = -35.;
-                } else if agl < FLARE_HEIGHT_FT {
+                } else if agl < flare_height() {
                     // Flare: sink rate falls with height, to a firm but
                     // gentle touchdown.
                     // A float past the touchdown zone is cut short by a growing

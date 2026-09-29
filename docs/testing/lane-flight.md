@@ -178,11 +178,99 @@ fault in one aircraft's handling. The scripted landing's
 approach speed is 1.3 times the 1 G edge (F-22 92 kt, Su-25 100, Su-27 139), a probe choice
 and not an aircraft figure.
 
-Decision for John: to make these aircraft need 130 to 150 knots the polygon edge or a
-weight-scaled stall term would have to be invented, which the takeoff spec forbids without
-a source ("no real-aircraft flight manual values ... are used to fill those gaps"). The
-`flight-takeoff-*` scenarios now check that liftoff is between 0.75 and 1.6 times the 1 G edge
-so the lift model cannot drift unnoticed.
+John decided the same day to have the model scale the stall speed with weight,
+as a deliberate departure from the polygon data (next section). The
+`flight-takeoff-*` scenarios check that liftoff follows the model's own
+minimum speed for 1 G.
+
+## Weight-scaled stall speed (2026-09-29)
+
+`opinionated`, requested by John; rules in the
+[takeoff spec](../spec/takeoff-ground-contact.md#weight-scaled-stall-speed). The polygon's
+slow edges apply at the empty weight and grow with the square root of the weight.
+Reference weight: the empty weight, from the game's own data (the loaded-elevator
+percentage counts loading from zero fuel and stores). Trying reference weights of 0.6 to
+1.0 times the empty weight against John's figures for all twelve types showed no single
+fraction that brings every aircraft within 10 percent: 1.0 is the best overall and the one
+the data supports, and lower fractions push the F/A-18D, Rafale and A-4E 20 to 40
+percent too high to help the F-22 and Su-25. Nothing is tuned per aircraft.
+
+Liftoff at the default loadout (calm, sea level, UKR airport 1, full flaps, afterburner,
+back stick 0.35), before (`--retail-stall-speeds`) and after, against John's figures where
+he gave them:
+
+| Aircraft | Gross lb | Scale | Liftoff before (kt / ft) | Liftoff after (kt / ft) | John's liftoff |
+| --- | ---: | ---: | ---: | ---: | :---: |
+| F/A-18D | 41,838 | 1.35 | 112 / 780 | 147 / 1,383 | - |
+| Rafale C | 32,092 | 1.37 | 112 / 588 | 149 / 1,056 | - |
+| F-14D | 64,511 | 1.27 | 91 / 607 | 114 / 948 | - |
+| A-4E | 22,026 | 1.43 | 94 / 847 | 132 / 1,716 | - |
+| X-31 | 28,620 | 1.33 | 121 / 597 | 156 / 1,001 | - |
+| MiG-29 | 31,895 | 1.33 | 111 / 506 | 143 / 851 | - |
+| Su-27 | 57,920 | 1.27 | 97 / 429 | 120 / 659 | 135 to 150 (12 percent low) |
+| MiG-21 | 18,018 | 1.19 | 101 / 662 | 118 / 911 | - |
+| Su-25 | 69,875 | 1.29 | 73 / 513 | 93 / 836 | 130 to 145 (29 percent low) |
+| MiG-23 | 39,413 | 1.29 | 99 / 748 | 126 / 1,219 | - |
+| Su-35 | 69,054 | 1.31 | 97 / 523 | 124 / 855 | - |
+| F-22, F-22N, F/A-XX | 57,800 | 1.39 | 78 / 207 | 103 / 359 | 130 to 150 (21 percent low) |
+
+Approach speed of the scripted landing (flaps down, 65 percent internal fuel, stores as
+loaded; 1.3 times the flapped, scaled stall speed and never under 1.05 times the loaded
+minimum for 1 G) before (full fuel, 1.3 times the polygon edge) and after, against the
+figures John gave:
+
+| Aircraft | Before (kt) | After (kt) | Figure (kt) | Off by |
+| --- | ---: | ---: | :---: | ---: |
+| F/A-18D | 154 | 156 | 135 | +15 percent |
+| Rafale C | 154 | 158 | 130 to 140 | +17 percent |
+| F-14D | 131 | 125 | 130 to 140 | -8 percent |
+| A-4E | 139 | 149 | 130 to 140 | +10 percent |
+| X-31 | 166 | 166 | (research aircraft) | - |
+| MiG-29 | 154 | 154 | 135 to 145 | +10 percent |
+| Su-27 | 139 | 132 | 120 to 135 | in range |
+| MiG-21 | 154 | 137 | 160 to 170 | -17 percent |
+| Su-25 | 100 | 97 | 125 to 140 | -27 percent |
+| MiG-23 | 139 | 134 | 150 to 165 | -14 percent |
+| Su-35 | 139 | 136 | 135 to 145 | in range |
+| F-22, F-22N, F/A-XX | 92 | 102 | 135 to 145 | -27 percent |
+
+Aircraft outside 10 percent: the F-22 family, Su-25, MiG-21 and MiG-23 are low because their
+imported polygon edges are low (the F-22's and Su-25's 1 G edges are 71 and 77 knots against
+the F/A-18D's 118.5) and the empty-weight reference already gives the largest scale the data
+allows; the F/A-18D and Rafale approach speeds are 15 to 17 percent high because their
+default loadout carries 5,000 to 7,600 pounds of stores that the landing keeps. To bring
+the low group into range the reference weight would have to be below the empty weight, which
+would put the F/A-18D, Rafale and A-4E 20 percent or more too high. The rule and the numbers
+are for John to change; `STALL_REFERENCE_WEIGHT_FRACTION` in `flight.rs` is the single
+constant.
+
+**Short strips.** The roll to liftoff at full afterburner is now longer for the heavy
+loadouts. On the roughly 1,074 ft strips (Santa Fe, San Carlos) the F/A-18D (1,383 ft), A-4E
+(1,716 ft) and MiG-23 (1,219 ft) no longer lift off within the strip, and the Rafale (1,056
+ft) barely does; the X-31, F-14D, MiG-21, Su-35, MiG-29, Su-25, Su-27 and F-22 family (359
+ft) still do. Landing rollouts shorten slightly (touchdown is nearer the threshold with the
+same flare), for example the F/A-18D stops 3,623 ft past the threshold against 3,956 ft, so
+the 5,532 ft UKR runway still works for all twelve.
+
+**Other users of the stall speed.** The flight model, the stall warning and departure
+behaviour, the autopilot, the ejection G check, the flight envelope window (the drawn slow
+edges follow the weight), the belly rule, the scripted landing probe and the crew callouts all
+read the scaled speeds. The HUD landing-speed brackets are not implemented in the game, so
+there is nothing to update. The AI reads the same scaled speeds through the model's
+configuration without any change to `tore-sim/src/ai`. **AI landing needs a follow-up** (in the
+AI agent's files): `ai-ground-land-selected-wing2` and `ai-rtb-after-win` now end with the
+wingman flying into the ground short of the runway (an F/A-18D on a 3 degree final at 138 kt
+and 15 ft, about 700 ft short of the threshold at Simferopol); both pass with
+`--retail-stall-speeds`. Cause: the AI's `speed_limits().minimum` is the lowest left edge of
+any envelope row, including the 0 G and negative G rows, which lies 20 to 30 percent under the
+1 G stall speed (raw 143 ft/s, 85 kt, for the F/A-18D; 114 kt scaled). The final speed
+(`APPROACH_SPEED_FACTOR` 1.1 times that, capped at 174 kt) is 125 kt, while the loaded minimum
+speed for 1 G with full flaps at that weight (`State::minimum_level_speed`) is about 140 kt, so
+the wingman decelerates through it and sinks. The retail speeds only worked with a smaller
+margin. A fix belongs in `ai/airfield.rs` and `ai/mission.rs`: fly final at the larger of
+1.1 times the 1 G stall edge and 1.05 times `minimum_level_speed`, and flare at that too.
+AI takeoffs are unaffected (all 56 `ai-takeoff-*` pass: the
+roll only lasts longer).
 
 ## Needs a decision
 
