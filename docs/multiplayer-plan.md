@@ -8,8 +8,9 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, planning pass of 2026-09-28. Stage A1 is built (the
-mission core inside `tore-app`); the rest is not yet. The design of stages A and B (types, tick order, handoff rules) is in the
+Implementation mode, planning pass of 2026-09-28. Stage A is built: the
+mission core is the `tore-world` crate, stepped by the app. Stage B and the
+later stages are not built yet. The design of stages A and B (types, tick order, handoff rules) is in the
 [architecture guide](ARCHITECTURE.md#mission-core-and-seats), written and
 approved by John on 2026-09-28. Sequencing is in the [roadmap](ROADMAP.md#milestone-2-multiplayer). What players
 experience is in the [multiplayer guide](MULTIPLAYER.md). What Fighters
@@ -67,7 +68,9 @@ Two parts of the spec change:
 ## Where the code stands
 
 Surveyed on main at `0a1e14f` and corrected at `4ad5171` while designing
-stages A and B. Line numbers are indicative and will drift.
+stages A and B. Line numbers are indicative and will drift. This is the code
+before stage A; what stage A changed is in the
+[architecture guide](ARCHITECTURE.md#where-the-code-stands).
 
 **Simulation loop.**
 
@@ -378,7 +381,7 @@ Sizes are relative: S, M, L, XL.
 
 | Stage | Work | Acceptance | Size |
 | --- | --- | --- | --- |
-| A. Mission core | **A1:** gather the mission state into one `World` inside `tore-app` with one `step`, moving the live loop body over unchanged in order. The windowed loop and `--ai-probe-ticks` call it; `--headless-flight` stays the isolated flight-model probe. **A2:** split what mixes simulation with presentation, then move `World` and its simulation glue into `crates/tore-world`. Commit sequence in the [architecture guide](ARCHITECTURE.md#how-stage-a-lands). | A1: existing golden fingerprints, replay export goldens and flight tests are unchanged, and a new headless full-tick fingerprint pins the order from then on. The AI probe switching to the full tick (it gains weather, turbulence and airport service) is a separate commit with re-blessed probe output. A2: `cargo tree -p tore-world` shows no wgpu, winit or cpal. | L |
+| A. Mission core | **Built 2026-09-28.** **A1:** gather the mission state into one `World` inside `tore-app` with one `step`, moving the live loop body over unchanged in order. The windowed loop and `--ai-probe-ticks` call it; `--headless-flight` stays the isolated flight-model probe. **A2:** split what mixes simulation with presentation, then move `World` and its simulation glue into `crates/tore-world`. Commit sequence in the [architecture guide](ARCHITECTURE.md#how-stage-a-lands). | A1: existing golden fingerprints, replay export goldens and flight tests are unchanged, and a new headless full-tick fingerprint pins the order from then on. The AI probe switching to the full tick (it gains weather, turbulence and airport service) is a separate commit with re-blessed probe output. A2: `cargo tree -p tore-world` shows no wgpu, winit or cpal. | L |
 | B. Seats | One aircraft record for every aircraft with an AI or human pilot. The player-only combat state becomes per-aircraft. Tick-stamped `SeatInput`. A gun round can hit any aircraft except its shooter, and a missile or bomb any aircraft once armed (John, 2026-09-28), subject to friendly fire. AI to human handoff and back, keeping pose, fuel, stores and damage. Radio listener, orders and debrief per seat. Lead succession, to a human in the flight if there is one, otherwise the next AI member (John, 2026-09-28), with "You're the Wingleader now". A multiplayer mission option that puts every aircraft on the hybrid flight model (John, 2026-09-28). | Single-player goldens unchanged, or any one-tick timing shift documented. A headless test flies two humans in each of two wings through a fight. Handoff tests show no jump in position or speed and keep fuel and stores. Succession tests cover a human lead and an AI lead. AI air combat on the hybrid model is checked with AI probe runs against the legacy baseline. | XL |
 | C. Network foundation and dedicated server | `tore-net`: transport, handshake with build and protocol version, reliable and unreliable channels, statistics, network simulator. Snapshot coder with acknowledged-baseline deltas; every packet decodes on its own; full keyframes for joiners. Real-time server driver, input jitter buffer, snapshots at 30 Hz (setting). Client prediction, correction smoothing, interpolation, clock sync. Missile hits by the host; gun lag compensation. `tore-server` runs a Quick Mission from its config file; a development `--connect` flag joins it. Network diagnostics recorded in replays. | A dedicated server and two clients on a LAN complete a Quick Mission with AI. Under the simulator at 50, 150 and 300 ms round trip with 0, 2 and 5 percent loss, corrections to the own aircraft and smoothness of others stay within limits set in the follow-up spec. Bandwidth measured against the budget above. Headless bot clients run in CI. | XL |
 | D. Player-hosted | The core runs on a real-time thread inside the host's game; the host's seat is fed directly; the renderer reads snapshots. Single player keeps the render-loop driver. | A host and one remote client complete a mission. Dragging, minimizing or stalling the host's window does not freeze the client. | M |
