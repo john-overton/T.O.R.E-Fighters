@@ -1376,6 +1376,12 @@ impl AiWings {
         Ok(())
     }
 
+    /// The AI mission, changeable, for tests that set up an aircraft's state.
+    #[cfg(test)]
+    pub(crate) fn mission_mut(&mut self) -> &mut AiMission {
+        &mut self.mission
+    }
+
     pub fn mission(&self) -> &AiMission {
         &self.mission
     }

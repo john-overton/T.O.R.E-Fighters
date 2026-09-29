@@ -1556,6 +1556,11 @@ pub mod fixtures {
             .map(|id| Arc::new(AircraftType::synthetic(id, Vec::new())))
             .collect()
     }
+    /// Sets the other aircraft types the mission holds, as `Combat::mission_dummies`
+    /// would have loaded them.
+    pub fn set_types(combat: &mut Combat, types: Vec<Arc<AircraftType>>) {
+        combat.dummy_types = types;
+    }
     /// Sets where the player's aircraft's engines exhaust.
     pub fn set_contrail_offsets(combat: &mut Combat, offsets: Vec<Vector>) {
         combat.contrail_offsets = offsets;

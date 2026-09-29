@@ -22,6 +22,8 @@ use tore_sim::{attitude, flight};
 mod command_tests;
 mod commands;
 mod handoff;
+#[cfg(test)]
+mod handoff_tests;
 pub use commands::{MissionCommand, OrderCall, OrderOutcome, OrderReply, Settings};
 #[cfg(test)]
 mod tick_tests;
