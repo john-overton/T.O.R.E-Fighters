@@ -222,7 +222,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
     // (a surface weapon refused against the aircraft target) leaves its tape
     // open, and the records that follow go to that file until the next slot's
     // tape replaces it, as they did when combat held the file.
-    let mut recorder: Option<crate::combat_tape::Recorder> = None;
+    let mut recorder: Option<crate::tape_file::Recorder> = None;
     for index in 0..combat.state.ammo.len() {
         let station = &combat.state.configuration().stations[index];
         if !station.internal && station.weapon.seeker.signature == 0 {
@@ -254,7 +254,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 if combat.recording_tape() && recorder.is_some() {
                     write_tape(&mut combat, recorder.as_mut())?;
                 }
-                recorder = Some(crate::combat_tape::Recorder::new(
+                recorder = Some(crate::tape_file::Recorder::new(
                     path,
                     data,
                     combat.state.configuration(),
@@ -603,7 +603,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
             }
             if let Some(path) = &tape {
                 write_tape(&mut combat, recorder.as_mut())?;
-                let decoded = crate::combat_tape::replay_without_airports(
+                let decoded = crate::tape_file::replay_without_airports(
                     path,
                     data,
                     combat.state.configuration().clone(),
@@ -644,7 +644,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                     combat.step(&mut flight, &world)?;
                 }
                 write_tape(&mut combat, recorder.as_mut())?;
-                let decoded = crate::combat_tape::replay_without_airports(
+                let decoded = crate::tape_file::replay_without_airports(
                     path,
                     data,
                     combat.state.configuration().clone(),
@@ -664,7 +664,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 combat.step(&mut flight, &world)?;
                 write_tape(&mut combat, recorder.as_mut())?;
                 combat.stop_tape();
-                let decoded = crate::combat_tape::replay_without_airports(
+                let decoded = crate::tape_file::replay_without_airports(
                     path,
                     data,
                     combat.state.configuration().clone(),
@@ -695,7 +695,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
 /// and flushes it.
 fn write_tape(
     combat: &mut Combat,
-    recorder: Option<&mut crate::combat_tape::Recorder>,
+    recorder: Option<&mut crate::tape_file::Recorder>,
 ) -> AppResult<()> {
     let recorder = recorder.ok_or("missing smoke recorder")?;
     recorder.write_all(combat.take_tape());

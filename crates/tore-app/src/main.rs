@@ -84,6 +84,7 @@ mod sound_screen;
 mod startup;
 mod static_art;
 mod surface_lighting;
+mod tape_file;
 mod target_preview;
 mod target_window;
 mod terrain;
@@ -207,7 +208,7 @@ struct App {
     combat_view: combat_view::CombatView,
     /// The combat tape being written (`--record-combat`). Combat collects the
     /// records and the app writes them after every tick and when the tape ends.
-    combat_tape: Option<combat_tape::Recorder>,
+    combat_tape: Option<tape_file::Recorder>,
     hornet: aircraft::Airframe,
     researched_flight: bool,
     native_tables: Option<std::sync::Arc<tore_sim::native::Tables>>,
@@ -8475,7 +8476,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         // failures are unchanged.
         combat_view::CombatView::new(&c, &assets.theater_resources)?;
         let w = scenery::launch_terrain(&assets.theater_resources, &theater_code, None)?;
-        combat_tape::replay(
+        tape_file::replay(
             &path,
             &assets.theater_resources,
             c.state.configuration().clone(),
@@ -9821,7 +9822,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     combat.add_airport_targets(&world.airport_scene)?;
     let combat_tape = match record_combat {
         Some(ref path) => {
-            let writer = combat_tape::Recorder::new(
+            let writer = tape_file::Recorder::new(
                 path,
                 &theater_resources,
                 combat.state.configuration(),

@@ -988,7 +988,7 @@ These splits touch different files and can run in parallel:
   The combat tape is done too: `Combat` holds no file. While a tape is being
   recorded it collects each record (the action name and the `Launcher`, as
   `combat_tape::Entry`) in a write-only list (`start_tape`, `record_tape`,
-  `take_tape`). The app owns the `combat_tape::Recorder`, writes the list after
+  `take_tape`). The app owns the `tape_file::Recorder`, writes the list after
   every tick (`World::step` puts its airport records in the same list) and
   again when the tape ends. The tape's bytes are the same as before. The
   `TORE_COMBAT_EVIDENCE` variable stays in the `--combat-smoke` harness, which
