@@ -158,7 +158,8 @@ the lead if there is one; otherwise the next AI member does, and the flight
 re-forms on the new leader. The new leader hears the retail "You're the
 Wingleader now" call ([radio chatter](spec/radio-chatter.md#youre-the-wingleader-now)).
 Single player gains the same succession: the AI takes over from a player who is
-shot down. Built in the AI (stage B3): the radio call is still to come.
+shot down. Built in stage B: the AI passes the lead (B3), and a human who takes
+it hears the call (B4).
 
 ## Rejoin and observers
 
