@@ -298,6 +298,41 @@ def scenarios() -> list[Scenario]:
                 )
             )
 
+    # Ground starts through the real launch path, wings of three, every aircraft,
+    # and the adapters that cannot ground start.
+    for a in AIRCRAFT:
+        out.append(
+            Scenario(
+                name=f"menus-window-launch-ground-{a}",
+                lane="menus",
+                window=True,
+                args=["--aircraft", a, "--launch-quick-mission", "--ground-start", "1", "--probe-wing-size", "3", "--smoke-test", "--no-audio"],
+                timeout=180,
+                expect=[r"Quick Mission restart: PASS", r"Quick Mission launch: ground=Some\(\d+\).*supported=true.*parked_targets=2"],
+            )
+        )
+    out.append(
+        Scenario(
+            name="menus-window-launch-legacy-adapter-airborne",
+            lane="menus",
+            window=True,
+            args=["--legacy-flight", "--launch-quick-mission", "--smoke-test", "--no-audio"],
+            timeout=180,
+            expect=[r"Quick Mission restart: PASS", r"Quick Mission launch: ground=None"],
+        )
+    )
+    out.append(
+        Scenario(
+            name="menus-window-launch-legacy-adapter-ground-refused",
+            lane="menus",
+            window=True,
+            args=["--legacy-flight", "--launch-quick-mission", "--ground-start", "1", "--smoke-test", "--no-audio"],
+            timeout=180,
+            expect_exit=1,
+            expect=[r"Ground start requires the researched flight model; choose Airborne for this adapter"],
+        )
+    )
+
     # Windowed captures through tools/agent-run.sh: a few per lane, quick ones.
     sizes = {"960x720": (960, 720), "1280x720": (1280, 720), "640x900": (640, 900)}
     for label, size in sizes.items():

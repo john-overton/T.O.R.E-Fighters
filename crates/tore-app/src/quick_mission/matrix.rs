@@ -1153,6 +1153,24 @@ pub fn fuzz_screens(
         if blank(&pixels) {
             problems.push(format!("graphics screen seed {seed}: blank after input"));
         }
+        // What the screen applies is what it saves, and never a choice the
+        // adapter cannot do (8x when unsupported).
+        let path = std::env::temp_dir().join(format!(
+            "tore-graphics-fuzz-{}-{seed}.conf",
+            std::process::id()
+        ));
+        let applied = graphics.apply(Some(&path));
+        if seed % 2 != 0 && applied.anti_aliasing == crate::graphics::AntiAliasing::X8 {
+            problems.push(format!(
+                "graphics screen seed {seed}: applied unsupported 8x"
+            ));
+        }
+        if crate::graphics::Options::load(&path) != applied {
+            problems.push(format!(
+                "graphics screen seed {seed}: saved options differ from applied"
+            ));
+        }
+        let _ = std::fs::remove_file(&path);
         // Sound.
         let mut sound = crate::sound_screen::Screen::new(
             crate::sound_prefs::Settings::default(),
