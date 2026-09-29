@@ -682,7 +682,7 @@ decision, 2026-09-28):
 | --- | --- | --- |
 | `spin-recover` | Starts at 15,000 feet, holds pro-spin controls until the aircraft spins, holds the spin for four seconds, then follows the manual's recovery (stick centred then slightly forward, full opposite rudder, full throttle). Aircraft whose PT disables spins report `entered_tick=never`. | `spin_recovery:` |
 | `stall-recover` | Starts slow at 15,000 feet, pulls until the departure alert sounds, holds it three seconds, then afterburner, nose down and wings level until the alert clears. | `stall_recovery:` |
-| `land` | With `--ground-start N`: starts four miles out on a three degree slope with gear, flaps and hook down at a speed taken from the aircraft's own stall speed and landing limits, flares, closes the throttle, brakes to a stop. | `landing_start:` and `landing:` |
+| `land` | With `--ground-start N`: starts four miles out on a three degree slope with gear, flaps and hook down at a speed taken from the aircraft's own stall speed and landing limits, flares, closes the throttle, brakes to a stop. | `landing_start:`, `landing:` and `ils_probe:` (what the player's ILS read along the approach) |
 | `land-gear-up`, `land-hard`, `land-off-runway` | The same approach with the gear left up, no flare, or lined up 1,500 feet beside the runway's footprint, to check that unsafe touchdowns crash for the reason the aircraft's landing limits give. | `landing:` |
 | `climb` | Full afterburner climb holding a climb speed, then whatever the aircraft does at the top; reports the highest altitude against the 1 G envelope's ceiling. | `climb:` |
 | `dive` | A full afterburner dive from 40,000 feet at 60 degrees, nobody pulling out: ends on the ground, or in the overspeed loss for an aircraft that reaches 1.5 times its top speed first. | `extremes:` and `loss:` |
@@ -1435,7 +1435,7 @@ TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater KUR
 TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --theater '~UKR1' --viewer --capture-terrain .local/ukr1.ppm
 ```
 
-`--validate-maps` needs imported media but no display. It constructs every
+`--validate-ils` (imported media, no display) measures the ILS at every airport of every base theater, and of the `--theater ~CODE` variant if one is named: the datum against the runway plane, the glide path crossing the threshold, the bars reading zero with the right signs down the ideal path, and any terrain above the final 5 nm of it. See [ILS alignment](testing/ils.md). `--validate-maps` needs imported media but no display. It constructs every
 imported layout, reports source identity, placement/body counts, geometry and
 indexed artwork size, and exits with an error on construction failure. The
 other two commands need a display. Older caches require re-import for the

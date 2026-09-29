@@ -4,6 +4,24 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const ILS_RANGE_FT: f64 = 5.0 * 6_076.12;
 pub const ILS_ALTITUDE_AGL_FT: f64 = 4_000.0;
+/// The ILS glide path, degrees. Fitted: the retail angle is not recovered (the
+/// AI's recovered landing path is 6 degrees); John chose the usual 3 on
+/// 2026-09-29. The player's ILS and the AI landing controller share this.
+pub const GLIDE_SLOPE_DEGREES: f64 = 3.0;
+/// Where the glide path meets the runway surface, feet past the threshold: the
+/// touchdown zone. The path therefore crosses the threshold about 52 ft up.
+pub const AIM_PAST_THRESHOLD_FT: f64 = 1_000.0;
+/// Height of the ideal glide path above the runway surface, feet, for a wheel
+/// contact point `before_threshold_ft` short of the threshold along the
+/// approach (negative past it). Zero at the aim point; the AI controller and
+/// the player ILS both fly to this.
+pub fn glide_path_height_ft(before_threshold_ft: f64) -> f64 {
+    (before_threshold_ft + AIM_PAST_THRESHOLD_FT).max(0.0) * GLIDE_SLOPE_DEGREES.to_radians().tan()
+}
+/// The path's height over the threshold itself, feet (about 52).
+pub fn threshold_crossing_height_ft() -> f64 {
+    glide_path_height_ft(0.0)
+}
 pub const LANDING_SPEED_FPS: f64 = 30.0 * 6_076.12 / 3_600.0;
 pub const LANDING_TICKS: u16 = 240;
 
@@ -141,6 +159,17 @@ impl Runway {
         position[0] += self.heading.sin() * inset;
         position[2] += self.heading.cos() * inset;
         (position, self.heading)
+    }
+    /// The glide path's aim point for an approach to `end`: the touchdown zone,
+    /// [`AIM_PAST_THRESHOLD_FT`] past the threshold, on the runway plane.
+    pub fn aim_point(&self, end: ApproachEnd) -> [f64; 3] {
+        let t = self.threshold(end);
+        let heading = self.approach_heading(end);
+        let (x, z) = (
+            t[0] + heading.sin() * AIM_PAST_THRESHOLD_FT,
+            t[2] + heading.cos() * AIM_PAST_THRESHOLD_FT,
+        );
+        [x, self.support_height(x, z).unwrap_or(t[1]), z]
     }
     pub fn approach_heading(&self, end: ApproachEnd) -> f64 {
         if end == ApproachEnd::Near {
@@ -286,6 +315,9 @@ pub struct Aircraft {
     pub supported: bool,
     pub alive: bool,
     pub speed_fps: f64,
+    /// Height of the aircraft's origin above its wheels' contact plane, feet.
+    /// The glide path is flown by the wheels, so it is taken off the height.
+    pub ground_clearance_ft: f64,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Guidance {
@@ -597,10 +629,15 @@ impl Service {
         let (dx, dz, forward, range) = ils_eligible(aircraft, r, c.end)?;
         let lateral = dx * heading.cos() - dz * heading.sin();
         let localizer = (lateral / forward).atan().to_degrees();
-        let glide = ((aircraft.position[1] - r.elevation_ft) / forward)
+        // The wheels fly the path to the touchdown zone: elevation angle of the
+        // wheels' height over the aim point against the glide slope. Zero on the
+        // path, positive high, negative low.
+        let aim = r.aim_point(c.end);
+        let wheels = aircraft.position[1] - aircraft.ground_clearance_ft;
+        let glide = ((wheels - aim[1]) / (forward + AIM_PAST_THRESHOLD_FT))
             .atan()
             .to_degrees()
-            - 3.;
+            - GLIDE_SLOPE_DEGREES;
         let active = aircraft.alive && aircraft.nav_mode && aircraft.gear_down;
         Some(Guidance {
             airport: c.airport,
@@ -714,6 +751,7 @@ mod tests {
             supported: false,
             alive: true,
             speed_fps: 100.,
+            ground_clearance_ft: 0.,
         }
     }
     #[test]
@@ -747,6 +785,67 @@ mod tests {
         x.command(&s, plane(-10000., 4100.), Command::RequestLanding);
         assert!(x.guidance(&s, plane(-10000., 4100.)).unwrap().active);
         assert!(x.guidance(&s, plane(-10000., 4100.01)).is_none());
+    }
+    #[test]
+    fn the_glide_path_aims_at_the_touchdown_zone_and_reads_zero_on_the_path() {
+        let s = scene();
+        let r = &s.runways[0];
+        // North-facing near end: the threshold is the runway's south end.
+        let t = r.threshold(ApproachEnd::Near);
+        let aim = r.aim_point(ApproachEnd::Near);
+        assert_eq!(aim[1], 100.);
+        assert!((aim[2] - t[2] - AIM_PAST_THRESHOLD_FT).abs() < 1e-9);
+        // About 52 ft over the threshold, and zero at the aim point.
+        assert!((threshold_crossing_height_ft() - 52.4).abs() < 0.1);
+        assert_eq!(glide_path_height_ft(-AIM_PAST_THRESHOLD_FT), 0.);
+        let x = Service::new(&s).unwrap();
+        for clearance in [0., 8.5, 14.] {
+            for range in [30_000., 12_000., 4_000., 900., 300.] {
+                let mut p = plane(t[2] - range, 0.);
+                p.ground_clearance_ft = clearance;
+                // The wheels sit on the path; the origin is `clearance` higher.
+                p.position[1] = aim[1] + glide_path_height_ft(range) + clearance;
+                let g = x.guidance(&s, p).unwrap();
+                assert!(g.glide_degrees.abs() < 1e-9, "{range}: {}", g.glide_degrees);
+                assert!(g.localizer_degrees.abs() < 1e-9);
+                // High reads positive (the HUD dots go down), low negative.
+                let mut high = p;
+                high.position[1] += 20.;
+                let mut low = p;
+                low.position[1] -= 20.;
+                assert!(x.guidance(&s, high).unwrap().glide_degrees > 0.);
+                assert!(x.guidance(&s, low).unwrap().glide_degrees < 0.);
+                // Right of the centre line reads positive (the bar moves left).
+                let mut right = p;
+                right.position[0] += 30.;
+                let mut left = p;
+                left.position[0] -= 30.;
+                assert!(x.guidance(&s, right).unwrap().localizer_degrees > 0.);
+                assert!(x.guidance(&s, left).unwrap().localizer_degrees < 0.);
+            }
+        }
+    }
+    #[test]
+    fn wheels_on_the_runway_at_the_threshold_are_below_the_path() {
+        // The old datum put the origin, not the wheels, on the path over the
+        // threshold: an aircraft flying the bar would touch down short.
+        let s = scene();
+        let x = Service::new(&s).unwrap();
+        let t = s.runways[0].threshold(ApproachEnd::Near);
+        let mut p = plane(t[2] - 300., 100. + 10.);
+        p.ground_clearance_ft = 10.;
+        // Wheels on the surface 300 ft short: far below the 3 degree path.
+        assert!(x.guidance(&s, p).unwrap().glide_degrees < -2.);
+    }
+    #[test]
+    fn a_tilted_runway_moves_the_aim_point_with_its_plane() {
+        let mut s = scene();
+        s.runways[0].surface.pitch = 0.02;
+        let r = &s.runways[0];
+        let aim = r.aim_point(ApproachEnd::Near);
+        let t = r.threshold(ApproachEnd::Near);
+        assert_eq!(Some(aim[1]), r.support_height(aim[0], aim[2]));
+        assert!((aim[1] - t[1]).abs() > 1.0);
     }
     #[test]
     fn gates_behind_and_range_nav_gear() {
