@@ -1228,6 +1228,8 @@ pub struct AiMission {
     pending_attack_reports: Vec<(u32, ObservedAttack)>,
     /// Airport where the human player holds landing clearance.
     priority_landing: Option<u32>,
+    /// Sides that have seen a living hostile aircraft (mission RTB).
+    hostiles_seen: Vec<super::targeting::Side>,
     /// External leaders seen airborne, so a later touchdown reads as landing.
     airborne_seen: Vec<u32>,
     /// Write-only journal of messages between aircraft. No decision reads
@@ -1257,6 +1259,7 @@ impl AiMission {
             must_survive: Vec::new(),
             pending_attack_reports: Vec::new(),
             priority_landing: None,
+            hostiles_seen: Vec::new(),
             airborne_seen: Vec::new(),
             journal: thought::Journal::default(),
         }
@@ -1431,6 +1434,78 @@ impl AiMission {
         self.external_leaders.push((side, wing, id));
     }
 
+    /// Opinionated (requested by John, 2026-09-29): once a side has seen
+    /// hostile aircraft and none is left alive, its AI aircraft have no
+    /// mission left and return to base: each airborne AI aircraft that is not
+    /// already landing, recovering or bugged out is ordered to land at its
+    /// home runway through the ordinary landing sequence. A wing with no
+    /// home runway flies the B48 return-to-base path to its launch point and
+    /// holds there, the wingmen in formation on the leader. Nothing happens while any hostile aircraft
+    /// remains. A wing led by the player stays with the player, whose own
+    /// mission may still be open.
+    fn return_when_done(&mut self, world: &[WorldObject]) {
+        let alive_on = |side: super::targeting::Side| {
+            world
+                .iter()
+                .any(|o| o.is_aircraft && o.alive && !o.destroyed && o.side == side)
+        };
+        let mut sides: Vec<super::targeting::Side> = Vec::new();
+        for actor in &self.actors {
+            if !sides.contains(&actor.identity.side) {
+                sides.push(actor.identity.side);
+            }
+        }
+        for side in sides {
+            let hostile = |other: super::targeting::Side| other != side;
+            let hostiles_alive = world
+                .iter()
+                .any(|o| o.is_aircraft && o.alive && !o.destroyed && hostile(o.side));
+            if hostiles_alive {
+                if !self.hostiles_seen.contains(&side) {
+                    self.hostiles_seen.push(side);
+                }
+                continue;
+            }
+            if !self.hostiles_seen.contains(&side) || !alive_on(side) {
+                continue;
+            }
+            let external = &self.external_leaders;
+            let mut ids: Vec<u32> = Vec::new();
+            for a in self.actors.iter_mut().filter(|a| {
+                a.identity.side == side
+                    && a.alive()
+                    && !a.identity.human_controlled
+                    && a.airfield.is_none()
+                    && a.landing_order.is_none()
+                    && !a.bugged_out
+                    && !a.flight.research.as_ref().is_some_and(|r| r.on_ground)
+                    && !external
+                        .iter()
+                        .any(|(s, w, _)| *s == a.identity.side && *w == a.identity.wing)
+            }) {
+                if a.home_runway.is_some() {
+                    ids.push(a.id());
+                } else if a.identity.member == 0 && !a.controller.mission_complete() {
+                    // No runway: the leader flies home and holds; its
+                    // wingmen stay in formation on it.
+                    a.controller.set_mission_complete(true);
+                }
+            }
+            for id in ids {
+                let Some(runway) = self.actor(id).and_then(|a| a.home_runway) else {
+                    continue;
+                };
+                let _ = self.order(
+                    id,
+                    super::wing::WingRequest::Land(super::airfield::LandingOrder {
+                        runway,
+                        reason: super::airfield::LandingReason::Ordered,
+                    }),
+                );
+            }
+        }
+    }
+
     /// Opinionated (requested by John, 2026-09-29): when an AI-led wing's
     /// leader is lost (destroyed, ejected, crashed or removed), the surviving
     /// member next in the wing's order becomes its leader and the others
@@ -1567,6 +1642,7 @@ impl AiMission {
     ) -> Result<MissionOutput> {
         let mut output = MissionOutput::default();
         self.pass_leadership();
+        self.return_when_done(world);
         let mut delivered = Vec::new();
         for (receiver, report) in std::mem::take(&mut self.pending_attack_reports) {
             if let Some(actor) = self.actor_mut(receiver) {

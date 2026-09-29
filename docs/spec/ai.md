@@ -477,6 +477,22 @@ while it holds, so it does not flap. Avoidance never overrides missile or gun
 defense, an airfield sequence, or a formation procedure (station keeping, a
 join or a rejoin): wingmen in formation are kept apart by their slots.
 
+### Return to base when the mission is over
+
+**Opinionated, requested by John on 2026-09-29:** once a side has seen hostile
+aircraft and none is left alive, its AI aircraft return to base. Each airborne
+AI aircraft on that side that is not already taking off, landing, recovering
+from damage or bugged out, and has a home runway, is ordered to land there
+through the ordinary landing sequence ([AI airfield sequences](ai-airfield.md));
+its wingmen join the leader's landing as for any ordered landing. A wing with
+no home runway has its leader fly the B48 return-to-base path to its home
+position (the launch point) and hold there by flying back over it, the
+wingmen staying in formation. Nothing changes while any hostile aircraft is
+alive, and a mission that never had a hostile aircraft does not end this way.
+A wing led by the player stays with the player, whose own mission may still be
+open. The AI's objectives are air objectives (patrol, intercept, escort), so
+no hostile aircraft left means they are complete.
+
 ### Normal formation variation and transitions
 
 **Opinionated, requested by John on 2026-09-18:** tighten normal vertical
@@ -1039,7 +1055,9 @@ fuel reaches zero is lost. The route ends in a Land goal, so the aircraft lands
 and stays parked; the takeoff and landing sequences are specified in
 [AI airfield sequences](ai-airfield.md). With a home runway, leaders,
 singletons and wingmen of a human leader land the same way (fitted).
-Damage-triggered disengagement is open.
+Damage-triggered disengagement is open. When no hostile aircraft remains, the
+same landing and return path end the mission
+([return to base](#return-to-base-when-the-mission-is-over), opinionated).
 
 ## Implementation status
 

@@ -488,6 +488,24 @@ def scenarios() -> list[Scenario]:
                                                             "--separation", "5", *attack),
                      ticks=6000, check=checker(strict=True, allow_anomalies=("mid-air collision",)),
                      notes="Enemy 1-2 swapped gun tracking and its missile tactic every few ticks (fixed 2026-09-29)"))
+    # John, 2026-09-29: once no hostile aircraft remains the winning wing
+    # returns to base and lands (lane doc, bb2 item 17).
+    def winners_go_home(output: str) -> list[str]:
+        problems = probe_problems(output)
+        final = re.findall(r"^actor=\d+ (Friendly|Enemy) (\S+) \S+ activity=(.*?) alive=(true|false)", output, re.M)
+        if any(side == "Friendly" and alive == "true" for side, _, _, alive in final):
+            problems.append("the friendly wing survived, so the fight never ended")
+        home = ("Returning to base", "Holding at marshal", "Landing", "Landed", "Taxiing")
+        for side, member, activity, alive in final:
+            if side == "Enemy" and alive == "true" and activity not in home:
+                problems.append(f"Enemy {member} is still {activity} with no hostile aircraft left")
+        return problems
+
+    out.append(probe("rtb-after-win", fight(2, 4, "--aircraft", "mig21", "--probe-friendly-aircraft", "mig21",
+                                            "--probe-enemy-aircraft", "f22", "--probe-enemy-skill", "ace",
+                                            "--separation", "10", *attack),
+                     ticks=72000, timeout=1800, check=winners_go_home,
+                     notes="the winning wing lands at its home runway once no hostile aircraft remains (added 2026-09-29)"))
     out.append(probe("regress-decoy-over-100", fight(2, 2, "--aircraft", "su25", "--probe-friendly-aircraft", "su25",
                                                      "--probe-enemy-aircraft", "mig21", "--separation", "5", *attack),
                      ticks=6000, notes="mission aborted: decoy percentages exceed 100 (fixed 2026-09-28)"))

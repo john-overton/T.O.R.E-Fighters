@@ -540,6 +540,37 @@ fn the_next_wingman_leads_when_the_leader_is_lost() {
 }
 
 #[test]
+fn a_wing_returns_to_base_once_no_hostile_aircraft_remains() {
+    // John, 2026-09-29: mission return to base.
+    let mut mission = AiMission::new();
+    let mut leader = hornet(1, 0, [0., 6_000., -60_000.], 0.);
+    leader.set_home_runway(Some(runway()));
+    mission.push(leader);
+    let mut lone = hornet(2, 0, [0., 6_000., 60_000.], 0.);
+    lone.identity.wing = 2;
+    mission.push(lone);
+    let mut hostile = object(mission.actor(1).unwrap(), 2);
+    hostile.id = 50;
+    hostile.position = [0., 6_000., 200_000.];
+    for _ in 0..240 {
+        step(&mut mission, Some(hostile.clone()));
+    }
+    assert_eq!(mission.actor(1).unwrap().landing_order(), None);
+    assert!(!mission.actor(2).unwrap().controller.mission_complete());
+    hostile.alive = false;
+    hostile.destroyed = true;
+    step(&mut mission, Some(hostile));
+    assert_eq!(
+        mission.actor(1).unwrap().landing_order().map(|o| o.reason),
+        Some(LandingReason::Ordered)
+    );
+    assert!(
+        mission.actor(2).unwrap().controller.mission_complete(),
+        "without a runway it flies home and holds"
+    );
+}
+
+#[test]
 fn aircraft_meeting_head_on_both_turn_right_and_pass_clear() {
     // John, 2026-09-29: traffic avoidance outside formation.
     let mut mission = AiMission::new();
@@ -586,6 +617,18 @@ fn aircraft_meeting_head_on_both_turn_right_and_pass_clear() {
     }
     assert!(closest > AVOID_SEPARATION_FT, "closest {closest:.0} ft");
     assert!(cleared.is_some(), "the avoidance ends once clear");
+}
+
+#[test]
+fn a_mission_without_hostile_aircraft_never_returns_to_base() {
+    let mut mission = AiMission::new();
+    let mut leader = hornet(1, 0, [0., 6_000., -60_000.], 0.);
+    leader.set_home_runway(Some(runway()));
+    mission.push(leader);
+    for _ in 0..120 {
+        step(&mut mission, None);
+    }
+    assert_eq!(mission.actor(1).unwrap().landing_order(), None);
 }
 
 #[test]

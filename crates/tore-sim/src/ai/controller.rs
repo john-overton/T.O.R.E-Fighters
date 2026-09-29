@@ -724,6 +724,10 @@ pub struct Controller {
     gun_cycles: std::collections::BTreeMap<u8, super::gunnery::Cycle>,
     gun_phase: Option<weapon_service::Phase>,
     damage_recovery: bool,
+    /// Opinionated (requested by John, 2026-09-29): the mission is over for
+    /// this aircraft and it has no runway to land on, so it flies the B48
+    /// return-to-base path home and holds there.
+    mission_complete: bool,
     gun_tracking: Option<super::gunnery::View>,
     /// B42: after no store resolved, the tick before which a missile is not
     /// chosen again for the motion (the nominal no-station retry).
@@ -893,6 +897,7 @@ impl Controller {
             gun_cycles: Default::default(),
             gun_phase: None,
             damage_recovery: false,
+            mission_complete: false,
             gun_tracking: None,
             missile_retry_until: None,
             gun_tracking_since: None,
@@ -957,6 +962,15 @@ impl Controller {
 
     pub fn identity(&self) -> &ActorIdentity {
         &self.identity
+    }
+
+    /// Mission return to base without a runway (see `AiMission`).
+    pub fn set_mission_complete(&mut self, complete: bool) {
+        self.mission_complete = complete;
+    }
+
+    pub fn mission_complete(&self) -> bool {
+        self.mission_complete
     }
 
     /// Leader succession renumbers a wing (see `AiMission`).
@@ -1097,7 +1111,8 @@ impl Controller {
 
         // 2. Fuel and recovery (B48) outrank ordinary combat decisions.
         let fuel = self.fuel(frame, &mut batch);
-        let recovering = matches!(fuel, Some(FuelState::Bingo) | Some(FuelState::Critical));
+        let recovering = matches!(fuel, Some(FuelState::Bingo) | Some(FuelState::Critical))
+            || self.mission_complete;
         if let Some(fuel_trace) = self.trace.0.fuel.as_mut() {
             fuel_trace.recovering = recovering;
         }
