@@ -211,7 +211,7 @@ fixtures are committed.
 
 Construct and render every imported layout. Inspect matched close and distant
 views of Kurile coast, Ukraine land/cities, Pakistan high ground and desert/river
-scenes. Check the variant picker and ground-start identity. Record frame-time
+scenes. Check the `--theater ~CODE` variant option and ground-start identity. Record frame-time
 comparisons using the same camera/settings and state their scope. Run the
 repository checks and display smoke after rebasing. [Measured validation](baselines/retail-terrain-review.md#implementation-validation)
 records actual results and platform limits. Retail side-by-side comparison is
