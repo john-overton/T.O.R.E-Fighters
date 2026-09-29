@@ -26,11 +26,14 @@ python3 tools/battery.py --lane ai --jobs 6 --tag ai
 python3 tools/battery.py --scenario 'ai-regress-*'
 ```
 
-About 445 scenarios, each one `--ai-probe-ticks` run (plus the roster probe and
-the 1,008-case probe matrix). On the Ryzen 9 7900X with three other lanes
-running, the whole lane takes about 45 minutes at `--jobs 6`; the probe matrix
-alone is about 12 minutes and the six 30-minute runs 1 to 4 minutes each.
-Without the matrix and the long runs it is about 15 minutes.
+About 446 scenarios, each one `--ai-probe-ticks` run (plus the roster probe and
+the 1,008-case probe matrix). With the other lanes running on the same Ryzen 9
+7900X, the whole lane took 26 minutes at `--jobs 5` (final run 2026-09-28:
+444 of 445 passed, the one failure is the known failure below). The probe
+matrix alone is about 16 minutes and the six 30-minute runs 1 to 5 minutes
+each; without them the lane takes about 12 minutes. A 15 v 15 probe holds
+about 400 MB and its tick rate rises as aircraft are lost, so 30 simulated
+minutes cost about 4 minutes.
 
 ## What it covers
 
