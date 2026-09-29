@@ -130,18 +130,26 @@ pub enum AirportInput {
 }
 
 /// Something the tick did for the screen, the speakers or the controllers, in
-/// the order it happened. The two markers say where presentation that reads
-/// the simulation used to run inside the tick.
+/// the order it happened. The markers say where presentation that reads the
+/// simulation used to run inside the tick. Every cue that is for one human
+/// names its seat, and a presenter shows only its own seat's; the markers and
+/// `WingEjection` are about the mission, so every presenter shows them.
 #[derive(Clone, Debug)]
 pub enum Cue {
-    /// A line for the HUD message area.
-    Message(String),
-    /// Controller feedback.
-    Feedback(tore_input::FeedbackEvent),
-    /// Tower speech for a reply, or `None` to cut the tower off.
-    Tower(Option<&'static str>),
-    /// The weapon selection moved from the weapon page.
-    WeaponCycled,
+    /// A line for a seat's HUD message area.
+    Message { seat: SeatId, text: String },
+    /// Controller feedback for a seat.
+    Feedback {
+        seat: SeatId,
+        event: tore_input::FeedbackEvent,
+    },
+    /// Tower speech for a seat's reply, or `None` to cut the tower off.
+    Tower {
+        seat: SeatId,
+        stem: Option<&'static str>,
+    },
+    /// The weapon selection moved from the seat's weapon page.
+    WeaponCycled { seat: SeatId },
     /// The player's flight, the weather clock and turbulence have stepped:
     /// camera weather, the view rig, blackout, vapor and control sounds ran
     /// here.
@@ -158,9 +166,23 @@ pub enum Cue {
     Picture,
     /// A radio or crew line due now for a seat.
     Radio { seat: SeatId, call: comms::Call },
-    /// The player's own order call, played at once and cutting off what is
+    /// A seat's own order call, played at once and cutting off what is
     /// playing, though it may hold no stems.
-    OrderVoice(Vec<&'static str>),
+    OrderVoice {
+        seat: SeatId,
+        stems: Vec<&'static str>,
+    },
+}
+
+/// A weapon release sound: what a seat's plane fired.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Release {
+    /// The seat whose plane fired.
+    pub seat: SeatId,
+    /// The sound's name.
+    pub sound: String,
+    /// The station of that plane's stores it came from.
+    pub station: usize,
 }
 
 /// What one tick produced. Every queue inside the world that the tick fills is
@@ -172,12 +194,12 @@ pub struct TickOutput {
     /// what belongs between the commands and the rest of the tick, such as
     /// the mission recording's notes of them, at this point.
     pub commanded: usize,
-    /// What became of each wing order given this tick.
+    /// What became of each wing order given this tick; each names its seat.
     pub orders: Vec<OrderReply>,
     /// Combat's events for the tick.
     pub events: Vec<tore_sim::combat::live::Event>,
-    /// The player's weapon release sounds: the sound's name and the station.
-    pub releases: Vec<(String, usize)>,
+    /// Every seat's weapon release sounds, in the order the events came.
+    pub releases: Vec<Release>,
     /// Shot outcomes the ledger resolved during the tick.
     pub outcomes: Vec<tore_sim::combat::ledger::Outcome>,
     /// The AI message journal of the tick (`None` without AI).
@@ -587,18 +609,20 @@ impl World {
         // Weather shares the authoritative tick; pausing simply stops calling
         // it, with no elapsed-time catch-up.
         self.terrain.weather.step();
-        for cockpit in &mut self.cockpits {
+        for index in 0..self.cockpits.len() {
+            let seat = self.seat_of_cockpit(index);
+            let cockpit = &mut self.cockpits[index];
             let turbulence = !cockpit.flight.cheats.no_turbulence;
-            let turbulence_cue = step_turbulence(
+            let turbulence_event = step_turbulence(
                 &mut cockpit.turbulence,
                 &mut cockpit.turbulence_rng,
                 &mut cockpit.flight,
                 &self.terrain,
                 turbulence,
             );
-            edge_and_overspeed(cockpit, &self.terrain, out);
-            if let Some(cue) = turbulence_cue {
-                out.cues.push(Cue::Feedback(cue));
+            edge_and_overspeed(cockpit, seat, &self.terrain, out);
+            if let Some(event) = turbulence_event {
+                out.cues.push(Cue::Feedback { seat, event });
             }
         }
         out.cues.push(Cue::Flown);
@@ -628,7 +652,9 @@ impl World {
             .collect();
         let events = self.combat.step_all(&mut flights, &self.terrain)?;
         out.cues.push(Cue::CombatStepped);
-        for cockpit in &mut self.cockpits {
+        for index in 0..self.cockpits.len() {
+            let seat = self.seat_of_cockpit(index);
+            let cockpit = &mut self.cockpits[index];
             for airport_event in cockpit.airport_service.synchronize_health(
                 self.combat
                     .state
@@ -648,8 +674,11 @@ impl World {
                             self.combat.state.tick() as f64 / 120.,
                             message,
                         ));
-                    out.cues.push(Cue::Message(message.into()));
-                    out.cues.push(Cue::Tower(None));
+                    out.cues.push(Cue::Message {
+                        seat,
+                        text: message.into(),
+                    });
+                    out.cues.push(Cue::Tower { seat, stem: None });
                 }
             }
             for event in cockpit.airport_service.step(
@@ -657,7 +686,10 @@ impl World {
                 airport_aircraft(&self.terrain, &cockpit.flight, cockpit.airport_nav_mode),
             ) {
                 if matches!(event, tore_sim::airport::Event::LandingComplete { .. }) {
-                    out.cues.push(Cue::Message("Landing complete".into()));
+                    out.cues.push(Cue::Message {
+                        seat,
+                        text: "Landing complete".into(),
+                    });
                 }
             }
         }
@@ -677,14 +709,26 @@ impl World {
                 );
             }
         }
-        for message in self.cockpits[0].flight.systems.messages.drain(..) {
-            out.cues.push(Cue::Message(message));
+        // Every human-flown plane's systems messages, in cockpit order, are
+        // drained every tick: each queue is its seat's.
+        for index in 0..self.cockpits.len() {
+            let seat = self.seat_of_cockpit(index);
+            for text in self.cockpits[index].flight.systems.messages.drain(..) {
+                out.cues.push(Cue::Message { seat, text });
+            }
         }
-        let own_id = self.combat.own_id();
+        // Who flies each plane an event can be about, in cockpit order.
+        let flown: Vec<(u32, SeatId)> = (0..self.cockpits.len())
+            .map(|index| (self.cockpits[index].plane.0, self.seat_of_cockpit(index)))
+            .collect();
         for event in &events {
             use tore_sim::combat::live::Event;
-            if let Some(cue) = combat::feedback(event, own_id, self.combat.own().configuration()) {
-                out.cues.push(Cue::Feedback(cue));
+            for &(plane, seat) in &flown {
+                if let Some(ownship) = self.combat.state.ownship(plane)
+                    && let Some(event) = combat::feedback(event, plane, ownship.configuration())
+                {
+                    out.cues.push(Cue::Feedback { seat, event });
+                }
             }
             match event {
                 Event::Jolt(jolt) => {
@@ -720,31 +764,44 @@ impl World {
                 Event::Fired {
                     aircraft,
                     station: i,
-                } if *aircraft == own_id => {
-                    if let Some(name) = self.combat.own().configuration().stations[*i]
-                        .weapon
-                        .fire_sound
-                        .as_deref()
+                } => {
+                    if let Some(&(_, seat)) = flown.iter().find(|(plane, _)| plane == aircraft)
+                        && let Some(name) = self.combat.state.ownship(*aircraft).and_then(|own| {
+                            own.configuration().stations[*i]
+                                .weapon
+                                .fire_sound
+                                .as_deref()
+                        })
                     {
-                        out.releases.push((name.to_string(), *i));
+                        out.releases.push(Release {
+                            seat,
+                            sound: name.to_string(),
+                            station: *i,
+                        });
                     }
                 }
-                Event::Fired { .. } => {}
                 Event::OwnshipGroundImpact { aircraft } => {
-                    if *aircraft == own_id {
-                        out.cues
-                            .push(Cue::Message("Your aircraft exploded on impact".into()));
+                    if let Some(&(_, seat)) = flown.iter().find(|(plane, _)| plane == aircraft) {
+                        out.cues.push(Cue::Message {
+                            seat,
+                            text: "Your aircraft exploded on impact".into(),
+                        });
                     }
                 }
                 Event::Airburst(id) => {
-                    out.cues.push(Cue::Message(
-                        if *id == own_id {
-                            "Your aircraft exploded"
-                        } else {
-                            "Destroyed aircraft exploded"
-                        }
-                        .into(),
-                    ));
+                    // Every seat reads the burst: its own plane's as "Your
+                    // aircraft", any other as a destroyed aircraft.
+                    for &(plane, seat) in &flown {
+                        out.cues.push(Cue::Message {
+                            seat,
+                            text: if *id == plane {
+                                "Your aircraft exploded"
+                            } else {
+                                "Destroyed aircraft exploded"
+                            }
+                            .into(),
+                        });
+                    }
                 }
             }
         }
@@ -791,8 +848,18 @@ impl World {
             let message = bridge.take_message();
             self.ai_wings = Some(bridge);
             stepped?;
-            if let Some(message) = message {
-                out.cues.push(Cue::Message(message));
+            if let Some(text) = message {
+                // Agent decision (B7a): the AI wings' one HUD line goes to
+                // the seats flying in Friendly Wing 1, the wing whose
+                // formation reports it carries (single player's wing).
+                for index in 0..self.cockpits.len() {
+                    if self.flies_in_first_friendly_wing(index) {
+                        out.cues.push(Cue::Message {
+                            seat: self.seat_of_cockpit(index),
+                            text: text.clone(),
+                        });
+                    }
+                }
             }
         }
         // The tick's picture: combat and the AI have both written their poses
@@ -812,6 +879,22 @@ impl World {
         out.emissions = self.combat.state.take_sound_events();
         out.events = events;
         Ok(())
+    }
+
+    /// The seat that flies the plane of `cockpit`. Every cockpit has one, as
+    /// a cockpit exists only while a human flies its plane.
+    fn seat_of_cockpit(&self, cockpit: usize) -> SeatId {
+        self.roster
+            .seat_of(self.cockpits[cockpit].plane)
+            .unwrap_or_default()
+    }
+
+    /// Whether the plane of `cockpit` flies in Friendly Wing 1, the wing the
+    /// AI wings' HUD line describes.
+    fn flies_in_first_friendly_wing(&self, cockpit: usize) -> bool {
+        self.roster
+            .plane(self.cockpits[cockpit].plane)
+            .is_some_and(|plane| plane.slot.wing == Slot::FRIENDLY_LEAD.wing)
     }
 
     /// Whether the plane in `cockpit` and its pilot are alive, as the radio
@@ -996,10 +1079,7 @@ impl World {
     /// A queued NAV mode switch or tower request for a cockpit's plane,
     /// applied at the start of the tick in the order it was given.
     fn airport_command(&mut self, cockpit: usize, command: AirportInput, out: &mut TickOutput) {
-        let seat = self
-            .roster
-            .seat_of(self.cockpits[cockpit].plane)
-            .unwrap_or_default();
+        let seat = self.seat_of_cockpit(cockpit);
         let cockpit = &mut self.cockpits[cockpit];
         match command {
             AirportInput::NavMode => {
@@ -1025,14 +1105,15 @@ impl World {
                         combat::launcher(&cockpit.flight),
                     );
                 }
-                out.cues.push(Cue::Message(
-                    if cockpit.airport_nav_mode {
+                out.cues.push(Cue::Message {
+                    seat,
+                    text: if cockpit.airport_nav_mode {
                         "Navigation mode selected"
                     } else {
                         "Navigation mode off"
                     }
                     .into(),
-                ));
+                });
             }
             AirportInput::Command(command) => {
                 if cockpit.plane.0 == self.combat.own_id() {
@@ -1059,9 +1140,14 @@ impl World {
                             airport_reply(&self.terrain, &reply),
                             airport_reply_audio(&reply),
                         ));
-                        out.cues
-                            .push(Cue::Message(airport_reply(&self.terrain, &reply)));
-                        out.cues.push(Cue::Tower(airport_reply_audio(&reply)));
+                        out.cues.push(Cue::Message {
+                            seat,
+                            text: airport_reply(&self.terrain, &reply),
+                        });
+                        out.cues.push(Cue::Tower {
+                            seat,
+                            stem: airport_reply_audio(&reply),
+                        });
                     }
                 }
             }
@@ -1231,7 +1317,12 @@ pub fn airport_reply_audio(reply: &tore_sim::airport::Reply) -> Option<&'static 
 /// cockpit message, repeated every four seconds. Both requested by John,
 /// 2026-09-29; see docs/spec/world-edge.md and docs/spec/overspeed.md. Each
 /// human-flown plane has its own warnings and its own clocks.
-fn edge_and_overspeed(cockpit: &mut Cockpit, terrain: &terrain::Terrain, out: &mut TickOutput) {
+fn edge_and_overspeed(
+    cockpit: &mut Cockpit,
+    seat: SeatId,
+    terrain: &terrain::Terrain,
+    out: &mut TickOutput,
+) {
     let flight = &mut cockpit.flight;
     if !flight.crashed {
         let [x, _, z] = flight.position;
@@ -1248,9 +1339,10 @@ fn edge_and_overspeed(cockpit: &mut Cockpit, terrain: &terrain::Terrain, out: &m
                 .is_none_or(|at| now - at >= 10. || now < at)
             {
                 cockpit.edge_message_at = Some(now);
-                out.cues.push(Cue::Message(
-                    "You have left the theater: turn back now".into(),
-                ));
+                out.cues.push(Cue::Message {
+                    seat,
+                    text: "You have left the theater: turn back now".into(),
+                });
             }
         } else {
             cockpit.edge_message_at = None;
@@ -1267,7 +1359,10 @@ fn edge_and_overspeed(cockpit: &mut Cockpit, terrain: &terrain::Terrain, out: &m
             .is_none_or(|at| now - at >= 4. || now < at)
         {
             cockpit.overspeed_message_at = Some(now);
-            out.cues.push(Cue::Message("OVERSPEED".into()));
+            out.cues.push(Cue::Message {
+                seat,
+                text: "OVERSPEED".into(),
+            });
         }
     }
 }

@@ -276,7 +276,7 @@ fn a_range_command_outside_live_fire_is_refused_with_a_message() {
     assert_eq!(out.commanded, 1);
     assert!(matches!(
         &out.cues[0],
-        Cue::Message(text) if text == "Manual range command requires --live-fire"
+        Cue::Message { text, .. } if text == "Manual range command requires --live-fire"
     ));
 }
 
@@ -307,7 +307,7 @@ fn a_range_reset_matches_the_old_path_and_is_refused_outside_live_fire() {
     let (_, _, out) = same_as_old(vec![SeatCommand::RangeReset], |_| {});
     assert!(matches!(
         &out.cues[0],
-        Cue::Message(text) if text == "Target reset is available only with --live-fire"
+        Cue::Message { text, .. } if text == "Target reset is available only with --live-fire"
     ));
     let (mut before, mut after) = (warmed(), warmed());
     before.combat.range = true;
@@ -375,7 +375,7 @@ fn chaff_and_flares_match_the_old_path_and_say_how_many_are_left() {
         );
         let old_message = old_message.expect("a live aircraft releases");
         assert_eq!(out.commanded, 1);
-        assert!(matches!(&out.cues[0], Cue::Message(text) if *text == old_message));
+        assert!(matches!(&out.cues[0], Cue::Message { text, .. } if *text == old_message));
         let left = |world: &World| {
             let state = &world.combat.state;
             if chaff {
@@ -474,7 +474,7 @@ fn weapon_cycling_matches_the_old_path() {
         let (_, _, out) = same_as_old(vec![SeatCommand::CycleWeapon { forward }], |world| {
             world.cycle_cockpit_weapon(0, forward)
         });
-        assert!(matches!(out.cues[0], Cue::WeaponCycled));
+        assert!(matches!(out.cues[0], Cue::WeaponCycled { .. }));
     }
 }
 
@@ -614,7 +614,7 @@ fn radio_silence_toggles_and_says_so() {
         },
     );
     assert!(after.comms.radio_silence(crate::seats::SeatId(0)));
-    assert!(matches!(&out.cues[0], Cue::Message(text) if text == "Radio silence"));
+    assert!(matches!(&out.cues[0], Cue::Message { text, .. } if text == "Radio silence"));
 }
 
 use tore_sim::ai::wing::{Formation, PlayerOrder};
@@ -648,13 +648,13 @@ fn wing_orders_match_the_old_path_and_the_order_call_comes_back() {
             message = old_order(world, order, None)
         });
         assert!(
-            matches!(&out.orders[..], [OrderReply { order: o, outcome: OrderOutcome::Given { message: m } }]
+            matches!(&out.orders[..], [OrderReply { order: o, outcome: OrderOutcome::Given { message: m }, .. }]
                 if *o == order && *m == message),
             "{order:?}: {:?} against {message:?}",
             out.orders
         );
-        assert!(matches!(out.cues[0], Cue::OrderVoice(_)));
-        assert!(matches!(&out.cues[1], Cue::Message(text) if *text == message));
+        assert!(matches!(out.cues[0], Cue::OrderVoice { .. }));
+        assert!(matches!(&out.cues[1], Cue::Message { text, .. } if *text == message));
     }
 }
 
@@ -696,7 +696,8 @@ fn a_formation_cycle_orders_the_formation_after_the_wings_current_one() {
         &out.orders[..],
         [OrderReply {
             order: PlayerOrder::Formation(_),
-            outcome: OrderOutcome::Given { .. }
+            outcome: OrderOutcome::Given { .. },
+            ..
         }]
     ));
 }
@@ -721,10 +722,10 @@ fn a_wing_order_without_an_ai_wing_is_refused_and_journaled() {
         }]
     ));
     assert!(
-        matches!(&out.cues[0], Cue::Message(text) if text == "Wing order unavailable: no AI wing")
+        matches!(&out.cues[0], Cue::Message { text, .. } if text == "Wing order unavailable: no AI wing")
     );
     assert!(
-        matches!(&out.cues[1], Cue::Message(text) if text == "Wing order unavailable: no AI wing")
+        matches!(&out.cues[1], Cue::Message { text, .. } if text == "Wing order unavailable: no AI wing")
     );
 }
 
@@ -752,7 +753,7 @@ fn land_at_selected_reports_a_refused_site_to_the_pilot_and_the_journal() {
             ],
         ) => {
             assert_eq!(&message, given);
-            assert!(matches!(&out.cues[0], Cue::Message(text) if *text == message));
+            assert!(matches!(&out.cues[0], Cue::Message { text, .. } if *text == message));
             assert!(!format!("{:?}", world.comms.journal()).is_empty());
         }
         (Ok(_), [OrderReply { outcome, .. }]) => {

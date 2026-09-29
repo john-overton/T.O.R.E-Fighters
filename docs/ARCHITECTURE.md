@@ -864,8 +864,8 @@ taken out:
    weapons, projectiles, hits, damage, wrecks and contrails.
 9. **Airport service.** It learns which runway objects were destroyed, then
    steps. The AI wings learn whether the player is landing.
-10. **Events.** The player's system messages and combat's events are applied:
-    jolts, destruction and weapon release sounds.
+10. **Events.** Every human-flown plane's system messages and combat's events
+    are applied: jolts, destruction and weapon release sounds.
 11. **AI.** Hit reports, then every AI actor, then crash sites and ejections.
 12. **The tick's picture**: the render snapshot, with this tick's shot outcomes
     and AI journal.
@@ -916,16 +916,47 @@ commands given since the last tick. Every command a player gives, from weapon
 selection to wing orders, travels this way; see [seat input](#seat-input).
 
 `TickOutput` holds, in tick order: combat's events; an ordered list of cues (HUD
-lines, rumble, tower audio cues, ejection notices, delivered radio calls, each
-with the seat that hears it, and the point where the picture was taken); how
-many of those cues the command phase made (`commanded`); what became of each
-wing order (`orders`); the player's weapon
-release sounds; shot outcomes; the AI journal; sound emissions; and the native
-fault, if the tick stopped early. Every output queue inside `World` is drained
-into it each tick, whether or not anyone reads it, so the state between ticks
-never depends on its consumers. The radio's journal and
-the player's command notes still go to the replay recorder directly, as they
-did before.
+lines, rumble, tower audio cues, weapon page turns, order calls, ejection
+notices, delivered radio calls, and the points where the flight, combat and the
+picture were done); how many of those cues the command phase made
+(`commanded`); what became of each wing order (`orders`); every seat's weapon
+release sounds (`releases`); shot outcomes; the AI journal; sound emissions; and
+the native fault, if the tick stopped early. Every output queue inside `World`
+is drained into it each tick, whether or not anyone reads it, so the state
+between ticks never depends on its consumers. The radio's journal and the
+player's command notes still go to the replay recorder directly, as they did
+before.
+
+**Every seat-specific output names its seat** (slice B7a, built). A host that
+serves several seats reads each seat's own output from the one list, and a
+presenter shows only the cues addressed to its seat, in the order they came:
+
+| Output | Seat it is for |
+| --- | --- |
+| `Cue::Message { seat, text }` | A command's reply, the tower, "Landing complete" and the other cockpit lines belong to the seat whose plane they are about. Every human-flown plane's systems messages (`flight.systems.messages`) are drained every tick into its own seat, in cockpit order. |
+| `Cue::Feedback { seat, event }` | Turbulence to the seat whose plane it shakes. Gun, missile, damage and crash feedback to the seat that flies the plane the combat event names. |
+| `Cue::Tower { seat, stem }` | The seat whose tower request or clearance it is. |
+| `Cue::WeaponCycled { seat }`, `Cue::OrderVoice { seat, stems }` | The seat that pressed the weapon page button or gave the order. |
+| `Cue::Radio { seat, call }` | The seat that hears the call (built in B4). |
+| `TickOutput::releases`, each a `Release { seat, sound, station }` | The seat whose plane fired; `station` indexes that plane's stores. |
+| `OrderReply { seat, .. }` in `TickOutput::orders` | The seat that gave the order. |
+| An aircraft's airburst | Every seat reads it: "Your aircraft exploded" for the seat that flew the aircraft, "Destroyed aircraft exploded" for every other. "Your aircraft exploded on impact" is for the seat that flew the aircraft only. |
+| The AI wings' HUD line (`AiWings::take_message`) | Each seat whose plane flies in Friendly Wing 1, single player's wing. |
+| `Cue::Flown`, `CombatStepped`, `Picture`, `WingEjection` | The mission: every presenter reads them. |
+
+*Agent decision (B7a):* the AI wings' line carries two things in one queue: the
+formation reports of Friendly Wing 1's members, and the activity line ("Enemy
+2-1: Attacking") for any AI aircraft. Its one natural audience is the wing the
+reports describe, so it goes to the seats flying in Friendly Wing 1, in cockpit
+order. Single player flies the lead of that wing, so its output is unchanged. A
+seat in another wing, or on the enemy side, sees none of it. Splitting the queue
+by wing, so that other wings' seats hear their own activity, is left to the AI
+wings' owner. A seat that has no ownship in combat gets no feedback or release
+sound, since it fired nothing.
+
+The app's `TickPresenter` and the AI probe present only `SEAT`'s cues, releases
+and order replies (the recorder's release list is `seat_releases` in `main.rs`);
+the markers and `WingEjection` are read whatever the seat.
 
 #### Drivers
 
@@ -1181,7 +1212,7 @@ today, because window events always arrive between frames.
 
 | Command | What the step does |
 | --- | --- |
-| `CycleWeapon` | The weapon selection steps and NAV mode follows the arming; the weapon page turns to it (`Cue::WeaponCycled`). |
+| `CycleWeapon` | The weapon selection steps and NAV mode follows the arming; the weapon page turns to it (`Cue::WeaponCycled { seat }`). |
 | `Airport` | A NAV mode switch or a tower request, as in B0. |
 | `Combat(command)` | Combat takes the command as it is: designation (next, previous, visual, by identity from a scope click) and the seeker mode or the designation release from the weapon display. |
 | `Manual(command)` | A key, button or menu command: arming, seeker mode, clearing the designation, jettison and the range and development commands. It lets go of the trigger, gives combat the command, and puts the payload weight right. Outside `--live-fire` only arming, seeker and designation work, and the pilot gets "Manual range command requires --live-fire". |
@@ -1189,7 +1220,7 @@ today, because window events always arrive between frames.
 | `ReleaseChaff`, `ReleaseFlare` | One cartridge or flare, with the retail messages ("Chaff launched, 11 left", "Out of flares"). Refused when the aircraft is destroyed, the pilot has ejected or it has no hit points. |
 | `RadioSilence` | Toggles radio silence and tells the pilot ("Radio silence", "Radio traffic OK"). |
 | `WingRecipient` | Chooses the wingman the seat's orders address, or the whole wing. It is state of the seat (`Seat::wing_recipient`). |
-| `WingOrder`, `WingFormationCycle` | An Alt-key order goes to the AI wings with the seat's recipient and its designated target. The formation cycle reads the wing's next formation first. The pilot's own order call comes back as `Cue::OrderVoice`, the wing's report and any refusal as `Cue::Message`, and `TickOutput::orders` lists what became of each order. |
+| `WingOrder`, `WingFormationCycle` | An Alt-key order goes to the AI wings with the seat's recipient and its designated target. The formation cycle reads the wing's next formation first. The pilot's own order call comes back as `Cue::OrderVoice`, the wing's report and any refusal as `Cue::Message`, each naming the seat, and `TickOutput::orders` lists what became of each order, with its seat. |
 | `ReleaseTrigger` | `Combat::cancel`, which a menu opening, a pause, a modifier key or losing focus does. |
 | `TriggerKey` | The Space key going down or up, with the app's "blocked" flag (paused, out of focus or a modifier held). |
 
@@ -1740,4 +1771,5 @@ applies when play resumes (stage B).
    and a human](#handoff-between-the-ai-and-a-human).
 4. **B7**: a headless test with two humans in each of two wings flying through a
    fight, succession tests with a human and an AI lead, and the hybrid probe
-   comparison.
+   comparison. B7a is built: every seat-specific tick output names its seat (see
+   [tick input and output](#tick-input-and-output)).

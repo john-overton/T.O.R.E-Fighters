@@ -451,19 +451,19 @@ fn record_event(fp: &mut Fingerprint, event: &Event) {
 
 fn record_cue(fp: &mut Fingerprint, cue: &Cue) {
     match cue {
-        Cue::Message(text) => {
+        Cue::Message { text, .. } => {
             fp.u64(1);
             fp.text(text);
         }
-        Cue::Feedback(event) => {
+        Cue::Feedback { event, .. } => {
             fp.u64(2);
             fp.name(event);
         }
-        Cue::Tower(audio) => {
+        Cue::Tower { stem, .. } => {
             fp.u64(3);
-            fp.option(*audio, |fp, name| fp.text(name));
+            fp.option(*stem, |fp, name| fp.text(name));
         }
-        Cue::WeaponCycled => fp.u64(4),
+        Cue::WeaponCycled { .. } => fp.u64(4),
         Cue::Flown => fp.u64(5),
         Cue::CombatStepped => fp.u64(6),
         Cue::WingEjection {
@@ -477,7 +477,7 @@ fn record_cue(fp: &mut Fingerprint, cue: &Cue) {
             fp.bool(*friendly);
         }
         Cue::Picture => fp.u64(8),
-        Cue::OrderVoice(stems) => {
+        Cue::OrderVoice { stems, .. } => {
             fp.u64(10);
             fp.count(stems.len());
             for stem in stems {
@@ -555,8 +555,8 @@ fn record_tick(fp: &mut Fingerprint, world: &World, out: &TickOutput, seen: &mut
     for cue in &out.cues {
         record_cue(fp, cue);
         match cue {
-            Cue::Message(_) => seen.messages += 1,
-            Cue::Tower(_) => seen.tower += 1,
+            Cue::Message { .. } => seen.messages += 1,
+            Cue::Tower { .. } => seen.tower += 1,
             Cue::Radio { .. } => seen.radio += 1,
             _ => {}
         }
@@ -572,9 +572,9 @@ fn record_tick(fp: &mut Fingerprint, world: &World, out: &TickOutput, seen: &mut
         }
     }
     fp.count(out.releases.len());
-    for (name, station) in &out.releases {
-        fp.text(name);
-        fp.count(*station);
+    for release in &out.releases {
+        fp.text(&release.sound);
+        fp.count(release.station);
     }
     seen.releases += out.releases.len() as u32;
     fp.count(out.outcomes.len());
@@ -1200,4 +1200,221 @@ fn radio_leaders_are_the_ai_missions_current_leaders() {
                 .any(|m| m.id == *leader && m.flight == *flight)
         );
     }
+}
+
+/// Two seats' inputs for the next tick, with `commands` for the seat they name.
+fn tick_seats(
+    world: &mut World,
+    held: [bool; 2],
+    commands: [Vec<SeatCommand>; 2],
+    out: &mut TickOutput,
+) {
+    let tick = world.tick();
+    let [first, second] = commands;
+    let inputs: Vec<_> = [first, second]
+        .into_iter()
+        .enumerate()
+        .map(|(n, commands)| SeatInput {
+            seat: SeatId(n as u8),
+            tick,
+            trigger: held[n],
+            commands,
+            ..SeatInput::default()
+        })
+        .collect();
+    world.step(&inputs, out).unwrap();
+}
+
+/// [`two_ownship_mission`] with both ownships' weapons making a fire sound,
+/// which the synthetic weapons lack.
+fn sounding_mission() -> World {
+    let mut world = two_ownship_mission();
+    let mut config = world.combat.own().configuration().clone();
+    for station in &mut config.stations {
+        station.weapon.fire_sound = Some("&TESTFIRE".into());
+    }
+    let side = world.combat.own().side;
+    for plane in [50, 0] {
+        world.combat.state.remove_ownship(plane).unwrap();
+        let mut ownship =
+            tore_sim::combat::live::Ownship::new(plane, side, config.clone(), true).unwrap();
+        ownship.armed = true;
+        world.combat.add_ownship(ownship, Vec::new()).unwrap();
+    }
+    world
+}
+
+/// The messages a tick gave `seat`, in order.
+fn messages_for(out: &TickOutput, seat: SeatId) -> Vec<&str> {
+    out.cues
+        .iter()
+        .filter_map(|cue| match cue {
+            Cue::Message { seat: to, text } if *to == seat => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every seat-specific output names the seat it is for: a seat's commands,
+/// controller feedback and weapon release sounds come back under its own
+/// name, and never under another's.
+#[test]
+fn each_seat_gets_its_own_messages_feedback_and_releases() {
+    let mut world = sounding_mission();
+    let mut out = TickOutput::default();
+    let (one, two) = (SeatId(0), SeatId(1));
+    // A command's line goes to the seat that gave it.
+    tick_seats(
+        &mut world,
+        [false, false],
+        [
+            vec![SeatCommand::ReleaseFlare],
+            vec![SeatCommand::ReleaseChaff],
+        ],
+        &mut out,
+    );
+    let flare = messages_for(&out, one);
+    let chaff = messages_for(&out, two);
+    assert!(
+        matches!(&flare[..], [text] if text.contains("lares") || text.starts_with("Flare launched")),
+        "{flare:?}"
+    );
+    assert!(
+        matches!(&chaff[..], [text] if text.contains("haff")),
+        "{chaff:?}"
+    );
+    assert_eq!(out.commanded, 2);
+    // A seat's trigger fires its own plane: the sound and the rumble are its.
+    let mut released = Vec::new();
+    let mut felt = Vec::new();
+    for (held, seat) in [([false, true], two), ([true, false], one)] {
+        for _ in 0..30 {
+            tick_seats(&mut world, held, [vec![], vec![]], &mut out);
+            released.extend(out.releases.iter().map(|release| release.seat));
+            felt.extend(out.cues.iter().filter_map(|cue| match cue {
+                Cue::Feedback { seat, event } => Some((*seat, *event)),
+                _ => None,
+            }));
+        }
+        assert!(
+            released.contains(&seat),
+            "{seat:?} never fired: {released:?}"
+        );
+        assert!(
+            felt.iter()
+                .any(|(to, event)| *to == seat
+                    && matches!(event, tore_input::FeedbackEvent::GunFired)),
+            "{seat:?} felt nothing: {felt:?}"
+        );
+        // Nothing of the other seat's.
+        assert!(released.iter().all(|to| *to == seat), "{released:?}");
+        assert!(felt.iter().all(|(to, _)| *to == seat), "{felt:?}");
+        released.clear();
+        felt.clear();
+        for _ in 0..600 {
+            tick_seats(&mut world, [false, false], [vec![], vec![]], &mut out);
+        }
+    }
+}
+
+/// A plane's own systems messages are drained every tick into its own seat,
+/// second cockpit included, so no queue grows unread.
+#[test]
+fn every_cockpits_systems_messages_are_drained_into_its_seat() {
+    let mut world = two_ownship_mission();
+    let mut out = TickOutput::default();
+    for tick in 0..5 {
+        world.cockpits[1]
+            .flight
+            .systems
+            .notify(format!("second {tick}"));
+        world.cockpits[0]
+            .flight
+            .systems
+            .notify(format!("first {tick}"));
+        tick_seats(&mut world, [false, false], [vec![], vec![]], &mut out);
+        assert!(world.cockpits[0].flight.systems.messages.is_empty());
+        assert!(world.cockpits[1].flight.systems.messages.is_empty());
+        let first = messages_for(&out, SeatId(0));
+        let second = messages_for(&out, SeatId(1));
+        assert!(
+            first.contains(&format!("first {tick}").as_str()),
+            "{first:?}"
+        );
+        assert!(
+            second.contains(&format!("second {tick}").as_str()),
+            "{second:?}"
+        );
+        assert!(!first.iter().any(|text| text.starts_with("second")));
+        assert!(!second.iter().any(|text| text.starts_with("first")));
+    }
+}
+
+/// A plane's airburst reads "Your aircraft exploded" to its own seat and
+/// "Destroyed aircraft exploded" to every other, as single player reads it
+/// for the first aircraft and the rest.
+#[test]
+fn an_airburst_reads_differently_to_the_seat_that_flew_the_plane() {
+    let mut world = two_ownship_mission();
+    let mut out = TickOutput::default();
+    let mut wreck = tore_sim::wreck::Wreck::new(50, 0, [0.; 3]);
+    wreck.phase = tore_sim::wreck::Phase::Exploded;
+    world.cockpits[1].flight.wreck = Some(wreck);
+    tick_seats(&mut world, [false, false], [vec![], vec![]], &mut out);
+    assert!(
+        out.events
+            .iter()
+            .any(|event| matches!(event, Event::Airburst(50)))
+    );
+    assert_eq!(
+        messages_for(&out, SeatId(1))
+            .iter()
+            .filter(|text| **text == "Your aircraft exploded")
+            .count(),
+        1
+    );
+    assert!(!messages_for(&out, SeatId(0)).contains(&"Your aircraft exploded"));
+    assert_eq!(
+        messages_for(&out, SeatId(0))
+            .iter()
+            .filter(|text| **text == "Destroyed aircraft exploded")
+            .count(),
+        1
+    );
+}
+
+/// The AI wings' HUD line goes to the seats flying in Friendly Wing 1 only.
+#[test]
+fn the_ai_wings_line_goes_to_the_seats_in_friendly_wing_one() {
+    let mut world = two_ownship_mission();
+    assert!(world.flies_in_first_friendly_wing(0));
+    assert!(world.flies_in_first_friendly_wing(1));
+    let enemy = tore_sim::ai::launch::WingId {
+        side: tore_sim::ai::launch::Side::Enemy,
+        index: 0,
+    };
+    let ai: Vec<_> = world
+        .roster
+        .planes()
+        .iter()
+        .filter(|plane| plane.id != PlaneId(0) && plane.id != PlaneId(50))
+        .map(|plane| (plane.id, plane.slot))
+        .collect();
+    world.roster = Roster::with_humans(
+        [
+            (PlaneId(0), Slot::FRIENDLY_LEAD, SeatId(0), None),
+            (
+                PlaneId(50),
+                Slot {
+                    wing: enemy,
+                    member: 0,
+                },
+                SeatId(1),
+                None,
+            ),
+        ],
+        ai,
+    );
+    assert!(world.flies_in_first_friendly_wing(0));
+    assert!(!world.flies_in_first_friendly_wing(1));
 }

@@ -387,6 +387,27 @@ fn airport_wind(
     )
 }
 
+/// The release sounds of `seat`'s plane, with the weapon each came from, for
+/// the replay recorder: other seats' releases are theirs to present.
+fn seat_releases<'a>(
+    world: &'a world::World,
+    seat: seats::SeatId,
+    releases: &'a [world::Release],
+) -> Vec<(&'a str, &'a tore_formats::weapons::Weapon)> {
+    let Some(ownship) = world
+        .cockpit_of(seat)
+        .and_then(|cockpit| world.combat.state.ownship(world.cockpits[cockpit].plane.0))
+    else {
+        return Vec::new();
+    };
+    let stations = &ownship.configuration().stations;
+    releases
+        .iter()
+        .filter(|release| release.seat == seat)
+        .map(|release| (release.sound.as_str(), &stations[release.station].weapon))
+        .collect()
+}
+
 /// Everything that presents a tick, borrowed from `App` apart from the
 /// renderer, which the redraw handler holds while the ticks run.
 struct TickPresenter<'a> {
@@ -423,9 +444,17 @@ impl TickPresenter<'_> {
                 self.commands_applied();
             }
             match cue {
-                world::Cue::Message(text) => self.flight_ui.message(text.clone()),
-                world::Cue::Feedback(cue) => self.input.feedback(*cue),
-                world::Cue::Tower(stem) => {
+                // Another seat's output is that seat's to present.
+                world::Cue::Message { seat, .. }
+                | world::Cue::Feedback { seat, .. }
+                | world::Cue::Tower { seat, .. }
+                | world::Cue::WeaponCycled { seat }
+                | world::Cue::OrderVoice { seat, .. }
+                | world::Cue::Radio { seat, .. }
+                    if *seat != input.seat => {}
+                world::Cue::Message { text, .. } => self.flight_ui.message(text.clone()),
+                world::Cue::Feedback { event, .. } => self.input.feedback(*event),
+                world::Cue::Tower { stem, .. } => {
                     if let Some(audio) = self.audio {
                         match stem {
                             Some(stem) => audio.airport_radio(&[stem]),
@@ -433,8 +462,8 @@ impl TickPresenter<'_> {
                         }
                     }
                 }
-                world::Cue::WeaponCycled => weapon_cycled = true,
-                world::Cue::OrderVoice(stems) => {
+                world::Cue::WeaponCycled { .. } => weapon_cycled = true,
+                world::Cue::OrderVoice { stems, .. } => {
                     if let Some(audio) = self.audio {
                         audio.radio(stems, true);
                     }
@@ -491,8 +520,6 @@ impl TickPresenter<'_> {
                         audio.cancel_airport_radio();
                     }
                 }
-                // Another seat's line is that seat's to present.
-                world::Cue::Radio { seat, .. } if *seat != input.seat => {}
                 world::Cue::Radio { call, .. } => match call.route {
                     comms::Route::Radio | comms::Route::Airport => {
                         self.flight_ui.message(call.line());
@@ -618,7 +645,8 @@ impl TickPresenter<'_> {
                 &out.emissions,
                 &out.releases
                     .iter()
-                    .map(|(name, _)| name.as_str())
+                    .filter(|release| release.seat == input.seat)
+                    .map(|release| release.sound.as_str())
                     .collect::<Vec<_>>(),
                 self.world.cockpits[OWN].flight.position,
                 Some((
@@ -640,12 +668,7 @@ impl TickPresenter<'_> {
             );
         }
         if let Some(recording) = &mut self.recorder {
-            let stations = &self.world.combat.state.own().configuration().stations;
-            let releases: Vec<(&str, &tore_formats::weapons::Weapon)> = out
-                .releases
-                .iter()
-                .map(|(name, i)| (name.as_str(), &stations[*i].weapon))
-                .collect();
+            let releases = seat_releases(self.world, input.seat, &out.releases);
             recording.sounds(&out.emissions, &releases);
         }
         if self.world.cockpits[OWN].flight.crashed
@@ -6130,7 +6153,7 @@ fn ai_probe_run(
                     attacker.commands_applied(tick, &world.combat);
                 }
                 // What became of the script's wing orders.
-                for reply in &out.orders {
+                for reply in out.orders.iter().filter(|reply| reply.seat == SEAT) {
                     let order = reply.order;
                     match &reply.outcome {
                         world::OrderOutcome::Given { message } => {
@@ -6241,7 +6264,7 @@ fn ai_probe_run(
                         });
                     }
                 }
-                world::Cue::Radio { call, .. } => {
+                world::Cue::Radio { seat, call } if *seat == SEAT => {
                     heard.push(format!("{now:.1}s {} {:?}", call.line(), call.stems));
                 }
                 _ => {}
@@ -6250,12 +6273,7 @@ fn ai_probe_run(
         if let Some(recording) = &mut recording {
             // Write-only: every communication decision of the tick.
             recording.drain_comms(&mut mission.comms);
-            let stations = &mission.combat.state.own().configuration().stations;
-            let releases: Vec<(&str, &tore_formats::weapons::Weapon)> = output
-                .releases
-                .iter()
-                .map(|(name, i)| (name.as_str(), &stations[*i].weapon))
-                .collect();
+            let releases = seat_releases(&mission, SEAT, &output.releases);
             recording.sounds(&output.emissions, &releases);
             recording.end(None, &mut mission.combat);
             if verify {

@@ -47,6 +47,8 @@ pub enum OrderCall {
 /// What became of a wing order the step applied.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OrderReply {
+    /// The seat that gave the order.
+    pub seat: SeatId,
     pub order: PlayerOrder,
     pub outcome: OrderOutcome,
 }
@@ -112,7 +114,7 @@ impl World {
             match command {
                 SeatCommand::CycleWeapon { forward } => {
                     self.cycle_cockpit_weapon(cockpit, forward);
-                    out.cues.push(Cue::WeaponCycled);
+                    out.cues.push(Cue::WeaponCycled { seat });
                 }
                 SeatCommand::Airport(command) => self.airport_command(cockpit, command, out),
                 SeatCommand::Combat(command) => {
@@ -136,14 +138,18 @@ impl World {
                                 PlayerOrder::Formation(wings.next_formation(plane.0, recipient));
                             self.wing_order(plane, seat, cockpit, order, out);
                         }
-                        None => out
-                            .cues
-                            .push(Cue::Message("Wing order unavailable: no AI wing".into())),
+                        None => out.cues.push(Cue::Message {
+                            seat,
+                            text: "Wing order unavailable: no AI wing".into(),
+                        }),
                     }
                 }
                 SeatCommand::RadioSilence => {
                     let message = self.comms.toggle_silence(input.seat);
-                    out.cues.push(Cue::Message(message.into()));
+                    out.cues.push(Cue::Message {
+                        seat,
+                        text: message.into(),
+                    });
                 }
                 SeatCommand::TriggerKey {
                     down,
@@ -162,15 +168,17 @@ impl World {
     /// designation commands always work; the rest are range and development
     /// commands that need `--live-fire`.
     fn manual_command(&mut self, cockpit: usize, command: Live, out: &mut TickOutput) {
+        let seat = self.seat_of_cockpit(cockpit);
         if !self.combat.range
             && !matches!(
                 command,
                 Live::ToggleArm | Live::ClearDesignation | Live::ToggleSeekerMode
             )
         {
-            out.cues.push(Cue::Message(
-                "Manual range command requires --live-fire".into(),
-            ));
+            out.cues.push(Cue::Message {
+                seat,
+                text: "Manual range command requires --live-fire".into(),
+            });
             return;
         }
         let aircraft = self.cockpits[cockpit].plane.0;
@@ -194,16 +202,20 @@ impl World {
         if let Err(error) =
             flight.set_payload((payload - flight.systems.used_external_lbs()).max(0.))
         {
-            out.cues.push(Cue::Message(error.to_string()));
+            out.cues.push(Cue::Message {
+                seat,
+                text: error.to_string(),
+            });
         }
     }
 
     /// Puts a new target on the range.
     fn range_reset(&mut self, cockpit: usize, out: &mut TickOutput) {
         if !self.combat.range {
-            out.cues.push(Cue::Message(
-                "Target reset is available only with --live-fire".into(),
-            ));
+            out.cues.push(Cue::Message {
+                seat: self.seat_of_cockpit(cockpit),
+                text: "Target reset is available only with --live-fire".into(),
+            });
             return;
         }
         let aircraft = self.cockpits[cockpit].plane.0;
@@ -245,12 +257,15 @@ impl World {
             launcher,
         );
         let after = count(&self.combat.state);
-        out.cues.push(Cue::Message(match (chaff, before) {
-            (true, 0) => "Out of chaff".to_string(),
-            (false, 0) => "Out of flares".to_string(),
-            (true, _) => format!("Chaff launched, {after} left"),
-            (false, _) => format!("Flare launched, {after} left"),
-        }));
+        out.cues.push(Cue::Message {
+            seat: self.seat_of_cockpit(cockpit),
+            text: match (chaff, before) {
+                (true, 0) => "Out of chaff".to_string(),
+                (false, 0) => "Out of flares".to_string(),
+                (true, _) => format!("Chaff launched, {after} left"),
+                (false, _) => format!("Flare launched, {after} left"),
+            },
+        });
     }
 
     /// An Alt-key order from the seat `seat`, flying `plane` from `cockpit`.
@@ -288,8 +303,12 @@ impl World {
                         order,
                         message.clone(),
                     ));
-                    out.cues.push(Cue::Message(message.clone()));
+                    out.cues.push(Cue::Message {
+                        seat,
+                        text: message.clone(),
+                    });
                     out.orders.push(OrderReply {
+                        seat,
                         order,
                         outcome: OrderOutcome::Refused { message },
                     });
@@ -315,8 +334,14 @@ impl World {
                 if self.order_call != OrderCall::Silent && !report.radio.is_empty() {
                     self.comms.spoken(seat, now);
                 }
-                out.cues.push(Cue::OrderVoice(report.radio));
-                out.cues.push(Cue::Message(report.message.clone()));
+                out.cues.push(Cue::OrderVoice {
+                    seat,
+                    stems: report.radio,
+                });
+                out.cues.push(Cue::Message {
+                    seat,
+                    text: report.message.clone(),
+                });
                 OrderOutcome::Given {
                     message: report.message,
                 }
@@ -328,7 +353,10 @@ impl World {
                     order,
                     message.clone(),
                 ));
-                out.cues.push(Cue::Message(message.clone()));
+                out.cues.push(Cue::Message {
+                    seat,
+                    text: message.clone(),
+                });
                 OrderOutcome::Failed { message }
             }
             None => {
@@ -338,10 +366,17 @@ impl World {
                     order,
                     message.clone(),
                 ));
-                out.cues.push(Cue::Message(message.clone()));
+                out.cues.push(Cue::Message {
+                    seat,
+                    text: message.clone(),
+                });
                 OrderOutcome::Refused { message }
             }
         };
-        out.orders.push(OrderReply { order, outcome });
+        out.orders.push(OrderReply {
+            seat,
+            order,
+            outcome,
+        });
     }
 }
