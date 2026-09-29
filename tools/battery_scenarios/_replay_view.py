@@ -194,7 +194,30 @@ def scenarios() -> list[Scenario]:
     )
     out += speed_scenarios()
     out += flight_panel_scenarios()
+    out += model_scenarios()
     out += bad_recording_scenarios()
+    return out
+
+
+def model_scenarios() -> list[Scenario]:
+    """Each aircraft as the player and as every enemy, seen from outside in the viewer."""
+    from battery_scenarios._replay_record import AIRCRAFT
+
+    out = []
+    for ac in AIRCRAFT:
+        out.append(
+            Scenario(
+                name=f"replay-view-model-{ac}",
+                lane="replay",
+                args=["--ai-probe-ticks", "600", "--aircraft", ac, "--probe-enemy-aircraft", ac, "--separation", "1", "--ai-mission", "hold", "--probe-flight-model", "researched", "--record-mission", "{work}/rec.tore-replay", "--no-audio"],
+                then=[
+                    Step(["--watch-replay", "{work}/rec.tore-replay", "--capture-replay", "{work}/you.ppm", "--replay-tick", "240", "--replay-aircraft", "0", "--flight-view", "1", "--replay-ui", "labels", "--no-audio"], window=True, timeout=120),
+                    Step(["--watch-replay", "{work}/rec.tore-replay", "--capture-replay", "{work}/enemy.ppm", "--replay-tick", "240", "--replay-aircraft", "3", "--flight-view", "1", "--replay-ui", "labels", "--no-audio"], window=True, timeout=120),
+                ],
+                check_work=lambda work, output: tools.ppm_problems(str(work / "you.ppm")) + tools.ppm_problems(str(work / "enemy.ppm")),
+                timeout=300,
+            )
+        )
     return out
 
 
