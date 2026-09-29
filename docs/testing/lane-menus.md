@@ -264,6 +264,14 @@ of which say "not implemented yet" when chosen). The merged menus lane and the w
 flight subset were rerun on the merged tree; results are in the report to the parent
 (no regressions from this lane's changes).
 
+**Review fixes after round three.** The BAY label moved above GEAR (the time rate and BAY
+now sit at y 118 and 129) so it no longer runs into the MSL caption; a test checks every
+status label pair for overlap with a solid 10 px font, and an F-22 capture with the bay
+open shows BAY and MSL apart. With the guns only cheat on and an empty gun, startup now
+begins on NAV instead of arming a missile (`station_allowed` is public and used by the
+fallback search). The weapons window truncates names by character, so accented names
+keep their letters.
+
 ## Found and not fixed
 
 - **`--combat-smoke` fails for 13 of the 14 aircraft** (only the MiG-29 passes). Its
