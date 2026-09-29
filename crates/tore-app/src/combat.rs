@@ -1342,6 +1342,26 @@ pub fn feedback(event: &Event, config: &live::Configuration) -> Option<tore_inpu
         _ => None,
     }
 }
+/// Where two Debug dumps first differ, with a little context from each, so a
+/// failed replay comparison says which field moved.
+fn first_difference(a: &str, b: &str) -> String {
+    let at = a
+        .bytes()
+        .zip(b.bytes())
+        .position(|(x, y)| x != y)
+        .unwrap_or(a.len().min(b.len()));
+    let window = |s: &str| {
+        let from = s.floor_char_boundary(at.saturating_sub(120));
+        let to = s.floor_char_boundary((at + 120).min(s.len()));
+        s[from..to].to_owned()
+    };
+    format!(
+        "at byte {at}: replay ...{}... live ...{}...",
+        window(a),
+        window(b)
+    )
+}
+
 pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let world = World::for_theater(data, "UKR")?;
     let mut combat = Combat::new(h, data, true)?;
@@ -1900,17 +1920,29 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     .as_mut()
                     .ok_or("missing smoke recorder")?
                     .flush()?;
-                let decoded = crate::combat_tape::replay(
+                let decoded = crate::combat_tape::replay_without_airports(
                     path,
                     data,
                     combat.state.configuration().clone(),
                     "UKR",
                     &world,
                 )?;
-                if format!("{decoded:?}") != format!("{:?}", combat.state) {
-                    return Err("serialized live-fire replay diverged before reset".into());
+                let (replayed, live_state) =
+                    (format!("{decoded:?}"), format!("{:?}", combat.state));
+                if replayed != live_state {
+                    return Err(format!(
+                        "serialized live-fire replay diverged before reset: {}",
+                        first_difference(&replayed, &live_state)
+                    )
+                    .into());
                 }
                 // Also replay manual state transitions, including a full reset.
+                // A slow gun can lose the race with the fixture and collide, and
+                // a tape does not record the host turning a crashed flight into
+                // a dead player, so the manual commands start from a fresh
+                // flight and a fresh combat state.
+                flight = h.start(&world);
+                combat.reset(&mut flight)?;
                 for command in [
                     live::Command::ToggleArm,
                     live::Command::ClearDesignation,
@@ -1933,28 +1965,40 @@ pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
                     .as_mut()
                     .ok_or("missing smoke recorder")?
                     .flush()?;
-                let decoded = crate::combat_tape::replay(
+                let decoded = crate::combat_tape::replay_without_airports(
                     path,
                     data,
                     combat.state.configuration().clone(),
                     "UKR",
                     &world,
                 )?;
-                if format!("{decoded:?}") != format!("{:?}", combat.state) {
-                    return Err("serialized manual-command replay diverged before reset".into());
+                let (replayed, live_state) =
+                    (format!("{decoded:?}"), format!("{:?}", combat.state));
+                if replayed != live_state {
+                    return Err(format!(
+                        "serialized manual-command replay diverged before reset: {}",
+                        first_difference(&replayed, &live_state)
+                    )
+                    .into());
                 }
                 combat.reset(&mut flight)?;
                 combat.step(&mut flight, &world)?;
                 combat.finish_recording()?;
-                let decoded = crate::combat_tape::replay(
+                let decoded = crate::combat_tape::replay_without_airports(
                     path,
                     data,
                     combat.state.configuration().clone(),
                     "UKR",
                     &world,
                 )?;
-                if format!("{decoded:?}") != format!("{:?}", combat.state) {
-                    return Err("serialized combat replay diverged after commands/reset".into());
+                let (replayed, live_state) =
+                    (format!("{decoded:?}"), format!("{:?}", combat.state));
+                if replayed != live_state {
+                    return Err(format!(
+                        "serialized combat replay diverged after commands/reset: {}",
+                        first_difference(&replayed, &live_state)
+                    )
+                    .into());
                 }
                 println!("serialized combat replay {} PASS", path.display());
             }

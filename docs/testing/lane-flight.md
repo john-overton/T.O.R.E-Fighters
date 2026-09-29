@@ -49,7 +49,7 @@ each and the windowed ones five to eight seconds. See "Runtime" at the end for t
 | `spinrecover-*`, `stallrecover-*` | 28 | The manual's spin and stall recovery procedures recover every aircraft that can enter a spin or stall (X-31 and the F-22 family cannot spin: their data says so). |
 | `climb-*`, `sprint-*` | 28 | How far past its own envelope an aircraft goes (see "Needs a decision"), and that full-afterburner level flight settles near the top speed. |
 | `fault*` | 73 | Every system fault 0..44 on three aircraft in a pull, all 45 at once, and one after another, in every aircraft. |
-| `combatsmoke-*`, `missileacceptance-*` | 28 | The headless combat smoke (default slots, five damage classes, jettison, radar power, incoming missiles, jammer) and the missile reach probes. |
+| `combatsmoke-*`, `combatevidence-*`, `missileacceptance-*` | 40 | The headless combat smoke (default slots, five damage classes, jettison, radar power, incoming missiles, jammer), the same smoke with per-slot combat tapes written and replayed to the identical state, and the missile reach probes (the F-14 and Su-35 tables take about 40 minutes each in a debug build and are run by hand). |
 | `livefire-*`, `cheat-unlimited-ammo-*`, `cheat-damage-*`, `countermeasures-*` | about 90 | Windowed: fire every weapon slot of every aircraft (ammunition never negative or over capacity, drops by exactly what was fired, other stations untouched, surface weapons refuse the practice aircraft), Unlimited ammo, the three Damage modes, and chaff and flare counts against capacity. |
 | `cheat-*` | 70 | Extra G reaches about 9 G, No redout or blackout, No spins, No crashes and Unlimited fuel on every aircraft. |
 | `devices-*` | 14 | Gear, flaps, airbrake and hook stay within 0..1, never move against their command and take the aircraft's own deployment time; an aircraft with no hook does not lower one. |
@@ -82,6 +82,7 @@ is allowed a 400 ft longer roll.
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `--combat-smoke` failed for 13 of 14 aircraft (only the MiG-29 passed), since 0.1.0. | Not the game: the probe expected rules that have since changed on purpose. Radar power off now allows an unguided radar-missile release (feature matrix, "Uncued launch with the onboard seeker enabled"); surface weapons refuse the practice aircraft (`WrongTarget`); a fixture flying at the player can win the race against a slow gun and collide with it; the A-4E's guns need far more than forty hits to destroy the player fixture. | The probe now checks those rules and names the slot, weapon and reason when it fails (commit 503b580). All fourteen pass and are in the battery. |
+| A combat tape replayed with `--replay-combat` drifted its smoke differently from the live run (`TORE_COMBAT_EVIDENCE` smoke: "serialized live-fire replay diverged"). | The host sets the mission wind on the smoke and countermeasures before every step, but a tape does not record it, so the replay drifted them with no wind. The smoke also compared a live state without airfields to a replay that added them, and kept stepping a crashed flight. | The replay is given the theater's wind (`combat_tape.rs`); the smoke replays without airfields and starts its manual-command tape from a fresh flight. All fourteen aircraft roundtrip their tapes and are in the battery as `combatevidence-*` (commit below). |
 | The RCS instrument window drew "NO EXPOSURE DATA" over the 270 bearing label. | Message placed at the left edge of the window. | Moved below the crosshair. The menus lane fixed the same line the same way; that version is the one merged. |
 
 No game defect was found in takeoff, landing, the manoeuvres, spin and stall recovery, faults,
@@ -124,7 +125,11 @@ None of these is defined in the specs, the manual text or the feature matrix, so
    so it is by design; whether a narrower landing area is wanted is a decision.
 5. **The small airstrips (about 1,000 ft) accept any aircraft.** A ground start and takeoff work for a
    Su-25 or an F-22 there, and nothing says a fighter needs a longer runway.
-6. **Carrier hook and arresting gear.** The hook lowers on the five aircraft that have one (F/A-18D,
+6. **Combat tapes do not record everything the host does.** A replayed tape shows the player alive
+   after a flight that crashed, because the host turns a crashed flight into a dead player and the
+   tape does not record that. Only the developer replay uses tapes; the mission recordings of
+   [REPLAYS.md](../REPLAYS.md) are separate.
+7. **Carrier hook and arresting gear.** The hook lowers on the five aircraft that have one (F/A-18D,
    F-14D, A-4E, F-22N and the F/A-XX concept) and does nothing else; carriers are listed as
    remaining work in the feature matrix.
 

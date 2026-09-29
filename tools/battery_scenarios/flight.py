@@ -8,6 +8,7 @@ See docs/testing/lane-flight.md.
 """
 import os
 import re
+import time
 
 from battery import Scenario
 
@@ -520,6 +521,16 @@ def check_missile_rows(rows: list[str]) -> list[str]:
     return problems
 
 
+def check_combat_evidence(output: str) -> list[str]:
+    """The smoke's per-slot tapes replay to exactly the live state."""
+    problems = check_combat_smoke(output)
+    if "serialized combat replay" not in output:
+        problems.append("no combat tape was written and replayed")
+    if "diverged" in output:
+        problems.append("a combat tape replay diverged from the live state")
+    return problems
+
+
 def combat_scenarios() -> list[Scenario]:
     out = []
     for ac in AIRCRAFT:
@@ -529,6 +540,21 @@ def combat_scenarios() -> list[Scenario]:
         # hand (the F-14's 480 rows were clean on 2026-09-28).
         if ac not in SLOW_ACCEPTANCE:
             out.append(Scenario(name=f"flight-missileacceptance-{ac}", lane="flight", args=["--missile-acceptance", "--aircraft", ac, "--no-audio"], check=make_check_missile_acceptance(ac), timeout=1200))
+    # The same smoke with per-slot combat tapes written and replayed
+    # (TORE_COMBAT_EVIDENCE takes a new folder each run, so it is named by the
+    # time the scenario list was built).
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    for ac in AIRCRAFT:
+        out.append(
+            Scenario(
+                name=f"flight-combatevidence-{ac}",
+                lane="flight",
+                args=["--combat-smoke", "--aircraft", ac, "--no-audio"],
+                env={"TORE_COMBAT_EVIDENCE": f".local/battery/evidence/{stamp}-{ac}"},
+                check=check_combat_evidence,
+                timeout=300,
+            )
+        )
     out.append(Scenario(name="flight-sensor-summary", lane="flight", args=["--sensor-summary", "--no-audio"], expect=[r"radar .* search"], timeout=120))
     out.append(Scenario(name="flight-validate-weather", lane="flight", args=["--validate-weather", "--no-audio"], timeout=600))
     out.append(Scenario(name="flight-validate-maps", lane="flight", args=["--validate-maps", "--no-audio"], timeout=600))
