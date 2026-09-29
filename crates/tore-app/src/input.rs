@@ -101,8 +101,8 @@ impl Input {
                 .map_err(|e| format!("{}: {e}", path.display()))?
                 .take(256 * 1024 + 1)
                 .read_to_string(&mut text)
-                .map_err(|e| e.to_string())?;
-            custom = Profile::parse(&text)?;
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            custom = Profile::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         }
         let profile = complete(&custom)?;
         let head = match profile.head_port {
@@ -950,6 +950,23 @@ mod tests {
         assert!(input.save_settings(&bad).is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
         assert!(input.resolver.profile.rumble);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn a_bad_profile_error_names_the_file() {
+        let dir = std::env::temp_dir().join(format!("tore-badprofile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, bytes) in [
+            ("empty.conf", &b""[..]),
+            ("wrong.conf", b"not a profile\n"),
+            ("action.conf", b"tore-input 1\nbind key:F1 nonsense press\n"),
+            ("utf8.conf", b"\xff\xfe bad"),
+        ] {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            let error = Input::new(Some(&path), false).err().unwrap();
+            assert!(error.contains(name), "{error}");
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
