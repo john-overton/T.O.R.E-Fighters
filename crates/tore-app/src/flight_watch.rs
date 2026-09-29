@@ -31,6 +31,14 @@ pub struct FlightWatch {
     max_dead_stick_gain_ft: f64,
     /// Total energy height gained over the whole run while the engine was off.
     dead_stick_gain_ft: f64,
+    /// Full thrust over empty weight: energy height can rise no faster than
+    /// this times the speed.
+    thrust_to_weight: f64,
+    /// Energy height at the last one-second mark, and the largest one-second gain.
+    energy_mark_ft: f64,
+    max_energy_rate_fps: f64,
+    /// The largest ratio of a one-second energy gain to what thrust could give.
+    max_energy_ratio: f64,
 }
 
 impl FlightWatch {
@@ -52,6 +60,17 @@ impl FlightWatch {
             last_energy_ft: energy_ft(state),
             max_dead_stick_gain_ft: 0.,
             dead_stick_gain_ft: 0.,
+            thrust_to_weight: {
+                use tore_sim::models::FlightModel;
+                let c = state.model().configuration();
+                c.propulsion
+                    .afterburner_thrust_lbf
+                    .max(c.propulsion.military_thrust_lbf)
+                    / c.mass.empty_lbs.max(1.)
+            },
+            energy_mark_ft: energy_ft(state),
+            max_energy_rate_fps: 0.,
+            max_energy_ratio: 0.,
         }
     }
 
@@ -103,6 +122,17 @@ impl FlightWatch {
             self.dead_stick_gain_ft += gain;
         }
         self.last_energy_ft = energy;
+        // One-second energy gain against the thrust power available at this speed,
+        // only while flying free with the engine on.
+        if state.ticks.is_multiple_of(120) {
+            if state.engine && !state.crashed && state.position[1] > 60. {
+                let rate = energy - self.energy_mark_ft;
+                let bound = self.thrust_to_weight * state.speed.max(1.);
+                self.max_energy_rate_fps = self.max_energy_rate_fps.max(rate);
+                self.max_energy_ratio = self.max_energy_ratio.max(rate / bound);
+            }
+            self.energy_mark_ft = energy;
+        }
         if self.trace_ticks > 0 && state.ticks.is_multiple_of(self.trace_ticks) {
             println!(
                 "trace: tick={} alt_ft={:.1} speed_kt={:.1} vs_fps={:.1} g={:.2} aoa_deg={:.1} pitch_deg={:.1} bank_deg={:.1} yaw_deg={:.1} throttle={:.2} fuel_lb={:.0} gear={:.2} flaps={:.2} brake={:.2} hook={:.2} on_ground={}",
@@ -135,7 +165,7 @@ impl FlightWatch {
             );
         }
         format!(
-            "extremes: samples={} non_finite={} max_speed_kt={:.1} max_g={:.2} min_g={:.2} min_altitude_ft={:.1} max_altitude_ft={:.1} max_pitch_rate_dps={:.1} max_roll_rate_dps={:.1} fuel_start_lb={:.1} fuel_end_lb={:.1} fuel_rise_lb={:.3} dead_stick_gain_ft={:.3} max_dead_stick_step_ft={:.4}",
+            "extremes: samples={} non_finite={} max_speed_kt={:.1} max_g={:.2} min_g={:.2} min_altitude_ft={:.1} max_altitude_ft={:.1} max_pitch_rate_dps={:.1} max_roll_rate_dps={:.1} fuel_start_lb={:.1} fuel_end_lb={:.1} fuel_rise_lb={:.3} dead_stick_gain_ft={:.3} max_dead_stick_step_ft={:.4} max_energy_rate_fps={:.1} energy_rate_over_thrust={:.3}",
             self.samples,
             self.non_finite,
             self.max_speed_kt,
@@ -150,6 +180,8 @@ impl FlightWatch {
             self.fuel_rise_lb,
             self.dead_stick_gain_ft,
             self.max_dead_stick_gain_ft,
+            self.max_energy_rate_fps,
+            self.max_energy_ratio,
         )
     }
 }

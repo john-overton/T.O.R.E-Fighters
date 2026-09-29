@@ -6930,6 +6930,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut flight_probe_ticks = None;
     let mut flight_trace_ticks = 0u64;
     let mut flight_faults: Vec<(u64, usize)> = Vec::new();
+    let mut flight_cheats: Vec<String> = Vec::new();
     let mut flight_devices = None;
     let mut flight_controls = None;
     let mut flight_throttle = None;
@@ -7437,6 +7438,13 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 }
                 flight_faults.push((tick, index));
             }
+            "--flight-cheat" => {
+                let name = args.next().ok_or("--flight-cheat needs extra-g, no-spins, no-crashes or unlimited-fuel")?;
+                if !["extra-g", "no-spins", "no-crashes", "unlimited-fuel"].contains(&name.as_str()) {
+                    return Err("--flight-cheat needs extra-g, no-spins, no-crashes or unlimited-fuel".into());
+                }
+                flight_cheats.push(name);
+            }
             "--flight-trace" => {
                 flight_trace_ticks = args.next().ok_or("--flight-trace needs a tick count")?.parse()?;
             }
@@ -7497,6 +7505,9 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "stall",
                     "spin",
                     "spin-recover",
+                    "autopilot",
+                    "eject",
+                    "eject-low",
                     "land",
                     "land-gear-up",
                     "land-hard",
@@ -8229,6 +8240,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 keys.pitch = 1.;
                 keys.yaw = 1.;
             }
+            "eject-low" => state.position[1] = 250.,
+            "autopilot" => {
+                // A 25 degree bank with the heading and altitude hold engaged: it
+                // has to level the wings and hold the 5,000 feet it captured.
+                state.bank = 25f64.to_radians();
+                keys.commands = vec![flight::PilotCommand::Set(flight::Switch::Autopilot, true)];
+            }
             "spin-recover" => {
                 state.speed = 180.;
                 state.position[1] = flight_probe::SPIN_START_FT;
@@ -8324,6 +8342,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 );
             }
         }
+        for name in &flight_cheats {
+            match name.as_str() {
+                "extra-g" => state.cheats.extra_g = true,
+                "no-spins" => state.cheats.no_spins = true,
+                "no-crashes" => state.cheats.no_crashes = true,
+                _ => state.cheats.unlimited_fuel = true,
+            }
+        }
         if flight_probe::LandingVariant::from_maneuver(&maneuver).is_some()
             && landing_probe.is_none()
         {
@@ -8346,10 +8372,19 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             let keys = if let Some(probe) = spin_recovery.as_mut() {
                 scripted = probe.keys(&state);
                 &scripted
+            } else if matches!(maneuver.as_str(), "eject" | "eject-low")
+                && (tick == 120 || tick == 140)
+            {
+                // Two presses inside the confirmation interval, as Shift-E twice.
+                scripted = flight::PilotInput {
+                    commands: vec![flight::PilotCommand::Eject],
+                    ..Default::default()
+                };
+                &scripted
             } else if let Some(probe) = landing_probe.as_mut() {
                 let world = replay_world.as_ref().unwrap();
-                let ground = world.surface(state.position[0], state.position[2]).height;
-                scripted = probe.keys(&state, ground);
+                let surface = world.surface(state.position[0], state.position[2]);
+                scripted = probe.keys(&state, surface.height, surface.landable);
                 &scripted
             } else {
                 replay_frames.as_ref().map_or(&keys, |frames| &frames[tick])
@@ -9184,11 +9219,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         let devices = &combat.state.devices;
         println!(
-            "Countermeasure preview: ticks={ticks} flares={} burning={} puffs={} chaff={}",
+            "Countermeasure preview: ticks={ticks} flares={} burning={} puffs={} chaff={} carried_chaff={} carried_flares={} capacity_chaff={} capacity_flares={}",
             devices.flares.len(),
             devices.flares.iter().filter(|f| f.burning()).count(),
             devices.puffs().count(),
-            devices.chaff.len()
+            devices.chaff.len(),
+            combat.state.chaff,
+            combat.state.flares,
+            combat.state.configuration().ecm.chaff[0],
+            combat.state.configuration().ecm.flare[0]
         );
         for flare in &devices.flares {
             let p = flare.position;
