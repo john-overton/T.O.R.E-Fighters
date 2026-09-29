@@ -949,3 +949,170 @@ fn no_result_call_without_a_mission_or_when_decided_at_the_start() {
         }
     }
 }
+
+/// The mission with a second human-flown plane, 50, that combat carries as a
+/// second ownship. Plane 50 is no AI aircraft, so no target row shares its id.
+fn two_ownship_mission() -> World {
+    let mut world = mission();
+    let second = PlaneId(50);
+    let slot = Slot {
+        wing: tore_sim::ai::launch::WingId {
+            side: tore_sim::ai::launch::Side::Friendly,
+            index: 0,
+        },
+        member: 5,
+    };
+    let ai: Vec<_> = world
+        .roster
+        .planes()
+        .iter()
+        .filter(|plane| plane.id != PlaneId(0))
+        .map(|plane| (plane.id, plane.slot))
+        .collect();
+    world.roster = Roster::with_humans(
+        [
+            (
+                PlaneId(0),
+                Slot::FRIENDLY_LEAD,
+                SeatId(0),
+                Some(comms::Crew::Rio),
+            ),
+            (second, slot, SeatId(1), None),
+        ],
+        ai,
+    );
+    world
+        .comms
+        .set_seats(world.roster.seats().iter().map(|seat| seat.id));
+    let first = &world.cockpits[0];
+    let mut flight = first.flight.clone();
+    flight.position[0] += 300.;
+    let profile = crate::test_support::profile();
+    world.cockpits.push(Cockpit {
+        plane: second,
+        previous_flight: flight.clone(),
+        flight,
+        turbulence: Default::default(),
+        turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng::seeded(1).unwrap(),
+        airport_service: first.airport_service.clone(),
+        airport_nav_mode: false,
+        airfield_radio: airfield_radio::AirfieldRadio::for_seat(SeatId(1), second.0),
+        crew_voice: crew_voice::CrewVoice::new(&profile).for_seat(SeatId(1), second.0),
+        result: Default::default(),
+        overspeed_message_at: None,
+        edge_message_at: None,
+    });
+    let config = world.combat.own().configuration().clone();
+    let mut ownship =
+        tore_sim::combat::live::Ownship::new(second.0, world.combat.own().side, config, true)
+            .unwrap();
+    ownship.armed = true;
+    world.combat.add_ownship(ownship, Vec::new()).unwrap();
+    world
+}
+
+fn tick_both(world: &mut World, held: [bool; 2], out: &mut TickOutput) {
+    let tick = world.tick();
+    let inputs: Vec<_> = (0..2)
+        .map(|n| SeatInput {
+            seat: SeatId(n as u8),
+            tick,
+            trigger: held[n],
+            ..SeatInput::default()
+        })
+        .collect();
+    world.step(&inputs, out).unwrap();
+}
+
+/// Combat steps every human-flown plane: each plane's own damage reaches its
+/// own flight, and each seat's trigger fires its own ownship.
+#[test]
+fn combat_steps_each_human_flown_plane_with_its_own_ownship() {
+    let mut world = two_ownship_mission();
+    let mut out = TickOutput::default();
+    // A hit on the second plane only.
+    let launcher = combat::launcher(&world.cockpits[1].flight);
+    world
+        .combat
+        .command_for(50, tore_sim::combat::live::Command::DamagePlayer, launcher);
+    tick_both(&mut world, [false, false], &mut out);
+    assert!(
+        out.events
+            .iter()
+            .any(|e| matches!(e, Event::OwnshipDamaged { aircraft: 50, .. }))
+    );
+    assert!(
+        !out.events
+            .iter()
+            .any(|e| matches!(e, Event::OwnshipDamaged { aircraft: 0, .. }))
+    );
+    assert!(world.cockpits[1].flight.damage_fraction > 0.);
+    assert_eq!(world.cockpits[0].flight.damage_fraction, 0.);
+    let hp = |world: &World, plane: u32| world.combat.state.ownship(plane).unwrap().hp;
+    let capacity = world.combat.own().configuration().damage_capacity;
+    assert_eq!(hp(&world, 0), capacity);
+    assert!(hp(&world, 50) < capacity);
+    // Each seat's trigger fires its own ownship's gun.
+    let mut fired = Vec::new();
+    for _ in 0..30 {
+        tick_both(&mut world, [false, true], &mut out);
+        fired.extend(out.events.iter().filter_map(|e| match e {
+            Event::Fired { aircraft, .. } => Some(*aircraft),
+            _ => None,
+        }));
+    }
+    assert!(
+        !fired.is_empty() && fired.iter().all(|aircraft| *aircraft == 50),
+        "{fired:?}"
+    );
+    assert!(world.combat.state.ownship(50).unwrap().shots > 0);
+    assert_eq!(world.combat.state.ownship(0).unwrap().shots, 0);
+    // A plane whose ownship is destroyed is dead to the radio, the other is not.
+    world.combat.state.ownship_mut(50).unwrap().hp = 0;
+    assert!(world.cockpit_alive(0));
+    assert!(!world.cockpit_alive(1));
+}
+
+/// Every human-flown plane is in the tick's picture: the first as the player,
+/// the other as an ordinary aircraft, and taking one out of combat gives back
+/// its ownship as it stands.
+#[test]
+fn every_human_flown_plane_is_in_the_picture_and_leaves_with_its_ownship() {
+    let mut world = two_ownship_mission();
+    let mut out = TickOutput::default();
+    tick_both(&mut world, [false, false], &mut out);
+    let snapshot = world.combat.render_snapshot();
+    assert_eq!(snapshot.player.id, 0);
+    let other = snapshot
+        .targets
+        .iter()
+        .find(|t| t.id == 50)
+        .expect("the second human-flown plane is drawn");
+    assert_eq!(other.position, world.cockpits[1].flight.position);
+    assert!(other.airborne && !other.crashed);
+    assert_eq!(
+        snapshot.targets.iter().filter(|t| t.id == 50).count(),
+        1,
+        "once"
+    );
+    assert!(snapshot.models.contains(&other.aircraft.unwrap()));
+    // The first plane stays the only player; giving the second back returns
+    // its damage and countermeasures.
+    world.combat.state.ownship_mut(50).unwrap().chaff = 3;
+    let given_back = world.combat.remove_ownship(50).expect("it is an ownship");
+    assert_eq!((given_back.aircraft, given_back.chaff), (50, 3));
+    assert!(world.combat.state.ownship(50).is_none());
+    assert!(
+        world.combat.remove_ownship(0).is_none(),
+        "the presented plane stays"
+    );
+    tick_both(&mut world, [false, false], &mut out);
+    assert!(
+        world
+            .combat
+            .render_snapshot()
+            .targets
+            .iter()
+            .all(|t| t.id != 50)
+    );
+}

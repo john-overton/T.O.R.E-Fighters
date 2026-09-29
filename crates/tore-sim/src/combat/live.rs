@@ -946,7 +946,8 @@ pub struct Ownship {
     pub ecm_failed: bool,
     pub chaff: u8,
     pub flares: u8,
-    localized_damage: LocalizedDamage,
+    /// Regional damage; public so a handoff can carry it over.
+    pub localized_damage: LocalizedDamage,
     fragment_released: bool,
     explosion_reported: bool,
     /// Rounds fired.
@@ -1405,7 +1406,7 @@ impl<'a> OwnshipView<'a> {
     }
     /// A target row by its id: a target of the state, or another ownship's
     /// aircraft. An ownship is never a contact of itself.
-    fn contact(&self, id: u32) -> Option<&'a Target> {
+    pub fn contact(&self, id: u32) -> Option<&'a Target> {
         let state = self.state;
         state.targets.iter().find(|t| t.id == id).or_else(|| {
             state

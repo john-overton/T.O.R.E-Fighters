@@ -39,6 +39,29 @@ impl FireInput {
         self.held = false;
     }
 }
+/// One ownship's trigger: the keyboard and the controller hold it separately.
+#[derive(Default)]
+pub struct Trigger {
+    pub input: FireInput,
+    pub controller: FireInput,
+}
+impl Trigger {
+    pub fn held(&self) -> bool {
+        self.input.held || self.controller.held
+    }
+}
+/// What the picture draws of a human-flown plane other than the first, as its
+/// flight left it in the last step.
+struct Pose {
+    position: Vector,
+    attitude: [f64; 3],
+    velocity: Vector,
+    devices: [f64; crate::snapshot::DEVICES],
+    engine: Engine,
+    wreck: Option<tore_sim::wreck::Phase>,
+    crashed: bool,
+    escape: Option<tore_sim::ejection::Escape>,
+}
 /// Yaw, pitch and bank for one drawn airborne target.
 ///
 /// With `ai_poses` off this is the existing straight-flight fixture rule: the
@@ -111,8 +134,13 @@ pub struct Combat {
     contrail_offsets: Vec<Vector>,
     contrail_sortie: u64,
     pub contrails: tore_sim::combat::smoke::Smoke,
-    pub input: FireInput,
-    pub controller: FireInput,
+    /// Each ownship's trigger, made on first use.
+    triggers: BTreeMap<u32, Trigger>,
+    /// The engine outlets of the ownships other than the first, by aircraft.
+    ownship_contrails: BTreeMap<u32, Vec<Vector>>,
+    /// How the last step left each ownship other than the first, for the
+    /// picture.
+    poses: BTreeMap<u32, Pose>,
     pub range: bool,
     /// Draw airborne targets with their own stored attitude instead of the
     /// straight-flight fixture pose. Enabled by an AI creator launch; disabled
@@ -269,8 +297,9 @@ impl Combat {
             dummy_types: Vec::new(),
             dummy_configs: Vec::new(),
             airport_objects: Vec::new(),
-            input: FireInput::default(),
-            controller: FireInput::default(),
+            triggers: BTreeMap::new(),
+            ownship_contrails: BTreeMap::new(),
+            poses: BTreeMap::new(),
             range,
             ai_poses: false,
             clean_recording: false,
@@ -290,6 +319,16 @@ impl Combat {
         wings: Option<&crate::ai_wings::AiWings>,
     ) -> RenderSnapshot {
         let ownship = self.dummies.is_empty();
+        let own_id = self.own_id();
+        // The other human-flown planes, in aircraft id order, as the last step
+        // left them.
+        let others: Vec<(&live::Ownship, &Pose)> = self
+            .state
+            .ownships()
+            .iter()
+            .filter(|own| own.aircraft != own_id)
+            .filter_map(|own| Some((own, self.poses.get(&own.aircraft)?)))
+            .collect();
         let model = |id: u32| {
             id.checked_sub(1)
                 .and_then(|index| self.dummies.get(index as usize))
@@ -298,6 +337,8 @@ impl Combat {
         let draw = |id: u32| {
             if ownship {
                 Draw::Ownship
+            } else if let Some((own, _)) = others.iter().find(|(own, _)| own.aircraft == id) {
+                Draw::Model(own.configuration().aircraft)
             } else {
                 model(id).map_or(Draw::Hidden, Draw::Model)
             }
@@ -356,7 +397,7 @@ impl Combat {
         RenderSnapshot {
             tick: self.state.tick(),
             player: AircraftPose {
-                id: 0,
+                id: own_id,
                 aircraft: Some(config.aircraft),
                 draw: Draw::Ownship,
                 position: player.position,
@@ -408,6 +449,28 @@ impl Combat {
                     wreck: t.wreck.as_ref().map(|wreck| wreck.phase),
                     crashed: t.hp <= 0,
                 })
+                .chain(others.iter().map(|(own, pose)| AircraftPose {
+                    id: own.aircraft,
+                    aircraft: Some(own.configuration().aircraft),
+                    draw: Draw::Model(own.configuration().aircraft),
+                    position: pose.position,
+                    attitude: pose.attitude,
+                    velocity: pose.velocity,
+                    devices: Some(pose.devices),
+                    engine: Engine {
+                        flame: pose.engine.flame && own.hp > 0,
+                        ..pose.engine
+                    },
+                    damage: Damage {
+                        hp: own.hp,
+                        initial_hp: own.configuration().damage_capacity,
+                        sections: own.damage_amounts(),
+                        structural: own.damage_section(),
+                    },
+                    airborne: true,
+                    wreck: pose.wreck,
+                    crashed: pose.crashed,
+                }))
                 .collect(),
             projectiles: self
                 .state
@@ -454,15 +517,19 @@ impl Combat {
                 .iter()
                 .map(|piece| DebrisPose {
                     owner: piece.owner,
-                    draw: if piece.owner == 0 {
+                    draw: if piece.owner == own_id {
                         Draw::Ownship
                     } else {
                         draw(piece.owner)
                     },
                     position: piece.position,
                     attitude: piece.basis.angles(),
-                    variant: if piece.owner == 0 {
+                    variant: if piece.owner == own_id {
                         player.damage_variant
+                    } else if let Some((own, _)) =
+                        others.iter().find(|(own, _)| own.aircraft == piece.owner)
+                    {
+                        own.damage_section().map(|section| section as usize)
                     } else {
                         self.state
                             .targets
@@ -476,7 +543,12 @@ impl Combat {
             pilots: player
                 .escape
                 .iter()
-                .map(|escape| pilot(0, escape))
+                .map(|escape| pilot(own_id, escape))
+                .chain(others.iter().filter_map(|(own, pose)| {
+                    pose.escape
+                        .as_ref()
+                        .map(|escape| pilot(own.aircraft, escape))
+                }))
                 .chain(
                     wings
                         .into_iter()
@@ -484,7 +556,16 @@ impl Combat {
                         .map(|(owner, escape)| pilot(owner, escape)),
                 )
                 .collect(),
-            models: self.dummy_types.iter().map(|h| h.profile.id).collect(),
+            models: {
+                let mut models: Vec<_> = self.dummy_types.iter().map(|h| h.profile.id).collect();
+                // The type of every other human-flown plane, for the app to draw.
+                for (own, _) in &others {
+                    if !models.contains(&own.configuration().aircraft) {
+                        models.push(own.configuration().aircraft);
+                    }
+                }
+                models
+            },
         }
     }
     /// once a mission's AI has placed its aircraft.
@@ -685,14 +766,25 @@ impl Combat {
         }
         Ok(())
     }
+    /// A command for the first ownship, as a host with one flight gives it.
     pub fn command(&mut self, command: live::Command, l: Launcher) {
-        if self.tape.is_some() {
+        let aircraft = self.own_id();
+        self.command_for(aircraft, command, l);
+    }
+    /// A command for one ownship. The combat tape and the command notes follow
+    /// the first ownship only.
+    pub fn command_for(&mut self, aircraft: u32, command: live::Command, l: Launcher) {
+        let first = aircraft == self.own_id();
+        if first && self.tape.is_some() {
             self.record_tape(crate::combat_tape::command_name(command), l);
         }
-        self.note(CommandNote::Command(command));
-        let aircraft = self.own_id();
+        if first {
+            self.note(CommandNote::Command(command));
+        }
         self.state.command(aircraft, command, l);
-        self.last_launcher = Some(l);
+        if first {
+            self.last_launcher = Some(l);
+        }
     }
     fn note(&mut self, note: CommandNote) {
         if self.notes.len() == MAX_COMMAND_NOTES {
@@ -731,19 +823,68 @@ impl Combat {
     pub fn take_tape(&mut self) -> Vec<crate::combat_tape::Entry> {
         self.tape.as_mut().map(std::mem::take).unwrap_or_default()
     }
+    /// The first ownship lets go of its trigger.
     pub fn cancel(&mut self) {
-        if self.tape.is_some()
+        let aircraft = self.own_id();
+        self.cancel_for(aircraft);
+    }
+    /// One ownship lets go of its trigger and drops its queued rounds.
+    pub fn cancel_for(&mut self, aircraft: u32) {
+        let first = aircraft == self.own_id();
+        if first
+            && self.tape.is_some()
             && let Some(l) = self.last_launcher
         {
             self.record_tape("release", l);
         }
-        if self.input.held || self.controller.held {
+        let trigger = self.trigger(aircraft);
+        let held = trigger.held();
+        trigger.input.cancel();
+        trigger.controller.cancel();
+        if first && held {
             self.note(CommandNote::Release);
         }
-        self.input.cancel();
-        self.controller.cancel();
-        let aircraft = self.own_id();
         self.state.release(aircraft);
+    }
+    /// One ownship's trigger.
+    pub fn trigger(&mut self, aircraft: u32) -> &mut Trigger {
+        self.triggers.entry(aircraft).or_default()
+    }
+    /// The first ownship's trigger.
+    pub fn own_trigger(&mut self) -> &mut Trigger {
+        let aircraft = self.own_id();
+        self.trigger(aircraft)
+    }
+    /// Puts another human-flown aircraft into combat with the stores, damage
+    /// and countermeasures its ownship carries; `contrail_offsets` are where
+    /// its engines exhaust. The aircraft must not have an ownship yet, and its
+    /// id must not be an AI target's.
+    pub fn add_ownship(
+        &mut self,
+        ownship: live::Ownship,
+        contrail_offsets: Vec<Vector>,
+    ) -> WorldResult<()> {
+        let aircraft = ownship.aircraft;
+        if self.state.targets.iter().any(|t| t.id == aircraft) {
+            return Err(format!("aircraft {aircraft} is already an AI target").into());
+        }
+        self.state
+            .add_ownship(ownship)
+            .map_err(std::io::Error::other)?;
+        self.ownship_contrails.insert(aircraft, contrail_offsets);
+        Ok(())
+    }
+    /// Takes an aircraft out of combat when its human gives it back, with its
+    /// ownship: stores, damage and countermeasures as they stand. The first
+    /// ownship, the one the app presents, stays.
+    pub fn remove_ownship(&mut self, aircraft: u32) -> Option<live::Ownship> {
+        if aircraft == self.own_id() {
+            return None;
+        }
+        self.triggers.remove(&aircraft);
+        self.ownship_contrails.remove(&aircraft);
+        self.poses.remove(&aircraft);
+        self.state.remove_ownship(aircraft)
     }
     pub fn reset(&mut self, s: &mut flight::State) -> WorldResult<()> {
         self.render.restart();
@@ -770,8 +911,24 @@ impl Combat {
             self.state.own_mut().ammo.clone_from(ammo);
         }
         self.state.own_mut().start_load();
-        self.input = FireInput::default();
-        self.controller.cancel();
+        // The keyboard trigger starts over; the controller's is only let go.
+        let aircraft = self.own_id();
+        let mut controller = self
+            .triggers
+            .remove(&aircraft)
+            .map(|trigger| trigger.controller)
+            .unwrap_or_default();
+        controller.cancel();
+        self.triggers.clear();
+        self.triggers.insert(
+            aircraft,
+            Trigger {
+                input: FireInput::default(),
+                controller,
+            },
+        );
+        self.ownship_contrails.clear();
+        self.poses.clear();
         s.set_payload(self.state.own().payload_lbs())?;
         s.systems = tore_sim::aircraft_systems::Systems::new(
             self.state.own().configuration().engines,
@@ -844,104 +1001,132 @@ impl Combat {
         }
         raised
     }
+    /// One combat tick for the first ownship's aircraft, as a host with one
+    /// flight steps it.
     pub fn step(&mut self, s: &mut flight::State, world: &Terrain) -> WorldResult<Vec<Event>> {
         let aircraft = self.own_id();
-        let l = launcher(s);
-        self.last_launcher = Some(l);
-        self.record_tape(
-            if self.input.held || self.controller.held {
-                "fire"
-            } else {
-                "tick"
-            },
-            l,
-        );
+        self.step_all(&mut [(aircraft, s)], world)
+    }
+    /// One combat tick for every human-flown aircraft given, each with its
+    /// flight, in aircraft id order: every launcher goes into one combat step,
+    /// then each flight takes what combat did to its aircraft: system faults,
+    /// payload, bay, radar and jammer, damage and the crash. A flight whose
+    /// aircraft has no ownship is left alone. The combat tape and the command
+    /// notes follow the first ownship only.
+    pub fn step_all(
+        &mut self,
+        flights: &mut [(u32, &mut flight::State)],
+        world: &Terrain,
+    ) -> WorldResult<Vec<Event>> {
+        flights.sort_by_key(|(aircraft, _)| *aircraft);
+        let first = self.own_id();
+        let mut inputs = Vec::new();
         let mut events = Vec::new();
-        self.state.own_mut().note_loaded();
-        if s.airburst()
-            && let Some(event) = self.state.ownship_airburst(aircraft, s.position)
-        {
-            events.push(event);
-        }
-        if s.ground_impact()
-            && let Some(event) = self.state.ownship_ground_impact(
+        for (aircraft, s) in flights.iter() {
+            let aircraft = *aircraft;
+            if self.state.ownship(aircraft).is_none() {
+                continue;
+            }
+            let l = launcher(s);
+            let held = self.triggers.get(&aircraft).is_some_and(Trigger::held);
+            if aircraft == first {
+                self.last_launcher = Some(l);
+                self.record_tape(if held { "fire" } else { "tick" }, l);
+            }
+            if let Some(own) = self.state.ownship_mut(aircraft) {
+                own.note_loaded();
+            }
+            if s.airburst()
+                && let Some(event) = self.state.ownship_airburst(aircraft, s.position)
+            {
+                events.push(event);
+            }
+            if s.ground_impact()
+                && let Some(event) = self.state.ownship_ground_impact(
+                    aircraft,
+                    s.position,
+                    world.over_water(s.position[0], s.position[2]),
+                )
+            {
+                events.push(event);
+            }
+            inputs.push(OwnshipInput {
                 aircraft,
-                s.position,
-                world.over_water(s.position[0], s.position[2]),
-            )
-        {
-            events.push(event);
+                held,
+                launcher: l,
+            });
         }
         self.state.smoke.wind = world.wind();
         self.state.devices.wind = world.wind();
         self.contrails.wind = world.wind();
         // Stop wreck emissions before advancing smoke on the impact/airburst tick.
         events.extend(self.state.step_surface(
-            &[OwnshipInput {
-                aircraft,
-                held: self.input.held || self.controller.held,
-                launcher: l,
-            }],
+            &inputs,
             |x, z| f64::from(world.height(x as f32, z as f32)),
             |x, z| world.over_water(x, z),
         ));
-        for index in 0..45 {
-            while s.systems.counts[index] < self.state.own().subsystem_counts[index] {
-                s.systems.hit(index, s.throttle);
-                if let Some(hardpoint) = index.checked_sub(36) {
-                    let config = self.state.own().configuration();
-                    if config.external_fuel_lbs[hardpoint] > 0. {
-                        s.systems.fuel.external[hardpoint] = 0.;
-                        s.systems.notify(format!(
-                            "External fuel tank {} damaged: fuel lost",
-                            hardpoint + 1
-                        ));
-                    } else if let Some(Some(slot)) = config.hardpoint_slots.get(hardpoint) {
-                        s.systems.notify(format!(
-                            "{} station damaged",
-                            config.stations[*slot].weapon.hud_name
-                        ));
-                    } else {
-                        s.systems.notify(
-                            if self.state.own().radar_failed && hardpoint == config.radar_hardpoint
-                            {
-                                "Radar failed"
-                            } else if self.state.own().visual_failed
-                                && hardpoint == config.visual_hardpoint
-                            {
-                                "Visual sensor failed"
-                            } else if self.state.own().infrared_failed
-                                && Some(hardpoint) == config.infrared_hardpoint
-                            {
-                                "Infrared sensor failed"
-                            } else if Some(hardpoint) == config.rwr_hardpoint {
-                                "RWR failed"
-                            } else if hardpoint == config.ecm_hardpoint {
-                                "Countermeasure equipment damaged"
-                            } else {
-                                "Hardpoint equipment damaged"
-                            },
-                        );
+        for (aircraft, s) in flights.iter_mut() {
+            let aircraft = *aircraft;
+            let Some(own) = self.state.ownship(aircraft) else {
+                continue;
+            };
+            for index in 0..45 {
+                while s.systems.counts[index] < own.subsystem_counts[index] {
+                    s.systems.hit(index, s.throttle);
+                    if let Some(hardpoint) = index.checked_sub(36) {
+                        let config = own.configuration();
+                        if config.external_fuel_lbs[hardpoint] > 0. {
+                            s.systems.fuel.external[hardpoint] = 0.;
+                            s.systems.notify(format!(
+                                "External fuel tank {} damaged: fuel lost",
+                                hardpoint + 1
+                            ));
+                        } else if let Some(Some(slot)) = config.hardpoint_slots.get(hardpoint) {
+                            s.systems.notify(format!(
+                                "{} station damaged",
+                                config.stations[*slot].weapon.hud_name
+                            ));
+                        } else {
+                            s.systems.notify(
+                                if own.radar_failed && hardpoint == config.radar_hardpoint {
+                                    "Radar failed"
+                                } else if own.visual_failed && hardpoint == config.visual_hardpoint
+                                {
+                                    "Visual sensor failed"
+                                } else if own.infrared_failed
+                                    && Some(hardpoint) == config.infrared_hardpoint
+                                {
+                                    "Infrared sensor failed"
+                                } else if Some(hardpoint) == config.rwr_hardpoint {
+                                    "RWR failed"
+                                } else if hardpoint == config.ecm_hardpoint {
+                                    "Countermeasure equipment damaged"
+                                } else {
+                                    "Hardpoint equipment damaged"
+                                },
+                            );
+                        }
                     }
                 }
             }
-        }
-        let scrape = s.take_belly_scrape();
-        if scrape > 0. {
-            self.state.scrape_damage(aircraft, scrape, &mut events);
-        }
-        if s.systems.fatal() {
-            s.crashed = true;
-        }
-        if s.crashed
-            && let Some(event) = self.state.systems_destroyed(aircraft)
-        {
-            events.push(event);
+            let scrape = s.take_belly_scrape();
+            if scrape > 0. {
+                self.state.scrape_damage(aircraft, scrape, &mut events);
+            }
+            if s.systems.fatal() {
+                s.crashed = true;
+            }
+            if s.crashed
+                && let Some(event) = self.state.systems_destroyed(aircraft)
+            {
+                events.push(event);
+            }
         }
         use tore_sim::combat::smoke::contrail_altitude_ft;
+        let sortie = self.contrail_sortie;
         let mut outlets = Vec::new();
         let mut add = |id: u32, position: Vector, basis: Basis, offsets: &[Vector]| {
-            if position[1] < contrail_altitude_ft(self.contrail_sortie, id) {
+            if position[1] < contrail_altitude_ft(sortie, id) {
                 return;
             }
             for (engine, offset) in offsets.iter().enumerate() {
@@ -954,23 +1139,42 @@ impl Combat {
                 outlets.push((u64::from(id) * 2 + engine as u64, point));
             }
         };
-        let height = f64::from(world.height(s.position[0] as f32, s.position[2] as f32));
-        if !s.crashed
-            && s.engine
-            && s.fuel > 0.
-            && self.state.own().hp > 0
-            && !s.supported_at(height)
-        {
-            add(0, s.position, l.basis, &self.contrail_offsets);
+        let offsets_of = |aircraft: u32| -> &[Vector] {
+            if aircraft == first {
+                &self.contrail_offsets
+            } else {
+                self.ownship_contrails
+                    .get(&aircraft)
+                    .map_or(&[][..], Vec::as_slice)
+            }
+        };
+        for (aircraft, s) in flights.iter() {
+            let Some(own) = self.state.ownship(*aircraft) else {
+                continue;
+            };
+            let height = f64::from(world.height(s.position[0] as f32, s.position[2] as f32));
+            if !s.crashed && s.engine && s.fuel > 0. && own.hp > 0 && !s.supported_at(height) {
+                add(
+                    *aircraft,
+                    s.position,
+                    launcher(s).basis,
+                    offsets_of(*aircraft),
+                );
+            }
         }
         for target in self.state.targets.iter().filter(|t| t.airborne && t.hp > 0) {
             if let Some(id) = target.aircraft {
-                if id == self.state.own().configuration().aircraft {
+                if let Some(own) = self
+                    .state
+                    .ownships()
+                    .iter()
+                    .find(|own| own.configuration().aircraft == id)
+                {
                     add(
                         target.id,
                         target.position,
                         target.basis,
-                        &self.contrail_offsets,
+                        offsets_of(own.aircraft),
                     );
                 } else if let Some(other) = self.dummy_types.iter().find(|h| h.profile.id == id) {
                     add(
@@ -984,55 +1188,80 @@ impl Combat {
         }
         self.contrails.step([]);
         self.contrails.contrails(outlets);
-        s.set_payload((self.state.own().payload_lbs() - s.systems.used_external_lbs()).max(0.))?;
-        // The bays stay shut until a release asks for them.
-        s.bay_auto_open = s.bay_available() && self.state.bay_demand(aircraft);
-        if self.state.own().radar_failed {
-            s.radar = false;
-        }
-        if self.state.own().ecm_failed {
-            s.jammer = false;
-        }
-        s.damage_fraction = (1.
-            - f64::from(self.state.own().hp)
-                / f64::from(self.state.own().configuration().damage_capacity))
-        .clamp(0., 1.);
-        if events
-            .iter()
-            .any(|e| matches!(e, Event::OwnshipDamaged { .. }))
-        {
-            s.systems.report_impact(s.ticks, s.damage_fraction);
-        }
-        s.damage_variant = self
-            .state
-            .own()
-            .damage_section()
-            .map(|section| section as usize);
-        s.damage_regions = self.state.own().damage_regions();
-        if self.state.own().hp == 0 {
-            s.crashed = true;
-            if matches!(
-                self.state.own().damage_section(),
-                Some(live::DamageSection::Nose | live::DamageSection::Cockpit)
-            ) {
-                s.systems.kill_pilot("Pilot killed: nose or cockpit lost");
+        for (aircraft, s) in flights.iter_mut() {
+            let aircraft = *aircraft;
+            let Some(own) = self.state.ownship(aircraft) else {
+                continue;
+            };
+            s.set_payload((own.payload_lbs() - s.systems.used_external_lbs()).max(0.))?;
+            // The bays stay shut until a release asks for them.
+            s.bay_auto_open = s.bay_available() && self.state.bay_demand(aircraft);
+            if own.radar_failed {
+                s.radar = false;
             }
-        }
-        if events.contains(&Event::PilotKilled { aircraft }) {
-            s.systems.kill_pilot("Pilot killed by cockpit hit");
+            if own.ecm_failed {
+                s.jammer = false;
+            }
+            s.damage_fraction = (1.
+                - f64::from(own.hp) / f64::from(own.configuration().damage_capacity))
+            .clamp(0., 1.);
+            if events.iter().any(
+                |e| matches!(e, Event::OwnshipDamaged { aircraft: who, .. } if *who == aircraft),
+            ) {
+                s.systems.report_impact(s.ticks, s.damage_fraction);
+            }
+            s.damage_variant = own.damage_section().map(|section| section as usize);
+            s.damage_regions = own.damage_regions();
+            if own.hp == 0 {
+                s.crashed = true;
+                if matches!(
+                    own.damage_section(),
+                    Some(live::DamageSection::Nose | live::DamageSection::Cockpit)
+                ) {
+                    s.systems.kill_pilot("Pilot killed: nose or cockpit lost");
+                }
+            }
+            if events.contains(&Event::PilotKilled { aircraft }) {
+                s.systems.kill_pilot("Pilot killed by cockpit hit");
+            }
+            if aircraft != first {
+                self.poses.insert(aircraft, Pose::of(s));
+            }
         }
         // A station that ran dry hands the selection on, but never while the
         // trigger is held: the next store must not fire from the same press.
-        if !(self.input.held || self.controller.held)
-            && self.state.own().armed
-            && !self
+        for input in &inputs {
+            let aircraft = input.aircraft;
+            let unlimited_ammo = self.state.cheats.unlimited_ammo;
+            let dry = self
                 .state
-                .own()
-                .carries(self.state.own().selected, self.state.cheats.unlimited_ammo)
-        {
-            self.command(live::Command::AdvanceFromEmpty, l);
+                .ownship(aircraft)
+                .is_some_and(|own| own.armed && !own.carries(own.selected, unlimited_ammo));
+            if dry && !self.triggers.get(&aircraft).is_some_and(Trigger::held) {
+                self.command_for(aircraft, live::Command::AdvanceFromEmpty, input.launcher);
+            }
         }
         Ok(events)
+    }
+}
+
+impl Pose {
+    fn of(s: &flight::State) -> Self {
+        Self {
+            position: s.position,
+            attitude: [s.yaw, s.pitch, s.bank],
+            velocity: s.velocity,
+            devices: crate::snapshot::devices(s),
+            engine: Engine {
+                lit: s.engine && s.fuel > 0.,
+                afterburner: s.afterburner_active(),
+                rates: s.auxiliary_rates,
+                flame: s.afterburner_active() && s.escape.is_none(),
+            },
+            wreck: s.wreck.as_ref().map(|wreck| wreck.phase),
+            crashed: s.crashed,
+            escape: s.escape.clone(),
+        }
     }
 }
 
@@ -1300,8 +1529,9 @@ pub mod fixtures {
             contrail_offsets: Vec::new(),
             contrail_sortie: 0,
             contrails: Default::default(),
-            input: FireInput::default(),
-            controller: FireInput::default(),
+            triggers: BTreeMap::new(),
+            ownship_contrails: BTreeMap::new(),
+            poses: BTreeMap::new(),
             range: false,
             ai_poses: true,
             clean_recording: false,

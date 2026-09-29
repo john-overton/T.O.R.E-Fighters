@@ -95,6 +95,10 @@ fn state(world: &mut World) -> String {
         .into_iter()
         .map(|entry| entry.action)
         .collect();
+    let held = {
+        let trigger = world.combat.own_trigger();
+        (trigger.input.held, trigger.controller.held)
+    };
     let combat = &world.combat.state;
     [
         format!(
@@ -124,7 +128,7 @@ fn state(world: &mut World) -> String {
         format!(
             "{:?}",
             (
-                (world.combat.input.held, world.combat.controller.held),
+                held,
                 (own.flight.position, own.flight.velocity, own.flight.speed),
                 (own.flight.fuel, own.flight.crashed),
                 (own.airport_nav_mode, own.airport_service.selected()),
@@ -423,7 +427,7 @@ fn countermeasures_are_refused_for_a_destroyed_ejected_or_hitless_aircraft() {
 
 #[test]
 fn releasing_the_trigger_and_the_space_key_match_the_old_path() {
-    let held = |world: &mut World| world.combat.input.space(true, false, false);
+    let held = |world: &mut World| world.combat.own_trigger().input.space(true, false, false);
     let (mut before, mut after) = (warmed(), warmed());
     held(&mut before);
     held(&mut after);
@@ -434,7 +438,7 @@ fn releasing_the_trigger_and_the_space_key_match_the_old_path() {
     let commanded = input(&after, vec![SeatCommand::ReleaseTrigger]);
     after.step(&[commanded], &mut out).unwrap();
     assert_eq!(state(&mut before), state(&mut after));
-    assert!(!after.combat.input.held);
+    assert!(!after.combat.own_trigger().input.held);
 
     // Press, then a press the game was paused for: the second only lets go.
     for (down, repeat, blocked) in [
@@ -443,7 +447,11 @@ fn releasing_the_trigger_and_the_space_key_match_the_old_path() {
         (true, false, true),
     ] {
         let (mut before, mut after) = (warmed(), warmed());
-        before.combat.input.space(down, repeat, blocked);
+        before
+            .combat
+            .own_trigger()
+            .input
+            .space(down, repeat, blocked);
         let mut out = TickOutput::default();
         let plain = input(&before, Vec::new());
         before.step(&[plain], &mut out).unwrap();

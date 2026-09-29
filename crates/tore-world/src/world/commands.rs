@@ -102,13 +102,13 @@ impl World {
                 SeatCommand::Airport(command) => self.airport_command(cockpit, command, out),
                 SeatCommand::Combat(command) => {
                     let launcher = combat::launcher(&self.cockpits[cockpit].flight);
-                    self.combat.command(command, launcher);
+                    self.combat.command_for(plane.0, command, launcher);
                 }
                 SeatCommand::Manual(command) => self.manual_command(cockpit, command, out),
                 SeatCommand::RangeReset => self.range_reset(cockpit, out),
                 SeatCommand::ReleaseChaff => self.release_countermeasure(cockpit, true, out),
                 SeatCommand::ReleaseFlare => self.release_countermeasure(cockpit, false, out),
-                SeatCommand::ReleaseTrigger => self.combat.cancel(),
+                SeatCommand::ReleaseTrigger => self.combat.cancel_for(plane.0),
                 SeatCommand::WingRecipient(recipient) => {
                     self.roster.set_wing_recipient(seat, recipient);
                 }
@@ -133,7 +133,11 @@ impl World {
                     down,
                     repeat,
                     blocked,
-                } => self.combat.input.space(down, repeat, blocked),
+                } => self
+                    .combat
+                    .trigger(plane.0)
+                    .input
+                    .space(down, repeat, blocked),
             }
         }
     }
@@ -153,18 +157,27 @@ impl World {
             ));
             return;
         }
-        self.combat.cancel();
-        self.combat
-            .command(command, combat::launcher(&self.cockpits[cockpit].flight));
+        let aircraft = self.cockpits[cockpit].plane.0;
+        self.combat.cancel_for(aircraft);
+        self.combat.command_for(
+            aircraft,
+            command,
+            combat::launcher(&self.cockpits[cockpit].flight),
+        );
         // Range commands can replace targets or launch a round now.
         if self.combat.range {
             self.combat
                 .refresh_render(&self.cockpits[cockpit].flight, self.ai_wings.as_ref());
         }
         let flight = &mut self.cockpits[cockpit].flight;
-        if let Err(error) = flight.set_payload(
-            (self.combat.state.own().payload_lbs() - flight.systems.used_external_lbs()).max(0.),
-        ) {
+        let payload = self
+            .combat
+            .state
+            .ownship(aircraft)
+            .map_or(0., tore_sim::combat::live::Ownship::payload_lbs);
+        if let Err(error) =
+            flight.set_payload((payload - flight.systems.used_external_lbs()).max(0.))
+        {
             out.cues.push(Cue::Message(error.to_string()));
         }
     }
@@ -177,8 +190,10 @@ impl World {
             ));
             return;
         }
-        self.combat.cancel();
-        self.combat.command(
+        let aircraft = self.cockpits[cockpit].plane.0;
+        self.combat.cancel_for(aircraft);
+        self.combat.command_for(
+            aircraft,
             Live::ReplaceTarget,
             combat::launcher(&self.cockpits[cockpit].flight),
         );
@@ -189,20 +204,23 @@ impl World {
     /// Releases one chaff cartridge or flare, and tells the pilot how many
     /// are left, with the retail cockpit messages (FA.EXE string table).
     fn release_countermeasure(&mut self, cockpit: usize, chaff: bool, out: &mut TickOutput) {
+        let aircraft = self.cockpits[cockpit].plane.0;
         let flight = &self.cockpits[cockpit].flight;
         let launcher = combat::launcher(flight);
-        if !launcher.alive || flight.escape.is_some() || self.combat.state.own().hp <= 0 {
+        let Some(own) = self.combat.state.ownship(aircraft) else {
+            return;
+        };
+        if !launcher.alive || flight.escape.is_some() || own.hp <= 0 {
             return;
         }
         let count = |state: &tore_sim::combat::live::State| {
-            if chaff {
-                state.own().chaff
-            } else {
-                state.own().flares
-            }
+            state
+                .ownship(aircraft)
+                .map_or(0, |own| if chaff { own.chaff } else { own.flares })
         };
         let before = count(&self.combat.state);
-        self.combat.command(
+        self.combat.command_for(
+            aircraft,
             if chaff {
                 Live::ReleaseChaff
             } else {
@@ -236,7 +254,11 @@ impl World {
     ) {
         let now = self.combat.state.tick() as f64 / 120.;
         let recipient = self.roster.seat(seat).and_then(|s| s.wing_recipient);
-        let selected = self.combat.state.own_view().designated();
+        let selected = self
+            .combat
+            .state
+            .view(self.cockpits[cockpit].plane.0)
+            .and_then(|view| view.designated());
         // Land at selected airport uses the airport Shift-N selected for the
         // tower.
         let site = if order == PlayerOrder::LandAtSelected {

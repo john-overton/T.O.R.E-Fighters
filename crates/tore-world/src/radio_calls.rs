@@ -14,7 +14,7 @@ use tore_sim::combat::{
     missiles::{self, TargetRole},
 };
 
-use crate::ai_wings::{AiWings, Chatter, Contact, FuelLevel, Member, PLAYER_ID};
+use crate::ai_wings::{AiWings, Chatter, Contact, FuelLevel, Member};
 use crate::comms::journal::{
     self, Cause, Entry, Origin, Outcome, REPEAT_S, Reason, Roll, Source, Store, Test, WingReply,
 };
@@ -1080,21 +1080,20 @@ pub fn step(
         targets: &state.targets,
         friendlies: &state.own().friendlies,
     };
-    // Combat's own events are the first human-flown plane's until its
-    // ownships name their planes (stage B1).
-    let shooter = listeners.first().map_or(PLAYER_ID, |l| l.plane);
     for event in events {
-        if let live::Event::Fired { station, .. } = event {
-            let weapon = &state.own().configuration().stations[*station].weapon;
+        if let live::Event::Fired { aircraft, station } = event
+            && let Some(own) = state.ownship(*aircraft)
+        {
+            let weapon = &own.configuration().stations[*station].weapon;
             // The round's own target, else the designation.
             let target = state
                 .projectiles
                 .iter()
                 .rev()
-                .find(|p| p.owner == PLAYER_ID && p.station == *station)
+                .find(|p| p.owner == *aircraft && p.station == *station)
                 .and_then(|p| p.target)
-                .or(state.own().designated());
-            radio.release(comms, &scene, shooter, Release::of(weapon, target));
+                .or(own.designated());
+            radio.release(comms, &scene, *aircraft, Release::of(weapon, target));
         }
     }
     for strike in &strikes {
@@ -1107,6 +1106,7 @@ pub fn step(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ai_wings::PLAYER_ID;
     use crate::comms::Elevation;
 
     fn phrases() -> Phrases {

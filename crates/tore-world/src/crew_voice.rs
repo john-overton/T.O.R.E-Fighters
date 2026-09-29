@@ -1025,7 +1025,7 @@ fn fuel_state(flight: &tore_sim::flight::State, home: Vector) -> FuelState {
 /// the player's aircraft now. Fitted stand-in for the original's seeker
 /// evaluation: TORE's seeker model with no terrain masking.
 fn missile_would_lock(
-    state: &tore_sim::combat::live::State,
+    own: &tore_sim::combat::live::Ownship,
     launcher: tore_sim::combat::live::Launcher,
     target: &tore_sim::combat::live::Target,
 ) -> bool {
@@ -1036,15 +1036,13 @@ fn missile_would_lock(
         cap: None,
         obscured: &|_, _| false,
     };
-    state
-        .own()
-        .configuration()
+    own.configuration()
         .stations
         .iter()
         .enumerate()
         .any(|(i, station)| {
             let w = &station.weapon;
-            state.own().rounds(i) > 0
+            own.rounds(i) > 0
                 && matches!(w.seeker.signature, 2 | 3)
                 && !tore_sim::combat::live::is_gun(w)
                 && Profile::for_weapon(w).is_some_and(|profile| {
@@ -1062,10 +1060,10 @@ pub struct Host<'a> {
     pub world: &'a crate::terrain::Terrain,
     /// Where the plane sits in its wing, for its wingman.
     pub slot: crate::seats::Slot,
-    /// Combat's player-only state (designation, weapon selection, incoming
-    /// missiles) is this plane's. False for a human-flown plane combat has no
-    /// ownship for yet, which sees none of them (stage B1).
-    pub ownship: bool,
+    /// The plane's aircraft id: combat's ownship of that id has its
+    /// designation, weapon selection and incoming missiles. A plane with no
+    /// ownship sees none of them.
+    pub aircraft: u32,
 }
 
 impl CrewVoice {
@@ -1088,26 +1086,25 @@ impl CrewVoice {
                 .and_then(|w| w.mission().actor(id))
                 .is_some_and(|a| a.experience().level == tore_sim::ai::Experience::Ace)
         };
-        let designated = if host.ownship {
-            state.own().designated()
-        } else {
-            None
-        };
+        let view = state.view(host.aircraft);
+        let designated = view.and_then(|view| view.designated());
         let target = designated
-            .filter(|id| !state.own().friendlies.contains(id))
-            .and_then(|id| state.targets.iter().find(|t| t.id == id))
+            .filter(|id| view.is_some_and(|view| !view.ownship().friendlies.contains(id)))
+            .and_then(|id| view.and_then(|view| view.contact(id)))
             .filter(|t| t.role == TargetRole::Aircraft || t.hp > 0);
-        let gun_selected = host.ownship
-            && state.own().armed
-            && state
-                .own()
-                .configuration()
-                .stations
-                .get(state.own().selected)
-                .is_some_and(|s| is_gun(&s.weapon));
+        let gun_selected = view.is_some_and(|view| {
+            let own = view.ownship();
+            own.armed
+                && own
+                    .configuration()
+                    .stations
+                    .get(own.selected)
+                    .is_some_and(|s| is_gun(&s.weapon))
+        });
         let missile_would_lock = gun_selected
             && target.is_some_and(|t| {
-                t.role == TargetRole::Aircraft && missile_would_lock(state, launcher, t)
+                t.role == TargetRole::Aircraft
+                    && view.is_some_and(|view| missile_would_lock(view.ownship(), launcher, t))
             });
         let target = target.map(|t| Target {
             id: t.id,
@@ -1127,7 +1124,7 @@ impl CrewVoice {
         let incoming = state
             .projectiles
             .iter()
-            .filter(|p| host.ownship && p.incoming.is_some())
+            .filter(|p| p.incoming == Some(host.aircraft))
             .filter_map(|p| {
                 let w = state.weapon(p);
                 (w.seeker.signature != 0 && !is_gun(w)).then_some(Incoming {

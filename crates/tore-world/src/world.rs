@@ -371,8 +371,10 @@ impl World {
     }
 
     fn cycle_cockpit_weapon(&mut self, cockpit: usize, forward: bool) {
-        self.combat.cancel();
-        self.combat.command(
+        let aircraft = self.cockpits[cockpit].plane.0;
+        self.combat.cancel_for(aircraft);
+        self.combat.command_for(
+            aircraft,
             if forward {
                 tore_sim::combat::live::Command::NextSelection
             } else {
@@ -380,7 +382,11 @@ impl World {
             },
             combat::launcher(&self.cockpits[cockpit].flight),
         );
-        self.cockpits[cockpit].airport_nav_mode = !self.combat.own().armed;
+        self.cockpits[cockpit].airport_nav_mode = self
+            .combat
+            .state
+            .ownship(aircraft)
+            .is_none_or(|own| !own.armed);
     }
 
     /// Each cockpit's input for this tick, in cockpit order: every seat that
@@ -455,9 +461,9 @@ impl World {
     ) -> WorldResult<()> {
         *out = TickOutput::default();
         let inputs = self.cockpit_inputs(inputs)?;
-        let Some(&first_input) = inputs.first() else {
+        if inputs.is_empty() {
             return Err("a tick needs a human-flown plane".into());
-        };
+        }
         // Mission commands first, then each seat's commands in seat order on
         // its own plane.
         for command in mission {
@@ -519,11 +525,14 @@ impl World {
             }
         }
         out.cues.push(Cue::Flown);
-        self.combat
-            .controller
-            .space(first_input.trigger, false, false);
-        let own = &mut self.cockpits[0];
+        for (cockpit, input) in self.cockpits.iter().zip(&inputs) {
+            self.combat
+                .trigger(cockpit.plane.0)
+                .controller
+                .space(input.trigger, false, false);
+        }
         if self.combat.recording_tape() {
+            let own = &self.cockpits[0];
             let airport = airport_aircraft(&self.terrain, &own.flight, own.airport_nav_mode);
             self.combat.record_tape(
                 format!(
@@ -535,7 +544,12 @@ impl World {
                 combat::launcher(&own.flight),
             );
         }
-        let events = self.combat.step(&mut own.flight, &self.terrain)?;
+        let mut flights: Vec<(u32, &mut flight::State)> = self
+            .cockpits
+            .iter_mut()
+            .map(|cockpit| (cockpit.plane.0, &mut cockpit.flight))
+            .collect();
+        let events = self.combat.step_all(&mut flights, &self.terrain)?;
         out.cues.push(Cue::CombatStepped);
         for cockpit in &mut self.cockpits {
             for airport_event in cockpit.airport_service.synchronize_health(
@@ -570,7 +584,7 @@ impl World {
                 }
             }
         }
-        let own = &mut self.cockpits[0];
+        let own = &self.cockpits[0];
         // Manual p.65: the player always lands first and other aircraft hold at
         // marshal. The retail condition (gear, height, speed and range) is
         // re-evaluated every tick, so climbing away, raising the gear, a crash
@@ -584,19 +598,23 @@ impl World {
                 self.terrain.surface(x, z).height,
             );
         }
-        for message in own.flight.systems.messages.drain(..) {
+        for message in self.cockpits[0].flight.systems.messages.drain(..) {
             out.cues.push(Cue::Message(message));
         }
+        let own_id = self.combat.own_id();
         for event in &events {
             use tore_sim::combat::live::Event;
-            let own_id = self.combat.own_id();
             if let Some(cue) = combat::feedback(event, own_id, self.combat.own().configuration()) {
                 out.cues.push(Cue::Feedback(cue));
             }
             match event {
                 Event::Jolt(jolt) => {
-                    if jolt.target == own_id {
-                        own.flight.jolt_from(jolt.from, jolt.strength);
+                    if let Some(cockpit) = self
+                        .cockpits
+                        .iter_mut()
+                        .find(|cockpit| cockpit.plane.0 == jolt.target)
+                    {
+                        cockpit.flight.jolt_from(jolt.from, jolt.strength);
                     } else if let Some(wings) = &mut self.ai_wings {
                         wings.jolt(jolt.target, jolt.from, jolt.strength);
                     }
@@ -611,10 +629,19 @@ impl World {
                 | Event::TrackLost(_)
                 | Event::SeekerActivated(_)
                 | Event::Pitbull(_) => {}
-                Event::OwnshipDestroyed { .. } => {
-                    own.flight.crashed = true;
+                Event::OwnshipDestroyed { aircraft } => {
+                    if let Some(cockpit) = self
+                        .cockpits
+                        .iter_mut()
+                        .find(|cockpit| cockpit.plane.0 == *aircraft)
+                    {
+                        cockpit.flight.crashed = true;
+                    }
                 }
-                Event::Fired { station: i, .. } => {
+                Event::Fired {
+                    aircraft,
+                    station: i,
+                } if *aircraft == own_id => {
                     if let Some(name) = self.combat.own().configuration().stations[*i]
                         .weapon
                         .fire_sound
@@ -623,9 +650,12 @@ impl World {
                         out.releases.push((name.to_string(), *i));
                     }
                 }
-                Event::OwnshipGroundImpact { .. } => {
-                    out.cues
-                        .push(Cue::Message("Your aircraft exploded on impact".into()));
+                Event::Fired { .. } => {}
+                Event::OwnshipGroundImpact { aircraft } => {
+                    if *aircraft == own_id {
+                        out.cues
+                            .push(Cue::Message("Your aircraft exploded on impact".into()));
+                    }
                 }
                 Event::Airburst(id) => {
                     out.cues.push(Cue::Message(
@@ -642,6 +672,7 @@ impl World {
         // One AI tick per combat tick, immediately after it, so the AI reads
         // the damage combat just applied and then writes the authoritative pose
         // back.
+        let own = &self.cockpits[0];
         if let Some(mut bridge) = self.ai_wings.take() {
             bridge.report_weapon_hits(&events);
             let stepped = bridge.step(&mut self.combat.state, &own.flight, &self.terrain);
@@ -680,11 +711,15 @@ impl World {
     }
 
     /// Whether the plane in `cockpit` and its pilot are alive, as the radio
-    /// hears it. Combat keeps the hit points of the first cockpit's plane
-    /// only, until each human-flown plane has its own ownship (stage B1).
+    /// hears it: its flight has not crashed and its ownship has hit points.
     fn cockpit_alive(&self, cockpit: usize) -> bool {
-        let flight = &self.cockpits[cockpit].flight;
-        !flight.crashed && (cockpit != 0 || self.combat.state.own().hp > 0)
+        let cockpit = &self.cockpits[cockpit];
+        !cockpit.flight.crashed
+            && self
+                .combat
+                .state
+                .ownship(cockpit.plane.0)
+                .is_none_or(|own| own.hp > 0)
     }
 
     /// The radio's half of a tick: the tower and crew voice of every
@@ -763,7 +798,7 @@ impl World {
             cockpit.airfield_radio.apply_wing(now, &mine);
             cockpit.airfield_radio.deliver(now, &mut self.comms);
         }
-        for (index, cockpit) in self.cockpits.iter_mut().enumerate() {
+        for cockpit in &mut self.cockpits {
             let slot = self
                 .roster
                 .plane(cockpit.plane)
@@ -777,9 +812,7 @@ impl World {
                     wings: self.ai_wings.as_ref(),
                     world: &self.terrain,
                     slot,
-                    // Combat's player-only state is the first cockpit's until
-                    // every human-flown plane has an ownship (stage B1).
-                    ownship: index == 0,
+                    aircraft: cockpit.plane.0,
                 },
             );
         }
@@ -865,8 +898,10 @@ impl World {
         match command {
             AirportInput::NavMode => {
                 cockpit.airport_nav_mode = !cockpit.airport_nav_mode;
-                self.combat.cancel();
-                self.combat.command(
+                let plane = cockpit.plane.0;
+                self.combat.cancel_for(plane);
+                self.combat.command_for(
+                    plane,
                     if cockpit.airport_nav_mode {
                         tore_sim::combat::live::Command::SelectNav
                     } else {
@@ -874,14 +909,16 @@ impl World {
                     },
                     combat::launcher(&cockpit.flight),
                 );
-                self.combat.record_tape(
-                    if cockpit.airport_nav_mode {
-                        "airport-nav:1"
-                    } else {
-                        "airport-nav:0"
-                    },
-                    combat::launcher(&cockpit.flight),
-                );
+                if plane == self.combat.own_id() {
+                    self.combat.record_tape(
+                        if cockpit.airport_nav_mode {
+                            "airport-nav:1"
+                        } else {
+                            "airport-nav:0"
+                        },
+                        combat::launcher(&cockpit.flight),
+                    );
+                }
                 out.cues.push(Cue::Message(
                     if cockpit.airport_nav_mode {
                         "Navigation mode selected"
@@ -892,10 +929,12 @@ impl World {
                 ));
             }
             AirportInput::Command(command) => {
-                self.combat.record_tape(
-                    combat_tape::airport_command_name(command),
-                    combat::launcher(&cockpit.flight),
-                );
+                if cockpit.plane.0 == self.combat.own_id() {
+                    self.combat.record_tape(
+                        combat_tape::airport_command_name(command),
+                        combat::launcher(&cockpit.flight),
+                    );
+                }
                 let aircraft =
                     airport_aircraft(&self.terrain, &cockpit.flight, cockpit.airport_nav_mode);
                 for event in

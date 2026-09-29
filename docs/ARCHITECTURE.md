@@ -1278,6 +1278,26 @@ aircraft uses today's AI rules. *Agent proposal, approved by John on
 2026-09-28:* this keeps single player exact and gives every human the toughness
 the player has today.
 
+`tore-world`'s `Combat` serves every human-flown plane (B1's last step).
+`Combat::step_all` takes each human-flown plane's flight, in aircraft id order,
+puts every launcher into one combat step, then hands each flight what combat did
+to its aircraft: system faults, payload, bay, radar and jammer, damage and the
+crash. Each ownship has its own trigger (`Combat::trigger(aircraft)`, the
+keyboard's and the controller's), and commands, trigger releases and cockpit
+questions name the aircraft (`command_for`, `cancel_for`); the first ownship, the
+one the app presents, keeps the one-flight calls (`step`, `command`, `cancel`,
+`own()`), the combat tape and the command notes. `World::step` calls it with
+every cockpit, and the radio reads each plane's own ownship: hit points for
+`cockpit_alive`, designation, weapon selection and incoming missiles for the
+crew voice, the shooter and weapon of each `Fired` event for the weapon call.
+Every other human-flown plane is in the tick's render snapshot as an ordinary
+aircraft (its model, pose, devices, damage and pilot) beside the AI's; with one
+cockpit the snapshot is unchanged. `Combat::add_ownship(ownship, contrail
+offsets)` and `remove_ownship(aircraft)` are the calls a handoff (B6) uses: the
+ownship carries the stores, damage and countermeasures in and out, and
+`Ownship::localized_damage` is public for it. The AI still flies against the
+first ownship only (B3).
+
 *Agent decisions in B1 (not settled by the brief):*
 
 - One counter (`State::next_shot`) numbers every ownship's rounds, so two
@@ -1315,7 +1335,8 @@ hit on an AI row through the AI pipeline.
 *Agent decisions:* a round that starts inside its own launcher's hit volume
 (every rocket and bomb with no arming delay does) is not a hit, so it cannot
 explode on its pylon; only a round that comes back into the volume from outside
-counts. Easy aiming widens the volume of other aircraft, never the shooter's own.
+counts. This matches John's words at the design review: "missiles should be
+able to hit anything once it leaves the shooting aircraft". Easy aiming widens the volume of other aircraft, never the shooter's own.
 Missile and bomb records in the synthetic test fixtures keep an arming delay of
 zero, so their tests rely on that rule.
 

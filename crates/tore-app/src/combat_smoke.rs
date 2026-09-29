@@ -641,10 +641,10 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
             // smallest source station; damage remains source class-0 per hit.
             for tick in 0..6000 {
                 if tick % 240 == 0 {
-                    combat.input.space(true, false, false);
+                    combat.own_trigger().input.space(true, false, false);
                 }
                 if index != 0 && tick % 240 == 1 {
-                    combat.input.space(false, false, false);
+                    combat.own_trigger().input.space(false, false, false);
                 }
                 flight.step(&flight::PilotInput::default(), |x, z| {
                     f64::from(world.height(x as f32, z as f32))
@@ -652,7 +652,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 let replay_events = replay.step(
                     &[OwnshipInput {
                         aircraft: 0,
-                        held: combat.input.held,
+                        held: combat.own_trigger().input.held,
                         launcher: launcher(&flight),
                     }],
                     |x, z| f64::from(world.height(x as f32, z as f32)),
@@ -660,7 +660,7 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
                 let events = combat.step(&mut flight, &world)?;
                 // The host hands a dry station's selection on (see `step`);
                 // the second state applies the same rule from the tape.
-                if !combat.input.held
+                if !combat.own_trigger().input.held
                     && replay.own().armed
                     && !replay
                         .own()

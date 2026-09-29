@@ -9981,7 +9981,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             combat.step(&mut flight, &world)?;
             combat.advance_render(&flight, None);
         }
-        combat.input.space(true, false, false);
+        combat.own_trigger().input.space(true, false, false);
         let mut feedback = tore_input::FeedbackMixer::default();
         let mut cues = std::collections::BTreeMap::<String, usize>::new();
         let mut pulses = 0;
