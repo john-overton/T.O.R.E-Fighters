@@ -27,6 +27,10 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
 }
 
 pub const MAX_PROJECTILES: usize = 256;
+/// The owner of the diagnostic incoming round ([`Command::Incoming`]): no
+/// aircraft, so it can hit any ownship. It carries the selected station's
+/// weapon record.
+pub const INCOMING_OWNER: u32 = u32::MAX;
 pub const MAX_EFFECTS: usize = 64;
 pub const MAX_HIT_RECORDS: usize = 128;
 /// Fitted: a trigger press waits this long, 3 seconds, for the bay to open.
@@ -685,9 +689,10 @@ pub struct Projectile {
     pub motion: Option<Motion>,
     pub guidance_ticks: Option<u64>,
     pub age: u64,
-    /// The ownship this round was aimed at when it was released, if any.
-    /// Fixed then and never updated, so a round decoyed away from it still
-    /// carries it. The hit test still reads it; ledger aim and warnings read it too.
+    /// The ownship this round was aimed at when it was released, if any: aim
+    /// metadata, fixed then and never updated. It no longer decides who the
+    /// round can hit. The ledger's aim and the warnings read it, and the
+    /// diagnostic incoming round is always treated as illuminated.
     pub incoming: Option<u32>,
     pub station: usize,
     pub position: Vector,
@@ -2117,9 +2122,9 @@ impl State {
                         launcher.position[i] + launcher.basis.forward[i] * 1800.
                     });
                     self.projectiles.push(Projectile {
-                        id: own.shots,
-                        owner: own.aircraft,
-                        weapon: None,
+                        id: self.next_shot,
+                        owner: INCOMING_OWNER,
+                        weapon: Some(w.clone()),
                         guidance: None,
                         motion: None,
                         guidance_ticks: None,
@@ -3449,21 +3454,22 @@ impl State {
                     p.target = None;
                 }
                 if let Some(t) = p.target.and_then(|id| {
-                    p.incoming
-                        .and_then(|_| rows.iter().find(|r| r.target.id == id && r.target.hp > 0))
+                    rows.iter()
+                        .find(|r| r.target.id == id && r.target.hp > 0)
                         .map(|r| &r.target)
                         .or_else(|| self.targets.iter().find(|t| t.id == id && t.hp > 0))
                 }) {
                     // Required illumination is specific to this missile's own
                     // target, never to whatever the cockpit has selected now.
-                    let supported = if p.weapon.is_some() {
+                    let supported = if p.incoming.is_some() {
+                        // The diagnostic incoming round is always illuminated.
+                        true
+                    } else if p.weapon.is_some() {
                         self.targets.iter().any(|owner| {
                             owner.id == p.owner && owner.hp > 0 && owner.radar_emitting
                         })
                     } else {
-                        p.incoming.is_some()
-                            || owner_ownship(&ships, p.owner)
-                                .is_some_and(|own| own.sensors.supports(t.id))
+                        owner_ownship(&ships, p.owner).is_some_and(|own| own.sensors.supports(t.id))
                     };
                     if acquisition(w, p.position, p.direction, t.position, supported, 0)
                         && terrain_hit(p.position, t.position, &ground).is_none()
@@ -3529,23 +3535,32 @@ impl State {
             };
             p.age += 1;
             let mut first: Option<(f64, Option<Hit>)> = None;
+            // One search over every aircraft row and every ownship. A gun round
+            // can hit any aircraft but the one that fired it; a missile or bomb
+            // can hit any aircraft once its fuze has armed, even its launcher.
             if armed {
                 for (n, r) in rows.iter().enumerate() {
                     let t = &r.target;
-                    if (p.incoming.is_some() || (is_gun(w) && p.owner != t.id))
+                    // Easy aiming widens the volume of the aircraft it shoots at,
+                    // never the shooter's own.
+                    let hitbox = if p.owner == t.id { 1. } else { hitbox };
+                    if (!is_gun(w) || p.owner != t.id)
                         && p.guidance.as_ref().is_none_or(|f| f.eligible(w, t))
                         && t.hp > 0
                         && let Some(at) = if is_gun(w) {
                             let previous = std::array::from_fn(|i| {
                                 p.previous[i] + t.position[i] - r.previous[i]
                             });
-                            LocalizedDamage::contact(previous, p.position, t, 1.).map(|v| v.0)
+                            LocalizedDamage::contact(previous, p.position, t, hitbox).map(|v| v.0)
                         } else {
-                            segment_sphere(
-                                sub(p.previous, r.previous),
-                                sub(p.position, t.position),
-                                t.radius + f64::from(w.damage.fuze_radius.max(0)),
-                            )
+                            let radius = t.radius * hitbox + f64::from(w.damage.fuze_radius.max(0));
+                            let start = sub(p.previous, r.previous);
+                            // A round leaving its own launcher's volume is not a hit.
+                            if p.owner == t.id && dot(start, start) <= radius * radius {
+                                None
+                            } else {
+                                segment_sphere(start, sub(p.position, t.position), radius)
+                            }
                         }
                         && first.is_none_or(|f| at < f.0)
                     {
@@ -3553,7 +3568,7 @@ impl State {
                     }
                 }
             }
-            if armed && (p.incoming.is_none() || is_gun(w)) {
+            if armed {
                 for (i, t) in self
                     .targets
                     .iter()
@@ -3563,6 +3578,7 @@ impl State {
                     if p.guidance.as_ref().is_some_and(|f| !f.eligible(w, t)) {
                         continue;
                     }
+                    let hitbox = if p.owner == t.id { 1. } else { hitbox };
                     let at = if let Some(bounds) = self.ground_bounds.get(&t.id) {
                         // Contact uses the reviewed/fitted solid box. Fuze blast
                         // radius remains a separate damage rule and does not turn
@@ -3575,11 +3591,13 @@ impl State {
                         LocalizedDamage::contact(previous, p.position, t, hitbox).map(|v| v.0)
                     } else {
                         let radius = t.radius * hitbox + f64::from(w.damage.fuze_radius.max(0));
-                        segment_sphere(
-                            sub(p.previous, old_targets[i]),
-                            sub(p.position, t.position),
-                            radius,
-                        )
+                        let start = sub(p.previous, old_targets[i]);
+                        // A round leaving its own launcher's volume is not a hit.
+                        if p.owner == t.id && dot(start, start) <= radius * radius {
+                            None
+                        } else {
+                            segment_sphere(start, sub(p.position, t.position), radius)
+                        }
                     };
                     if let Some(at) = at
                         && first.is_none_or(|f| at < f.0)
@@ -5996,7 +6014,13 @@ mod tests {
             let mut strikes = Vec::new();
             for _ in 0..600 {
                 for p in &mut s.projectiles {
-                    p.owner = owner;
+                    // A fresh round of another aircraft starts 60 ft ahead,
+                    // clear of the ownship's own volume, which it would hit.
+                    if p.owner != owner {
+                        p.owner = owner;
+                        p.position[2] += 60.;
+                        p.previous = p.position;
+                    }
                 }
                 collected.extend(s.step(
                     &[OwnshipInput {
@@ -8023,5 +8047,231 @@ mod pair_tests {
                 .iter()
                 .any(|e| matches!(e, Event::OwnshipDestroyed { .. }))
         );
+    }
+}
+
+/// The hit rule: a gun round can hit any aircraft but its shooter; a missile
+/// or bomb can hit any aircraft once its fuze has armed, its launcher included.
+#[cfg(test)]
+mod hit_rule_tests {
+    use super::tests::{fixture, target};
+    use super::*;
+
+    fn launcher() -> Launcher {
+        Launcher {
+            position: [0., 1000., 0.],
+            basis: Basis::new(0., 0., 0.),
+            speed_fps: 300.,
+            velocity: [0., 0., 300.],
+            bay_ready: true,
+            radar_power: true,
+            radar: true,
+            jammer: false,
+            alive: true,
+            controls: sensors::Controls::default(),
+        }
+    }
+    /// An unguided round of the fixture's missile record, already armed
+    /// unless `arms_after` says otherwise.
+    fn shell(
+        state: &State,
+        owner: u32,
+        from: Vector,
+        toward: Vector,
+        aimed_at: Option<u32>,
+        arms_after: u16,
+    ) -> Projectile {
+        let mut weapon = state.own().config.stations[0].weapon.clone();
+        weapon.damage.fuze_arm_t = arms_after;
+        weapon.seeker.signature = 0;
+        weapon.flags = 0x14;
+        let direction = unit(sub(toward, from));
+        Projectile {
+            id: 900 + owner,
+            owner,
+            weapon: Some(weapon),
+            guidance: None,
+            motion: None,
+            guidance_ticks: None,
+            age: 0,
+            incoming: aimed_at,
+            station: 0,
+            position: from,
+            previous: from,
+            direction,
+            speed_f8: 1200 * 256,
+            launched_t: 0,
+            target: None,
+            fall: FallState::default(),
+            gun_round: None,
+            tracer: false,
+        }
+    }
+    fn run(s: &mut State, ticks: usize) -> Vec<Event> {
+        let mut events = Vec::new();
+        for _ in 0..ticks {
+            events.extend(s.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: launcher(),
+                }],
+                |_, _| 0.,
+            ));
+        }
+        events
+    }
+    fn scene() -> State {
+        let mut s = fixture(true);
+        s.targets.clear();
+        s
+    }
+    fn damaged(events: &[Event]) -> bool {
+        events
+            .iter()
+            .any(|e| matches!(e, Event::OwnshipDamaged { aircraft: 0, .. }))
+    }
+
+    #[test]
+    fn a_missile_aimed_at_someone_else_hits_the_ownship_in_its_path() {
+        let mut s = scene();
+        s.targets.push(target(5, [0., 1000., 900.], 100, 0x80));
+        let round = shell(&s, 5, [0., 1000., 300.], [0., 1000., 0.], None, 0);
+        s.projectiles.push(round);
+        let events = run(&mut s, 30);
+        assert!(damaged(&events), "{events:?}");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::Jolt(Jolt { target: 0, .. })))
+        );
+    }
+
+    #[test]
+    fn a_missile_aimed_at_the_ownship_hits_another_aircraft_in_its_path() {
+        let mut s = scene();
+        s.targets.push(target(5, [0., 1000., 900.], 100, 0x80));
+        s.targets.push(target(6, [0., 1000., 600.], 100, 0x80));
+        // Fired by 5 at the ownship, it meets 6 first.
+        let round = shell(&s, 5, [0., 1000., 850.], [0., 1000., 0.], Some(0), 0);
+        s.projectiles.push(round);
+        let events = run(&mut s, 30);
+        assert!(events.contains(&Event::Hit(6)), "{events:?}");
+        assert!(!damaged(&events));
+    }
+
+    #[test]
+    fn a_decoyed_missile_no_longer_keeps_its_hit_for_the_ownship() {
+        let mut s = scene();
+        s.targets.push(target(6, [0., 1000., 600.], 100, 0x80));
+        // Aimed at the ownship, decoyed away (no target left), and the wingman
+        // is in the way.
+        let round = shell(&s, 5, [0., 1000., 900.], [0., 1000., 0.], Some(0), 0);
+        s.projectiles.push(round);
+        s.projectiles[0].target = None;
+        let events = run(&mut s, 30);
+        assert!(events.contains(&Event::Hit(6)), "{events:?}");
+        assert!(!damaged(&events));
+    }
+
+    #[test]
+    fn a_missile_can_hit_its_own_launcher_only_once_armed() {
+        for (arms_after, hits) in [(0, true), (2, false)] {
+            let mut s = scene();
+            // The ownship's own missile doubles back over it.
+            let round = shell(&s, 0, [0., 1000., 200.], [0., 1000., 0.], None, arms_after);
+            s.projectiles.push(round);
+            let events = run(&mut s, 40);
+            assert_eq!(
+                damaged(&events),
+                hits,
+                "armed after {arms_after}: {events:?}"
+            );
+            // An AI aircraft's missile can too.
+            let mut s = scene();
+            s.targets.push(target(5, [0., 1000., 900.], 100, 0x80));
+            let round = shell(
+                &s,
+                5,
+                [0., 1000., 1100.],
+                [0., 1000., 900.],
+                None,
+                arms_after,
+            );
+            s.projectiles.push(round);
+            let events = run(&mut s, 40);
+            assert_eq!(
+                events.contains(&Event::Hit(5)),
+                hits,
+                "armed after {arms_after}: {events:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_round_leaving_its_own_launcher_is_not_a_hit() {
+        // Real rockets have no arming delay and start inside the aircraft's
+        // volume; they must not explode on the pylon.
+        let mut s = scene();
+        s.targets.push(target(5, [0., 1000., 900.], 100, 0x80));
+        let from = [0., 1000., 0.];
+        let round = shell(&s, 0, from, [0., 1000., 100.], None, 0);
+        s.projectiles.push(round);
+        let round = shell(&s, 5, [0., 1000., 900.], [0., 1000., 1000.], None, 0);
+        s.projectiles.push(round);
+        let events = run(&mut s, 30);
+        assert!(
+            !damaged(&events) && !events.contains(&Event::Hit(5)),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn a_gun_round_never_hits_its_shooter() {
+        let mut s = scene();
+        s.targets.push(target(5, [0., 1000., 900.], 100, 0x80));
+        for (owner, from) in [(0, [0., 1000., 200.]), (5, [0., 1000., 1100.])] {
+            let mut round = shell(&s, owner, from, [0., 1000., 1000. - from[2]], None, 0);
+            round.weapon.as_mut().unwrap().source = "M61.JT".into();
+            s.projectiles.push(round);
+        }
+        // Each round flies back over its own aircraft.
+        s.projectiles[0].direction = [0., 0., -1.];
+        s.projectiles[1].direction = [0., 0., -1.];
+        let events = run(&mut s, 30);
+        assert!(!damaged(&events), "{events:?}");
+        assert!(!events.contains(&Event::Hit(5)), "{events:?}");
+    }
+
+    #[test]
+    fn damage_follows_the_pilot_of_the_aircraft_hit() {
+        // A hit on an ownship takes twice the aircraft's hit points, spread
+        // 80 to 119 percent, and reports an ownship event; the same weapon on
+        // an AI row takes the plain damage and reports a hit.
+        let mut s = scene();
+        s.targets.push(target(5, [0., 1000., 900.], 100, 0x80));
+        s.targets.push(target(6, [0., 1000., 1500.], 100, 0x80));
+        let round = shell(&s, 5, [0., 1000., 300.], [0., 1000., 0.], None, 0);
+        s.projectiles.push(round);
+        let round = shell(&s, 5, [0., 1000., 1400.], [0., 1000., 1500.], None, 0);
+        s.projectiles.push(round);
+        let events = run(&mut s, 30);
+        assert!(
+            damaged(&events) && events.contains(&Event::Hit(6)),
+            "{events:?}"
+        );
+        let capacity = s.own().config.damage_capacity;
+        assert!(s.own().hp < capacity);
+        let ai = s.targets.iter().find(|t| t.id == 6).unwrap();
+        assert_eq!(ai.hp, 100 - 10, "the AI row takes the unrolled damage");
+        // Invulnerable still spares the ownship, not the AI row.
+        let mut s = scene();
+        s.cheats.damage = crate::cheats::Damage::Invulnerable;
+        s.targets.push(target(5, [0., 1000., 900.], 100, 0x80));
+        let round = shell(&s, 5, [0., 1000., 300.], [0., 1000., 0.], None, 0);
+        s.projectiles.push(round);
+        let events = run(&mut s, 30);
+        assert!(!damaged(&events));
+        assert_eq!(s.own().hp, capacity);
     }
 }
