@@ -253,6 +253,17 @@ arrows pan the view (manual p. 104: its "ASWZ" is the arrow-key symbols);
 Ctrl and arrows (thrust vectoring), Ctrl-R, M for HARM and the wing sweep keys have no
 binding, as FLIGHT-CONTROLS.md says.
 
+**Round three summary.** Fixed from the audit: the scope range keys were reversed (comma
+raises the range and period lowers it, manual pp. 21, 94, 97), the HUD had no BAY entry for
+aircraft with a weapons bay, and the HUD did not show the time compression rate the manual
+prints beside the clock (`1/2X`, `2X`, `4X`, `8X`). One attempted fix was wrong and was
+reverted: the manual's "A S W Z" for scrolling the map are its typeface's arrow-key
+symbols, so the arrows already do it, and A stays the autopilot. Also added: `TORE_CREATOR_STAGE=menu`
+prints every retail in-flight menu leaf with its result (96 items, 35 not implemented, all
+of which say "not implemented yet" when chosen). The merged menus lane and the windowed
+flight subset were rerun on the merged tree; results are in the report to the parent
+(no regressions from this lane's changes).
+
 ## Found and not fixed
 
 - **`--combat-smoke` fails for 13 of the 14 aircraft** (only the MiG-29 passes). Its
@@ -288,6 +299,12 @@ binding, as FLIGHT-CONTROLS.md says.
 - **HUD line for a dry station.** After the last round is fired, the station stays
   selected and the HUD reads `0 M61`, the weapons window still lists it, until the next
   `[` or `]`. Retail behaviour here is not recorded.
+
+- **Enter in the creator.** The manual says Enter accepts the whole form (OK); here Enter
+  activates the focused field and OK is a button. Either is workable, the choice is a
+  design decision.
+- **Rear-view mirrors menu row.** The mirrors are always on; the retail toggle row shows
+  "not implemented yet".
 
 ## Needs a human eye or ear
 
