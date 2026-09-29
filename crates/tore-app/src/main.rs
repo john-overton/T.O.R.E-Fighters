@@ -218,7 +218,7 @@ struct App {
     fullscreen_preference: bool,
     flight_ui: flight_ui::FlightUi,
     instruments: instruments::Instruments,
-    world: terrain::World,
+    world: terrain::Terrain,
     airport_service: tore_sim::airport::Service,
     airport_nav_mode: bool,
     airport_commands: Vec<flight_ui::Command>,
@@ -340,7 +340,7 @@ fn deliver_radio(
 /// along the trail.
 fn vapor_vertices(
     vapor: &tore_sim::vapor::Vapor,
-    world: &terrain::World,
+    world: &terrain::Terrain,
     presented: &flight::State,
     attachments: Option<[[f64; 3]; 2]>,
 ) -> Vec<f32> {
@@ -384,7 +384,7 @@ fn step_turbulence(
     turbulence: &mut tore_sim::turbulence::Turbulence,
     rng: &mut tore_formats::flight_model::clock_rng::NativeRng,
     flight: &mut flight::State,
-    world: &terrain::World,
+    world: &terrain::Terrain,
     enabled: bool,
 ) -> Option<tore_input::FeedbackEvent> {
     // The joined native service explicitly selects the source disabled branch.
@@ -416,7 +416,7 @@ fn step_turbulence(
 }
 
 fn airport_aircraft(
-    world: &terrain::World,
+    world: &terrain::Terrain,
     flight: &flight::State,
     nav_mode: bool,
 ) -> tore_sim::airport::Aircraft {
@@ -437,7 +437,7 @@ fn airport_aircraft(
 }
 
 fn airport_wind(
-    world: &terrain::World,
+    world: &terrain::Terrain,
     flight: &flight::State,
     guidance: Option<&tore_sim::airport::Guidance>,
 ) -> Option<tore_sim::runway_wind::Assessment> {
@@ -470,7 +470,7 @@ fn airport_wind(
     )
 }
 
-fn airport_reply(world: &terrain::World, reply: &tore_sim::airport::Reply) -> String {
+fn airport_reply(world: &terrain::Terrain, reply: &tore_sim::airport::Reply) -> String {
     use tore_sim::airport::Reply;
     match reply {
         Reply::Selected { airport } => world
@@ -544,7 +544,7 @@ impl App {
     /// owns per-world GPU resources, so it is rebuilt with it.
     fn set_condition(&mut self, index: usize) -> AppResult<()> {
         let code = self.world.layout.trim_end_matches(".MM").to_string();
-        self.world = terrain::World::for_mission(&self.theater_resources, &code, Some(index))?;
+        self.world = terrain::Terrain::for_mission(&self.theater_resources, &code, Some(index))?;
         if let Some(renderer) = &mut self.renderer {
             renderer.set_world(&self.world);
             renderer.prepare_aircraft(&self.hornet);
@@ -1663,7 +1663,7 @@ impl App {
                     return;
                 }
                 if let Some((code, _)) = self.world.catalog.get(index) {
-                    match terrain::World::for_theater(&self.theater_resources, code) {
+                    match terrain::Terrain::for_theater(&self.theater_resources, code) {
                         Ok(world) => {
                             self.ground_start = None;
                             let service =
@@ -4776,7 +4776,7 @@ fn build_combat(
 
 /// The map-edge rule for a probe's flight: lost 105 nautical miles beyond the
 /// theater. (The game host also warns the player from 100; see `terrain.rs`.)
-fn apply_edge_loss(flight: &mut flight::State, world: &terrain::World) {
+fn apply_edge_loss(flight: &mut flight::State, world: &terrain::Terrain) {
     if flight.crashed {
         return;
     }
@@ -5005,7 +5005,7 @@ fn gear_pull(
     state: &flight::State,
     pulled: &mut bool,
     keys: &flight::PilotInput,
-    world: &Option<terrain::World>,
+    world: &Option<terrain::Terrain>,
 ) -> Option<flight::PilotInput> {
     if *pulled {
         return None;
@@ -5039,7 +5039,7 @@ impl ProbePilot {
         tick: u64,
         flight: &mut flight::State,
         keys: &mut flight::PilotInput,
-        world: &terrain::World,
+        world: &terrain::Terrain,
         ground: Option<&quick_mission::GroundLayout>,
         script: &ProbeScript,
     ) {
@@ -5144,7 +5144,7 @@ impl ProbeWatch {
         tick: u64,
         bridge: &ai_wings::AiWings,
         player: &flight::State,
-        world: &terrain::World,
+        world: &terrain::Terrain,
     ) {
         use tore_sim::ai::airfield::Phase;
         let seconds = tick as f64 / 120.;
@@ -5879,7 +5879,7 @@ fn inject_probe_threat(
     ordinal: usize,
     bridge: &mut ai_wings::AiWings,
     combat: &mut combat::Combat,
-    world: &terrain::World,
+    world: &terrain::Terrain,
 ) -> AppResult<()> {
     use tore_sim::combat::live;
     let slot = bridge
@@ -6019,7 +6019,7 @@ fn ai_probe_run(
     quick: &mut quick_mission::QuickMission,
     hornet: &aircraft::Airframe,
     resources: &std::collections::BTreeMap<String, Vec<u8>>,
-    world: &terrain::World,
+    world: &terrain::Terrain,
     enemy_skill: Option<tore_sim::ai::experience::EnemySkillOverride>,
     ai_mission: ai_wings::Preset,
     script: &ProbeScript,
@@ -6618,7 +6618,7 @@ fn start_probe_recording(
     flight: &flight::State,
     bridge: &ai_wings::AiWings,
     hornet: &aircraft::Airframe,
-    world: &terrain::World,
+    world: &terrain::Terrain,
     ticks: usize,
     ai_mission: ai_wings::Preset,
     script: &ProbeScript,
@@ -8739,7 +8739,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     if validate_maps {
         let catalog = tore_formats::theater::map_catalog(&assets.theater_resources)?;
         for (code, _) in &catalog {
-            let world = terrain::World::for_theater(&assets.theater_resources, code)?;
+            let world = terrain::Terrain::for_theater(&assets.theater_resources, code)?;
             let bytes = world.texture_indices.len() + world.sky_indices.len();
             if bytes / 65536 > 4096 {
                 return Err("map artwork exceeds GPU page budget".into());
@@ -8772,7 +8772,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             return Err("combat record and replay are mutually exclusive".into());
         }
         let c = combat::Combat::new(&hornet, &assets.theater_resources, true)?;
-        let w = terrain::World::for_theater(&assets.theater_resources, &theater_code)?;
+        let w = terrain::Terrain::for_theater(&assets.theater_resources, &theater_code)?;
         combat_tape::replay(
             &path,
             &assets.theater_resources,
@@ -8824,7 +8824,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         return Ok(Outcome::Done);
     }
-    let ground_object = |world: &terrain::World| -> AppResult<Option<u32>> {
+    let ground_object = |world: &terrain::Terrain| -> AppResult<Option<u32>> {
         ground_start_airport
             .map(|id| {
                 world
@@ -8978,7 +8978,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             || ground_start_airport.is_some()
             || flight_start.is_some()
         {
-            Some(terrain::World::for_theater(
+            Some(terrain::Terrain::for_theater(
                 &assets.theater_resources,
                 &theater_code,
             )?)
@@ -9518,7 +9518,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     diagnostics::stage("terrain construction");
     let mut world =
-        terrain::World::for_mission(&assets.theater_resources, &theater_code, weather_condition)?;
+        terrain::Terrain::for_mission(&assets.theater_resources, &theater_code, weather_condition)?;
     diagnostics::stage_done();
     let ground_start = ground_object(&world)?;
     if std::env::var_os("TORE_AIRPORT_PROBE").is_some() {

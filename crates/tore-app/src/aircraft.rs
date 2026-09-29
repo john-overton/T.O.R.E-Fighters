@@ -2,7 +2,7 @@
 use crate::{
     AppResult, flight,
     menu::Sprite,
-    terrain::{Camera, World},
+    terrain::{Camera, Terrain},
 };
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::{Pic, aircraft::Aircraft, font::Font, shape::Shape};
@@ -261,7 +261,12 @@ impl Airframe {
         colors
     }
     /// One palette for cockpit art and HUD, retaining the original private prefix.
-    pub fn cockpit_palette(&self, world: &World, altitude: f64, brightness: i16) -> [[u8; 3]; 256] {
+    pub fn cockpit_palette(
+        &self,
+        world: &Terrain,
+        altitude: f64,
+        brightness: i16,
+    ) -> [[u8; 3]; 256] {
         let mut colors = world.palette;
         let mut source = [[0; 3]; 256];
         for (out, color) in source.iter_mut().zip(&self.cockpit_pic.palette) {
@@ -353,7 +358,7 @@ impl Airframe {
         streamer_world_points(def, s.position, [s.yaw, s.pitch, s.bank])
     }
 
-    pub fn start(&self, world: &World) -> flight::State {
+    pub fn start(&self, world: &Terrain) -> flight::State {
         let c = Camera::for_world(world);
         let mut p = c.position;
         p[1] = 5000f64.max(world.height(p[0] as f32, p[2] as f32) as f64 + 2000.);
@@ -469,7 +474,7 @@ impl Airframe {
             .collect()
     }
 
-    pub fn vertices(&self, s: &flight::State, camera: &Camera, world: &World) -> Vec<f32> {
+    pub fn vertices(&self, s: &flight::State, camera: &Camera, world: &Terrain) -> Vec<f32> {
         self.visual_vertices(s, camera, world, false)
     }
     /// Largest bounding-box dimension of the clean airframe in feet. The
@@ -483,14 +488,19 @@ impl Airframe {
             )
         })
     }
-    pub fn fragment_vertices(&self, s: &flight::State, camera: &Camera, world: &World) -> Vec<f32> {
+    pub fn fragment_vertices(
+        &self,
+        s: &flight::State,
+        camera: &Camera,
+        world: &Terrain,
+    ) -> Vec<f32> {
         self.visual_vertices(s, camera, world, true)
     }
     fn visual_vertices(
         &self,
         s: &flight::State,
         camera: &Camera,
-        world: &World,
+        world: &Terrain,
         fragment: bool,
     ) -> Vec<f32> {
         if s.wreck_gone() {

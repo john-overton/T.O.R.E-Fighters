@@ -3,7 +3,7 @@ use crate::{
     flight,
     hud::Paint,
     menu::{Canvas, Sprite},
-    terrain::World,
+    terrain::Terrain,
 };
 use tore_formats::text::GlyphCodes;
 use tore_formats::{font::Font, theater::CELL_FEET};
@@ -296,7 +296,7 @@ impl Map {
     pub fn draw(
         &mut self,
         pixels: &mut [u8],
-        world: &World,
+        world: &Terrain,
         state: &flight::State,
         combat: &live::State,
         font: &Font,

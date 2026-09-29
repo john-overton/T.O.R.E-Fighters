@@ -10,7 +10,7 @@ use tore_sim::airport::{
     Aircraft, ApproachEnd, Command, GLIDE_SLOPE_DEGREES, Service, glide_path_height_ft,
 };
 
-use crate::{AppResult, terrain::World};
+use crate::{AppResult, terrain::Terrain};
 
 /// Distances from the threshold (feet) at which the ideal path is checked.
 const CHECK_RANGES_FT: [f64; 6] = [28_000., 15_000., 6_000., 2_500., 800., 300.];
@@ -48,7 +48,7 @@ impl EndReport {
 }
 
 /// Every runway end of a scene, measured for a glide path of `glide_deg`.
-pub fn survey_world(theater: &str, world: &World) -> Vec<EndReport> {
+pub fn survey_world(theater: &str, world: &Terrain) -> Vec<EndReport> {
     let scene = &world.airport_scene;
     let mut out = Vec::new();
     for runway in &scene.runways {
@@ -84,7 +84,7 @@ pub fn survey_world(theater: &str, world: &World) -> Vec<EndReport> {
 
 /// Fly the ideal path to every runway end and check the bars. Returns the
 /// problems found.
-pub fn check_path(theater: &str, world: &World, clearance_ft: f64) -> Vec<String> {
+pub fn check_path(theater: &str, world: &Terrain, clearance_ft: f64) -> Vec<String> {
     let scene = &world.airport_scene;
     let mut problems = Vec::new();
     for runway in &scene.runways {
@@ -164,7 +164,7 @@ pub fn check_path(theater: &str, world: &World, clearance_ft: f64) -> Vec<String
 /// the largest depth of terrain above the path, feet, and its range. Scenery
 /// fact, not an ILS fault, so it is reported and not failed.
 pub fn terrain_under_path(
-    world: &World,
+    world: &Terrain,
     runway: &tore_sim::airport::Runway,
     end: ApproachEnd,
 ) -> Option<(f64, f64)> {
@@ -208,7 +208,7 @@ pub fn run(
     let mut problems = Vec::new();
     let mut ends = 0;
     for code in codes {
-        let world = World::for_theater(resources, code)?;
+        let world = Terrain::for_theater(resources, code)?;
         let reports = survey_world(code, &world);
         let mut worst = 0_f64;
         for r in &reports {

@@ -1,7 +1,7 @@
 //! Original weather primitives, projected independently of camera translation.
 use crate::{
     AppResult,
-    terrain::{Camera, World},
+    terrain::{Camera, Terrain},
 };
 use std::collections::BTreeMap;
 use tore_formats::{
@@ -160,7 +160,7 @@ impl Celestial {
             .filter(|r| *r > 0.)
             .max_by(f32::total_cmp)
     }
-    pub fn sun_uniform(&self, world: &World, altitude: f64) -> Vec<f32> {
+    pub fn sun_uniform(&self, world: &Terrain, altitude: f64) -> Vec<f32> {
         let layer = world.weather.sample(altitude);
         let seconds = world.weather.seconds_of_day();
         let direction = layer.as_ref().and_then(|layer| {
@@ -193,7 +193,7 @@ impl Celestial {
         }
         out
     }
-    pub fn vertices(&self, world: &World, camera: &Camera, height: u32) -> Vec<f32> {
+    pub fn vertices(&self, world: &Terrain, camera: &Camera, height: u32) -> Vec<f32> {
         let Some(layer) = world.weather.sample(camera.position[1]) else {
             return Vec::new();
         };
@@ -243,7 +243,7 @@ impl Celestial {
         vertices
     }
 }
-pub(crate) fn glare_strength(world: &World, altitude: f64, sun: [f32; 3]) -> f32 {
+pub(crate) fn glare_strength(world: &Terrain, altitude: f64, sun: [f32; 3]) -> f32 {
     if !world.smooth_weather {
         return 1.;
     }

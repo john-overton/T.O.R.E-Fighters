@@ -64,7 +64,7 @@ use tore_sim::{
     sensors::{self, Observable, Sensors},
 };
 
-use crate::{AppResult, flight, terrain::World};
+use crate::{AppResult, flight, terrain::Terrain};
 
 fn terrain_visible(from: Vector, to: Vector, ground: &dyn Fn(f64, f64) -> f64) -> bool {
     (1..=8).all(|step| {
@@ -467,7 +467,7 @@ impl Airfields {
     }
 
     /// [`from_scene`](Self::from_scene) with each runway's airfield points.
-    pub fn from_world(world: &World, departure: Option<Departure>) -> Self {
+    pub fn from_world(world: &Terrain, departure: Option<Departure>) -> Self {
         let mut fields = Self::from_scene(&world.airport_scene, departure);
         for runway in &mut fields.runways {
             runway.view.anchors = world.airfield_anchors.get(&runway.view.object).copied();
@@ -1017,7 +1017,7 @@ impl AiWings {
         &mut self,
         state: &mut live::State,
         player: &flight::State,
-        world: &World,
+        world: &Terrain,
     ) -> AppResult<()> {
         let ground = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32));
         // The decoy draws and rolls describe this step only. Clearing the
@@ -2332,7 +2332,7 @@ impl AiWings {
 pub fn roster_probe(
     ticks: usize,
     resources: &BTreeMap<String, Vec<u8>>,
-    world: &World,
+    world: &Terrain,
 ) -> AppResult<()> {
     use tore_sim::ai::{
         Experience,

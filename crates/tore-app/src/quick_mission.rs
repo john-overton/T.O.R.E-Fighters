@@ -2,7 +2,7 @@
 //! are validated separately. Popup frame/focus feedback are authored presentation.
 use crate::{
     menu::{Action, Canvas, HEIGHT, Sprite, WIDTH, text_width},
-    terrain::{Camera, World},
+    terrain::{Camera, Terrain},
 };
 use std::collections::BTreeMap;
 use tore_formats::{aircraft::AircraftId, ui::creator::Options};
@@ -1012,7 +1012,7 @@ impl QuickMission {
         &mut self,
         pixels: &mut [u8],
         sprites: &BTreeMap<String, Sprite>,
-        _world: &World,
+        _world: &Terrain,
     ) -> bool {
         let animating = self.rocker.advance(std::time::Instant::now());
         if let Some(d) = &mut self.debrief {
@@ -1364,7 +1364,7 @@ fn source_theaters() -> [&'static str; 16] {
         "NSK", "WTA", "UKR", "VLA",
     ]
 }
-pub fn runway_pose(world: &World, object: u32) -> crate::AppResult<([f64; 3], f64)> {
+pub fn runway_pose(world: &Terrain, object: u32) -> crate::AppResult<([f64; 3], f64)> {
     let runway = world
         .airport_scene
         .runway(object)
@@ -1422,7 +1422,7 @@ impl GroundLayout {
 /// must be on the airport's paving, on a landable surface and clear of
 /// buildings. If the staggered layout cannot fit, its spacing tightens, and
 /// if none works the start is rejected with a message for the creator.
-pub fn ground_layout(world: &World, object: u32, count: usize) -> crate::AppResult<GroundLayout> {
+pub fn ground_layout(world: &Terrain, object: u32, count: usize) -> crate::AppResult<GroundLayout> {
     let runway = world
         .airport_scene
         .runway(object)
@@ -1494,7 +1494,7 @@ pub fn ground_layout(world: &World, object: u32, count: usize) -> crate::AppResu
 /// flaps down, brakes set. Rejects a slot where the aircraft itself would sit
 /// inside a building.
 pub fn place_on_runway(
-    world: &World,
+    world: &Terrain,
     flight: &mut tore_sim::flight::State,
     layout: &GroundLayout,
     order: usize,
@@ -1527,7 +1527,7 @@ pub fn place_on_runway(
 /// The player alone on the runway, as the `--ground-start` developer option
 /// and the straight-flight fixtures use it.
 pub fn apply_ground_start(
-    world: &World,
+    world: &Terrain,
     flight: &mut tore_sim::flight::State,
     object: u32,
 ) -> crate::AppResult<u32> {
@@ -1556,7 +1556,7 @@ impl MissionLayout {
     /// `group` is every enemy aircraft's offset from the enemy placement
     /// point ([`crate::ai_wings::enemy_group_offsets`]).
     pub fn plan(
-        world: &World,
+        world: &Terrain,
         start: &tore_sim::flight::State,
         ground: Option<GroundLayout>,
         group: &[[f64; 2]],
@@ -1602,7 +1602,7 @@ impl MissionLayout {
 }
 
 /// The usable map for starting aircraft: the terrain less one cell each side.
-pub fn map_bounds(world: &World) -> MapBounds {
+pub fn map_bounds(world: &Terrain) -> MapBounds {
     let cell = f64::from(tore_formats::theater::CELL_FEET);
     MapBounds::from_cells(
         world.theater.cols,
@@ -1641,7 +1641,12 @@ pub fn notice(c: &mut Canvas, font: &Sprite, text: &str) {
     }
     c.text(font, &line, 36, y, Some([235, 225, 179]));
 }
-pub fn hud(pixels: &mut [u8], sprites: &BTreeMap<String, Sprite>, camera: &Camera, world: &World) {
+pub fn hud(
+    pixels: &mut [u8],
+    sprites: &BTreeMap<String, Sprite>,
+    camera: &Camera,
+    world: &Terrain,
+) {
     pixels.fill(0);
     let mut c = Canvas(pixels);
     let font = &sprites["SMLFONT.PIC"];
@@ -2198,7 +2203,7 @@ mod tests {
 
     /// The synthetic terrain with one 6000 ft north-facing runway, its near
     /// threshold 1096 ft into the map.
-    fn airfield(length_ft: f64) -> World {
+    fn airfield(length_ft: f64) -> Terrain {
         use tore_sim::airport::{Airport, Allegiance, OrientedBox, SourceKey, StaticObject};
         let mut world = crate::terrain::tests::world();
         let surface = OrientedBox {
@@ -2244,12 +2249,12 @@ mod tests {
         world
     }
 
-    fn hangar(world: &mut World, id: u32, along_ft: f64) {
+    fn hangar(world: &mut Terrain, id: u32, along_ft: f64) {
         let near = 4096. - world.airport_scene.runways[0].length_ft / 2.;
         building(world, id, 4096., near + along_ft);
     }
 
-    fn building(world: &mut World, id: u32, x: f64, z: f64) {
+    fn building(world: &mut Terrain, id: u32, x: f64, z: f64) {
         world
             .airport_scene
             .objects

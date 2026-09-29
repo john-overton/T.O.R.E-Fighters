@@ -15,7 +15,7 @@ use crate::{
     comms::journal::{Audience, Cause, Entry, Music, Origin, Outcome, Source},
     comms::{Call, Kind, Phrase, Phrases},
     flight,
-    terrain::World,
+    terrain::Terrain,
 };
 use tore_sim::ai::weapon_service::{self, Rounds, TargetClass};
 use tore_sim::combat::{live, missiles::TargetRole};
@@ -87,7 +87,7 @@ pub struct Observer {
 
 /// `fitted`: the Quick Mission home base is the ground-start airport, placed
 /// at the mean centre of its runways. An airborne start has no home base.
-pub fn home_base(world: &World, airport: Option<u32>) -> Option<[f64; 3]> {
+pub fn home_base(world: &Terrain, airport: Option<u32>) -> Option<[f64; 3]> {
     let runways: Vec<_> = world
         .airport_scene
         .runways
@@ -124,7 +124,7 @@ impl Observer {
         combat: &live::State,
         events: &[live::Event],
         wings: Option<&AiWings>,
-        world: &World,
+        world: &Terrain,
         // Whether the mission has succeeded, from the debrief evaluator;
         // `None` without a mission. Called only on the 4 second cadence.
         mission: Option<&dyn Fn() -> bool>,

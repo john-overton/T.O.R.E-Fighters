@@ -302,7 +302,7 @@ pub fn verify(
     path: &Path,
     live: &[RenderSnapshot],
     devices: &[(u64, u64)],
-    world: &crate::terrain::World,
+    world: &crate::terrain::Terrain,
 ) -> AppResult<Verification> {
     let recording = open(path)?;
     let presentation = Presentation::from_header(recording.header());

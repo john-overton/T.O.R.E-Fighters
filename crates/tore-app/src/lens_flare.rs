@@ -1,7 +1,7 @@
 //! Source lens-flare circles over a completed world view, before cockpit/UI.
 //! Smooth presentation adds continuous optical emission; stepped compatibility
 //! retains the imported palette remaps inside the original circles.
-use crate::terrain::{Camera, World};
+use crate::terrain::{Camera, Terrain};
 
 pub struct LensFlare {
     pipeline: wgpu::RenderPipeline,
@@ -34,7 +34,7 @@ fn texture(
 }
 /// Source 0x4b4990 gates and offsets, normalized to the host drawable size.
 /// Native x/y shifts and whole-pixel circle rounding are projection adaptations.
-pub fn circles(world: &World, camera: &Camera, size: [u32; 2]) -> Vec<[f32; 4]> {
+pub fn circles(world: &Terrain, camera: &Camera, size: [u32; 2]) -> Vec<[f32; 4]> {
     let Some(celestial) = &world.celestial else {
         return vec![];
     };
@@ -152,7 +152,7 @@ impl LensFlare {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        world: &World,
+        world: &Terrain,
         camera: &Camera,
         size: [u32; 2],
         palette: &[[u8; 3]; 256],

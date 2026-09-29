@@ -8,7 +8,7 @@ use crate::{
         ProjectilePose, RenderSnapshot,
     },
     sim_renderer::Contact,
-    terrain::{Camera, World},
+    terrain::{Camera, Terrain},
 };
 use std::collections::BTreeMap;
 use tore_sim::{
@@ -555,7 +555,7 @@ impl Combat {
     /// An AI aircraft that flew into the ground with hit points left gets a
     /// crash site where it hit, as a shot-down wreck does when it lands.
     /// Presentation only; call after each AI step.
-    pub fn ai_crashes(&mut self, wings: &crate::ai_wings::AiWings, world: &World) {
+    pub fn ai_crashes(&mut self, wings: &crate::ai_wings::AiWings, world: &Terrain) {
         let crashed: Vec<_> = wings
             .mission()
             .actors()
@@ -578,7 +578,7 @@ impl Combat {
     /// 15 to 38 halfway through its animation in a row 2,500 feet ahead,
     /// surface types on the ground, and a burning crash site with its
     /// column and three weapon craters on the ground 4,000 feet ahead.
-    pub fn preview_effects(&mut self, s: &flight::State, world: &World) {
+    pub fn preview_effects(&mut self, s: &flight::State, world: &Terrain) {
         use tore_sim::combat::{blast, smoke};
         let (sin, cos) = s.yaw.sin_cos();
         let (forward, right) = ([sin, 0., cos], [cos, 0., -sin]);
@@ -642,7 +642,7 @@ impl Combat {
     pub fn dummy_geometry(
         &self,
         camera: &Camera,
-        world: &World,
+        world: &Terrain,
     ) -> Vec<(&Airframe, Vec<f32>, Vec<Contact>)> {
         crate::render_snapshot::aircraft_batches(
             &self.presented(),
@@ -657,7 +657,7 @@ impl Combat {
         h: &Airframe,
         s: &flight::State,
         camera: &Camera,
-        world: &World,
+        world: &Terrain,
     ) -> crate::sim_renderer::CombatGeometry {
         crate::render_snapshot::combat_geometry(&self.presented(), &self.art, h, s, camera, world)
     }
@@ -825,7 +825,7 @@ impl Combat {
     /// sea level or [`SPAWN_MIN_AGL_FT`] above the ground under it is raised
     /// to the higher of the two. Runway starts are untouched. Returns how many
     /// aircraft were raised.
-    pub fn raise_airborne_spawns(&mut self, world: &World) -> usize {
+    pub fn raise_airborne_spawns(&mut self, world: &Terrain) -> usize {
         let Some(spawns) = self.mission_spawns.as_ref() else {
             return 0;
         };
@@ -847,7 +847,7 @@ impl Combat {
         }
         raised
     }
-    pub fn step(&mut self, s: &mut flight::State, world: &World) -> AppResult<Vec<Event>> {
+    pub fn step(&mut self, s: &mut flight::State, world: &Terrain) -> AppResult<Vec<Event>> {
         let l = launcher(s);
         self.last_launcher = Some(l);
         if let Some(r) = &mut self.recorder {
@@ -1053,7 +1053,7 @@ impl Combat {
         &self,
         player: &flight::State,
         aircraft: &Airframe,
-        world: &World,
+        world: &Terrain,
     ) -> Option<Camera> {
         let target = self.state.display_target()?;
         let mut camera = self.target_camera(player)?;
@@ -1417,7 +1417,7 @@ fn first_difference(a: &str, b: &str) -> String {
 }
 
 pub fn smoke(h: &Airframe, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
-    let world = World::for_theater(data, "UKR")?;
+    let world = Terrain::for_theater(data, "UKR")?;
     let mut combat = Combat::new(h, data, true)?;
     println!(
         "systems source {:?}: player capacity={} ECM={:?} weights={} repeat-limited=45",
@@ -2074,7 +2074,7 @@ const ACQUISITION: usize = tore_sim::sensors::track::ACQUISITION_STEPS as usize;
 fn observe(
     combat: &mut Combat,
     flight: &mut flight::State,
-    world: &World,
+    world: &Terrain,
     steps: usize,
 ) -> AppResult<()> {
     for _ in 0..steps {
@@ -3304,7 +3304,7 @@ pub(crate) mod render_hash_tests {
         far.position = std::array::from_fn(|i| near.position[i] + shift[i]);
         let mut far_camera = cameras().remove(0);
         far_camera.position = std::array::from_fn(|i| camera.position[i] + shift[i]);
-        let error = |world: &crate::terrain::World| {
+        let error = |world: &crate::terrain::Terrain| {
             let vertices = ownship.vertices(&far, &far_camera, world);
             assert_eq!(vertices.len(), reference.len());
             vertices

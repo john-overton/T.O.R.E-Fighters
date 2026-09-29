@@ -131,7 +131,7 @@ impl Renderer {
         state: &crate::flight::State,
         visible: bool,
         camera: &crate::terrain::Camera,
-        world: &crate::terrain::World,
+        world: &crate::terrain::Terrain,
     ) {
         self.mirror_camera = crate::mirrors::camera(state);
         if !visible {
@@ -198,7 +198,7 @@ impl Renderer {
     pub fn vapor(&mut self, vertices: &[f32]) {
         self.sim.vapor(&self.device, &self.queue, vertices);
     }
-    pub fn set_world(&mut self, world: &crate::terrain::World) {
+    pub fn set_world(&mut self, world: &crate::terrain::Terrain) {
         self.sim = crate::sim_renderer::SimRenderer::new(
             &self.device,
             &self.queue,
@@ -234,7 +234,7 @@ impl Renderer {
 
     pub async fn new(
         window: Arc<Window>,
-        world: &crate::terrain::World,
+        world: &crate::terrain::Terrain,
         graphics: crate::graphics::Options,
     ) -> AppResult<Self> {
         crate::diagnostics::stage("game graphics instance and surface");
@@ -426,7 +426,7 @@ impl Renderer {
     }
     /// Submit before the primary pass writes the shared camera/vertex buffers.
     /// GPU-only render-to-texture, every visible frame, with no rate timer/readback.
-    fn render_mirrors(&mut self, world: &crate::terrain::World) {
+    fn render_mirrors(&mut self, world: &crate::terrain::Terrain) {
         if !self.mirrors_enabled || !self.cockpit.mirrors_visible {
             return;
         }
@@ -451,7 +451,7 @@ impl Renderer {
         &mut self,
         path: &std::path::Path,
         camera: &crate::terrain::Camera,
-        world: &crate::terrain::World,
+        world: &crate::terrain::Terrain,
         overlay: bool,
     ) -> AppResult<()> {
         use std::io::Write;
@@ -472,7 +472,7 @@ impl Renderer {
     pub fn scene_pixels(
         &mut self,
         camera: &crate::terrain::Camera,
-        world: &crate::terrain::World,
+        world: &crate::terrain::Terrain,
         width: u32,
         height: u32,
         overlay: bool,
@@ -508,7 +508,7 @@ impl Renderer {
         &mut self,
         page: u8,
         camera: &crate::terrain::Camera,
-        world: &crate::terrain::World,
+        world: &crate::terrain::Terrain,
     ) -> AppResult<bool> {
         if !matches!(page, 2..=4) {
             return Err("invalid camera instrument".into());
@@ -523,7 +523,7 @@ impl Renderer {
     fn submit_readback(
         &mut self,
         camera: &crate::terrain::Camera,
-        world: &crate::terrain::World,
+        world: &crate::terrain::Terrain,
         width: u32,
         height: u32,
         overlay: bool,
@@ -707,7 +707,7 @@ impl Renderer {
     pub fn draw(
         &mut self,
         pixels: &[u8],
-        scene: Option<(&crate::terrain::Camera, &crate::terrain::World)>,
+        scene: Option<(&crate::terrain::Camera, &crate::terrain::Terrain)>,
         flight_size: Option<[u32; 2]>,
     ) -> AppResult<bool> {
         self.first_frame.begin("game first frame presentation");

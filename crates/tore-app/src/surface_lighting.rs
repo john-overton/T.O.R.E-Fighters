@@ -1,6 +1,6 @@
 //! Shared, opinionated surface lighting and geometric shadows.
 //! Player-visible rules: docs/spec/surface-lighting.md.
-use crate::terrain::{Camera, World};
+use crate::terrain::{Camera, Terrain};
 use wgpu::util::DeviceExt;
 
 pub const MAP_SIZE: u32 = 2048;
@@ -310,7 +310,7 @@ impl SurfaceLighting {
         &self,
         queue: &wgpu::Queue,
         camera: &Camera,
-        world: &World,
+        world: &Terrain,
         flares: &[crate::countermeasure_renderer::FlareLight],
     ) -> bool {
         let layer = world.weather.sample(camera.position[1]);

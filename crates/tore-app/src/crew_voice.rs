@@ -1034,7 +1034,7 @@ pub struct Host<'a> {
     pub flight: &'a crate::flight::State,
     pub combat: &'a tore_sim::combat::live::State,
     pub wings: Option<&'a crate::ai_wings::AiWings>,
-    pub world: &'a crate::terrain::World,
+    pub world: &'a crate::terrain::Terrain,
 }
 
 impl CrewVoice {

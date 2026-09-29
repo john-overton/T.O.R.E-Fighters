@@ -254,7 +254,7 @@ All proposed type/file names below are agent design choices, not existing APIs.
 | `tore-formats::aircraft::Brf` and OBJECT schema | Inert OT token/field parsing | General static object definition, explicit resources and reviewed scalar fields |
 | `tore-formats::strip`, SH contact boxes | Reviewed STRIP identity and runway anchors | Review all thirteen airport definitions and their actual shape contracts |
 | `tore-app/src/assets.rs`, `tore-extract` | Archive provenance, runtime imports and caches | One shared transitive object dependency resolver; import report/cache version |
-| `terrain::World` and `World::surface` | Source terrain, weather, grounding queries | Scene construction and runway surface query integration |
+| `terrain::Terrain` and `Terrain::surface` | Source terrain, weather, grounding queries | Scene construction and runway surface query integration |
 | `tore-sim::combat::live::Target` | Stable IDs, ground roles, hit points, sensors and damage classes | Per-object configuration and building/runway contact geometry |
 | `combat.rs`, `sim_renderer.rs`, HUD/instruments | Current target display, geometry submission, palette and shadows | Static meshes, ground-object identity, ILS readout and airport selection |
 | `audio.rs`, `tore-formats::radio` | Serial recorded speech playback and reviewed phrase mappings | Airport response events; only independently reviewed tower phrases |
@@ -359,7 +359,7 @@ resources/ambiguous overlay operations are actionable errors.
 **Depends on A; finish Ukraine first, extend through B's shared definitions.**
 
 Add an airport surface query using reviewed extents/anchors and the fitted support
-policy in the spec. Wire it through all applicable World surface consumers so
+policy in the spec. Wire it through all applicable Terrain surface consumers so
 flight, target grounding and presentation agree. Building contact uses a separate
 solid-object query, not roof height returned as terrain. Verify both runway ends,
 edge transitions, taxi exits, gear contact and off-runway terrain. Preserve legacy,

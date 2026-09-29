@@ -99,7 +99,7 @@ impl ProbeInvariants {
         tick: u64,
         bridge: &ai_wings::AiWings,
         combat: &combat::Combat,
-        world: &terrain::World,
+        world: &terrain::Terrain,
     ) {
         let cell = f64::from(tore_formats::theater::CELL_FEET);
         let extent = [

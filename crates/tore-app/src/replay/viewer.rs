@@ -25,7 +25,7 @@ use crate::replay::sound::{self, ReplaySound};
 use crate::replay::tracks::{Scanner, Tracks};
 use crate::replay::trails;
 use crate::replay::weather::WeatherTrack;
-use crate::terrain::{Camera, World};
+use crate::terrain::{Camera, Terrain};
 use crate::{AppResult, attitude::Basis};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -256,7 +256,7 @@ const VIEW_ORDER: [u8; 11] = [
 ];
 
 /// The terrain height under an east and north position, feet.
-fn ground(world: &World) -> impl Fn(f64, f64) -> f64 + '_ {
+fn ground(world: &Terrain) -> impl Fn(f64, f64) -> f64 + '_ {
     move |x, z| f64::from(world.height(x as f32, z as f32))
 }
 
@@ -682,7 +682,7 @@ pub(super) fn targets(events: &[TimedEvent]) -> BTreeMap<u32, Vec<(u64, Option<u
 pub struct Viewer {
     pub path: PathBuf,
     recording: Arc<Recording>,
-    pub world: World,
+    pub world: Terrain,
     /// The recorded player's aircraft, drawn in the renderer's ownship slot.
     pub ownship: Airframe,
     /// Models of the other aircraft, in the recording's draw order.
@@ -789,7 +789,7 @@ impl Viewer {
         if recording.first_tick().is_none() {
             return Err(format!("{}: the recording holds no frames", path.display()).into());
         }
-        let world = World::for_identity(resources, &recording.header().world)?;
+        let world = Terrain::for_identity(resources, &recording.header().world)?;
         let identities = crate::replay::convert::Identities::of(&recording);
         let presentation = crate::replay::convert::Presentation::from_header(recording.header());
         let player = match identities.aircraft.get(&0) {
@@ -818,7 +818,7 @@ impl Viewer {
     fn assemble(
         path: &Path,
         recording: Arc<Recording>,
-        world: World,
+        world: Terrain,
         ownship: Airframe,
         models: Vec<Airframe>,
         art: CombatArt,

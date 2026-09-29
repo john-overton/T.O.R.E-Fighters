@@ -1,5 +1,5 @@
 //! Extensible 3D pass. World data/camera are independent of wgpu; UI composites afterward.
-use crate::terrain::{Camera, World};
+use crate::terrain::{Camera, Terrain};
 use wgpu::util::DeviceExt;
 
 /// Material-local packing flag. World and weather art use sixteen independent
@@ -525,7 +525,7 @@ impl SimRenderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-        world: &World,
+        world: &Terrain,
         options: crate::graphics::Options,
         samples: u32,
     ) -> Self {
@@ -1319,7 +1319,7 @@ impl SimRenderer {
         target: &wgpu::TextureView,
         size: [u32; 2],
         camera: &Camera,
-        world: &World,
+        world: &Terrain,
     ) {
         // The world renders at the render-scale size; the lens flare and the
         // resample work at the output size.

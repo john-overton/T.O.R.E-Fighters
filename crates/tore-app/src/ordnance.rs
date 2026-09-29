@@ -813,7 +813,7 @@ fn card_outline(c: &mut Canvas, x: i32, y: i32, selected: bool) {
 /// Source-cache regression probe. No GPU, native execution, or invented targets.
 pub fn validate_sources(
     data: &BTreeMap<String, Vec<u8>>,
-    world: &crate::terrain::World,
+    world: &crate::terrain::Terrain,
 ) -> AppResult<()> {
     // Run editor/loadout checks for the complete roster before unrelated flight
     // appearance probes, so their failures cannot hide preflight coverage.
@@ -1123,7 +1123,7 @@ fn validate_removed_stores(
     load: &Loadout,
     airframe: &crate::aircraft::Airframe,
     data: &BTreeMap<String, Vec<u8>>,
-    world: &crate::terrain::World,
+    world: &crate::terrain::Terrain,
 ) -> AppResult<()> {
     let stations = load.quantities.len();
     let mut cases: Vec<Vec<u16>> = (0..stations)
@@ -1207,7 +1207,7 @@ fn validate_guns_only(
     airframe: &crate::aircraft::Airframe,
     targets: &[tore_sim::combat::live::Target],
     data: &BTreeMap<String, Vec<u8>>,
-    world: &crate::terrain::World,
+    world: &crate::terrain::Terrain,
 ) -> AppResult<()> {
     use tore_sim::ai::{
         launch::{Side, WingId, WingSelection, resolve_wings},

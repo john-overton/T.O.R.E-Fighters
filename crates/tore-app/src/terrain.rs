@@ -18,7 +18,7 @@ pub struct ViewWeather {
     pub visual_bands: Vec<tore_formats::weather::Layer>,
 }
 
-pub struct World {
+pub struct Terrain {
     pub ocean_motion: crate::ocean::Motion,
     pub theater: Theater,
     /// Exact selected MM identity, distinct from its referenced base grid.
@@ -214,7 +214,7 @@ fn anchor_points(
 pub const CONDITION_NAMES: [&str; 6] = ["clear", "cloudy", "foggy", "dawn", "sunset", "night"];
 
 /// The launch settings a mission recording keeps for its world, resolved
-/// once when it was flown. [`World::for_identity`] builds from these instead
+/// once when it was flown. [`Terrain::for_identity`] builds from these instead
 /// of the environment variables and mission defaults.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Recorded {
@@ -316,7 +316,7 @@ fn wind_setting(fps: [f64; 3]) -> AppResult<Option<[i32; 2]>> {
     Err(format!("the recorded wind {fps:?} matches no wind setting").into())
 }
 
-impl World {
+impl Terrain {
     /// Grid the render origin snaps to, in feet, so it is exact in 32 bits
     /// and moves only when the camera crosses a cell.
     pub const ORIGIN_CELL: f64 = 1024.;
@@ -352,7 +352,7 @@ impl World {
     /// Rebuilds the world a mission recording was flown in from its
     /// recorded, resolved identity: layout, weather choice and layer, start
     /// time, wind and cloud deck. It reads none of the environment variables
-    /// [`World::for_mission`] honours, so a replay looks the same whatever
+    /// [`Terrain::for_mission`] honours, so a replay looks the same whatever
     /// the viewer's settings are.
     #[allow(dead_code)] // Used by the mission replay viewer.
     pub fn for_identity(
@@ -1348,7 +1348,7 @@ impl Camera {
             keys: BTreeSet::new(),
         }
     }
-    pub fn for_world(world: &World) -> Self {
+    pub fn for_world(world: &Terrain) -> Self {
         let mut camera = Self::new();
         if tore_formats::theater::base_theater(&world.layout) != Some("UKR") {
             camera.position = [
@@ -1361,7 +1361,7 @@ impl Camera {
         camera.position[1] = camera.position[1].max(f64::from(ground + 3000.0));
         camera
     }
-    pub fn step(&mut self, dt: f32, fast: bool, world: &World) {
+    pub fn step(&mut self, dt: f32, fast: bool, world: &Terrain) {
         let dt = dt.clamp(0.0, 0.05);
         let k = |s: &str| f32::from(self.keys.contains(s));
         self.yaw += (k("d") - k("a")) * dt;
@@ -1640,7 +1640,7 @@ pub(crate) mod tests {
         assert!(Recorded::from_identity(&bad).is_err());
     }
 
-    pub(crate) fn world() -> World {
+    pub(crate) fn world() -> Terrain {
         use tore_formats::theater::TerrainCell;
         let cells = [0, 4, 8, 12]
             .map(|elevation| TerrainCell {
@@ -1649,7 +1649,7 @@ pub(crate) mod tests {
                 elevation,
             })
             .to_vec();
-        World {
+        Terrain {
             ocean_motion: crate::ocean::Motion::default(),
             theater: Theater {
                 name: "Synthetic".into(),

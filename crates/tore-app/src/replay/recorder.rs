@@ -109,7 +109,7 @@ pub struct Tick<'a> {
     /// The player's controls for the tick.
     pub pilot: &'a flight::PilotInput,
     pub wings: Option<&'a AiWings>,
-    pub world: &'a terrain::World,
+    pub world: &'a terrain::Terrain,
     /// Combat's events for the tick.
     pub events: &'a [live::Event],
     /// Shot outcomes the ledger resolved during the tick.
@@ -1587,7 +1587,7 @@ pub fn cheats_on(cheats: &tore_sim::cheats::Cheats) -> Vec<String> {
     on
 }
 
-fn ground_height(world: &terrain::World, position: [f64; 3]) -> f64 {
+fn ground_height(world: &terrain::Terrain, position: [f64; 3]) -> f64 {
     world.surface(position[0], position[2]).height
 }
 
@@ -1823,7 +1823,7 @@ pub fn roster(
 /// A recording's header. `extra` holds the flight's settings, in order.
 pub fn header(
     mission: replay::MissionKind,
-    world: &terrain::World,
+    world: &terrain::Terrain,
     presentation: &Presentation,
     mut extra: Vec<(String, String)>,
     recorded_at: std::time::SystemTime,

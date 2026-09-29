@@ -15,7 +15,7 @@
 //! so it is kept every ten seconds; the view presentation, which depends on
 //! the player's path, is kept every second.
 use crate::replay::tracks::{Tracks, View};
-use crate::terrain::{Camera, World};
+use crate::terrain::{Camera, Terrain};
 use tore_sim::environment::{Environment, Presentation};
 
 /// Ticks between presentation snapshots: one second.
@@ -49,7 +49,7 @@ pub struct WeatherTrack {
 
 /// One live weather step, with the world's weather swapped for the given
 /// state around it.
-fn step(world: &mut World, environment: &mut Environment, view: &mut Presentation, input: &View) {
+fn step(world: &mut Terrain, environment: &mut Environment, view: &mut Presentation, input: &View) {
     std::mem::swap(&mut world.weather, environment);
     std::mem::swap(&mut world.weather_presentation, view);
     world.step_weather(input.airspeed, &camera(input));
@@ -60,7 +60,7 @@ fn step(world: &mut World, environment: &mut Environment, view: &mut Presentatio
 impl WeatherTrack {
     /// Starts from the world's weather as built, which is the weather at
     /// launch: tick 0. `end` is the recording's last tick.
-    pub fn new(world: &World, end: u64) -> Self {
+    pub fn new(world: &Terrain, end: u64) -> Self {
         let (environment, view) = (world.weather.clone(), world.weather_presentation.clone());
         Self {
             environments: vec![environment.clone()],
@@ -79,7 +79,7 @@ impl WeatherTrack {
 
     /// Builds snapshots forwards by up to `budget` ticks, as far as the
     /// track pass has read the player's path.
-    pub fn build(&mut self, world: &mut World, tracks: &Tracks, budget: u64) {
+    pub fn build(&mut self, world: &mut Terrain, tracks: &Tracks, budget: u64) {
         let (tick, environment, view) = &mut self.frontier;
         let end = tick.saturating_add(budget).min(self.end);
         while *tick < end {
@@ -100,7 +100,7 @@ impl WeatherTrack {
     /// Puts the weather at `tick` into `world`. Until the track pass has
     /// read that far it shows the newest weather it can, and the next call
     /// catches up; the tick it shows is returned.
-    pub fn seek(&mut self, world: &mut World, tracks: &Tracks, tick: u64) -> u64 {
+    pub fn seek(&mut self, world: &mut Terrain, tracks: &Tracks, tick: u64) -> u64 {
         if tick > self.frontier.0 {
             self.build(world, tracks, tick - self.frontier.0);
         }

@@ -41,7 +41,7 @@ impl Matrix<'_> {
         Ok(&self.airframes[key])
     }
 
-    fn describe(quick: &QuickMission, world: &World) -> String {
+    fn describe(quick: &QuickMission, world: &Terrain) -> String {
         let v = &quick.draft.values;
         format!(
             "theater={} player={} weather={} alt={} sep={} start={}/{} wings=[{}x{}:{}, {}x{}:{}, {}x{}:{} | {}x{}:{}, {}x{}:{}, {}x{}:{}] orders={:?} ai={} guns_only={}",
@@ -77,7 +77,7 @@ impl Matrix<'_> {
     }
 
     /// The flown-mission start, step by step.
-    fn start(&mut self, quick: &QuickMission, world: &World, full: bool) -> Outcome {
+    fn start(&mut self, quick: &QuickMission, world: &Terrain, full: bool) -> Outcome {
         if let Some(message) = quick.unsupported() {
             return Outcome::Refused(message);
         }
@@ -218,16 +218,16 @@ impl Matrix<'_> {
     }
 
     /// A setup through the whole start.
-    fn run(&mut self, quick: &QuickMission, world: &World, what: &str) {
+    fn run(&mut self, quick: &QuickMission, world: &Terrain, what: &str) {
         self.go(quick, world, what, true);
     }
 
     /// A setup through the creator's checks and layout only, which is quick.
-    fn plan(&mut self, quick: &QuickMission, world: &World, what: &str) {
+    fn plan(&mut self, quick: &QuickMission, world: &Terrain, what: &str) {
         self.go(quick, world, what, false);
     }
 
-    fn go(&mut self, quick: &QuickMission, world: &World, what: &str, full: bool) {
+    fn go(&mut self, quick: &QuickMission, world: &Terrain, what: &str, full: bool) {
         let described = Self::describe(quick, world);
         if let Some(id) = (3..quick.draft.values.len()).find(|id| {
             !((30..=32).contains(id) && quick.draft.values[*id] == 0
@@ -272,7 +272,7 @@ impl Matrix<'_> {
 
 /// Positions and populations that must hold after a start.
 fn check_scene(
-    world: &World,
+    world: &Terrain,
     quick: &QuickMission,
     flight: &tore_sim::flight::State,
     combat: &combat::Combat,
@@ -391,7 +391,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
     // Loop 1: every theater layout, F/A-18D, airborne at every separation and
     // altitude, then a ground start on every runway with wings of one to five.
     for code in quick.theater_codes.clone() {
-        let world = match World::for_mission(data, &code, None) {
+        let world = match Terrain::for_mission(data, &code, None) {
             Ok(w) => w,
             Err(e) => {
                 m.problems
@@ -445,7 +445,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
             let Some(condition) = condition(weather) else {
                 continue;
             };
-            let world = match World::for_mission(data, &code, Some(condition)) {
+            let world = match Terrain::for_mission(data, &code, Some(condition)) {
                 Ok(w) => w,
                 Err(e) => {
                     m.problems.push(format!(
@@ -473,7 +473,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
     // theaters, against each enemy aircraft.
     for code in ["UKR"] {
         let index = quick.theater_codes.iter().position(|c| c == code).unwrap();
-        let world = World::for_mission(data, code, None)?;
+        let world = Terrain::for_mission(data, code, None)?;
         quick.apply(13, index);
         for player in 0..selectable {
             quick.apply(6, player);
@@ -504,7 +504,7 @@ pub fn validate(data: &BTreeMap<String, Vec<u8>>, options: Options) -> AppResult
 
     m.stage("start of wing sweep");
     // Loop 4: every wing's count, skill and aircraft, one wing at a time.
-    let world = World::for_mission(data, "UKR", None)?;
+    let world = Terrain::for_mission(data, "UKR", None)?;
     let index = quick.theater_codes.iter().position(|c| c == "UKR").unwrap();
     quick.apply(13, index);
     for field in [4, 7, 10, 21, 24, 27] {
@@ -624,7 +624,7 @@ pub fn render(
     data: &BTreeMap<String, Vec<u8>>,
     options: Options,
     sprites: &BTreeMap<String, Sprite>,
-    world: &World,
+    world: &Terrain,
 ) -> AppResult<()> {
     let mut quick = QuickMission::new(AircraftId::F18, options, data);
     let mut pixels = vec![0u8; WIDTH * HEIGHT * 4];
@@ -936,7 +936,7 @@ pub fn fuzz(
     data: &BTreeMap<String, Vec<u8>>,
     options: Options,
     sprites: &BTreeMap<String, Sprite>,
-    world: &World,
+    world: &Terrain,
 ) -> AppResult<()> {
     let mut problems: Vec<String> = Vec::new();
     let mut events = 0usize;

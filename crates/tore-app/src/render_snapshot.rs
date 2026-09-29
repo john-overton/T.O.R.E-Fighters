@@ -10,7 +10,7 @@ use crate::{
     aircraft::Airframe,
     flight,
     sim_renderer::{CombatGeometry, Contact},
-    terrain::{Camera, World},
+    terrain::{Camera, Terrain},
 };
 use std::collections::BTreeMap;
 use tore_formats::{Pic, aircraft::AircraftId, shape::Shape};
@@ -471,7 +471,7 @@ pub fn aircraft_batches<'a>(
     snapshot: &RenderSnapshot,
     models: &'a [Airframe],
     camera: &Camera,
-    world: &World,
+    world: &Terrain,
 ) -> Vec<(&'a Airframe, Vec<f32>, Vec<Contact>)> {
     snapshot
         .models
@@ -517,7 +517,7 @@ pub fn combat_geometry(
     ownship: &Airframe,
     ownship_state: &flight::State,
     camera: &Camera,
-    world: &World,
+    world: &Terrain,
 ) -> CombatGeometry {
     let mut v = Vec::new();
     let mut contacts = Vec::new();

@@ -8,7 +8,7 @@ use crate::{
     comms::journal::{Audience, Cause, Entry, Origin, Outcome, Reason, Roll, Source, TowerEvent},
     comms::{Call, Comms, Kind, Phrase, Phrases},
     flight,
-    terrain::World,
+    terrain::Terrain,
 };
 use std::collections::{BTreeMap, VecDeque};
 use tore_sim::{
@@ -104,7 +104,7 @@ fn busy(wings: Option<&AiWings>, runway: RunwayView, except: u32) -> bool {
         })
     })
 }
-fn tower(world: &World, airport: u32) -> String {
+fn tower(world: &Terrain, airport: u32) -> String {
     world
         .airport_scene
         .airports
@@ -237,7 +237,7 @@ impl AirfieldRadio {
         phrases: &Phrases,
         comms: &mut Comms,
         flight: &flight::State,
-        world: &World,
+        world: &Terrain,
         service: &Service,
         wings: Option<&AiWings>,
     ) {
@@ -341,7 +341,7 @@ impl AirfieldRadio {
         phrases: &Phrases,
         comms: &mut Comms,
         f: &flight::State,
-        world: &World,
+        world: &Terrain,
         service: &Service,
         wings: Option<&AiWings>,
     ) {
@@ -512,7 +512,7 @@ impl AirfieldRadio {
 fn distance(a: [f64; 3], b: [f64; 3]) -> f64 {
     (a[0] - b[0]).hypot(a[2] - b[2])
 }
-fn approach_runway(f: &flight::State, world: &World, service: &Service) -> Option<RunwayView> {
+fn approach_runway(f: &flight::State, world: &Terrain, service: &Service) -> Option<RunwayView> {
     world
         .airport_scene
         .airports
@@ -552,7 +552,7 @@ mod tests {
     use tore_sim::airport::{
         Airport, Allegiance, OrientedBox, Runway, Scene, SourceKey, StaticObject,
     };
-    fn fixture() -> (World, Service, flight::State, Phrases) {
+    fn fixture() -> (Terrain, Service, flight::State, Phrases) {
         let mut world = crate::terrain::tests::world();
         let bounds = OrientedBox {
             center: [0., 100., 0.],
@@ -613,7 +613,7 @@ mod tests {
         r: &mut AirfieldRadio,
         c: &mut Comms,
         p: &Phrases,
-        w: &World,
+        w: &Terrain,
         s: &Service,
         f: &flight::State,
         t: f64,

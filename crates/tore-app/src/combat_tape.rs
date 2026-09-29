@@ -1,6 +1,6 @@
 //! Bounded combat-service replay. Records explicit launcher/environment inputs,
 //! not a native replay or a replacement for the separate pilot-input tape.
-use crate::{AppResult, terrain::World};
+use crate::{AppResult, terrain::Terrain};
 use std::{
     collections::BTreeMap,
     io::{BufRead, Write},
@@ -312,7 +312,7 @@ pub fn replay(
     data: &BTreeMap<String, Vec<u8>>,
     config: Configuration,
     theater: &str,
-    world: &World,
+    world: &Terrain,
 ) -> AppResult<State> {
     replay_reader(
         std::io::BufReader::new(std::fs::File::open(path)?),
@@ -336,7 +336,7 @@ pub fn replay_without_airports(
     data: &BTreeMap<String, Vec<u8>>,
     config: Configuration,
     theater: &str,
-    world: &World,
+    world: &Terrain,
 ) -> AppResult<State> {
     replay_reader(
         std::io::BufReader::new(std::fs::File::open(path)?),

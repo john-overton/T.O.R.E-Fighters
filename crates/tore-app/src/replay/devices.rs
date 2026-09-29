@@ -12,7 +12,7 @@
 //! John on 2026-09-26; the keying is an agent decision. See
 //! docs/REPLAYS.md.
 use crate::replay::convert::{self, DeviceRelease};
-use crate::terrain::World;
+use crate::terrain::Terrain;
 use std::collections::BTreeMap;
 use tore_replay::{TimedEvent, vocab::field, vocab::kind};
 use tore_sim::combat::countermeasures::Devices;
@@ -106,7 +106,7 @@ impl DeviceTrack {
 
     /// The devices after the step of `tick` and everything released after
     /// it, over `world`'s ground.
-    pub fn at(&mut self, tick: u64, world: &World) -> &Devices {
+    pub fn at(&mut self, tick: u64, world: &Terrain) -> &Devices {
         let ground = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32));
         let Some(&(start, _)) = self
             .busy
@@ -214,7 +214,7 @@ mod tests {
 
     /// Flies `releases` the way combat does, one tick at a time, and returns
     /// the devices after each tick.
-    fn flown(entries: &[TimedEvent], last: u64, world: &World) -> Vec<Devices> {
+    fn flown(entries: &[TimedEvent], last: u64, world: &Terrain) -> Vec<Devices> {
         let ground = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32));
         let mut devices = Devices::default();
         let mut states = Vec::new();

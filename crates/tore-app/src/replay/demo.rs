@@ -294,7 +294,7 @@ fn demo() {
     let data = crate::assets::data_directory().unwrap();
     let assets = crate::assets::Assets::load(&data).unwrap();
     let resources = &assets.theater_resources;
-    let world = crate::terrain::World::for_mission(resources, "UKR", Some(0)).unwrap();
+    let world = crate::terrain::Terrain::for_mission(resources, "UKR", Some(0)).unwrap();
     let centre = crate::terrain::Camera::for_world(&world)
         .position
         .map(f64::from);

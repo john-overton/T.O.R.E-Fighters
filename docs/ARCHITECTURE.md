@@ -154,10 +154,10 @@ agent-selected host correction for distant surface flicker; see
 Theaters are about a million feet across, where a 32-bit float steps 1/8 foot,
 so aircraft built in world coordinates snapped a little differently every
 frame and shimmered in exterior views. Camera positions are kept in f64, and
-each frame `World::set_origin` picks a render origin: the camera position
+each frame `Terrain::set_origin` picks a render origin: the camera position
 snapped to a 1,024-foot grid, shared by every camera that frame. Aircraft,
 ejected pilots, weapons, debris, tracers and effects are built relative to it
-(`World::local`), and the scene uniform carries the origin and the camera's
+(`Terrain::local`), and the scene uniform carries the origin and the camera's
 exact offset from it. `object_vertex` and `shadow_object_vertex` place those
 vertices through the offset; terrain and airports stay in world coordinates
 and reach the camera through the origin, so only their own storage rounding
@@ -488,7 +488,7 @@ operation. See [glare](spec/sun-glow.md#continuous-lens-flare-composition) and
 
 ## Airport scenes
 
-Airport scenes are immutable imported data owned by `terrain::World`. Static
+Airport scenes are immutable imported data owned by `terrain::Terrain`. Static
 GPU geometry is batched by placement and filtered each frame from combat-owned
 target HP, so destroyed objects disappear consistently in main and mirror
 views; a replay filters by its recorded destroyed objects instead. The airport
@@ -640,8 +640,8 @@ a live debug panel can build the same tree from the current tick.
 `replay/library.rs` owns the `replays/` folder: names, `replays-v1.conf`
 auto-delete settings, listing from each file's header, seek index and footer
 (`Recording::peek`), and a cleanup that deletes only proven, unkept, inactive
-recordings. `terrain::World::identity` captures the resolved world for the
-header and `World::for_identity` rebuilds it without environment variables.
+recordings. `terrain::Terrain::identity` captures the resolved world for the
+header and `Terrain::for_identity` rebuilds it without environment variables.
 `replay/screen.rs` is the Replays screen, a main-menu overlay built from the
 Controls screen's drawing helpers that reads a recording's details and
 writes its exports on background threads the menu's redraw polls, so the
@@ -653,7 +653,7 @@ The mission replay viewer is its own screen, `Screen::Replay`, run by
 `replay/viewer.rs` and wired into the app by `replay/host.rs`, which takes the
 screen's window events before `main`'s own handling and hands back what the
 app still owns: resizing, focus, Alt-Enter and quitting. The viewer owns a
-`World` built from the recording's identity and its own airframes, so the
+`Terrain` built from the recording's identity and its own airframes, so the
 Quick Mission screen's world is untouched. Entering the screen points the
 renderer at them (`set_world`, then `prepare_aircraft` for the recorded
 player, since a world rebuild discards the aircraft); leaving restores the

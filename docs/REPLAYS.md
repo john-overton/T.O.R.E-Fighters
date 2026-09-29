@@ -1644,10 +1644,10 @@ headless workflow.
   aircraft draw with them) are header extras, read with
   `Presentation::from_header`. Ground objects are not aircraft: only their
   hit points are recorded.
-- `terrain::World::for_identity` rebuilds the recorded world from the
+- `terrain::Terrain::for_identity` rebuilds the recorded world from the
   header's resolved settings (layout, weather choice and layer, start time,
   wind and cloud deck) without reading `TORE_WEATHER_TIME`, `TORE_WIND` or
-  `TORE_CLOUD_ALTITUDE`; `World::identity` captures them from a live world.
+  `TORE_CLOUD_ALTITUDE`; `Terrain::identity` captures them from a live world.
 - The viewer lives in `tore-app/src/replay/`: `viewer.rs` (the screen:
   loading, cameras, keys, drawing), `host.rs` (the `Screen::Replay`
   plumbing in the app), `panels.rs` (the debug panels and the chunk cache
