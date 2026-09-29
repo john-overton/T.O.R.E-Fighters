@@ -251,4 +251,6 @@ over the hills (item 6: the fitted terrain correction is specified to hold
 heading), the terrain look-ahead (item 7: executable-confirmed 1,000 ft) and
 the land order on the ground (item 10: undefined). All 16 theaters' landing
 pairs parked (in 618 to 816 s), both 30-minute 15 v 15 runs abroad were clean,
-and the 138 new scenarios passed except the known failures above.
+and the 138 new scenarios passed except the known failures above. Final run
+of the whole lane on the merged branch: 577 of 584 passed in 29 minutes at
+`--jobs 6`; the 7 failures are exactly the Known failures listed above.
