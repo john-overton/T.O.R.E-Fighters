@@ -108,6 +108,32 @@ pub fn shake(g: f64, seconds: f64) -> [f64; 2] {
     })
 }
 
+/// Full-strength overspeed shake, radians: two and a half times the high-G
+/// shake, about 1.4 degrees. `opinionated`: John asked for a clear maximum on
+/// 2026-09-29; the size is an agent decision.
+pub const OVERSPEED_SHAKE_RADIANS: f64 = 0.024;
+
+/// Overspeed view shake as [yaw, pitch] radians for an airspeed of `ratio` times
+/// the aircraft's top speed: nothing below 95 percent, rising smoothly to the
+/// clear maximum at 100 percent and staying there above it. It is a pure
+/// function of `ratio` and the simulation time, so it never touches flight
+/// state and repeats exactly.
+pub fn overspeed_shake(ratio: f64, seconds: f64) -> [f64; 2] {
+    use crate::flight::{OVERSPEED_SHAKE_FULL, OVERSPEED_SHAKE_START};
+    let x = ((ratio - OVERSPEED_SHAKE_START) / (OVERSPEED_SHAKE_FULL - OVERSPEED_SHAKE_START))
+        .clamp(0., 1.);
+    if x == 0. || !x.is_finite() {
+        return [0.; 2];
+    }
+    let strength = OVERSPEED_SHAKE_RADIANS * x * x * (3. - 2. * x);
+    // Faster and coarser than the high-G shake (23 and 31 Hz): a buffet.
+    [0, 1].map(|axis| {
+        let a = noise(seconds * 23., axis * 2 + 4);
+        let b = noise(seconds * 31., axis * 2 + 5);
+        strength * (0.6 * a + 0.4 * b)
+    })
+}
+
 /// Smooth value noise in -1..1, deterministic in `t` and `stream`.
 fn noise(t: f64, stream: u64) -> f64 {
     let cell = t.floor();
@@ -126,6 +152,23 @@ fn noise(t: f64, stream: u64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn overspeed_shake_rises_smoothly_from_95_to_100_percent_and_is_deterministic() {
+        let peak = |ratio: f64| {
+            (0..2000)
+                .map(|i| overspeed_shake(ratio, i as f64 * 0.01))
+                .flat_map(|[a, b]| [a.abs(), b.abs()])
+                .fold(0., f64::max)
+        };
+        assert_eq!(overspeed_shake(0.9, 1.234), [0.; 2]);
+        assert_eq!(overspeed_shake(0.95, 1.234), [0.; 2]);
+        let (a, b, c, d) = (peak(0.96), peak(0.975), peak(0.99), peak(1.0));
+        assert!(0. < a && a < b && b < c && c < d, "{a} {b} {c} {d}");
+        assert!(d <= OVERSPEED_SHAKE_RADIANS && d > 0.6 * OVERSPEED_SHAKE_RADIANS);
+        assert_eq!(peak(1.4), d);
+        assert_eq!(overspeed_shake(1.0, 3.3), overspeed_shake(1.0, 3.3));
+        assert_eq!(overspeed_shake(f64::NAN, 1.0), [0.; 2]);
+    }
     fn seconds_to_full(g: f64) -> f64 {
         let mut e = GEffects::default();
         let mut ticks = 0;

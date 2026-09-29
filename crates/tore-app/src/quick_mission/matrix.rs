@@ -809,6 +809,7 @@ pub fn render(
                 status: Status::Ejected,
                 damage: 1.,
                 landing_grade: Some(100),
+                cause: None,
                 kills: [999; 10],
                 friendly_fire: 999,
                 air_to_air: tally,

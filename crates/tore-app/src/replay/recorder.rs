@@ -1146,6 +1146,10 @@ impl Recorder {
                 if let Some(killer) = killer {
                     event = event.with_object(killer);
                 }
+                // Lost to overspeed or the map edge, not to a weapon.
+                if let Some(cause) = flight.and_then(|f| f.systems.structure.cause) {
+                    event = event.with(field::REASON, cause.label());
+                }
                 if let Some(hit) = hit_by(id) {
                     event = event.with(field::PROJECTILE, replay::Value::Id(hit.projectile));
                     if let Some(weapon) = self.shots.get(&hit.projectile).map(|s| s.weapon) {
@@ -1273,7 +1277,13 @@ impl Recorder {
                         Event::new(kind::AIRCRAFT_CRASHED)
                             .with_subject(id)
                             .with(field::SPEED_KT, speed_kt)
-                            .with(field::REASON, "it hit the ground or a structure"),
+                            .with(
+                                field::REASON,
+                                f.systems
+                                    .structure
+                                    .cause
+                                    .map_or("it hit the ground or a structure", |c| c.label()),
+                            ),
                     );
                 }
                 watch.crashed = f.crashed;

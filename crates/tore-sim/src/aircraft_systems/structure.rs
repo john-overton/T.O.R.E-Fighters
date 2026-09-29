@@ -30,9 +30,35 @@ impl RegionalEffects {
         ]
     }
 }
+/// Why an airframe was lost outside combat damage. Requested by John on
+/// 2026-09-29 (docs/spec/overspeed.md, docs/spec/world-edge.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LossCause {
+    /// Flown at 1.5 times the aircraft's own top speed or faster.
+    Overspeed,
+    /// Flown 105 nautical miles beyond the edge of the theater.
+    OutOfBounds,
+}
+impl LossCause {
+    /// The word a recording, replay log or debrief line uses.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Overspeed => "overspeed",
+            Self::OutOfBounds => "out of bounds",
+        }
+    }
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Overspeed => "Airframe failed: overspeed",
+            Self::OutOfBounds => "Aircraft lost: out of bounds",
+        }
+    }
+}
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Structure {
     pub failed: bool,
+    /// Set when the airframe was lost to overspeed or leaving the map.
+    pub cause: Option<LossCause>,
     pub wing_damage: bool,
     fire_remaining: Option<f64>,
     weak: bool,
