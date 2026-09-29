@@ -741,6 +741,11 @@ impl State {
             self.crashed = true;
         }
     }
+    /// Adds airframe wear as a share of the hit points, as a belly slide does;
+    /// for hosts and tests that need the wear without the slide.
+    pub fn add_belly_scrape(&mut self, fraction: f64) {
+        self.belly_scrape += fraction.max(0.);
+    }
     /// The airframe wear since the last call, as a share of the aircraft's hit
     /// points, for the host to take from the combat hit points.
     pub fn take_belly_scrape(&mut self) -> f64 {

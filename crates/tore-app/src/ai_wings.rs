@@ -308,6 +308,9 @@ pub struct AiWings {
     last_hp: BTreeMap<u32, i32>,
     /// Hit points owed to belly scrape wear, below one whole point, by actor.
     scrape_carry: BTreeMap<u32, f64>,
+    /// Aircraft lost this tick to overspeed or belly wear: no shooter earns
+    /// them (see [`AiWings::lose_uncredited`]).
+    uncredited_losses: std::collections::BTreeSet<u32>,
     pub ejection_events: Vec<(u32, String, bool)>,
     /// Radio events for `radio_calls`, drained by the host each tick.
     pub chatter: Vec<Chatter>,
@@ -810,6 +813,7 @@ impl AiWings {
             watch,
             last_hp: BTreeMap::new(),
             scrape_carry: BTreeMap::new(),
+            uncredited_losses: Default::default(),
             last_activity: BTreeMap::new(),
             reports: reports::Reports::default(),
             next_projectile_id: AI_PROJECTILE_ID_BASE,
@@ -1048,6 +1052,7 @@ impl AiWings {
         let output = self.advance_on_surface(object, &mut state.targets, &ground, &|x, z| {
             world.surface(x, z)
         })?;
+        self.lose_uncredited(&mut state.ledger);
         self.observe_chatter(&output, player);
         for event in &output.launches {
             if let Some(weapon) = self.weapons.get(&(event.actor, event.station.0)).cloned() {
@@ -1485,6 +1490,10 @@ impl AiWings {
             let whole = carry.floor();
             *carry -= whole;
             target.hp = (target.hp - whole as i32).max(0);
+            if target.hp == 0 {
+                // The wear finished it: nobody who shot at it earlier gets it.
+                self.uncredited_losses.insert(slot.id);
+            }
         }
         for slot in &self.slots {
             let Some(actor) = self.mission.actor(slot.id) else {
@@ -1510,6 +1519,11 @@ impl AiWings {
                 && let Some(target) = targets.iter_mut().find(|t| t.id == slot.id)
                 && target.hp > 0
             {
+                // Lost to the aircraft's own structure (overspeed, the map
+                // edge): no shooter caused it.
+                if actor.flight().systems.structure.cause.is_some() {
+                    self.uncredited_losses.insert(slot.id);
+                }
                 target.hp = 0;
                 target.radar_emitting = false;
                 target.jammer_active = false;
@@ -2225,6 +2239,21 @@ impl AiWings {
         if self.stale_line.is_some_and(|(stale, _)| stale != id) {
             self.stale_line = None;
         }
+    }
+
+    /// Records the aircraft lost this tick to overspeed or to belly scrape wear
+    /// as lost without credit, exactly like the map edge: whoever shot at them
+    /// earlier is not rewarded for a crash it did not cause (requested by John,
+    /// 2026-09-29). The debrief still counts them as lost aircraft. Returns the
+    /// ids recorded.
+    pub fn lose_uncredited(&mut self, ledger: &mut tore_sim::combat::ledger::Ledger) -> Vec<u32> {
+        let lost: Vec<u32> = std::mem::take(&mut self.uncredited_losses)
+            .into_iter()
+            .collect();
+        for id in &lost {
+            ledger.lose_without_credit(*id);
+        }
+        lost
     }
 
     /// An AI aircraft 105 nautical miles beyond the edge of the map is lost,
@@ -3608,6 +3637,57 @@ pub(crate) mod tests {
                 .iter()
                 .all(|id| *id != 3)
         );
+    }
+
+    #[test]
+    fn an_ai_aircraft_finished_by_overspeed_or_belly_wear_credits_nobody() {
+        use tore_sim::aircraft_systems::LossCause;
+        use tore_sim::combat::ledger::{Kill, Ledger};
+        // Enemy 3 was shot at by the player earlier in every case.
+        let hit = Kill {
+            owner: 0,
+            victim: 3,
+            category: 0x8000,
+            aircraft: true,
+        };
+        for cause in [
+            Some(LossCause::Overspeed),
+            None,
+            Some(LossCause::OutOfBounds),
+        ] {
+            let (mut wings, mut targets) = build(None);
+            run(&mut wings, &mut targets, 10);
+            let mut ledger = Ledger::default();
+            ledger.damaged(hit);
+            if let Some(cause) = cause {
+                let flight = wings.mission.actor_mut(3).unwrap().flight_mut();
+                flight.systems.destroy(cause);
+                flight.crashed = true;
+            } else {
+                wings
+                    .mission
+                    .actor_mut(3)
+                    .unwrap()
+                    .flight_mut()
+                    .add_belly_scrape(1.);
+            }
+            run(&mut wings, &mut targets, 2);
+            assert_eq!(targets[2].hp, 0, "{cause:?}");
+            assert_eq!(wings.lose_uncredited(&mut ledger), [3], "{cause:?}");
+            assert_eq!(ledger.credit(3), None, "{cause:?}");
+            // Nothing is recorded twice, and the others are untouched.
+            assert!(wings.lose_uncredited(&mut ledger).is_empty());
+            assert!(targets.iter().filter(|t| t.hp == 0).count() == 1);
+        }
+        // An ordinary crash with no cause of its own still goes to the last shooter.
+        let (mut wings, mut targets) = build(None);
+        run(&mut wings, &mut targets, 10);
+        let mut ledger = Ledger::default();
+        ledger.damaged(hit);
+        wings.mission.actor_mut(3).unwrap().flight_mut().crashed = true;
+        run(&mut wings, &mut targets, 2);
+        assert!(wings.lose_uncredited(&mut ledger).is_empty());
+        assert_eq!(ledger.credit(3), Some(hit));
     }
 
     #[test]
