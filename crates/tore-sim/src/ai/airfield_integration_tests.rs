@@ -572,6 +572,41 @@ fn a_hybrid_aircraft_may_always_ask_for_1_g_inside_its_1_g_envelope() {
 }
 
 #[test]
+fn ai_speed_limits_stay_where_the_loaded_aircraft_can_hold_1_g() {
+    // 2026-09-29, after the weight-scaled stall speeds: finals built on the
+    // 0 G row's slow edge sank, and full power near the top speed left a
+    // loaded legacy-model fighter under 1 G.
+    for research in [false, true] {
+        let mut actor = hornet(1, 0, [0., 5_000., 0.], 0.);
+        if research {
+            actor.flight_mut().enable_research(1).unwrap();
+        }
+        let limits = actor.speed_limits();
+        let level = actor
+            .flight()
+            .minimum_level_speed(5_000., actor.flight().flaps);
+        assert!(
+            limits.minimum.0 >= level - 1e-9,
+            "{research}: {limits:?} {level}"
+        );
+        let config = actor.flight().model().configuration().clone();
+        let load = 1.0
+            + (actor.flight().fuel + actor.flight().payload_lbs) / config.mass.empty_lbs
+                * config.aerodynamics.loaded_elevator_percent
+                / 100.0;
+        let top = limits.maximum.0;
+        assert!(
+            config.aerodynamics.envelopes.iter().any(|e| {
+                f64::from(e.g) / load >= TOP_SPEED_G_MARGIN
+                    && e.speeds(5_000.)
+                        .is_some_and(|(low, high)| top >= low && top <= high)
+            }),
+            "{research}: no row with the G margin at {top}"
+        );
+    }
+}
+
+#[test]
 fn a_wing_returns_to_base_once_no_hostile_aircraft_remains() {
     // John, 2026-09-29: mission return to base.
     let mut mission = AiMission::new();

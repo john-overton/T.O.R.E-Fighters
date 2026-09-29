@@ -3494,6 +3494,37 @@ impl AiActor {
                 corner: ScalarSpeed(FALLBACK_CORNER_FPS),
             };
         }
+        // Fitted (agent decision, 2026-09-29, after the weight-scaled stall
+        // speeds): the lowest slow edge over every row, 0 G and negative G
+        // included, lies well under the speed at which the loaded aircraft
+        // can hold 1 G. The AI never plans to fly slower than that, in its
+        // current flap setting (`flight::State::minimum_level_speed`); on the
+        // F/A-18D the rows alone gave 114 kt against the 140 kt it needs, and
+        // finals built on it sank into the ground.
+        let level = self.flight.minimum_level_speed(altitude, self.flight.flaps);
+        if level < maximum {
+            minimum = minimum.max(level);
+        }
+        // Fitted (agent decision, 2026-09-29): nor faster than the fastest
+        // row that still leaves the loaded aircraft TOP_SPEED_G_MARGIN of
+        // lift. Near its top speed only the 1 G row covers the aircraft, and
+        // the legacy flight model divides that 1 G by the loading, so a
+        // loaded fighter at full power there sank steadily into flat ground
+        // at 1,100 kt without being able to pull up (fuzz seeds 43, 183,
+        // 266).
+        let config = self.flight.model().configuration();
+        let load = 1.0
+            + (self.flight.fuel + self.flight.payload_lbs) / config.mass.empty_lbs
+                * config.aerodynamics.loaded_elevator_percent
+                / 100.0;
+        let manoeuvring = envelopes
+            .iter()
+            .filter(|e| f64::from(e.g) / load >= TOP_SPEED_G_MARGIN)
+            .filter_map(|e| e.speeds(altitude).map(|(_, high)| high))
+            .fold(f64::NEG_INFINITY, f64::max);
+        if manoeuvring > minimum {
+            maximum = maximum.min(manoeuvring);
+        }
         if !corner.is_finite() {
             corner = minimum;
         }
@@ -3952,9 +3983,14 @@ const AVOID_HOLD_TICKS: u64 = 360;
 const LOST_MEMBER_BASE: u8 = 100;
 
 /// B44's retail terrain look-ahead, feet; the floor of the speed-scaled one.
+/// Fitted (agent decision, 2026-09-29): the loaded lift, in G, the AI keeps
+/// in hand at its planned top speed.
+pub const TOP_SPEED_G_MARGIN: f64 = 1.2;
 /// Fitted (agent decision, 2026-09-29): the loaded lift, in G, a final
-/// approach keeps in hand to arrest a sink and follow its path.
-pub const APPROACH_G_MARGIN: f64 = 1.3;
+/// approach keeps in hand to arrest a sink and follow its path. 1.15 since
+/// the weight-scaled stall speeds (1.3 before, which then asked for more
+/// than the 174 kt final cap).
+pub const APPROACH_G_MARGIN: f64 = 1.15;
 pub const TERRAIN_LOOKAHEAD_MIN_FT: f64 = 1000.0;
 /// Opinionated (requested by John, 2026-09-29; number an agent decision):
 /// the terrain floor looks this many seconds of travel ahead, never less than
