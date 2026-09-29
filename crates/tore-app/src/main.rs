@@ -4783,6 +4783,10 @@ struct ProbeScript {
     friendly_aircraft: Option<tore_formats::aircraft::AircraftId>,
     /// Wing orders to all wingmen at a tick.
     orders: Vec<(u64, tore_sim::ai::wing::PlayerOrder)>,
+    /// `--probe-group GROUP:CHOICE[:survive]`: a creator group objective
+    /// (group 1..6, friendly then enemy; choice index in that group's
+    /// objective list) and whether the group must survive.
+    groups: Vec<(usize, usize, bool)>,
     /// From the first tick to the second the player flies gear down over the
     /// departure airfield, the configuration that gives it landing priority.
     home: Option<(u64, u64)>,
@@ -5924,6 +5928,19 @@ fn ai_probe_run(
             quick.draft.values[field] = quick.draft.values[22];
         }
     }
+    for &(group, choice, survive) in &script.groups {
+        let choices = quick_mission::QuickMission::objective_choices(group);
+        let (label, objective) = choices
+            .get(choice)
+            .cloned()
+            .ok_or("--probe-group choice is outside that group's objective list")?;
+        quick.group_objectives[group] = objective;
+        quick.group_must_survive[group] = survive;
+        println!(
+            "AI probe group: {} objective={label:?} survive={survive}",
+            group + 1
+        );
+    }
     let wings = quick
         .wing_launches(enemy_skill)
         .map_err(|e| e.to_string())?;
@@ -6054,11 +6071,18 @@ fn ai_probe_run(
                 world.airport_scene.vertical_pad(home.object)
             );
         }
-        let [x, _, z] = actor.flight().position;
+        let [x, y, z] = actor.flight().position;
         if !(bounds.min[0]..=bounds.max[0]).contains(&x)
             || !(bounds.min[1]..=bounds.max[1]).contains(&z)
         {
             println!("AI probe OFF-MAP start: {} x={x:.0} z={z:.0}", slot.label());
+        }
+        let ground = world.surface(x, z).height;
+        if actor.ground_start().is_none() && y < ground {
+            println!(
+                "AI probe UNDERGROUND start: {} y={y:.0} ground={ground:.0}",
+                slot.label()
+            );
         }
     }
     // The tower service the player's Shift-A would use, with the departure
@@ -7277,6 +7301,22 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 separation_nm = Some(nm);
             }
             "--probe-wing-only" => probe_script.wing_only = true,
+            "--probe-group" => {
+                let usage = "--probe-group needs GROUP:CHOICE[:survive], group 1..6";
+                let value = args.next().ok_or(usage)?;
+                let mut parts = value.split(':');
+                let group: usize = parts.next().ok_or(usage)?.parse().map_err(|_| usage)?;
+                let choice: usize = parts.next().ok_or(usage)?.parse().map_err(|_| usage)?;
+                let survive = match parts.next() {
+                    None => false,
+                    Some("survive") => true,
+                    Some(_) => return Err(usage.into()),
+                };
+                if !(1..=6).contains(&group) {
+                    return Err(usage.into());
+                }
+                probe_script.groups.push((group - 1, choice, survive));
+            }
             "--probe-fight" => {
                 let usage = "--probe-fight needs FRIENDLY:ENEMY, each 1..15";
                 let value = args.next().ok_or(usage)?;

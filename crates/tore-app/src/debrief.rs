@@ -304,12 +304,7 @@ pub fn capture(
                 .map(|a| a.id)
                 .collect();
         }
-        protect = assignment.protected_ids.clone();
-        for id in mission.must_survive() {
-            if !protect.contains(id) {
-                protect.push(*id);
-            }
-        }
+        protect = friendly_objectives(&assignment.protected_ids, mission.must_survive(), &aircraft);
     }
     report(&Ending {
         ledger: &state.ledger,
@@ -320,6 +315,23 @@ pub fn capture(
         destroy,
         protect,
     })
+}
+
+/// The player's friendly objectives: the aircraft the player's flight
+/// protects, then every aircraft of the player's side whose group must
+/// survive (the player is id 0). An enemy group whose survival its own side
+/// requires is not the player's objective (docs/spec/debrief.md, "Friendly
+/// objectives"; battery finding 2026-09-29: destroying such a group failed
+/// the player's mission).
+fn friendly_objectives(protected: &[u32], must_survive: &[u32], aircraft: &[Airframe]) -> Vec<u32> {
+    let mut protect = protected.to_vec();
+    for id in must_survive {
+        let friendly = *id == 0 || aircraft.iter().any(|a| a.id == *id && a.friendly);
+        if friendly && !protect.contains(id) {
+            protect.push(*id);
+        }
+    }
+    protect
 }
 
 pub fn report(end: &Ending) -> Report {
@@ -933,6 +945,28 @@ mod tests {
         )
         .unwrap()
     }
+    #[test]
+    fn enemy_survival_groups_are_not_the_players_objectives() {
+        let craft = |id, friendly| Airframe {
+            id,
+            friendly,
+            alive: false,
+            ejected: false,
+            damage: 1.,
+            landing_grade: None,
+        };
+        let aircraft = [
+            craft(1, true),
+            craft(2, true),
+            craft(7, false),
+            craft(8, false),
+        ];
+        assert_eq!(
+            friendly_objectives(&[2], &[0, 1, 2, 7, 8], &aircraft),
+            vec![2, 0, 1]
+        );
+    }
+
     #[test]
     fn five_pages_with_mission_text_first() {
         let lost = pages(&Report::default(), &text());

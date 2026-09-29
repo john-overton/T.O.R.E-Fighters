@@ -58,6 +58,10 @@ minutes cost about 4 minutes.
 | Other theaters | `ai-theater-*` | all 16 base theaters: a 4 v 4 fight, an 8 v 8 without the leader attacking, wing-of-3 takeoffs at airports 1 and 3, and a pair ordered to land at airport 1 |
 | Every aircraft's takeoff | `ai-takeoff-*` | all 14 aircraft as a ground-started pair at Zaporizhzhya (UKR 1), Ras Al Khaimah (PGU 2), Chateaudun (FRA 3) and Nuchon Ni (NSK 5) |
 | Long runs elsewhere | `ai-long-15v15-pgu`, `ai-long-15v15-vla` | 30 minutes of 15 v 15 in the Persian Gulf and Vladivostok |
+| Random configurations | `ai-fuzz-NNNN` | seeded whole configurations from `tools/battery_scenarios/_ai_fuzz.py` (theater and layout variant, sizes, three aircraft types, skill, mission, separation, geometry, adapter, ground start, orders, threats and faults at random ticks, attack script, 1 to 5 minutes); the first 60 of 400 fixed seeds by default, `TORE_AI_FUZZ=all` for all; `python3 tools/_ai_fuzz_cmd.py SEED` prints a seed's command |
+| Creator objectives | `ai-objective-*` | ten group setups (`--probe-group GROUP:CHOICE[:survive]`: free, CAP, targets, protection, self-defense, hold, required survival on either side) at four fight sizes; the debrief's targets, protected aircraft and SUCCESS or FAILURE must match the aircraft left alive ([debrief rules](../spec/debrief.md)) |
+| Order drills | `ai-orders-cycle-*` | the four player wing orders cycled twelve times through a fight, in the air and after a ground start; every order must be answered |
+| Damaged aircraft | `ai-damaged-*` | twelve recovery faults, each with hits or gunfire and a second fault, for 20 minutes under weapons hold |
 
 ## What is checked
 
@@ -101,6 +105,8 @@ never lands; or the same radio line repeats three times in five seconds.
 
 | A wingman flipped from missile defense to its previous task and straight back when a radar warning lapsed and it could see the missile | The first visual sample cannot judge a missile's motion, so the threat vanished for one tick; and round one's sticky "was aimed at us" memory made a passing missile a stale threat again the moment it left sight | `1c5f013`: a missile warned of as aimed at the aircraft last tick counts as incoming at the switch to eyesight, and seen missiles are judged afresh (fitted) |
 | A fighter at the edge of its missile's zone swapped between the missile tactic and gun tracking every few ticks for seconds (30 activity changes in 3 s) | Its own stick input moved the body-relative zone test each time; the motion ignored B42's two-second "no suitable station" retry that the weapon service already honours | `6e81213`: once no store resolves, gun tracking holds until the retry ends (spec-derived from B42, recorded in the AI spec; `ai-regress-envelope-edge-flap`) |
+
+| Shooting down an enemy group whose own side required it to survive failed the player's mission (Destroy 5 of 5, Protect 0 of 5, FAILURE) | The debrief counted every "must survive" group as the player's friendly objective, enemy groups included | `e146788`: only the player's side becomes friendly objectives, as the debrief spec says |
 
 Supporting commit: `17144d1` adds the per-tick checks and the lane's scenarios.
 
@@ -148,6 +154,18 @@ suitable station", so a hold here would be a new rule.
 
 ## Found, not fixed
 
+**Aircraft spawned inside mountains (fourth round).** In a ground start at
+Jixian (Vladivostok, airport 2) or Bahawalpur (South Asia, airport 2) with
+the enemy 50 nm away, the enemy group starts at the chosen 5,000 ft over
+ground up to 6,856 ft high and is destroyed at 0.0 s (fuzz seed 100). The
+probe now reports `AI probe UNDERGROUND start`. The spec's check ("the
+altitude must clear the airport ground by at least 100 feet", [Quick
+Mission](../spec/quick-mission-menu.md#player-ground-start)) only covers the
+airport; extending it to every airborne aircraft's own ground, or raising
+those aircraft, would be a new rule, so it is item 12 under decisions. A scan
+of all 16 base theaters, airports 1 to 3 and separations 5 to 100 nm found
+only these two cases.
+
 **AI aircraft outside formation collide in the air.** After the formation
 fix, 18 of 86 fight, mission and big-fight scenarios still showed a mid-air
 collision (6 scenarios), all between aircraft that fly no formation:
@@ -189,6 +207,27 @@ them (see `KNOWN_ANOMALIES` in the scenario file).
 - `ai-theater-cub-takeoff-a1` (Key West, near the north edge): the airborne
   friendly wing starts on the runway heading, north, has no route and leaves
   the map after 163 s (item 5 below).
+- `ai-known-f22-leader-wingman-ukr3` (reported by the flight lane): after a
+  ground start at Krasnodar (UKR 3) behind the test harness's F-22, the
+  wingman (the player's wing flies the player's type; `--probe-friendly-aircraft`
+  sets wings 2 and 3 only, so an F-18 there gives the same run) flies into
+  rising ground at about 800 kt after 71 s. The formation trace shows why: the harness cruises
+  the F-22 at about 890 kt, 3,000 ft above the ground, so the wingman is in
+  Intercept 25,000 to 35,000 ft behind and 2,500 to 3,100 ft below its gate.
+  The fitted intercept rule ([physical departure and
+  rejoin](../spec/ai.md#physical-departure-and-rejoin)) asks for leader
+  velocity plus a closing vector toward the gate, so the altitude closes in
+  proportion to the distance: about 20 ft/s of climb, while the ground ahead
+  rises at over 100 ft/s at that speed. The wingman at full afterburner,
+  lower and in denser air, still loses ground (closure -100 to -700 ft/s), and
+  the 1,000 ft terrain look-ahead (item 7) warns 0.7 s before the hill. This
+  follows the formation spec as written, so it was not changed; closing the
+  altitude error first when far behind, or a speed-scaled look-ahead, would be
+  new rules (item 14). The same happens with an F-22 in human hands only if
+  the player cruises that fast that low.
+- Default fuzz seeds `ai-fuzz-0014`, `-0028`, `-0032` and `-0053`, and
+  `ai-damaged-fault04-hit` and `-gun` (an undamaged X-31 wingman at 900 to
+  950 kt): the supersonic low-level class above (see "Fourth round").
 - Activity flapping and pitch-stick oscillation at a weapon's envelope edge,
   and mid-air collisions, are reported but allowed (see above and below);
   regression scenarios check strictly.
@@ -257,6 +296,16 @@ Behaviour the specs do not define, with the evidence. None of these were changed
 11. **Short strips.** Quick Mission ground starts accept 1,074 ft strips
     (Santa Fe, San Carlos), and fighters then roll off the end onto grass
     before lifting off. No spec sets a minimum runway for an aircraft.
+12. **Airborne starts inside the terrain.** See "Found, not fixed": should
+    the creator refuse, or raise, an airborne aircraft that would start below
+    its own ground?
+13. **Slow damaged approaches.** A damaged Rafale recovering at 158 kt spent
+    12 minutes flying the approach over the hills south of Simferopol, went
+    around once and was still approaching after 20 minutes (`ai-damaged-*`,
+    fuel leak and control faults); same cause as item 6.
+14. **A wingman far behind and below its leader.** Should Intercept close a
+    large altitude error before the distance (see Known failures, F-22
+    leader at Krasnodar)?
 
 ## Needs a human eye or ear
 
@@ -276,6 +325,36 @@ Behaviour the specs do not define, with the evidence. None of these were changed
 Windowed captures (this lane is headless only), theater layout variants
 (the `~` maps; only the 16 base theaters), Windows and macOS, and a retail
 comparison.
+
+### Fourth round (2026-09-29, all four lanes merged)
+
+The merged branch passed the lane with only the known failures. All 400 fuzz
+seeds ran (about 45 minutes at `--jobs 6`): 385 passed. The 15 failures are
+known classes: 12 are F-22-family aircraft (and one X-31) flying at 890 to
+1,140 kt low over rising ground (item 7; several are the player's wingmen
+chasing the test harness leader, which cruises an F-22 at about 890 kt),
+seven are ground starts on 1,074 ft strips (item 11; a crash also leaves the
+probe's ground hazard open), and seed 100 is the spawn inside a mountain. In
+the default 60, seeds 14, 28, 32 and 53 fail this way. Creator objectives:
+all 40 scenarios agree with the debrief after the fix. Order drills: every
+order answered, refusals with the documented messages (no airport selected,
+no hostile designated, wingmen bugged out). Damaged aircraft: no impossible
+states; every damaged aircraft either died, ejected, landed or was still
+flying its approach; the only other failures were the known supersonic class
+and aircraft with no route leaving the map (now allowed there). The replay lane's list of 29 flagged scenarios
+(`.local/battery/ai-churn-flags.txt`, recorded before the third-round fixes)
+was re-run: of its 26 probe commands, 24 now carry no churn flag, and the two
+left are the furball and the G-limited pursuit described in the third round.
+After the
+player dies the player's wingmen keep "In formation" with no leader, which
+only matters if a flight continued without the player. No friendly-fire kill
+by a wingman was seen in any run, so that counter was not exercised.
+
+Fourth-round final run of the whole lane: 697 of 712 passed in 45 minutes at
+`--jobs 6`; the 15 failures are the Known failures above. After merging the
+flight lane's round two (the envelope 1 G floor and ceiling lift), the gates
+passed and a 33-scenario post-merge subset (regressions, objectives, fuzz
+seeds 1 to 9, determinism, order drills) passed.
 
 ### Third round (2026-09-29, after the merge with the replay lane)
 
