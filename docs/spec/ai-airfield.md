@@ -150,21 +150,26 @@ its home airport at cruise speed.
 - **Final** (opinionated path, fitted speed and flare): down the same 3 degree
   path to the landing point (retail 6 degrees), wings level below 50 ft. Retail flies at most 293 ft/s
   with the nose 17 degrees above the path and has no flare. The AI flies 1.1
-  times its clean minimum speed, but never slower than the speed at which the
-  loaded aircraft with flaps down still has 1.3 G of lift in hand (fitted,
-  agent decision 2026-09-29: 232 ft/s, 137 kt, for a fuelled F/A-18D, where
-  1.1 times the minimum gave 94 kt and a final that could not hold its path),
+  times its minimum speed (since 2026-09-29 the speed at which the loaded
+  aircraft can hold 1 G in its flap setting, see the AI spec's speed limits),
+  but never slower than the speed at which the loaded aircraft with flaps down
+  still has 1.15 G of lift in hand (fitted, agent decision 2026-09-29; 1.3 G
+  before the weight-scaled stall speeds, when it gave 137 kt; now 162 kt for a
+  fuelled F/A-18D, against 144 kt to hold 1 G and a first final built on the
+  0 G row's 94 kt that could not hold its path),
   under that 293 ft/s cap. The speedbrake stays closed while the aircraft is
   below the final path (fitted, same date). Short of the threshold, with the
   wheels less than 40 ft above the ground below, it holds level instead of
   descending (fitted, same date: at KURILE 3 and NSK 6 the ground before the
   threshold stands 65 to 71 ft above the runway, higher than the 3 degree
   path; see [ILS checks](../testing/ils.md)). It lets the hybrid model
-  set its own angle of attack, and eases its descent toward height above the wheels divided by 6 seconds,
-  with a minimum 1.5 degree downward path, so a fast final has time to flare.
-  On the 3 degree path at 137 kt that is a 12 ft/s sink eased to about 6 ft/s
-  at the wheels, and the flare begins about 70 ft up (re-derived 2026-09-29;
-  on the retail 6 degree path it began about 150 ft up).
+  set its own angle of attack, and eases its descent toward height above the
+  wheels divided by 4 seconds, with a minimum 1.5 degree downward path, so a
+  fast final has time to flare. On the 3 degree path at 162 kt that is a
+  14 ft/s sink eased to about 7 ft/s at the wheels, and the flare begins
+  about 60 ft up (re-derived 2026-09-29: 6 seconds before the weight-scaled
+  stall speeds; at the faster finals it floated the F/A-18D past a go-around
+  point at KURILE 3's 5,532 ft runway).
   Below 60 ft it reduces the speed target to the clean minimum. The speedbrake
   stays closed during the flare. These flare constants are fitted.
 - **Rollout** (spec-derived end, fitted method): brakes on, idle, flaps down,

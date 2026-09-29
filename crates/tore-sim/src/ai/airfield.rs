@@ -293,7 +293,9 @@ pub const FLARE_HEIGHT_FT: f64 = 60.0;
 pub const FLARE_PITCH_DEG: f64 = -1.5;
 /// Fitted height-to-sink horizon. A fast descent must start easing before
 /// the fixed 60 ft throttle-close height to allow the pitch controller to act.
-pub const FLARE_SETTLE_S: f64 = 6.0;
+/// 4 s since 2026-09-29 (6 s before): with the weight-scaled stall speeds the
+/// finals are faster and 6 s floated a high F/A-18D past the go-around point.
+pub const FLARE_SETTLE_S: f64 = 4.0;
 /// Fitted (agent decision, 2026-09-29): wheel clearance over the ground
 /// short of the threshold below which a final holds level.
 pub const FINAL_TERRAIN_CLEARANCE_FT: f64 = 40.0;
