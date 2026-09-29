@@ -34,7 +34,9 @@ def flight_checks(work: Path, output: str, *, min_bookmarks: int = 0, ended: str
     text = s.get(1, "")
     if "driver: game pid" not in text:
         return [f"the driver never found the game: {text.strip()[-200:]}"]
-    for bad in ("panicked at", "did not exit on Alt+F4", "the game exited before"):
+    # A random key can choose the menu's Exit to Desktop row, so an early exit is not a fault by itself;
+    # the step still has to exit 0.
+    for bad in ("panicked at", "did not exit on Alt+F4"):
         if bad in text:
             problems.append(f"driver reports: {bad}")
     rest = "\n".join(s.get(i, "") for i in (2, 3, 4, 5))
@@ -344,7 +346,9 @@ def viewer_checks(output: str) -> list[str]:
     problems = []
     if "driver: game pid" not in text:
         return [f"the driver never found the game: {text.strip()[-200:]}"]
-    for bad in ("panicked at", "did not exit on Alt+F4", "the game exited before"):
+    # A random key can choose the menu's Exit to Desktop row, so an early exit is not a fault by itself;
+    # the step still has to exit 0.
+    for bad in ("panicked at", "did not exit on Alt+F4"):
         if bad in text:
             problems.append(f"driver reports: {bad}")
     return problems
