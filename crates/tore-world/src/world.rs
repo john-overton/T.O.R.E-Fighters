@@ -21,6 +21,10 @@ use tore_sim::{attitude, flight};
 #[cfg(test)]
 mod command_tests;
 mod commands;
+#[cfg(test)]
+mod crowd;
+#[cfg(test)]
+mod fight_tests;
 mod handoff;
 #[cfg(test)]
 mod handoff_tests;
