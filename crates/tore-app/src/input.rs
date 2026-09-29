@@ -621,11 +621,18 @@ pub fn diagnostics(
     seconds: u64,
     write_profile: Option<&Path>,
     rumble: Option<&str>,
+    native: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !(1..=300).contains(&seconds) {
         return Err("input monitor duration must be 1..300 seconds".into());
     }
-    let backend = Backend::start();
+    // --no-controllers means no device is opened, diagnostics included.
+    let backend = if native {
+        Backend::start()
+    } else {
+        println!("Device input is off (--no-controllers): no device is opened");
+        Backend::disabled()
+    };
     let start = Instant::now();
     let mut devices = BTreeMap::new();
     println!("Input diagnostics: {seconds}s; native raw values, no retail media or GPU required");

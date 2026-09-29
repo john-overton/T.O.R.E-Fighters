@@ -135,6 +135,16 @@ def make_tape_step(kind: str, dest: str) -> Step:
 
 def input_scenarios() -> list[Scenario]:
     out = []
+    out.append(
+        Scenario(
+            name="replay-input-list-no-controllers",
+            lane="replay",
+            args=["--list-inputs", "--no-controllers", "--no-audio"],
+            expect=[r"no device is opened"],
+            forbid=[r"^device ", r"detected, but no readable"],
+            timeout=60,
+        )
+    )
     out.append(Scenario(name="replay-input-list", lane="replay", args=["--list-inputs", "--no-audio"], expect=[r"Input diagnostics"], timeout=60))
     out.append(
         Scenario(

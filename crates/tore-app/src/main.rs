@@ -8126,6 +8126,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             seconds,
             write_input_profile.as_deref(),
             test_rumble.as_deref(),
+            native_input,
         )?;
         return Ok(Outcome::Done);
     }
