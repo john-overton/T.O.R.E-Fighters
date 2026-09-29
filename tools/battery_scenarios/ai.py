@@ -19,6 +19,8 @@ from typing import Callable, Optional
 
 from battery import ROOT, Scenario
 
+from battery_scenarios import _ai_fuzz
+
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
 SKILLS = ["novice", "average", "experienced", "ace"]
 MISSIONS = ["free", "cap", "intercept", "escort", "self-defense", "hold"]
@@ -100,7 +102,7 @@ def probe_problems(
         lost_enemy, enemies = int(attack.group(7)), int(attack.group(8))
         objective = re.search(r"Destroy \{ destroyed: (\d+), total: (\d+) \}", debrief.group(2))
         # Only free engagement makes every enemy aircraft the objective.
-        if objective and re.search(r"^AI probe: .* mission=free$", output, re.M) and (int(objective.group(1)), int(objective.group(2))) != (lost_enemy, enemies):
+        if objective and re.search(r"^AI probe: .* mission=free$", output, re.M) and not GROUP.search(output) and (int(objective.group(1)), int(objective.group(2))) != (lost_enemy, enemies):
             problems.append(
                 f"debrief objective {objective.group(1)}/{objective.group(2)} but {lost_enemy}/{enemies} enemies lost"
             )
@@ -118,6 +120,7 @@ def probe_problems(
             if need_landing and label in actors and actors[label][1] and not any(n in names for n in ("Rollout", "Landed", "Parked", "TaxiIn")):
                 problems.append(f"{label} never landed: {phases[:160]}")
     problems.extend(radio_problems(output))
+    problems.extend(objective_problems(output))
     return problems
 
 
@@ -137,6 +140,53 @@ def ground_collisions(output: str, actors: dict) -> list[str]:
         at, label, agl = m.group(1), m.group(2), int(m.group(3))
         if agl < 40 and label not in destroyed and label not in ejected and ids.get(label) not in damaged:
             problems.append(f"{label} flew into the ground undamaged at {at}s")
+    return problems
+
+
+GROUP = re.compile(r'^AI probe group: (\d) objective="(.*)" survive=(true|false)$', re.M)
+OUTCOME = re.compile(r"^AI probe debrief: (SUCCESS|FAILURE) \[(.*?)\] elapsed=\S+ player\[(\S+) .*?ff=(\d+)", re.M)
+
+
+def objective_problems(output: str) -> list[str]:
+    """The debrief's objectives and outcome against the aircraft the probe
+    reports alive, by the rules in docs/spec/debrief.md (Outcome and
+    objectives). Checked only when `--probe-group` set the player's group."""
+    groups = {int(g): (label, survive == "true") for g, label, survive in GROUP.findall(output)}
+    debrief = OUTCOME.search(output)
+    if 1 not in groups or not debrief:
+        return []
+    alive: dict[str, bool] = {}
+    for line in output.splitlines():
+        m = ACTOR.match(line)
+        if m:
+            alive[m.group(2)] = m.group(5) == "true"
+    alive["Friendly 1-1"] = debrief.group(3) == "Alive"
+
+    def members(side: str, wing: int) -> list[str]:
+        return [label for label in alive if label.startswith(f"{side} {wing}-")]
+
+    label = groups[1][0]
+    target = re.match(r"Primary target: enemy group (\d)", label)
+    targets = members("Enemy", int(target.group(1))) if target else [l for l in alive if l.startswith("Enemy")]
+    protect = set()
+    guard = re.match(r"Protect friendly group (\d)", label)
+    if guard:
+        protect.update(members("Friendly", int(guard.group(1))))
+    for group, (_, survive) in groups.items():
+        if survive and group <= 3:
+            protect.update(members("Friendly", group))
+    problems = []
+    destroyed = sum(1 for t in targets if not alive[t])
+    found = re.search(r"Destroy \{ destroyed: (\d+), total: (\d+) \}", debrief.group(2))
+    if targets and (not found or (int(found.group(1)), int(found.group(2))) != (destroyed, len(targets))):
+        problems.append(f"debrief targets {found.group(0) if found else 'missing'} but {destroyed} of {len(targets)} are down")
+    kept = sum(1 for p in protect if alive[p])
+    found = re.search(r"Protect \{ protected: (\d+), total: (\d+) \}", debrief.group(2))
+    if protect and (not found or (int(found.group(1)), int(found.group(2))) != (kept, len(protect))):
+        problems.append(f"debrief protected {found.group(0) if found else 'missing'} but {kept} of {len(protect)} survive")
+    success = destroyed == len(targets) and kept == len(protect) and debrief.group(4) == "0"
+    if (debrief.group(1) == "SUCCESS") != success:
+        problems.append(f"debrief says {debrief.group(1)} but targets {destroyed}/{len(targets)}, protected {kept}/{len(protect)}")
     return problems
 
 
@@ -439,12 +489,50 @@ def scenarios() -> list[Scenario]:
         out.append(probe(f"long-15v15-{theater.lower()}", ["--theater", theater, *fight(15, 15, "--separation", "20", *attack)],
                          ticks=216000, timeout=3600, check=checker(allow_anomalies=("outside the world",))))
 
+    # 17. Creator objectives and required survival against the debrief.
+    group_cases = [
+        ("free", ["--probe-group", "1:1"]),
+        ("cap", ["--probe-group", "1:2"]),
+        ("target-e1", ["--probe-group", "1:3"]),
+        ("target-e2", ["--probe-group", "1:4", "--probe-group", "3:0:survive"]),
+        ("protect-f2", ["--probe-group", "1:6"]),
+        ("protect-f3-survive", ["--probe-group", "1:7", "--probe-group", "3:0:survive"]),
+        ("self-defense-survive", ["--probe-group", "1:8:survive"]),
+        ("hold", ["--probe-group", "1:9"]),
+        ("own-survive", ["--probe-group", "1:1:survive", "--probe-group", "2:0:survive"]),
+        ("enemy-escort", ["--probe-group", "1:3", "--probe-group", "4:6", "--probe-group", "5:0:survive"]),
+    ]
+    for name, groups in group_cases:
+        for f, e, attacking in [(6, 6, True), (12, 12, True), (11, 13, False), (15, 15, True)]:
+            extra = attack if attacking else []
+            out.append(probe(f"objective-{name}-{f}v{e}{'' if attacking else '-passive'}",
+                             fight(f, e, "--separation", "5", *extra, *groups), ticks=12000))
+
+    # 16. Seeded random configurations (tools/battery_scenarios/_ai_fuzz.py).
+    for seed in _ai_fuzz.selected_seeds():
+        args, ticks, info = _ai_fuzz.config(seed)
+        out.append(probe(f"fuzz-{seed:04d}", args, ticks=ticks, timeout=2400,
+                         check=fuzz_checker(seed, args, ticks),
+                         notes=f"fuzz seed {seed}: {info}"))
+
     # 14. The fixed acceptance probes.
     out.append(Scenario(name="ai-roster-probe", lane="ai", args=["--ai-roster-probe-ticks", "3600", "--no-audio"], timeout=1800))
     out.append(Scenario(name="ai-probe-matrix", lane="ai",
                         args=["--probe-matrix", "{work}/matrix", "--ai-probe-ticks", "360", "--separation", "1", "--no-audio"],
                         timeout=3600, check=matrix_problems))
     return out
+
+
+def fuzz_checker(seed: int, args: list[str], ticks: int) -> Callable[[str], list[str]]:
+    """The usual checks, each problem prefixed with the seed and command."""
+    command = " ".join(["tore-app", "--ai-probe-ticks", str(ticks), *args, "--no-audio"])
+
+    def check(output: str) -> list[str]:
+        problems = probe_problems(output, ground="--ground-start" in args,
+                                  allow_anomalies=("outside the world",))
+        return [f"seed {seed} ({command}): {p}" for p in problems]
+
+    return check
 
 
 def matrix_problems(output: str) -> list[str]:

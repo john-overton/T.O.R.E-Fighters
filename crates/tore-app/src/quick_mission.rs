@@ -327,7 +327,7 @@ impl QuickMission {
             .cloned()
             .unwrap_or_else(|| "Unavailable".into())
     }
-    fn objective_choices(group: usize) -> Vec<(String, GroupObjective)> {
+    pub(crate) fn objective_choices(group: usize) -> Vec<(String, GroupObjective)> {
         let side = if group < 3 {
             Side::Friendly
         } else {
