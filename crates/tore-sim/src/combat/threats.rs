@@ -327,16 +327,29 @@ impl ThreatService {
         // flipped the judgment every tick, and an AI aircraft alternated
         // between defending and its previous task on every tick.
         let stored = self.contacts.get(&missile.id);
+        // A missile that was already warned of as aimed at us last tick (an
+        // electronic warning that just lapsed) counts as incoming then, so
+        // the switch to visual evidence keeps the threat instead of dropping
+        // it for the one tick a first visual sample cannot judge.
         let incoming_tick = if incoming {
             Some(tick)
         } else {
             stored
-                .and_then(|stored| stored.incoming_tick)
+                .and_then(|stored| {
+                    stored.incoming_tick.or_else(|| {
+                        stored
+                            .record
+                            .targeting_receiver
+                            .then(|| tick.saturating_sub(1))
+                    })
+                })
                 .filter(|last| tick.saturating_sub(*last) < LOST_GRACE_TICKS)
         };
         let targeting = incoming_tick.is_some();
-        let was_targeting =
-            targeting || stored.is_some_and(|stored| stored.record.was_targeting_receiver);
+        // Seen missiles are judged afresh: one that has stopped looking
+        // incoming (after the grace) is not remembered as aimed at us, or it
+        // would become a stale threat again the moment it left sight.
+        let was_targeting = targeting;
         let record = ThreatRecord {
             missile_id: missile.id,
             source: EvidenceSource::Visual,
@@ -616,7 +629,29 @@ mod tests {
         }
         let expired = step(&mut service, 1 + LOST_GRACE_TICKS);
         assert!(!expired.targeting_receiver);
-        assert!(expired.was_targeting_receiver);
+        // Nor is it remembered as aimed at us, so losing sight of it later
+        // does not raise a stale threat.
+        assert!(!expired.was_targeting_receiver);
+    }
+
+    #[test]
+    fn a_lapsed_warning_seen_by_eye_stays_a_threat() {
+        // Battery finding (2026-09-29): when a radar warning lapsed and the
+        // pilot could see the missile, the first visual sample could not yet
+        // judge its motion, so the threat vanished for one tick and the AI
+        // flipped from missile defense to its previous task and back.
+        let mut service = ThreatService::new(7);
+        let mut m = missile(Guidance::Supported);
+        m.supported = true;
+        m.supporting_radar_position = Some([1_000.0, 0.0, 0.0]);
+        service.observe(0, receiver(), &[m], |_, _| true);
+        assert!(service.records().next().unwrap().targeting_receiver);
+        m.supported = false;
+        m.position[2] -= 1_000.0 / TICKS_PER_SECOND;
+        service.observe(1, receiver(), &[m], |_, _| true);
+        let record = *service.records().next().unwrap();
+        assert_eq!(record.source, EvidenceSource::Visual);
+        assert!(record.targeting_receiver);
     }
 
     #[test]

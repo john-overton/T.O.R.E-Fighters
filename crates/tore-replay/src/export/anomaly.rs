@@ -26,7 +26,7 @@ pub mod kinds {
     pub const AI_STUCK: &str = "ai_stuck";
     /// An AI aircraft changed activity or target many times in a short span.
     pub const AI_FLIPPING: &str = "ai_flipping";
-    /// A guided weapon lost its target soon after launch.
+    /// A guided weapon lost its target soon after launch, other than to a decoy.
     pub const TRACK_LOST_EARLY: &str = "track_lost_early";
     /// An aircraft ran out of fuel.
     pub const FUEL_EXHAUSTED: &str = "fuel_exhausted";
@@ -102,7 +102,12 @@ impl Default for Thresholds {
             g_low: -4.5,
             stuck_s: 300.,
             flip_count: 6,
-            flip_window_s: 10.,
+            // 2 s (was 10, changed 2026-09-29 by the AI battery lane): a
+            // dogfight's ordinary progression (pursue, fire for one tick,
+            // defend, resume) makes six changes in 5 to 10 s, which flagged
+            // most fights; decisions flipping every few ticks make six in
+            // well under 2 s.
+            flip_window_s: 2.,
             oscillation_reversals: 8,
             oscillation_window_s: 2.,
             oscillation_swing: 0.5,
@@ -418,6 +423,13 @@ impl<'a> Detector<'a> {
             kind::WEAPON_LAUNCH => {
                 if let Some(p) = e.id(field::PROJECTILE) {
                     self.launches.insert(p, tick);
+                }
+            }
+            // A decoy is the missile's outcome, already in the shot table,
+            // not a suspect: its track loss is not an early loss.
+            kind::WEAPON_DECOYED => {
+                if let Some(p) = e.id(field::PROJECTILE) {
+                    self.launches.remove(&p);
                 }
             }
             kind::WEAPON_TRACK_LOST => {

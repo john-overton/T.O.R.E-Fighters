@@ -99,6 +99,9 @@ never lands; or the same radio line repeats three times in five seconds.
 | Two wingmen breaking out of formation at the same time turned into each other and collided (`ai-mission-hold-10v10`, `ai-mission-self-defense-10v10`) | Each scored its escape assuming the other would fly straight on; and for two aircraft already 50 ft apart every heading away scored the same, so straight ahead won | `b43c9b3`: a lower-ID aircraft that is itself breaking out is predicted along its chosen escape (repositioning aircraft already yield to lower IDs this way), and an aircraft already within 220 ft is scored on clearance from 2 s ahead (both fitted, in the AI spec). The formation diving-reversal test still passes |
 | The in-flight activity line kept saying "Friendly 1-2: Defending" for an aircraft destroyed a moment later | Changes inside the line's 2-second interval were dropped, including "Destroyed" | `04b0657`: a later change of the aircraft the line already names is posted as soon as the interval allows |
 
+| A wingman flipped from missile defense to its previous task and straight back when a radar warning lapsed and it could see the missile | The first visual sample cannot judge a missile's motion, so the threat vanished for one tick; and round one's sticky "was aimed at us" memory made a passing missile a stale threat again the moment it left sight | `1c5f013`: a missile warned of as aimed at the aircraft last tick counts as incoming at the switch to eyesight, and seen missiles are judged afresh (fitted) |
+| A fighter at the edge of its missile's zone swapped between the missile tactic and gun tracking every few ticks for seconds (30 activity changes in 3 s) | Its own stick input moved the body-relative zone test each time; the motion ignored B42's two-second "no suitable station" retry that the weapon service already honours | `6e81213`: once no store resolves, gun tracking holds until the retry ends (spec-derived from B42, recorded in the AI spec; `ai-regress-envelope-edge-flap`) |
+
 Supporting commit: `17144d1` adds the per-tick checks and the lane's scenarios.
 
 ### Golden fingerprints
@@ -108,10 +111,40 @@ fingerprints (compared on Apple silicon only) will fail there until their
 values are updated from the macOS CI log: `ai/mission-engagement`,
 `combat/guided-missiles` and `combat/player-countermeasures`. On Linux, after
 the merge with the menus lane (whose stores fix also moves
-`combat/guided-missiles`), the totals are `0xd84f7b64adbdab50`,
-`0x8d34dbfaca1b5ab8` and `0x24800010e49363c6` (macOS values may differ in the
-last bits). The formation and activity-line fixes move none. They were not
+`combat/guided-missiles`) and the third round's threat and weapon-retry fixes,
+the totals are `0xfc8ffd6c7bdf65e9`, `0x614fbe4f273d1e9b` and
+`0x7bdb41a533c2ec1b` (macOS values may differ in the last bits). The
+formation and activity-line fixes move none. They were not
 edited here.
+
+### Recording summary churn flags (third round, 2026-09-29)
+
+The replay lane's recording summaries flagged `ai_flipping` 89 times,
+`track_lost_early` 69 times (48 on its first count) and `control_oscillation`
+6 times on its recordings. Classified on the lane's own fight recordings:
+
+- **`track_lost_early`: every one was a missile decoyed by chaff or flares**
+  within 2 s of launch, an intended outcome (the decoy rule in
+  [countermeasures](../spec/countermeasures.md)) already shown in the shot
+  table. The summary rule was wrong; `0ba94aa` stops counting decoys.
+- **`ai_flipping`: about two thirds were a dogfight's ordinary progression**
+  (pursue, fire with a one-tick Attacking, defend, resume): six changes in
+  5 to 10 s. The rest were real: decisions swapping every few ticks (the two
+  AI fixes above). `0ba94aa` narrows the window from 10 s to 2 s, which still
+  catches every real case (six changes in 0.1 to 1.6 s).
+- **`control_oscillation`** came with the defense flips and mostly went with
+  them.
+
+Re-recording the replay lane's 84 recording scenarios with all fixes and the
+new rule: `ai_flipping` 1 (a furball with three missiles in two seconds,
+reasonable transitions), `track_lost_early` 0, `control_oscillation` 2 (one
+aircraft pulling at its G limit in pursuit, both recordings of the same run).
+The rule alone, on the old recordings, gives 20, 0 and 6.
+
+Still open: a fighter whose chosen store alternates between its gun and a
+missile (not "no store") can still swap maneuvers every few ticks
+(`ai-pair-a4e-vs-mig29`, Enemy 1-2 at 48 s). B42 gives a retry only for "no
+suitable station", so a hold here would be a new rule.
 
 ## Found, not fixed
 
@@ -140,6 +173,11 @@ them (see `KNOWN_ANOMALIES` in the scenario file).
   envelope is 2.2 G. See "Needs a decision". Other runs can show the same
   class; the failing scenario can change with any behaviour change because the
   fights are chaotic.
+- After the third round's fixes changed the fights' paths, the same terrain
+  class also shows in `ai-big-x31-vs-faxx-researched` (an FA-XX at 958 kt) and
+  `ai-long-15v15` (an F/A-18D searching level at 3,000 ft, 446 kt, into a
+  hillside rising about 14 degrees; the floor gave 1.3 s of warning). Which
+  runs hit this class moves with any behaviour change.
 - `ai-takeoff-nsk-a5-f22`, `-f22n`, `-faxx`: at Nuchon Ni the F-22-family
   wingman chases its leader (which the test harness cruises at about 890 kt,
   3,000 ft above the ground) at 1,065 kt, 1,300 ft above rising ground, and
@@ -159,13 +197,10 @@ them (see `KNOWN_ANOMALIES` in the scenario file).
 
 Behaviour the specs do not define, with the evidence. None of these were changed.
 
-1. **Dithering at a missile's employment-zone edge.** A fighter whose missile
-   is at the edge of its zone flips every one to five ticks between its chosen
-   maneuver (for example a 45 degree dive) and gun lead tracking, for up to
-   about 3 seconds (`ai-fight-8v8-default`, Friendly 2-3 at 20.4 to 21.5 s;
-   `ai-pair-a4e-vs-mig29`). The zone test uses the body attitude, which the
-   previous tick's opposite stick input just moved. Hysteresis or a minimum
-   commitment time would stop it; the spec has neither.
+1. **Dithering between gun and missile.** The "no store" case is fixed from
+   B42's retry (above). A fighter whose chosen store alternates between its
+   gun and a missile at the zone edge still swaps maneuvers every few ticks
+   (`ai-pair-a4e-vs-mig29`); B42 has no retry for a change of store.
 2. **Notch side on a head-on shot.** The notch turns 90 degrees toward the
    smaller turn with a tie break; with the radar source dead ahead the side
    flipped after one second (heading 288, then 108), wasting the roll-in.
@@ -242,6 +277,17 @@ Windowed captures (this lane is headless only), theater layout variants
 (the `~` maps; only the 16 base theaters), Windows and macOS, and a retail
 comparison.
 
+### Third round (2026-09-29, after the merge with the replay lane)
+
+Second read of the specs for the two round-two items: the airborne friendly
+wings in a ground start "keep the airborne launch" ([Quick
+Mission](../spec/quick-mission-menu.md#player-ground-start)), which places
+them relative to the player's heading, here the runway heading; with no route
+they hold it (B48), so leaving the map from Key West is what the specs say and
+stays a decision (item 5). The 1,074 ft strips are the documented runway
+fallback fields, whose placement is specified but whose usable length for a
+given aircraft is not (item 11). Neither was changed.
+
 ### Second round (2026-09-28, after the merge with the menus lane)
 
 The merged branch passed 445 of 446 (the known F-22N failure). Investigated
@@ -254,3 +300,6 @@ pairs parked (in 618 to 816 s), both 30-minute 15 v 15 runs abroad were clean,
 and the 138 new scenarios passed except the known failures above. Final run
 of the whole lane on the merged branch: 577 of 584 passed in 29 minutes at
 `--jobs 6`; the 7 failures are exactly the Known failures listed above.
+Third-round final run (with the replay and menus merges and the round-three
+fixes): 576 of 585 passed in 28 minutes; the 9 failures are the Known failures above (the
+terrain look-ahead class, the two short strips and Key West).

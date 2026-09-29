@@ -779,7 +779,7 @@ fn anomalies_are_found_with_their_numbers() {
                     .with(field::TO, "PATROL"),
             );
         }
-        if (2_000..2_600).contains(&tick) && tick.is_multiple_of(100) {
+        if (2_000..2_120).contains(&tick) && tick.is_multiple_of(20) {
             frame.events.push(
                 Event::new(kind::AI_TARGET)
                     .with_subject(2)
@@ -800,6 +800,27 @@ fn anomalies_are_found_with_their_numbers() {
                     .with(field::PROJECTILE, Value::Id(1 << 24))
                     .with(field::REASON, "notch"),
             ),
+            // A second shot is decoyed early: an outcome, not a suspect.
+            3_100 => frame.events.push(
+                Event::new(kind::WEAPON_LAUNCH)
+                    .with_subject(2)
+                    .with_object(0)
+                    .with(field::PROJECTILE, Value::Id((1 << 24) + 1)),
+            ),
+            3_150 => {
+                frame.events.push(
+                    Event::new(kind::WEAPON_DECOYED)
+                        .with_subject(2)
+                        .with(field::PROJECTILE, Value::Id((1 << 24) + 1)),
+                );
+                frame.events.push(
+                    Event::new(kind::WEAPON_TRACK_LOST)
+                        .with_subject(2)
+                        .with_object(0)
+                        .with(field::PROJECTILE, Value::Id((1 << 24) + 1))
+                        .with(field::REASON, "decoyed by chaff"),
+                );
+            }
             4_000 => frame.events.push(
                 Event::new(kind::COMMS_DELIVERY)
                     .with_subject(1)
@@ -904,7 +925,9 @@ fn anomalies_are_found_with_their_numbers() {
     assert_eq!(stuck[0].tick, 1_000);
     assert!(stuck[0].detail.contains("PATROL"));
     assert_eq!(find(kinds::AI_FLIPPING).len(), 1);
-    assert_eq!(find(kinds::TRACK_LOST_EARLY)[0].tick, 3_060);
+    let lost = find(kinds::TRACK_LOST_EARLY);
+    assert_eq!(lost.len(), 1, "a decoy is not an early loss: {lost:?}");
+    assert_eq!(lost[0].tick, 3_060);
     assert_eq!(find(kinds::ORDER_REJECTED)[0].tick, 4_000);
     assert_eq!(find(kinds::CALL_DROPPED)[0].tick, 4_100);
     assert_eq!(find(kinds::CALL_SUPPRESSED)[0].tick, 4_200);
