@@ -888,9 +888,10 @@ pub fn fuzz(
 /// and clicks and must neither panic nor draw a blank picture.
 pub fn fuzz_screens(
     data: &BTreeMap<String, Vec<u8>>,
-    sprites: &BTreeMap<String, Sprite>,
+    menu: &mut crate::menu::Menu,
 ) -> AppResult<()> {
-    let font = Airframe::load(data, AircraftId::F18)?.font;
+    let hornet = Airframe::load(data, AircraftId::F18)?;
+    let font = &hornet.font;
     let mut problems: Vec<String> = Vec::new();
     let mut pixels = vec![0u8; WIDTH * HEIGHT * 4];
     let mut events = 0usize;
@@ -903,6 +904,79 @@ pub fn fuzz_screens(
             .len()
             < 6
     };
+    // The flight menu (Escape), keyboard help, map and cheats, with the
+    // flight's own key handling.
+    for seed in 1..=3u64 {
+        let mut rng = Rng(0x7777_1234_abcd_ef01 ^ seed);
+        let mut ui = crate::flight_ui::FlightUi::default();
+        ui.menu = false;
+        for step in 0..6000 {
+            events += 1;
+            let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                match rng.below(8) {
+                    0..=3 => {
+                        ui.key(
+                            FUZZ_KEYS[rng.below(FUZZ_KEYS.len())],
+                            rng.below(4) == 0,
+                            rng.below(6) == 0,
+                            rng.below(8) == 0,
+                            &hornet.flight_menu,
+                        );
+                    }
+                    4 | 5 => {
+                        let down = rng.below(2) == 0;
+                        ui.pointer(
+                            &hornet.flight_menu,
+                            Some((rng.below(640) as f64, rng.below(480) as f64)),
+                            down,
+                        );
+                    }
+                    6 => {
+                        ui.key("Escape", false, false, false, &hornet.flight_menu);
+                    }
+                    _ => ui.cancel_press(),
+                }
+                if step % 40 == 0 {
+                    ui.draw(&mut pixels, font, &hornet.flight_menu);
+                }
+            }))
+            .is_ok();
+            if !ok {
+                problems.push(format!("flight menu seed {seed} step {step}: panicked"));
+                break;
+            }
+        }
+    }
+    // The main menu and its bars.
+    let mut rng = Rng(0x0fed_cba9_8765_4321);
+    for step in 0..6000 {
+        events += 1;
+        let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            match rng.below(8) {
+                0..=2 => {
+                    menu.state
+                        .key(FUZZ_KEYS[rng.below(FUZZ_KEYS.len())], rng.below(4) == 0);
+                }
+                3 | 4 => {
+                    menu.state
+                        .pointer(Some((rng.below(640) as f64, rng.below(480) as f64)));
+                }
+                5 => menu.state.down(),
+                6 => {
+                    menu.state.up();
+                }
+                _ => menu.state.cancel(),
+            }
+            if step % 40 == 0 {
+                menu.render();
+            }
+        }))
+        .is_ok();
+        if !ok {
+            problems.push(format!("main menu step {step}: panicked"));
+            break;
+        }
+    }
     for seed in 1..=4u64 {
         let mut rng = Rng(0x1234_5678_9abc_def1 ^ seed);
         let point = |rng: &mut Rng| Some((rng.below(640) as f64, rng.below(480) as f64));
@@ -928,7 +1002,7 @@ pub fn fuzz_screens(
                     }
                 }
                 if step % 30 == 0 {
-                    graphics.draw(&mut pixels, &font);
+                    graphics.draw(&mut pixels, font);
                 }
             }))
             .is_ok();
@@ -937,7 +1011,7 @@ pub fn fuzz_screens(
                 break;
             }
         }
-        graphics.draw(&mut pixels, &font);
+        graphics.draw(&mut pixels, font);
         if blank(&pixels) {
             problems.push(format!("graphics screen seed {seed}: blank after input"));
         }
@@ -966,7 +1040,7 @@ pub fn fuzz_screens(
                 }
                 if step % 30 == 0 {
                     sound.animate();
-                    sound.draw(&mut pixels, sprites);
+                    sound.draw(&mut pixels, &menu.sprites);
                 }
             }))
             .is_ok();
@@ -1005,7 +1079,7 @@ pub fn fuzz_screens(
                     }
                 }
                 if step % 40 == 0 {
-                    controls.draw(&mut pixels, &font);
+                    controls.draw(&mut pixels, font);
                 }
             }))
             .is_ok();
@@ -1015,7 +1089,7 @@ pub fn fuzz_screens(
             }
         }
         controls.cancel_capture();
-        controls.draw(&mut pixels, &font);
+        controls.draw(&mut pixels, font);
         if blank(&pixels) {
             problems.push(format!("controls screen seed {seed}: blank after input"));
         }
@@ -1041,7 +1115,7 @@ pub fn fuzz_screens(
                     }
                 }
                 if step % 30 == 0 {
-                    replays.draw(&mut pixels, &font);
+                    replays.draw(&mut pixels, font);
                 }
             }))
             .is_ok();

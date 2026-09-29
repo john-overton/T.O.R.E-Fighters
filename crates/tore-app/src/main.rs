@@ -8459,7 +8459,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         if wanted("render") {
             let resources = assets.theater_resources.clone();
             let options = assets.creator_options.clone();
-            let menu = Menu::new(assets, Some("CHOOSEV"))?;
+            let mut menu = Menu::new(assets, Some("CHOOSEV"))?;
             quick_mission::matrix::render(
                 &resources,
                 options.clone(),
@@ -8467,7 +8467,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 &world,
             )?;
             quick_mission::matrix::fuzz(&resources, options, &menu.quick_sprites, &world)?;
-            quick_mission::matrix::fuzz_screens(&resources, &menu.sprites)?;
+            quick_mission::matrix::fuzz_screens(&resources, &mut menu)?;
         }
         return Ok(Outcome::Done);
     }
