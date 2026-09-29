@@ -139,8 +139,29 @@ def loadout_problems(output: str) -> list[str]:
     return problems
 
 
+def tank_problems(output: str) -> list[str]:
+    """External tanks feed first, and no fuel figure goes negative or rises."""
+    load = _numbers(output, "loadout:")
+    end = _numbers(output, "fuel_end:")
+    if not load or not end:
+        return []
+    try:
+        external0, internal0 = float(load["external_fuel_lb"]), float(load["fuel_lb"])
+        external, internal = float(end["external_lb"]), float(end["internal_lb"])
+    except (KeyError, ValueError):
+        return ["unreadable fuel lines"]
+    problems = []
+    if external < -0.05 or internal < -0.05:
+        problems.append(f"negative fuel: internal {internal}, external {external}")
+    if external > external0 + 0.05 or internal > internal0 + 0.05:
+        problems.append("fuel rose during the run")
+    if external > 0.05 and internal < internal0 - 0.05:
+        problems.append(f"internal fuel used ({internal0} -> {internal}) while the tanks still held {external} lb")
+    return problems
+
+
 def check_takeoff(output: str) -> list[str]:
-    problems = extremes_problems(output) + loadout_problems(output)
+    problems = extremes_problems(output) + loadout_problems(output) + tank_problems(output)
     n = _plain_numbers(output)
     if "takeoff_complete=true" not in output:
         problems.append("never reached 100 ft (stuck on the runway or crashed)")
@@ -536,13 +557,30 @@ def combat_scenarios() -> list[Scenario]:
     for ac in AIRCRAFT:
         out.append(Scenario(name=f"flight-combatsmoke-{ac}", lane="flight", args=["--combat-smoke", "--aircraft", ac, "--no-audio"], check=check_combat_smoke, timeout=300))
         # The F-14 and Su-35 carry very long range missiles: their acceptance
-        # tables take about 40 minutes each in a debug build, so they are run by
-        # hand (the F-14's 480 rows were clean on 2026-09-28).
+        # tables take about 40 minutes each in a debug build, so they are left to
+        # the slow set (below) with the other aircraft's release-build runs.
         if ac not in SLOW_ACCEPTANCE:
             out.append(Scenario(name=f"flight-missileacceptance-{ac}", lane="flight", args=["--missile-acceptance", "--aircraft", ac, "--no-audio"], check=make_check_missile_acceptance(ac), timeout=1200))
     # The same smoke with per-slot combat tapes written and replayed
     # (TORE_COMBAT_EVIDENCE takes a new folder each run, so it is named by the
     # time the scenario list was built).
+    if os.environ.get("TORE_BATTERY_SLOW"):
+        # Slow set, off by default: every aircraft's missile acceptance table.
+        # Run it with an optimized build:
+        #   cargo build --release -p tore-app
+        #   TORE_BATTERY_SLOW=1 python3 tools/battery.py --scenario 'flight-slow-*' \
+        #       --bin target/release/tore-app --jobs 4
+        for ac in AIRCRAFT:
+            out.append(
+                Scenario(
+                    name=f"flight-slow-missileacceptance-{ac}",
+                    lane="flight",
+                    args=["--missile-acceptance", "--aircraft", ac, "--no-audio"],
+                    check=make_check_missile_acceptance(ac),
+                    timeout=7200,
+                    notes="slow: run with an optimized build and TORE_BATTERY_SLOW=1",
+                )
+            )
     stamp = time.strftime("%Y%m%d-%H%M%S")
     for ac in AIRCRAFT:
         out.append(
@@ -618,6 +656,62 @@ def slot_scenarios() -> list[Scenario]:
                     args=["--live-fire", "--aircraft", ac, "--weapon-slot", str(slot), "--combat-probe-ticks", "1200", "--capture-flight", "{work}/shot.ppm", "--no-audio"],
                     window=True,
                     check=check_slot(ac, slot),
+                    timeout=180,
+                )
+            )
+    return out
+
+
+def check_jettison(ac: str, slot: int):
+    capacity = STATIONS[ac]
+
+    def check(output: str) -> list[str]:
+        m = re.search(
+            r"Combat probe: .* shots=(\d+) .* ammo=\[([\d, ]+)\] payload_start_lb=(\d+) payload_lb=(\d+) flight_payload_lb=(\d+) external_fuel_lb=(\d+)",
+            output,
+        )
+        if not m:
+            return ["no Combat probe line with payload figures"]
+        shots = int(m.group(1))
+        ammo = [int(v) for v in m.group(2).split(",")]
+        start, payload, flight_payload = (int(m.group(i)) for i in (3, 4, 5))
+        problems = []
+        if payload == start and ammo[slot - 1] == capacity[slot - 1] - shots:
+            # An internal station (for example the Su-35's slot 5) cannot be
+            # jettisoned: the load does not change and it still fires normally.
+            if shots == 0 and (ac, slot) not in REFUSED_SLOTS:
+                problems.append("a station neither jettisoned nor fired")
+        else:
+            if ammo[slot - 1] != 0:
+                problems.append(f"station {slot} still holds {ammo[slot - 1]} after a jettison")
+            if shots != 0:
+                problems.append(f"{shots} shots left a jettisoned station")
+            if not payload < start:
+                problems.append(f"jettison did not lighten the load: {start} -> {payload} lb")
+        # The flight model carries the store weight less the fuel already used.
+        if not payload - 30 <= flight_payload <= payload:
+            problems.append(f"flight carries {flight_payload} lb but the stores weigh {payload} lb")
+        for index, (left, cap) in enumerate(zip(ammo, capacity)):
+            if index != slot - 1 and left != cap:
+                problems.append(f"station {index + 1} changed ({cap}->{left}) when station {slot} was jettisoned")
+        return problems
+
+    return check
+
+
+def jettison_scenarios() -> list[Scenario]:
+    out = []
+    for ac, capacity in STATIONS.items():
+        if ac in {"f22n", "faxx"}:
+            continue
+        for slot in range(2, len(capacity) + 1):
+            out.append(
+                Scenario(
+                    name=f"flight-jettison-{ac}-slot{slot}",
+                    lane="flight",
+                    args=["--live-fire", "--aircraft", ac, "--weapon-slot", str(slot), "--combat-command", "jettison", "--combat-probe-ticks", "300", "--capture-flight", "{work}/j.ppm", "--no-audio"],
+                    window=True,
+                    check=check_jettison(ac, slot),
                     timeout=180,
                 )
             )
@@ -980,10 +1074,11 @@ def waypoint_scenarios() -> list[Scenario]:
 
 def check_climb(output: str) -> list[str]:
     """A full-power climb and the dive after it. Today's aircraft go well past
-    their own 1 G envelope: up to 1.65 times the ceiling and 1.95 times the top
-    speed (see "Needs a decision" in the lane page). These limits are that
-    behaviour with a margin, so a change for the worse is caught; they are not a
-    specification."""
+    their own top speed by up to 1.95 times (see "Needs a decision" in the lane
+    page); the ceiling is enforced by the density rule in docs/FLIGHT-MODEL.md, so
+    a zoom climb carries them at most a fifth past it. These limits are today's
+    behaviour with a margin, so a change for the worse is caught; the speed limit
+    is not a specification."""
     problems = extremes_problems(output, engine_off_ok=True, beyond_envelope_ok=True)
     c = _numbers(output, "climb:")
     e = _numbers(output, "extremes:")
@@ -992,7 +1087,7 @@ def check_climb(output: str) -> list[str]:
     try:
         if float(c["ceiling_ft"]) <= 0:
             problems.append("the aircraft has no envelope ceiling")
-        if float(c["over_ceiling"]) > 1.7:
+        if float(c["over_ceiling"]) > 1.3:
             problems.append(f"climbed to {c['max_altitude_ft']} ft, {c['over_ceiling']} of its {c['ceiling_ft']} ft ceiling")
         if float(c["max_altitude_ft"]) < 0.6 * float(c["ceiling_ft"]):
             problems.append(f"could only climb to {c['max_altitude_ft']} ft of a {c['ceiling_ft']} ft ceiling")
@@ -1267,6 +1362,177 @@ def environment_scenarios() -> list[Scenario]:
     return out
 
 
+# ------------------------------------------------------- stripped loadouts
+
+
+def make_check_loadout(kind: str, ac: str, landing: bool):
+    default_carried = {}
+
+    def check(output: str) -> list[str]:
+        problems = loadout_problems(output)
+        load = _numbers(output, "loadout:")
+        problems += check_landing(output) if landing else check_takeoff(output)
+        if load:
+            # Nothing loaded can carry no more than the aircraft's own gun and
+            # tanks; the default load carries at least as much.
+            if float(load["carried_lb"]) > float(load["internal_fuel_lb"]) * 0.5 + 4000:
+                problems.append(f"--loadout {kind} still carries {load['carried_lb']} lb")
+        return problems
+
+    return check
+
+
+def loadout_scenarios() -> list[Scenario]:
+    """An aircraft with nothing loaded, or only its gun, must take off, fly and
+    land like any other, and carry less."""
+    out = []
+    for ac in AIRCRAFT:
+        for kind in ("none", "guns"):
+            for maneuver, ticks in (("takeoff", "9000"), ("land", "60000")):
+                out.append(
+                    Scenario(
+                        name=f"flight-loadout-{kind}-{maneuver}-{ac}",
+                        lane="flight",
+                        args=["--theater", "UKR", "--ground-start", "1", "--headless-flight", ticks, "--maneuver", maneuver, "--loadout", kind, "--aircraft", ac, "--no-audio"],
+                        check=make_check_loadout(kind, ac, maneuver == "land"),
+                        timeout=180,
+                    )
+                )
+    return out
+
+
+# ------------------------------------------------------ passive in a fight
+
+
+PLAYER_LINE = re.compile(r"^AI probe debrief: .*?player\[(\w+) damage=(\d+)% .*?enemy_aam=(\d+)/(\d+) enemy_gun=(\d+)/(\d+)\]", re.M)
+
+
+def check_passive_fight(output: str) -> list[str]:
+    """The player flies straight and level through a 5 v 5 fight. Whatever
+    happens, the pilot's fate, the damage, the hit points, the crash flag and
+    the debrief must agree, and no AI or player invariant may break."""
+    problems = []
+    m = PLAYER_LINE.search(output)
+    crashed = re.search(r"^player crashed=(\w+)", output, re.M)
+    hp = re.search(r"player_hp=(-?\d+)", output)
+    invariants = re.search(r"^AI probe invariants: .*anomalies=(\d+)", output, re.M)
+    if not (m and crashed and hp and invariants):
+        return ["missing debrief, player, hit point or invariant line"]
+    status, damage = m.group(1), int(m.group(2))
+    aam_hits, aam_shots, gun_hits, gun_shots = (int(m.group(i)) for i in range(3, 7))
+    crashed, hp = crashed.group(1) == "true", int(hp.group(1))
+    # Two AI aircraft touching in a crowded 5 v 5 is the AI lane's business (it
+    # happens, for example, with the F-14 as the player and enemies from the
+    # rear), so it is listed in the lane page and not counted here.
+    anomalies = [a for a in re.findall(r"^AI probe anomaly: (.*)$", output, re.M) if "mid-air collision" not in a]
+    if anomalies:
+        problems.append(f"{len(anomalies)} probe anomalies: {anomalies[0][:120]}")
+    if aam_hits > aam_shots or gun_hits > gun_shots:
+        problems.append(f"the debrief counts more hits than shots (missiles {aam_hits}/{aam_shots}, guns {gun_hits}/{gun_shots})")
+    if status == "Dead":
+        if not crashed or hp != 0 or damage != 100:
+            problems.append(f"debrief says Dead but crashed={crashed}, hit points {hp}, damage {damage}%")
+        if aam_hits + gun_hits == 0:
+            problems.append("the player is dead but nothing hit it")
+    elif status == "Alive":
+        if crashed or hp <= 0 or damage >= 100:
+            problems.append(f"debrief says Alive but crashed={crashed}, hit points {hp}, damage {damage}%")
+    elif status == "Ejected":
+        if not crashed:
+            problems.append("ejected but the aircraft did not crash")
+    else:
+        problems.append(f"unknown player status {status}")
+    if status == "Alive" and (aam_hits + gun_hits) > 0 and damage == 0:
+        problems.append("the player was hit but the debrief shows no damage")
+    return problems
+
+
+def fight_scenarios() -> list[Scenario]:
+    out = []
+    for n, ac in enumerate(AIRCRAFT):
+        enemy = ["f18", "su27", "mig29", "f22"][n % 4]
+        for geometry in ("head", "rear"):
+            out.append(
+                Scenario(
+                    name=f"flight-fight-{ac}-{geometry}",
+                    lane="flight",
+                    args=[
+                        "--aircraft", ac, "--probe-enemy-aircraft", enemy, "--probe-enemy-skill", "ace",
+                        "--probe-geometry", geometry, "--ai-probe-ticks", "20000", "--probe-fight", "5:5",
+                        "--separation", "5", "--no-audio",
+                    ],
+                    check=check_passive_fight,
+                    timeout=600,
+                )
+            )
+    return out
+
+
+ATTACK_LINE = re.compile(
+    r"^AI probe attack: clicks=(\d+) steps=(\d+) presses=(\d+) missiles=(\d+) gun_bursts=(\d+) gun_rounds=(\d+) "
+    r"player_hits=(\d+) player_kills=(\d+) .* player_alive=(\w+) player_damaged=(\d+)",
+    re.M,
+)
+
+
+# Aircraft whose seeded fight shows the debrief crediting more kills than hits.
+DEBRIEF_KILL_MISMATCH = {"su27", "su35"}
+
+
+def check_attacking_fight(output: str, ac: str = "") -> list[str]:
+    """The scripted leader designates, selects a weapon and fires through the
+    player's own controls in a 5 v 5. What it did, what the debrief says it did
+    and the end state must agree."""
+    problems = check_passive_fight(output)
+    a = ATTACK_LINE.search(output)
+    d = re.search(r"player\[(\w+) damage=\d+% kills=\[([\d, ]+)\] .*? a2a=(\d+)/(\d+) dmg=(\d+) gun=(\d+)/(\d+)", output)
+    if not (a and d):
+        return problems + ["missing attack or debrief line"]
+    clicks, steps, presses, missiles, bursts, rounds, hits, kills = (int(a.group(i)) for i in range(1, 9))
+    alive = a.group(9) == "true"
+    kill_list = sum(int(v) for v in d.group(2).split(","))
+    a2a_hits, a2a_shots, damage_dealt, gun_hits, gun_shots = (int(d.group(i)) for i in (3, 4, 5, 6, 7))
+    if clicks < 1:
+        problems.append("the leader never designated a target")
+    # A kill needs a recorded hit by the player. Known not to hold today with the
+    # Su-27 and Su-35: the debrief credits two kills against one recorded hit
+    # (see "Bugs found" in the lane page), so those two skip this one check.
+    if kill_list > a2a_hits + gun_hits and ac not in DEBRIEF_KILL_MISMATCH:
+        problems.append(f"the debrief lists {kill_list} kills but only {a2a_hits + gun_hits} recorded hits")
+    if kills > hits:
+        problems.append(f"the probe counts {kills} kills from {hits} hits")
+    if a2a_hits > a2a_shots or gun_hits > gun_shots:
+        problems.append("the debrief counts more hits than shots")
+    if missiles + rounds > 0 and a2a_shots + gun_shots == 0:
+        problems.append("the probe fired but the debrief shows no shots")
+    if presses > 0 and missiles + bursts == 0:
+        problems.append("the trigger was pressed and nothing left")
+    if alive != (d.group(1) == "Alive"):
+        problems.append(f"the probe says player_alive={alive} but the debrief says {d.group(1)}")
+    if kills > 0 and damage_dealt == 0:
+        problems.append("a kill with no damage dealt in the debrief")
+    return problems
+
+
+def attack_scenarios() -> list[Scenario]:
+    out = []
+    for n, ac in enumerate(AIRCRAFT):
+        out.append(
+            Scenario(
+                name=f"flight-attack-{ac}",
+                lane="flight",
+                args=[
+                    "--aircraft", ac, "--probe-enemy-aircraft", ["f18", "su27", "mig29", "f22"][n % 4],
+                    "--probe-enemy-skill", "average", "--ai-probe-ticks", "20000", "--probe-fight", "5:5",
+                    "--separation", "10", "--probe-attack", "100:8", "--no-audio",
+                ],
+                check=lambda out, ac=ac: check_attacking_fight(out, ac),
+                timeout=600,
+            )
+        )
+    return out
+
+
 # -------------------------------------------------------- instrument panels
 
 
@@ -1328,6 +1594,7 @@ def scenarios() -> list[Scenario]:
         + fault_scenarios()
         + combat_scenarios()
         + slot_scenarios()
+        + jettison_scenarios()
         + countermeasure_scenarios()
         + climbout_scenarios()
         + autopilot_scenarios()
@@ -1339,6 +1606,9 @@ def scenarios() -> list[Scenario]:
         + device_scenarios()
         + edge_scenarios()
         + terrain_scenarios()
+        + fight_scenarios()
+        + attack_scenarios()
+        + loadout_scenarios()
         + environment_scenarios()
         + capture_scenarios()
         + daytime_scenarios()

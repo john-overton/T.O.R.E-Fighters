@@ -4687,6 +4687,32 @@ impl ApplicationHandler for App {
         event_loop.set_control_flow(ControlFlow::WaitUntil(next));
     }
 }
+/// The combat state for a run: the PT default load (or the range's), or the Load
+/// Ordnance page's edits without the page: every store off (`none`), or every
+/// external store off with the internal gun kept (`guns`).
+fn build_combat(
+    hornet: &aircraft::Airframe,
+    resources: &std::collections::BTreeMap<String, Vec<u8>>,
+    live_fire: bool,
+    stripped: Option<&str>,
+) -> AppResult<combat::Combat> {
+    let Some(choice) = stripped else {
+        return combat::Combat::new(hornet, resources, live_fire);
+    };
+    let mut load = tore_sim::combat::loadout::Loadout::new(&hornet.profile, |name| {
+        resources
+            .get(name)
+            .cloned()
+            .ok_or_else(|| std::io::Error::other(format!("missing loadout resource {name}")))
+    })?;
+    if choice == "none" {
+        load.quantities.fill(0);
+    } else {
+        load.restrict_to_guns();
+    }
+    combat::Combat::with_loadout(hornet, resources, &load)
+}
+
 /// The `--maneuver devices` script: each device is set down one after another,
 /// then up again, so the run shows every travel.
 fn device_schedule(tick: u64) -> Option<Vec<flight::PilotCommand>> {
@@ -8748,12 +8774,23 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             && let Some(object) = ground_object(world)?
         {
             if replay_frames.is_none() {
-                let load = combat::Combat::new(&hornet, &assets.theater_resources, false)?;
-                state.set_payload(load.state.payload_lbs())?;
-                state.systems = tore_sim::aircraft_systems::Systems::new(
-                    load.state.configuration().engines,
-                    load.state.external_fuel_lbs(),
-                );
+                let mut load = build_combat(
+                    &hornet,
+                    &assets.theater_resources,
+                    false,
+                    stripped_loadout.as_deref(),
+                )?;
+                if stripped_loadout.is_some() {
+                    // A stripped load only takes effect on a reset, which also
+                    // sets the payload and the fuel systems from it.
+                    load.reset(&mut state)?;
+                } else {
+                    state.set_payload(load.state.payload_lbs())?;
+                    state.systems = tore_sim::aircraft_systems::Systems::new(
+                        load.state.configuration().engines,
+                        load.state.external_fuel_lbs(),
+                    );
+                }
             }
             quick_mission::apply_ground_start(world, &mut state, object)?;
             println!(
@@ -8767,7 +8804,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 use tore_sim::models::FlightModel;
                 let mass = state.model().configuration().mass;
                 println!(
-                    "loadout: empty_lb={:.0} internal_fuel_lb={:.0} fuel_lb={:.0} carried_lb={:.0} gross_lb={:.0} max_takeoff_lb={:.0}",
+                    "loadout: external_fuel_lb={:.0} empty_lb={:.0} internal_fuel_lb={:.0} fuel_lb={:.0} carried_lb={:.0} gross_lb={:.0} max_takeoff_lb={:.0}",
+                    state.systems.external_lbs(),
                     mass.empty_lbs,
                     mass.internal_fuel_lbs,
                     state.fuel,
@@ -8954,6 +8992,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.yaw.to_degrees().rem_euclid(360.)
         );
         println!("{}", watch.report());
+        println!(
+            "fuel_end: internal_lb={:.1} external_lb={:.1}",
+            state.fuel,
+            state.systems.external_lbs()
+        );
         if !flight_faults.is_empty() {
             println!(
                 "systems: fatal={} pilot_dead={} engine={} {}",
@@ -9626,24 +9669,12 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 .into(),
         );
     }
-    let mut combat = match &stripped_loadout {
-        // The Load Ordnance page's edits without the page: every store off, or
-        // every external store off with the internal gun kept.
-        Some(choice) => {
-            let mut load = tore_sim::combat::loadout::Loadout::new(&hornet.profile, |name| {
-                theater_resources.get(name).cloned().ok_or_else(|| {
-                    std::io::Error::other(format!("missing loadout resource {name}"))
-                })
-            })?;
-            if choice == "none" {
-                load.quantities.fill(0);
-            } else {
-                load.restrict_to_guns();
-            }
-            combat::Combat::with_loadout(&hornet, &theater_resources, &load)?
-        }
-        None => combat::Combat::new(&hornet, &theater_resources, live_fire)?,
-    };
+    let mut combat = build_combat(
+        &hornet,
+        &theater_resources,
+        live_fire,
+        stripped_loadout.as_deref(),
+    )?;
     combat.add_airport_targets(&world.airport_scene)?;
     if let Some(ref path) = record_combat {
         combat.recorder = Some(combat_tape::Recorder::new(
@@ -9765,6 +9796,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         combat.step(&mut flight, &world)?;
         combat.advance_render(&flight, None);
     }
+    let payload_start = combat.state.payload_lbs();
     for command in combat_commands {
         combat.command(command, combat::launcher(&flight));
     }
@@ -9843,13 +9875,17 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         );
         combat.cancel();
         println!(
-            "Combat probe: {} shots={} hits={} kills={} active={} ammo={:?}",
+            "Combat probe: {} shots={} hits={} kills={} active={} ammo={:?} payload_start_lb={:.0} payload_lb={:.0} flight_payload_lb={:.0} external_fuel_lb={:.0}",
             hornet.profile.name,
             combat.state.shots,
             combat.state.hits,
             combat.state.kills,
             combat.state.projectiles.len(),
-            combat.state.ammo
+            combat.state.ammo,
+            payload_start,
+            combat.state.payload_lbs(),
+            flight.carried_lbs(),
+            flight.systems.external_lbs()
         );
     }
     if let Some([bearing, elevation, range]) = hud_target_preview {

@@ -1040,11 +1040,36 @@ impl State {
                 rows += 1;
             }
         }
+        // Above the aircraft's own 1 G ceiling the air is too thin to lift its
+        // weight (manual p. 90): the available lift falls with the air density
+        // above the ceiling, so an aircraft carried past it by a zoom climb
+        // sinks back instead of flying on. Fitted rule (agent decision,
+        // 2026-09-29): the density ratio is a standard atmosphere estimate.
+        if env_speeds.is_none() {
+            let top = env.points.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
+            if self.position[1] > top
+                && let (Ok(here), Ok(there)) = (
+                    crate::telemetry::Atmosphere::standard(self.position[1]),
+                    crate::telemetry::Atmosphere::standard(top),
+                )
+            {
+                hi *= (here.density_kg_m3() / there.density_kg_m3()).min(1.);
+            }
+        }
         let envelope_g = [lo, hi];
         let loading = (self.fuel + self.carried_lbs()) / c.mass.empty_lbs;
         let load_factor = 1. + loading * c.aerodynamics.loaded_elevator_percent / 100.;
         hi /= load_factor;
         lo /= load_factor;
+        // Loading takes away manoeuvring G, not the aircraft's ability to fly
+        // at all: inside the 1 G envelope (manual p. 90, "absolute limits at
+        // 1G") an aircraft always keeps 1 G, however full its tanks. Without
+        // this the outermost band, where only the 1 G row holds, gave a loaded
+        // aircraft less than 1 G and it sank at full power near its top speed
+        // and its ceiling. Fitted rule (agent decision, 2026-09-29).
+        if rows > 0 && envelope_g[1] >= 1. {
+            hi = hi.max(1.);
+        }
         let loaded_positive_g = hi;
         // Pull extra G: 9 G whatever the load. Near stall the low-speed ceiling
         // still ramps up to it.
@@ -1605,6 +1630,45 @@ mod tests {
         let impact = s.clone();
         s.step(&PilotInput::default(), |_, _| 0.);
         assert_eq!(s, impact);
+    }
+    #[test]
+    fn above_its_ceiling_an_aircraft_cannot_hold_level_flight() {
+        // The synthetic 1 G envelope reaches 50,000 ft (manual p. 90: above the
+        // ceiling the air is too thin to lift the weight).
+        let sink = |altitude: f64| {
+            let mut s = State::new(&profile(), [0., altitude, 0.]).unwrap();
+            for _ in 0..600 {
+                s.step(&PilotInput::default(), |_, _| 0.);
+            }
+            s.velocity[1]
+        };
+        let inside = sink(45_000.);
+        let above = sink(65_000.);
+        assert!(inside > -10., "{inside}");
+        assert!(above < -50. && above < inside - 40., "{above} vs {inside}");
+    }
+    #[test]
+    fn a_loaded_aircraft_holds_level_flight_on_the_outer_band_of_its_envelope() {
+        // The 1 G row runs past 2,000 ft/s but every other row stops near 1,700 at 10,000 ft, so
+        // at 1,750 ft/s only the 1 G row holds. Loading takes away manoeuvring G,
+        // not the 1 G the envelope grants.
+        let mut aircraft = profile();
+        for envelope in &mut aircraft.envelopes {
+            if envelope.g == 1 {
+                envelope.points = vec![[200., 0.], [250., 50000.], [2000., 50000.], [2100., 0.]];
+            }
+        }
+        let mut s = State::new(&aircraft, [0., 10_000., 0.]).unwrap();
+        s.set_payload(3_500.).unwrap();
+        s.speed = 1_750.;
+        s.velocity = [0., 0., 1_750.];
+        s.yaw = 0.;
+        s.pitch = 0.;
+        s.throttle = 1.;
+        s.step(&PilotInput::default(), |_, _| 0.);
+        let limits = s.trace().adapter.unwrap().envelope.limits_g;
+        assert_eq!(s.trace().adapter.unwrap().envelope.rows, 1);
+        assert!(limits[1] >= 1., "the upper G limit is {}", limits[1]);
     }
     #[test]
     fn direct_ground_crash_finishes_in_the_same_tick() {

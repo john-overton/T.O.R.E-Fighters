@@ -225,6 +225,7 @@ impl ControlAdapter {
             config.tuning.legacy_roll_limit_rad_per_second * authority
         };
         let (mut low, mut high) = (-1.0_f64, 1.0_f64);
+        let mut inside_envelope = false;
         for envelope in &config.aerodynamics.envelopes {
             if let Some((min, max)) = envelope.speeds(state.position[1])
                 && state.speed >= min
@@ -232,6 +233,7 @@ impl ControlAdapter {
             {
                 low = low.min(f64::from(envelope.g));
                 high = high.max(f64::from(envelope.g));
+                inside_envelope = true;
             }
         }
         let loading = 1.0
@@ -240,6 +242,10 @@ impl ControlAdapter {
                 / 100.0;
         low /= loading;
         high /= loading;
+        // The flight model keeps 1 G anywhere inside the 1 G envelope.
+        if inside_envelope {
+            high = high.max(1.0);
+        }
         if state.systems.has(30) {
             low = low.max(-g_limit);
         }
