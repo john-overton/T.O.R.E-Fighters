@@ -225,8 +225,9 @@ them (see `KNOWN_ANOMALIES` in the scenario file).
   altitude error first when far behind, or a speed-scaled look-ahead, would be
   new rules (item 14). The same happens with an F-22 in human hands only if
   the player cruises that fast that low.
-- Default fuzz seeds `ai-fuzz-0014`, `-0028`, `-0032` and `-0053`: the
-  supersonic low-level class above (see "Fourth round").
+- Default fuzz seeds `ai-fuzz-0014`, `-0028`, `-0032` and `-0053`, and
+  `ai-damaged-fault04-hit` and `-gun` (an undamaged X-31 wingman at 900 to
+  950 kt): the supersonic low-level class above (see "Fourth round").
 - Activity flapping and pitch-stick oscillation at a weapon's envelope edge,
   and mid-air collisions, are reported but allowed (see above and below);
   regression scenarios check strictly.
@@ -348,6 +349,12 @@ After the
 player dies the player's wingmen keep "In formation" with no leader, which
 only matters if a flight continued without the player. No friendly-fire kill
 by a wingman was seen in any run, so that counter was not exercised.
+
+Fourth-round final run of the whole lane: 697 of 712 passed in 45 minutes at
+`--jobs 6`; the 15 failures are the Known failures above. After merging the
+flight lane's round two (the envelope 1 G floor and ceiling lift), the gates
+passed and a 33-scenario post-merge subset (regressions, objectives, fuzz
+seeds 1 to 9, determinism, order drills) passed.
 
 ### Third round (2026-09-29, after the merge with the replay lane)
 
