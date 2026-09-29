@@ -1,0 +1,28 @@
+# Free flight: the Escape menu by mouse. Click the Cheat tab and its Unlimited ammo row, the
+# Keyboard shortcuts button (and Escape back), then Restart free flight, then Resume.
+wait 1
+waittick 240
+key Escape
+wait 0.5
+movemenu 263 13
+click
+wait 0.3
+movemenu 300 78
+click
+wait 0.3
+movemenu 530 459
+click
+wait 0.5
+key Escape
+wait 0.3
+movemenu 320 459
+click
+wait 1
+waittick 120 20
+key Escape
+wait 0.5
+movemenu 110 459
+click
+wait 0.5
+waittick 300 20
+exit

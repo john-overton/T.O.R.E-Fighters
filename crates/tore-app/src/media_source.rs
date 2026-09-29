@@ -72,6 +72,11 @@ pub(crate) struct MediaSource {
 pub(crate) enum DetectError {
     NotFound(PathBuf),
     NotASource(PathBuf),
+    /// A file was chosen and its folder is not a source either.
+    NotASourceFile {
+        file: PathBuf,
+        folder: PathBuf,
+    },
     RawImage(PathBuf),
     Io(io::Error),
 }
@@ -83,6 +88,12 @@ impl fmt::Display for DetectError {
                 f,
                 "{} is not a Fighters Anthology source. Choose an installed game folder, or the folder of a mounted disc 1.",
                 path.display()
+            ),
+            DetectError::NotASourceFile { file, folder } => write!(
+                f,
+                "{} is a file, and its folder {} is not a Fighters Anthology source either. Choose an installed game folder, or the folder of a mounted disc 1.",
+                file.display(),
+                folder.display()
             ),
             DetectError::RawImage(path) => write!(
                 f,
@@ -230,7 +241,13 @@ impl MediaSource {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
         {
-            Some(parent) => detect_directory(parent),
+            Some(parent) => detect_directory(parent).map_err(|error| match error {
+                DetectError::NotASource(folder) => DetectError::NotASourceFile {
+                    file: path.to_path_buf(),
+                    folder,
+                },
+                other => other,
+            }),
             None => Err(DetectError::NotASource(path.to_path_buf())),
         }
     }
@@ -694,6 +711,20 @@ mod tests {
                 .unwrap()
                 .to_string()
                 .contains("FA_2.LIB")
+        );
+    }
+
+    #[test]
+    fn a_file_that_is_not_in_a_source_is_named_with_its_folder() {
+        let directory = TempDir::new();
+        let file = directory.file("notes.txt", b"hello");
+        let message = MediaSource::detect(&file).unwrap_err().to_string();
+        assert!(message.contains("notes.txt is a file"), "{message}");
+        assert!(message.contains("its folder"), "{message}");
+        installed(&directory);
+        assert!(
+            MediaSource::detect(&file).is_ok(),
+            "a file inside a source still resolves"
         );
     }
 

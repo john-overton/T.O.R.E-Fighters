@@ -1,0 +1,32 @@
+# Quick Mission: end the mission (Ctrl+Q), page through the debrief with the NEXT and PREV rocker
+# by mouse, then OK back to the creator.
+wait 1
+waittick 240
+key Ctrl+q
+wait 1.5
+snapshot page1.ppm
+movemenu 105 431
+click
+wait 0.5
+snapshot page2.ppm
+movemenu 105 431
+click
+wait 0.5
+snapshot page3.ppm
+movemenu 105 431
+click
+wait 0.5
+snapshot page4.ppm
+movemenu 105 431
+click
+wait 0.5
+snapshot page5.ppm
+movemenu 105 412
+click
+wait 0.5
+snapshot back4.ppm
+movemenu 168 421
+click
+wait 1.5
+snapshot creator.ppm
+exit

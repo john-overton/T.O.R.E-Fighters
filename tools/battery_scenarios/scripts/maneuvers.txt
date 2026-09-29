@@ -1,0 +1,19 @@
+# Free flight: a hard pull and a roll, then idle throttle and a long pull into a stall, then recover.
+wait 1
+waittick 120
+down Down
+waittick 480
+up Down
+waittick 600
+down Left
+waittick 840
+up Left
+waittick 960
+key 1
+waittick 1080
+down Down
+waittick 3600
+up Down
+key 5
+waittick 4200
+exit
