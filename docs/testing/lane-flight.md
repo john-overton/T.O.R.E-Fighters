@@ -35,7 +35,7 @@ python3 tools/battery.py --scenario 'flight-land-*' --jobs 6              # one 
 python3 tools/battery.py --scenario 'flight-livefire-f18-*' --windows 2   # windowed
 ```
 
-The whole lane is 2,953 scenarios, 356 of them windowed (through `tools/agent-run.sh`).
+The whole lane is 3,089 scenarios, 394 of them windowed (through `tools/agent-run.sh`).
 The headless ones take about a second each; the missile acceptance runs take up to five minutes
 each and the windowed ones five to eight seconds. See "Runtime" at the end for the measured time.
 
@@ -59,7 +59,7 @@ each and the windowed ones five to eight seconds. See "Runtime" at the end for t
 | `edge-*`, `terrain-*` | 96 | Flying out over each of the four map edges at 20,000 ft, and a spin or roll at 90 ft over every theater. |
 | `weather*-*`, `hour*-*`, `groundstart-*`, `damage-*`, `bay-*` | about 250 | Windowed frames of every weather condition in every base theater, every hour of the day in three theaters, every aircraft at a ground start, and the damage and F-22 bay fixtures, each checked for a blank or flat frame. |
 | `loadout-*` | 56 | Round two: every aircraft with `--loadout none` and `--loadout guns` takes off and lands on a long runway like any other and carries less than its default load. |
-| `jettison-*` | 39 | Round two, windowed: jettisoning every external station of every aircraft empties exactly that station, lightens the load, keeps the flight model's carried weight in step (less fuel already burned) and touches no other station. |
+| `jettison-*` | 38 | Round two, windowed: jettisoning every station of every aircraft empties exactly that station (an internal station, for example the Su-35 slot 5, refuses and still fires), lightens the load, keeps the flight model's carried weight in step (less fuel already burned) and touches no other station. |
 | `fight-*`, `attack-*` | 56 | Round two: the player passive, then attacking through its own controls, in a 5 v 5 against ace or average AI from ahead and behind: the debrief's fate, damage, hit points, crash flag and hit and shot counts agree, and the AI invariants hold. |
 | `environment-*` | 96 | The wind, air data and turbulence probe in every base theater at 100 and 5,000 ft in three winds. |
 | `panel-*`, `panelfault*` | 175 | Every instrument page of every aircraft, and the Systems page under panel faults 1..35. |
@@ -204,6 +204,8 @@ target cycling with several targets in view are exercised only by the probe-atta
 
 ## Runtime
 
-The full lane, 2,953 scenarios with `--jobs 6 --windows 2`, took 1,646 seconds (27 minutes) on the
-24-thread dev machine with other agents running, and all of them passed. The missile acceptance
+The full lane, 3,089 scenarios with `--jobs 6 --windows 2`, took 1,804 seconds (30 minutes) on the
+24-thread dev machine with other agents running (load average about 24). Round two's run had one
+failure, the jettison check of the Su-35's internal slot 5, which was the check's mistake and is
+fixed; that family passes 38 of 38, and the rest passed. The missile acceptance
 runs (about five minutes each in a debug build) and the windowed frames set the length.

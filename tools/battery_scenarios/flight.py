@@ -676,12 +676,18 @@ def check_jettison(ac: str, slot: int):
         ammo = [int(v) for v in m.group(2).split(",")]
         start, payload, flight_payload = (int(m.group(i)) for i in (3, 4, 5))
         problems = []
-        if ammo[slot - 1] != 0:
-            problems.append(f"station {slot} still holds {ammo[slot - 1]} after a jettison")
-        if shots != 0:
-            problems.append(f"{shots} shots left a jettisoned station")
-        if not payload < start:
-            problems.append(f"jettison did not lighten the load: {start} -> {payload} lb")
+        if payload == start and ammo[slot - 1] == capacity[slot - 1] - shots:
+            # An internal station (for example the Su-35's slot 5) cannot be
+            # jettisoned: the load does not change and it still fires normally.
+            if shots == 0 and (ac, slot) not in REFUSED_SLOTS:
+                problems.append("a station neither jettisoned nor fired")
+        else:
+            if ammo[slot - 1] != 0:
+                problems.append(f"station {slot} still holds {ammo[slot - 1]} after a jettison")
+            if shots != 0:
+                problems.append(f"{shots} shots left a jettisoned station")
+            if not payload < start:
+                problems.append(f"jettison did not lighten the load: {start} -> {payload} lb")
         # The flight model carries the store weight less the fuel already used.
         if not payload - 30 <= flight_payload <= payload:
             problems.append(f"flight carries {flight_payload} lb but the stores weigh {payload} lb")
