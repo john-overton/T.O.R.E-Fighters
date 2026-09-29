@@ -69,6 +69,7 @@ mod roster_animation;
 mod rwr_tone;
 mod scope;
 mod sim_renderer;
+mod situation;
 mod smoke_renderer;
 mod sound_prefs;
 mod sound_screen;

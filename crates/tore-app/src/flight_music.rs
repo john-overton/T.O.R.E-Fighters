@@ -11,10 +11,10 @@
 //! the audio device and is not visible here.
 use crate::{
     ai_wings::{AiWings, PLAYER_ID, outcome},
-    audio::situation::{self, AIM_MEMORY_S, AIM120_IGNORE_FT, AIR_RANGE_FT, HIT_HOLD_S},
     comms::journal::{Audience, Cause, Entry, Music, Origin, Outcome, Source},
     comms::{Call, Kind, Phrase, Phrases},
     flight,
+    situation::{self, AIM_MEMORY_S, AIM120_IGNORE_FT, AIR_RANGE_FT, HIT_HOLD_S},
     terrain::Terrain,
 };
 use tore_sim::ai::weapon_service::{self, Rounds, TargetClass};

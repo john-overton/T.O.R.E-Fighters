@@ -20,8 +20,8 @@ use tore_sim::ai::{
 };
 
 use super::{Call, Kind, Route};
-use crate::audio::situation::{Inputs, Rank};
 use crate::crew_voice::Situation;
+use crate::situation::{Inputs, Rank};
 
 /// Entries kept between drains. A host that never drains keeps the newest
 /// ones and counts the rest in [`Journal::lost`].
@@ -864,12 +864,12 @@ impl fmt::Display for Cause {
                     why.push(format!(
                         "designated enemy {} {} {}",
                         who(id),
-                        if range < crate::audio::situation::AIR_RANGE_FT {
+                        if range < crate::situation::AIR_RANGE_FT {
                             "inside"
                         } else {
                             "beyond"
                         },
-                        feet(crate::audio::situation::AIR_RANGE_FT)
+                        feet(crate::situation::AIR_RANGE_FT)
                     ));
                 }
                 if let Some(at) = music.hit_at

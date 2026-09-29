@@ -645,7 +645,7 @@ fn music_event(entry: &talk::Entry) -> Event {
         .with(field::OUTCOME, entry.outcome.name())
         .with(field::REASON, entry.origin.cause.to_string());
     if let Cause::Music(music) = &entry.origin.cause {
-        let name = |rank: crate::audio::situation::Rank| format!("{rank:?}").to_lowercase();
+        let name = |rank: crate::situation::Rank| format!("{rank:?}").to_lowercase();
         event = event
             .with(field::FROM, music.from.map_or_else(|| "-".to_owned(), name))
             .with(field::TO, name(music.to));
@@ -660,8 +660,8 @@ fn music_event(entry: &talk::Entry) -> Event {
 }
 
 /// The music's inputs in the order of [`vocab::music::ALL`].
-fn music_inputs(inputs: &crate::audio::situation::Inputs) -> [bool; 8] {
-    let crate::audio::situation::Inputs {
+fn music_inputs(inputs: &crate::situation::Inputs) -> [bool; 8] {
+    let crate::situation::Inputs {
         succeeded,
         ejected,
         launching,

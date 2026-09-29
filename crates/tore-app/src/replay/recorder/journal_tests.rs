@@ -305,9 +305,9 @@ fn comms_entries_become_radio_order_hud_and_music_events() {
             Origin::of(
                 Source::Music,
                 Cause::Music(Box::new(Music {
-                    from: Some(crate::audio::situation::Rank::Normal),
-                    to: crate::audio::situation::Rank::Air,
-                    inputs: crate::audio::situation::Inputs {
+                    from: Some(crate::situation::Rank::Normal),
+                    to: crate::situation::Rank::Air,
+                    inputs: crate::situation::Inputs {
                         air_target: true,
                         home: true,
                         ..Default::default()

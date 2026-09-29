@@ -191,7 +191,7 @@ above. The rank order, the condition order, the 1 second lockout, immediate
 upgrades, downgrades at marked boundaries, a re-chosen score continuing, SUCC
 and HOME once per flight, LAUNCH restarting, the 30 second hit hold and the
 distances are **spec-derived**. The selector is
-`crates/tore-app/src/audio/situation.rs`, its inputs come from
+`crates/tore-app/src/situation.rs`, its inputs come from
 `crates/tore-app/src/flight_music.rs`, and the mission result cadence from
 `crates/tore-app/src/ai_wings/outcome.rs`. Audio only reads simulation state;
 headless and `--no-audio` runs do not compute any of it.

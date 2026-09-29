@@ -1,7 +1,7 @@
 //! Which RWR warning tone the player hears, from authoritative combat and AI
 //! state. Read-only and presentation only: nothing here feeds back into the
 //! simulation. Rules and numbers: docs/spec/rwr.md#warning-tones.
-use crate::audio::situation::AIM120_IGNORE_FT;
+use crate::situation::AIM120_IGNORE_FT;
 use tore_sim::ai::weapon_service::quarter_clock;
 use tore_sim::combat::live;
 
