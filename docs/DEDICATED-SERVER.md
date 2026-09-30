@@ -8,8 +8,12 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Stage D design of 2026-09-30, reviewed by John the same day; **nothing here
-is built yet.** The dedicated server is part of the [multiplayer plan](multiplayer-plan.md#stages)
+Stage D design of 2026-09-30, reviewed by John the same day. **Built (D7b):**
+the program around the host session: the options, the configuration file, the
+import, `--check`, the start-up refusals, the real-time run loop, the console,
+the status line and the log. **Not yet built:** the host session itself (slice
+D7a), so `tore-server` cannot yet accept a player, and the joining game
+(stage D8). The dedicated server is part of the [multiplayer plan](multiplayer-plan.md#stages)
 and the [multiplayer guide](MULTIPLAYER.md#dedicated-servers). Fighters
 Anthology had no dedicated server; everything on this page is an agent
 proposal unless it is credited to John.
@@ -81,6 +85,21 @@ tore-server --config server.conf
 | `--import FOLDER` | Import the game, then exit |
 | `--port N`, `--mission FILE` | Override those two settings of the configuration file |
 | `--check` | Load the import and the mission, print the mission's aircraft with their plane numbers, its runways and its content manifest, then exit without opening the port |
+| `--help`, `--version` | Print the options, or the version and commit, and exit |
+
+*Built (D7b).* *Agent decisions:* with no `server.conf` in the data folder the
+defaults apply (a configuration file named with `--config` must exist); a
+`--mission` path is taken against the current folder, like any command-line
+path, where the configuration file's own `mission` is taken against the
+configuration file; `--check` also reads the configuration file, since the
+mission path and `open-planes` come from it, and it builds the mission once,
+which is what catches a mission the import cannot fly. `--import` prints its
+progress as the game's first-run screen shows it and ends with the path of
+`import-report.txt`. `--check` prints each plane as its number, aircraft,
+wing, place in the wing and skill, each runway as its number, airport name and
+length (a short strip is marked: nobody starts there), and the manifest's
+resource count and 64-bit digest. A mission that cannot be built is refused
+with the builder's own words, for example "Selected runway is unavailable".
 
 At start it prints the version and commit, the data folder, a summary of the
 mission, the port it listens on and "Waiting for players". It refuses to start,
@@ -112,6 +131,16 @@ start, so a typo never passes silently.
 | `after-end` | `restart` | `restart` the same mission, or `quit` |
 | `restart-delay` | `30` | Seconds between a mission's end and the next start |
 | `status-interval` | `10` | Seconds between status lines; 0 for none |
+
+*Built (D7b).* A name that appears twice is refused too, and a setting with no
+value. A comment runs from the first `#`, so a password cannot contain one.
+*Agent decisions for the ranges the table leaves open:* `name` is 1 to 60
+printable characters, `password` at most 255 bytes (the wire's string limit),
+`address` is `any` or an IP address (not a host name), `open-planes` lists plane
+numbers 0 to 29 separated by spaces or commas (and each must exist in the
+mission, which start-up checks), `time-limit` is at most 10,080 minutes (a
+week), `empty-timeout` at most 86,400 seconds, and `restart-delay` and
+`status-interval` at most 3,600 seconds.
 
 ## The mission file
 
@@ -243,7 +272,11 @@ The server reads commands from its standard input:
 | `quit` | Tells every player the server is stopping, then exits |
 
 Ctrl+C stops the process at once instead; the players' games report the lost
-connection after 5 seconds.
+connection after 5 seconds. *Built (D7b), agent decisions:* `help` lists the
+commands; a console whose input ends (a service with no terminal) is left
+alone, so only `quit` or a signal stops the server; `kick` names a seat as
+`players` shows it, and a seat with no player is answered, not an error; the
+console thread only reads lines, and the run loop acts on them within 4 ms.
 
 A status line every `status-interval` seconds:
 
@@ -257,6 +290,19 @@ mission's end, and once a minute each player's figures: the same round trip,
 loss, snapshot arrival spread, input margin, inputs repeated and bytes each
 way that a player's game writes to its own
 [diagnostics log](ARCHITECTURE.md#recordings-and-diagnostics).
+
+*Built (D7b).* Every log line starts with a UTC date and time, and a new file
+starts at UTC midnight (the standard library has no time zones; agent
+decision). The start lines, joins, refusals, seat changes, departures, the
+mission's end and console actions also appear on the console. Status lines go
+to the console only, and each player's once-a-minute figures line to the log
+file only. The figures line also carries the bytes
+sent to and received from that player since it joined. A log file that cannot
+be written is reported once on the console and the server carries on without
+it. The clock the run loop waits on sleeps until 0.4 ms (2 ms on Windows, whose
+sleep is coarse) before each deadline and then spins; the host catches up any
+tick a late wake-up missed (agent decision; the margins are not measured on
+Windows).
 
 ## Ports and firewalls
 
