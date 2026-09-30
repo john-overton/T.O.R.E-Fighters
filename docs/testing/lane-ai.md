@@ -371,6 +371,21 @@ this build's output for that seed is identical to it apart from timestamps
 it began with the multiplayer branch's radio changes; it is not marked here
 because the lead owns that branch's known failures.
 
+### Aircraft pass: the new lead after a lost human (2026-09-30, branch `mp/air-lead`)
+
+John's decision 6 of the aircraft pass
+([mission of opportunity](../spec/ai.md#mission-of-opportunity-after-a-lost-human-leader)).
+Whole lane at `--jobs 8`: 727 of 727 passed in 51 minutes, the known failures
+caught as such. The player is lost in 142 scenarios: in 24 the new lead knew
+of no enemy and went home (every ground start at Simferopol and the ILS
+terrain pairs among them), in 10 its wing flew under weapons hold or
+self-defense and went home, and in 112 it searched and fought. None of the
+112 ran long enough, or kept a wing alive long enough, to end a search by
+itself; the unit tests cover the end of the search. The first run failed four
+ground starts at Simferopol (wings of four and five): the waiting wingmen,
+held by the lead's landing traffic, never took off. They now stay parked when
+the wing goes home, and the takeoff check excuses them.
+
 ### Sixth round (2026-09-29, John's decisions)
 
 Whole lane on the sixth-round build before the last fix: 713 of 716 passed in
