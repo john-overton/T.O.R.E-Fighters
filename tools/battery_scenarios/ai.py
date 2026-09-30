@@ -39,7 +39,15 @@ ANOMALY = re.compile(r"^AI probe anomaly: (.*)$", re.M)
 TOTALS = re.compile(r"^AI probe totals: wings=(\d+) ticks=(\d+) shots=(\d+) dropped=(\d+) warnings=(\d+) live_projectiles=(\d+) player_hp=(-?\d+)", re.M)
 DEBRIEF = re.compile(r"^AI probe debrief: (\S+) \[(.*?)\] elapsed=(\d+)s player\[(\S+) damage=(\d+)% kills=\[([\d, ]*)\] ff=(\d+)", re.M)
 ATTACK = re.compile(r"^AI probe attack: clicks=.*? missiles=(\d+) .*?player_kills=(\d+) hits=(\d+) destroyed=(\d+) lost_friendly=(\d+)/(\d+) lost_enemy=(\d+)/(\d+) player_alive=(true|false) .*?ejections=(\d+) ", re.M)
-RADIO_LINE = re.compile(r"^  (\d+\.\d)s (.+?): '(.*)' \[", re.M)
+RADIO_LINE = re.compile(r"^  (\d+\.\d)s (.+?): '(.*)' \[(.*)\]$", re.M)
+# The hit calls of `crates/tore-world/src/radio_calls.rs` (HIT_BY_AIRCRAFT,
+# HIT_BY_AAA, HIT_BY_OTHER). The radio chatter spec calls one on every missile
+# hit (gun hits are limited in the game), so several hits within a few seconds
+# may repeat the same words: fuzz seed 163 took three missile hits in 3 s and
+# all three drew "Get this guy off me".
+HIT_REACTION_CODES = frozenset(
+    ["^IMHIT1", "^IMDMGE1", "^OFFME", "^SCORCH", "^HEAT", "^IMHIT2", "^IMDMGE2", "^IMAAA", "^EATLD"]
+)
 EVENT = re.compile(r"^t=(\d+) \(([\d.]+)s\) (?:destroyed: (\S+ \d-\d)|(\S+ \d-\d) pilot ejected)", re.M)
 HAZARDS = re.compile(r"^AI probe liftoff gaps: \[(.*?)\] hazards_open=(\d+)", re.M)
 PHASES = re.compile(r"^AI probe phases: (\S+ \d-\d): (.*)$", re.M)
@@ -214,10 +222,14 @@ def objective_problems(output: str) -> list[str]:
 
 
 def radio_problems(output: str) -> list[str]:
-    """Radio lines that flood: the same speaker and words three times within five seconds."""
+    """Radio lines that flood: the same speaker and words three times within five
+    seconds. Hit calls are exempt: the game calls one on every missile hit."""
     problems = []
     recent: dict[tuple[str, str], list[float]] = {}
-    for at, speaker, words in RADIO_LINE.findall(output):
+    for at, speaker, words, codes in RADIO_LINE.findall(output):
+        called = re.findall(r'"(\^[^"]+)"', codes)
+        if called and all(code in HIT_REACTION_CODES for code in called):
+            continue
         times = recent.setdefault((speaker, words), [])
         times.append(float(at))
         window = [t for t in times if float(at) - t <= 5.0]

@@ -67,6 +67,12 @@ class ProbeCheckTests(unittest.TestCase):
         text = CLEAN + "".join(f"  {20 + i}.0s Red two: 'Contact' []\n" for i in range(3))
         self.assertTrue(any("radio repeats" in p for p in ai.probe_problems(text)))
 
+    def test_hit_calls_may_repeat(self):
+        hits = "".join(f"  {20 + i}.0s YOU: 'Get this guy off me' [\"^OFFME\"]\n" for i in range(3))
+        self.assertFalse(any("radio repeats" in p for p in ai.probe_problems(CLEAN + hits)))
+        calls = "".join(f"  {20 + i}.0s YOU: 'Fox one' [\"^FOXONE\"]\n" for i in range(3))
+        self.assertTrue(any("radio repeats" in p for p in ai.probe_problems(CLEAN + calls)))
+
     def test_scenarios_are_unique_and_named_for_the_lane(self):
         names = [s.name for s in ai.scenarios()]
         self.assertEqual(len(names), len(set(names)))
