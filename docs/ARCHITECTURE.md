@@ -1739,11 +1739,13 @@ the ground and aircraft that begin a landing. `AllHybrid`, for every multiplayer
 mission (John, 2026-09-28), puts every AI aircraft on the hybrid model at mission
 start, seeded as the AI probe's `--probe-flight-model researched` does, so a
 human taking over an AI aircraft never feels its handling change. AI air combat
-on the hybrid model was checked with 336 AI probe runs against the legacy model
-(B7): the same enemy aircraft lost, one more friendly AI aircraft lost (23
-against 22) and one round fewer fired (911 against 912) over 168 encounters on
-each, and no encounter differs by more than one aircraft or one round. See
-[the comparison](baselines/ai-hybrid-2026-09-29.md).
+on the hybrid model was checked with 336 AI probe runs against the legacy model,
+measured again at `663ac82` after the bug battery changed the AI: two more enemy
+aircraft lost (255 against 253), one more friendly AI aircraft lost (27 against
+26) and the same rounds fired (913) over 168 encounters on each, and no encounter
+differs by more than one aircraft or one round. The earlier B7 measurement at
+`42b3d76` had the same enemy losses, 23 friendly against 22 and 911 rounds
+against 912. See [the comparison](baselines/ai-hybrid-2026-09-29.md).
 
 *Built (B3).* `ai_wings::AiFlightModel` is the setting: `AiSetup::flight_model`
 in `world.rs` (single player passes `Standard`) and the probe's
@@ -1756,7 +1758,7 @@ drift on a straight line, stay as they are, and `Standard` cannot undo
 recordings identical (those already on the researched model, and the wing-only
 ground start) and changes 31: the seven ground starts differ by fractions of a
 knot in wings other than the player's, and the 24 air fights diverge from the
-first tick with small shifts in launches and hits. The full comparison is the B7
+first tick with small shifts in launches and hits. The full comparison is the
 one linked above.
 
 #### Single-player guarantee
