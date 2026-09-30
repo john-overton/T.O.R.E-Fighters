@@ -63,6 +63,24 @@ impl CombatView {
         })
     }
 
+    /// The art for `combat`, a mission `World::new` built, with the drawn
+    /// models of the other aircraft types its build loaded, in the order
+    /// `combat` holds their types.
+    pub fn with_models(
+        combat: &Combat,
+        data: &BTreeMap<String, Vec<u8>>,
+        models: Vec<Airframe>,
+    ) -> AppResult<Self> {
+        let mut view = Self::new(combat, data)?;
+        view.outlets = models
+            .iter()
+            .map(|model| model.kind.contrail_offsets.clone())
+            .collect();
+        view.models = models;
+        view.load_weapon_shapes(combat, data);
+        Ok(view)
+    }
+
     /// Sets the frame's fraction of the way from the previous tick to the
     /// current one, for everything drawn this frame.
     pub fn present(&mut self, combat: &Combat, alpha: f64) {

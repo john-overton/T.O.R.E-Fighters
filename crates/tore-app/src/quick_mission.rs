@@ -12,8 +12,9 @@ use tore_sim::ai::{
     AiError,
     engagement::GroupObjective,
     experience::EnemySkillOverride,
-    launch::{Side, WingId, WingLaunch, WingSelection, legacy_pairs, resolve_wings},
+    launch::{Side, WingId, WingLaunch, WingSelection, resolve_wings},
 };
+use tore_world::mission::{ALTITUDES_FT, Condition, MissionSpec, Skill, Start, WingSpec};
 pub mod matrix;
 type Rect = (i32, i32, i32, i32);
 const POPUP: Rect = (185, 100, 270, 370);
@@ -539,6 +540,55 @@ impl QuickMission {
         }
         resolve_wings(&selections, enemy_override)
     }
+    /// The creator's draft as a mission with stable names: the theater code,
+    /// the condition, the start, the six wings by their aircraft keys, the
+    /// standing orders and the groups' objectives. What belongs to the
+    /// session rather than the creator (the flight models, the enemy skill
+    /// override, the weather overrides, the cheats, the loadout) keeps the
+    /// spec's defaults for the caller to set.
+    pub fn mission_spec(&self) -> Result<MissionSpec, String> {
+        let v = &self.draft.values;
+        let player = self.player().ok_or("Choose an imported aircraft to fly.")?;
+        let theater = self
+            .theater_codes
+            .get(v[13])
+            .ok_or("Choose a theater.")?
+            .clone();
+        let mut spec = MissionSpec::new(&theater, player);
+        spec.condition = condition(v[15])
+            .and_then(Condition::from_index)
+            .ok_or("Choose one of the six available weather conditions.")?;
+        let altitude_ft = *ALTITUDES_FT
+            .get(v[14])
+            .ok_or("Choose one of the four altitudes.")?;
+        spec.start = match self.ground_runway() {
+            Some(runway) => Start::Ground {
+                runway,
+                altitude_ft,
+            },
+            None => Start::Airborne { altitude_ft },
+        };
+        spec.separation_nm = self.separation_nm() as u32;
+        spec.preset = self.ai_mission;
+        spec.guns_only = self.guns_only();
+        for (index, field) in [4, 7, 10, 21, 24, 27].into_iter().enumerate() {
+            // A wing whose aircraft choice does not resolve keeps the
+            // player's type; `unsupported` refuses to fly one with aircraft.
+            let aircraft = self
+                .aircraft_files
+                .get(v[field + 2])
+                .and_then(|name| AircraftId::parse(name).ok())
+                .unwrap_or(player);
+            spec.wings[index] = WingSpec {
+                aircraft,
+                count: v[field].max(usize::from(index == 0)),
+                skill: Skill::from_level(v[field + 1] as i32).ok_or("Choose a pilot skill.")?,
+            };
+        }
+        spec.objectives = self.group_objectives;
+        spec.must_survive = self.group_must_survive;
+        Ok(spec)
+    }
     /// The aircraft/count pairs the current mission spawner still takes. This
     /// is the launch payload with side, member and experience dropped; it stays
     /// for the existing spawner call and must not grow new callers.
@@ -549,9 +599,10 @@ impl QuickMission {
     /// experience levels plus Dummy and counts 0 through 5 per wing (`docs/formats/quick-mission.md`),
     /// so the menu cannot reach that state; the empty result is a visible
     /// failure rather than a silent clamp if it ever does.
+    #[cfg(test)]
     pub fn dummy_wings(&self) -> Vec<(AircraftId, usize)> {
         self.wing_launches(None)
-            .map(|wings| legacy_pairs(&wings))
+            .map(|wings| tore_sim::ai::launch::legacy_pairs(&wings))
             .unwrap_or_default()
     }
     pub fn ground_start(&self) -> bool {
@@ -1395,10 +1446,7 @@ fn stripe(c: &mut Canvas, (x, y, w, h): Rect, selected: bool) {
     }
 }
 fn source_theaters() -> [&'static str; 16] {
-    [
-        "BAL", "CUB", "EGY", "LFA", "FRA", "GRE", "IRA", "KURILE", "TVIET", "SPA", "APA", "PGU",
-        "NSK", "WTA", "UKR", "VLA",
-    ]
+    tore_world::mission::THEATERS
 }
 fn inside(p: (f64, f64), r: Rect) -> bool {
     p.0 >= r.0 as f64 && p.1 >= r.1 as f64 && p.0 < (r.0 + r.2) as f64 && p.1 < (r.1 + r.3) as f64
@@ -1470,6 +1518,7 @@ pub fn hud(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tore_sim::ai::launch::legacy_pairs;
     #[test]
     fn variant_selection_retains_layout_and_uses_base_country_and_target_lists() {
         let mut q = setup();

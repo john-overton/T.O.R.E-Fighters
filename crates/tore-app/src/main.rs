@@ -82,7 +82,7 @@ mod weather;
 
 // The mission core lives in tore-world; these keep the app's module paths.
 pub(crate) use tore_world::{
-    ai_wings, aircraft_type, airfield_radio, combat, combat_tape, comms, crew_voice,
+    ai_wings, aircraft_type, airfield_radio, combat, combat_tape, comms, crew_voice, mission,
     mission_layout, radio_calls, seats, situation, snapshot, target_window, terrain, world,
 };
 
@@ -800,24 +800,6 @@ impl TickPresenter<'_> {
 }
 
 impl App {
-    /// Rebuilds the world under one recovered weather condition. The renderer
-    /// owns per-world GPU resources, so it is rebuilt with it.
-    fn set_condition(&mut self, index: usize) -> AppResult<()> {
-        let code = self
-            .world
-            .terrain
-            .layout
-            .trim_end_matches(".MM")
-            .to_string();
-        self.world.terrain = scenery::launch_terrain(&self.theater_resources, &code, Some(index))?;
-        self.scenery = scenery::Scenery::build(&self.theater_resources, &self.world.terrain)?;
-        if let Some(renderer) = &mut self.renderer {
-            renderer.set_scenery(&self.scenery);
-            renderer.prepare_aircraft(&self.hornet);
-        }
-        Ok(())
-    }
-
     /// Queues a command of the seat for the next tick.
     fn queue(&mut self, command: seats::SeatCommand) {
         queue_command(&mut self.seat_commands, command);
@@ -1840,6 +1822,166 @@ impl App {
             }
         }
     }
+    /// Builds the Quick Mission the creator describes and the screen's
+    /// beside it: the creator's draft becomes a `MissionSpec` with stable
+    /// names, `World::build` makes the mission from it, and the drawn models
+    /// of the aircraft it loaded and the combat art are made for the new
+    /// world. The error is the line the pilot reads on the Load Ordnance page.
+    fn build_mission(&mut self) -> Result<(world::Built, combat_view::CombatView), String> {
+        let mut spec = self.quick.mission_spec()?;
+        spec.cheats = self.flight_ui.cheats;
+        spec.researched_flight = self.researched_flight;
+        spec.ai_flight_model = ai_wings::AiFlightModel::Standard;
+        spec.enemy_skill = self.enemy_skill;
+        spec.fixture_wings = !self.ai_wings_enabled;
+        spec.loadout = Some(mission::LoadoutSpec::of(
+            &self
+                .quick
+                .ordnance
+                .as_ref()
+                .ok_or("Open the Load Ordnance page first.")?
+                .loadout,
+        ));
+        spec.weather = scenery::launch_overrides().map_err(|error| error.to_string())?;
+        // The drawn model of each other aircraft type, loaded as the build
+        // asks for its simulation half.
+        let resources = &self.theater_resources;
+        let mut models = Vec::new();
+        let mut load = |id| -> tore_world::WorldResult<Arc<aircraft_type::AircraftType>> {
+            let model = aircraft::Airframe::load(resources, id)?;
+            let kind = Arc::clone(&model.kind);
+            models.push(model);
+            Ok(kind)
+        };
+        let font = ordnance::label_font();
+        let label = ordnance::weapon_label(resources, &font);
+        let built = world::World::build(
+            &spec,
+            resources,
+            world::Seating::SinglePlayer,
+            &mut world::Hooks {
+                player: Some(Arc::clone(&self.hornet.kind)),
+                load: Some(&mut load),
+                weapon_label: Some(&label),
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        let view = combat_view::CombatView::with_models(&built.world.combat, resources, models)
+            .map_err(|error| error.to_string())?;
+        Ok((built, view))
+    }
+
+    /// Starts a flight: what ends the old one, the world (a free flight
+    /// restarted, or the Quick Mission just built), and what a new flight
+    /// resets in the app.
+    fn begin_flight(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        mission: Option<(world::Built, combat_view::CombatView)>,
+    ) {
+        // A flight still recording is being restarted.
+        let restarted = self.replay_recorder.is_some();
+        self.finish_replay_recording("restart");
+        if let Some(audio) = &self.audio {
+            audio.restart_flight();
+        }
+        if self.recorded_ticks > 0 {
+            self.finish_recording();
+        }
+        self.input.context(true, self.focused);
+        // The old mission's trace is closed first, so its last rows
+        // land before the new header.
+        self.formation_trace = None;
+        let restarted_flight = match mission {
+            // The Quick Mission was built whole, and started once, by
+            // `World::build`. The renderer draws the new world's terrain.
+            Some((built, view)) => {
+                self.world = built.world;
+                self.combat_view = view;
+                match scenery::Scenery::build(&self.theater_resources, &self.world.terrain) {
+                    Ok(scenery) => self.scenery = scenery,
+                    Err(error) => {
+                        self.error = Some(error);
+                        event_loop.exit();
+                        return;
+                    }
+                }
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.set_scenery(&self.scenery);
+                    renderer.prepare_aircraft(&self.hornet);
+                }
+                built.restarted
+            }
+            None => match self.world.restart(&self.hornet, &self.theater_resources) {
+                Ok(restarted) => restarted,
+                Err(error) => {
+                    self.error = Some(error);
+                    event_loop.exit();
+                    return;
+                }
+            },
+        };
+        // A flight starts on fresh camera weather, as on a fresh clock.
+        self.scenery.reset_presentations();
+        if let Some(wings) = &mut self.world.ai_wings {
+            match formation_trace::start(wings) {
+                Ok(trace) => self.formation_trace = trace,
+                Err(error) => {
+                    self.error = Some(error.into());
+                    event_loop.exit();
+                    return;
+                }
+            }
+        }
+        self.seat_commands.clear();
+        self.cheats_sent = None;
+        self.instruments.navigation = navigation::Navigation::default();
+        match restarted_flight.ai_aircraft {
+            Some(0) => self
+                .flight_ui
+                .message("AI wings: no aircraft in this setup"),
+            Some(count) => self
+                .flight_ui
+                .message(format!("AI wings: {count} aircraft")),
+            None => {}
+        }
+        let layout = restarted_flight.layout;
+        // Every flight records itself from this picture on.
+        self.start_replay_recording();
+        if restarted && let Some(recording) = &mut self.replay_recorder {
+            recording.note(tore_replay::Event::new(
+                tore_replay::vocab::kind::SYSTEM_RESTART,
+            ));
+        }
+        self.flight_music = flight_music::Observer::new();
+        self.rwr_warnings = Default::default();
+        self.reset_vapor();
+        self.g_effects = Default::default();
+        self.flight_clock.remainder = 0.;
+        self.flight_view = 0;
+        self.view_rig = Default::default();
+        let saved = preferences::Preferences::capture(
+            &self.flight_ui,
+            &self.instruments,
+            self.fullscreen_preference,
+        );
+        self.flight_ui.reset_for_flight();
+        self.live_debug.reset();
+        saved.apply(&mut self.flight_ui, &mut self.instruments);
+        if self.world.setup.ground_start.is_some() {
+            self.flight_ui
+                .message("Ground start: B releases brakes; 5 sets full throttle.");
+        }
+        if let Some(notice) = layout.as_ref().and_then(|l| l.notice()) {
+            self.flight_ui.message(notice);
+        }
+        self.screen = Screen::Flight;
+        self.camera.keys.clear();
+        self.world.combat.cancel();
+        self.quick.cancel();
+        self.frame_time = Instant::now();
+    }
+
     fn action(&mut self, event_loop: &ActiveEventLoop, action: Action) {
         if action == Action::Exit {
             self.finished = true;
@@ -2030,240 +2172,23 @@ impl App {
                     self.quick.ordnance.as_mut().unwrap().message = Some(message);
                     return;
                 }
-                let load = &self.quick.ordnance.as_ref().unwrap().loadout;
-                if self.quick.guns_only()
-                    && load
-                        .configuration
-                        .stations
-                        .iter()
-                        .zip(&load.quantities)
-                        .any(|(s, n)| s.weapon.source != load.aircraft.gun() && *n > 0)
-                {
-                    self.quick.ordnance.as_mut().unwrap().message=Some("Guns only is selected. Unload other weapons or return to setup and change the restriction.".into());
+                if self.native_tables.is_some() {
+                    if self.quick.ground_runway().is_some() {
+                        self.quick.ordnance.as_mut().unwrap().message=Some("Ground start requires the researched flight model. Choose Airborne for this adapter.".into());
+                    } else {
+                        self.error = Some(
+                            "native research flight currently requires clean free flight".into(),
+                        );
+                        event_loop.exit();
+                    }
                     return;
                 }
-                let altitude = [5000., 10000., 20000., 40000.][self.quick.draft.values[14]];
-                let selected_ground = self.quick.ground_runway();
-                if selected_ground.is_some()
-                    && (!self.researched_flight || self.native_tables.is_some())
-                {
-                    self.quick.ordnance.as_mut().unwrap().message=Some("Ground start requires the researched flight model. Choose Airborne for this adapter.".into());
-                    return;
-                }
-                let wings = match self.quick.wing_launches(self.enemy_skill) {
-                    Ok(wings) => wings,
-                    Err(error) => {
-                        self.quick.ordnance.as_mut().unwrap().message = Some(error.to_string());
-                        return;
-                    }
-                };
-                // A ground start parks the player's whole wing on the runway;
-                // the straight-flight fixtures keep only the player there.
-                let parked = if self.ai_wings_enabled {
-                    self.quick.player_wing_size()
-                } else {
-                    1
-                };
-                let mut start = self.hornet.start(&self.world.terrain);
-                let ground_layout = match selected_ground {
-                    Some(object) => {
-                        let result = start
-                            .enable_research(1)
-                            .map_err(|e| -> Box<dyn Error> { e.into() })
-                            .and_then(|()| {
-                                mission_layout::ground_layout(&self.world.terrain, object, parked)
-                            })
-                            .and_then(|layout| {
-                                mission_layout::place_on_runway(
-                                    &self.world.terrain,
-                                    &mut start,
-                                    &layout,
-                                    0,
-                                )
-                                .map(|()| layout)
-                            });
-                        match result {
-                            Ok(layout) => Some(layout),
-                            Err(error) => {
-                                self.quick.ordnance.as_mut().unwrap().message =
-                                    Some(error.to_string());
-                                return;
-                            }
-                        }
-                    }
-                    None => None,
-                };
-                let layout = mission_layout::MissionLayout::plan(
-                    &self.world.terrain,
-                    &start,
-                    ground_layout,
-                    &ai_wings::enemy_group_offsets(&wings),
-                    self.quick.separation_feet(),
-                );
-                let ground = f64::from(
-                    self.world
-                        .terrain
-                        .height(start.position[0] as f32, start.position[2] as f32),
-                );
-                // Only aircraft that start in the air need the altitude to
-                // clear the ground; parked wingmen do not.
-                let airborne_wings = if self.ai_wings_enabled {
-                    wings.iter().any(|wing| {
-                        !wing.is_empty()
-                            && (layout.ground.is_none()
-                                || wing.wing.side.is_enemy()
-                                || wing.wing.index != 0)
-                    })
-                } else {
-                    self.quick.dummy_wings().iter().any(|(_, count)| *count > 0)
-                };
-                if (selected_ground.is_none() || airborne_wings) && altitude < ground + 100. {
-                    self.quick.ordnance.as_mut().unwrap().message = Some(format!(
-                        "Airborne altitude must exceed {:.0} feet here. Choose a higher altitude.",
-                        ground + 100.
-                    ));
-                    return;
-                }
-                let fuel = load.fuel_lbs;
-                match combat::Combat::with_loadout(&self.hornet, load).and_then(|c| {
-                    let view = combat_view::CombatView::new(&c, &self.theater_resources)?;
-                    Ok((c, view))
-                }) {
-                    Ok((mut c, mut view)) => {
-                        if let Err(error) = c.add_airport_targets(&self.world.terrain.airport_scene)
-                        {
-                            self.error = Some(error);
-                            event_loop.exit();
-                            return;
-                        }
-                        let populated = if self.ai_wings_enabled {
-                            view.mission_aircraft(&mut c, &wings, &layout, &self.theater_resources)
-                        } else {
-                            c.mission_layout = Some(layout.clone());
-                            view.mission_dummies(
-                                &mut c,
-                                &self.quick.dummy_wings(),
-                                layout.enemy.distance_ft,
-                                &self.theater_resources,
-                            )
-                        };
-                        if let Err(error) = populated {
-                            self.quick.ordnance.as_mut().unwrap().message = Some(error.to_string());
-                            return;
-                        }
-                        self.world.combat = c;
-                        self.combat_view = view;
-                        self.world.setup = world::Setup {
-                            mission: Some((altitude, fuel)),
-                            ground_start: selected_ground,
-                            researched_flight: self.researched_flight,
-                            native_tables: self.native_tables.clone(),
-                            ai: self.ai_wings_enabled.then(|| world::AiSetup {
-                                wings,
-                                guns_only: self.quick.guns_only(),
-                                preset: self.ai_mission,
-                                flight_model: ai_wings::AiFlightModel::Standard,
-                                group_objectives: self.quick.group_objectives,
-                                group_must_survive: self.quick.group_must_survive,
-                            }),
-                        };
-                        // Rebuild the world on the mission's own weather choice
-                        // before entering flight, so palette, clock and wind
-                        // all start from it.
-                        if let Some(index) = quick_mission::condition(self.quick.draft.values[15])
-                            && let Err(error) = self.set_condition(index)
-                        {
-                            self.quick.ordnance.as_mut().unwrap().message = Some(error.to_string());
-                            return;
-                        }
-                        self.action(event_loop, Action::FreeFlight);
-                    }
-                    Err(e) => self.quick.ordnance.as_mut().unwrap().message = Some(e.to_string()),
+                match self.build_mission() {
+                    Ok(built) => self.begin_flight(event_loop, Some(built)),
+                    Err(message) => self.quick.ordnance.as_mut().unwrap().message = Some(message),
                 }
             }
-            Action::FreeFlight => {
-                // A flight still recording is being restarted.
-                let restarted = self.replay_recorder.is_some();
-                self.finish_replay_recording("restart");
-                if let Some(audio) = &self.audio {
-                    audio.restart_flight();
-                }
-                if self.recorded_ticks > 0 {
-                    self.finish_recording();
-                }
-                self.input.context(true, self.focused);
-                // The old mission's trace is closed first, so its last rows
-                // land before the new header.
-                self.formation_trace = None;
-                let restarted_flight =
-                    match self.world.restart(&self.hornet, &self.theater_resources) {
-                        Ok(restarted) => restarted,
-                        Err(error) => {
-                            self.error = Some(error);
-                            event_loop.exit();
-                            return;
-                        }
-                    };
-                // A flight starts on fresh camera weather, as on a fresh clock.
-                self.scenery.reset_presentations();
-                if let Some(wings) = &mut self.world.ai_wings {
-                    match formation_trace::start(wings) {
-                        Ok(trace) => self.formation_trace = trace,
-                        Err(error) => {
-                            self.error = Some(error.into());
-                            event_loop.exit();
-                            return;
-                        }
-                    }
-                }
-                self.seat_commands.clear();
-                self.cheats_sent = None;
-                self.instruments.navigation = navigation::Navigation::default();
-                match restarted_flight.ai_aircraft {
-                    Some(0) => self
-                        .flight_ui
-                        .message("AI wings: no aircraft in this setup"),
-                    Some(count) => self
-                        .flight_ui
-                        .message(format!("AI wings: {count} aircraft")),
-                    None => {}
-                }
-                let layout = restarted_flight.layout;
-                // Every flight records itself from this picture on.
-                self.start_replay_recording();
-                if restarted && let Some(recording) = &mut self.replay_recorder {
-                    recording.note(tore_replay::Event::new(
-                        tore_replay::vocab::kind::SYSTEM_RESTART,
-                    ));
-                }
-                self.flight_music = flight_music::Observer::new();
-                self.rwr_warnings = Default::default();
-                self.reset_vapor();
-                self.g_effects = Default::default();
-                self.flight_clock.remainder = 0.;
-                self.flight_view = 0;
-                self.view_rig = Default::default();
-                let saved = preferences::Preferences::capture(
-                    &self.flight_ui,
-                    &self.instruments,
-                    self.fullscreen_preference,
-                );
-                self.flight_ui.reset_for_flight();
-                self.live_debug.reset();
-                saved.apply(&mut self.flight_ui, &mut self.instruments);
-                if self.world.setup.ground_start.is_some() {
-                    self.flight_ui
-                        .message("Ground start: B releases brakes; 5 sets full throttle.");
-                }
-                if let Some(notice) = layout.as_ref().and_then(|l| l.notice()) {
-                    self.flight_ui.message(notice);
-                }
-                self.screen = Screen::Flight;
-                self.camera.keys.clear();
-                self.world.combat.cancel();
-                self.quick.cancel();
-                self.frame_time = Instant::now();
-            }
+            Action::FreeFlight => self.begin_flight(event_loop, None),
             Action::Back => {
                 if self.screen == Screen::Flight && self.world.setup.mission.is_some() {
                     if let Some(report) = debrief::capture(&self.world, SEAT) {

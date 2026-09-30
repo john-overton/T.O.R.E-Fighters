@@ -28,6 +28,28 @@ struct Drag {
     origin: (f64, f64),
     moved: bool,
 }
+/// The loadout screen's display name for a weapon: the long store name, when
+/// it fits the card in the screen's font. The simulation's weapon rows carry
+/// the same names, so the mission is built with this too.
+pub fn weapon_label<'a>(
+    data: &'a BTreeMap<String, Vec<u8>>,
+    font: &'a Sprite,
+) -> impl Fn(&mut Weapon) + 'a {
+    move |w: &mut Weapon| {
+        if let Some(bytes) = data.get(&w.source)
+            && let Ok(brf) = tore_formats::aircraft::Brf::parse(bytes)
+            && let Ok(names) = brf.strings("si_names")
+            && let Some(long) = names.get(1)
+            && text_width(font, long) <= 111
+        {
+            w.name = long.clone();
+        }
+    }
+}
+/// The font the loadout screen measures names in.
+pub fn label_font() -> Sprite {
+    crate::menu::flat_font([232, 233, 230])
+}
 pub struct Ordnance {
     pub loadout: Loadout,
     pub visible: bool,
@@ -110,22 +132,14 @@ impl Ordnance {
             .filter(|(n, _)| n.ends_with(".JT") && !n.starts_with('~'))
             .filter_map(|(name, b)| Weapon::parse(name, b).ok())
             .collect();
-        let display = |w: &mut Weapon| {
-            if let Some(bytes) = data.get(&w.source)
-                && let Ok(brf) = tore_formats::aircraft::Brf::parse(bytes)
-                && let Ok(names) = brf.strings("si_names")
-                && let Some(long) = names.get(1)
-                && text_width(&sprites["QUICKFONT"], long) <= 111
-            {
-                w.name = long.clone();
-            }
-        };
+        let display = weapon_label(data, &sprites["QUICKFONT"]);
         for w in &mut weapons {
             display(w);
         }
         for station in &mut loadout.configuration.stations {
             display(&mut station.weapon);
         }
+        drop(display);
         weapons.sort_by(|a, b| a.name.cmp(&b.name).then(a.source.cmp(&b.source)));
         let mut ordnance = Self {
             loadout,

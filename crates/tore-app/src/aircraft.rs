@@ -8,7 +8,7 @@ use std::{
     ops::Deref,
     sync::Arc,
 };
-use tore_formats::{Pic, aircraft::Aircraft, font::Font, shape::Shape};
+use tore_formats::{Pic, font::Font, shape::Shape};
 /// One aircraft type ready to draw: the simulation's [`AircraftType`] plus the
 /// imported art, cockpit, HUD, animation rig and damage art. It dereferences
 /// to its type, so `airframe.profile`, `airframe.sensors` and
@@ -50,13 +50,11 @@ impl Airframe {
             data.get(s)
                 .ok_or_else(|| format!("aircraft cache missing {s}; re-import media"))
         };
-        let mut profile = Aircraft::parse(get(id.pt())?)?;
-        if profile.id != id.source() || profile.shape != format!("{}.SH", id.stem()) {
-            return Err(
-                "aircraft identity/shape does not match the selected retail profile".into(),
-            );
-        }
-        profile.id = id;
+        // The simulation half: the profile, its identity check, the flight
+        // model and the sensors. The engine outlets come from the drawn model
+        // below.
+        let mut kind = AircraftType::load(data, id)?;
+        let profile = &kind.profile;
         let shape = Shape::parse(get(&profile.shape)?)?;
         let streamer = tore_formats::shape::StreamerDef::parse(get(&profile.shape)?)?;
         if id == tore_formats::aircraft::AircraftId::F18
@@ -129,9 +127,6 @@ impl Airframe {
             return Err("unreviewed instrument window frame dimensions".into());
         }
         let font = Font::parse(get("WIN11.FNT")?)?;
-        let sensors = tore_sim::sensors::SensorProfiles::from_source(&profile, |name| {
-            get(name).cloned().map_err(std::io::Error::other)
-        })?;
         let mut poses = Vec::new();
         let mut rig = None;
         if id == tore_formats::aircraft::AircraftId::F18 {
@@ -242,10 +237,9 @@ impl Airframe {
             }
         }
         let damage_art = crate::damage_art::DamageArt::load(id, data, &mut atlas)?;
-        let model = tore_sim::models::AircraftModel::for_aircraft(&profile)?;
-        let contrail_offsets = contrail_offsets(id, &poses[0], rig.as_ref());
+        kind.contrail_offsets = contrail_offsets(id, &poses[0], rig.as_ref());
         Ok(Self {
-            kind: Arc::new(AircraftType::new(profile, model, sensors, contrail_offsets)),
+            kind: Arc::new(kind),
             engine_material,
             nozzle_bounds,
             rig,
