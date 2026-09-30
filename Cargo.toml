@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/tore-app", "crates/tore-formats", "crates/tore-extract", "crates/tore-sim", "crates/tore-input", "crates/tore-input-native", "crates/tore-diagnostics-native", "crates/tore-replay", "crates/tore-world"]
+members = ["crates/tore-app", "crates/tore-formats", "crates/tore-extract", "crates/tore-sim", "crates/tore-input", "crates/tore-input-native", "crates/tore-diagnostics-native", "crates/tore-replay", "crates/tore-world", "crates/tore-codec"]
 resolver = "3"
 
 [workspace.package]

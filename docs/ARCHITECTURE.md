@@ -13,7 +13,7 @@ The M0 environment supports the M1a menu slice, the M1b renderer across all 16 t
 | Component | Choice | Purpose |
 | --- | --- | --- |
 | Language | Rust 2024, compiler 1.91.1 | Reproducible native builds |
-| Workspace | `crates/tore-app`, `tore-formats`, `tore-extract`, `tore-sim`, `tore-input`, `tore-input-native`, `tore-diagnostics-native`, `tore-replay`, `tore-world` | Desktop shell and entry point, plus the format, extraction, simulation, input, mission recording and mission core crates |
+| Workspace | `crates/tore-app`, `tore-formats`, `tore-extract`, `tore-sim`, `tore-input`, `tore-input-native`, `tore-diagnostics-native`, `tore-replay`, `tore-world`, `tore-codec` | Desktop shell and entry point, plus the format, extraction, simulation, input, mission recording, mission core and network encoding (standard library only) crates |
 | Window/input | `winit` 0.30 | Native window lifecycle and input |
 | Graphics | `wgpu` 27 | Metal on macOS; native backends for Windows/Linux |
 | Diagnostic facade | Existing `log` 0.4 and `tracing` 0.1 | Bounded app/backend logs without a logging framework |
@@ -1908,7 +1908,7 @@ combat, the AI bridge, the debrief and the recorder.
 Design for stage D of the [multiplayer plan](multiplayer-plan.md#stages),
 written by the lead on 2026-09-30, revised the same day after an independent
 review, and reviewed by John the same day: his answers are in the guide's
-[decisions](MULTIPLAYER.md#decisions). Nothing in this section is built yet.
+[decisions](MULTIPLAYER.md#decisions). Only slice D1, the `tore-codec` crate, is built so far (see the [slice table](#how-stage-d-lands)).
 Every choice here is an agent decision unless it is credited to John. The three
 follow-up specs the plan assigns to stage D are:
 
@@ -2367,7 +2367,7 @@ risky refactors, as John asked; the rest are Sonnet.
 
 | Slice | Branch | Model | After | Work | Acceptance |
 | --- | --- | --- | --- | --- | --- |
-| D1 Codec | `mp/d-codec` | Sonnet | | `tore-codec`: bits, variable-length integers, quantizers, FNV-1a, CRC-32 | Round trips at every width; a bounded reader never panics on 100,000 seeded random inputs; known CRC-32 and FNV-1a test vectors |
+| D1 Codec | `mp/d-codec` | Sonnet | | `tore-codec`: bits, variable-length integers, quantizers, FNV-1a, CRC-32 | Round trips at every width; a bounded reader never panics on 100,000 seeded random inputs; known CRC-32 and FNV-1a test vectors. **Built (D1):** also the bucketed signed coding, exact floats against a baseline and short strings; the readers reject every non-canonical form |
 | D2 Transport | `mp/d-net` | Opus | D1 | `tore-net`: packets, handshake, acks and round trip, reliable ordered messages, statistics, UDP and the simulator | On the simulator at 300 ms and 5 percent loss with duplicates and reordering: the handshake completes, 10,000 reliable messages arrive once and in order, a 64 KB message arrives whole, the round trip estimate is within 5 percent and the loss estimate within 1 point; a challenge is never larger than its request; a seeded packet fuzz never panics; two real sockets on 127.0.0.1 connect |
 | D3a Import library | `mp/d-import` | Sonnet | | `tore-import` out of the app: data folder, pack, media detection, import | Single-player baseline SAME; the app imports and loads as before; `cargo tree -p tore-import` has no winit, wgpu or cpal; where both a 1.0 and a 1.02F import are available, the simulation resources of a sample mission hash the same |
 | D3b Mission as data | `mp/d-mission` | Sonnet | D3a | `MissionSpec` and its text form; `World::new` with single-player seating; the creator builds through it | Single-player baseline SAME; the spec round-trips through text; a headless test builds a single-player mission from synthetic resources and steps it |
