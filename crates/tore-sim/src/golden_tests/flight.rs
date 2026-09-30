@@ -787,11 +787,16 @@ fn approach_and_landing(_tick: u64, s: &mut State) -> PilotInput {
     let height = s.position[1] - 8.;
     let wanted_height = ((-3_200. - s.position[2]) * glide).max(0.);
     let wanted_sink = if height < 25. { -4. } else { -s.speed * glide };
+    // 250 ft/s, or the weight-scaled loaded minimum speed for 1 G with the flaps
+    // down where an aircraft's own stall speed is higher: the F-22 family's
+    // stall reference leaves its synthetic fixture at 380 ft/s clean, and at
+    // 270 ft/s it sank into the ground short of the runway.
+    let approach_speed = 250_f64.max(s.minimum_level_speed(0., 1.));
     PilotInput {
         pitch: (0.03 * (wanted_height - height) + 0.02 * (wanted_sink - s.velocity[1]))
             .clamp(-0.5, 0.5),
         roll: (-0.002 * s.position[0] - 1.5 * s.bank).clamp(-0.5, 0.5),
-        throttle: Some((0.45 + 0.01 * (250. - s.speed)).clamp(0., 1.)),
+        throttle: Some((0.45 + 0.01 * (approach_speed - s.speed)).clamp(0., 1.)),
         ..PilotInput::default()
     }
 }

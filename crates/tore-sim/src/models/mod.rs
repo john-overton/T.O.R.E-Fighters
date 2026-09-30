@@ -87,7 +87,51 @@ pub enum AircraftModel {
     Su35(su35::Su35FlightModel),
     F22(f22::F22FlightModel),
 }
+/// Stall reference fractions, one per aircraft (see
+/// [`AircraftModel::stall_reference_fraction`]). `fitted`: an agent decision
+/// (2026-09-30) fitted to John's unsourced liftoff and approach ranges, not a
+/// real weight. The reference weight is the empty weight times the fraction, so
+/// a lower fraction means higher liftoff and approach speeds and a longer roll.
+/// The F-22, F-22N and F/A-XX share one model and so one value. Each value sits
+/// at least 0.02 clear of the liftoff jumps the model's G rows make at larger
+/// scales (docs/spec/takeoff-ground-contact.md). The X-31 has no figure from
+/// John and keeps 1.00.
+pub const STALL_REFERENCE_FRACTIONS: [(&str, f64); 12] = [
+    ("F/A-18D", 1.33),
+    ("Rafale C", 1.38),
+    ("F-14D", 0.85),
+    ("A-4E", 1.20),
+    ("X-31", 1.00),
+    ("MiG-29", 1.20),
+    ("Su-27", 0.86),
+    ("MiG-21", 0.73),
+    ("Su-25", 0.55),
+    ("MiG-23", 0.78),
+    ("Su-35", 0.95),
+    ("F-22 family", 0.42),
+];
 impl AircraftModel {
+    /// The fitted stall reference fraction for this aircraft: its reference
+    /// weight for the weight-scaled stall speed is its empty weight times this.
+    /// Keyed by the aircraft's own model (its exact identity), never by weight,
+    /// and read the same for the player and every AI aircraft.
+    pub fn stall_reference_fraction(&self) -> f64 {
+        STALL_REFERENCE_FRACTIONS[match self {
+            Self::F18(_) => 0,
+            Self::RafaleC(_) => 1,
+            Self::F14D(_) => 2,
+            Self::A4E(_) => 3,
+            Self::X31(_) => 4,
+            Self::Mig29(_) => 5,
+            Self::Su27(_) => 6,
+            Self::Mig21(_) => 7,
+            Self::Su25(_) => 8,
+            Self::Mig23(_) => 9,
+            Self::Su35(_) => 10,
+            Self::F22(_) => 11,
+        }]
+        .1
+    }
     pub fn for_aircraft(a: &tore_formats::aircraft::Aircraft) -> tore_formats::Result<Self> {
         match (a.name.as_str(), a.shape.as_str()) {
             ("F/A-18D", "F18.SH") => Ok(Self::F18(f18::F18FlightModel::from_aircraft(a)?)),
@@ -311,6 +355,49 @@ mod additional_tests {
     use super::*;
     use crate::flight::{PilotCommand, State, Switch};
     use tore_formats::aircraft::AircraftId;
+    #[test]
+    fn stall_reference_fraction_is_fitted_per_aircraft_identity() {
+        // The fitted values (`fitted`, 2026-09-30, see the takeoff spec), read
+        // from the model itself, so the player and every AI aircraft get them.
+        let mut seen = Vec::new();
+        for (id, name, shape, want) in [
+            (AircraftId::F18, "F/A-18D", "F18.SH", 1.33),
+            (AircraftId::Rafale, "RAFALE", "RAF.SH", 1.38),
+            (AircraftId::F14, "F-14", "F14.SH", 0.85),
+            (AircraftId::A4E, "A-4E", "A4.SH", 1.20),
+            (AircraftId::X31, "X-31", "F31.SH", 1.00),
+            (AircraftId::Mig29, "MiG-29", "MIG29.SH", 1.20),
+            (AircraftId::Su27, "Su-27", "SU27.SH", 0.86),
+            (AircraftId::Mig21, "MiG-21", "MIG21.SH", 0.73),
+            (AircraftId::Su25, "Su-25", "SU25.SH", 0.55),
+            (AircraftId::Mig23, "MiG-23", "MIG23.SH", 0.78),
+            (AircraftId::Su35, "Su-35", "SU35.SH", 0.95),
+            (AircraftId::F22, "F-22", "F22.SH", 0.42),
+            (AircraftId::F22n, "F-22", "F22N.SH", 0.42),
+        ] {
+            let mut a = crate::flight::integration_tests::profile();
+            a.id = id;
+            a.name = name.into();
+            a.shape = shape.into();
+            let model = AircraftModel::for_aircraft(&a).unwrap();
+            assert_eq!(model.stall_reference_fraction(), want, "{name} {shape}");
+            // The bare aircraft (no fuel, no stores) is at 1 / sqrt(fraction).
+            let mut state = State::from_model(model, [0., 10000., 0.]);
+            state.enable_research(1).unwrap();
+            state.fuel = 0.;
+            state.payload_lbs = 0.;
+            let scale = state.target_stall_scale();
+            assert!(
+                (scale - 1. / f64::sqrt(want)).abs() < 1e-9,
+                "{name} {scale}"
+            );
+            seen.push(want);
+        }
+        // Twelve rows in the table, thirteen models (the F-22 family shares one).
+        assert_eq!(STALL_REFERENCE_FRACTIONS.len(), 12);
+        assert_eq!(seen.len(), 13);
+        assert!(STALL_REFERENCE_FRACTIONS.iter().all(|(_, f)| *f > 0.));
+    }
     #[test]
     fn independent_models_preserve_identity_and_nonburning_aircraft_controls() {
         for (id, name, has_hook, ab) in [

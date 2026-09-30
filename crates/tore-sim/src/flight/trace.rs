@@ -1268,8 +1268,9 @@ mod tests {
 
     #[test]
     fn a_stall_scales_controls_and_lift_and_records_the_spin_check() {
-        // The fixture's clean stall speed at 5,000 ft is 205 ft/s.
-        let mut s = airborne(true, 5000., 150.);
+        // The fixture's clean stall speed at 5,000 ft is about 186 ft/s (its
+        // fitted stall reference, the F/A-18D's, scales the imported edge).
+        let mut s = airborne(true, 5000., 130.);
         s.research.as_mut().unwrap().departure.mode = DepartureMode::Stalled;
         step(
             &mut s,

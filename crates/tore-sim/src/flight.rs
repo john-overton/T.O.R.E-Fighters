@@ -15,12 +15,13 @@ pub const OVERSPEED_SHAKE_START: f64 = 0.95;
 pub const OVERSPEED_SHAKE_FULL: f64 = 1.0;
 /// Share of its top speed at which the airframe is lost.
 pub const OVERSPEED_DESTROY: f64 = 1.5;
-/// Weight-scaled stall speed (hybrid adapter): the imported envelope's left edges
-/// are the aircraft's minimum speeds at its empty weight times this fraction, and
-/// they grow with the square root of the weight above it. `opinionated`
-/// (requested by John, 2026-09-29; the reference weight is an agent decision,
-/// docs/spec/takeoff-ground-contact.md).
-pub const STALL_REFERENCE_WEIGHT_FRACTION: f64 = 1.0;
+// Weight-scaled stall speed (hybrid adapter): the imported envelope's left edges
+// are the aircraft's minimum speeds at its reference weight, and they grow with
+// the square root of the weight over it. The reference weight is the empty weight
+// times a fitted fraction per aircraft,
+// [`crate::models::STALL_REFERENCE_FRACTIONS`]. `opinionated` (requested by John,
+// 2026-09-29; the reference weights are agent decisions,
+// docs/spec/takeoff-ground-contact.md).
 static RETAIL_STALL_SPEEDS: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 /// `--retail-stall-speeds`: switch the weight scaling off for the whole process, so
@@ -621,8 +622,10 @@ impl State {
     /// The multiplier on every left edge of the imported speed envelope that the
     /// model's polygons carry now: the square root of the weight over the
     /// reference weight (the empty weight times
-    /// [`STALL_REFERENCE_WEIGHT_FRACTION`]), so 1 for the bare aircraft and higher
-    /// the more fuel and stores it carries. It follows fuel burn, jettisoned
+    /// [`crate::models::AircraftModel::stall_reference_fraction`], one fitted
+    /// value per aircraft), so 1 at the reference weight and higher the more
+    /// fuel and stores it carries (above 1 even bare for an aircraft whose
+    /// fraction is under 1). It follows fuel burn, jettisoned
     /// stores and expended ordnance. Hybrid adapter only; the legacy adapter and
     /// `--retail-stall-speeds` keep 1.
     ///
@@ -641,7 +644,7 @@ impl State {
         let mass = self.model.configuration().mass;
         stall_scale_for(
             mass.empty_lbs + self.fuel + self.carried_lbs(),
-            mass.empty_lbs * STALL_REFERENCE_WEIGHT_FRACTION,
+            mass.empty_lbs * self.model.stall_reference_fraction(),
         )
     }
     /// Bring the model's envelope polygons to the weight now. Called every step
@@ -2018,13 +2021,20 @@ mod tests {
     }
     #[test]
     fn stall_speed_scales_with_the_square_root_of_the_weight() {
-        // The reference weight is the empty weight: bare, the polygon's own edge.
+        // The reference weight is the empty weight times the aircraft's fitted
+        // fraction: bare, the polygon's edge is scaled by 1 / sqrt(fraction).
         let mut bare = State::new(&profile(), [0., 1024., 0.]).unwrap();
         bare.enable_research(1).unwrap();
         bare.fuel = 0.;
         bare.payload_lbs = 0.;
         bare.update_stall_scale();
-        assert_eq!(bare.stall_scale(), 1.);
+        let fraction = bare.model().stall_reference_fraction();
+        assert!(
+            fraction != 1.,
+            "the fixture would not tell the fraction apart"
+        );
+        let base = 1. / fraction.sqrt();
+        assert!((bare.stall_scale() - base).abs() < 1e-12);
         let raw = |s: &State, g: i32| {
             s.retail_envelopes()
                 .iter()
@@ -2034,7 +2044,7 @@ mod tests {
                 .unwrap()
         };
         let edge = raw(&bare, 1).0;
-        assert!((bare.clean_stall_speed().unwrap() - edge).abs() < 1e-9);
+        assert!((bare.clean_stall_speed().unwrap() - edge * base).abs() < 1e-9);
         // Heavier means faster, as the square root of the weight; burning fuel
         // brings it back down and jettisoned stores take it down too.
         let empty = bare.model().configuration().mass.empty_lbs;
@@ -2043,12 +2053,12 @@ mod tests {
         heavy.payload_lbs = empty * 0.25;
         heavy.update_stall_scale();
         let scale = heavy.stall_scale();
-        assert!((scale - 1.75_f64.sqrt()).abs() < 1e-12, "{scale}");
+        assert!((scale - (1.75 / fraction).sqrt()).abs() < 1e-12, "{scale}");
         assert!((heavy.clean_stall_speed().unwrap() - edge * scale).abs() < 1e-9);
         let mut burned = heavy.clone();
         burned.fuel = empty * 0.1;
         burned.update_stall_scale();
-        assert!(burned.stall_scale() < scale && burned.stall_scale() > 1.);
+        assert!(burned.stall_scale() < scale && burned.stall_scale() > base);
         let mut dropped = heavy.clone();
         dropped.payload_lbs = 0.;
         dropped.update_stall_scale();
@@ -2187,7 +2197,8 @@ mod tests {
         s.step(&PilotInput::default(), |_, _| 0.);
         let e = s.trace().adapter.as_ref().unwrap().envelope;
         assert!((e.stall_scale - s.stall_scale()).abs() < 1e-9);
-        assert!(e.stall_scale > 1.3);
+        // Twice the empty weight over the fitted reference: sqrt(2 / 1.33).
+        assert!(e.stall_scale > 1.2);
         assert!(e.flaps > 0.);
         assert!((e.stall_fps - e.clean_stall_fps * (1. - 0.25 * e.flaps)).abs() < 1e-9);
         let raw = s
