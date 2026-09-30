@@ -52,8 +52,8 @@ impl Trigger {
         self.input.held || self.controller.held
     }
 }
-/// What the picture draws of a human-flown plane other than the first, as its
-/// flight left it in the last step.
+/// What the picture draws of a human-flown plane when someone else's screen
+/// is presented, as its flight left it in the last step.
 struct Pose {
     position: Vector,
     attitude: [f64; 3],
@@ -337,24 +337,33 @@ impl Combat {
             notes: Default::default(),
         })
     }
-    /// Everything combat draws for this tick, as plain data. `wings` supplies
-    /// the AI aircraft's devices and ejected pilots. An aircraft whose AI is
-    /// not alive, or that has no AI, keeps the devices last drawn for it.
+    /// Everything combat draws for this tick, as plain data, for the screen
+    /// of the human who flies `plane`: that plane is the picture's player, in
+    /// the flight state `player`, and every other human-flown plane, the
+    /// first one too, is an ordinary target drawn from the pose its last step
+    /// left it in. `wings` supplies the AI aircraft's devices and ejected
+    /// pilots. An aircraft whose AI is not alive, or that has no AI, keeps the
+    /// devices last drawn for it. Panics when `plane` has no ownship.
     pub fn snapshot(
         &self,
+        plane: u32,
         player: &flight::State,
         wings: Option<&crate::ai_wings::AiWings>,
     ) -> RenderSnapshot {
         let ownship = self.dummies.is_empty();
-        let own_id = self.own_id();
+        let own_id = plane;
+        let own = self
+            .state
+            .ownship(plane)
+            .expect("the presented plane has an ownship");
         // The other human-flown planes, in aircraft id order, as the last step
         // left them.
         let others: Vec<(&live::Ownship, &Pose)> = self
             .state
             .ownships()
             .iter()
-            .filter(|own| own.aircraft != own_id)
-            .filter_map(|own| Some((own, self.poses.get(&own.aircraft)?)))
+            .filter(|other| other.aircraft != own_id)
+            .filter_map(|other| Some((other, self.poses.get(&other.aircraft)?)))
             .collect();
         let model = |id: u32| {
             id.checked_sub(1)
@@ -390,15 +399,13 @@ impl Combat {
                 .copied()
                 .or_else(|| self.render.current_target(id).and_then(|pose| pose.devices))
         };
-        let config = self.state.own().configuration();
+        let config = own.configuration();
         let capacity = config.damage_capacity;
         let player_engine = Engine {
             lit: player.engine && player.fuel > 0.,
             afterburner: player.afterburner_active(),
             rates: player.auxiliary_rates,
-            flame: player.afterburner_active()
-                && player.escape.is_none()
-                && self.state.own().hp > 0,
+            flame: player.afterburner_active() && player.escape.is_none() && own.hp > 0,
         };
         // Fixtures copy the player's state with their own crash flag.
         let fixture_afterburner = ownship
@@ -433,11 +440,11 @@ impl Combat {
                 devices: Some(crate::snapshot::devices(player)),
                 engine: player_engine,
                 damage: Damage {
-                    hp: self.state.own().hp,
+                    hp: own.hp,
                     initial_hp: capacity,
                     // The exact amounts the drawn fractions divide.
-                    sections: self.state.own().damage_amounts(),
-                    structural: self.state.own().damage_section(),
+                    sections: own.damage_amounts(),
+                    structural: own.damage_section(),
                 },
                 airborne: true,
                 wreck: player.wreck.as_ref().map(|wreck| wreck.phase),
@@ -598,30 +605,33 @@ impl Combat {
     /// once a mission's AI has placed its aircraft.
     pub fn restart_render(
         &mut self,
+        plane: u32,
         player: &flight::State,
         wings: Option<&crate::ai_wings::AiWings>,
     ) {
         self.render.restart();
-        let current = self.snapshot(player, wings);
+        let current = self.snapshot(plane, player, wings);
         self.render.set_current(current);
     }
     /// Ends a simulation tick: the current snapshot becomes the previous one.
     pub fn advance_render(
         &mut self,
+        plane: u32,
         player: &flight::State,
         wings: Option<&crate::ai_wings::AiWings>,
     ) {
-        let next = self.snapshot(player, wings);
+        let next = self.snapshot(plane, player, wings);
         self.render.advance(next);
     }
     /// Retakes the current snapshot after a command changed the scene between
     /// ticks, so the change shows at once as it always has.
     pub fn refresh_render(
         &mut self,
+        plane: u32,
         player: &flight::State,
         wings: Option<&crate::ai_wings::AiWings>,
     ) {
-        let current = self.snapshot(player, wings);
+        let current = self.snapshot(plane, player, wings);
         self.render.set_current(current);
     }
     /// An AI aircraft that flew into the ground with hit points left gets a
@@ -997,7 +1007,7 @@ impl Combat {
         for object in &self.airport_objects {
             Self::register_airport_object(&mut self.state, object)?;
         }
-        self.restart_render(s, None);
+        self.restart_render(self.own_id(), s, None);
         Ok(())
     }
     /// Opinionated (requested by John, 2026-09-29): an airborne mission
@@ -1204,9 +1214,7 @@ impl Combat {
             let own_terms = OwnshipTerms::of(own, self.state.tick());
             plane::take_combat(s, aircraft, &own_terms, own.configuration(), &events)?;
             terms.push((aircraft, own_terms));
-            if aircraft != first {
-                self.poses.insert(aircraft, Pose::of(s));
-            }
+            self.poses.insert(aircraft, Pose::of(s));
         }
         // A station that ran dry hands the selection on, but never while the
         // trigger is held: the next store must not fire from the same press.
@@ -2040,12 +2048,12 @@ pub mod fixtures {
         combat.ai_poses = ai_poses;
         combat.render = RenderHistory::default();
         combat.state.targets.clone_from(&scene.previous);
-        let mut previous = combat.snapshot(player, None);
+        let mut previous = combat.snapshot(combat.own_id(), player, None);
         combat.state.targets.clone_from(&scene.current);
         combat.state.projectiles.clone_from(&scene.projectiles);
         combat.state.effects.clone_from(&scene.effects);
         combat.state.debris.clone_from(&scene.debris);
-        let mut current = combat.snapshot(player, None);
+        let mut current = combat.snapshot(combat.own_id(), player, None);
         for &(id, before, after) in &scene.devices {
             for (snapshot, devices) in [(&mut previous, before), (&mut current, after)] {
                 if let Some(pose) = snapshot.targets.iter_mut().find(|pose| pose.id == id) {
@@ -2102,7 +2110,7 @@ pub mod fixtures {
         let player = player();
         let mut combat = combat(types(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
         combat.state.targets = scene(combat.state.own().configuration()).current;
-        combat.restart_render(&player, None);
+        combat.restart_render(combat.own_id(), &player, None);
         let devices = |combat: &Combat| combat.render_snapshot().target(1).unwrap().devices;
         assert_eq!(devices(&combat), None);
         let last = [0.5; crate::snapshot::DEVICES];
@@ -2114,9 +2122,9 @@ pub mod fixtures {
             .find(|pose| pose.id == 1)
             .unwrap()
             .devices = Some(last);
-        combat.advance_render(&player, None);
+        combat.advance_render(combat.own_id(), &player, None);
         assert_eq!(devices(&combat), Some(last));
-        combat.restart_render(&player, None);
+        combat.restart_render(combat.own_id(), &player, None);
         assert_eq!(devices(&combat), None, "a restart forgets them");
     }
 }

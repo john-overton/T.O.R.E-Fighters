@@ -29,6 +29,8 @@ mod commands;
 mod crowd;
 #[cfg(test)]
 mod fight_tests;
+#[cfg(test)]
+mod frame_tests;
 mod handoff;
 #[cfg(test)]
 mod handoff_tests;
@@ -393,7 +395,7 @@ impl World {
         }
         // Draw from the placed start, including the AI's own poses.
         self.combat
-            .restart_render(&cockpit.flight, self.ai_wings.as_ref());
+            .restart_render(cockpit.plane.0, &cockpit.flight, self.ai_wings.as_ref());
         cockpit.previous_flight = cockpit.flight.clone();
         cockpit.overspeed_message_at = None;
         cockpit.edge_message_at = None;
@@ -892,8 +894,7 @@ impl World {
         // The tick's picture: combat and the AI have both written their poses
         // for it. The mission recording reads the same picture, before the
         // radio drains this tick's strikes.
-        self.combat
-            .advance_render(&self.cockpits[0].flight, self.ai_wings.as_ref());
+        self.advance_picture();
         out.outcomes = self.combat.state.ledger.take_outcomes();
         // The AI's messages of this tick; the journal is write-only, so
         // draining it changes nothing.

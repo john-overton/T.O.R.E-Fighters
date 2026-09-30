@@ -2205,7 +2205,7 @@ mod tests {
         let (mut recorder, receiver) = Recorder::detached(3, &[]);
         let mut combat = fixture::combat(Vec::new(), Vec::new());
         let player = fixture::player();
-        combat.restart_render(&player, None);
+        combat.restart_render(combat.own_id(), &player, None);
         let snapshot = combat.render_snapshot().clone();
         let mut ui = flight_ui::FlightUi::default();
         for number in 0..8 {
@@ -2252,7 +2252,7 @@ mod tests {
         });
         let mut combat = fixture::combat(Vec::new(), Vec::new());
         let player = fixture::player();
-        combat.restart_render(&player, None);
+        combat.restart_render(combat.own_id(), &player, None);
         let snapshot = combat.render_snapshot().clone();
         let mut ui = flight_ui::FlightUi::default();
         for number in 0..12 {
@@ -2342,7 +2342,7 @@ mod tests {
         let mut combat = fixture::combat(Vec::new(), Vec::new());
         combat.state = sighted(combat.state.own().configuration());
         let player = fixture::player();
-        combat.restart_render(&player, None);
+        combat.restart_render(combat.own_id(), &player, None);
         let snapshot = combat.render_snapshot().clone();
         let mut ui = flight_ui::FlightUi::default();
         let launcher = combat::launcher(&player);
@@ -2439,7 +2439,7 @@ mod tests {
         let (mut recorder, receiver) = Recorder::detached(64, &[]);
         let mut combat = fixture::combat(Vec::new(), Vec::new());
         let player = fixture::player();
-        combat.restart_render(&player, None);
+        combat.restart_render(combat.own_id(), &player, None);
         let snapshot = combat.render_snapshot().clone();
         let mut ui = flight_ui::FlightUi::default();
         recorder.session(&ui);
@@ -2544,7 +2544,7 @@ mod tests {
         let (mut recorder, receiver) = Recorder::detached(64, &[]);
         let mut combat = fixture::combat(Vec::new(), Vec::new());
         let player = fixture::player();
-        combat.restart_render(&player, None);
+        combat.restart_render(combat.own_id(), &player, None);
         let snapshot = combat.render_snapshot().clone();
         let mut ui = flight_ui::FlightUi::default();
         tick_with_commands(&mut recorder, &mut combat, &snapshot, 0, &mut ui, |_, _| {});
@@ -2603,7 +2603,7 @@ mod tests {
         let (mut recorder, receiver) = Recorder::detached(64, &[]);
         let mut combat = fixture::combat(Vec::new(), Vec::new());
         let player = fixture::player();
-        combat.restart_render(&player, None);
+        combat.restart_render(combat.own_id(), &player, None);
         let snapshot = combat.render_snapshot().clone();
         let mut ui = flight_ui::FlightUi::default();
         let own = combat.state.own_mut();

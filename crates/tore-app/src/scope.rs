@@ -2,7 +2,7 @@
 //! observable; this module only reprojects shared observations for drawing and
 //! picking. It can never make a hidden target selectable, and it carries
 //! bearing and intensity for received noise rather than an emitter's range.
-use crate::flight;
+use crate::{combat_view::PlaneState, flight};
 use tore_sim::{
     attitude::{Basis, Vector, dot},
     combat::live,
@@ -174,8 +174,13 @@ fn relative(basis: &Basis, from: Vector, to: Vector) -> (f64, f64) {
     )
 }
 
-pub fn scope(state: &live::State, s: &flight::State, controls: sensors::Controls) -> Scope {
-    let sensors = &state.own().sensors;
+pub fn scope(
+    state: &live::State,
+    plane: u32,
+    s: &flight::State,
+    controls: sensors::Controls,
+) -> Scope {
+    let sensors = &state.own_of(plane).sensors;
     let basis = Basis::new(s.yaw, s.pitch, s.bank);
     // Labels and the plotted scale follow the player's own controls, so they
     // never lag a step behind the switch that was just pressed. Contacts and
@@ -258,8 +263,8 @@ pub fn scope(state: &live::State, s: &flight::State, controls: sensors::Controls
     }
 }
 
-pub fn rcs(state: &live::State, s: &flight::State, scale_nmi: f64) -> Rcs {
-    let signature = state.own().configuration().sensors.signature;
+pub fn rcs(state: &live::State, plane: u32, s: &flight::State, scale_nmi: f64) -> Rcs {
+    let signature = state.own_of(plane).configuration().sensors.signature;
     let basis = Basis::new(s.yaw, s.pitch, s.bank);
     let configuration = sensors::Configuration {
         gear: s.gear,
@@ -269,10 +274,10 @@ pub fn rcs(state: &live::State, s: &flight::State, scale_nmi: f64) -> Rcs {
     Rcs {
         contour: signature.exposure_contour(&basis, configuration, 5.),
         emitters: state
-            .own()
+            .own_of(plane)
             .emitters
             .iter()
-            .filter(|_| !state.own().rwr_failed)
+            .filter(|_| !state.own_of(plane).rwr_failed)
             .map(|e| Emitter {
                 bearing_rad: e.bearing_rad,
                 distance_nmi: e.distance_nmi,

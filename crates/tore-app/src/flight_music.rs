@@ -12,9 +12,11 @@
 //! entry ([`Step::journal`]). The score the mixer then plays is decided in
 //! the audio device and is not visible here.
 use crate::{
-    ai_wings::{AiWings, PLAYER_ID, outcome},
+    ai_wings::{AiWings, outcome},
+    combat_view::PlaneState,
     comms::journal::{Audience, Cause, Entry, Music, Origin, Outcome, Source},
     flight,
+    frame::FlightFrame,
     situation::{self, AIM_MEMORY_S, AIM120_IGNORE_FT, AIR_RANGE_FT, HIT_HOLD_S},
     terrain::Terrain,
 };
@@ -66,9 +68,12 @@ impl Observer {
         Self::default()
     }
 
+    /// One step for the screen of the human the frame is for: its plane's
+    /// damage, designated target, inbound missiles and the AI aircraft aimed
+    /// at it.
     pub fn step(
         &mut self,
-        flight: &flight::State,
+        frame: &FlightFrame,
         combat: &live::State,
         events: &[live::Event],
         wings: Option<&AiWings>,
@@ -77,14 +82,14 @@ impl Observer {
         // for this plane.
         status: &outcome::Status,
     ) -> Step {
+        let (plane, flight) = (frame.plane.0, frame.flight);
         let now = self.steps as f64 * flight::DT;
         self.steps += 1;
         let position = flight.position;
 
-        if events
-            .iter()
-            .any(|e| matches!(e, live::Event::OwnshipDamaged { .. }))
-        {
+        if events.iter().any(
+            |e| matches!(e, live::Event::OwnshipDamaged { aircraft, .. } if *aircraft == plane),
+        ) {
             self.hit.refresh(now, HIT_HOLD_S);
             self.hit_at = Some(now);
         }
@@ -93,12 +98,12 @@ impl Observer {
         // wings every non-friendly target (range and fixture aircraft) counts
         // as the other side.
         let designated_target = combat
-            .own_view()
+            .view_of(plane)
             .designated()
             .and_then(|id| combat.targets.iter().find(|t| t.id == id && t.hp > 0))
             .filter(|t| t.role == TargetRole::Aircraft)
             .filter(|t| {
-                wings.map_or(!combat.own().friendlies.contains(&t.id), |w| {
+                wings.map_or(!combat.own_of(plane).friendlies.contains(&t.id), |w| {
                     w.slot(t.id).is_some_and(|slot| slot.side.is_enemy())
                 })
             })
@@ -118,7 +123,7 @@ impl Observer {
                 .iter()
                 .filter(|actor| {
                     actor.alive()
-                        && actor.controller().target() == Some(PLAYER_ID)
+                        && actor.controller().target() == Some(plane)
                         && actor.stations().iter().any(|s| {
                             s.guided
                                 && !s.store.inhibited
@@ -140,11 +145,8 @@ impl Observer {
             .iter()
             .filter(|p| {
                 p.incoming.is_some()
-                    && p.target == Some(combat.own().aircraft)
-                    && !(p
-                        .weapon(combat.own().configuration())
-                        .source
-                        .eq_ignore_ascii_case("AIM120.JT")
+                    && p.target == Some(plane)
+                    && !(combat.weapon(p).source.eq_ignore_ascii_case("AIM120.JT")
                         && distance(p.position, position) > AIM120_IGNORE_FT)
             })
             .map(|p| p.id)
@@ -231,6 +233,27 @@ impl Observer {
 mod tests {
     use super::*;
 
+    /// The frame parts a test's flight frame borrows.
+    #[derive(Default)]
+    struct Parts {
+        picture: crate::snapshot::RenderSnapshot,
+        smoke: tore_sim::combat::smoke::Smoke,
+        devices: tore_sim::combat::countermeasures::Devices,
+    }
+    fn test_frame<'a>(parts: &'a Parts, flight: &'a flight::State) -> FlightFrame<'a> {
+        FlightFrame {
+            seat: crate::seats::SeatId(0),
+            plane: crate::seats::PlaneId(0),
+            flight,
+            previous: flight,
+            presented: std::borrow::Cow::Borrowed(flight),
+            picture: &parts.picture,
+            smoke: [&parts.smoke, &parts.smoke],
+            devices: &parts.devices,
+            tick_cues: &[],
+        }
+    }
+
     #[test]
     fn hits_and_guided_missiles_feed_air_and_danger() {
         let world = tore_world::test_support::terrain();
@@ -238,9 +261,10 @@ mod tests {
         let flight =
             flight::State::new(&tore_world::test_support::profile(), [0., 20_000., 0.]).unwrap();
         let mut observer = Observer::new();
+        let parts = Parts::default();
         let step = |observer: &mut Observer, combat: &live::State, events: &[live::Event]| {
             observer.step(
-                &flight,
+                &test_frame(&parts, &flight),
                 combat,
                 events,
                 None,
@@ -290,9 +314,10 @@ mod tests {
         let flight =
             flight::State::new(&tore_world::test_support::profile(), [0., 20_000., 0.]).unwrap();
         let mut observer = Observer::new();
+        let parts = Parts::default();
         let step = |observer: &mut Observer, combat: &live::State, events: &[live::Event]| {
             observer.step(
-                &flight,
+                &test_frame(&parts, &flight),
                 combat,
                 events,
                 None,

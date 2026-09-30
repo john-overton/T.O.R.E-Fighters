@@ -201,7 +201,7 @@ fn old_manual(world: &mut World, command: Live) {
     if world.combat.range {
         world
             .combat
-            .refresh_render(&world.cockpits[0].flight, world.ai_wings.as_ref());
+            .refresh_render(0, &world.cockpits[0].flight, world.ai_wings.as_ref());
     }
     let flight = &mut world.cockpits[0].flight;
     flight
@@ -316,7 +316,7 @@ fn a_range_reset_matches_the_old_path_and_is_refused_outside_live_fire() {
     before.combat.command(Live::ReplaceTarget, launcher);
     before
         .combat
-        .refresh_render(&before.cockpits[0].flight, before.ai_wings.as_ref());
+        .refresh_render(0, &before.cockpits[0].flight, before.ai_wings.as_ref());
     let mut out = TickOutput::default();
     let plain = input(&before, Vec::new());
     before.step(&[plain], &mut out).unwrap();

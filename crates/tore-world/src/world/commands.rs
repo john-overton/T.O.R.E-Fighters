@@ -172,8 +172,7 @@ impl World {
         );
         // Range commands can replace targets or launch a round now.
         if self.combat.range {
-            self.combat
-                .refresh_render(&self.cockpits[cockpit].flight, self.ai_wings.as_ref());
+            self.refresh_picture();
         }
         let flight = &mut self.cockpits[cockpit].flight;
         let payload = self
@@ -207,8 +206,7 @@ impl World {
             Live::ReplaceTarget,
             combat::launcher(&self.cockpits[cockpit].flight),
         );
-        self.combat
-            .refresh_render(&self.cockpits[cockpit].flight, self.ai_wings.as_ref());
+        self.refresh_picture();
     }
 
     /// Releases one chaff cartridge or flare, and tells the pilot how many

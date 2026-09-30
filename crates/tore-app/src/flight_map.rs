@@ -1,5 +1,6 @@
 //! Opinionated map presentation. Knowledge comes from simulation observations.
 use crate::{
+    combat_view::PlaneState,
     flight,
     hud::Paint,
     menu::{Canvas, Sprite},
@@ -302,6 +303,7 @@ impl Map {
         scenery: &Scenery,
         state: &flight::State,
         combat: &live::State,
+        plane: u32,
         font: &Font,
         sprites: &std::collections::BTreeMap<String, Sprite>,
     ) {
@@ -378,7 +380,7 @@ impl Map {
                 label(pixels, font, name, (x, y + 12), INK, &mut labels);
             }
         }
-        let contacts = combat.own().sensors.map_contacts();
+        let contacts = combat.own_of(plane).sensors.map_contacts();
         for observed in contacts
             .iter()
             .filter(|c| c.airborne)
@@ -452,7 +454,7 @@ impl Map {
         // Passive noise has no measured location. Show its direction at ownship.
         if let Some((x, y)) = projection.point(state.position) {
             for emitter in combat
-                .own()
+                .own_of(plane)
                 .emitters
                 .iter()
                 .filter(|e| e.distance_nmi.is_none() && self.filters.shows(Category::Emitters))

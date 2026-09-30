@@ -82,8 +82,9 @@ mod weather;
 
 // The mission core lives in tore-world; these keep the app's module paths.
 pub(crate) use tore_world::{
-    ai_wings, aircraft_type, airfield_radio, combat, combat_tape, comms, crew_voice, mission,
-    mission_layout, radio_calls, seats, situation, snapshot, target_window, terrain, world,
+    ai_wings, aircraft_type, airfield_radio, combat, combat_tape, comms, crew_voice, frame,
+    mission, mission_layout, radio_calls, seats, situation, snapshot, target_window, terrain,
+    world,
 };
 
 /// The seat single player flies from.
@@ -94,6 +95,7 @@ const OWN: usize = 0;
 const MAX_SEAT_COMMANDS: usize = 256;
 
 use assets::Assets;
+use combat_view::PlaneState;
 use menu::{Action, Menu};
 use renderer::Renderer;
 use std::{
@@ -408,6 +410,28 @@ fn seat_releases<'a>(
         .collect()
 }
 
+/// What `seat`'s plane keeps outside combat: its tower conversation, NAV mode
+/// and mission result, which the cockpit readout of slice D5b will carry. The
+/// presenter's seat always flies a plane.
+fn seat_cockpit(world: &world::World, seat: seats::SeatId) -> &world::Cockpit {
+    &world.cockpits[world
+        .cockpit_of(seat)
+        .expect("the presented seat flies a plane")]
+}
+
+/// The flight frame of the tick just stepped, for `seat`'s plane: its flight
+/// as the tick left it, the tick's newest picture and `cues`, the tick's cues.
+/// The seat flies, as the presenter's seat always does.
+fn tick_frame<'a>(
+    world: &'a world::World,
+    seat: seats::SeatId,
+    cues: &'a [world::Cue],
+) -> frame::FlightFrame<'a> {
+    world
+        .flight_frame(seat, None, world.combat.render_snapshot(), cues)
+        .expect("the presented seat flies a plane")
+}
+
 /// Everything that presents a tick, borrowed from `App` apart from the
 /// renderer, which the redraw handler holds while the ticks run.
 struct TickPresenter<'a> {
@@ -445,13 +469,7 @@ impl TickPresenter<'_> {
             }
             match cue {
                 // Another seat's output is that seat's to present.
-                world::Cue::Message { seat, .. }
-                | world::Cue::Feedback { seat, .. }
-                | world::Cue::Tower { seat, .. }
-                | world::Cue::WeaponCycled { seat }
-                | world::Cue::OrderVoice { seat, .. }
-                | world::Cue::Radio { seat, .. }
-                    if *seat != input.seat => {}
+                cue if !cue.is_for(input.seat) => {}
                 world::Cue::Message { text, .. } => self.flight_ui.message(text.clone()),
                 world::Cue::Feedback { event, .. } => self.input.feedback(*event),
                 world::Cue::Tower { stem, .. } => {
@@ -468,10 +486,10 @@ impl TickPresenter<'_> {
                         audio.radio(stems, true);
                     }
                 }
-                world::Cue::Flown => self.flown(),
+                world::Cue::Flown => self.flown(input.seat),
                 world::Cue::CombatStepped => {
-                    let before = &self.world.cockpits[OWN].previous_flight;
-                    let after = &self.world.cockpits[OWN].flight;
+                    let frame = tick_frame(self.world, input.seat, &out.cues);
+                    let (before, after) = (frame.previous, frame.flight);
                     if let Some(view) = self.flight_ui.pilot_death_view(
                         before.systems.pilot.dead || before.escape.is_some(),
                         after.systems.pilot.dead || after.escape.is_some(),
@@ -495,14 +513,15 @@ impl TickPresenter<'_> {
                 }
                 world::Cue::Picture => {
                     // The mission recording reads the tick's picture.
+                    let frame = tick_frame(self.world, input.seat, &out.cues);
                     if let Some(recording) = &mut self.recorder {
                         let idle = flight::PilotInput::default();
-                        let others = other_crews(&self.world.cockpits, OWN, &idle);
+                        let others = other_crews(&self.world.cockpits, frame.plane, &idle);
                         recording.begin(replay::recorder::Tick {
-                            snapshot: self.world.combat.render_snapshot(),
+                            snapshot: frame.picture,
                             combat: &self.world.combat,
-                            flight: &self.world.cockpits[OWN].flight,
-                            previous: &self.world.cockpits[OWN].previous_flight,
+                            flight: frame.flight,
+                            previous: frame.previous,
                             pilot: &input.pilot,
                             others: &others,
                             wings: self.world.ai_wings.as_ref(),
@@ -512,9 +531,9 @@ impl TickPresenter<'_> {
                             journal: out.journal.as_ref(),
                         });
                     }
-                    if (self.world.cockpits[OWN].flight.crashed
-                        || self.world.cockpits[OWN].flight.escape.is_some()
-                        || self.world.cockpits[OWN].flight.systems.pilot.dead)
+                    if (frame.flight.crashed
+                        || frame.flight.escape.is_some()
+                        || frame.flight.systems.pilot.dead)
                         && let Some(audio) = &self.audio
                     {
                         audio.cancel_airport_radio();
@@ -543,7 +562,11 @@ impl TickPresenter<'_> {
             self.commands_applied();
         }
         if weapon_cycled {
-            show_selected_weapon_page(self.world, self.instruments);
+            show_selected_weapon_page(
+                &tick_frame(self.world, input.seat, &out.cues),
+                &self.world.combat,
+                self.instruments,
+            );
         }
         if let Some(error) = &out.fault {
             self.flight_ui.message(error.clone());
@@ -556,43 +579,37 @@ impl TickPresenter<'_> {
         if let Some(recording) = &mut self.recorder {
             recording.drain_comms(&mut self.world.comms);
         }
-        let danger = tore_sim::ejection::assess(&self.world.cockpits[OWN].flight, |x, z| {
+        let frame = tick_frame(self.world, input.seat, &out.cues);
+        let (plane, flight) = (frame.plane.0, frame.flight);
+        let danger = tore_sim::ejection::assess(flight, |x, z| {
             f64::from(self.world.terrain.height(x as f32, z as f32))
         })
         .is_some();
         if let Some(audio) = self.audio {
-            audio.ejection(
-                &self.world.cockpits[OWN].previous_flight,
-                &self.world.cockpits[OWN].flight,
-                danger,
-            );
+            audio.ejection(frame.previous, flight, danger);
         }
         if let Some(audio) = self.audio {
             let music = self.flight_music.step(
-                &self.world.cockpits[OWN].flight,
+                &frame,
                 &self.world.combat.state,
                 &out.events,
                 self.world.ai_wings.as_ref(),
                 &self.world.terrain,
                 // The mission core's result and home checks, which also send
                 // the result calls whatever the audio.
-                &self.world.cockpits[OWN].result.status(),
+                &seat_cockpit(self.world, input.seat).result.status(),
             );
             audio.situation(&music.inputs, music.now);
             let locks = self
                 .world
                 .ai_wings
                 .as_ref()
-                .map_or_else(Vec::new, |w| w.locks_on(ai_wings::PLAYER_ID));
+                .map_or_else(Vec::new, |w| w.locks_on(plane));
             audio.rwr(self.rwr_warnings.step(
                 self.world.combat.state.tick(),
-                rwr_tone::inbound(
-                    &self.world.combat.state,
-                    self.world.cockpits[OWN].flight.position,
-                ),
+                rwr_tone::inbound(&self.world.combat.state, plane, flight.position),
                 &locks,
-                self.world.cockpits[OWN].flight.escape.is_some()
-                    || self.world.cockpits[OWN].flight.systems.pilot.dead,
+                flight.escape.is_some() || flight.systems.pilot.dead,
             ));
             // What the music's inputs asked for, and why.
             if let Some(recording) = &mut self.recorder {
@@ -602,7 +619,8 @@ impl TickPresenter<'_> {
         // Audio observes authoritative poses and consumes each emission once.
         if let Some(audio) = self.audio {
             let scene = flight_views::Scene::new(
-                &self.world.cockpits[OWN].flight,
+                plane,
+                flight,
                 &self.world.combat,
                 self.world.ai_wings.as_ref(),
                 None,
@@ -613,11 +631,8 @@ impl TickPresenter<'_> {
                 .camera(
                     *self.flight_view,
                     &scene,
-                    self.hornet.camera(
-                        &self.world.cockpits[OWN].flight,
-                        *self.flight_view,
-                        Default::default(),
-                    ),
+                    self.hornet
+                        .camera(flight, *self.flight_view, Default::default()),
                     look::combine(
                         self.flight_ui.look,
                         self.head_look,
@@ -625,10 +640,7 @@ impl TickPresenter<'_> {
                     ),
                     self.flight_ui.zoom,
                 )
-                .unwrap_or_else(|_| {
-                    self.hornet
-                        .camera(&self.world.cockpits[OWN].flight, 0, Default::default())
-                });
+                .unwrap_or_else(|_| self.hornet.camera(flight, 0, Default::default()));
             let basis = tore_sim::attitude::Basis::new(
                 f64::from(listener_camera.yaw),
                 f64::from(listener_camera.pitch),
@@ -641,20 +653,17 @@ impl TickPresenter<'_> {
                     view: *self.flight_view,
                     external: !self.view_rig.cockpit(*self.flight_view),
                 },
-                &audio::spatial_sources(&self.world.combat.state, &self.world.cockpits[OWN].flight),
+                &audio::spatial_sources(&self.world.combat.state, plane, flight),
                 &out.emissions,
                 &out.releases
                     .iter()
                     .filter(|release| release.seat == input.seat)
                     .map(|release| release.sound.as_str())
                     .collect::<Vec<_>>(),
-                self.world.cockpits[OWN].flight.position,
-                Some((
-                    self.world.cockpits[OWN].flight.position,
-                    self.world.cockpits[OWN].flight.velocity,
-                )),
+                flight.position,
+                Some((flight.position, flight.velocity)),
                 &audio::loop_sources(
-                    self.world.combat.render_snapshot(),
+                    frame.picture,
                     &self
                         .world
                         .combat
@@ -671,22 +680,14 @@ impl TickPresenter<'_> {
             let releases = seat_releases(self.world, input.seat, &out.releases);
             recording.sounds(&out.emissions, &releases);
         }
-        if self.world.cockpits[OWN].flight.crashed
-            && !self.world.cockpits[OWN].previous_flight.crashed
-            && self.world.cockpits[OWN].flight.escape.is_none()
-        {
+        if flight.crashed && !frame.previous.crashed && flight.escape.is_none() {
             self.input.feedback(tore_input::FeedbackEvent::Crash);
         }
-        if self.world.cockpits[OWN].flight.afterburner_active()
-            && !self.world.cockpits[OWN]
-                .previous_flight
-                .afterburner_active()
-        {
+        if flight.afterburner_active() && !frame.previous.afterburner_active() {
             self.input
                 .feedback(tore_input::FeedbackEvent::AfterburnerEngaged);
         }
-        self.input
-            .afterburner_feedback(self.world.cockpits[OWN].flight.afterburner_active());
+        self.input.afterburner_feedback(flight.afterburner_active());
         self.input.feedback_tick();
         if let Some(recording) = &mut self.recorder {
             recording.end(Some(&mut self.flight_ui), &mut self.world.combat);
@@ -707,10 +708,13 @@ impl TickPresenter<'_> {
     /// Presentation that follows the player's flight, the weather clock and
     /// turbulence: each camera slot's weather, the view rig, blackout and
     /// redout, wing vapor and control-surface sounds.
-    fn flown(&mut self) {
-        let speed = self.world.cockpits[OWN].flight.speed;
+    fn flown(&mut self, seat: seats::SeatId) {
+        let frame = tick_frame(self.world, seat, &[]);
+        let (plane, flight) = (frame.plane.0, frame.flight);
+        let speed = flight.speed;
         let scene = flight_views::Scene::new(
-            &self.world.cockpits[OWN].flight,
+            plane,
+            flight,
             &self.world.combat,
             self.world.ai_wings.as_ref(),
             None,
@@ -720,11 +724,8 @@ impl TickPresenter<'_> {
             .camera(
                 *self.flight_view,
                 &scene,
-                self.hornet.camera(
-                    &self.world.cockpits[OWN].flight,
-                    *self.flight_view,
-                    Default::default(),
-                ),
+                self.hornet
+                    .camera(flight, *self.flight_view, Default::default()),
                 look::combine(
                     self.flight_ui.look,
                     self.head_look,
@@ -732,26 +733,19 @@ impl TickPresenter<'_> {
                 ),
                 self.flight_ui.zoom,
             )
-            .unwrap_or_else(|_| {
-                self.hornet
-                    .camera(&self.world.cockpits[OWN].flight, 0, Default::default())
-            });
+            .unwrap_or_else(|_| self.hornet.camera(flight, 0, Default::default()));
         self.scenery
             .step_view_weather(&self.world.terrain, &weather_view, speed);
+        self.scenery
+            .step_view_weather(&self.world.terrain, &mirrors::camera(flight), speed);
         self.scenery.step_view_weather(
             &self.world.terrain,
-            &mirrors::camera(&self.world.cockpits[OWN].flight),
-            speed,
-        );
-        self.scenery.step_view_weather(
-            &self.world.terrain,
-            &self
-                .hornet
-                .panel_camera(&self.world.cockpits[OWN].flight, 2),
+            &self.hornet.panel_camera(flight, 2),
             speed,
         );
         let scene = flight_views::Scene::new(
-            &self.world.cockpits[OWN].flight,
+            plane,
+            flight,
             &self.world.combat,
             self.world.ai_wings.as_ref(),
             None,
@@ -759,47 +753,41 @@ impl TickPresenter<'_> {
         self.view_rig.observe(&scene);
         if let Ok(camera) = self.view_rig.other_camera(
             &scene,
-            self.hornet.camera(
-                &self.world.cockpits[OWN].flight,
-                self.view_rig.other_view(),
-                Default::default(),
-            ),
+            self.hornet
+                .camera(flight, self.view_rig.other_view(), Default::default()),
         ) {
             self.scenery
                 .step_view_weather(&self.world.terrain, &camera, speed);
         }
         if let Some(camera) = self
             .combat_view
-            .target_camera(&self.world.combat, &self.world.cockpits[OWN].flight)
+            .target_camera(&self.world.combat, plane, flight)
         {
             self.scenery
                 .step_view_weather(&self.world.terrain, &camera, speed);
         }
         self.g_effects.step(
-            self.world.cockpits[OWN].flight.g,
-            !self.flight_ui.cheats.no_g_effects
-                && !self.world.cockpits[OWN].flight.crashed
-                && self.world.cockpits[OWN].flight.native.is_none(),
+            flight.g,
+            !self.flight_ui.cheats.no_g_effects && !flight.crashed && flight.native.is_none(),
         );
         if let Some(level) = self.perf_blackout {
             self.g_effects.blackout = level;
         }
-        if let Some(points) = self
-            .hornet
-            .streamer_points(&self.world.cockpits[OWN].flight)
-        {
+        if let Some(points) = self.hornet.streamer_points(flight) {
             self.vapor.step(self.world.terrain.weather.ticks(), points);
         }
         if let Some(audio) = self.audio {
-            audio.controls(
-                &self.world.cockpits[OWN].previous_flight,
-                &self.world.cockpits[OWN].flight,
-            );
+            audio.controls(frame.previous, flight);
         }
     }
 }
 
 impl App {
+    /// The plane the app presents: the one `SEAT` flies.
+    fn plane(&self) -> u32 {
+        seat_cockpit(&self.world, SEAT).plane.0
+    }
+
     /// Queues a command of the seat for the next tick.
     fn queue(&mut self, command: seats::SeatCommand) {
         queue_command(&mut self.seat_commands, command);
@@ -1006,7 +994,7 @@ impl App {
         };
         // The flight as it starts, before the first tick.
         let idle = flight::PilotInput::default();
-        let crews = other_crews(&self.world.cockpits, OWN, &idle);
+        let crews = other_crews(&self.world.cockpits, self.world.cockpits[OWN].plane, &idle);
         recording.begin(recorder::Tick {
             snapshot: self.world.combat.render_snapshot(),
             combat: &self.world.combat,
@@ -1376,7 +1364,9 @@ impl App {
                             .message(tore_sim::aircraft_systems::label(index));
                     }
                 }
-                for message in combat_view::equipment_damage_report(&self.world.combat) {
+                for message in
+                    combat_view::equipment_damage_report(&self.world.combat, self.plane())
+                {
                     self.flight_ui.message(message);
                 }
                 Action::None
@@ -1535,6 +1525,7 @@ impl App {
                     _ => unreachable!(),
                 };
                 let scene = flight_views::Scene::new(
+                    self.plane(),
                     &self.world.cockpits[OWN].flight,
                     &self.world.combat,
                     self.world.ai_wings.as_ref(),
@@ -1636,11 +1627,12 @@ impl App {
                 // Cycles the available sensor channels. Radar search and track
                 // modes follow the selected display range automatically.
                 self.instruments.cycle_channel();
+                let plane = self.plane();
                 if !self
                     .world
                     .combat
                     .state
-                    .own()
+                    .own_of(plane)
                     .sensors
                     .available(self.instruments.controls().channel)
                 {
@@ -1654,11 +1646,12 @@ impl App {
                 Action::Click
             }
             Command::SensorInfrared => {
+                let plane = self.plane();
                 if self
                     .world
                     .combat
                     .state
-                    .own()
+                    .own_of(plane)
                     .sensors
                     .available(tore_sim::sensors::Channel::Infrared)
                 {
@@ -1866,8 +1859,13 @@ impl App {
             },
         )
         .map_err(|error| error.to_string())?;
-        let view = combat_view::CombatView::with_models(&built.world.combat, resources, models)
-            .map_err(|error| error.to_string())?;
+        let view = combat_view::CombatView::with_models(
+            &built.world.combat,
+            built.world.picture_plane().0,
+            resources,
+            models,
+        )
+        .map_err(|error| error.to_string())?;
         Ok((built, view))
     }
 
@@ -1959,7 +1957,7 @@ impl App {
         self.g_effects = Default::default();
         self.flight_clock.remainder = 0.;
         self.flight_view = 0;
-        self.view_rig = Default::default();
+        self.view_rig = flight_views::Rig::for_plane(self.plane());
         let saved = preferences::Preferences::capture(
             &self.flight_ui,
             &self.instruments,
@@ -2068,8 +2066,11 @@ impl App {
                                 self.world.combat.range,
                             )
                             .and_then(|mut c| {
-                                let view =
-                                    combat_view::CombatView::new(&c, &self.theater_resources)?;
+                                let view = combat_view::CombatView::new(
+                                    &c,
+                                    c.own_id(),
+                                    &self.theater_resources,
+                                )?;
                                 c.reset(&mut self.world.cockpits[OWN].flight)?;
                                 if c.uses_normal_startup_defaults() {
                                     c.apply_startup_weapons();
@@ -2797,9 +2798,10 @@ impl ApplicationHandler for App {
                                 .mission_layout
                                 .as_ref()
                                 .map_or(0., |l| l.enemy.distance_ft / mission_layout::FEET_PER_NM),
-                            self.world.combat.state.own().ammo,
+                            self.world.combat.state.own_of(self.plane()).ammo,
                             combat_view::readout(
                                 &self.world.combat,
+                                self.plane(),
                                 &self.world.cockpits[OWN].flight,
                                 self.instruments.controls(),
                                 1.
@@ -3278,14 +3280,13 @@ impl ApplicationHandler for App {
                         let steps = self.flight_ui.steps(&mut self.flight_clock, elapsed);
                         self.frame_time = now;
                         if let Some(audio) = &self.audio {
+                            let frame = tick_frame(&self.world, SEAT, &[]);
                             audio.seeker(
                                 self.world
                                     .combat
                                     .state
-                                    .own_view()
-                                    .seeker_tone(combat::launcher(
-                                        &self.world.cockpits[OWN].flight,
-                                    )),
+                                    .view_of(frame.plane.0)
+                                    .seeker_tone(combat::launcher(frame.flight)),
                             );
                             audio.pause_flight(self.flight_ui.frozen());
                         }
@@ -3299,8 +3300,8 @@ impl ApplicationHandler for App {
                             // from the state at the start of the tick.
                             self.instruments.navigation.refresh(
                                 &self.world.terrain.airport_scene,
-                                &self.world.cockpits[OWN].airport_service,
-                                self.world.cockpits[OWN].flight.position,
+                                &seat_cockpit(&self.world, SEAT).airport_service,
+                                tick_frame(&self.world, SEAT, &[]).flight.position,
                             );
                             for button in std::mem::take(&mut self.instruments.navigation.pending) {
                                 if let Some(id) = self.instruments.navigation.control(button) {
@@ -3312,9 +3313,10 @@ impl ApplicationHandler for App {
                                     );
                                 }
                             }
-                            let (pilot, _) = self
-                                .input
-                                .frame(&self.camera.keys, self.world.cockpits[OWN].flight.throttle);
+                            let (pilot, _) = self.input.frame(
+                                &self.camera.keys,
+                                tick_frame(&self.world, SEAT, &[]).flight.throttle,
+                            );
                             if let Some(recording) = &mut self.input_recording {
                                 self.recorded_ticks += 1;
                                 if let Err(error) = tore_input::recording::write_frame(
@@ -3413,21 +3415,35 @@ impl ApplicationHandler for App {
                             },
                         );
                         // Everything combat draws this frame, shared by every camera.
-                        let frame = self.combat_view.presented(&self.world.combat);
-                        let presented = if self.flight_ui.frozen() {
-                            self.world.cockpits[OWN].flight.clone()
-                        } else {
-                            self.world.cockpits[OWN].flight.presented(
-                                &self.world.cockpits[OWN].previous_flight,
-                                self.flight_clock.remainder / flight::DT,
+                        let picture = self.combat_view.presented(&self.world.combat);
+                        // The flight frame every screen below draws: the seat's
+                        // plane at this frame's instant, the picture, the smoke
+                        // and the devices.
+                        let frame = self
+                            .world
+                            .flight_frame(
+                                SEAT,
+                                (!self.flight_ui.frozen())
+                                    .then(|| {
+                                        self.world.presented_flight(
+                                            SEAT,
+                                            self.flight_clock.remainder / flight::DT,
+                                        )
+                                    })
+                                    .flatten(),
+                                &picture,
+                                &[],
                             )
-                        };
+                            .expect("the presented seat flies a plane");
+                        let (plane, presented) = (frame.plane.0, frame.presented());
+                        let cockpit = seat_cockpit(&self.world, SEAT);
                         if presented.escape.is_some() {
                             self.flight_view = 1;
                             self.view_rig.select(flight_views::Reference::Player);
                         }
                         let scene = flight_views::Scene::new(
-                            &presented,
+                            plane,
+                            presented,
                             &self.world.combat,
                             self.world.ai_wings.as_ref(),
                             Some(&self.combat_view),
@@ -3435,7 +3451,7 @@ impl ApplicationHandler for App {
                         let camera_keys = std::mem::take(&mut self.camera.keys);
                         let base =
                             self.hornet
-                                .camera(&presented, self.flight_view, camera_keys.clone());
+                                .camera(presented, self.flight_view, camera_keys.clone());
                         self.camera = match self.view_rig.camera(
                             self.flight_view,
                             &scene,
@@ -3455,11 +3471,11 @@ impl ApplicationHandler for App {
                                 self.view_rig.select(flight_views::Reference::Player);
                                 self.flight_ui.look = [0.; 2];
                                 self.flight_ui.zoom = 1.;
-                                self.hornet.camera(&presented, 0, camera_keys)
+                                self.hornet.camera(presented, 0, camera_keys)
                             }
                         };
                         if !self.flight_ui.cheats.no_screen_shake && !presented.crashed {
-                            let seconds = self.world.cockpits[OWN].flight.ticks as f64 * flight::DT
+                            let seconds = frame.flight.ticks as f64 * flight::DT
                                 + self.flight_clock.remainder;
                             // High-G shake is the cockpit's; the overspeed shake
                             // shakes every view (requested by John, 2026-09-29).
@@ -3490,26 +3506,23 @@ impl ApplicationHandler for App {
                         let vapor = vapor_vertices(
                             &self.vapor,
                             &self.world.terrain,
-                            &presented,
-                            self.hornet.streamer_points(&presented),
+                            presented,
+                            self.hornet.streamer_points(presented),
                         );
                         renderer.vapor(&vapor);
-                        renderer.smoke(
-                            &self.combat_view.art.smoke,
-                            [&self.world.combat.state.smoke, &self.world.combat.contrails],
-                            &self.world.combat.state.devices,
-                        );
-                        let picture = self.world.combat.render_snapshot();
+                        renderer.smoke(&self.combat_view.art.smoke, frame.smoke, frame.devices);
                         renderer.effects(
                             &self.combat_view.art.effects,
                             &picture.effects,
                             &picture.marks,
                         );
                         renderer.emitters(
-                            &self.world.combat.state.devices,
-                            &self
-                                .combat_view
-                                .afterburner_glows(&self.world.combat, &presented),
+                            frame.devices,
+                            &self.combat_view.afterburner_glows(
+                                &self.world.combat,
+                                plane,
+                                presented,
+                            ),
                         );
                         match renderer.poll_previews() {
                             Ok(previews) => {
@@ -3522,7 +3535,7 @@ impl ApplicationHandler for App {
                                                 .world
                                                 .combat
                                                 .state
-                                                .own_view()
+                                                .view_of(plane)
                                                 .display_target()
                                                 .map(|t| t.id)
                                         {
@@ -3570,7 +3583,8 @@ impl ApplicationHandler for App {
                                     let camera = if page == 4 {
                                         let Some(camera) = self.combat_view.framed_target_camera(
                                             &self.world.combat,
-                                            &presented,
+                                            plane,
+                                            presented,
                                             &self.hornet,
                                             &self.world.terrain,
                                             &self.scenery,
@@ -3582,7 +3596,7 @@ impl ApplicationHandler for App {
                                         camera
                                     } else if page == 3 {
                                         let base = self.hornet.camera(
-                                            &presented,
+                                            presented,
                                             self.view_rig.other_view(),
                                             Default::default(),
                                         );
@@ -3593,33 +3607,33 @@ impl ApplicationHandler for App {
                                         };
                                         camera
                                     } else {
-                                        self.hornet.panel_camera(&presented, page)
+                                        self.hornet.panel_camera(presented, page)
                                     };
                                     let front = (page == 2).then(|| {
                                         instruments::front_view::Symbology::new(
-                                            &presented,
-                                            self.world.terrain.air_data(&presented).ok().as_ref(),
+                                            presented,
+                                            self.world.terrain.air_data(presented).ok().as_ref(),
                                         )
                                     });
                                     renderer.dummies(render_snapshot::aircraft_batches(
-                                        &frame,
+                                        &picture,
                                         &self.combat_view.models,
                                         &camera,
                                         &self.world.terrain,
                                         &self.scenery,
                                     ));
                                     renderer.combat(&render_snapshot::combat_geometry(
-                                        &frame,
+                                        &picture,
                                         &self.combat_view.art,
                                         &self.hornet,
-                                        &presented,
+                                        presented,
                                         &camera,
                                         &self.world.terrain,
                                         &self.scenery,
                                     ));
                                     renderer.aircraft(
                                         &self.hornet,
-                                        &presented,
+                                        presented,
                                         page == 3 && self.view_rig.other_shows_player(),
                                         &camera,
                                         &self.world.terrain,
@@ -3645,7 +3659,7 @@ impl ApplicationHandler for App {
                                                         .world
                                                         .combat
                                                         .state
-                                                        .own_view()
+                                                        .view_of(plane)
                                                         .display_target()
                                                         .map(|t| t.id);
                                                 }
@@ -3671,7 +3685,7 @@ impl ApplicationHandler for App {
                                                         .world
                                                         .combat
                                                         .state
-                                                        .own_view()
+                                                        .view_of(plane)
                                                         .display_target()
                                                         .map(|t| t.id);
                                                 }
@@ -3689,7 +3703,7 @@ impl ApplicationHandler for App {
                             renderer.escapees(
                                 art,
                                 &art.vertices_for(
-                                    frame
+                                    picture
                                         .pilots
                                         .iter()
                                         .map(|p| (p.position, p.heading, p.phase)),
@@ -3700,24 +3714,24 @@ impl ApplicationHandler for App {
                             );
                         }
                         renderer.dummies(render_snapshot::aircraft_batches(
-                            &frame,
+                            &picture,
                             &self.combat_view.models,
                             &self.camera,
                             &self.world.terrain,
                             &self.scenery,
                         ));
                         renderer.combat(&render_snapshot::combat_geometry(
-                            &frame,
+                            &picture,
                             &self.combat_view.art,
                             &self.hornet,
-                            &presented,
+                            presented,
                             &self.camera,
                             &self.world.terrain,
                             &self.scenery,
                         ));
                         renderer.aircraft(
                             &self.hornet,
-                            &presented,
+                            presented,
                             self.view_rig.shows_player(self.flight_view),
                             &self.camera,
                             &self.world.terrain,
@@ -3726,7 +3740,8 @@ impl ApplicationHandler for App {
                         simulation_ms = frame_start.elapsed().as_secs_f64() * 1000.;
                         self.instruments.combat = Some(combat_view::readout(
                             &self.world.combat,
-                            &self.world.cockpits[OWN].flight,
+                            plane,
+                            frame.flight,
                             self.instruments.controls(),
                             self.instruments.rcs_scale_nmi(),
                         ));
@@ -3737,7 +3752,7 @@ impl ApplicationHandler for App {
                             .and_then(|c| c.target.as_mut())
                             && let Some(wings) = &self.world.ai_wings
                         {
-                            target.with_activity(wings, ai_wings::PLAYER_ID);
+                            target.with_activity(wings, plane);
                         }
                         if let (Some(readout), Some(wings)) = (
                             self.instruments.combat.as_mut(),
@@ -3782,7 +3797,7 @@ impl ApplicationHandler for App {
                         self.flight_canvas.begin(
                             renderer.flight_size(),
                             &self.hornet,
-                            &presented,
+                            presented,
                             &self.instruments,
                         );
                         self.menu.pixels.fill(0);
@@ -3793,13 +3808,13 @@ impl ApplicationHandler for App {
                         if self.flight_ui.hud && self.view_rig.cockpit(self.flight_view) {
                             let airport_aircraft = airport_aircraft(
                                 &self.world.terrain,
-                                &presented,
-                                self.world.cockpits[OWN].airport_nav_mode,
+                                presented,
+                                cockpit.airport_nav_mode,
                             );
-                            let guidance = self.world.cockpits[OWN]
+                            let guidance = cockpit
                                 .airport_service
                                 .guidance(&self.world.terrain.airport_scene, airport_aircraft)
-                                .filter(|_| self.world.cockpits[OWN].airport_nav_mode);
+                                .filter(|_| cockpit.airport_nav_mode);
                             let ils = guidance.as_ref().and_then(|g| {
                                 let airport = self
                                     .world
@@ -3813,25 +3828,25 @@ impl ApplicationHandler for App {
                             });
                             hud::draw(
                                 &mut self.menu.pixels,
-                                &presented,
+                                presented,
                                 &self.hornet.hud_font,
                                 self.world.terrain.height(
                                     presented.position[0] as f32,
                                     presented.position[2] as f32,
                                 ) as f64,
-                                self.world.terrain.air_data(&presented).ok().as_ref(),
+                                self.world.terrain.air_data(presented).ok().as_ref(),
                                 self.flight_ui.ladder,
-                                !self.world.cockpits[OWN].airport_nav_mode
-                                    && weapon_hud::active(&self.world.combat.state),
+                                !cockpit.airport_nav_mode
+                                    && weapon_hud::active(&self.world.combat.state, plane),
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                                 self.flight_canvas.hud_zoom(1.),
                                 ils,
-                                airport_wind(&self.world.terrain, &presented, guidance.as_ref())
+                                airport_wind(&self.world.terrain, presented, guidance.as_ref())
                                     .as_ref(),
                                 (gyro_bank, self.flight_ui.time_scale),
                             );
                         }
-                        let target_friendly = self.world.combat.state.own_view().display_target().is_some_and(|target| {
+                        let target_friendly = self.world.combat.state.view_of(plane).display_target().is_some_and(|target| {
                             self.world.ai_wings.as_ref().and_then(|wings| wings.slot(target.id))
                                 .is_some_and(|slot| slot.side == tore_sim::ai::launch::Side::Friendly)
                                 || self.world.terrain.airport_scene.runway(target.id).is_some_and(|runway| {
@@ -3847,11 +3862,12 @@ impl ApplicationHandler for App {
                             && self.flight_ui.hud
                             && self.view_rig.cockpit(self.flight_view)
                             && !weapon_hud::target_in_hud(
-                                &presented,
+                                presented,
                                 &self.world.combat.state,
+                                plane,
                                 f64::from(self.flight_canvas.hud_zoom(1.)),
                             ))
-                        .then(|| self.world.combat.state.own_view().display_target())
+                        .then(|| self.world.combat.state.view_of(plane).display_target())
                         .flatten()
                         .and_then(|target| {
                             self.camera
@@ -3860,18 +3876,19 @@ impl ApplicationHandler for App {
                         if self.flight_ui.hud && self.view_rig.cockpit(self.flight_view) {
                             weapon_hud::draw(
                                 &mut self.menu.pixels,
-                                &presented,
+                                presented,
                                 &self.world.combat.state,
+                                plane,
                                 &self.hornet.hud_font,
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
                                 f64::from(self.flight_canvas.hud_zoom(1.)),
-                                self.world.cockpits[OWN].airport_nav_mode,
+                                cockpit.airport_nav_mode,
                                 target_friendly,
                                 easy_square.is_none(),
                             );
                         }
                         renderer.cockpit(
-                            &presented,
+                            presented,
                             &self.camera,
                             self.flight_ui.cockpit
                                 && !presented.wreck_gone()
@@ -3889,10 +3906,11 @@ impl ApplicationHandler for App {
                             weapon_hud::debug(
                                 &mut self.menu.pixels,
                                 &self.world.combat.state,
-                                &presented,
+                                plane,
+                                presented,
                                 &self.hornet.hud_font,
                                 cockpit_palette[usize::from(self.hornet.hud.primary_color)],
-                                self.world.cockpits[OWN].airport_nav_mode,
+                                cockpit.airport_nav_mode,
                             );
                             self.flight_canvas.weapon_debug(&self.menu.pixels);
                         }
@@ -3930,8 +3948,9 @@ impl ApplicationHandler for App {
                                 &mut self.menu.pixels,
                                 &self.world.terrain,
                                 &self.scenery,
-                                &presented,
+                                presented,
                                 &self.world.combat.state,
+                                plane,
                                 &self.hornet.font,
                                 &self.menu.quick_sprites,
                             );
@@ -3946,7 +3965,8 @@ impl ApplicationHandler for App {
                         if self.flight_view == flight_views::TARGET
                             && self.view_rig.reference == flight_views::Reference::Player
                             && !self.flight_ui.map.open
-                            && let Some(target) = self.world.combat.state.own_view().view_target()
+                            && let Some(target) =
+                                self.world.combat.state.view_of(plane).view_target()
                         {
                             view_compass::draw(
                                 &mut self.flight_canvas,
@@ -3973,9 +3993,9 @@ impl ApplicationHandler for App {
                             self.live_debug.frame(
                                 &mut self.flight_canvas,
                                 &replay::live::Flight {
-                                    frame: &frame,
+                                    frame: &picture,
                                     airframe: &self.hornet,
-                                    player: self.world.cockpits[OWN].plane.0,
+                                    player: plane,
                                     mission: self.world.setup.mission.is_some(),
                                     wings: self.world.ai_wings.as_ref(),
                                     combat: &self.world.combat,
@@ -4018,18 +4038,16 @@ impl ApplicationHandler for App {
                                 self.world
                                     .combat
                                     .state
-                                    .own_view()
-                                    .seeker_tone(combat::launcher(
-                                        &self.world.cockpits[OWN].flight,
-                                    )),
+                                    .view_of(plane)
+                                    .seeker_tone(combat::launcher(frame.flight)),
                             );
                             audio.pause_flight(self.flight_ui.frozen());
                             audio.flight(Some((
                                 &self.hornet.profile,
-                                &self.world.cockpits[OWN].flight,
+                                frame.flight,
                                 f64::from(self.world.terrain.height(
-                                    self.world.cockpits[OWN].flight.position[0] as f32,
-                                    self.world.cockpits[OWN].flight.position[2] as f32,
+                                    frame.flight.position[0] as f32,
+                                    frame.flight.position[2] as f32,
                                 )),
                             )));
                         }
@@ -4500,19 +4518,18 @@ fn recorded_humans(
     )
 }
 
-/// The human-flown planes other than the one at cockpit `own`, for the
+/// The human-flown planes other than plane `own`, for the
 /// recorder's tick. Only the app's own seat sends controls, so the others' read
 /// as idle.
 fn other_crews<'a>(
     cockpits: &'a [world::Cockpit],
-    own: usize,
+    own: seats::PlaneId,
     idle: &'a flight::PilotInput,
 ) -> Vec<replay::recorder::Crewed<'a>> {
     cockpits
         .iter()
-        .enumerate()
-        .filter(|(index, _)| *index != own)
-        .map(|(_, cockpit)| replay::recorder::Crewed {
+        .filter(|cockpit| cockpit.plane != own)
+        .map(|cockpit| replay::recorder::Crewed {
             plane: cockpit.plane.0,
             flight: &cockpit.flight,
             pilot: idle,
@@ -6032,7 +6049,7 @@ fn ai_probe_run(
         .wing_launches(enemy_skill)
         .map_err(|e| e.to_string())?;
     let mut combat = combat::Combat::new(hornet, resources, false)?;
-    let mut combat_view = combat_view::CombatView::new(&combat, resources)?;
+    let mut combat_view = combat_view::CombatView::new(&combat, combat.own_id(), resources)?;
     combat.add_airport_targets(&world.airport_scene)?;
     // The same launch layout a flown mission uses, including a ground start
     // when `--ground-start` chose a runway.
@@ -6232,7 +6249,7 @@ fn ai_probe_run(
     // flight takes it, and nothing it reads feeds back into the run.
     let mut recording = match record {
         Some(record) => {
-            combat.restart_render(&flight, Some(&bridge));
+            combat.restart_render(combat.own_id(), &flight, Some(&bridge));
             let mut recording = start_probe_recording(
                 record, &combat, &flight, &bridge, hornet, world, ticks, ai_mission, script,
             )?;
@@ -6475,7 +6492,8 @@ fn ai_probe_run(
                             verify_probe_attitudes(mission.combat.render_snapshot(), bridge)?;
                         }
                         let idle = flight::PilotInput::default();
-                        let others = other_crews(&mission.cockpits, OWN, &idle);
+                        let others =
+                            other_crews(&mission.cockpits, mission.cockpits[OWN].plane, &idle);
                         recording.begin(replay::recorder::Tick {
                             snapshot: mission.combat.render_snapshot(),
                             combat: &mission.combat,
@@ -10161,7 +10179,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         live_fire,
         stripped_loadout.as_deref(),
     )?;
-    let mut combat_view = combat_view::CombatView::new(&combat, &theater_resources)?;
+    let mut combat_view =
+        combat_view::CombatView::new(&combat, combat.own_id(), &theater_resources)?;
     combat.add_airport_targets(&world.airport_scene)?;
     let combat_tape = match record_combat {
         Some(ref path) => {
@@ -10266,7 +10285,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
 
     if std::env::var_os("TORE_EFFECT_PREVIEW").is_some() {
         combat.preview_effects(&flight, &world);
-        combat.refresh_render(&flight, None);
+        combat.refresh_render(combat.own_id(), &flight, None);
     }
     if let Some(weapon_slot) = weapon_slot {
         if weapon_slot == 0 || weapon_slot > combat.state.own().ammo.len() {
@@ -10302,17 +10321,17 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             tore_sim::combat::live::Command::ReplaceTarget,
             combat::launcher(&flight),
         );
-        combat.refresh_render(&flight, None);
+        combat.refresh_render(combat.own_id(), &flight, None);
         // A scripted designation needs a current observation first, exactly as
         // a player's click does.
         combat.step(&mut flight, &world)?;
-        combat.advance_render(&flight, None);
+        combat.advance_render(combat.own_id(), &flight, None);
     }
     let payload_start = combat.state.own().payload_lbs();
     for command in combat_commands {
         combat.command(command, combat::launcher(&flight));
     }
-    combat.refresh_render(&flight, None);
+    combat.refresh_render(combat.own_id(), &flight, None);
     // Lets released chaff and flares develop before a capture.
     if let Some(ticks) = countermeasure_preview {
         for _ in 0..ticks {
@@ -10320,7 +10339,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 f64::from(world.height(x as f32, z as f32))
             });
             combat.step(&mut flight, &world)?;
-            combat.advance_render(&flight, None);
+            combat.advance_render(combat.own_id(), &flight, None);
         }
         let devices = &combat.state.devices;
         println!(
@@ -10357,7 +10376,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         // has the same support a player would wait for.
         for _ in 0..tore_sim::sensors::track::ACQUISITION_STEPS {
             combat.step(&mut flight, &world)?;
-            combat.advance_render(&flight, None);
+            combat.advance_render(combat.own_id(), &flight, None);
         }
         combat.own_trigger().input.space(true, false, false);
         let mut feedback = tore_input::FeedbackMixer::default();
@@ -10375,7 +10394,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     feedback.event(cue);
                 }
             }
-            combat.advance_render(&flight, None);
+            combat.advance_render(combat.own_id(), &flight, None);
             if matches!(
                 feedback.tick(),
                 Some(tore_input::FeedbackUpdate::Pulse { .. })
@@ -10385,7 +10404,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
         println!(
             "Combat probe feedback generation (no hardware playback): {cues:?}, pulses={pulses}; {}",
-            combat_view::status(&combat, &flight)
+            combat_view::status(&combat, combat.own_id(), &flight)
         );
         combat.cancel();
         println!(
@@ -10405,7 +10424,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     if let Some([bearing, elevation, range]) = hud_target_preview {
         for _ in 0..120 {
             combat.step(&mut flight, &world)?;
-            combat.advance_render(&flight, None);
+            combat.advance_render(combat.own_id(), &flight, None);
         }
         let id = combat
             .state
@@ -10436,10 +10455,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                         + body.right[i] * bearing.sin() * elevation.cos()
                         + body.up[i] * elevation.sin())
         });
-        combat.refresh_render(&flight, None);
+        combat.refresh_render(combat.own_id(), &flight, None);
         for _ in 0..24 {
             combat.step(&mut flight, &world)?;
-            combat.advance_render(&flight, None);
+            combat.advance_render(combat.own_id(), &flight, None);
         }
         println!(
             "HUD target preview: bearing={} elevation={} display={:?} sensor={:?}",
@@ -10459,13 +10478,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         for target in &mut combat.state.targets {
             target.hp = (f64::from(target.initial_hp) * (1. - fraction)).round() as i32;
         }
-        combat.refresh_render(&flight, None);
+        combat.refresh_render(combat.own_id(), &flight, None);
         for _ in 0..damage_preview_ticks {
             flight.step(&tore_input::PilotInput::default(), |x, z| {
                 f64::from(world.height(x as f32, z as f32))
             });
             combat.step(&mut flight, &world)?;
-            combat.advance_render(&flight, None);
+            combat.advance_render(combat.own_id(), &flight, None);
         }
         println!(
             "Damage preview: ticks={} debris={} impacts={} smoke={}",
@@ -10518,7 +10537,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         }
     }
     // The first frame draws the prepared scene, ejected pilot included.
-    combat.refresh_render(&flight, None);
+    combat.refresh_render(combat.own_id(), &flight, None);
     // The saved controls file loads without being asked for; a damaged one
     // falls back to the default controls with a warning. A file named with
     // `--input-profile` is what the player asked for and fails loudly.
@@ -10661,6 +10680,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         wing_status: Default::default(),
         radio: Default::default(),
     };
+    let presented_plane = world.picture_plane().0;
     let mut app = App {
         launch_creator,
         quick_loadout: stripped_loadout.clone(),
@@ -10700,7 +10720,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         g_effects: Default::default(),
         flight_view,
         view_rig: {
-            let mut rig = flight_views::Rig::default();
+            let mut rig = flight_views::Rig::for_plane(presented_plane);
             rig.select(flight_reference);
             rig
         },
@@ -10967,10 +10987,15 @@ fn flight_key(physical: winit::keyboard::PhysicalKey, fallback: &str) -> String 
 }
 
 /// Turns the weapon page to the selected weapon.
-fn show_selected_weapon_page(world: &world::World, instruments: &mut instruments::Instruments) {
+fn show_selected_weapon_page(
+    frame: &frame::FlightFrame,
+    combat: &combat::Combat,
+    instruments: &mut instruments::Instruments,
+) {
     let readout = combat_view::readout(
-        &world.combat,
-        &world.cockpits[OWN].flight,
+        combat,
+        frame.plane.0,
+        frame.flight,
         instruments.controls(),
         instruments.rcs_scale_nmi(),
     );

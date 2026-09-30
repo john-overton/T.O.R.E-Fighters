@@ -77,14 +77,15 @@ impl Warnings {
 }
 
 /// Whether a radar-guided (class 3) and an infrared-guided (class 2) missile
-/// is in flight with the player as its target. An AIM-120 farther than
-/// 30,380 ft is not counted, as for the flight music.
-pub fn inbound(combat: &live::State, player: [f64; 3]) -> [bool; 2] {
+/// is in flight with `plane`, the plane the screen presents, as its target.
+/// An AIM-120 farther than 30,380 ft from `player`, the plane's position, is
+/// not counted, as for the flight music.
+pub fn inbound(combat: &live::State, plane: u32, player: [f64; 3]) -> [bool; 2] {
     [3, 2].map(|class| {
         combat.projectiles.iter().any(|p| {
-            let weapon = p.weapon(combat.own().configuration());
+            let weapon = combat.weapon(p);
             p.incoming.is_some()
-                && p.target == Some(combat.own().aircraft)
+                && p.target == Some(plane)
                 && weapon.seeker.signature == class
                 && !(weapon.source.eq_ignore_ascii_case("AIM120.JT")
                     && distance(p.position, player) > AIM120_IGNORE_FT)

@@ -841,7 +841,7 @@ pub fn validate_sources(
                 .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
         })?;
         let mut combat = crate::combat::Combat::with_loadout(&airframe, &load)?;
-        let mut view = crate::combat_view::CombatView::new(&combat, data)?;
+        let mut view = crate::combat_view::CombatView::new(&combat, combat.own_id(), data)?;
         view.mission_dummies(&mut combat, &[(id, 29)], 5280., data)?;
         combat.reset(&mut airframe.start(world))?;
         validate_guns_only(&load, &airframe, &combat.state.targets, data, world)?;
@@ -861,7 +861,7 @@ pub fn validate_sources(
         })?;
         load.validate()?;
         let mut normal = crate::combat::Combat::new(&airframe, data, false)?;
-        let mut normal_view = crate::combat_view::CombatView::new(&normal, data)?;
+        let mut normal_view = crate::combat_view::CombatView::new(&normal, normal.own_id(), data)?;
         let mut flight = airframe.start(world);
         let mtow = flight.model().configuration().mass.max_takeoff_lbs;
         let wind_limits =
@@ -931,7 +931,7 @@ pub fn validate_sources(
             }
         }
         let mut gun = crate::combat::Combat::new(&airframe, data, false)?;
-        let gun_view = crate::combat_view::CombatView::new(&gun, data)?;
+        let gun_view = crate::combat_view::CombatView::new(&gun, gun.own_id(), data)?;
         gun.state.own_mut().armed = true;
         let gun_flight = airframe.start(world);
         let launcher = crate::combat::launcher(&gun_flight);
@@ -970,7 +970,7 @@ pub fn validate_sources(
         {
             return Err(format!("{id:?}: invalid imported gun sight/range").into());
         }
-        gun.refresh_render(&gun_flight, None);
+        gun.refresh_render(gun.own_id(), &gun_flight, None);
         let tracer = gun_view.vertices(&gun, &airframe, &gun_flight, &camera, world, scenery);
         if !tracer.vertices.chunks_exact(10).any(|v| v[5] == -8.) {
             return Err(format!("{id:?}: imported gun has no luminous tracer geometry").into());
@@ -1003,9 +1003,9 @@ pub fn validate_sources(
         flight.damage_variant = None;
         flight.damage_regions = [0.; tore_sim::combat::live::DAMAGE_SECTIONS];
         normal.state.targets[0].hp = 0;
-        normal.refresh_render(&flight, None);
+        normal.refresh_render(normal.own_id(), &flight, None);
         normal.step(&mut flight, world)?;
-        normal.advance_render(&flight, None);
+        normal.advance_render(normal.own_id(), &flight, None);
         if normal_view.dummy_geometry(&normal, &camera, world, scenery)[0]
             .1
             .is_empty()
@@ -1190,7 +1190,9 @@ fn validate_removed_stores(
                 )
                 .into());
             }
-            let listed = crate::combat_view::readout(&combat, &flight, flight.sensors, 1.).weapons;
+            let listed =
+                crate::combat_view::readout(&combat, combat.own_id(), &flight, flight.sensors, 1.)
+                    .weapons;
             let carried: std::collections::BTreeSet<&str> = combat
                 .state
                 .own()

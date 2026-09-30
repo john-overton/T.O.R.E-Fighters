@@ -17,7 +17,7 @@ pub enum Reference {
     Player,
     Target,
     Missile,
-    /// Any aircraft by id, 0 being the player. It never selects the cockpit:
+    /// Any aircraft by id, the player's own included. It never selects the cockpit:
     /// the front, up and track views sit at that aircraft and hide it through
     /// the camera's hidden target, the back view looks from its pilot's eye
     /// over its airframe, and the missile view follows that aircraft's
@@ -125,7 +125,10 @@ impl Scene {
             missiles,
         }
     }
+    /// The scene of the flight screen of the human who flies `plane`, in the
+    /// flight state `player`: that plane is the scene's player.
     pub fn new(
+        plane: u32,
         player: &flight::State,
         combat: &Combat,
         wings: Option<&crate::ai_wings::AiWings>,
@@ -133,12 +136,16 @@ impl Scene {
     ) -> Self {
         Self::from_parts(
             Body::new(
-                0,
+                plane,
                 player.view_position(),
                 player.velocity,
                 Basis::new(player.yaw, player.pitch, player.bank),
             ),
-            combat.state.own_view().view_target().map(|t| t.id),
+            combat
+                .state
+                .view(plane)
+                .and_then(|view| view.view_target())
+                .map(|t| t.id),
             combat
                 .state
                 .targets
@@ -181,9 +188,7 @@ impl Scene {
                 .state
                 .projectiles
                 .iter()
-                .filter(|p| {
-                    !tore_sim::combat::live::is_gun(p.weapon(combat.state.own().configuration()))
-                })
+                .filter(|p| !tore_sim::combat::live::is_gun(combat.state.weapon(p)))
                 .map(|p| {
                     let direction = unit(p.direction, [0., 0., 1.]);
                     Shot::new(
@@ -206,7 +211,7 @@ impl Scene {
         )
     }
     fn body(&self, id: u32) -> Option<Body> {
-        if id == 0 {
+        if id == self.player.id {
             Some(self.player)
         } else {
             self.bodies.iter().find(|b| b.id == id).copied()
@@ -230,11 +235,11 @@ impl Scene {
             self.missiles
                 .iter()
                 .find(|p| p.body.id == reference.id)
-                .map_or(0, |p| p.owner)
+                .map_or(self.player.id, |p| p.owner)
         } else {
             reference.id
         };
-        let group = if id == 0 {
+        let group = if id == self.player.id {
             Some((true, 1))
         } else {
             self.wings.iter().find(|s| s.0 == id).map(|s| (s.1, s.2))
@@ -277,8 +282,11 @@ struct Saved {
 #[derive(Clone, Default)]
 pub struct Rig {
     pub reference: Reference,
-    /// Whose missiles the missile reference follows: 0, the player, in
-    /// flight; the selected aircraft in a replay.
+    /// The aircraft the rig's player is: the plane the screen presents, or
+    /// aircraft 0 in a replay.
+    player: u32,
+    /// Whose missiles the missile reference follows: the player in flight; the
+    /// selected aircraft in a replay.
     missile_owner: u32,
     last_missile: Option<u32>,
     fly_by: Option<Vector>,
@@ -290,12 +298,20 @@ pub struct Rig {
     pub other_pending: bool,
 }
 impl Rig {
+    /// A rig for the screen of the human who flies `plane`.
+    pub fn for_plane(plane: u32) -> Self {
+        Self {
+            player: plane,
+            missile_owner: plane,
+            ..Self::default()
+        }
+    }
     /// Whether `shot` counts as a launch of the missile reference's owner.
     /// The player's own shots exclude the incoming fixtures, which can share
     /// the player's shot counter; another aircraft's shots at the player are
     /// incoming and count.
     fn owns(&self, shot: &Shot) -> bool {
-        shot.owner == self.missile_owner && (self.missile_owner != 0 || !shot.incoming)
+        shot.owner == self.missile_owner && (self.missile_owner != self.player || !shot.incoming)
     }
     /// The missile reference follows `owner`'s newest launch from now on,
     /// forgetting another owner's last missile.
@@ -430,7 +446,8 @@ impl Rig {
                         .iter()
                         .filter(|p| {
                             !subject.missile
-                                && (p.target == Some(subject.id) || (subject.id == 0 && p.incoming))
+                                && (p.target == Some(subject.id)
+                                    || (subject.id == scene.player.id && p.incoming))
                         })
                         .min_by(|a, b| {
                             distance(a.body.position, subject.position)

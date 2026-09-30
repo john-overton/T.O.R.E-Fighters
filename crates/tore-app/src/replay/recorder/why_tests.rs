@@ -92,7 +92,7 @@ fn fly(ticks: u64, record: bool) -> (Fingerprint, Vec<tore_replay::Frame>) {
     combat.state.targets = targets;
     let player = flight::State::new(&aircraft(), [0., 20_000., -5_000.]).unwrap();
     let world = tore_world::test_support::terrain();
-    combat.restart_render(&player, Some(&wings));
+    combat.restart_render(combat.own_id(), &player, Some(&wings));
     let (mut recorder, receiver) = Recorder::detached(1 << 20, &[]);
     for tick in 0..ticks {
         if record {
@@ -125,7 +125,7 @@ fn fly(ticks: u64, record: bool) -> (Fingerprint, Vec<tore_replay::Frame>) {
             own.configuration(),
         );
         wings.step(&mut combat.state, &[human], &world).unwrap();
-        combat.advance_render(&player, Some(&wings));
+        combat.advance_render(combat.own_id(), &player, Some(&wings));
         if record {
             let journal = wings.take_ai_journal();
             let outcomes = combat.state.ledger.take_outcomes();

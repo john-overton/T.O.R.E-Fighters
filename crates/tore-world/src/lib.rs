@@ -13,6 +13,7 @@ pub mod combat;
 pub mod combat_tape;
 pub mod comms;
 pub mod crew_voice;
+pub mod frame;
 pub mod mission;
 pub mod mission_layout;
 pub mod radio_calls;

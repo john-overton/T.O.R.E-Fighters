@@ -149,7 +149,7 @@ impl Matrix<'_> {
         // As a flown launch builds it: combat, then the art that draws it.
         let (mut combat, mut view) =
             match combat::Combat::with_loadout(hornet, &load).and_then(|c| {
-                let view = crate::combat_view::CombatView::new(&c, data)?;
+                let view = crate::combat_view::CombatView::new(&c, c.own_id(), data)?;
                 Ok((c, view))
             }) {
                 Ok(built) => built,

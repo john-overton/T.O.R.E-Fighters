@@ -213,9 +213,20 @@ pub fn loop_sources(
     out
 }
 
-/// Presentation-only observations. No aircraft or missile control is changed.
+/// The acoustic label of plane 0 when it is not the presented plane.
+const OTHER_PLANE_0: u32 = u32::MAX;
+
+/// Presentation-only observations for the screen of the human who flies
+/// `plane`, whose flight is `player`. No aircraft or missile control is
+/// changed.
+///
+/// The acoustics (`tore_sim::acoustics::Passes`) take `Aircraft(0)` to be the
+/// listener's own aircraft, so the presented plane's source is labelled that
+/// whatever its id, and an aircraft that really is plane 0 while another plane
+/// is presented is labelled [`OTHER_PLANE_0`] instead.
 pub fn spatial_sources(
     combat: &tore_sim::combat::live::State,
+    plane: u32,
     player: &crate::flight::State,
 ) -> Vec<tore_sim::acoustics::Source> {
     use tore_sim::acoustics::{Source, SourceId};
@@ -230,7 +241,11 @@ pub fn spatial_sources(
             .iter()
             .filter(|t| t.airborne)
             .map(|t| Source {
-                id: SourceId::Aircraft(t.id),
+                id: SourceId::Aircraft(match t.id {
+                    id if id == plane => 0,
+                    0 => OTHER_PLANE_0,
+                    id => id,
+                }),
                 position: t.position,
                 velocity: t.velocity,
             }),
@@ -239,12 +254,7 @@ pub fn spatial_sources(
         combat
             .projectiles
             .iter()
-            .filter(|p| {
-                tore_sim::combat::missiles::Profile::for_weapon(
-                    p.weapon(combat.own().configuration()),
-                )
-                .is_some()
-            })
+            .filter(|p| tore_sim::combat::missiles::Profile::for_weapon(combat.weapon(p)).is_some())
             .map(|p| Source {
                 id: SourceId::Missile(p.id),
                 position: p.position,
@@ -2158,8 +2168,8 @@ mod tests {
             .clone();
         missile.source = "AIM9M.JT".into();
         combat.state.projectiles[0].weapon = Some(missile);
-        let live = spatial_sources(&combat.state, &player);
-        let replay = snapshot_sources(&combat.snapshot(&player, None));
+        let live = spatial_sources(&combat.state, combat.own_id(), &player);
+        let replay = snapshot_sources(&combat.snapshot(combat.own_id(), &player, None));
         assert_eq!(live.len(), replay.len());
         for (live, replay) in live.iter().zip(&replay) {
             assert_eq!(live.id, replay.id);
