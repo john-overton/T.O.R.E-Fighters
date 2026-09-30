@@ -201,7 +201,7 @@ Planned for Milestone 2. John wrote the feature spec on 2026-09-28. The
 
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
 | --- | :---: | :---: | --- | --- |
-| Multiplayer Quick Mission, co-op and PvP | ☑ | ☑ | Planned. Humans take wing slots in a Quick Mission and AI flies the rest; join in progress; up to 30 humans instead of retail's 8. Nothing is built; the mission core and multi-seat refactors come first. | Manual pp. 31-46; [guide](MULTIPLAYER.md#lobby-and-quick-mission-flow) |
+| Multiplayer Quick Mission, co-op and PvP | ☑ | ☑ | Planned. Humans take wing slots in a Quick Mission and AI flies the rest; join in progress; up to 30 humans instead of retail's 8. Nothing a player can use yet. Built on the multiplayer branch: the mission core, several human seats in one mission, handoff between the AI and a human, lead succession (stages A to C); the network stages are under way (stage D, [design](ARCHITECTURE.md#network-sessions)). | Manual pp. 31-46; [guide](MULTIPLAYER.md#lobby-and-quick-mission-flow) |
 | Lobby, King and host roles | ☑ | ☑ | Planned. The King runs the lobby, as retail's host did; the network host is chosen separately and can move. | Manual p. 42; [guide](MULTIPLAYER.md#roles-and-identity) |
 | Server browser, master server and NAT traversal | ☐ | ☑ | Planned. Replaces retail's typed addresses, modem and serial links. | [Guide](MULTIPLAYER.md#networking) |
 | Dedicated server | ☐ | ☑ | Planned. Headless build for Linux, Windows and macOS; its operator imports their own copy of the game. Designed 2026-09-30 (stage D, reviewed by John): configuration and mission files, console, lifecycle; nothing built. | [Guide](MULTIPLAYER.md#dedicated-servers), [server guide](DEDICATED-SERVER.md) |
