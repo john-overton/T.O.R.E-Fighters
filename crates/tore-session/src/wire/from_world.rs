@@ -1,0 +1,346 @@
+//! Filling the wire's plain data from `tore-world`'s: the entities from the
+//! picture combat takes each tick, and the events from a tick's output.
+//!
+//! These are the host's conversions; which events go to which connection
+//! (the seat's own cues, and the mission-wide ones to everyone) is the host
+//! session's choice.
+
+use super::WireResult;
+use super::bits::{steps, turn16};
+use super::entity::{
+    AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKind, EntityState,
+    Motion, POSITION_STEP, PilotState, ProjectileState, RATE_STEP, SPEED_STEP, Status,
+};
+use super::events::{Rumble, WireEvent};
+use super::names::NameTable;
+use super::priority::Relevance;
+use tore_formats::aircraft::AircraftId;
+use tore_sim::acoustics::Emission;
+use tore_sim::combat::live::{DeviceRelease, EffectKind};
+use tore_world::comms;
+use tore_world::seats::SeatId;
+use tore_world::snapshot::{
+    AircraftPose, DebrisPose, Draw, EffectPose, MarkPose, PilotPose, ProjectilePose, RenderSnapshot,
+};
+use tore_world::world::{Cue, OrderReply, Release};
+
+fn level(value: f64) -> u8 {
+    if value.is_finite() {
+        (value.clamp(0., 1.) * 255.).round() as u8
+    } else {
+        0
+    }
+}
+
+fn surface(value: f64) -> i8 {
+    if value.is_finite() {
+        (value.clamp(-1., 1.) * 127.).round() as i8
+    } else {
+        0
+    }
+}
+
+fn attitude(angles: [f64; 3]) -> [u16; 3] {
+    angles.map(turn16)
+}
+
+fn position(p: [f64; 3]) -> [i64; 3] {
+    p.map(|v| steps(v, POSITION_STEP))
+}
+
+/// An aircraft as drawn, quantized.
+pub fn aircraft_state(pose: &AircraftPose) -> AircraftState {
+    let devices = pose.devices.map(|d| Devices {
+        levels: [d[0], d[1], d[2], d[3], d[4], d[5]].map(level),
+        surfaces: [d[6], d[7], d[8]].map(surface),
+        speed: steps(d[9], SPEED_STEP).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        throttle: level(d[10]),
+    });
+    let rate = |v: f64| steps(v, RATE_STEP).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+    AircraftState {
+        aircraft: pose.aircraft,
+        motion: Motion::of(pose.position, pose.velocity),
+        attitude: attitude(pose.attitude),
+        devices,
+        engine: EngineState {
+            lit: pose.engine.lit,
+            afterburner: pose.engine.afterburner,
+            flame: pose.engine.flame,
+            rates: pose.engine.rates.map(rate),
+        },
+        damage: DamageState {
+            hp: pose.damage.hp,
+            initial_hp: pose.damage.initial_hp,
+            sections: pose.damage.sections,
+            structural: pose.damage.structural,
+        },
+        status: Status {
+            airborne: pose.airborne,
+            crashed: pose.crashed,
+            wreck: pose.wreck,
+        },
+    }
+}
+
+/// A projectile as drawn, quantized; `player` is the connection's plane, for
+/// whether it is aimed at the player.
+pub fn projectile_state(
+    pose: &ProjectilePose,
+    player: u32,
+    names: &mut NameTable,
+) -> WireResult<ProjectileState> {
+    let velocity: [f64; 3] = std::array::from_fn(|i| {
+        (pose.position[i] - pose.previous[i]) * tore_sim::flight::DT.recip()
+    });
+    let [x, y, z] = pose.direction;
+    Ok(ProjectileState {
+        owner: pose.owner,
+        weapon: names.intern(&pose.weapon)?,
+        shape: pose.shape.as_deref().map(|s| names.intern(s)).transpose()?,
+        target: pose.target,
+        aimed_at_player: pose.target == Some(player),
+        motion: Motion::of(pose.position, velocity),
+        direction: [turn16(x.atan2(z)), turn16(y.atan2(x.hypot(z)))],
+    })
+}
+
+fn velocity_between(now: [f64; 3], then: Option<[f64; 3]>, ticks: u64) -> [f64; 3] {
+    match then {
+        Some(then) if ticks > 0 => {
+            let seconds = ticks as f64 * tore_sim::flight::DT;
+            std::array::from_fn(|i| (now[i] - then[i]) / seconds)
+        }
+        _ => [0.; 3],
+    }
+}
+
+/// Every entity of `current` a client flying `player` draws: every aircraft
+/// but its own, every missile, bomb and rocket (gun rounds are burst events),
+/// every debris piece, and every ejected pilot but its own (its escape is
+/// part of its plane's exact state). Debris and pilots take their velocity
+/// from `previous`, the picture a tick or more before.
+pub fn entities(
+    current: &RenderSnapshot,
+    previous: Option<&RenderSnapshot>,
+    player: u32,
+    names: &mut NameTable,
+) -> WireResult<Vec<Entity>> {
+    let mut out = Vec::new();
+    let aircraft_of = |id: u32| -> Option<AircraftId> {
+        std::iter::once(&current.player)
+            .chain(&current.targets)
+            .find(|pose| pose.id == id)
+            .and_then(|pose| pose.aircraft)
+    };
+    for pose in std::iter::once(&current.player).chain(&current.targets) {
+        if pose.aircraft.is_none() || pose.id == player {
+            continue;
+        }
+        if out
+            .iter()
+            .any(|e: &Entity| e.id == pose.id && e.state.kind() == EntityKind::Aircraft)
+        {
+            continue;
+        }
+        out.push(Entity {
+            id: pose.id,
+            state: EntityState::Aircraft(aircraft_state(pose)),
+        });
+    }
+    for pose in current.projectiles.iter().filter(|p| !p.gun) {
+        out.push(Entity {
+            id: pose.id,
+            state: EntityState::Projectile(projectile_state(pose, player, names)?),
+        });
+    }
+    let ticks = previous.map_or(0, |p| current.tick.saturating_sub(p.tick));
+    for pose in &current.debris {
+        let then = previous
+            .and_then(|p| p.debris.iter().find(|d| d.owner == pose.owner))
+            .map(|d| d.position);
+        let model = match pose.draw {
+            Draw::Model(id) => Some(id),
+            Draw::Ownship | Draw::Hidden => aircraft_of(pose.owner),
+        };
+        if out
+            .iter()
+            .any(|e| e.id == pose.owner && e.state.kind() == EntityKind::Debris)
+        {
+            continue;
+        }
+        out.push(Entity {
+            id: pose.owner,
+            state: EntityState::Debris(debris_state(
+                pose,
+                model,
+                velocity_between(pose.position, then, ticks),
+            )),
+        });
+    }
+    for pose in current.pilots.iter().filter(|p| p.owner != player) {
+        let then = previous
+            .and_then(|p| p.pilots.iter().find(|q| q.owner == pose.owner))
+            .map(|q| q.position);
+        if out
+            .iter()
+            .any(|e| e.id == pose.owner && e.state.kind() == EntityKind::Pilot)
+        {
+            continue;
+        }
+        out.push(Entity {
+            id: pose.owner,
+            state: EntityState::Pilot(pilot_state(
+                pose,
+                velocity_between(pose.position, then, ticks),
+            )),
+        });
+    }
+    Ok(out)
+}
+
+/// A debris piece, quantized.
+pub fn debris_state(
+    pose: &DebrisPose,
+    model: Option<AircraftId>,
+    velocity: [f64; 3],
+) -> DebrisState {
+    DebrisState {
+        owner: pose.owner,
+        model,
+        variant: pose.variant.map(|v| v.min(7) as u8),
+        motion: Motion::of(pose.position, velocity),
+        attitude: attitude(pose.attitude),
+    }
+}
+
+/// An ejected pilot, quantized.
+pub fn pilot_state(pose: &PilotPose, velocity: [f64; 3]) -> PilotState {
+    PilotState {
+        owner: pose.owner,
+        motion: Motion::of(pose.position, velocity),
+        heading: turn16(pose.heading),
+        phase: pose.phase,
+    }
+}
+
+/// The relevance a host can work out from positions alone: the distance
+/// from the player's plane at `own` and whether a missile is aimed at
+/// `player`. The host adds its own flight, the friendly sensors' tracks and
+/// the view's subject.
+pub fn distance_relevance(entity: &Entity, own: [f64; 3], player: u32) -> Relevance {
+    let at = entity.state.motion().position_ft();
+    let distance_ft = (0..3).map(|i| (at[i] - own[i]).powi(2)).sum::<f64>().sqrt();
+    Relevance {
+        distance_ft,
+        aimed_at_player: matches!(entity.state, EntityState::Projectile(p) if p.target == Some(player)),
+        ..Relevance::NEAR
+    }
+}
+
+/// The event a cue makes for `seat`: the seat's own cues and the
+/// mission-wide wing ejections; `None` for another seat's cues and for the
+/// tick's markers, which only a local presenter uses.
+pub fn cue_event(cue: &Cue, seat: SeatId, names: &mut NameTable) -> WireResult<Option<WireEvent>> {
+    let mine = |s: &SeatId| *s == seat;
+    Ok(match cue {
+        Cue::Message { seat: s, text } if mine(s) => {
+            Some(WireEvent::Message { text: text.clone() })
+        }
+        Cue::Feedback { seat: s, event } if mine(s) => Some(WireEvent::Feedback {
+            rumble: Rumble::of(*event),
+        }),
+        Cue::Tower { seat: s, stem } if mine(s) => Some(WireEvent::Tower {
+            stem: stem.map(|stem| names.intern(stem)).transpose()?,
+        }),
+        Cue::WeaponCycled { seat: s } if mine(s) => Some(WireEvent::WeaponCycled),
+        Cue::WingEjection {
+            id,
+            message,
+            friendly,
+        } => Some(WireEvent::WingEjection {
+            aircraft: *id,
+            message: message.clone(),
+            friendly: *friendly,
+        }),
+        Cue::Radio { seat: s, call } if mine(s) => Some(WireEvent::Radio {
+            route: call.route,
+            important: call.kind == comms::Kind::Important,
+            label: call.label.clone(),
+            text: call.text.clone(),
+            stems: call
+                .stems
+                .iter()
+                .take(super::limits::STEMS)
+                .map(|stem| names.intern(stem))
+                .collect::<WireResult<_>>()?,
+        }),
+        Cue::OrderVoice { seat: s, stems } if mine(s) => Some(WireEvent::OrderVoice {
+            stems: stems
+                .iter()
+                .take(super::limits::STEMS)
+                .map(|stem| names.intern(stem))
+                .collect::<WireResult<_>>()?,
+        }),
+        _ => None,
+    })
+}
+
+/// A weapon release sound for its seat.
+pub fn release_event(release: &Release, names: &mut NameTable) -> WireResult<WireEvent> {
+    Ok(WireEvent::Release {
+        sound: names.intern(&release.sound)?,
+        station: release.station.min(255) as u8,
+    })
+}
+
+/// What became of a wing order, for the seat that gave it.
+pub fn order_event(reply: &OrderReply) -> WireEvent {
+    WireEvent::OrderReply {
+        order: reply.order,
+        outcome: reply.outcome.clone(),
+    }
+}
+
+/// A sound emission.
+pub fn sound_event(emission: &Emission, from: Option<u32>) -> WireEvent {
+    WireEvent::Sound {
+        kind: emission.kind,
+        position: position(emission.position),
+        arrived: emission.arrived,
+        from,
+    }
+}
+
+/// A flash, hit or explosion as combat draws it.
+pub fn effect_event(effect: &EffectPose) -> WireEvent {
+    WireEvent::Effect {
+        kind: effect.kind,
+        position: position(effect.position),
+        ticks: effect.ticks,
+        blast: effect.blast,
+    }
+}
+
+/// A crater or crash-site fire.
+pub fn mark_event(mark: &MarkPose) -> WireEvent {
+    WireEvent::Mark {
+        kind: mark.kind,
+        position: position(mark.position),
+    }
+}
+
+/// Chaff or a flare leaving an aircraft.
+pub fn countermeasure_event(release: &DeviceRelease) -> WireEvent {
+    WireEvent::Countermeasure {
+        aircraft: release.owner,
+        flare: release.kind == EffectKind::Flare,
+        position: position(release.release.position),
+        velocity: release
+            .release
+            .velocity
+            .map(|v| steps(v, super::entity::VELOCITY_STEP)),
+        attitude: attitude(release.release.basis.angles()),
+        number: release.number,
+        left: release.left,
+    }
+}

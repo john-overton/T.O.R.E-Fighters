@@ -363,14 +363,18 @@ planned.
 
 ## Bandwidth budget
 
-Agent estimates, to be replaced by measurements in stages D and H.
+Agent estimates, to be replaced by measurements in stages D and H. The first
+stage D measurements (slice D6, 2026-09-30) are in the rows below: seat 0's
+snapshot packets on a three-minute 15 against 15 Quick Mission in the Ukraine
+theater, 10 nm apart, every aircraft within 20 nm and so at the full rate,
+acknowledged 100 ms later (`crates/tore-session/tests/bandwidth.rs`).
 
 | Item | Estimate | Basis |
 | --- | --- | --- |
-| One remote aircraft per snapshot | about 20 bytes | Replays measure 10 to 12 bytes per aircraft per tick; snapshots are 4 ticks apart and delta against an older acknowledged state |
-| Full 30-aircraft snapshot | about 750 bytes | Fits one 1,200-byte packet |
-| The player's own aircraft and cockpit readout per snapshot | 8 bytes of own-state hash and up to 200 bytes of readout per snapshot; 200 to 350 bytes of exact own state when needed and at least once a second; unmeasured | Stage D's client checks its own aircraft against a hash and receives the exact state only when it cannot match, plus the cockpit's readouts (contacts, RWR, weapon estimates) that only the host can compute ([architecture](ARCHITECTURE.md#the-flight-screen-draws-a-frame)). The host upload rows below are from before the readout; stage D measures them |
-| Client download | about 22 KB/s (175 kbit/s) before relevance filtering | 30 snapshots a second |
+| One remote aircraft per snapshot | about 20 bytes; **measured about 9** | Replays measure 10 to 12 bytes per aircraft per tick; snapshots are 4 ticks apart and delta against an older acknowledged state. Measured: the Snapshot section's bytes over its records, missiles included, against states 100 to 130 ms old |
+| Full 30-aircraft snapshot | about 750 bytes; **measured 177 to 879, mean 350** | Fits one 1,200-byte packet. Measured with 29 other aircraft, up to 31 missiles, 4 pilots and 2 debris pieces; the whole packet with its events 199 to 940 bytes, mean 386. Keeping 256 bytes for messages left a due entity waiting a snapshot in 5 percent of snapshots, all during missile-heavy moments; keeping none, never after the first second |
+| The player's own aircraft and cockpit readout per snapshot | 8 bytes of own-state hash and up to 200 bytes of readout per snapshot; 200 to 350 bytes of exact own state when needed and at least once a second; **measured** own state 54 to 363 bytes, mean 80, once a second for a gently turning plane (363 with no baseline); the readout unmeasured until its coding lands | Stage D's client checks its own aircraft against a hash and receives the exact state only when it cannot match, plus the cockpit's readouts (contacts, RWR, weapon estimates) that only the host can compute ([architecture](ARCHITECTURE.md#the-flight-screen-draws-a-frame)). The host upload rows below are from before the readout; stage D measures them |
+| Client download | about 22 KB/s (175 kbit/s) before relevance filtering; **measured 11.7 KB/s (93 kbit/s)** before the readout and the messages | 30 snapshots a second; the same at 5 percent loss |
 | Client upload | 2 to 4 KB/s | Inputs sent 60 times a second, each packet repeating recent unacknowledged ticks |
 | Host upload, 4-player co-op | about 0.5 Mbit/s | 3 clients |
 | Host upload, 15-player co-op | about 2.5 Mbit/s | 14 clients |

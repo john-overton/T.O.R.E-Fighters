@@ -493,8 +493,13 @@ estimates. How they are used is in the
 | The player's own flight, anything within 20 nm, anything a friendly sensor tracks, any missile aimed at the player, any missile within 10 nm, and whatever the player's view follows (the target, wing, external and fly-by views' subject) | Every snapshot (30 a second) | 1 |
 | Everything else | Twice a second | 1/15 |
 
-A band is a priority, not a hard rate: an entity waits only when the packet is
-full. In a 30-aircraft LAN mission everything is expected to fit every time.
+A band sets how often an entity is due: a near one every snapshot, a far one
+twice a second. A due entity waits only when the packet is full, and then goes
+first next time. In a 30-aircraft LAN mission everything due is expected to fit
+every time (measured in D6: it does, but for a snapshot now and then in
+missile-heavy moments while 256 bytes are kept for messages). *Correction
+(D6):* the design called a band only a priority, which would have sent far
+entities at the full rate whenever there was room.
 The view rule is an *agent decision*, so that an aircraft the player watches is
 never a twice-a-second one.
 
