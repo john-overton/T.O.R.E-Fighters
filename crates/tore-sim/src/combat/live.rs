@@ -28,6 +28,7 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
 
 mod handoff;
 pub use handoff::{AiHandback, AiPose, AiStores};
+pub mod rewind;
 
 pub const MAX_PROJECTILES: usize = 256;
 pub use crate::ai::targeting::Side;
@@ -1021,6 +1022,13 @@ pub struct State {
     pub cheats: crate::cheats::Cheats,
     /// The mission's friendly-fire setting.
     pub friendly_fire: FriendlyFire,
+    /// The last second of every aircraft's hit volume, for rewound gun
+    /// rounds. Mission state: a checkpoint carries it.
+    volumes: rewind::History,
+    /// The rewind, in ticks, of every round in flight that has one, by
+    /// projectile number: gun rounds a human fired with a view. Mission state
+    /// like the rounds themselves.
+    rewinds: BTreeMap<u32, u16>,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct GunCadence {
@@ -1812,6 +1820,8 @@ impl State {
             service_remainder: 0,
             cheats: Default::default(),
             friendly_fire: FriendlyFire::default(),
+            volumes: rewind::History::default(),
+            rewinds: BTreeMap::new(),
         }
     }
     /// A state with one ownship, on aircraft 0: single player's arrangement,
@@ -1968,6 +1978,15 @@ impl State {
             .extend(supports.into_iter().map(|support| (support.owner, support)));
     }
 
+    /// The rewind, in ticks, that projectile `id` carries: 0 for every round
+    /// but a gun round a human fired with a view.
+    pub fn rewind_of(&self, id: u32) -> u16 {
+        self.rewinds.get(&id).copied().unwrap_or(0)
+    }
+    /// The last second of every aircraft's hit volume.
+    pub fn hit_volumes(&self) -> &rewind::History {
+        &self.volumes
+    }
     pub fn tick(&self) -> u64 {
         self.tick
     }
@@ -2867,6 +2886,22 @@ impl State {
         ground: impl Fn(f64, f64) -> f64,
         water: impl Fn(f64, f64) -> bool,
     ) -> Vec<Event> {
+        self.step_rewound(inputs, &[], ground, water)
+    }
+    /// [`Self::step_surface`] with lag compensation: `rewinds` gives, for an
+    /// aircraft that fires this tick, the rewind its gun rounds carry, in
+    /// ticks (capped at [`rewind::MAX_REWIND_TICKS`]). On every tick of its
+    /// flight such a round tests each aircraft's hit volume from that many
+    /// ticks before, as the shooter's screen showed it. Missiles, rockets and
+    /// bombs never rewind, and an aircraft not listed fires rounds with none,
+    /// which take exactly the path of [`Self::step_surface`].
+    pub fn step_rewound(
+        &mut self,
+        inputs: &[OwnshipInput],
+        rewinds: &[(u32, u16)],
+        ground: impl Fn(f64, f64) -> f64,
+        water: impl Fn(f64, f64) -> bool,
+    ) -> Vec<Event> {
         let mut events = Vec::new();
         // The ownships are worked one at a time in aircraft id order; every
         // stage that concerns only them loops over them here.
@@ -3324,6 +3359,14 @@ impl State {
                             events.push(Event::Pitbull(self.next_shot));
                         }
                     }
+                    if let Some(ticks) = rewinds
+                        .iter()
+                        .find(|(aircraft, _)| *aircraft == own.aircraft)
+                        .map(|(_, ticks)| (*ticks).min(rewind::MAX_REWIND_TICKS))
+                        .filter(|ticks| gun && *ticks > 0)
+                    {
+                        self.rewinds.insert(self.next_shot, ticks);
+                    }
                     own.shots += 1;
                     self.next_shot += 1;
                     fired = true;
@@ -3388,6 +3431,43 @@ impl State {
         for (id, position) in crashes {
             self.aircraft_crashed(id, position, water(position[0], position[2]));
         }
+        // Every aircraft's hit volume as the search below reads it, for the
+        // rounds that look back.
+        let ground_bounds = &self.ground_bounds;
+        self.volumes.record(
+            self.tick,
+            rows.iter()
+                .map(|r| {
+                    (
+                        r.target.id,
+                        rewind::HitVolume {
+                            position: r.target.position,
+                            previous: r.previous,
+                            basis: r.target.basis,
+                            radius: r.target.radius,
+                        },
+                    )
+                })
+                .chain(
+                    self.targets
+                        .iter()
+                        .zip(&old_targets)
+                        .filter(|(t, _)| {
+                            t.role == TargetRole::Aircraft && !ground_bounds.contains_key(&t.id)
+                        })
+                        .map(|(t, previous)| {
+                            (
+                                t.id,
+                                rewind::HitVolume {
+                                    position: t.position,
+                                    previous: *previous,
+                                    basis: t.basis,
+                                    radius: t.radius,
+                                },
+                            )
+                        }),
+                ),
+        );
         let mut ownship_hits = Vec::new();
         let mut strikes = Vec::new();
         let mut impacts = Vec::new();
@@ -3411,6 +3491,16 @@ impl State {
             } else {
                 1.
             };
+            // A gun round a human fired with a view tests every aircraft's
+            // volume from that many ticks back; every other round, the
+            // current one, by today's code.
+            let rewind = self
+                .rewinds
+                .get(&p.id)
+                .copied()
+                .filter(|ticks| *ticks > 0 && is_gun(w));
+            let volumes = &self.volumes;
+            let past = |id: u32| rewind.and_then(|ticks| volumes.volume(id, ticks));
             if p.age == 0 {
                 p.direction = projectile_launch_direction(w, p.direction, p.id, p.owner, p.station);
                 self.ledger
@@ -3601,10 +3691,15 @@ impl State {
                         && p.guidance.as_ref().is_none_or(|f| f.eligible(w, t))
                         && t.hp > 0
                         && let Some(at) = if is_gun(w) {
-                            let previous = std::array::from_fn(|i| {
-                                p.previous[i] + t.position[i] - r.previous[i]
-                            });
-                            LocalizedDamage::contact(previous, p.position, t, hitbox).map(|v| v.0)
+                            if let Some(v) = past(t.id) {
+                                rewound_contact(p, v, hitbox)
+                            } else {
+                                let previous = std::array::from_fn(|i| {
+                                    p.previous[i] + t.position[i] - r.previous[i]
+                                });
+                                LocalizedDamage::contact(previous, p.position, t, hitbox)
+                                    .map(|v| v.0)
+                            }
                         } else {
                             let radius = t.radius * hitbox + f64::from(w.damage.fuze_radius.max(0));
                             let start = sub(p.previous, r.previous);
@@ -3637,10 +3732,14 @@ impl State {
                         // a long runway into a giant interception sphere.
                         bounds.segment_fraction(p.previous, p.position)
                     } else if is_gun(w) && t.role == TargetRole::Aircraft {
-                        let previous = std::array::from_fn(|axis| {
-                            p.previous[axis] + t.position[axis] - old_targets[i][axis]
-                        });
-                        LocalizedDamage::contact(previous, p.position, t, hitbox).map(|v| v.0)
+                        if let Some(v) = past(t.id) {
+                            rewound_contact(p, v, hitbox)
+                        } else {
+                            let previous = std::array::from_fn(|axis| {
+                                p.previous[axis] + t.position[axis] - old_targets[i][axis]
+                            });
+                            LocalizedDamage::contact(previous, p.position, t, hitbox).map(|v| v.0)
+                        }
                     } else {
                         let radius = t.radius * hitbox + f64::from(w.damage.fuze_radius.max(0));
                         let start = sub(p.previous, old_targets[i]);
@@ -3692,11 +3791,16 @@ impl State {
                             super::systems::damage_amount(base, 100, draw(&mut self.rng, 40) as u8);
                         self.ledger
                             .resolve(p.id, Resolution::Hit(u32::try_from(amount).unwrap_or(0)));
-                        let previous = std::array::from_fn(|i| {
-                            p.previous[i] + r.target.position[i] - r.previous[i]
-                        });
-                        let section =
-                            LocalizedDamage::section_segment(previous, p.position, &r.target);
+                        let (section, position) = if let Some(v) = past(r.target.id) {
+                            rewound_section(p, v, &r.target, position)
+                        } else {
+                            let previous = std::array::from_fn(|i| {
+                                p.previous[i] + r.target.position[i] - r.previous[i]
+                            });
+                            let section =
+                                LocalizedDamage::section_segment(previous, p.position, &r.target);
+                            (section, position)
+                        };
                         ownship_hits.push((n, amount, section, is_gun(w), p.owner, w.flags));
                         impacts.push((position, EffectKind::Hit, w.effects.object_explosion, 0));
                         if !is_gun(w) {
@@ -3730,10 +3834,18 @@ impl State {
                     }
                     let class = damage_class(t.category);
                     let nominal = i32::from(w.damage.by_class[class]).max(0);
-                    let previous = std::array::from_fn(|axis| {
-                        p.previous[axis] + t.position[axis] - old_targets[i][axis]
-                    });
-                    let section = LocalizedDamage::section_segment(previous, p.position, t);
+                    // Only aircraft have a history; a ground object never rewinds.
+                    let (section, position) = if let Some(v) = past(t.id) {
+                        rewound_section(p, v, t, position)
+                    } else {
+                        let previous = std::array::from_fn(|axis| {
+                            p.previous[axis] + t.position[axis] - old_targets[i][axis]
+                        });
+                        (
+                            LocalizedDamage::section_segment(previous, p.position, t),
+                            position,
+                        )
+                    };
                     let scaled = projectile_damage(p, w, nominal);
                     if t.role == TargetRole::Aircraft && !is_gun(w) {
                         events.push(Event::Jolt(Jolt {
@@ -3825,6 +3937,12 @@ impl State {
             }
             true
         });
+        // A round that is gone takes its rewind with it.
+        if !self.rewinds.is_empty() {
+            let flying: std::collections::BTreeSet<u32> =
+                self.projectiles.iter().map(|p| p.id).collect();
+            self.rewinds.retain(|id, _| flying.contains(id));
+        }
         for strike in strikes {
             self.strike(strike);
         }
@@ -4130,6 +4248,33 @@ fn segment_box_fraction(from: Vector, to: Vector, lo: Vector, hi: Vector) -> Opt
     Some(enter.max(0.))
 }
 
+/// A rewound gun round against an aircraft's volume from its history: the
+/// round's segment in that volume's moving frame, as the current test does
+/// with the current volume.
+fn rewound_contact(p: &Projectile, v: &rewind::HitVolume, hitbox: f64) -> Option<f64> {
+    let previous = std::array::from_fn(|i| p.previous[i] + v.position[i] - v.previous[i]);
+    aircraft_contact(previous, p.position, v.position, v.basis, v.radius * hitbox).map(|v| v.0)
+}
+/// Where a rewound gun round hit: the section of the volume it was tested
+/// against, and the impact moved from that past volume onto the aircraft as
+/// it is now, so the hit shows on the aircraft every screen draws.
+fn rewound_section(
+    p: &Projectile,
+    v: &rewind::HitVolume,
+    target: &Target,
+    impact: Vector,
+) -> (DamageSection, Vector) {
+    let past = Target {
+        position: v.position,
+        basis: v.basis,
+        radius: v.radius,
+        ..target.clone()
+    };
+    let previous = std::array::from_fn(|i| p.previous[i] + v.position[i] - v.previous[i]);
+    let section = LocalizedDamage::section_segment(previous, p.position, &past);
+    let impact = std::array::from_fn(|i| impact[i] + target.position[i] - v.position[i]);
+    (section, impact)
+}
 fn scaled_weapon_damage(w: &Weapon, damage: i32) -> i32 {
     let damage = damage.max(0);
     if is_gun(w) { damage / 3 } else { damage }
