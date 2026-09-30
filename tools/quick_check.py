@@ -226,6 +226,7 @@ def main(argv: Sequence[str]) -> int:
     ap.add_argument("--jobs", type=int, default=None, help="parallel runs for the battery and the guard (default: half the cores, 4 to 12)")
     ap.add_argument("--profile", help="imported data folder for the battery and the guard (default: $TORE_DATA_DIR, then .local/bugbash-data)")
     ap.add_argument("--with-windows", choices=("auto", "yes", "no"), default="auto", help="windowed battery scenarios (auto: only when the change touches rendering or windowed input)")
+    ap.add_argument("--windows", type=int, default=1, help="windowed battery scenarios open at once (default %(default)s)")
     ap.add_argument("--no-battery", action="store_true", help="skip the battery selection")
     ap.add_argument("--no-guard", action="store_true", help="skip the single-player guard")
     ap.add_argument("--fail-fast", action="store_true", help="stop at the first failing step")
@@ -305,7 +306,7 @@ def main(argv: Sequence[str]) -> int:
     if want_battery:
         cmd = [
             sys.executable, "tools/battery.py", "--changed", base, "--budget", str(opts.budget), "--jobs", str(jobs),
-            "--profile", str(profile), "--with-windows", opts.with_windows, "--no-unit-tests", "--tag", "quick",
+            "--profile", str(profile), "--with-windows", opts.with_windows, "--windows", str(opts.windows), "--no-unit-tests", "--tag", "quick",
         ]
         if opts.head:
             cmd += ["--head", opts.head]

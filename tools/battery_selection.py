@@ -213,6 +213,10 @@ def _r(pattern: str, families: Sequence[str], why: str, windowed: bool = False, 
 
 FLIGHT_CORE = ("flight-maneuvers", "flight-stall", "flight-takeoff", "flight-landing", "ai-fights")
 AI_CORE = ("ai-fights", "ai-missions", "ai-orders", "ai-airfield", "ai-lead", "ai-regression")
+MAIN_FAMILIES = (
+    "replay-cli", "menus-creator", "flight-maneuvers", "flight-takeoff", "flight-landing", "ai-fights",
+    "ai-airfield", "ai-lead", "ai-orders", "ai-regression",
+)
 RENDER_FAMILIES = ("windowed-menus", "flight-views", "instruments")
 MENU_FAMILIES = ("menus-screens", "menus-creator", "menus-validate")
 
@@ -398,8 +402,10 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/diagnostics.rs", ("replay-settings",), "diagnostics"),
     _r("crates/tore-app/src/performance.rs", ("flight-maneuvers",), "performance counters"),
     _r("crates/tore-app/src/replay/*", ("replay-recording", "ai-regression", "replay-live"), "recording and replay screens"),
-    _r("crates/tore-app/src/main.rs", ("replay-cli", "ai-fights", "flight-maneuvers", "menus-creator"), "command line and start-up wiring"),
-    _r("crates/tore-app/*", ("replay-cli", "ai-fights", "flight-maneuvers", "menus-creator"), "tore-app, unmapped file"),
+    # main.rs holds the command line and the probes, including the AI probe's scripted pilot, so it reaches
+    # every kind of headless run.
+    _r("crates/tore-app/src/main.rs", MAIN_FAMILIES, "command line, probes and start-up wiring"),
+    _r("crates/tore-app/*", MAIN_FAMILIES, "tore-app, unmapped file"),
     # Tools.
     _r("tools/battery_selection.py", (), "the selection map", unit_tests=("test_battery_selection",)),
     _r("tools/test_battery_selection.py", (), "the selection map's tests", unit_tests=("test_battery_selection",)),
