@@ -331,6 +331,12 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-replay/*", ("replay-recording", "ai-regression"), "replay format"),
     _r("crates/tore-diagnostics-native/*", ("replay-settings",), "diagnostics"),
     _r("crates/tore-extract/*", ("replay-settings", "menus-validate"), "extractor"),
+    # Stage D crates. Until networked scenarios exist, only the import reaches a battery scenario.
+    _r("crates/tore-import/*", ("menus-validate", "replay-settings"), "importer and data folder"),
+    _r("crates/tore-codec/*", (), "network encoding; no single-player scenario uses it yet"),
+    _r("crates/tore-net/*", (), "network transport; no scenario yet"),
+    _r("crates/tore-session/*", (), "network sessions; no scenario yet"),
+    _r("crates/tore-server/*", (), "dedicated server; no scenario yet"),
     # tore-app: rendering (windowed).
     _r("crates/tore-app/src/*.wgsl", RENDER_FAMILIES, "shaders", windowed=True),
     _r("crates/tore-app/src/*renderer*.rs", RENDER_FAMILIES, "renderers", windowed=True),
