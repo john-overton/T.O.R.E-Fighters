@@ -234,6 +234,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/*/tests.rs", (), "unit tests only"),
     _r("crates/*_tests/*", (), "unit tests only"),
     _r("crates/*/test_support.rs", (), "test support only"),
+    _r("crates/*/test_support/*", (), "test support only"),
     _r("crates/*/assets/*", (), "bundled art and notices", windowed=True),
     # Build configuration can change anything.
     _r("Cargo.toml", ALL_FAMILIES, "workspace manifest"),
@@ -289,6 +290,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-world/src/seats.rs", ("ai-lead", "ai-fights"), "seats"),
     _r("crates/tore-world/src/snapshot.rs", ("replay-recording", "ai-fights"), "snapshots"),
     _r("crates/tore-world/src/mission_layout.rs", ("ai-missions", "menus-creator"), "mission layout"),
+    _r("crates/tore-world/src/mission.rs", ("ai-missions", "menus-creator"), "mission spec"),
+    _r("crates/tore-world/src/resources.rs", ("ai-missions", "menus-creator", "airports"), "mission resource reads"),
     _r("crates/tore-world/src/target_window.rs", ("instruments",), "target window"),
     _r("crates/tore-world/src/aircraft_type.rs", ("ai-fights", "menus-creator"), "aircraft types"),
     _r("crates/tore-world/src/world.rs", AI_CORE + ("replay-recording",), "mission world"),

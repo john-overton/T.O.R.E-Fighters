@@ -1,0 +1,303 @@
+//! Building a mission from a [`MissionSpec`] and the synthetic import, headless.
+
+use super::*;
+use crate::{
+    mission::{MissionSpec, Skill, Start},
+    resources::ResourceReads,
+    seats::SeatInput,
+    test_support::resources::{THEATER, resources},
+};
+use tore_formats::aircraft::AircraftId;
+
+/// A small mission in the synthetic theater: the player's flight of two
+/// against an enemy flight of two.
+fn spec() -> MissionSpec {
+    let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+    spec.wings[0].count = 2;
+    spec.wings[3].count = 2;
+    spec.wings[3].skill = Skill::Average;
+    spec.separation_nm = 2;
+    spec.start = Start::Airborne {
+        altitude_ft: 10_000,
+    };
+    spec
+}
+
+fn step(world: &mut World, ticks: usize) {
+    let mut out = TickOutput::default();
+    for _ in 0..ticks {
+        let input = SeatInput {
+            tick: world.tick(),
+            ..SeatInput::default()
+        };
+        world.step(&[input], &mut out).unwrap();
+    }
+}
+
+#[test]
+fn a_single_player_mission_builds_steps_and_restarts_from_its_spec() {
+    let map = resources();
+    let built = World::build(&spec(), &map, Seating::SinglePlayer, &mut Hooks::default()).unwrap();
+    let mut world = built.world;
+    // The player's flight, one of its two aircraft flown by a human, and the
+    // enemy's two: four planes, the AI flying three.
+    assert_eq!(world.roster.seats().len(), 1);
+    assert_eq!(world.cockpits.len(), 1);
+    assert_eq!(built.restarted.ai_aircraft, Some(3));
+    assert_eq!(
+        world.setup.mission,
+        Some((10_000., world.setup.mission.unwrap().1))
+    );
+    assert!(world.ai_wings.is_some());
+    assert_eq!(world.tick(), 0);
+    let start = world.cockpits[0].flight.position;
+    assert!((world.cockpits[0].flight.position[1] - 10_000.).abs() < 1e-6);
+
+    step(&mut world, 240);
+    assert_eq!(world.tick(), 240);
+    assert_ne!(world.cockpits[0].flight.position, start);
+
+    // A restart puts the mission back where the build left it.
+    let again = World::new(&spec(), &map, Seating::SinglePlayer).unwrap();
+    let player = aircraft_type::AircraftType::load(&map, AircraftId::F18).unwrap();
+    world.restart(&player, &map).unwrap();
+    assert_eq!(world.tick(), 0);
+    assert_eq!(world.cockpits[0].flight.position, start);
+    assert_eq!(again.cockpits[0].flight.position, start);
+    step(&mut world, 10);
+}
+
+#[test]
+fn the_manifest_lists_the_resources_the_build_read() {
+    let map = resources();
+    let reads = ResourceReads::new(&map);
+    World::new(&spec(), &reads, Seating::SinglePlayer).unwrap();
+    let manifest = reads.manifest();
+    let names: Vec<&str> = manifest.entries.iter().map(|e| e.name.as_str()).collect();
+    // The theater, the weather module of the condition, the aircraft with its
+    // sensors, jammer and weapons.
+    for name in [
+        "UKR.MM", "UKR.T2", "DAY2.LAY", "F18.PT", "F18R.SEE", "F18V.SEE", "F18.ECM", "M61.JT",
+    ] {
+        assert!(names.contains(&name), "{name} was not read: {names:?}");
+    }
+    assert!(
+        names.windows(2).all(|pair| pair[0] < pair[1]),
+        "sorted: {names:?}"
+    );
+    // A resource the build never asked for is not in it.
+    assert!(!names.contains(&"CLOUD1.LAY"));
+    // Every entry the import has carries the hash of its bytes.
+    for entry in &manifest.entries {
+        assert_eq!(
+            entry.hash,
+            map.get(&entry.name)
+                .map(|bytes| tore_codec::hash::fnv1a64(bytes))
+        );
+    }
+    // The same build reads the same names.
+    let again = ResourceReads::new(&map);
+    World::new(&spec(), &again, Seating::SinglePlayer).unwrap();
+    assert_eq!(manifest, again.manifest());
+}
+
+fn error_of(spec: &MissionSpec, map: &std::collections::BTreeMap<String, Vec<u8>>) -> String {
+    match World::new(spec, map, Seating::SinglePlayer) {
+        Ok(_) => panic!("the mission built"),
+        Err(error) => error.to_string(),
+    }
+}
+
+/// The standard load of the synthetic F/A-18D.
+fn standard(
+    map: &std::collections::BTreeMap<String, Vec<u8>>,
+) -> tore_sim::combat::loadout::Loadout {
+    let player = aircraft_type::AircraftType::load(map, AircraftId::F18).unwrap();
+    tore_sim::combat::loadout::Loadout::new(&player.profile, |name| {
+        map.get(name)
+            .cloned()
+            .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+    })
+    .unwrap()
+}
+
+#[test]
+fn the_spec_and_its_text_build_the_same_mission() {
+    let map = resources();
+    let mut spec = spec();
+    spec.weather.time = Some([6, 30]);
+    spec.weather.wind = Some([90, 30]);
+    let parsed = MissionSpec::from_text(&spec.to_text()).unwrap();
+    assert_eq!(parsed, spec);
+    let (mut a, mut b) = (
+        World::new(&spec, &map, Seating::SinglePlayer).unwrap(),
+        World::new(&parsed, &map, Seating::SinglePlayer).unwrap(),
+    );
+    step(&mut a, 600);
+    step(&mut b, 600);
+    assert_eq!(a.cockpits[0].flight.position, b.cockpits[0].flight.position);
+    assert_eq!(
+        a.terrain.weather.seconds_of_day(),
+        b.terrain.weather.seconds_of_day()
+    );
+    // The overrides reached the terrain.
+    assert_eq!(a.terrain.environment.time, Some([6, 30]));
+    let plain = World::new(&self::spec(), &map, Seating::SinglePlayer).unwrap();
+    assert_ne!(a.terrain.wind(), plain.terrain.wind());
+    assert_eq!(a.terrain.wind(), b.terrain.wind());
+}
+
+#[test]
+fn the_condition_picks_the_weather_layer_and_the_hour() {
+    let map = resources();
+    let mut night = spec();
+    night.condition = crate::mission::Condition::Night;
+    let world = World::new(&night, &map, Seating::SinglePlayer).unwrap();
+    assert_eq!(world.terrain.condition, Some(5));
+    let seconds = tore_sim::environment::CONDITIONS[5].seconds_of_day;
+    assert_eq!(
+        world.terrain.environment.time,
+        Some([seconds / 3600, seconds / 60 % 60])
+    );
+}
+
+#[test]
+fn a_loadout_in_the_spec_is_the_players_load() {
+    let map = resources();
+    let mut load = crate::mission::LoadoutSpec::of(&standard(&map));
+    assert_eq!(load.stations.len(), 2);
+    load.fuel_lbs = 500.;
+    load.stations[1].quantity = 1;
+    let mut spec = spec();
+    spec.loadout = Some(load.clone());
+    // It survives the text form.
+    assert_eq!(
+        MissionSpec::from_text(&spec.to_text()).unwrap().loadout,
+        Some(load)
+    );
+    let world = World::new(&spec, &map, Seating::SinglePlayer).unwrap();
+    assert_eq!(world.cockpits[0].flight.fuel, 500.);
+    assert_eq!(world.setup.mission.unwrap().1, 500.);
+    assert_eq!(world.combat.state.own().ammo, [500, 1]);
+    // Without one, the aircraft's standard load.
+    let standard = World::new(&self::spec(), &map, Seating::SinglePlayer).unwrap();
+    assert_eq!(standard.combat.state.own().ammo, [500, 2]);
+}
+
+#[test]
+fn a_loadout_that_does_not_fit_the_aircraft_is_refused() {
+    let map = resources();
+    let mut load = crate::mission::LoadoutSpec::of(&standard(&map));
+    load.stations.pop();
+    let mut spec = spec();
+    spec.loadout = Some(load);
+    assert!(error_of(&spec, &map).contains("stations"));
+    let mut load = crate::mission::LoadoutSpec::of(&standard(&map));
+    load.stations[1].quantity = 3;
+    spec.loadout = Some(load);
+    assert!(error_of(&spec, &map).contains("exceeds capacity"));
+}
+
+#[test]
+fn guns_only_unloads_the_standard_missiles_and_refuses_a_load_that_carries_them() {
+    let map = resources();
+    let mut spec = spec();
+    spec.guns_only = true;
+    let world = World::new(&spec, &map, Seating::SinglePlayer).unwrap();
+    assert_eq!(world.combat.state.own().ammo, [500, 0]);
+    // A load that still carries a missile does not meet the setting.
+    spec.loadout = Some(crate::mission::LoadoutSpec::of(&standard(&map)));
+    assert_eq!(
+        error_of(&spec, &map),
+        "Guns only is selected. Unload other weapons or return to setup and change the restriction."
+    );
+}
+
+#[test]
+fn a_ground_start_needs_the_hybrid_flight_model() {
+    let map = resources();
+    let mut spec = spec();
+    spec.start = Start::Ground {
+        runway: crate::mission::RUNWAY_OBJECT_BASE,
+        altitude_ft: 5_000,
+    };
+    spec.researched_flight = false;
+    assert_eq!(
+        error_of(&spec, &map),
+        "Ground start requires the researched flight model. Choose Airborne for this adapter."
+    );
+}
+
+#[test]
+fn an_altitude_under_the_terrain_is_refused_with_the_creators_message() {
+    let mut map = resources();
+    // Raise the whole land to 10,240 feet.
+    for cell in map.get_mut("UKR.T2").unwrap()[149..]
+        .chunks_exact_mut(3)
+        .take(128 * 128)
+    {
+        cell[2] = 40;
+    }
+    assert_eq!(
+        error_of(&spec(), &map),
+        "Airborne altitude must exceed 10340 feet here. Choose a higher altitude."
+    );
+}
+
+#[test]
+fn fixture_wings_fly_straight_with_no_ai() {
+    let map = resources();
+    let mut spec = spec();
+    spec.fixture_wings = true;
+    let built = World::build(&spec, &map, Seating::SinglePlayer, &mut Hooks::default()).unwrap();
+    let mut world = built.world;
+    assert!(world.ai_wings.is_none());
+    assert!(world.setup.ai.is_none());
+    assert_eq!(built.restarted.ai_aircraft, None);
+    assert!(world.combat.mission_layout.is_some());
+    step(&mut world, 120);
+}
+
+#[test]
+fn cheats_in_the_spec_are_in_force_from_the_first_tick() {
+    let map = resources();
+    let mut spec = spec();
+    spec.cheats.unlimited_ammo = true;
+    spec.cheats.no_spins = true;
+    let world = World::new(&spec, &map, Seating::SinglePlayer).unwrap();
+    assert!(world.cockpits[0].flight.cheats.unlimited_ammo);
+    assert!(world.combat.state.cheats.no_spins);
+    // No cheats sends nothing, so what the build set stands.
+    let world = World::new(&self::spec(), &map, Seating::SinglePlayer).unwrap();
+    assert_eq!(
+        world.combat.state.cheats,
+        tore_sim::cheats::Cheats::default()
+    );
+}
+
+#[test]
+fn the_callers_hooks_supply_the_types_and_the_weapon_labels() {
+    let map = resources();
+    let mut loaded = Vec::new();
+    let mut load = |id: AircraftId| {
+        loaded.push(id);
+        crate::aircraft_type::load_type(&map, id)
+    };
+    let label = |weapon: &mut tore_formats::weapons::Weapon| weapon.name = "Tidy".into();
+    let player = crate::aircraft_type::load_type(&map, AircraftId::F18).unwrap();
+    let built = World::build(
+        &spec(),
+        &map,
+        Seating::SinglePlayer,
+        &mut Hooks {
+            player: Some(std::sync::Arc::clone(&player)),
+            load: Some(&mut load),
+            weapon_label: Some(&label),
+        },
+    )
+    .unwrap();
+    // Friendly and enemy wings fly the one type: combat asks once.
+    assert_eq!(loaded, [AircraftId::F18]);
+    let stations = &built.world.combat.state.own().configuration().stations;
+    assert!(stations.iter().all(|s| s.weapon.name == "Tidy"));
+}

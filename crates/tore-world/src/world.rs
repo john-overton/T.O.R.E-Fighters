@@ -11,13 +11,17 @@
 use crate::{
     WorldResult, ai_wings, aircraft_type, airfield_radio, combat, combat_tape, comms, crew_voice,
     mission_layout, radio_calls,
+    resources::ResourceSource,
     seats::{PlaneId, Roster, SeatId, SeatInput, Slot},
     terrain,
 };
-use std::collections::BTreeMap;
 use tore_sim::models::FlightModel;
 use tore_sim::{attitude, flight};
 
+mod build;
+#[cfg(test)]
+mod build_tests;
+pub use build::{Built, Hooks, Seating};
 #[cfg(test)]
 mod command_tests;
 mod commands;
@@ -241,7 +245,7 @@ impl World {
     pub fn restart(
         &mut self,
         aircraft: &aircraft_type::AircraftType,
-        resources: &BTreeMap<String, Vec<u8>>,
+        resources: &dyn ResourceSource,
     ) -> WorldResult<Restarted> {
         // A fixed seed keeps headless runs deterministic.
         self.comms.restart(1);

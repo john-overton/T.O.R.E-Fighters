@@ -64,7 +64,7 @@ use tore_sim::{
     sensors::{self, Observable, Sensors},
 };
 
-use crate::{WorldResult, terrain::Terrain};
+use crate::{WorldResult, resources::ResourceSource, terrain::Terrain};
 use tore_sim::flight;
 
 fn terrain_visible(from: Vector, to: Vector, ground: &dyn Fn(f64, f64) -> f64) -> bool {
@@ -778,7 +778,7 @@ impl AiWings {
         wings: &[WingLaunch],
         targets: &[live::Target],
         guns_only: bool,
-        resources: &BTreeMap<String, Vec<u8>>,
+        resources: &dyn ResourceSource,
     ) -> WorldResult<Self> {
         Self::build_mission(wings, targets, guns_only, resources, &Airfields::default())
     }
@@ -790,7 +790,7 @@ impl AiWings {
         wings: &[WingLaunch],
         targets: &[live::Target],
         guns_only: bool,
-        resources: &BTreeMap<String, Vec<u8>>,
+        resources: &dyn ResourceSource,
         airfields: &Airfields,
     ) -> WorldResult<Self> {
         Self::build_mission_for(
@@ -810,7 +810,7 @@ impl AiWings {
         wings: &[WingLaunch],
         targets: &[live::Target],
         guns_only: bool,
-        resources: &BTreeMap<String, Vec<u8>>,
+        resources: &dyn ResourceSource,
         airfields: &Airfields,
         humans: &[HumanSlot],
     ) -> WorldResult<Self> {
@@ -829,7 +829,12 @@ impl AiWings {
             Ok((aircraft, Some(found)))
         })?;
         for actor in bridge.mission.actors_mut() {
-            let aircraft = Aircraft::parse(&resources[actor.identity().aircraft.pt()])?;
+            let pt = actor.identity().aircraft.pt();
+            let aircraft = Aircraft::parse(
+                resources
+                    .get(pt)
+                    .ok_or_else(|| format!("aircraft cache missing {pt}"))?,
+            )?;
             let config = live::Configuration::from_source(&aircraft, |name| {
                 resources
                     .get(name)

@@ -6,7 +6,7 @@
 //!
 //! Every decision is also written to the [`journal`], with its trigger and
 //! reason, for mission recordings. The journal is write-only.
-use crate::seats::SeatId;
+use crate::{resources::ResourceSource, seats::SeatId};
 use std::collections::{BTreeMap, VecDeque};
 
 pub mod journal;
@@ -157,7 +157,7 @@ impl Phrase {
 /// Imported phrase text keyed by stem, from `TORE_RADIO_<stem>` cache entries.
 pub type Phrases = BTreeMap<String, String>;
 
-pub fn phrases(resources: &BTreeMap<String, Vec<u8>>) -> Phrases {
+pub fn phrases(resources: &dyn ResourceSource) -> Phrases {
     tore_formats::radio::STEMS
         .iter()
         .filter_map(|(stem, _)| {

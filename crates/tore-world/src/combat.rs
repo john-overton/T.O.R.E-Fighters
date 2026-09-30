@@ -3,6 +3,7 @@ use crate::{
     WorldResult,
     ai_wings::{ENEMY_SIDE, FRIENDLY_SIDE},
     aircraft_type::AircraftType,
+    resources::ResourceSource,
     snapshot::{
         AircraftPose, Damage, DebrisPose, Draw, EffectPose, Engine, MarkPose, PilotPose,
         ProjectilePose, RenderSnapshot,
@@ -265,11 +266,7 @@ impl Combat {
             .find(|o| o.id == id)
             .map(|o| o.name.as_str())
     }
-    pub fn new(
-        h: &AircraftType,
-        data: &BTreeMap<String, Vec<u8>>,
-        range: bool,
-    ) -> WorldResult<Self> {
+    pub fn new(h: &AircraftType, data: &dyn ResourceSource, range: bool) -> WorldResult<Self> {
         let config = live::Configuration::from_source(&h.profile, |name| {
             data.get(name)
                 .cloned()
@@ -716,7 +713,7 @@ impl Combat {
         &mut self,
         wings: &[tore_sim::ai::launch::WingLaunch],
         layout: &crate::mission_layout::MissionLayout,
-        data: &BTreeMap<String, Vec<u8>>,
+        data: &dyn ResourceSource,
         load: &mut dyn FnMut(AircraftId) -> WorldResult<Arc<AircraftType>>,
     ) -> WorldResult<()> {
         self.mission_dummies(
@@ -737,7 +734,7 @@ impl Combat {
         &mut self,
         wings: &[(AircraftId, usize)],
         separation: f64,
-        data: &BTreeMap<String, Vec<u8>>,
+        data: &dyn ResourceSource,
         load: &mut dyn FnMut(AircraftId) -> WorldResult<Arc<AircraftType>>,
     ) -> WorldResult<()> {
         for (id, count) in wings {

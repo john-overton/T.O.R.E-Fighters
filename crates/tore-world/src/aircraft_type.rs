@@ -2,8 +2,9 @@
 //! its flight model, its sensors and where its engines exhaust. Nothing here
 //! draws, so the mission core can hold it without art, menus or animation rigs.
 //! The app's drawn half, `Airframe`, wraps one of these.
-use crate::terrain::Terrain;
-use tore_formats::aircraft::Aircraft;
+use crate::{WorldResult, resources::ResourceSource, terrain::Terrain};
+use std::sync::Arc;
+use tore_formats::aircraft::{Aircraft, AircraftId};
 use tore_sim::flight;
 use tore_sim::{attitude::Vector, models::AircraftModel, sensors::SensorProfiles};
 
@@ -25,7 +26,41 @@ pub struct AircraftType {
     pub contrail_offsets: Vec<Vector>,
 }
 
+/// Loads the simulation half of an aircraft type from the imported resources:
+/// the profile, the flight model and the sensors, with no engine outlets.
+/// A headless host has no drawn model to take them from; see
+/// [`AircraftType::load`].
+pub fn load_type(resources: &dyn ResourceSource, id: AircraftId) -> WorldResult<Arc<AircraftType>> {
+    Ok(Arc::new(AircraftType::load(resources, id)?))
+}
+
 impl AircraftType {
+    /// Loads the simulation half of an aircraft type: parses the profile,
+    /// checks that it is the identity asked for, and builds the flight model
+    /// and the sensor profiles. The engine outlets are empty: they come from
+    /// the drawn model's nozzle faces, so the app, which loads the shape, sets
+    /// `contrail_offsets` on what this returns; a host with no drawing leaves
+    /// them empty and a client works them out from its own art.
+    pub fn load(resources: &dyn ResourceSource, id: AircraftId) -> WorldResult<Self> {
+        let get = |name: &str| {
+            resources
+                .get(name)
+                .ok_or_else(|| format!("aircraft cache missing {name}; re-import media"))
+        };
+        let mut profile = Aircraft::parse(get(id.pt())?)?;
+        if profile.id != id.source() || profile.shape != format!("{}.SH", id.stem()) {
+            return Err(
+                "aircraft identity/shape does not match the selected retail profile".into(),
+            );
+        }
+        profile.id = id;
+        let sensors = SensorProfiles::from_source(&profile, |name| {
+            get(name).cloned().map_err(std::io::Error::other)
+        })?;
+        let model = AircraftModel::for_aircraft(&profile)?;
+        Ok(Self::new(profile, model, sensors, Vec::new()))
+    }
+
     pub fn new(
         profile: Aircraft,
         model: AircraftModel,

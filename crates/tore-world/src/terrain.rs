@@ -3,7 +3,7 @@
 //! clock. It holds no art, palette, render origin or per-frame state (those are
 //! the app's scenery) and reads no environment variable. World units
 //! are feet, X east, Y up, Z north.
-use crate::WorldResult;
+use crate::{WorldResult, resources::ResourceSource};
 use std::collections::{BTreeMap, BTreeSet};
 use tore_formats::theater::{CELL_FEET, Environment, HEIGHT_FEET, Theater};
 
@@ -216,7 +216,7 @@ pub fn runway_length_ft(min_z: f64, max_z: f64, anchor_z: Option<f64>) -> f64 {
 /// scene gives the runway of a placement of this type, without building the
 /// theater: the Quick Mission creator uses it to keep short strips off its
 /// ground-start list (`tore_sim::airport::SHORT_STRIP_FT`).
-pub fn strip_length_ft(resources: &BTreeMap<String, Vec<u8>>, object_type: &str) -> Option<f64> {
+pub fn strip_length_ft(resources: &dyn ResourceSource, object_type: &str) -> Option<f64> {
     let definition =
         tore_formats::static_object::Definition::parse(resources.get(object_type)?).ok()?;
     if !definition.callbacks.iter().any(|name| name == "_STRIPProc") {
@@ -243,7 +243,7 @@ pub fn strip_length_ft(resources: &BTreeMap<String, Vec<u8>>, object_type: &str)
 }
 
 impl Placements {
-    pub fn load(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> WorldResult<Self> {
+    pub fn load(resources: &dyn ResourceSource, code: &str) -> WorldResult<Self> {
         let layout_name = format!("{code}.MM");
         let layout = tore_formats::mission::Layout::parse(
             &layout_name,
@@ -394,7 +394,7 @@ impl Placements {
 
 impl Terrain {
     /// The terrain with the mission's own weather and no launch overrides.
-    pub fn for_theater(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> WorldResult<Self> {
+    pub fn for_theater(resources: &dyn ResourceSource, code: &str) -> WorldResult<Self> {
         Self::for_mission(resources, code, None, &Overrides::default())
     }
 
@@ -402,7 +402,7 @@ impl Terrain {
     /// the mission's own `layer` line and time are used unchanged. `overrides`
     /// replace the start time, wind and cloud deck.
     pub fn for_mission(
-        resources: &BTreeMap<String, Vec<u8>>,
+        resources: &dyn ResourceSource,
         code: &str,
         condition: Option<usize>,
         overrides: &Overrides,
@@ -415,10 +415,7 @@ impl Terrain {
     /// wind and cloud deck. No override applies, so a replay looks the same
     /// whatever the viewer's settings are.
     #[allow(dead_code)] // Used by the mission replay viewer.
-    pub fn for_recorded(
-        resources: &BTreeMap<String, Vec<u8>>,
-        recorded: &Recorded,
-    ) -> WorldResult<Self> {
+    pub fn for_recorded(resources: &dyn ResourceSource, recorded: &Recorded) -> WorldResult<Self> {
         Self::build(
             resources,
             &recorded.code,
@@ -429,7 +426,7 @@ impl Terrain {
     }
 
     fn build(
-        resources: &BTreeMap<String, Vec<u8>>,
+        resources: &dyn ResourceSource,
         code: &str,
         condition: Option<usize>,
         recorded: Option<&Recorded>,
@@ -452,7 +449,7 @@ impl Terrain {
             .or_else(|| resources.get(&format!("{base}.T2")))
             .ok_or("missing base terrain grid")?;
         let mut theater = Theater::parse(grid)?;
-        let catalog = tore_formats::theater::map_catalog(resources)?;
+        let catalog = resources.theater_catalog()?;
         if let Some((_, label)) = catalog
             .iter()
             .find(|(id, _)| *id == code.trim_end_matches(".MM"))
@@ -546,7 +543,7 @@ impl Terrain {
     /// matching geometry from the same [`Placements`].
     fn build_airport_scene(
         &mut self,
-        resources: &BTreeMap<String, Vec<u8>>,
+        resources: &dyn ResourceSource,
         code: &str,
     ) -> WorldResult<()> {
         use tore_sim::airport::{

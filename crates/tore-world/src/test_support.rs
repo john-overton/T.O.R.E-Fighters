@@ -2,6 +2,7 @@
 //! four-cell terrain, an aircraft profile, a combat state, and the AI wings'
 //! launch rows and spawned targets. No retail data. Compiled for this crate's
 //! own tests and, through the `test-support` feature, for the app's.
+pub mod resources;
 use crate::terrain::Terrain;
 use std::collections::BTreeMap;
 use tore_formats::{
