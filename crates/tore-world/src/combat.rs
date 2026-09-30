@@ -8,6 +8,7 @@ use crate::{
         ProjectilePose, RenderSnapshot,
     },
     terrain::Terrain,
+    world::plane::{self, OwnshipTerms},
 };
 use std::{collections::BTreeMap, sync::Arc};
 use tore_formats::aircraft::AircraftId;
@@ -167,6 +168,14 @@ pub struct Combat {
     /// Player commands since the mission recorder last looked. Nothing in
     /// flight reads them.
     notes: std::collections::VecDeque<CommandNote>,
+}
+
+/// What one combat tick did for the human-flown aircraft.
+pub struct Stepped {
+    /// The tick's events.
+    pub events: Vec<Event>,
+    /// The ownship terms each flight took, in aircraft id order.
+    pub terms: Vec<(u32, OwnshipTerms)>,
 }
 
 /// A player command combat received, kept for the mission recording.
@@ -1005,19 +1014,20 @@ impl Combat {
     /// flight steps it.
     pub fn step(&mut self, s: &mut flight::State, world: &Terrain) -> WorldResult<Vec<Event>> {
         let aircraft = self.own_id();
-        self.step_all(&mut [(aircraft, s)], world)
+        Ok(self.step_all(&mut [(aircraft, s)], world)?.events)
     }
     /// One combat tick for every human-flown aircraft given, each with its
     /// flight, in aircraft id order: every launcher goes into one combat step,
     /// then each flight takes what combat did to its aircraft: system faults,
-    /// payload, bay, radar and jammer, damage and the crash. A flight whose
+    /// payload, bay, radar and jammer, damage and the crash, through the
+    /// shared plane step's write-backs (`world::plane`). A flight whose
     /// aircraft has no ownship is left alone. The combat tape and the command
     /// notes follow the first ownship only.
     pub fn step_all(
         &mut self,
         flights: &mut [(u32, &mut flight::State)],
         world: &Terrain,
-    ) -> WorldResult<Vec<Event>> {
+    ) -> WorldResult<Stepped> {
         flights.sort_by_key(|(aircraft, _)| *aircraft);
         let first = self.own_id();
         let mut inputs = Vec::new();
@@ -1070,49 +1080,12 @@ impl Combat {
             let Some(own) = self.state.ownship(aircraft) else {
                 continue;
             };
-            for index in 0..45 {
-                while s.systems.counts[index] < own.subsystem_counts[index] {
-                    s.systems.hit(index, s.throttle);
-                    if let Some(hardpoint) = index.checked_sub(36) {
-                        let config = own.configuration();
-                        if config.external_fuel_lbs[hardpoint] > 0. {
-                            s.systems.fuel.external[hardpoint] = 0.;
-                            s.systems.notify(format!(
-                                "External fuel tank {} damaged: fuel lost",
-                                hardpoint + 1
-                            ));
-                        } else if let Some(Some(slot)) = config.hardpoint_slots.get(hardpoint) {
-                            s.systems.notify(format!(
-                                "{} station damaged",
-                                config.stations[*slot].weapon.hud_name
-                            ));
-                        } else {
-                            s.systems.notify(
-                                if own.radar_failed && hardpoint == config.radar_hardpoint {
-                                    "Radar failed"
-                                } else if own.visual_failed && hardpoint == config.visual_hardpoint
-                                {
-                                    "Visual sensor failed"
-                                } else if own.infrared_failed
-                                    && Some(hardpoint) == config.infrared_hardpoint
-                                {
-                                    "Infrared sensor failed"
-                                } else if Some(hardpoint) == config.rwr_hardpoint {
-                                    "RWR failed"
-                                } else if hardpoint == config.ecm_hardpoint {
-                                    "Countermeasure equipment damaged"
-                                } else {
-                                    "Hardpoint equipment damaged"
-                                },
-                            );
-                        }
-                    }
-                }
-            }
+            plane::take_system_hits(
+                s,
+                &OwnshipTerms::of(own, self.state.tick()),
+                own.configuration(),
+            );
             let mut uncredited = false;
-            if s.systems.fatal() {
-                s.crashed = true;
-            }
             if s.crashed
                 && let Some(event) = self.state.systems_destroyed(aircraft)
             {
@@ -1192,42 +1165,15 @@ impl Combat {
         }
         self.contrails.step([]);
         self.contrails.contrails(outlets);
+        let mut terms = Vec::with_capacity(flights.len());
         for (aircraft, s) in flights.iter_mut() {
             let aircraft = *aircraft;
             let Some(own) = self.state.ownship(aircraft) else {
                 continue;
             };
-            s.set_payload((own.payload_lbs() - s.systems.used_external_lbs()).max(0.))?;
-            // The bays stay shut until a release asks for them.
-            s.bay_auto_open = s.bay_available() && self.state.bay_demand(aircraft);
-            if own.radar_failed {
-                s.radar = false;
-            }
-            if own.ecm_failed {
-                s.jammer = false;
-            }
-            s.damage_fraction = (1.
-                - f64::from(own.hp) / f64::from(own.configuration().damage_capacity))
-            .clamp(0., 1.);
-            if events.iter().any(
-                |e| matches!(e, Event::OwnshipDamaged { aircraft: who, .. } if *who == aircraft),
-            ) {
-                s.systems.report_impact(s.ticks, s.damage_fraction);
-            }
-            s.damage_variant = own.damage_section().map(|section| section as usize);
-            s.damage_regions = own.damage_regions();
-            if own.hp == 0 {
-                s.crashed = true;
-                if matches!(
-                    own.damage_section(),
-                    Some(live::DamageSection::Nose | live::DamageSection::Cockpit)
-                ) {
-                    s.systems.kill_pilot("Pilot killed: nose or cockpit lost");
-                }
-            }
-            if events.contains(&Event::PilotKilled { aircraft }) {
-                s.systems.kill_pilot("Pilot killed by cockpit hit");
-            }
+            let own_terms = OwnshipTerms::of(own, self.state.tick());
+            plane::take_combat(s, aircraft, &own_terms, own.configuration(), &events)?;
+            terms.push((aircraft, own_terms));
             if aircraft != first {
                 self.poses.insert(aircraft, Pose::of(s));
             }
@@ -1245,7 +1191,7 @@ impl Combat {
                 self.command_for(aircraft, live::Command::AdvanceFromEmpty, input.launcher);
             }
         }
-        Ok(events)
+        Ok(Stepped { events, terms })
     }
 }
 

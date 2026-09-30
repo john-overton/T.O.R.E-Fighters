@@ -156,7 +156,7 @@ struct Seen {
 
 /// A synthetic airport with one runway, ahead of and below the player, so the
 /// tower, the airport service and the runway targets all have work to do.
-fn airport() -> Scene {
+pub(super) fn airport() -> Scene {
     let bounds = OrientedBox {
         center: [3000., 100., 30000.],
         half: [100., 10., 5000.],
@@ -299,12 +299,12 @@ pub(super) fn mission() -> World {
 }
 
 /// The drones' target ids, one per burst.
-const DRONES: [u32; 2] = [5, 6];
+pub(super) const DRONES: [u32; 2] = [5, 6];
 
 /// Put a drone 3,000 ft dead ahead of the player's nose, just before a burst,
 /// so the gun has something to hit whatever the flight model did to the
 /// heading.
-fn place_drone(world: &mut World, id: u32) {
+pub(super) fn place_drone(world: &mut World, id: u32) {
     let player = &world.cockpits[0].flight;
     let forward = attitude::Basis::new(player.yaw, player.pitch, player.bank).forward;
     let position = player.position;
@@ -321,7 +321,7 @@ fn place_drone(world: &mut World, id: u32) {
 /// The scripted input for one tick: stick movement, a throttle change, gear
 /// and flap commands, weapon-page cycles, airport commands and two bursts of
 /// the trigger.
-fn script(tick: usize) -> SeatInput {
+pub(super) fn script(tick: usize) -> SeatInput {
     let mut input = SeatInput::default();
     let pilot = &mut input.pilot;
     match tick {

@@ -288,9 +288,11 @@ state, when due, travels in a second packet.
 
 The player's plane's **exact state** is what the client's prediction needs to
 match the host bit for bit: the flight state, the cockpit's turbulence state
-and random stream, and the ownship terms the per-plane step reads (the stores'
-weight, whether a release holds the bay open, the radar and jammer failures,
-hit points against the damage capacity, the damaged section and regions).
+and random stream, and the ownship terms the per-plane step reads (the
+subsystem hit counts, the sensor and jammer failures, the stores' weight,
+whether a release holds the bay open, hit points, the broken section and the
+damage in each section; the full list is in the
+[architecture](../ARCHITECTURE.md#one-step-for-a-humans-plane)).
 Every field is coded, the private ones included (the stall scale that depends
 on the weight's history, the hybrid model's random state, the systems, the
 autopilot, the wreck and the escape), except the write-only trace and the

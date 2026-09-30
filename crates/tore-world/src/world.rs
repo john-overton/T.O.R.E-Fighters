@@ -28,6 +28,9 @@ mod fight_tests;
 mod handoff;
 #[cfg(test)]
 mod handoff_tests;
+pub mod plane;
+#[cfg(test)]
+mod plane_tests;
 pub use commands::{MissionCommand, OrderOutcome, OrderReply, Settings};
 #[cfg(test)]
 mod succession_tests;
@@ -211,6 +214,9 @@ pub struct TickOutput {
     pub emissions: Vec<tore_sim::acoustics::Emission>,
     /// A native research fault stopped the tick after the player's flight.
     pub fault: Option<String>,
+    /// The ownship terms each human-flown plane took from combat this tick,
+    /// in plane id order: what a client's copy of the plane's step reads.
+    pub terms: Vec<(PlaneId, plane::OwnshipTerms)>,
 }
 
 impl World {
@@ -578,32 +584,21 @@ impl World {
         }
         out.commanded = out.cues.len();
         commands_applied(self, out)?;
+        // Each human-flown plane's step: docs/ARCHITECTURE.md, "One step for
+        // a human's plane".
         for (cockpit, input) in self.cockpits.iter_mut().zip(&inputs) {
-            cockpit.previous_flight.clone_from(&cockpit.flight);
-            cockpit
-                .flight
-                .step_surface(&input.pilot, |x, z| self.terrain.surface(x, z));
-            if cockpit.flight.native.is_none()
-                && self
-                    .terrain
-                    .solid_contact(
-                        cockpit.previous_flight.position,
-                        cockpit.flight.position,
-                        self.combat
-                            .state
-                            .targets
-                            .iter()
-                            .filter(|target| target.hp > 0)
-                            .map(|target| target.id),
-                    )
-                    .is_some()
-            {
-                if cockpit.flight.cheats.no_crashes {
-                    cockpit.flight.rebound(cockpit.previous_flight.position);
-                } else {
-                    cockpit.flight.crashed = true;
-                }
-            }
+            plane::fly(
+                &mut cockpit.previous_flight,
+                &mut cockpit.flight,
+                &input.pilot,
+                &self.terrain,
+                self.combat
+                    .state
+                    .targets
+                    .iter()
+                    .filter(|target| target.hp > 0)
+                    .map(|target| target.id),
+            );
             if let Some(error) = cockpit.flight.native_fault() {
                 out.fault = Some(error.to_owned());
                 return Ok(());
@@ -612,19 +607,26 @@ impl World {
         // Weather shares the authoritative tick; pausing simply stops calling
         // it, with no elapsed-time catch-up.
         self.terrain.weather.step();
+        let weather = plane::WeatherReading::of(&self.terrain.weather);
         for index in 0..self.cockpits.len() {
             let seat = self.seat_of_cockpit(index);
             let cockpit = &mut self.cockpits[index];
-            let turbulence = !cockpit.flight.cheats.no_turbulence;
-            let turbulence_event = step_turbulence(
+            let warnings = plane::after_weather(
+                &mut cockpit.flight,
                 &mut cockpit.turbulence,
                 &mut cockpit.turbulence_rng,
-                &mut cockpit.flight,
+                &mut cockpit.edge_message_at,
+                &mut cockpit.overspeed_message_at,
                 &self.terrain,
-                turbulence,
+                weather,
             );
-            edge_and_overspeed(cockpit, seat, &self.terrain, out);
-            if let Some(event) = turbulence_event {
+            for text in warnings.messages.into_iter().flatten() {
+                out.cues.push(Cue::Message {
+                    seat,
+                    text: text.into(),
+                });
+            }
+            if let Some(event) = warnings.turbulence {
                 out.cues.push(Cue::Feedback { seat, event });
             }
         }
@@ -653,7 +655,12 @@ impl World {
             .iter_mut()
             .map(|cockpit| (cockpit.plane.0, &mut cockpit.flight))
             .collect();
-        let events = self.combat.step_all(&mut flights, &self.terrain)?;
+        let combat::Stepped { events, terms } =
+            self.combat.step_all(&mut flights, &self.terrain)?;
+        out.terms = terms
+            .into_iter()
+            .map(|(plane, terms)| (PlaneId(plane), terms))
+            .collect();
         out.cues.push(Cue::CombatStepped);
         for index in 0..self.cockpits.len() {
             let seat = self.seat_of_cockpit(index);
@@ -740,7 +747,7 @@ impl World {
                         .iter_mut()
                         .find(|cockpit| cockpit.plane.0 == jolt.target)
                     {
-                        cockpit.flight.jolt_from(jolt.from, jolt.strength);
+                        plane::take_event(&mut cockpit.flight, cockpit.plane.0, event);
                     } else if let Some(wings) = &mut self.ai_wings {
                         wings.jolt(jolt.target, jolt.from, jolt.strength);
                     }
@@ -761,7 +768,7 @@ impl World {
                         .iter_mut()
                         .find(|cockpit| cockpit.plane.0 == *aircraft)
                     {
-                        cockpit.flight.crashed = true;
+                        plane::take_event(&mut cockpit.flight, cockpit.plane.0, event);
                     }
                 }
                 Event::Fired {
@@ -1184,9 +1191,8 @@ pub fn ai_planes(wings: &ai_wings::AiWings) -> impl Iterator<Item = (PlaneId, Sl
     })
 }
 
-/// One tick of physical turbulence, applied to attitude and height only.
-/// Velocity is untouched: the recovered routine is an angular and vertical
-/// perturbation, not a three-dimensional wind field.
+/// One tick of physical turbulence at the weather clock's current reading;
+/// see [`plane::step_turbulence`].
 pub fn step_turbulence(
     turbulence: &mut tore_sim::turbulence::Turbulence,
     rng: &mut tore_formats::flight_model::clock_rng::NativeRng,
@@ -1194,32 +1200,14 @@ pub fn step_turbulence(
     world: &terrain::Terrain,
     enabled: bool,
 ) -> Option<tore_input::FeedbackEvent> {
-    // The joined native service explicitly selects the source disabled branch.
-    if flight.native.is_some() {
-        return None;
-    }
-    let ground = f64::from(world.height(flight.position[0] as f32, flight.position[2] as f32));
-    let agl = flight.position[1] - ground;
-    let conditions = tore_sim::turbulence::Conditions {
-        agl_feet: agl,
-        on_ground: flight.crashed || flight.research.as_ref().is_some_and(|r| r.on_ground),
-        speed_fps: flight.speed,
-        seconds_of_day: world.weather.seconds_of_day(),
-        percent: flight.model().configuration().turbulence_percent,
-        daytime_ground: world.turbulence_reduced_surface(flight.position[0], flight.position[2]),
+    plane::step_turbulence(
+        turbulence,
+        rng,
+        flight,
+        world,
+        plane::WeatherReading::of(&world.weather),
         enabled,
-        nearby_strength: 0,
-    };
-    let d = turbulence
-        .step(world.weather.ticks(), 2, conditions, rng)
-        .ok()?;
-    if d == tore_sim::turbulence::Disturbance::default() {
-        return None;
-    }
-    flight.apply_turbulence(d);
-    d.shake.then(|| tore_input::FeedbackEvent::Turbulence {
-        intensity: d.severity(),
-    })
+    )
 }
 
 /// The player's aircraft as the airport service sees it.
@@ -1312,60 +1300,5 @@ pub fn airport_reply_audio(reply: &tore_sim::airport::Reply) -> Option<&'static 
         Reply::Landed { .. } => Some(tore_formats::radio::AIRPORT_WELCOME_HOME),
         Reply::Repeated(reply) => airport_reply_audio(reply),
         Reply::Selected { .. } | Reply::Declined { .. } | Reply::Cancelled { .. } => None,
-    }
-}
-
-/// Beyond the map: a turn-back warning every ten seconds from 100 nautical
-/// miles out, and the aircraft is lost at 105. Past the top speed: a short
-/// cockpit message, repeated every four seconds. Both requested by John,
-/// 2026-09-29; see docs/spec/world-edge.md and docs/spec/overspeed.md. Each
-/// human-flown plane has its own warnings and its own clocks.
-fn edge_and_overspeed(
-    cockpit: &mut Cockpit,
-    seat: SeatId,
-    terrain: &terrain::Terrain,
-    out: &mut TickOutput,
-) {
-    let flight = &mut cockpit.flight;
-    if !flight.crashed {
-        let [x, _, z] = flight.position;
-        let out_nm = terrain.edge_distance_nm(x, z);
-        if out_nm >= terrain::EDGE_DESTROY_NM {
-            flight
-                .systems
-                .destroy(tore_sim::aircraft_systems::LossCause::OutOfBounds);
-            flight.crashed = true;
-        } else if out_nm >= terrain::EDGE_WARNING_NM {
-            let now = flight.ticks as f64 * flight::DT;
-            if cockpit
-                .edge_message_at
-                .is_none_or(|at| now - at >= 10. || now < at)
-            {
-                cockpit.edge_message_at = Some(now);
-                out.cues.push(Cue::Message {
-                    seat,
-                    text: "You have left the theater: turn back now".into(),
-                });
-            }
-        } else {
-            cockpit.edge_message_at = None;
-        }
-    }
-    if !flight.crashed
-        && flight
-            .overspeed_ratio()
-            .is_some_and(|r| r >= flight::OVERSPEED_SHAKE_FULL)
-    {
-        let now = flight.ticks as f64 * flight::DT;
-        if cockpit
-            .overspeed_message_at
-            .is_none_or(|at| now - at >= 4. || now < at)
-        {
-            cockpit.overspeed_message_at = Some(now);
-            out.cues.push(Cue::Message {
-                seat,
-                text: "OVERSPEED".into(),
-            });
-        }
     }
 }

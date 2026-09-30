@@ -787,7 +787,8 @@ messages) is a `Cockpit`, one per human-flown plane in
 names, and applies each seat's commands to its own plane. The flight step,
 building contact, turbulence, the world edge and OVERSPEED rules and the
 airport service run for every cockpit in
-plane order. Combat keeps one ownship per human-flown plane (B1), and the AI
+plane order, the first four through the
+[shared plane step](#one-step-for-a-humans-plane). Combat keeps one ownship per human-flown plane (B1), and the AI
 is handed every human-flown plane that has one (B3, see [the AI with several
 humans](#the-ai-with-several-humans)). The radio is per seat (slice B4, below): each seat has its own
 delivery queue, busy hold and radio silence, and each call is generated once.
@@ -1908,7 +1909,9 @@ combat, the AI bridge, the debrief and the recorder.
 Design for stage D of the [multiplayer plan](multiplayer-plan.md#stages),
 written by the lead on 2026-09-30, revised the same day after an independent
 review, and reviewed by John the same day: his answers are in the guide's
-[decisions](MULTIPLAYER.md#decisions). Slices D1 (`tore-codec`) and D3a (`tore-import`) are built so far (see the [slice table](#how-stage-d-lands)).
+[decisions](MULTIPLAYER.md#decisions). Slices D1 (`tore-codec`) and D3a
+(`tore-import`) are built so far, and from D4 the shared step for a human's
+plane (see the [slice table](#how-stage-d-lands)).
 Every choice here is an agent decision unless it is credited to John. The three
 follow-up specs the plan assigns to stage D are:
 
@@ -2085,16 +2088,70 @@ which sets each aircraft's contrail height. Both travel in the Mission message.
 
 ### One step for a human's plane
 
-The per-plane part of the tick moves into one function in `tore-world` that
-`World::step` calls for every cockpit and a client calls for its own plane:
-the pilot's input, the flight step over the terrain, building contact against
-the standing ground objects, turbulence from the cockpit's own state and the
-weather clock's reading at that tick, the world edge and OVERSPEED, and, after
-combat, the write-backs that depend only on a few **ownship terms**: the stores'
-weight, whether a release holds the bay open, the radar and jammer failures,
-hit points against the damage capacity, and the damaged section and regions.
-Single player keeps its results exactly: the function is today's code in
-today's order, moved.
+*Built (D4, the shared step).* The per-plane part of the tick is one set of
+functions in `tore-world`, `world::plane`, that `World::step` calls for every
+cockpit in the tick's order and a client calls for its own plane with no
+`World`, `Combat` or `AiWings`:
+
+1. `fly`: the flight at the start of the tick is kept, the flight steps with
+   the pilot's input over the terrain's surface, and building contact is
+   tested against the ground objects still standing (a crash, or a rebound
+   with no crashes).
+2. The weather clock steps; this is the mission's, not the plane's.
+3. `after_weather`: turbulence from the cockpit's own state and random stream
+   and the weather clock's **reading** at that tick (its native ticks and
+   seconds of day, `WeatherReading`), then the world edge and OVERSPEED with
+   their message clocks. It returns the warning lines and the turbulence
+   shake for the seat.
+4. Combat steps, and its step hands each flight to two write-backs with the
+   plane's **ownship terms** (`OwnshipTerms`, plain data):
+   `take_system_hits` (a systems hit for every subsystem hit the ownship counts
+   beyond the flight's own, with the notice for a damaged hardpoint, and the
+   crash when the systems are fatal), then, after combat has reacted to that
+   crash, `take_combat` (the payload less the external fuel burned, the bay
+   held open for a release, radar and jammer forced off, the damage fraction,
+   section and regions, the impact report on a damage event, and the crash
+   and the pilot's death at no hit points or on a cockpit hit).
+5. `take_event` for each of the tick's combat events: a missile blast's jolt
+   and the ownship's destruction.
+
+`OwnPlane::step` runs all of these in that order for one plane, after giving
+the flight the seat's sensor controls as the command phase does. Single
+player keeps its results exactly: the functions are the old code in the old
+order, moved, and the tick fingerprint (`world/tick_tests.rs`) did not move.
+
+What the step reads besides the plane's own state (the flight, the flight at
+the start of the tick, the turbulence state and random stream, and the two
+message clocks) is an argument:
+
+- the terrain, which a client builds from its own import; the step reads no
+  weather clock from it, only the reading it is given;
+- the ground objects standing as the tick starts, which a client learns from
+  the host's destruction events;
+- the weather clock's reading after its step, a function of the host tick
+  and the mission's start time;
+- the **ownship terms**, what changes during the mission: the 45 subsystem
+  hit counts; the radar, visual, infrared and jammer failures; the stores'
+  weight; whether a release holds the bay open; hit points; the broken
+  section; and the damage taken in each of the six sections, in whole points.
+  *Correction to the design*, which listed fewer: the visual and infrared
+  failures and the subsystem counts are read too, for the hardpoint notices
+  and the systems hits;
+- the plane's ownship **configuration**, what the loadout fixes: the damage
+  capacity, the external tanks, the stations' names and each sensor's
+  hardpoint. *Agent decision:* it is mission data the client already has, like
+  the aircraft type, so it stays out of the terms and is never sent;
+- the tick's combat events; those about other planes change nothing.
+
+`TickOutput::terms` carries each plane's terms of the tick. The command
+phase's rarer flight writes, a mission's new cheats and the payload after a
+range command, are not part of the step. The systems messages stay queued on
+the flight for the caller, which `World::step` drains into the seat's HUD cues.
+A test flies a copy of a plane beside the `World` from tick 600 to 1,200 with
+only what the step reads, for the single-player tick mission (turbulence,
+gear, throttle, flaps, gun) and for a human wingman of the crowd fixture that
+fires, is hit and is shot down, and the copy matches the cockpit to the last
+bit, trace included (`world/plane_tests.rs`).
 
 On the host the ownship terms come from combat each tick. A client uses the
 terms of its latest snapshot and keeps them until the next one: they change
@@ -2374,7 +2431,7 @@ risky refactors, as John asked; the rest are Sonnet.
 | D2 Transport | `mp/d-net` | Opus | D1 | `tore-net`: packets, handshake, acks and round trip, reliable ordered messages, statistics, UDP and the simulator | On the simulator at 300 ms and 5 percent loss with duplicates and reordering: the handshake completes, 10,000 reliable messages arrive once and in order, a 64 KB message arrives whole, the round trip estimate is within 5 percent and the loss estimate within 1 point; a challenge is never larger than its request; a seeded packet fuzz never panics; two real sockets on 127.0.0.1 connect |
 | D3a Import library | `mp/d-import` | Sonnet | | **Built (D3a).** `tore-import` out of the app: data folder, pack, media detection, import | Single-player baseline SAME; the app imports and loads as before; `cargo tree -p tore-import` has no winit, wgpu or cpal; where both a 1.0 and a 1.02F import are available, the simulation resources of a sample mission hash the same |
 | D3b Mission as data | `mp/d-mission` | Sonnet | D3a | `MissionSpec` and its text form; `World::new` with single-player seating; the creator builds through it | Single-player baseline SAME; the spec round-trips through text; a headless test builds a single-player mission from synthetic resources and steps it |
-| D4 Own-plane step and exact state | `mp/d-own-state` | Opus | D1 | The shared per-plane step; an exact coder and hash for a human plane's flight, turbulence and ownship terms, every field destructured | Single-player baseline SAME; a plane stepped by `World` and a copy stepped by the shared function from a decoded state, with the same inputs and terms, stay bit-identical for 1,200 ticks; adding a field to the state without coding it fails to compile |
+| D4 Own-plane step and exact state | `mp/d-own-state` | Opus | D1 | The shared per-plane step (built); an exact coder and hash for a human plane's flight, turbulence and ownship terms, every field destructured | Single-player baseline SAME; a plane stepped by `World` and a copy stepped by the shared function from a decoded state, with the same inputs and terms, stay bit-identical for 1,200 ticks; adding a field to the state without coding it fails to compile |
 | D5a Flight frame | `mp/d-frame` | Sonnet | D3b | The flight frame with its plane id; the screens, views and sounds read it; no "aircraft 0 is the player" in presentation; the picture for any seat | Single-player baseline SAME and every GPU capture byte-identical; a test builds the picture for a second seat of the crowd fixture with that seat's plane as the player |
 | D5b Cockpit readout | `mp/d-readout` | Sonnet | D5a | The cockpit readout and its builder; the HUD, weapon HUD, scope, RWR, target window, map and music read it | Single-player baseline SAME and every capture byte-identical; readouts for two seats of the crowd fixture each name their own plane's stores, contacts and damage |
 | D3c Open seating | `mp/d-open` | Opus | D5a | `Seating::Open`: plane 0 on the AI, a tick with no human, combat with no ownship | Single-player baseline SAME; a headless test builds an open mission with every plane on the AI, steps it 1,200 ticks, then a seat takes plane 0, flies, and gives it back |
