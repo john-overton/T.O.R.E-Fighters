@@ -1018,6 +1018,9 @@ These make exact checkpoints (stage H) possible. They apply to everything in
   mission setting, and a networked game must not rely on it.
 - No `log` or `tore-replay` in `tore-world`: warnings go into the tick output,
   and conversions to replay types live in the app.
+- Combat's one second of hit volumes and the rewinds of the rounds in flight
+  ([lag compensation](#hits-and-lag-compensation)) are mission state like the
+  rounds themselves: a checkpoint carries them.
 
 #### How stage A lands
 
@@ -1912,10 +1915,8 @@ combat, the AI bridge, the debrief and the recorder.
 Design for stage D of the [multiplayer plan](multiplayer-plan.md#stages),
 written by the lead on 2026-09-30, revised the same day after an independent
 review, and reviewed by John the same day: his answers are in the guide's
-[decisions](MULTIPLAYER.md#decisions). Slices D1 (`tore-codec`), D2
-(`tore-net`), D3a (`tore-import`), D3b (the mission as data) and D4 (the shared
-step for a human's plane and its exact state) are built so far (see the
-[slice table](#how-stage-d-lands)).
+[decisions](MULTIPLAYER.md#decisions). It is being built slice by slice; the
+[slice table](#how-stage-d-lands) marks each slice that is built.
 Every choice here is an agent decision unless it is credited to John. The three
 follow-up specs the plan assigns to stage D are:
 
@@ -2422,28 +2423,69 @@ missile that lives less than one snapshot is still the F12 view's last missile.
 
 ### Hits and lag compensation
 
-The host decides every hit. Missiles, rockets and bombs are simulated only on
-the host and are not rewound (John, 2026-09-28).
+*Built (D9).* The host decides every hit. Missiles, rockets and bombs are
+simulated only on the host and are not rewound (John, 2026-09-28).
 
 Gun rounds fired by a human are tested against targets **as the shooter saw
 them** (John, 2026-09-28). Each seat's input names the host tick its screen
-showed (V) for the tick the input is for (T). Because the player's game runs
-ahead of the host and draws other aircraft behind it, `T - V` is the whole round
-trip plus the interpolation delay plus the input margin. *Correction to the
-plan*, whose estimate of half the round trip plus the delay measured from the
-input's arrival was too small. A round fired on tick T carries a rewind of
-`T - V` ticks, of which the part beyond the interpolation delay is capped at 30
-ticks (250 ms), as the plan capped latency: a player on a very slow link is
-judged against where targets were 250 ms plus the delay ago, never earlier.
-The rewind is at most 60 ticks (500 ms).
+showed (V) for the tick the input is for (T), and its interpolation delay:
+`SeatInput::view`, a `SeatView { tick, interpolation_delay }` (`seats.rs`),
+which the wire slice fills from the input's view offset and delay. `None`, as
+single player, the AI probe and every local seat give, means no rewind.
+Because the player's game runs ahead of the host and draws other aircraft
+behind it, `T - V` is the whole round trip plus the interpolation delay plus
+the input margin. *Correction to the plan*, whose estimate of half the round
+trip plus the delay measured from the input's arrival was too small. A round
+fired on tick T carries a rewind of `T - V` ticks, of which the part beyond the
+interpolation delay is capped at 30 ticks (250 ms), as the plan capped latency:
+a player on a very slow link is judged against where targets were 250 ms plus
+the delay ago, never earlier. The rewind is at most 60 ticks (500 ms).
+`combat::gun_rewind` (`tore-world`) computes it; a view of tick T or later is
+no rewind.
 
-On every tick of its flight the round's hit search uses each aircraft's hit
-volume from `now - rewind` instead of the current one. The history lives in
-combat, inside `World`, since the hit search runs in `World::step`: one second
-of hit volumes for every aircraft. It is mission state, so stage H's
-checkpoints will carry it. `SeatInput` gains the view tick. Ground objects do
-not move and need no history. The AI's rounds and every round in single player
-have a rewind of 0 and take today's path, unchanged.
+```mermaid
+flowchart LR
+  input["SeatInput.view<br/>V and the delay"] --> rewind["combat::gun_rewind<br/>min(T - V, delay + 30, 60)"]
+  rewind --> step["Combat::step_all_rewound<br/>by plane"]
+  step --> fire["live::State::step_rewound<br/>a gun round keeps its rewind"]
+  history["one second of hit volumes<br/>recorded every tick"] --> search
+  fire --> search["hit search, every tick of the flight:<br/>each aircraft's volume from now - rewind"]
+```
+
+**The history.** Combat (`tore-sim`, `combat/live/rewind.rs`) records, once a
+tick, every aircraft's hit volume exactly as the hit search reads it: position,
+the position a tick before (a gun round is tested in the aircraft's moving
+frame), attitude and radius, for the AI's aircraft rows and every human-flown
+aircraft. It records where the search reads the current volume, after the AI
+rows have moved for the tick, and keeps 120 ticks (1 second). Ground objects do
+not move and have none. The history and the rewinds of the rounds in flight
+live in `live::State`, inside `World`, since the hit search runs in
+`World::step`; they are mission state, so stage H's checkpoints will carry them
+([rules for mission state](#rules-for-mission-state)).
+
+**The rewound search.** On every tick of its flight a round with a rewind tests
+each aircraft against its volume from `now - rewind` instead of the current one.
+An aircraft with no entry that far back (it did not exist yet) is tested at its
+oldest entry. Everything else is today's code: which aircraft can be hit, the
+nearest contact, damage, the ledger, friendly fire and the launcher's own
+volume rule use the aircraft as it is now. A round with no rewind (every AI
+round, every missile, rocket and bomb, and every round in single player) takes
+exactly today's path. `World::step` hands `Combat::step_all_rewound` each
+human-flown plane's rewind, and combat gives it to the gun rounds that plane
+fires on the tick.
+
+*Agent decisions (D9):*
+
+- The rewind of a round is kept beside the rounds (`State::rewind_of`, by
+  projectile number), not in `Projectile`, whose many literals in the app and
+  the AI would all have changed; a round that ends takes its rewind with it.
+- The damage section of a rewound hit comes from the volume the round was
+  tested against, and the hit's effect is moved from that past volume onto
+  the aircraft as it is now, so the sparks show on the aircraft every screen
+  draws instead of up to 500 ms behind it.
+- Whether an aircraft can still be hit (alive, not the shooter, friendly fire)
+  is decided on its state now, not its state then: a target destroyed since
+  the shooter's view is not hit again.
 
 A client draws its own tracers at once from its trigger and its predicted
 aircraft, and other aircraft's bursts from the host's burst events (shooter,
@@ -2549,7 +2591,7 @@ risky refactors, as John asked; the rest are Sonnet.
 | D6 Wire | `mp/d-wire` | Opus | D1, D3b, D4, D5b | `tore-session`'s messages: inputs, snapshots with acknowledged baselines, priorities and relevance, own-state hash and exact state, readouts, events (bursts and launches included), join messages, debrief | Every message round-trips; a snapshot decodes with any earlier packet lost; entities always get their share of the packet; a wire golden test fails when the bytes change without a protocol version bump; bytes per snapshot measured on the 15 against 15 mission against the [budget](multiplayer-plan.md#bandwidth-budget) |
 | D7 Host and server | `mp/d-host` | Opus | D2, D3c, D6 | The host session, its clock and input buffers; `tore-server` with its configuration, import and console | A server flies a 15 against 15 mission for 10 minutes with nobody connected under 20 percent of one core; scripted test clients join and leave 100 times without an error; late, early, missing and duplicated inputs are applied as specified |
 | D8 Client, bot and `--connect` | `mp/d-client` | Opus | D5b, D6, D7 | The client session: join, prediction, reconciliation, smoothing, interpolation (the slow entities' longer delay included), clock steering, local effects, neutral controls in menus; the headless bot (the client session with a scripted pilot); the game's `--connect`; the capture and the diagnostics log | On the simulator with no loss, one platform and no hit, the prediction never differs from the host; two bots fly a 5-minute fight against a server; a windowed client flies against a server on this machine through `tools/agent-run.sh` |
-| D9 Lag compensation | `mp/d-lagcomp` | Opus | D4 | The hit-volume history in combat, the view tick in `SeatInput`, rewound gun hit tests | Single-player baseline SAME; a burst aimed at the drawn position of a target crossing at 500 knots, with a 150 ms round trip and a 100 ms interpolation delay, hits with compensation and misses without; the cap holds |
+| D9 Lag compensation | `mp/d-lagcomp` | Opus | D4 | The hit-volume history in combat, the view tick in `SeatInput`, rewound gun hit tests | Single-player baseline SAME; a burst aimed at the drawn position of a target crossing at 500 knots, with a 150 ms round trip and a 100 ms interpolation delay, hits with compensation and misses without; the cap holds. **Built (D9):** see [hits and lag compensation](#hits-and-lag-compensation); missiles fired by the same seat carry no rewind |
 | D10 Matrix and measurements | `mp/d-bots` | Sonnet | D8, D9 | The simulator matrix as a test, a CI job with a server and two bots, load and bandwidth at 2, 8, 15 and 30 humans | The [matrix limits](MULTIPLAYER.md#netcode-numbers) hold; CI passes on all three platforms; `docs/baselines/net-<date>.md` records the matrix, bandwidth against the budget and host CPU per human |
 | D11 LAN acceptance | lead, then John | Opus | all | Agents smoke-test a dedicated server with a windowed client and a bot on the development machine; then John flies it on three machines on his LAN, macOS, Linux and Windows (John, 2026-09-30); docs brought to built | The plan's stage D acceptance, with evidence from both |
 
@@ -2577,4 +2619,4 @@ D1, D3a and D4 start together (D4 moves the shared step first and takes the
 codec when D1 merges); D2 follows D1. D3b, D5a, D5b and D3c
 all edit `main.rs` or combat's first-ownship code, so they run in that order,
 each rebased on the one before; D5b and D3c may overlap once D5a has taken the
-app off `own()`. D9 changes combat's hit search, so it rebases on D3c.
+app off `own()`. D9 merged before them; D3c rebases on its change to combat's hit search.

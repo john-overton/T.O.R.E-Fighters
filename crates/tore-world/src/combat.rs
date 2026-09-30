@@ -210,6 +210,27 @@ pub fn launcher(s: &flight::State) -> Launcher {
         controls: s.sensors,
     }
 }
+/// The longest part of a gun round's rewind beyond the seat's interpolation
+/// delay, ticks (250 ms): a player on a slow link is judged against where the
+/// targets were at most this long plus the delay ago.
+pub const REWIND_BEYOND_DELAY_TICKS: u16 = 30;
+
+/// The rewind the gun rounds a seat fires on input tick `tick` carry: the
+/// ticks between that tick and the host tick its screen showed, of which the
+/// part beyond the interpolation delay is at most
+/// [`REWIND_BEYOND_DELAY_TICKS`] and the whole at most
+/// [`live::rewind::MAX_REWIND_TICKS`]. No view, or a view of a tick not
+/// before this one, is no rewind.
+pub fn gun_rewind(tick: u64, view: Option<crate::seats::SeatView>) -> u16 {
+    let Some(view) = view else {
+        return 0;
+    };
+    let behind = tick.saturating_sub(view.tick);
+    let cap = (u16::from(view.interpolation_delay) + REWIND_BEYOND_DELAY_TICKS)
+        .min(live::rewind::MAX_REWIND_TICKS);
+    behind.min(u64::from(cap)) as u16
+}
+
 impl Combat {
     /// The aircraft the host flies: the state's only ownship.
     pub fn own_id(&self) -> u32 {
@@ -1025,6 +1046,17 @@ impl Combat {
         flights: &mut [(u32, &mut flight::State)],
         world: &Terrain,
     ) -> WorldResult<Stepped> {
+        self.step_all_rewound(flights, &[], world)
+    }
+    /// [`Self::step_all`] with lag compensation: `rewinds` gives, by
+    /// aircraft, the rewind in ticks ([`gun_rewind`]) of the gun rounds its
+    /// seat fires this tick. An aircraft not listed fires rounds with none.
+    pub fn step_all_rewound(
+        &mut self,
+        flights: &mut [(u32, &mut flight::State)],
+        rewinds: &[(u32, u16)],
+        world: &Terrain,
+    ) -> WorldResult<Stepped> {
         flights.sort_by_key(|(aircraft, _)| *aircraft);
         let first = self.own_id();
         let mut inputs = Vec::new();
@@ -1067,8 +1099,9 @@ impl Combat {
         self.state.devices.wind = world.wind();
         self.contrails.wind = world.wind();
         // Stop wreck emissions before advancing smoke on the impact/airburst tick.
-        events.extend(self.state.step_surface(
+        events.extend(self.state.step_rewound(
             &inputs,
+            rewinds,
             |x, z| f64::from(world.height(x as f32, z as f32)),
             |x, z| world.over_water(x, z),
         ));

@@ -32,6 +32,8 @@ mod fight_tests;
 mod handoff;
 #[cfg(test)]
 mod handoff_tests;
+#[cfg(test)]
+mod lagcomp_tests;
 pub mod plane;
 #[cfg(test)]
 mod plane_tests;
@@ -654,13 +656,24 @@ impl World {
                 combat::launcher(&own.flight),
             );
         }
+        // Lag compensation: the gun rounds of a seat that says what its screen
+        // showed look back that far (docs/ARCHITECTURE.md, "Hits and lag
+        // compensation"). Local seats give no view and fire as before.
+        let rewinds: Vec<(u32, u16)> = self
+            .cockpits
+            .iter()
+            .zip(&inputs)
+            .map(|(cockpit, input)| (cockpit.plane.0, combat::gun_rewind(input.tick, input.view)))
+            .filter(|(_, ticks)| *ticks > 0)
+            .collect();
         let mut flights: Vec<(u32, &mut flight::State)> = self
             .cockpits
             .iter_mut()
             .map(|cockpit| (cockpit.plane.0, &mut cockpit.flight))
             .collect();
         let combat::Stepped { events, terms } =
-            self.combat.step_all(&mut flights, &self.terrain)?;
+            self.combat
+                .step_all_rewound(&mut flights, &rewinds, &self.terrain)?;
         out.terms = terms
             .into_iter()
             .map(|(plane, terms)| (PlaneId(plane), terms))

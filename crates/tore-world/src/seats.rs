@@ -266,6 +266,24 @@ pub struct SeatInput {
     pub sensors: tore_sim::sensors::Controls,
     /// Commands given since the last tick, applied in this order at its start.
     pub commands: Vec<SeatCommand>,
+    /// What the seat's screen showed when this input was sampled, for lag
+    /// compensation: `None` means no rewind, as in single player, the AI
+    /// probe and every local seat. See docs/ARCHITECTURE.md, "Hits and lag
+    /// compensation".
+    pub view: Option<SeatView>,
+}
+
+/// What a remote seat's screen showed for one input: the host tick it drew the
+/// other aircraft at (V) for the input's tick (T), and its interpolation
+/// delay. The gun rounds the seat fires on that tick are tested against the
+/// aircraft as they were `T - V` ticks before, capped (see
+/// [`crate::combat::gun_rewind`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SeatView {
+    /// The host tick the seat's screen showed (V).
+    pub tick: u64,
+    /// The seat's interpolation delay, ticks.
+    pub interpolation_delay: u8,
 }
 
 /// A command a seat gives between ticks. The step applies each one at the

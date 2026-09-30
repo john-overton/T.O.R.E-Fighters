@@ -3339,6 +3339,8 @@ impl ApplicationHandler for App {
                                 // a recording reproduces every change.
                                 sensors: self.instruments.controls(),
                                 commands,
+                                // A local seat: no lag compensation.
+                                view: None,
                             };
                             // The cheats the flight menu changed reach the
                             // mission before any seat's commands.
