@@ -347,6 +347,16 @@ impl Connection {
         }
     }
 
+    /// The bytes of the Messages section the next packet would carry at `now`
+    /// with room for every due message.
+    pub(crate) fn messages_due_bytes(&self, now: Duration) -> usize {
+        if self.closed.is_some() {
+            return 0;
+        }
+        self.sender
+            .due_bytes(now, reliable::resend_interval(self.round_trip.mean()))
+    }
+
     pub(crate) fn send_message(&mut self, kind: u8, body: &[u8]) -> Result<(), SendError> {
         if self.closed.is_some() {
             return Err(SendError::NotConnected);

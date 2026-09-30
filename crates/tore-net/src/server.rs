@@ -280,6 +280,18 @@ impl Server {
         self.out.pop_front()
     }
 
+    /// The bytes a packet to `connection` sent at `now` would give its
+    /// Messages section, section header included, to carry every reliable
+    /// message due then (never sent, or due to be sent again), before the
+    /// message budget caps it; 0 when none is due or there is no such
+    /// connection. A caller that shares a packet between its own sections and
+    /// the messages keeps this much room, capped at the budget, instead of
+    /// always reserving the budget.
+    pub fn messages_due_bytes(&self, connection: ConnectionId, now: Duration) -> usize {
+        self.entry(connection)
+            .map_or(0, |entry| entry.connection.messages_due_bytes(now))
+    }
+
     /// Queues a reliable message.
     pub fn send_message(
         &mut self,

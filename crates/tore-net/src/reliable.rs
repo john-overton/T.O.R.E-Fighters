@@ -183,6 +183,24 @@ impl Sender {
         self.queue.len()
     }
 
+    /// The bytes a packet's Messages section would take, its header included,
+    /// to carry every message due now (unacknowledged, and never sent or last
+    /// sent more than `interval` ago) in the window, at most 255 records; 0
+    /// when none is due. A caller sharing a packet between its own sections
+    /// and the messages reserves this much (capped at its message budget).
+    pub(crate) fn due_bytes(&self, now: Duration, interval: Duration) -> usize {
+        let mut bits = 8;
+        let mut records = 0;
+        for m in self.window().filter(|m| due(m, now, interval)) {
+            if records == MAX_RECORDS {
+                break;
+            }
+            bits += record_bits(m.part, m.body.len());
+            records += 1;
+        }
+        if records == 0 { 0 } else { section_bytes(bits) }
+    }
+
     /// Queues a message, split into fragments when over 256 bytes.
     pub(crate) fn push(&mut self, kind: u8, body: &[u8]) -> Result<(), SendError> {
         if body.len() > MAX_MESSAGE_LEN {
@@ -472,6 +490,20 @@ mod tests {
             s.push(0, &vec![0; MAX_MESSAGE_LEN + 1]),
             Err(SendError::MessageTooLarge)
         );
+    }
+
+    #[test]
+    fn due_bytes_is_the_section_a_packet_would_carry() {
+        let mut s = Sender::default();
+        assert_eq!(s.due_bytes(Duration::ZERO, MIN_RESEND), 0);
+        s.push(1, b"hello").unwrap();
+        s.push(2, &[7; 300]).unwrap();
+        let due = s.due_bytes(Duration::ZERO, MIN_RESEND);
+        let (body, _) = s.select(Duration::ZERO, MIN_RESEND, 1181, 1181).unwrap();
+        assert_eq!(due, crate::packet::SECTION_HEADER_LEN + body.len());
+        // Just sent: nothing is due until the resend interval passes.
+        assert_eq!(s.due_bytes(MS, MIN_RESEND), 0);
+        assert_eq!(s.due_bytes(MIN_RESEND + MS, MIN_RESEND), due);
     }
 
     #[test]
