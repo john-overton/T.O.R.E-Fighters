@@ -1338,7 +1338,11 @@ crash. Each ownship has its own trigger (`Combat::trigger(aircraft)`, the
 keyboard's and the controller's), and commands, trigger releases and cockpit
 questions name the aircraft (`command_for`, `cancel_for`); the first ownship, the
 one the app presents, keeps the one-flight calls (`step`, `command`, `cancel`,
-`own()`), the combat tape and the command notes. `World::step` calls it with
+`own()`), the combat tape and the command notes. *Since D3c* the tape, the notes
+and the host's engine outlets follow `Combat::host_plane()`, single player's
+plane 0 while it has an ownship and none in an open mission, and the build, the
+tick and the handoff never call the one-flight calls, which panic with no
+ownship. `World::step` calls it with
 every cockpit, and the radio reads each plane's own ownship: hit points for
 `cockpit_alive`, designation, weapon selection and incoming missiles for the
 crew voice, the shooter and weapon of each `Fired` event for the weapon call.
@@ -1511,16 +1515,18 @@ one point.
   an aircraft at mission start has none before the mission preset and group
   objectives are applied, so a preset such as CAP or Hold does not reach an
   aircraft that comes back from a human, and it acts as under Free.
-- The first human-flown plane (the presented one, lowest id) cannot be given
-  back: the tick needs a human and `Combat::remove_ownship` keeps the first.
-  Taking a plane with a lower id than the first ownship makes that one the
-  first, so a host that presents one seat should reserve the lowest ids for it.
+- Taking a plane with a lower id than the first ownship makes that one the
+  first cockpit, whose plane the render history follows, so a host that
+  presents one seat should reserve the lowest ids for it. (B6 also kept the
+  lowest-numbered human plane from being given back; D3c lifted that: any
+  plane can go, the last one too, and the tick runs with no human.)
 - Only a plane whose row is alive and whose pilot is aboard changes hands, in
   both directions. A destroyed or ejected plane stays as it is.
 - Rendering: a plane given back that has no drawn model among the mission's
-  other aircraft (plane 0 when its type is not one the wings fly) is hidden in
-  the tick's picture until the app supplies a model for it. Combat's snapshot
-  looks a row's model up by its place among the mission's other aircraft.
+  other aircraft (single player's plane 0 when its type is not one the wings
+  fly) is hidden in the tick's picture until the app supplies a model for it.
+  Combat's snapshot looks a row's model up by its place among the mission's
+  other aircraft. In an open mission plane 0 is one of them, so it is drawn.
 
 #### The AI with several humans
 
@@ -2067,7 +2073,8 @@ exactly as the creator's Fly button and `restart` did by hand before. The
 creator's refusals keep their text (guns only with a missile loaded, ground
 start without the hybrid model, altitude under the terrain).
 `Seating::SinglePlayer` is today's mission: seat 0 flies plane 0 with the
-loadout the spec gives it. `World::build` is the same with the caller's
+loadout the spec gives it; `Seating::Open` puts every plane on the AI (below).
+`World::build` is the same with the caller's
 `Hooks` and returns what the start reported beside the world; the game passes
 its own drawn-model loader so that one load of each aircraft type serves both
 halves, the player's already loaded type, and the loadout screen's weapon
@@ -2110,16 +2117,48 @@ and pilots between the steps of the build, and never restarts (its `Setup`
 carries no AI). Moving it would need probe hooks in the middle of
 `World::build` for no gain, since `World::new` is now the headless path.
 
-**Open seating and no human.** `Seating::Open` is a networked mission: the AI
-flies every plane, plane 0 included, and humans take planes by
-[handoff](#handoff-between-the-ai-and-a-human). That needs work in several
-places: plane 0 becomes an AI actor and a combat target row (its model lookup
-by `id - 1` goes), Friendly Wing 1 keeps its full count, plane 0 starts from
-the spawn plan like its wingmen, the ground-start wing parks whether or not a
-human is in it, the tick runs with no cockpit, and combat runs with no ownship:
-`own()` and `own_id()` stop panicking, and "the first ownship is the presented
-one" goes, since a presenter names its seat. This also lifts stage B's known
-limit that the lowest-numbered human plane cannot be given back.
+**Open seating and no human.** *Built (D3c).* `Seating::Open` is a networked
+mission: the AI flies every plane, plane 0 included, and humans take planes by
+[handoff](#handoff-between-the-ai-and-a-human) and give them back at any time.
+
+- **Plane 0 on the AI.** Friendly Wing 1 keeps its full count
+  (`MissionSpec::open_wing_launches`), so plane 0 is the wing's member 0: an AI
+  actor that leads the wing, and a combat target row like its wingmen.
+  `Combat::open()` starts with no ownship and numbers its aircraft rows from 0
+  (`live::State::open_mission`), and the snapshot looks a row's model up from
+  the first row's id rather than by `id - 1`. Plane 0 starts from the spawn
+  plan like its wingmen (`ai_wings::mission_spawns_for(.., player: false)`),
+  on the spot single player's player would take: `restart` works out that
+  start (altitude, the layout's turn, the runway) the same way for both and
+  places the wings around it. A ground start parks Friendly Wing 1, the wing
+  the departure is laid out for, whether or not a human flies in it, plane 0
+  on the first slot with the lead's seed. Every AI aircraft flies the hybrid
+  model (`AllHybrid`, John 2026-09-28).
+- **A tick with no human.** `World::step_with` takes no seat input; combat
+  steps with no ownship; the AI gets no human aircraft; the radio, the crew
+  voice, the tower and the result checks have no cockpit to serve. Nothing on
+  the build, the tick or the handoff calls `Combat::own()` or `own_id()`.
+- **Handoff both ways at any time**, plane 0 included, and the last human
+  giving back the last plane. A plane given back while its rounds are in the
+  air: each round takes its own copy of its station's weapon record
+  (`live::State::remove_ownship`), as the AI's rounds carry theirs, so it
+  flies on with no ownship to look it up in.
+- **The picture.** With no cockpit there is no picture plane
+  (`World::picture_plane_if_any()` is `None`) and the render history keeps
+  nothing: it is emptied when the last human leaves, and starts over from the
+  first cockpit's plane when a human takes one or the first cockpit changes
+  hands (*agent decision*: a server draws nothing, so it keeps no history).
+  `World::picture_plane()` stays for presenters, which always have a cockpit.
+- **Restart.** `World::restart` of an open mission starts it again with every
+  plane on the AI: every cockpit and seat goes, and humans take planes again.
+  A server starts each new mission with `World::new` anyway.
+- **What an open spec refuses** (*agent decision*, refused rather than
+  overridden so a mission file says what it flies): straight-flight fixture
+  wings (nobody would fly), a player loadout (nobody flies from the start;
+  plane 0 carries the AI's standard stores, with Guns only applied as for any
+  AI aircraft), and the legacy human or standard AI flight model.
+- **Single player** takes the same path as before: the same start, the same
+  build of the AI with its one human, and the baseline compares SAME.
 
 **Resources and the content check.** `tore-import` loads the pack into the
 same name-to-bytes map the app uses today. *Built (D3b).* `World::new` reads it
@@ -2450,7 +2489,8 @@ the pose its last step left (combat now keeps a pose for every ownship, not
 only the ones after the first). `restart_render`, `advance_render` and
 `refresh_render` take the plane as well. The mission's render history is built
 for one plane, `World::picture_plane()`, the first cockpit's (agent decision):
-a host that serves other seats builds theirs with `snapshot`.
+a host that serves other seats builds theirs with `snapshot`. With no cockpit
+it keeps none (D3c).
 
 The "aircraft 0 is the player" reads are gone from the screens: the view rig
 (`Scene::new(plane, ..)`, `Rig::for_plane(plane)`: the scene's player body,
@@ -2642,7 +2682,7 @@ risky refactors, as John asked; the rest are Sonnet.
 | D4 Own-plane step and exact state | `mp/d-own-state` | Opus | D1 | The shared per-plane step; an exact coder and hash for a human plane's flight, turbulence and ownship terms, every field destructured | Single-player baseline SAME; a plane stepped by `World` and a copy stepped by the shared function from a decoded state, with the same inputs and terms, stay bit-identical for 1,200 ticks; adding a field to the state without coding it fails to compile. **Built (D4):** see [one step for a human's plane](#one-step-for-a-humans-plane) and [its exact state](#the-exact-state-of-a-humans-plane); an airborne plane's exact state costs about 200 bytes against a baseline one snapshot back |
 | D5a Flight frame | `mp/d-frame` | Sonnet | D3b | The flight frame with its plane id; the screens, views and sounds read it; no "aircraft 0 is the player" in presentation; the picture for any seat | Single-player baseline SAME and every GPU capture byte-identical; a test builds the picture for a second seat of the crowd fixture with that seat's plane as the player. **Built (D5a):** see [the flight screen draws a frame](#the-flight-screen-draws-a-frame) |
 | D5b Cockpit readout | `mp/d-readout` | Sonnet | D5a | The cockpit readout and its builder; the HUD, weapon HUD, scope, RWR, target window, map and music read it | Single-player baseline SAME and every capture byte-identical; readouts for two seats of the crowd fixture each name their own plane's stores, contacts and damage |
-| D3c Open seating | `mp/d-open` | Opus | D5a | `Seating::Open`: plane 0 on the AI, a tick with no human, combat with no ownship | Single-player baseline SAME; a headless test builds an open mission with every plane on the AI, steps it 1,200 ticks, then a seat takes plane 0, flies, and gives it back |
+| D3c Open seating | `mp/d-open` | Opus | D5a | `Seating::Open`: plane 0 on the AI, a tick with no human, combat with no ownship | Single-player baseline SAME; a headless test builds an open mission with every plane on the AI, steps it 1,200 ticks, then a seat takes plane 0, flies, and gives it back. **Built (D3c):** see [open seating and no human](#a-mission-with-no-window); the run repeats to the bit, and two seats hand planes in both wings through a fight, the last leaving the mission with no human |
 | D6 Wire | `mp/d-wire` | Opus | D1, D3b, D4, D5b | `tore-session`'s messages: inputs, snapshots with acknowledged baselines, priorities and relevance, own-state hash and exact state, readouts, events (bursts and launches included), join messages, debrief | Every message round-trips; a snapshot decodes with any earlier packet lost; entities always get their share of the packet; a wire golden test fails when the bytes change without a protocol version bump; bytes per snapshot measured on the 15 against 15 mission against the [budget](multiplayer-plan.md#bandwidth-budget) |
 | D7 Host and server | `mp/d-host` | Opus | D2, D3c, D6 | The host session, its clock and input buffers; `tore-server` with its configuration, import and console | A server flies a 15 against 15 mission for 10 minutes with nobody connected under 20 percent of one core; scripted test clients join and leave 100 times without an error; late, early, missing and duplicated inputs are applied as specified |
 | D8 Client, bot and `--connect` | `mp/d-client` | Opus | D5b, D6, D7 | The client session: join, prediction, reconciliation, smoothing, interpolation (the slow entities' longer delay included), clock steering, local effects, neutral controls in menus; the headless bot (the client session with a scripted pilot); the game's `--connect`; the capture and the diagnostics log | On the simulator with no loss, one platform and no hit, the prediction never differs from the host; two bots fly a 5-minute fight against a server; a windowed client flies against a server on this machine through `tools/agent-run.sh` |

@@ -119,6 +119,29 @@ impl Roster {
         }
     }
 
+    /// An open mission: the AI flies every plane of `ai`, plane 0 included,
+    /// and there is no seat yet. Humans join by taking planes
+    /// ([`Self::take_plane`]).
+    pub fn open(ai: impl IntoIterator<Item = (PlaneId, Slot)>) -> Self {
+        let mut planes: Vec<Plane> = ai
+            .into_iter()
+            .map(|(id, slot)| Plane {
+                id,
+                slot,
+                pilot: Pilot::Ai,
+            })
+            .collect();
+        planes.sort_by_key(|plane| plane.id);
+        debug_assert!(
+            planes.windows(2).all(|pair| pair[0].id != pair[1].id),
+            "two planes share an id"
+        );
+        Self {
+            planes,
+            seats: Vec::new(),
+        }
+    }
+
     /// A roster with a human in each of `humans`' planes, one seat each in
     /// seat order, and the AI in the planes of `ai`. For tests: the runtime
     /// way to put a human in a plane is a handoff.

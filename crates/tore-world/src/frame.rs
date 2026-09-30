@@ -86,27 +86,57 @@ impl<'a> FlightFrame<'a> {
 }
 
 impl World {
-    /// The plane the mission's render history is built for: the first cockpit's.
-    /// It is the picture the app presents; a host serving other seats builds
-    /// theirs with [`combat::Combat::snapshot`] for their planes.
+    /// The plane the mission's render history is built for: the first
+    /// cockpit's. It is the picture the app presents; a host serving other
+    /// seats builds theirs with [`combat::Combat::snapshot`] for their planes.
+    /// A presenter always has a cockpit; this panics without one (an open
+    /// mission before anyone takes a plane), which [`Self::picture_plane_if_any`]
+    /// answers instead.
     pub fn picture_plane(&self) -> PlaneId {
-        self.cockpits[0].plane
+        self.picture_plane_if_any()
+            .expect("a presented mission has a cockpit")
+    }
+
+    /// [`Self::picture_plane`], or `None` when no human flies: then the
+    /// render history keeps nothing, as a host with nobody to draw for needs
+    /// none (agent decision, D3c).
+    pub fn picture_plane_if_any(&self) -> Option<PlaneId> {
+        self.cockpits.first().map(|cockpit| cockpit.plane)
     }
 
     /// Ends the tick's picture for [`World::picture_plane`]: the current
-    /// snapshot becomes the previous one.
+    /// snapshot becomes the previous one. When the picture plane changed
+    /// (the first cockpit came or went by a handoff) the history starts over
+    /// from it, and with no cockpit it is emptied.
     pub(crate) fn advance_picture(&mut self) {
-        let cockpit = &self.cockpits[0];
-        self.combat
-            .advance_render(cockpit.plane.0, &cockpit.flight, self.ai_wings.as_ref());
+        let Some(cockpit) = self.cockpits.first() else {
+            self.combat.clear_render();
+            return;
+        };
+        let wings = self.ai_wings.as_ref();
+        if self.combat.render_plane() == Some(cockpit.plane.0) {
+            self.combat
+                .advance_render(cockpit.plane.0, &cockpit.flight, wings);
+        } else {
+            self.combat
+                .restart_render(cockpit.plane.0, &cockpit.flight, wings);
+        }
     }
 
     /// Retakes the current snapshot for [`World::picture_plane`] after a
-    /// command changed the scene between ticks.
+    /// command changed the scene between ticks; nothing with no cockpit.
     pub(crate) fn refresh_picture(&mut self) {
-        let cockpit = &self.cockpits[0];
-        self.combat
-            .refresh_render(cockpit.plane.0, &cockpit.flight, self.ai_wings.as_ref());
+        let Some(cockpit) = self.cockpits.first() else {
+            return;
+        };
+        let wings = self.ai_wings.as_ref();
+        if self.combat.render_plane() == Some(cockpit.plane.0) {
+            self.combat
+                .refresh_render(cockpit.plane.0, &cockpit.flight, wings);
+        } else {
+            self.combat
+                .restart_render(cockpit.plane.0, &cockpit.flight, wings);
+        }
     }
 
     /// The flight frame of `seat`, or `None` when it flies no plane.

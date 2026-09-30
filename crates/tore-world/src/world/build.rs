@@ -24,8 +24,12 @@ pub enum Seating {
     /// Single player: seat 0 flies plane 0, the lead of friendly wing 1, with
     /// the loadout the spec gives it; the AI flies every other plane.
     SinglePlayer,
-    // `Open`, every plane on the AI and humans taking planes by handoff,
-    // is slice D3c.
+    /// A networked mission: the AI flies every plane, plane 0 included, with
+    /// its standard stores, and there is no seat. Humans take planes and give
+    /// them back by handoff ([`World::take_plane`], [`World::give_back_plane`])
+    /// at any time, and the mission steps with no human at all. Every AI
+    /// aircraft flies the hybrid model.
+    Open,
 }
 
 /// What a caller can supply while a mission is built. The default supplies
@@ -72,8 +76,11 @@ impl World {
         seating: Seating,
         hooks: &mut Hooks<'_>,
     ) -> WorldResult<Built> {
-        let Seating::SinglePlayer = seating;
+        let open = seating == Seating::Open;
         spec.validate()?;
+        if open {
+            check_open(spec)?;
+        }
         let terrain = crate::terrain::Terrain::for_mission(
             resources,
             &spec.theater,
@@ -124,7 +131,12 @@ impl World {
         if selected_ground.is_some() && !spec.researched_flight {
             return Err("Ground start requires the researched flight model. Choose Airborne for this adapter.".into());
         }
-        let wings = spec.wing_launches().map_err(|error| error.to_string())?;
+        let wings = if open {
+            spec.open_wing_launches()
+        } else {
+            spec.wing_launches()
+        }
+        .map_err(|error| error.to_string())?;
         // A ground start parks the player's whole wing on the runway; the
         // straight-flight fixtures keep only the player there.
         let parked = if spec.fixture_wings {
@@ -172,7 +184,11 @@ impl World {
 
         // Combat, with the other aircraft of the mission.
         let fuel = load.fuel_lbs;
-        let mut combat = Combat::with_loadout(&player, &load)?;
+        let mut combat = if open {
+            Combat::open()
+        } else {
+            Combat::with_loadout(&player, &load)?
+        };
         combat.add_airport_targets(&terrain.airport_scene)?;
         let mut default_load = |id| load_type(resources, id);
         let loader: &mut dyn FnMut(AircraftId) -> WorldResult<Arc<AircraftType>> =
@@ -207,31 +223,45 @@ impl World {
             }),
         };
 
-        // The first cockpit is a free start that `restart` places.
-        let flight = player.start(&terrain);
-        let airport_service = tore_sim::airport::Service::new(&terrain.airport_scene)
-            .map_err(std::io::Error::other)?;
+        // Single player's first cockpit is a free start that `restart`
+        // places; an open mission starts with none.
+        let (roster, cockpits, comms) = if open {
+            (
+                Roster::open([]),
+                Vec::new(),
+                comms::Comms::with_seats(1, []),
+            )
+        } else {
+            let flight = player.start(&terrain);
+            let airport_service = tore_sim::airport::Service::new(&terrain.airport_scene)
+                .map_err(std::io::Error::other)?;
+            (
+                Roster::single_player(comms::crew(&player.profile), []),
+                vec![Cockpit {
+                    plane: PlaneId(0),
+                    previous_flight: flight.clone(),
+                    flight,
+                    turbulence: Default::default(),
+                    turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?,
+                    airport_service,
+                    airport_nav_mode: false,
+                    airfield_radio: Default::default(),
+                    crew_voice: crew_voice::CrewVoice::new(&player.profile),
+                    result: Default::default(),
+                    overspeed_message_at: None,
+                    edge_message_at: None,
+                }],
+                comms::Comms::new(1),
+            )
+        };
         let mut world = World {
             setup,
-            roster: Roster::single_player(comms::crew(&player.profile), []),
-            cockpits: vec![Cockpit {
-                plane: PlaneId(0),
-                previous_flight: flight.clone(),
-                flight,
-                turbulence: Default::default(),
-                turbulence_rng: tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?,
-                airport_service,
-                airport_nav_mode: false,
-                airfield_radio: Default::default(),
-                crew_voice: crew_voice::CrewVoice::new(&player.profile),
-                result: Default::default(),
-                overspeed_message_at: None,
-                edge_message_at: None,
-            }],
+            roster,
+            cockpits,
             terrain,
             combat,
             ai_wings: None,
-            comms: comms::Comms::new(1),
+            comms,
             wing_status: Default::default(),
             radio: Default::default(),
             phrases: comms::phrases(resources),
@@ -246,4 +276,27 @@ impl World {
         }
         Ok(Built { world, restarted })
     }
+}
+
+/// What an open mission refuses: it needs the AI (no straight-flight
+/// fixtures), nobody flies from the start (no player loadout), and a networked
+/// mission flies the hybrid model for humans and for every AI aircraft
+/// (John, 2026-09-28). Agent decision (D3c): refused rather than overridden,
+/// so a mission file says what it flies.
+fn check_open(spec: &MissionSpec) -> WorldResult<()> {
+    if spec.fixture_wings {
+        return Err(
+            "An open mission needs the AI: straight-flight fixture wings cannot fly it.".into(),
+        );
+    }
+    if spec.loadout.is_some() {
+        return Err("An open mission has no player loadout: every plane starts on the AI with its standard stores.".into());
+    }
+    if !spec.researched_flight {
+        return Err("An open mission flies the hybrid model: `flight-model human legacy` is single player's.".into());
+    }
+    if spec.ai_flight_model != ai_wings::AiFlightModel::AllHybrid {
+        return Err("An open mission flies every AI aircraft on the hybrid model: `flight-model ai standard` is single player's.".into());
+    }
+    Ok(())
 }

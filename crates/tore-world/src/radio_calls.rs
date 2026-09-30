@@ -63,6 +63,8 @@ pub const FRIENDLY_FIRE: [&str; 8] = [
 pub const FRIENDLY_FIRE_FT: f64 = 52_800.;
 /// Contact size and type words are said within 15 nautical miles.
 const SIZE_MILES: u32 = 15;
+/// The side list of a tick with no human-flown plane.
+static NO_FRIENDLIES: BTreeSet<u32> = BTreeSet::new();
 
 // Global cooldowns, shared by every speaker (spec-derived seconds).
 const BOMBS: &str = "radio-bombs";
@@ -1213,7 +1215,12 @@ pub fn step(
         members,
         leaders,
         targets: &state.targets,
-        friendlies: &state.own().friendlies,
+        // The first human's side list: only an id that is not a roster
+        // member reads it. With no human there is none.
+        friendlies: state
+            .ownships()
+            .first()
+            .map_or(&NO_FRIENDLIES, |own| &own.friendlies),
     };
     for event in events {
         if let live::Event::Fired { aircraft, station } = event

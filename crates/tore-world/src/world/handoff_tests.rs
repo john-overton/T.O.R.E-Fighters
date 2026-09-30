@@ -463,16 +463,14 @@ fn a_refused_handoff_changes_nothing() {
             .ejected = true;
     }
     refuse(&mut world, 1, 4);
-    // Giving back: a seat with no plane, an unknown seat, the first human's
-    // plane (the tick needs one), a dead plane.
-    assert!(world.can_give_back(SeatId(0)).is_err());
-    assert!(world.give_back_plane(SeatId(0)).is_err());
+    // Giving back: an unknown seat, a seat with no plane, a dead plane.
+    assert!(world.can_give_back(SeatId(7)).is_err());
     assert!(world.give_back_plane(SeatId(7)).is_err());
     world.take_plane(SeatId(1), WING_LEAD).unwrap();
-    assert!(
-        world.give_back_plane(SeatId(0)).is_err(),
-        "the last one stays"
-    );
+    world.give_back_plane(SeatId(1)).unwrap();
+    assert!(world.can_give_back(SeatId(1)).is_err());
+    assert!(world.give_back_plane(SeatId(1)).is_err());
+    world.take_plane(SeatId(1), WING_LEAD).unwrap();
     world.combat.state.ownship_mut(1).unwrap().hp = 0;
     let before = digest(&world, &TickOutput::default());
     assert!(world.give_back_plane(SeatId(1)).is_err());

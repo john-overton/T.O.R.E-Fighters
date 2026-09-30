@@ -134,10 +134,19 @@ impl World {
         let service = tore_sim::airport::Service::new(&self.terrain.airport_scene)
             .map_err(std::io::Error::other)?;
         let turbulence_rng = tore_formats::flight_model::clock_rng::NativeRng::seeded(1)?;
-        let home = self
-            .cockpits
-            .first()
-            .and_then(|cockpit| cockpit.result.home_base());
+        // The mission's home base: the one every cockpit checks, or with no
+        // cockpit the ground start's airport.
+        let home = match self.cockpits.first() {
+            Some(cockpit) => cockpit.result.home_base(),
+            None => ai_wings::outcome::home_base(
+                &self.terrain,
+                self.combat
+                    .mission_layout
+                    .as_ref()
+                    .and_then(|layout| layout.ground.as_ref())
+                    .map(|ground| ground.airport),
+            ),
+        };
         let wings = self.ai_wings.as_mut().ok_or("no AI flies this mission")?;
         let target = wings
             .mission()
@@ -230,8 +239,8 @@ impl World {
     }
 
     /// Whether `seat` can give its plane back to the AI now. Only a living
-    /// aircraft whose pilot is aboard can change hands, and the presented
-    /// plane, the first ownship, stays with a human: the tick needs one.
+    /// aircraft whose pilot is aboard can change hands. Any plane can go,
+    /// plane 0 and the last human's too: the tick runs with no human.
     pub fn can_give_back(&self, seat: SeatId) -> WorldResult<()> {
         self.give_back_index(seat).map(|_| ())
     }
@@ -253,13 +262,6 @@ impl World {
             .state
             .ownship(plane.0)
             .ok_or_else(|| format!("plane {} has no ownship", plane.0))?;
-        if plane.0 == self.combat.own_id() {
-            return Err(format!(
-                "plane {} is the first human-flown plane and stays with its human",
-                plane.0
-            )
-            .into());
-        }
         if self.ai_wings.is_none() {
             return Err("no AI flies this mission".into());
         }

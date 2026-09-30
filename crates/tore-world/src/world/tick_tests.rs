@@ -1101,16 +1101,11 @@ fn every_human_flown_plane_is_in_the_picture_and_leaves_with_its_ownship() {
         "once"
     );
     assert!(snapshot.models.contains(&other.aircraft.unwrap()));
-    // The first plane stays the only player; giving the second back returns
-    // its damage and countermeasures.
+    // Giving the second back returns its damage and countermeasures.
     world.combat.state.ownship_mut(50).unwrap().chaff = 3;
     let given_back = world.combat.remove_ownship(50).expect("it is an ownship");
     assert_eq!((given_back.aircraft, given_back.chaff), (50, 3));
     assert!(world.combat.state.ownship(50).is_none());
-    assert!(
-        world.combat.remove_ownship(0).is_none(),
-        "the presented plane stays"
-    );
     tick_both(&mut world, [false, false], &mut out);
     assert!(
         world

@@ -36,6 +36,8 @@ mod handoff;
 mod handoff_tests;
 #[cfg(test)]
 mod lagcomp_tests;
+#[cfg(test)]
+mod open_tests;
 pub mod plane;
 #[cfg(test)]
 mod plane_tests;
@@ -55,7 +57,8 @@ pub struct World {
     /// Every plane with its pilot, and every seat.
     pub roster: Roster,
     /// What each human-flown plane keeps outside combat, in plane id order.
-    /// Single player has one, seat 0's plane 0, and the app presents it.
+    /// Single player has one, seat 0's plane 0, and the app presents it; an
+    /// open mission has none until a human takes a plane.
     pub cockpits: Vec<Cockpit>,
     pub combat: combat::Combat,
     pub ai_wings: Option<ai_wings::AiWings>,
@@ -244,29 +247,36 @@ impl World {
     /// Rebuilds the flight from its setup: the radio, the weather, the
     /// player's start, combat, the airport service and the AI wings, in the
     /// order a flight has always started. Single player's seat 0 flies plane 0
-    /// from the first cockpit. The app ends the old flight's recording before
-    /// and starts the new one after.
+    /// from the first cockpit. An open mission (`Seating::Open`) starts with
+    /// every plane on the AI, plane 0 placed where single player's would start,
+    /// and no human: every cockpit and seat goes, and humans take planes again
+    /// by handoff. The app ends the old flight's recording before and starts
+    /// the new one after.
     pub fn restart(
         &mut self,
         aircraft: &aircraft_type::AircraftType,
         resources: &dyn ResourceSource,
     ) -> WorldResult<Restarted> {
+        let open = self.combat.is_open();
         // A fixed seed keeps headless runs deterministic.
         self.comms.restart(1);
         self.wing_status.reset();
         self.radio = Default::default();
-        self.cockpits.truncate(1);
+        if open {
+            self.cockpits.clear();
+        } else {
+            self.cockpits.truncate(1);
+        }
         self.reset_weather();
-        let Some(cockpit) = self.cockpits.first_mut() else {
+        if !open && self.cockpits.is_empty() {
             return Err("a flight needs a cockpit to restart".into());
-        };
-        cockpit.plane = PlaneId(0);
-        cockpit.crew_voice =
-            crew_voice::CrewVoice::new(&aircraft.profile).for_seat(SeatId::default(), 0);
-        cockpit.flight = aircraft.start(&self.terrain);
+        }
+        // Where the lead of Friendly Wing 1 starts: seat 0's flight in single
+        // player, and the point the open mission's wings are placed around.
+        let mut lead = aircraft.start(&self.terrain);
         if let Some((altitude, fuel)) = self.setup.mission {
-            cockpit.flight.position[1] = altitude;
-            cockpit.flight.fuel = fuel;
+            lead.position[1] = altitude;
+            lead.fuel = fuel;
         }
         // The accepted creator layout, reused unchanged on restart.
         let layout = self
@@ -275,80 +285,87 @@ impl World {
             .and(self.combat.mission_layout.clone())
             .filter(|layout| layout.ground.is_some() == self.setup.ground_start.is_some());
         let parked = layout.as_ref().and_then(|layout| layout.ground.clone());
-        cockpit
-            .airfield_radio
-            .reset(parked.as_ref().map(|g| g.runway));
         if let Some(layout) = layout.as_ref().filter(|l| l.player_turn != 0.) {
             // Airborne: the whole scene turns so the enemy ahead stays on the
             // map.
-            cockpit.flight.yaw += layout.player_turn;
-            let basis = attitude::Basis::new(cockpit.flight.yaw, 0., 0.);
-            cockpit.flight.velocity = std::array::from_fn(|i| {
-                basis.forward[i] * cockpit.flight.speed + self.terrain.wind()[i]
-            });
+            lead.yaw += layout.player_turn;
+            let basis = attitude::Basis::new(lead.yaw, 0., 0.);
+            lead.velocity =
+                std::array::from_fn(|i| basis.forward[i] * lead.speed + self.terrain.wind()[i]);
         }
         if let Some(object) = self.setup.ground_start {
             let (position, heading) = match &parked {
                 Some(ground) => (ground.slots[0], ground.heading),
                 None => mission_layout::runway_pose(&self.terrain, object)?,
             };
-            cockpit.flight.position[0] = position[0];
-            cockpit.flight.position[2] = position[2];
+            lead.position[0] = position[0];
+            lead.position[2] = position[2];
             if self.setup.mission.is_none() {
-                cockpit.flight.position[1] = cockpit.flight.position[1].max(position[1] + 5000.);
+                lead.position[1] = lead.position[1].max(position[1] + 5000.);
             }
-            cockpit.flight.yaw = heading;
+            lead.yaw = heading;
             let basis = attitude::Basis::new(heading, 0., 0.);
-            cockpit.flight.velocity = std::array::from_fn(|i| {
-                basis.forward[i] * cockpit.flight.speed + self.terrain.wind()[i]
-            });
+            lead.velocity =
+                std::array::from_fn(|i| basis.forward[i] * lead.speed + self.terrain.wind()[i]);
         }
         if self.setup.researched_flight {
-            cockpit.flight.enable_research(1)?;
+            lead.enable_research(1)?;
         }
         if let Some(tables) = &self.setup.native_tables {
             if self.combat.range || self.setup.mission.is_some() {
                 return Err("native research flight currently requires clean free flight".into());
             }
-            cockpit.flight.enable_native(tables.clone(), 1)?;
+            lead.enable_native(tables.clone(), 1)?;
         }
-        self.combat.reset(&mut cockpit.flight)?;
+        self.combat.reset(&mut lead)?;
         self.combat.raise_airborne_spawns(&self.terrain);
-        if self.combat.uses_normal_startup_defaults() {
+        if !open && self.combat.uses_normal_startup_defaults() {
             self.combat.apply_startup_weapons();
         }
         let ground_airport = match self.setup.ground_start {
             Some(object) => Some(match &parked {
                 Some(ground) => {
-                    mission_layout::place_on_runway(&self.terrain, &mut cockpit.flight, ground, 0)
+                    mission_layout::place_on_runway(&self.terrain, &mut lead, ground, 0)
                         .map(|()| ground.airport)?
                 }
-                None => {
-                    mission_layout::apply_ground_start(&self.terrain, &mut cockpit.flight, object)?
-                }
+                None => mission_layout::apply_ground_start(&self.terrain, &mut lead, object)?,
             }),
             None => None,
         };
-        cockpit.result = ai_wings::outcome::Tracker::new(ai_wings::outcome::home_base(
-            &self.terrain,
-            ground_airport,
-        ));
-        cockpit
-            .airport_service
-            .reset(&self.terrain.airport_scene)
-            .map_err(std::io::Error::other)?;
-        // A ground start begins on NAV, and so does an aircraft with nothing
-        // loaded in the selected station: an empty station is never armed.
-        let own = self.combat.own();
-        cockpit.airport_nav_mode = ground_airport.is_some()
-            || !own.carries(own.selected, self.combat.state.cheats.unlimited_ammo);
-        self.combat.own_mut().armed = !cockpit.airport_nav_mode;
-        if let Some(airport) = ground_airport {
-            cockpit.airport_service.command(
-                &self.terrain.airport_scene,
-                airport_aircraft(&self.terrain, &cockpit.flight, cockpit.airport_nav_mode),
-                tore_sim::airport::Command::SelectAirport(airport),
-            );
+        if let Some(cockpit) = self.cockpits.first_mut() {
+            cockpit.plane = PlaneId(0);
+            cockpit.crew_voice =
+                crew_voice::CrewVoice::new(&aircraft.profile).for_seat(SeatId::default(), 0);
+            cockpit
+                .airfield_radio
+                .reset(parked.as_ref().map(|g| g.runway));
+            cockpit.result = ai_wings::outcome::Tracker::new(ai_wings::outcome::home_base(
+                &self.terrain,
+                ground_airport,
+            ));
+            cockpit
+                .airport_service
+                .reset(&self.terrain.airport_scene)
+                .map_err(std::io::Error::other)?;
+            // A ground start begins on NAV, and so does an aircraft with
+            // nothing loaded in the selected station: an empty station is
+            // never armed.
+            let unlimited_ammo = self.combat.state.cheats.unlimited_ammo;
+            let own = self
+                .combat
+                .state
+                .ownship_mut(0)
+                .ok_or("single player's plane 0 has an ownship")?;
+            cockpit.airport_nav_mode =
+                ground_airport.is_some() || !own.carries(own.selected, unlimited_ammo);
+            own.armed = !cockpit.airport_nav_mode;
+            if let Some(airport) = ground_airport {
+                cockpit.airport_service.command(
+                    &self.terrain.airport_scene,
+                    airport_aircraft(&self.terrain, &lead, cockpit.airport_nav_mode),
+                    tore_sim::airport::Command::SelectAirport(airport),
+                );
+            }
         }
         // The AI bridge is built from the targets the existing spawner just
         // placed, so the AI aircraft start exactly where the straight-flight
@@ -365,40 +382,52 @@ impl World {
                 &self.terrain,
                 parked.as_ref().map(mission_layout::GroundLayout::departure),
             );
-            let mut bridge = ai_wings::AiWings::build_mission(
+            let humans: &[ai_wings::HumanSlot] = if open {
+                &[]
+            } else {
+                &[ai_wings::HumanSlot::SINGLE_PLAYER]
+            };
+            let mut bridge = ai_wings::AiWings::build_mission_for(
                 &ai.wings,
                 &self.combat.state.targets,
                 ai.guns_only,
                 resources,
                 &airfields,
+                humans,
             )?;
             bridge.set_flight_model(ai.flight_model)?;
-            bridge.apply_mission_preset(ai.preset, cockpit.flight.position);
-            bridge.apply_group_objectives(&ai.group_objectives, cockpit.flight.position);
+            bridge.apply_mission_preset(ai.preset, lead.position);
+            bridge.apply_group_objectives(&ai.group_objectives, lead.position);
             bridge.apply_group_survival(&ai.group_must_survive);
             bridge.mirror_pose_out(&mut self.combat.state.targets);
             self.combat.ai_poses = !bridge.is_empty();
             ai_aircraft = Some(bridge.len());
             self.ai_wings = Some(bridge);
         }
-        self.roster = Roster::single_player(
-            comms::crew(&aircraft.profile),
-            self.ai_wings.iter().flat_map(ai_planes),
-        );
+        let ai = self.ai_wings.iter().flat_map(ai_planes);
+        self.roster = if open {
+            Roster::open(ai)
+        } else {
+            Roster::single_player(comms::crew(&aircraft.profile), ai)
+        };
         self.comms
             .set_seats(self.roster.seats().iter().map(|seat| seat.id));
-        // The designation keys skip the player's friends.
-        if let Some(friends) = friendlies_of(self.ai_wings.as_ref(), &self.roster, cockpit.plane)
-            && let Some(own) = self.combat.state.ownship_mut(cockpit.plane.0)
-        {
-            own.friendlies = friends;
+        if let Some(cockpit) = self.cockpits.first_mut() {
+            // The designation keys skip the player's friends.
+            if let Some(friends) =
+                friendlies_of(self.ai_wings.as_ref(), &self.roster, cockpit.plane)
+                && let Some(own) = self.combat.state.ownship_mut(cockpit.plane.0)
+            {
+                own.friendlies = friends;
+            }
+            // Draw from the placed start, including the AI's own poses.
+            self.combat
+                .restart_render(cockpit.plane.0, &lead, self.ai_wings.as_ref());
+            cockpit.previous_flight = lead.clone();
+            cockpit.flight = lead;
+            cockpit.overspeed_message_at = None;
+            cockpit.edge_message_at = None;
         }
-        // Draw from the placed start, including the AI's own poses.
-        self.combat
-            .restart_render(cockpit.plane.0, &cockpit.flight, self.ai_wings.as_ref());
-        cockpit.previous_flight = cockpit.flight.clone();
-        cockpit.overspeed_message_at = None;
-        cockpit.edge_message_at = None;
         Ok(Restarted {
             ground_airport,
             layout,
@@ -541,10 +570,9 @@ impl World {
     }
 
     /// One fixed 120 Hz tick of the whole mission, with one input from every
-    /// seat that flies a plane. See the module documentation; the order below
-    /// is the order the redraw loop ran. Combat, the AI and the radio still
-    /// serve the first cockpit only (docs/ARCHITECTURE.md, "Where the code
-    /// stands").
+    /// seat that flies a plane, and none when nobody does (an open mission
+    /// with no human). See the module documentation; the order below is the
+    /// order the redraw loop ran.
     pub fn step(&mut self, inputs: &[SeatInput], out: &mut TickOutput) -> WorldResult<()> {
         self.step_with(&[], inputs, out, |_, _| Ok(()))
     }
@@ -581,10 +609,8 @@ impl World {
         for command in mission {
             self.apply_mission_command(command)?;
         }
+        // An open mission steps with no human at all: the AI flies on.
         let inputs = self.cockpit_inputs(inputs)?;
-        if inputs.is_empty() {
-            return Err("a tick needs a human-flown plane".into());
-        }
         let mut by_seat: Vec<(usize, &SeatInput)> = inputs.iter().copied().enumerate().collect();
         by_seat.sort_by_key(|(_, input)| input.seat);
         for (cockpit, input) in by_seat {
@@ -645,8 +671,9 @@ impl World {
                 .controller
                 .space(input.trigger, false, false);
         }
-        if self.combat.recording_tape() {
-            let own = &self.cockpits[0];
+        if self.combat.recording_tape()
+            && let Some(own) = self.cockpits.first()
+        {
             let airport = airport_aircraft(&self.terrain, &own.flight, own.airport_nav_mode);
             self.combat.record_tape(
                 format!(
@@ -1123,7 +1150,7 @@ impl World {
                     },
                     combat::launcher(&cockpit.flight),
                 );
-                if plane == self.combat.own_id() {
+                if Some(plane) == self.combat.host_plane() {
                     self.combat.record_tape(
                         if cockpit.airport_nav_mode {
                             "airport-nav:1"
@@ -1144,7 +1171,7 @@ impl World {
                 });
             }
             AirportInput::Command(command) => {
-                if cockpit.plane.0 == self.combat.own_id() {
+                if Some(cockpit.plane.0) == self.combat.host_plane() {
                     self.combat.record_tape(
                         combat_tape::airport_command_name(command),
                         combat::launcher(&cockpit.flight),

@@ -83,6 +83,9 @@ pub fn target_pose(target: &live::Target, ai_poses: bool) -> [f64; 3] {
 /// the two is the app's (`CombatView::presented`).
 #[derive(Default)]
 struct RenderHistory {
+    /// The plane the snapshots are drawn for; `None` while the history holds
+    /// none, as after a reset or in an open mission with no human.
+    plane: Option<u32>,
     /// The snapshot one tick earlier; none right after a restart.
     previous: Option<RenderSnapshot>,
     current: RenderSnapshot,
@@ -109,11 +112,13 @@ impl RenderHistory {
     }
     /// Replaces the current snapshot, keeping the previous one.
     fn set_current(&mut self, current: RenderSnapshot) {
+        self.plane = Some(current.player.id);
         self.places[1] = Self::places(&current);
         self.current = current;
     }
     /// The current snapshot becomes the previous one.
     fn advance(&mut self, next: RenderSnapshot) {
+        self.plane = Some(next.player.id);
         let places = Self::places(&next);
         self.places[0] = std::mem::replace(&mut self.places[1], places);
         self.previous = Some(std::mem::replace(&mut self.current, next));
@@ -150,6 +155,12 @@ pub struct Combat {
     pub ai_poses: bool,
     /// Pilot-only tapes retain their existing clean-aircraft initial state.
     pub clean_recording: bool,
+    /// An open mission: the AI flies every aircraft at the start, plane 0
+    /// included as the first aircraft row, and humans add ownships only by
+    /// handoff. Otherwise the host flies plane 0 as the first ownship from
+    /// the start (single player, free flight and the range), and the combat
+    /// tape, the command notes and [`Self::contrail_offsets`] follow it.
+    open: bool,
     initial_ammo: Option<Vec<u16>>,
     render: RenderHistory,
     dummies: Vec<(usize, Vector)>,
@@ -232,20 +243,43 @@ pub fn gun_rewind(tick: u64, view: Option<crate::seats::SeatView>) -> u16 {
 }
 
 impl Combat {
-    /// The aircraft the host flies: the state's only ownship.
+    /// The aircraft a host with one flight flies: its first ownship. For free
+    /// flight, the range, the AI probe and the loadout screen, which always
+    /// have one; it panics with none, so the build, the tick and the handoff
+    /// never call it and ask for a plane's ownship by id instead.
     pub fn own_id(&self) -> u32 {
         self.state.own().aircraft
     }
-    /// The combat state of the aircraft the host flies.
+    /// The combat state of the aircraft a host with one flight flies; see
+    /// [`Self::own_id`].
     pub fn own(&self) -> &live::Ownship {
         self.state.own()
     }
+    /// See [`Self::own`].
     pub fn own_mut(&mut self) -> &mut live::Ownship {
         self.state.own_mut()
     }
-    /// What the flown aircraft's cockpit shows.
+    /// What the flown aircraft's cockpit shows; see [`Self::own_id`].
     pub fn own_view(&self) -> live::OwnshipView<'_> {
         self.state.own_view()
+    }
+    /// The host's own plane while it has an ownship: plane 0 in single player,
+    /// free flight and the range, which the combat tape, the command notes and
+    /// [`Self::contrail_offsets`] follow. `None` in an open mission, where
+    /// every ownship is a plane a human took, and once plane 0 is given back.
+    pub fn host_plane(&self) -> Option<u32> {
+        const HOST: u32 = 0;
+        (!self.open && self.state.ownship(HOST).is_some()).then_some(HOST)
+    }
+    /// Whether this is an open mission's combat: the AI flew every aircraft at
+    /// the start, plane 0 included.
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+    /// The id of the first aircraft row a reset adds: 1 after the host's plane
+    /// 0, or 0 in an open mission, where plane 0 is a row too.
+    fn first_row(&self) -> u32 {
+        u32::from(!self.open)
     }
     /// Player airborne startup convention: canonical gun selected and armed.
     pub fn apply_startup_weapons(&mut self) {
@@ -307,17 +341,40 @@ impl Combat {
             Some(load.quantities.clone()),
         )
     }
+    /// Combat for an open mission: no ownship and no host's aircraft. The
+    /// mission's aircraft, plane 0 first, join as rows with
+    /// [`Self::mission_aircraft`] and take their places at [`Self::reset`];
+    /// humans join by handoff with [`Self::add_ownship`].
+    pub fn open() -> Self {
+        Self {
+            open: true,
+            ..Self::with_state(live::State::open_mission(), Vec::new(), false, None)
+        }
+    }
     fn configured(
         h: &AircraftType,
         range: bool,
         config: live::Configuration,
         initial_ammo: Option<Vec<u16>>,
     ) -> WorldResult<Self> {
-        Ok(Self {
-            contrail_offsets: h.contrail_offsets.clone(),
+        Ok(Self::with_state(
+            live::State::new(config, true)?,
+            h.contrail_offsets.clone(),
+            range,
+            initial_ammo,
+        ))
+    }
+    fn with_state(
+        state: live::State,
+        contrail_offsets: Vec<Vector>,
+        range: bool,
+        initial_ammo: Option<Vec<u16>>,
+    ) -> Self {
+        Self {
+            contrail_offsets,
             contrail_sortie: 0,
             contrails: Default::default(),
-            state: live::State::new(config, true)?,
+            state,
             dummies: Vec::new(),
             mission_spawns: None,
             mission_layout: None,
@@ -330,12 +387,13 @@ impl Combat {
             range,
             ai_poses: false,
             clean_recording: false,
+            open: false,
             initial_ammo,
             render: RenderHistory::default(),
             tape: None,
             last_launcher: None,
             notes: Default::default(),
-        })
+        }
     }
     /// Everything combat draws for this tick, as plain data, for the screen
     /// of the human who flies `plane`: that plane is the picture's player, in
@@ -366,7 +424,7 @@ impl Combat {
             .filter_map(|other| Some((other, self.poses.get(&other.aircraft)?)))
             .collect();
         let model = |id: u32| {
-            id.checked_sub(1)
+            id.checked_sub(self.first_row())
                 .and_then(|index| self.dummies.get(index as usize))
                 .map(|(model, _)| self.dummy_types[*model].profile.id)
         };
@@ -699,6 +757,18 @@ impl Combat {
                 .step([([site[0], site[1] + 20., site[2]], smoke::Kind::Burning)]);
         }
     }
+    /// The plane the render history is drawn for, `None` while it holds
+    /// nothing.
+    pub fn render_plane(&self) -> Option<u32> {
+        self.render.plane
+    }
+    /// Empties the render history, as when no human is left to draw for. An
+    /// empty one stays as it is.
+    pub fn clear_render(&mut self) {
+        if self.render.plane.is_some() {
+            self.render.restart();
+        }
+    }
     /// The latest tick's snapshot, uninterpolated.
     pub fn render_snapshot(&self) -> &RenderSnapshot {
         &self.render.current
@@ -753,7 +823,13 @@ impl Combat {
             data,
             load,
         )?;
-        self.mission_spawns = Some(crate::ai_wings::mission_spawns(wings, &layout.spawn_plan()));
+        // An open mission's wings hold plane 0 as friendly wing 1's first
+        // member; single player's player leads that wing outside them.
+        self.mission_spawns = Some(crate::ai_wings::mission_spawns_for(
+            wings,
+            &layout.spawn_plan(),
+            !self.open,
+        ));
         self.mission_layout = Some(layout.clone());
         Ok(())
     }
@@ -809,9 +885,9 @@ impl Combat {
         self.command_for(aircraft, command, l);
     }
     /// A command for one ownship. The combat tape and the command notes follow
-    /// the first ownship only.
+    /// the host's plane only ([`Self::host_plane`]).
     pub fn command_for(&mut self, aircraft: u32, command: live::Command, l: Launcher) {
-        let first = aircraft == self.own_id();
+        let first = Some(aircraft) == self.host_plane();
         if first && self.tape.is_some() {
             self.record_tape(crate::combat_tape::command_name(command), l);
         }
@@ -867,7 +943,7 @@ impl Combat {
     }
     /// One ownship lets go of its trigger and drops its queued rounds.
     pub fn cancel_for(&mut self, aircraft: u32) {
-        let first = aircraft == self.own_id();
+        let first = Some(aircraft) == self.host_plane();
         if first
             && self.tape.is_some()
             && let Some(l) = self.last_launcher
@@ -912,17 +988,21 @@ impl Combat {
         Ok(())
     }
     /// Takes an aircraft out of combat when its human gives it back, with its
-    /// ownship: stores, damage and countermeasures as they stand. The first
-    /// ownship, the one the app presents, stays.
+    /// ownship: stores, damage and countermeasures as they stand. Any
+    /// ownship can go, the host's plane 0 and the last one too.
     pub fn remove_ownship(&mut self, aircraft: u32) -> Option<live::Ownship> {
-        if aircraft == self.own_id() {
-            return None;
-        }
         self.triggers.remove(&aircraft);
         self.ownship_contrails.remove(&aircraft);
         self.poses.remove(&aircraft);
         self.state.remove_ownship(aircraft)
     }
+    /// Starts combat over from the start `s`. With a host, its plane 0 gets
+    /// a fresh ownship on the flight `s`, which takes the ownship's payload
+    /// and systems; the mission's aircraft take their places around `s`. In
+    /// an open mission `s` is only where the lead of Friendly Wing 1 starts:
+    /// the mission's aircraft, plane 0 first, take their places around it,
+    /// every ownship goes and the render history is left empty, as no human
+    /// flies yet.
     pub fn reset(&mut self, s: &mut flight::State) -> WorldResult<()> {
         self.render.restart();
         self.contrails = Default::default();
@@ -932,55 +1012,37 @@ impl Combat {
         self.last_launcher = Some(l);
         let weapon_rules = self.state.weapon_rules;
         let friendly_fire = self.state.friendly_fire;
-        let aircraft = self.own_id();
-        self.state = live::State::for_ownship(
-            aircraft,
-            self.state.own().side,
-            self.state.own().configuration().clone(),
-            s.native.is_none() && !self.clean_recording,
-        )?;
+        let host = if self.open {
+            self.state = live::State::open_mission();
+            None
+        } else {
+            let own = self
+                .state
+                .ownship(0)
+                .ok_or("the host's plane 0 has no ownship to restart")?;
+            let aircraft = own.aircraft;
+            self.state = live::State::for_ownship(
+                aircraft,
+                own.side,
+                own.configuration().clone(),
+                s.native.is_none() && !self.clean_recording,
+            )?;
+            Some(aircraft)
+        };
         self.state.weapon_rules = weapon_rules;
         self.state.friendly_fire = friendly_fire;
         if weapon_rules == tore_sim::combat::missiles::Rules::Compatibility {
             self.record_tape("compatibility-weapons", l);
         }
-        if let Some(ammo) = &self.initial_ammo {
-            self.state.own_mut().ammo.clone_from(ammo);
-        }
-        self.state.own_mut().start_load();
         // The keyboard trigger starts over; the controller's is only let go.
-        let aircraft = self.own_id();
-        let mut controller = self
-            .triggers
-            .remove(&aircraft)
-            .map(|trigger| trigger.controller)
-            .unwrap_or_default();
-        controller.cancel();
+        let controller = host.and_then(|aircraft| self.triggers.remove(&aircraft));
         self.triggers.clear();
-        self.triggers.insert(
-            aircraft,
-            Trigger {
-                input: FireInput::default(),
-                controller,
-            },
-        );
         self.ownship_contrails.clear();
         self.poses.clear();
-        s.set_payload(self.state.own().payload_lbs())?;
-        s.systems = tore_sim::aircraft_systems::Systems::new(
-            self.state.own().configuration().engines,
-            self.state.own().external_fuel_lbs(),
-        );
-        s.damage_fraction = 0.;
-        s.damage_variant = None;
-        s.damage_regions = [0.; live::DAMAGE_SECTIONS];
-        s.bay = 0.;
-        s.bay_open = false;
-        s.bay_auto_open = false;
-        if self.range {
-            let aircraft = self.own_id();
-            self.state.range_target(aircraft, launcher(s));
+        if let Some(aircraft) = host {
+            self.reset_host(aircraft, s, controller.map(|trigger| trigger.controller))?;
         }
+        let first_row = self.first_row();
         for (index, (model, offset)) in self.dummies.iter().enumerate() {
             let fixture_position = std::array::from_fn(|i| {
                 l.position[i] + l.basis.right[i] * offset[0] + l.basis.forward[i] * offset[2]
@@ -1001,13 +1063,64 @@ impl Combat {
             });
             self.state
                 .add_dummy(&self.dummy_configs[*model], position, basis, side);
-            debug_assert_eq!(self.state.targets.last().unwrap().id as usize, index + 1);
+            debug_assert_eq!(
+                self.state.targets.last().unwrap().id,
+                index as u32 + first_row
+            );
         }
         // Aircraft are spawned first, preserving their roster ordering.
         for object in &self.airport_objects {
             Self::register_airport_object(&mut self.state, object)?;
         }
-        self.restart_render(self.own_id(), s, None);
+        if let Some(aircraft) = host {
+            self.restart_render(aircraft, s, None);
+        }
+        Ok(())
+    }
+    /// The host's half of [`Self::reset`]: its plane's fresh ownship loaded,
+    /// its trigger, and the flight `s` it flies taking the ownship's payload
+    /// and systems.
+    fn reset_host(
+        &mut self,
+        aircraft: u32,
+        s: &mut flight::State,
+        controller: Option<FireInput>,
+    ) -> WorldResult<()> {
+        let own = self
+            .state
+            .ownship_mut(aircraft)
+            .ok_or("the host's plane has an ownship")?;
+        if let Some(ammo) = &self.initial_ammo {
+            own.ammo.clone_from(ammo);
+        }
+        own.start_load();
+        let mut controller = controller.unwrap_or_default();
+        controller.cancel();
+        self.triggers.insert(
+            aircraft,
+            Trigger {
+                input: FireInput::default(),
+                controller,
+            },
+        );
+        let own = self
+            .state
+            .ownship(aircraft)
+            .ok_or("the host's plane has an ownship")?;
+        s.set_payload(own.payload_lbs())?;
+        s.systems = tore_sim::aircraft_systems::Systems::new(
+            own.configuration().engines,
+            own.external_fuel_lbs(),
+        );
+        s.damage_fraction = 0.;
+        s.damage_variant = None;
+        s.damage_regions = [0.; live::DAMAGE_SECTIONS];
+        s.bay = 0.;
+        s.bay_open = false;
+        s.bay_auto_open = false;
+        if self.range {
+            self.state.range_target(aircraft, launcher(s));
+        }
         Ok(())
     }
     /// Opinionated (requested by John, 2026-09-29): an airborne mission
@@ -1068,7 +1181,7 @@ impl Combat {
         world: &Terrain,
     ) -> WorldResult<Stepped> {
         flights.sort_by_key(|(aircraft, _)| *aircraft);
-        let first = self.own_id();
+        let first = self.host_plane();
         let mut inputs = Vec::new();
         let mut events = Vec::new();
         for (aircraft, s) in flights.iter() {
@@ -1078,7 +1191,7 @@ impl Combat {
             }
             let l = launcher(s);
             let held = self.triggers.get(&aircraft).is_some_and(Trigger::held);
-            if aircraft == first {
+            if Some(aircraft) == first {
                 self.last_launcher = Some(l);
                 self.record_tape(if held { "fire" } else { "tick" }, l);
             }
@@ -1157,7 +1270,7 @@ impl Combat {
             }
         };
         let offsets_of = |aircraft: u32| -> &[Vector] {
-            if aircraft == first {
+            if Some(aircraft) == first {
                 &self.contrail_offsets
             } else {
                 self.ownship_contrails
@@ -1608,6 +1721,7 @@ pub mod fixtures {
             range: false,
             ai_poses: true,
             clean_recording: false,
+            open: false,
             initial_ammo: None,
             render: RenderHistory::default(),
             dummies,

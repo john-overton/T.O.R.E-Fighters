@@ -84,12 +84,11 @@ pub const FRIENDLY_SIDE: Side = Side(1);
 /// See [`FRIENDLY_SIDE`].
 pub const ENEMY_SIDE: Side = Side(2);
 
-/// The aircraft single player flies. `live::State` already reserves 0 for the
-/// player (`Projectile::target == Some(0)` is the player), and dummy target ids
-/// start at 1, so actor ids and target ids are the same number. The AI no
-/// longer reads this: every human-flown aircraft reaches it as a
-/// [`HumanAircraft`] with its own id, and this is only the id single player's
-/// entry carries.
+/// The aircraft single player flies. Single player's dummy target ids start
+/// at 1 after it, and an open mission's at 0, with plane 0 an AI aircraft, so
+/// actor ids and target ids are always the same number. The AI no longer reads
+/// this: every human-flown aircraft reaches it as a [`HumanAircraft`] with its
+/// own id, and this is only the id single player's entry carries.
 pub const PLAYER_ID: u32 = 0;
 
 /// Fitted Quick Mission placement, agent choice: use B43 echelon slots at
@@ -160,7 +159,21 @@ impl SpawnPlan {
     }
 }
 
+/// Where each wing member starts, in payload order, with the player leading
+/// friendly wing 1 ahead of its members.
 pub fn mission_spawns(wings: &[WingLaunch], plan: &SpawnPlan) -> Vec<MissionSpawn> {
+    mission_spawns_for(wings, plan, true)
+}
+
+/// [`mission_spawns`], where `player` says whether the player flies the lead
+/// of friendly wing 1 outside its members (single player). Without, as in an
+/// open mission, the wing's member 0 is its lead and starts on the player's
+/// spot, plane 0's.
+pub fn mission_spawns_for(
+    wings: &[WingLaunch],
+    plan: &SpawnPlan,
+    player: bool,
+) -> Vec<MissionSpawn> {
     use tore_sim::ai::wing::{Formation, formation_slot_point};
     wings
         .iter()
@@ -168,7 +181,7 @@ pub fn mission_spawns(wings: &[WingLaunch], plan: &SpawnPlan) -> Vec<MissionSpaw
             wing.members.iter().map(move |member| {
                 let opposing = wing.wing.side.is_enemy();
                 let player_wing = !opposing && wing.wing.index == 0;
-                let slot = member.member + u8::from(player_wing);
+                let slot = member.member + u8::from(player && player_wing);
                 if player_wing
                     && let Some(runway) = plan.runway_slots.as_ref()
                     && let Some([right, forward]) = runway.get(usize::from(slot))
@@ -772,7 +785,8 @@ impl AiWings {
     ///
     /// `targets` must be `combat.state.targets` immediately after
     /// `Combat::reset`, whose rows are the flattened wing members in payload
-    /// order with id `index + 1`. Nothing here recomputes a spawn position: the
+    /// order, with id `index + 1` in single player and `index` in an open
+    /// mission. Nothing here recomputes a spawn position: the
     /// AI aircraft start exactly where the fixtures would have started.
     pub fn build(
         wings: &[WingLaunch],
@@ -993,11 +1007,13 @@ impl AiWings {
                 state.velocity = Basis::new(yaw, pitch, bank)
                     .forward
                     .map(|v| v * state.speed);
-                // A ground start parks the player's wingmen on the departure
-                // runway instead of dropping them from altitude. Only the
-                // researched flight model can stand on a runway.
-                let player_wing = !taken.is_empty();
-                let ground_start = match airfields.departure.as_ref().filter(|_| player_wing) {
+                // A ground start parks Friendly Wing 1, the wing the
+                // departure is laid out for, on the departure runway instead
+                // of dropping it from altitude, whether or not a human flies
+                // in it: in an open mission the AI parks its lead too. Only
+                // the researched flight model can stand on a runway.
+                let departing = wing.wing.side == launch::Side::Friendly && wing.wing.index == 0;
+                let ground_start = match airfields.departure.as_ref().filter(|_| departing) {
                     Some(departure) => {
                         let order = usize::from(member_index);
                         let (Some(slot), Some(heading)) =
@@ -1008,8 +1024,9 @@ impl AiWings {
                             )
                             .into());
                         };
-                        // Deterministic per-aircraft seed: the player uses 1,
-                        // wingman n uses 1 + n.
+                        // Deterministic per-aircraft seed: the lead (the
+                        // player, or the AI's plane 0) uses 1, wingman n uses
+                        // 1 + n.
                         state.enable_research(1 + i32::from(member_index))?;
                         state.start_on_runway(*slot, *heading)?;
                         Some(GroundStart {
@@ -3152,6 +3169,76 @@ mod tests {
             assert_eq!(actor.ground_start().unwrap().runway, pad);
             assert_eq!(actor.home_runway(), Some(&field));
         }
+    }
+
+    /// An open mission (D3c): the AI flies the lead of Friendly Wing 1 too, so
+    /// its spawn and its runway slot are the leader's, and the whole wing
+    /// parks with no human in it.
+    #[test]
+    fn an_open_mission_parks_the_whole_first_wing_lead_included() {
+        let selections = [
+            (launch::Side::Friendly, 0u8, 3usize),
+            (launch::Side::Enemy, 0, 2),
+        ]
+        .map(|(side, index, count)| WingSelection {
+            wing: WingId::new(side, index).unwrap(),
+            aircraft: AircraftId::F18,
+            count,
+            skill_level: 1,
+        });
+        let wings = resolve_wings(&selections, None).unwrap();
+        let runway_slots = vec![[0., 0.], [40., -250.], [-40., -500.]];
+        let plan = SpawnPlan {
+            separation_ft: 60_000.,
+            enemy_turn: 0.,
+            runway_slots: Some(runway_slots.clone()),
+        };
+        let spawns = mission_spawns_for(&wings, &plan, false);
+        assert_eq!(spawns.len(), 5);
+        for (order, slot) in runway_slots.iter().enumerate() {
+            assert_eq!(spawns[order].runway_order, Some(order as u8));
+            assert_eq!(spawns[order].offset, [slot[0], 0., slot[1]]);
+        }
+        // Single player's player takes the lead's slot outside the wing.
+        assert_eq!(mission_spawns(&wings, &plan)[0].runway_order, Some(1));
+
+        let departure_runway = runway_view(7, [0., 30., 3000.]);
+        let slots = vec![[0., 30., 1100.], [40., 30., 850.], [-40., 30., 600.]];
+        let airfields = Airfields {
+            runways: vec![HomeRunway {
+                view: departure_runway,
+                friendly: true,
+                enemy: true,
+            }],
+            departure: Some(Departure {
+                runway: departure_runway,
+                headings: vec![0.; 3],
+                slots: slots.clone(),
+            }),
+        };
+        let targets = vec![
+            target(0, [0., 9000., 1100.], 0.),
+            target(1, [40., 9000., 850.], 0.),
+            target(2, [-40., 9000., 600.], 0.),
+            target(3, [0., 9000., 80_000.], std::f64::consts::PI),
+            target(4, [-512., 9000., 80_512.], std::f64::consts::PI),
+        ];
+        let bridge = AiWings::build_for(&wings, &targets, &airfields, &[], |_| {
+            Ok((aircraft(), None))
+        })
+        .unwrap();
+        for id in 0u32..3 {
+            let actor = bridge.mission.actor(id).unwrap();
+            let flight = actor.flight();
+            assert!(flight.research.as_ref().is_some_and(|r| r.on_ground));
+            let slot = slots[id as usize];
+            assert_eq!([flight.position[0], flight.position[2]], [slot[0], slot[2]]);
+            assert_eq!(actor.ground_start().unwrap().order, id as u8);
+            assert_eq!(actor.identity().member, id as u8);
+        }
+        assert!(bridge.mission.actor(0).unwrap().identity().is_leader());
+        // The enemy stays in the air.
+        assert!(bridge.mission.actor(3).unwrap().ground_start().is_none());
     }
 
     #[test]

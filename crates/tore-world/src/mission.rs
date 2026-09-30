@@ -386,13 +386,19 @@ impl MissionSpec {
     /// The six wings as the launch payload takes them: friendly wing 1 gives
     /// up one slot to the player.
     pub fn wing_selections(&self) -> Vec<WingSelection> {
+        self.selections(true)
+    }
+
+    /// The six wings for the AI, with the player's slot left out of friendly
+    /// wing 1 when `player` flies its lead, and its full count otherwise.
+    fn selections(&self, player: bool) -> Vec<WingSelection> {
         self.wings
             .iter()
             .enumerate()
             .map(|(index, wing)| WingSelection {
                 wing: Self::wing_id(index),
                 aircraft: wing.aircraft,
-                count: wing.count.saturating_sub(usize::from(index == 0)),
+                count: wing.count.saturating_sub(usize::from(player && index == 0)),
                 skill_level: wing.skill.level(),
             })
             .collect()
@@ -402,6 +408,13 @@ impl MissionSpec {
     /// skill override applied.
     pub fn wing_launches(&self) -> Result<Vec<WingLaunch>, AiError> {
         resolve_wings(&self.wing_selections(), self.enemy_skill)
+    }
+
+    /// [`Self::wing_launches`] for an open mission, where the AI flies every
+    /// plane: friendly wing 1 keeps its full count, its lead (plane 0)
+    /// included.
+    pub fn open_wing_launches(&self) -> Result<Vec<WingLaunch>, AiError> {
+        resolve_wings(&self.selections(false), self.enemy_skill)
     }
 
     /// The aircraft and count pairs the straight-flight fixtures take (no
