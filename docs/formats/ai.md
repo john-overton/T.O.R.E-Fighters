@@ -63,7 +63,7 @@ The installed-root census now also covers FA_1.LIB, FA_4B.LIB and FA_4D.LIB.
 None contains matching AI/BI/PT/NT/OT entries. Thus there is no cross-archive
 collision for those resource classes among these four installed archives.
 This does not cover loose overrides, disc subdirectories or other builds.
-The current host importer in `tore-app/src/assets.rs` reads FA_1 and FA_2 and
+The current host importer in `tore-import` (`crates/tore-import/src/import.rs`) reads FA_1 and FA_2 and
 rejects differing duplicate selected resources; FA_4B/FA_4D are optional music
 inputs. This is host behavior, not proof of original archive precedence.
 

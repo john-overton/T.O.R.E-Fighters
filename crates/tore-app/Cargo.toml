@@ -20,6 +20,7 @@ tore-world = { path = "../tore-world" }
 tore-replay = { path = "../tore-replay" }
 cpal = "0.16"
 tore-formats = { path = "../tore-formats" }
+tore-import = { path = "../tore-import" }
 pollster = "0.4"
 wgpu = { version = "27.0.1", default-features = false, features = ["std", "parking_lot", "metal", "dx12", "vulkan", "gles", "wgsl"] }
 winit = "0.30.12"

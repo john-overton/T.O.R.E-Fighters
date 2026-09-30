@@ -254,7 +254,7 @@ All proposed type/file names below are agent design choices, not existing APIs.
 | `tore-formats::theater::Environment` | Bounded top-level M/MM environment parsing | Separate object-block reader; side tables and both nationality forms |
 | `tore-formats::aircraft::Brf` and OBJECT schema | Inert OT token/field parsing | General static object definition, explicit resources and reviewed scalar fields |
 | `tore-formats::strip`, SH contact boxes | Reviewed STRIP identity and runway anchors | Review all thirteen airport definitions and their actual shape contracts |
-| `tore-app/src/assets.rs`, `tore-extract` | Archive provenance, runtime imports and caches | One shared transitive object dependency resolver; import report/cache version |
+| `tore-import` (was `tore-app/src/assets.rs`), `tore-extract` | Archive provenance, runtime imports and caches | One shared transitive object dependency resolver; import report/cache version |
 | `terrain::Terrain` and `Terrain::surface` | Source terrain, weather, grounding queries | Scene construction and runway surface query integration |
 | `tore-sim::combat::live::Target` | Stable IDs, ground roles, hit points, sensors and damage classes | Per-object configuration and building/runway contact geometry |
 | `combat.rs`, `sim_renderer.rs`, HUD/instruments | Current target display, geometry submission, palette and shadows | Static meshes, ground-object identity, ILS readout and airport selection |

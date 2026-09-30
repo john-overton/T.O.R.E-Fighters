@@ -13,7 +13,7 @@ The M0 environment supports the M1a menu slice, the M1b renderer across all 16 t
 | Component | Choice | Purpose |
 | --- | --- | --- |
 | Language | Rust 2024, compiler 1.91.1 | Reproducible native builds |
-| Workspace | `crates/tore-app`, `tore-formats`, `tore-extract`, `tore-sim`, `tore-input`, `tore-input-native`, `tore-diagnostics-native`, `tore-replay`, `tore-world`, `tore-codec` | Desktop shell and entry point, plus the format, extraction, simulation, input, mission recording, mission core and network encoding (standard library only) crates |
+| Workspace | `crates/tore-app`, `tore-formats`, `tore-import`, `tore-extract`, `tore-sim`, `tore-input`, `tore-input-native`, `tore-diagnostics-native`, `tore-replay`, `tore-world`, `tore-codec` | Desktop shell and entry point, plus the format, import, extraction, simulation, input, mission recording, mission core and network encoding (standard library only) crates |
 | Window/input | `winit` 0.30 | Native window lifecycle and input |
 | Graphics | `wgpu` 27 | Metal on macOS; native backends for Windows/Linux |
 | Diagnostic facade | Existing `log` 0.4 and `tracing` 0.1 | Bounded app/backend logs without a logging framework |
@@ -28,7 +28,7 @@ These are baseline-compatible versions, not automatically the latest versions. E
 
 The shell creates its window on the main event loop and uploads a 640 × 480 RGBA menu canvas to a Metal/native GPU texture. The shader draws a scaled, letterboxed image using linear filtering. The same viewport calculation maps physical mouse coordinates back into retail coordinates, including Retina scaling. It handles zero-sized windows and recoverable surface loss. Fatal graphics/startup errors return a failing process status.
 
-`media_source.rs` decides what a chosen folder is by its contents: an installed game folder with loose archives, or a disc folder holding the Electronic Arts installer container (`SETUP.ESA`), whose stored archives are read in place by offset rather than copied. `tore-formats::executable` maps the executable's hash to one of the two reviewed builds and supplies that build's table addresses, so the disc's 1.0 build and the 1.02F patch decode the same content; an unknown build is refused before any archive is opened. `assets.rs` selectively decompresses resources into a versioned local pack and validates them before import completes, reporting progress by archive and resource count. `menu.rs` composites original background, button pieces, and font strips and owns UI state. `renderer.rs` owns the surface, texture, and scaling. Every game object is built from imported assets before the window opens and the renderer needs a terrain world, so a first run cannot happen inside the game application: `main.rs` runs a pre-game shell, a second winit application handler holding `locate.rs` and the blit-only presenter in `canvas_present.rs`, on the same event loop through `run_app_on_demand`. Re-import from Pref ends the game application and runs the shell again; the event loop is created once. `audio.rs` mixes bounded local PCM, recorded music, and up to sixteen spatial voices with linear resampling into the device rate. `tore-sim::acoustics` advances sound wavefronts and passing-object detection at 120 Hz. Combat publishes bounded sound emissions with physical positions; the app uses the main camera as listener and the device mixer supplies stereo direction, distance gain and treble fade. An emission released by the player's own aircraft plays centered and without distance while the listener is in that cockpit; every other outside sound is muffled in a cockpit view. Up to ten looping sources (crash fires, other aircraft's engines) and, in external views, the player's own engine are placed with distance, stereo and Doppler pitch. See [audio behavior](audio.md). Explosions, craters and crash-site fires are drawn by `effect_renderer.rs` from the original sheets as textured sprites ([explosions](spec/explosions.md)). Audio initializes independently and can fail without blocking menus. No input device or microphone is opened.
+`tore-import` (`crates/tore-import`, standard library and `tore-formats` only, so a server can use it without the windowing, graphics and audio libraries) holds the whole import. Its `media_source.rs` decides what a chosen folder is by its contents: an installed game folder with loose archives, or a disc folder holding the Electronic Arts installer container (`SETUP.ESA`), whose stored archives are read in place by offset rather than copied. `tore-formats::executable` maps the executable's hash to one of the two reviewed builds and supplies that build's table addresses, so the disc's 1.0 build and the 1.02F patch decode the same content; an unknown build is refused before any archive is opened. Its `import.rs` selectively decompresses resources into a versioned local pack and verifies the pack from disk before the import completes, reporting progress by archive and resource count; `pack.rs` reads and writes the pack and loads the newest good one. The game's `assets.rs` calls it and adds what only the game needs: it validates and decodes the menu art, buttons, fonts and debrief art from the loaded resources (the library takes that check as a function, so a set the game cannot draw never reaches the cache). `menu.rs` composites original background, button pieces, and font strips and owns UI state. `renderer.rs` owns the surface, texture, and scaling. Every game object is built from imported assets before the window opens and the renderer needs a terrain world, so a first run cannot happen inside the game application: `main.rs` runs a pre-game shell, a second winit application handler holding `locate.rs` and the blit-only presenter in `canvas_present.rs`, on the same event loop through `run_app_on_demand`. Re-import from Pref ends the game application and runs the shell again; the event loop is created once. `audio.rs` mixes bounded local PCM, recorded music, and up to sixteen spatial voices with linear resampling into the device rate. `tore-sim::acoustics` advances sound wavefronts and passing-object detection at 120 Hz. Combat publishes bounded sound emissions with physical positions; the app uses the main camera as listener and the device mixer supplies stereo direction, distance gain and treble fade. An emission released by the player's own aircraft plays centered and without distance while the listener is in that cockpit; every other outside sound is muffled in a cockpit view. Up to ten looping sources (crash fires, other aircraft's engines) and, in external views, the player's own engine are placed with distance, stereo and Doppler pitch. See [audio behavior](audio.md). Explosions, craters and crash-site fires are drawn by `effect_renderer.rs` from the original sheets as textured sprites ([explosions](spec/explosions.md)). Audio initializes independently and can fail without blocking menus. No input device or microphone is opened.
 
 The app and general extractor share the same EALIB/DCL readers. `Archive::open` reads a directory and seeks to selected resources; it does not load whole disc archives. The menu retains a 16 MiB resource cap; the general CLI has an explicit configurable cap for larger media. The Python entry point handles portable invocation and SHA-256 report enrichment; it contains no second decompressor.
 
@@ -37,7 +37,7 @@ Menu-only startup randomness chooses one of the five native backgrounds independ
 Menu drawing uses CPU composition for this small static canvas; it is not a commitment to software-rendering flight scenes. The window sleeps while idle. Hover transitions and transient placeholder messages schedule temporary redraws. The fragment shader is authored source; it contains no retail bytes.
 
 
-`assets.rs` retains prior cache generations until a new import is synced and
+`tore-import` retains prior cache generations until a new import is synced and
 validated from disk. Successful import and startup load remove older numbered
 packs from that cache directory. Cleanup is best effort and does not touch
 source media or extracted assets. [Retention contract](spec/import-cache.md).
@@ -1908,7 +1908,7 @@ combat, the AI bridge, the debrief and the recorder.
 Design for stage D of the [multiplayer plan](multiplayer-plan.md#stages),
 written by the lead on 2026-09-30, revised the same day after an independent
 review, and reviewed by John the same day: his answers are in the guide's
-[decisions](MULTIPLAYER.md#decisions). Only slice D1, the `tore-codec` crate, is built so far (see the [slice table](#how-stage-d-lands)).
+[decisions](MULTIPLAYER.md#decisions). Slices D1 (`tore-codec`) and D3a (`tore-import`) are built so far (see the [slice table](#how-stage-d-lands)).
 Every choice here is an agent decision unless it is credited to John. The three
 follow-up specs the plan assigns to stage D are:
 
@@ -1944,9 +1944,10 @@ committed) found:
   constructor: the creator's Fly button, the AI probe and the tests each
   assemble one by hand in `tore-app` (`Action::MissionFly`, `ai_probe_run`),
   with the creator's list indices, the drawn aircraft (`Airframe::load`) and
-  `CombatView` in the path. The import (`assets.rs`, `media_source.rs`) lives
-  in the app binary, which links the audio library, so a Linux server without
-  ALSA could not even start it.
+  `CombatView` in the path. The import lived
+  in the app binary (`assets.rs`, `media_source.rs`), which links the audio
+  library, so a Linux server without ALSA could not even start it; slice D3a
+  moved it into `tore-import`.
 - **The tick assumes a human.** `World::step_with` refuses a tick with no
   human-flown plane; combat's `own()` and `own_id()` panic without an ownship
   and serve "the first ownship" as the presented one; the tick's picture and
@@ -1986,7 +1987,7 @@ dependency.
 | --- | --- | --- | --- |
 | `tore-codec` | library | Bit writer and bounded bit reader, variable-length integers, quantizers, FNV-1a and CRC-32. Shared by the wire, the exact own-plane coder and, in stage H, the checkpoints | std only |
 | `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator | tore-codec |
-| `tore-import` | library | The data folder, the import pack's reader and writer, media detection and the import itself, moved out of `tore-app` so a server can import and load without the game | tore-formats |
+| `tore-import` | library | The data folder, the import pack's reader and writer, media detection and the import itself, moved out of `tore-app` so a server can import and load without the game. *Built (D3a).* | tore-formats |
 | `tore-session` | library | The game's side of networking: the wire messages, the host session (clock, inputs, snapshots, joins), the client session (prediction, interpolation, clock steering, readouts) and the headless bot client | tore-world, tore-net, tore-codec |
 | `tore-server` | binary | The dedicated server: configuration, import, logging and the console | tore-session, tore-import |
 
@@ -2069,11 +2070,13 @@ same name-to-bytes map the app uses today. `World::new` reads it through a
 FNV-1a 64 hash of each resource's bytes are the mission's **content manifest**.
 A client builds the same mission from its own import and compares manifests at
 join. Only what the simulation reads is compared, so a 1.0 disc import and a
-1.02F import, which differ in menu and HUD resources, are expected to play
-together; entries the import derives from `FA.EXE` (the radio phrases) could
-still differ by build, so slice D3a compares both imports' manifests before the
-design claims it. A difference is refused with the names of the files that
-differ.
+1.02F import play together: slice D3a compared the two imports resource by
+resource and found 24 of 4,093 that differ, all menu, dialog, HUD and
+mission-module files that differ by four bytes (the link timestamp in their
+headers); every aircraft, weapon, sensor, theater, object, shape and radio
+resource and every entry the import derives from `FA.EXE` is byte-identical
+([result](formats/esa-installer.md#the-import-pack-under-both-builds)). A
+difference is refused with the names of the files that differ.
 
 **What a joining client also needs.** The host tick, from which the weather
 clock's reading follows (its seconds of day and ticks are a function of the
@@ -2369,7 +2372,7 @@ risky refactors, as John asked; the rest are Sonnet.
 | --- | --- | --- | --- | --- | --- |
 | D1 Codec | `mp/d-codec` | Sonnet | | `tore-codec`: bits, variable-length integers, quantizers, FNV-1a, CRC-32 | Round trips at every width; a bounded reader never panics on 100,000 seeded random inputs; known CRC-32 and FNV-1a test vectors. **Built (D1):** also the bucketed signed coding, exact floats against a baseline and short strings; the readers reject every non-canonical form |
 | D2 Transport | `mp/d-net` | Opus | D1 | `tore-net`: packets, handshake, acks and round trip, reliable ordered messages, statistics, UDP and the simulator | On the simulator at 300 ms and 5 percent loss with duplicates and reordering: the handshake completes, 10,000 reliable messages arrive once and in order, a 64 KB message arrives whole, the round trip estimate is within 5 percent and the loss estimate within 1 point; a challenge is never larger than its request; a seeded packet fuzz never panics; two real sockets on 127.0.0.1 connect |
-| D3a Import library | `mp/d-import` | Sonnet | | `tore-import` out of the app: data folder, pack, media detection, import | Single-player baseline SAME; the app imports and loads as before; `cargo tree -p tore-import` has no winit, wgpu or cpal; where both a 1.0 and a 1.02F import are available, the simulation resources of a sample mission hash the same |
+| D3a Import library | `mp/d-import` | Sonnet | | **Built (D3a).** `tore-import` out of the app: data folder, pack, media detection, import | Single-player baseline SAME; the app imports and loads as before; `cargo tree -p tore-import` has no winit, wgpu or cpal; where both a 1.0 and a 1.02F import are available, the simulation resources of a sample mission hash the same |
 | D3b Mission as data | `mp/d-mission` | Sonnet | D3a | `MissionSpec` and its text form; `World::new` with single-player seating; the creator builds through it | Single-player baseline SAME; the spec round-trips through text; a headless test builds a single-player mission from synthetic resources and steps it |
 | D4 Own-plane step and exact state | `mp/d-own-state` | Opus | D1 | The shared per-plane step; an exact coder and hash for a human plane's flight, turbulence and ownship terms, every field destructured | Single-player baseline SAME; a plane stepped by `World` and a copy stepped by the shared function from a decoded state, with the same inputs and terms, stay bit-identical for 1,200 ticks; adding a field to the state without coding it fails to compile |
 | D5a Flight frame | `mp/d-frame` | Sonnet | D3b | The flight frame with its plane id; the screens, views and sounds read it; no "aircraft 0 is the player" in presentation; the picture for any seat | Single-player baseline SAME and every GPU capture byte-identical; a test builds the picture for a second seat of the crowd fixture with that seat's plane as the player |

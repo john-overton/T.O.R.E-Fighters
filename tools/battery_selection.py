@@ -381,7 +381,6 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/preferences.rs", ("menus-screens", "replay-settings"), "preferences"),
     _r("crates/tore-app/src/debrief.rs", ("menus-screens", "ai-fights"), "debrief", windowed=True),
     _r("crates/tore-app/src/startup.rs", ("menus-creator", "replay-settings"), "start-up"),
-    _r("crates/tore-app/src/media_source.rs", ("replay-settings", "menus-validate"), "media source"),
     _r("crates/tore-app/src/assets.rs", ("menus-validate", "replay-settings"), "importer results"),
     _r("crates/tore-app/src/version.rs", ("replay-cli",), "version string"),
     _r("crates/tore-app/src/mirrors.rs", ("menus-screens",), "mirrors"),

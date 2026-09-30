@@ -16,19 +16,9 @@ use tore_sim::combat::ledger::{Kill, Ledger, ShotKind, Tally};
 
 type Rect = (i32, i32, i32, i32);
 
-/// Debrief resources beyond the shared menu art, by archive.
-pub const ART: &[&str] = &[
-    "DEBSCR.PIC",
-    "DEBSC3.PIC",
-    "DEBSCU.PIC",
-    "DEBSCV.PIC",
-    "PANLFNT2.PIC",
-    "PANELFNT.PIC",
-    "BODYFONT.PIC",
-    "BOLDFONT.PIC",
-    "HEADFONT.PIC",
-];
-pub const DATA: &[&str] = &["BRIEFSCR.DLG", "QUICK.MT", "&ROCKUP.11K", "&ROCKDN.11K"];
+/// Debrief art beyond the shared menu art. The import keeps it, so the lists
+/// live in `tore-import`.
+pub use tore_import::selection::DEBRIEF_ART as ART;
 
 const OK: usize = 1;
 const PREVIOUS: usize = 3;

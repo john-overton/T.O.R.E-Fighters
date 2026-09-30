@@ -1,5 +1,5 @@
 //! Fighters Anthology media sources: installed folders and disc folders, detected by content.
-//! Behaviour: docs/spec/first-run-import.md. Work package C owns this file.
+//! Behaviour: docs/spec/first-run-import.md.
 //!
 //! A source is always a folder. An installed folder holds `FA_1.LIB`,
 //! `FA_2.LIB` and `FA.EXE` as loose files; a disc folder holds an Electronic
@@ -9,7 +9,7 @@
 //! never copies an archive into memory, the container serves stored archives in
 //! place by offset.
 
-use crate::{AppResult, preferences};
+use crate::{ImportResult, files};
 use std::{
     collections::HashSet,
     fmt, fs,
@@ -28,14 +28,14 @@ const REMEMBERED: &str = "media-source.txt";
 
 /// How a folder provides the five files the importer needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Kind {
+pub enum Kind {
     /// Loose `FA_1.LIB`, `FA_2.LIB`, `FA.EXE` and optional music archives.
     Installed,
     /// An Electronic Arts installer container holding the same files.
     Disc,
 }
 impl Kind {
-    pub(crate) fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Kind::Installed => "Installed folder",
             Kind::Disc => "Disc or mounted image",
@@ -59,7 +59,7 @@ impl Kind {
 
 /// A folder the importer can read, with the container path when it is a disc.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct MediaSource {
+pub struct MediaSource {
     /// The folder the player chose, or the folder holding the container.
     pub path: PathBuf,
     pub kind: Kind,
@@ -69,7 +69,7 @@ pub(crate) struct MediaSource {
 
 /// Why a path is not a source. Every message is plain words for the screen.
 #[derive(Debug)]
-pub(crate) enum DetectError {
+pub enum DetectError {
     NotFound(PathBuf),
     NotASource(PathBuf),
     /// A file was chosen and its folder is not a source either.
@@ -207,7 +207,7 @@ impl MediaSource {
     /// Decide what a chosen path is, by content. A folder is examined directly;
     /// a container file names its own folder; a raw disc image is refused with
     /// the hint to mount it; any other file falls back to its folder.
-    pub(crate) fn detect(path: &Path) -> Result<MediaSource, DetectError> {
+    pub fn detect(path: &Path) -> Result<MediaSource, DetectError> {
         let metadata = match fs::metadata(path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -252,7 +252,7 @@ impl MediaSource {
         }
     }
 
-    fn container(&self) -> AppResult<esa::Container> {
+    fn container(&self) -> ImportResult<esa::Container> {
         let path = self
             .container
             .as_ref()
@@ -262,7 +262,7 @@ impl MediaSource {
 
     /// A required archive, `FA_1.LIB` or `FA_2.LIB`. A disc archive is served in
     /// place from inside the container; nothing is copied.
-    pub(crate) fn archive(&self, name: &str) -> AppResult<Archive> {
+    pub fn archive(&self, name: &str) -> ImportResult<Archive> {
         match self.kind {
             Kind::Installed => {
                 let path = named(&files(&self.path)?, name)
@@ -280,7 +280,7 @@ impl MediaSource {
     /// An archive the importer can do without, `FA_4B.LIB` or `FA_4D.LIB`.
     /// `Ok(None)` means the source does not carry it; an error means it is there
     /// but could not be read.
-    pub(crate) fn optional_archive(&self, name: &str) -> AppResult<Option<Archive>> {
+    pub fn optional_archive(&self, name: &str) -> ImportResult<Option<Archive>> {
         match self.kind {
             Kind::Installed => match named(&files(&self.path)?, name).cloned() {
                 Some(path) => Archive::open(&path)
@@ -302,7 +302,7 @@ impl MediaSource {
     }
 
     /// The reviewed executable's bytes. Never executed, only read as data.
-    pub(crate) fn executable(&self) -> AppResult<Vec<u8>> {
+    pub fn executable(&self) -> ImportResult<Vec<u8>> {
         match self.kind {
             Kind::Installed => {
                 let path = named(&files(&self.path)?, "FA.EXE")
@@ -437,7 +437,7 @@ fn roots() -> Vec<PathBuf> {
 
 /// Automatically detected sources, in the spec's scan order, best effort. The
 /// scan stops once `budget` is spent; anything slower is left to the path field.
-pub(crate) fn candidates(budget: Duration) -> Vec<MediaSource> {
+pub fn candidates(budget: Duration) -> Vec<MediaSource> {
     let deadline = Instant::now() + budget;
     let mut seen = HashSet::new();
     let mut found = Vec::new();
@@ -451,7 +451,7 @@ pub(crate) fn candidates(budget: Duration) -> Vec<MediaSource> {
 }
 
 /// Record the source a successful import read, beside the pack.
-pub(crate) fn remember(data_dir: &Path, source: &MediaSource) -> io::Result<()> {
+pub fn remember(data_dir: &Path, source: &MediaSource) -> io::Result<()> {
     // A relative path only means something from the directory the app was
     // launched in; store an absolute one so a later launch elsewhere finds it.
     let path = if source.path.is_absolute() {
@@ -460,12 +460,12 @@ pub(crate) fn remember(data_dir: &Path, source: &MediaSource) -> io::Result<()> 
         std::env::current_dir()?.join(&source.path)
     };
     let text = format!("path={}\nkind={}\n", path.display(), source.kind.word());
-    preferences::write(&data_dir.join(REMEMBERED), &text)
+    files::write(&data_dir.join(REMEMBERED), &text)
 }
 
 /// The remembered source, if one was written and still parses.
-pub(crate) fn remembered(data_dir: &Path) -> Option<(PathBuf, Kind)> {
-    let text = preferences::read(&data_dir.join(REMEMBERED)).ok()?;
+pub fn remembered(data_dir: &Path) -> Option<(PathBuf, Kind)> {
+    let text = files::read(&data_dir.join(REMEMBERED)).ok()?;
     let mut path = None;
     let mut kind = None;
     for line in text.lines() {

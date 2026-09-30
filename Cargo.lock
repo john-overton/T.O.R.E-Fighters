@@ -1937,6 +1937,7 @@ dependencies = [
  "pollster",
  "tore-diagnostics-native",
  "tore-formats",
+ "tore-import",
  "tore-input",
  "tore-input-native",
  "tore-replay",
@@ -1970,6 +1971,13 @@ dependencies = [
 [[package]]
 name = "tore-formats"
 version = "0.1.3"
+
+[[package]]
+name = "tore-import"
+version = "0.1.3"
+dependencies = [
+ "tore-formats",
+]
 
 [[package]]
 name = "tore-input"

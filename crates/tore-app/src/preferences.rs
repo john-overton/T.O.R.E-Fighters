@@ -3,52 +3,8 @@ use crate::{
     flight_ui::FlightUi,
     instruments::{Instruments, Layout},
 };
-use std::{
-    fs,
-    io::{self, Read, Write},
-    path::Path,
-};
-
-pub fn read(path: &Path) -> io::Result<String> {
-    let mut text = String::new();
-    fs::File::open(path)?
-        .take(256 * 1024 + 1)
-        .read_to_string(&mut text)?;
-    if text.len() > 256 * 1024 {
-        return Err(io::Error::other("settings file exceeds 256 KiB"));
-    }
-    Ok(text)
-}
-pub fn write(path: &Path, text: &str) -> io::Result<()> {
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    fs::create_dir_all(parent)?;
-    let temporary = parent.join(format!(
-        ".tore-settings-{}-{}.tmp",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    ));
-    // Cleanup is allowed only after successfully creating our own temporary file.
-    let mut f = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)?;
-    let result = (|| {
-        f.write_all(text.as_bytes())?;
-        f.sync_all()?;
-        drop(f);
-        fs::rename(&temporary, path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(temporary);
-    }
-    result
-}
+// The two file helpers moved to `tore-import`, which the media source also uses.
+pub use tore_import::files::{read, write};
 /// Nearest recovered scope setting to a saved nautical-mile value. An equal
 /// distance keeps the lower setting; an old index is never reinterpreted.
 fn nearest_range(nmi: f64) -> usize {

@@ -13,7 +13,7 @@ use crate::menu::{Canvas, HEIGHT, LARGE_CELL, Sprite, WIDTH, flat_font_large, te
 use std::path::PathBuf;
 
 /// How a candidate folder is offered to the player. Detection itself lives in
-/// `media_source.rs`; this is only the label the screen shows.
+/// `tore-import`; this is only the label the screen shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SourceKind {
     Installed,

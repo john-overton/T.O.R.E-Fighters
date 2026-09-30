@@ -45,7 +45,6 @@ mod instruments;
 mod lens_flare;
 mod locate;
 mod look;
-mod media_source;
 mod menu;
 mod mirrors;
 mod missile_acceptance;
@@ -103,6 +102,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use tore_import::media_source;
 use tore_sim::models::FlightModel;
 use winit::{
     application::ApplicationHandler,
@@ -7385,6 +7385,10 @@ fn sessions(event_loop: &mut Option<EventLoop<()>>) -> AppResult<()> {
 
 fn main() -> std::process::ExitCode {
     diagnostics::init();
+    tore_import::set_log(|level, text| match level {
+        tore_import::Level::Info => log::info!("{text}"),
+        tore_import::Level::Warn => log::warn!("{text}"),
+    });
     let interactive = startup::interactive();
     let result = std::panic::catch_unwind(|| {
         if let Some(result) = startup::self_test() {
