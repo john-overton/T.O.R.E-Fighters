@@ -420,10 +420,12 @@ the wing goes home, and the takeoff check excuses them.
 Then (John, 2026-09-30) the new lead flies the wing's remaining waypoints
 before going home. No mission has waypoints yet, so every scenario above goes
 home as before; `ai-lost-lead-route-ukr-a6` gives the player's wing two
-waypoints with `--probe-wing-route`, and after the player crashes 60 s after
+waypoints with `--probe-wing-route`, and after the player is lost 60 s after
 takeoff at Kharkiv the new lead flies both (the first reached at 213 s, the
-second at 364 s), returns to base and lands. It relies on that crash; the AI
-probe pilot work of the aircraft pass may need another way to lose the player.
+second at 364 s), returns to base and lands. The scripted pilot no longer
+crashes there (the aircraft pass's pilot work), so the player is lost on purpose
+with `--probe-lose-player 7200`; `ai-lost-lead-land-order-wing2` and `-wing4` keep
+the land-order branch the same way, at Simferopol, 20 s after takeoff.
 
 ### Sixth round (2026-09-29, John's decisions)
 

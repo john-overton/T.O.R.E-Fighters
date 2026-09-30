@@ -681,15 +681,26 @@ def scenarios() -> list[Scenario]:
             "--theater", theater, "--ground-start", airport, "--probe-wing-size", "2", "--maneuver", "takeoff",
             "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
             ticks=120000, timeout=2400, check=land_order_checker(lands_without_hanging)))
-    # The new lead flies the lost player's waypoints, then goes home (John,
-    # 2026-09-30). It needs the scripted player to crash, as it does 60 s
-    # after takeoff at Kharkiv; the AI probe pilot work (roadmap 1i) may
-    # change that.
+    # The new lead after a lost human (John, 2026-09-30). The scripted pilot
+    # survives, so these probes lose the player on purpose with
+    # `--probe-lose-player`, 60 s after takeoff at Kharkiv and 20 s after
+    # takeoff at Simferopol, where the old pilot used to crash. The lead flies
+    # the wing's waypoints, then goes home and lands.
     out.append(probe("lost-lead-route-ukr-a6", [
         "--theater", "UKR", "--ground-start", "6", "--probe-wing-size", "2", "--maneuver", "takeoff",
-        "--separation", "200", "--probe-wing-only",
+        "--separation", "200", "--probe-wing-only", "--probe-lose-player", "7200",
         "--probe-wing-route", "8:8:8000", "--probe-wing-route", "0:16:8000"],
         ticks=120000, timeout=2400, check=lost_lead_route_checker))
+    # With no route and a land order the player can no longer give, the new
+    # lead returns to base at once; a wingman still waiting to take off in a
+    # wing of four stays parked.
+    for size in [2, 4]:
+        out.append(probe(f"lost-lead-land-order-wing{size}", [
+            "--ground-start", GROUND_AIRPORT, "--probe-wing-size", str(size), "--maneuver", "takeoff",
+            "--probe-lose-player", "2400", "--probe-wing-order", f"{12000 * size // 2}:land-selected",
+            "--separation", "200", "--probe-wing-only"],
+            ticks=90000, timeout=1800,
+            check=land_order_checker(checker(ground=True, need_takeoff=True, need_landing=size == 2), player_lost=True)))
     for theater, airport in (("UKR", "1"), ("PGU", "2"), ("FRA", "3"), ("NSK", "5")):
         for aircraft in AIRCRAFT:
             out.append(probe(f"takeoff-{theater.lower()}-a{airport}-{aircraft}", [

@@ -1226,6 +1226,7 @@ to omit the other wings. Those two wing options also apply to
 or `TICK:engage-my-target`; `--probe-trace SECONDS`
 prints each wingman's airfield phase and position. `--probe-player-home FROM:UNTIL`
 flies the scripted leader gear down toward the field during that tick range.
+`--probe-lose-player TICK` crashes the scripted leader's aircraft at that tick, so that a probe can test the wing's new lead (test harness only).
 `--separation 200` or `300` also exercises the expanded enemy-distance choices.
 `--probe-fight FRIENDLY:ENEMY` sizes a whole battle, 1 to 15 aircraft a side filled five to a wing (the scripted leader counts as one friendly), and `--probe-friendly-aircraft ID` picks the friendly AI aircraft; `--probe-enemy-aircraft` and `--probe-enemy-skill` still choose the enemy. Fifteen against fifteen is the creator's own limit.
 The scripted leader is only a test harness. It holds the runway line on the roll, keeps its speed over the aircraft's own 1 G minimum in the climb, clears the terrain ahead and climbs again from its cruise if the ground rises to meet it ([the scripted pilot](testing/lane-ai.md)).
