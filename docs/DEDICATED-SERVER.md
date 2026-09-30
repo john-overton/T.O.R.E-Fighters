@@ -256,7 +256,7 @@ simulation reads for that mission (aircraft, weapons, theater, radio phrases).
 A 1.0 disc import and a 1.02F import play together, since they differ only in
 menu and HUD resources. A difference is refused with the names of the files
 that differ. The game version and protocol must match as well
-([wire protocol](formats/net-protocol.md#versions)).
+([wire protocol](formats/net-protocol.md#versions)). *Decided with the lead, 2026-09-30:* a build is a tagged release when the build stamped `TORE_BUILD_VERSION` at compile time (`option_env!("TORE_BUILD_VERSION").is_some()`, as the game's `version::version()` already tests); release builds match by version and other builds by commit. The server's rule is `app::is_release` in `crates/tore-server/src/app.rs`, and the game's `--connect` must use the same test.
 
 ## Console, status and logs
 

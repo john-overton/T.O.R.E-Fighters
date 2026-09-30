@@ -21,6 +21,16 @@ pub fn version() -> &'static str {
     option_env!("TORE_BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
+/// Whether this is a tagged release build, which the join gate compares by
+/// version instead of by commit. The rule is that the build script's stamped
+/// tag, `TORE_BUILD_VERSION`, was set at compile time: the same test as the
+/// game's `version::version()` uses to choose the tag over the crate version.
+/// The game's client (slice D8) must use the same rule.
+#[allow(dead_code)] // read by the real host's adapter in wiring.rs
+pub fn is_release() -> bool {
+    option_env!("TORE_BUILD_VERSION").is_some()
+}
+
 /// The build's commit, stamped by the build script.
 pub fn commit() -> &'static str {
     env!("TORE_BUILD_COMMIT")

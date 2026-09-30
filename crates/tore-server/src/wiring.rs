@@ -38,9 +38,8 @@ mod session {
             version,
             commit,
         } = setup;
-        // CHECK: the game must decide `release` the same way (a tagged release
-        // build is stamped with TORE_BUILD_VERSION, as the app's version() reads it).
-        let release = option_env!("TORE_BUILD_VERSION").is_some();
+        // The lead's rule: a tagged release is one stamped with TORE_BUILD_VERSION.
+        let release = crate::app::is_release();
         let mut config = HostConfig::new(BuildId {
             version,
             commit,
