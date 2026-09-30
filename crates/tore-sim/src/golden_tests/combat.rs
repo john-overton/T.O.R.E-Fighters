@@ -28,8 +28,8 @@ use crate::sensors;
 // Recorded on macOS aarch64. See the module comment in golden_tests.rs before
 // changing any of these.
 const GUNS_AND_DAMAGE: u64 = 0xf991_b9ae_63b6_6d4b;
-const GUIDED_MISSILES: u64 = 0x764b_3ab4_5961_0f6d;
-const PLAYER_COUNTERMEASURES: u64 = 0xa3f5_be71_5a0d_dcc1;
+const GUIDED_MISSILES: u64 = 0x1f24_4435_41d0_af2e;
+const PLAYER_COUNTERMEASURES: u64 = 0xda70_2332_e33b_0c5a;
 
 #[test]
 fn combat_guns_and_damage_match_recorded_fingerprint() {

@@ -46,16 +46,18 @@ class JudgeTests(unittest.TestCase):
         import argparse
 
         with tempfile.TemporaryDirectory() as d:
-            opts = argparse.Namespace(bin="/bin/echo", timeout_scale=1.0)
+            # The running Python stands in for the game and for other commands, so this runs on every platform.
+            opts = argparse.Namespace(bin=sys.executable, timeout_scale=1.0)
+            fail = [sys.executable, "-c", "raise SystemExit(1)"]
             steps = [
-                battery.Step(["one"]),
-                battery.Step(["/bin/false"], app=False, expect_exit=1),
-                battery.Step(["/bin/false"], app=False, expect_exit=None),
-                battery.Step(["/bin/false"], app=False),
+                battery.Step(["-c", "print('one')"]),
+                battery.Step(fail, app=False, expect_exit=1),
+                battery.Step(fail, app=False, expect_exit=None),
+                battery.Step(fail, app=False),
             ]
             problems: list[str] = []
             out = battery.run_steps(scenario(then=steps), opts, {}, Path(d), "main", problems)
-            self.assertIn("$ then 1: /bin/echo one", out)
+            self.assertIn(f"$ then 1: {sys.executable} -c print('one')", out)
             self.assertIn("one", out)
             self.assertEqual(problems, ["step 4 exit code 1, expected 0"])
 
@@ -67,20 +69,20 @@ class JudgeTests(unittest.TestCase):
             profile = Path(d) / "profile"
             profile.mkdir()
             opts = argparse.Namespace(
-                bin="/bin/sh", profile=str(profile), keep_data=True, timeout_scale=1.0, out=d,
+                bin=sys.executable, profile=str(profile), keep_data=True, timeout_scale=1.0, out=d,
             )
             run_dir = Path(d) / "run"
             slots = __import__("threading").Semaphore(1)
             sc = battery.Scenario(
-                name="t", lane="ai", args=["-c", "echo $MARK; exit 3"], env={"MARK": "{work}/x"}, expect_exit=0,
+                name="t", lane="ai", args=["-c", "import os; print(os.environ['MARK']); raise SystemExit(3)"], env={"MARK": "{work}/x"}, expect_exit=0,
                 known_failure="on purpose",
             )
             result = battery.run_one(sc, opts, run_dir, slots)
             self.assertTrue(result.ok)
             self.assertIn("known failure (on purpose)", result.problems[0])
             log = (run_dir / result.log).read_text()
-            self.assertIn(str(run_dir / "work" / "t" / "x"), log)
-            sc2 = battery.Scenario(name="t2", lane="ai", args=["-c", "true"], known_failure="on purpose")
+            self.assertIn(str(run_dir / "work" / "t") + "/x", log)
+            sc2 = battery.Scenario(name="t2", lane="ai", args=["-c", "pass"], known_failure="on purpose")
             result2 = battery.run_one(sc2, opts, run_dir, slots)
             self.assertFalse(result2.ok)
             self.assertIn("now passes", result2.problems[0])

@@ -121,7 +121,13 @@ def clone_profile(source: Path, dest: Path) -> None:
     if dest.exists():
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if subprocess.run(["cp", "-a", "--reflink=auto", str(source), str(dest)]).returncode != 0:
+    # A reflink copy is near free on Linux; elsewhere (no GNU cp, or no cp at all) copy the tree.
+    try:
+        copied = subprocess.run(["cp", "-a", "--reflink=auto", str(source), str(dest)]).returncode == 0
+    except OSError:
+        copied = False
+    if not copied:
+        shutil.rmtree(dest, ignore_errors=True)
         shutil.copytree(source, dest)
 
 
