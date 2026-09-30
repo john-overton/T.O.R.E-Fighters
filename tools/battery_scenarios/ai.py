@@ -230,6 +230,38 @@ def checker(**kw) -> Callable[[str], list[str]]:
     return lambda output: probe_problems(output, **kw)
 
 
+LAND_ORDER = re.compile(r'^t=(\d+) order=LandAtSelected reply="(.*)"$', re.M)
+PLAYER_DOWN = re.compile(r"^t=(\d+) \([\d.]+s\) player: .*crashed=true", re.M)
+
+
+def land_order_checker(whole: Callable[[str], list[str]]) -> Callable[[str], list[str]]:
+    """A probe that orders the wing to land, under lead succession (approved by
+    John 2026-09-28). The scripted player is the wing's leader. While it flies
+    the order is accepted and `whole` (the landing checks) must pass. Once it
+    has crashed the wing's next member leads and the human's order is refused
+    with "you are not leading your wing"; the AI lead has no order to land on,
+    so only the takeoff and the general checks apply, and its straight flight
+    may leave the map."""
+
+    def check(output: str) -> list[str]:
+        order = LAND_ORDER.search(output)
+        down = PLAYER_DOWN.search(output)
+        gone = bool(order and down and int(down.group(1)) <= int(order.group(1)))
+        refused = bool(order and "not leading your wing" in order.group(2))
+        problems: list[str] = []
+        if gone and not refused:
+            problems.append("a player who had already crashed still gave the land order and it was accepted")
+        if refused and not gone:
+            problems.append("the land order was refused although the player still led the wing")
+        if gone:
+            problems.extend(probe_problems(output, ground=True, need_takeoff=True, allow_anomalies=("outside the world",)))
+        else:
+            problems.extend(whole(output))
+        return problems
+
+    return check
+
+
 def rerun_same(args: list[str]) -> Callable[[str], list[str]]:
     """Determinism: run the same probe again on a fresh profile copy and compare."""
 
@@ -575,7 +607,7 @@ def scenarios() -> list[Scenario]:
         out.append(probe(f"ils-terrain-{theater.lower()}-a{airport}", [
             "--theater", theater, "--ground-start", airport, "--probe-wing-size", "2", "--maneuver", "takeoff",
             "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
-            ticks=120000, timeout=2400, check=lands_without_hanging))
+            ticks=120000, timeout=2400, check=land_order_checker(lands_without_hanging)))
     for theater, airport in (("UKR", "1"), ("PGU", "2"), ("FRA", "3"), ("NSK", "5")):
         for aircraft in AIRCRAFT:
             out.append(probe(f"takeoff-{theater.lower()}-a{airport}-{aircraft}", [

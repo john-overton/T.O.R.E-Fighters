@@ -73,6 +73,31 @@ class ProbeCheckTests(unittest.TestCase):
         self.assertTrue(all(n.startswith("ai-") for n in names))
         self.assertGreater(len(names), 300)
 
+class LandOrderTests(unittest.TestCase):
+    """Lead succession: a crashed player's land order is refused, a flying one's is accepted."""
+
+    DOWN = "t=2017 (16.8s) player: on_ground=false gear=false crashed=true agl=85 kt=202 x=1 z=2 hdg=8 terrain_agl=85\n"
+    REFUSED = 't=12000 order=LandAtSelected reply="Wing order unavailable: you are not leading your wing"\n'
+    ACCEPTED = 't=12000 order=LandAtSelected reply="Land at Simferopol: 1 landing"\n'
+
+    def check(self, text, whole=None):
+        return ai.land_order_checker(whole or (lambda output: ["did not land"]))(text)
+
+    def test_a_crashed_player_is_refused_and_the_landing_is_not_required(self):
+        self.assertEqual(self.check(CLEAN + self.DOWN + self.REFUSED), [])
+
+    def test_the_lead_flying_off_the_map_is_allowed_after_the_refusal(self):
+        text = CLEAN + self.DOWN + self.REFUSED + "AI probe anomaly: t=5 (0.0s) outside the world: Friendly 1-2 x=-5 z=1\n"
+        self.assertEqual(self.check(text), [])
+
+    def test_a_crashed_player_must_not_be_obeyed(self):
+        self.assertTrue(any("already crashed" in p for p in self.check(CLEAN + self.DOWN + self.ACCEPTED)))
+
+    def test_a_flying_player_must_be_obeyed_and_the_landing_checked(self):
+        self.assertEqual(self.check(CLEAN + self.ACCEPTED, whole=lambda output: []), [])
+        self.assertEqual(self.check(CLEAN + self.ACCEPTED), ["did not land"])
+        self.assertTrue(any("still led the wing" in p for p in self.check(CLEAN + self.REFUSED, whole=lambda output: [])))
+
 
 if __name__ == "__main__":
     unittest.main()
