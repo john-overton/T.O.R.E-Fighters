@@ -236,3 +236,61 @@ fn a_busy_seats_readout_is_measured() {
     assert!(bits > 0 && groups.iter().map(|(_, b)| b).sum::<usize>() == bits);
     let _ = (E_HUMAN, HUMANS);
 }
+
+/// In an open mission plane 0 is the AI's until a seat takes it: the seat has
+/// no readout before, and the readout after names the plane it took.
+#[test]
+fn a_seat_that_takes_a_plane_in_an_open_mission_gets_its_readout() {
+    use crate::{
+        mission::{MissionSpec, Skill, Start},
+        test_support::resources::{THEATER, resources},
+    };
+    let mut spec = MissionSpec::new(THEATER, tore_formats::aircraft::AircraftId::F18);
+    spec.wings[0].count = 2;
+    spec.wings[3].count = 2;
+    spec.wings[3].skill = Skill::Average;
+    spec.separation_nm = 5;
+    spec.start = Start::Airborne {
+        altitude_ft: 10_000,
+    };
+    let mut world = World::new(&spec, &resources(), Seating::Open).unwrap();
+    let mut out = TickOutput::default();
+    for _ in 0..120 {
+        world.step(&[], &mut out).unwrap();
+    }
+    let lead = world
+        .ai_wings
+        .as_ref()
+        .unwrap()
+        .mission()
+        .actor(0)
+        .unwrap()
+        .flight()
+        .clone();
+    assert!(
+        world.cockpit_readout(SeatId(0), launcher(&lead)).is_none(),
+        "nobody flies, so the seat has no readout"
+    );
+    let take = MissionCommand::Take {
+        seat: SeatId(0),
+        plane: PlaneId(0),
+    };
+    let tick = world.tick();
+    let input = SeatInput {
+        seat: SeatId(0),
+        tick,
+        ..SeatInput::default()
+    };
+    world
+        .step_with(&[take], &[input], &mut out, |_, _| Ok(()))
+        .unwrap();
+    let readout = readout_of(&world, 0);
+    assert_eq!(readout.plane, 0);
+    let own = world.combat.state.ownship(0).unwrap();
+    assert_eq!(readout.stores.ammo, own.ammo);
+    assert_eq!(readout.damage.hp, own.hp);
+    let frame = world
+        .flight_frame(SeatId(0), None, world.combat.render_snapshot(), &[])
+        .unwrap();
+    assert_eq!(frame.readout.plane, 0);
+}
