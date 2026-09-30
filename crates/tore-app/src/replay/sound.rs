@@ -226,6 +226,7 @@ pub fn listener(camera: &Camera, cut: u8) -> Listener {
         right: basis.right,
         view: cut,
         external: camera.hidden_target != Some(0),
+        own: None,
     }
 }
 
@@ -462,7 +463,11 @@ impl ReplaySound {
         cues.push((
             tick,
             Cue::Tick(Box::new(SpatialTick {
-                listener,
+                // The recorded player's aircraft is the listener's own.
+                listener: Listener {
+                    own: Some(snapshot.player.id),
+                    ..listener
+                },
                 sources: audio::snapshot_sources(&snapshot),
                 emissions,
                 releases,

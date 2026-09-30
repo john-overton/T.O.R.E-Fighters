@@ -80,6 +80,11 @@ pub struct Listener {
     /// Main camera mode. A change is a camera cut, not listener motion.
     pub view: u8,
     pub external: bool,
+    /// The aircraft the listener flies, whose source among the ones given to
+    /// [`Passes::step`] is its own: its sonic boom is heard from an outside
+    /// view only, and it never passes itself. `None` for a listener that flies
+    /// nothing.
+    pub own: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -309,7 +314,7 @@ impl Passes {
         for source in sources {
             let speed = length(source.velocity);
             let mach = speed / speed_of_sound(source.position[1]);
-            if source.id == SourceId::Aircraft(0) {
+            if matches!(source.id, SourceId::Aircraft(id) if listener.own == Some(id)) {
                 if let Some(armed) = self.own_armed {
                     if armed && mach >= 1. {
                         if listener.external {
@@ -436,6 +441,7 @@ mod tests {
             right: [1., 0., 0.],
             view: 0,
             external: false,
+            own: Some(0),
         }
     }
     #[test]

@@ -641,6 +641,7 @@ impl TickPresenter<'_> {
                     self.flight_ui.zoom,
                 )
                 .unwrap_or_else(|_| self.hornet.camera(flight, 0, Default::default()));
+                    own: Some(plane),
             let basis = tore_sim::attitude::Basis::new(
                 f64::from(listener_camera.yaw),
                 f64::from(listener_camera.pitch),

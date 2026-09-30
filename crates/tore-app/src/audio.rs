@@ -213,17 +213,11 @@ pub fn loop_sources(
     out
 }
 
-/// The acoustic label of plane 0 when it is not the presented plane.
-const OTHER_PLANE_0: u32 = u32::MAX;
-
 /// Presentation-only observations for the screen of the human who flies
 /// `plane`, whose flight is `player`. No aircraft or missile control is
-/// changed.
-///
-/// The acoustics (`tore_sim::acoustics::Passes`) take `Aircraft(0)` to be the
-/// listener's own aircraft, so the presented plane's source is labelled that
-/// whatever its id, and an aircraft that really is plane 0 while another plane
-/// is presented is labelled [`OTHER_PLANE_0`] instead.
+/// changed. The plane's own source is labelled with its own id, which the
+/// listener names ([`tore_sim::acoustics::Listener::own`]); no row of the
+/// state stands in for it.
 pub fn spatial_sources(
     combat: &tore_sim::combat::live::State,
     plane: u32,
@@ -231,7 +225,7 @@ pub fn spatial_sources(
 ) -> Vec<tore_sim::acoustics::Source> {
     use tore_sim::acoustics::{Source, SourceId};
     let mut sources = vec![Source {
-        id: SourceId::Aircraft(0),
+        id: SourceId::Aircraft(plane),
         position: player.position,
         velocity: player.velocity,
     }];
@@ -239,13 +233,9 @@ pub fn spatial_sources(
         combat
             .targets
             .iter()
-            .filter(|t| t.airborne)
+            .filter(|t| t.airborne && t.id != plane)
             .map(|t| Source {
-                id: SourceId::Aircraft(match t.id {
-                    id if id == plane => 0,
-                    0 => OTHER_PLANE_0,
-                    id => id,
-                }),
+                id: SourceId::Aircraft(t.id),
                 position: t.position,
                 velocity: t.velocity,
             }),
@@ -273,7 +263,7 @@ pub fn snapshot_sources(
     use tore_sim::acoustics::{Source, SourceId};
     let player = &snapshot.player;
     let mut sources = vec![Source {
-        id: SourceId::Aircraft(0),
+        id: SourceId::Aircraft(player.id),
         position: player.position,
         velocity: player.velocity,
     }];
@@ -1462,6 +1452,7 @@ mod tests {
                     right: [1., 0., 0.],
                     view: 0,
                     external: false,
+                    own: None,
                 },
                 &[],
                 &[Emission {
@@ -1499,6 +1490,7 @@ mod tests {
             right: [1., 0., 0.],
             view: if external { 1 } else { 0 },
             external,
+            own: None,
         };
         let settled = |m: &mut Mixer| {
             let mut out = [0.; 2];
@@ -1589,6 +1581,7 @@ mod tests {
                     right: [1., 0., 0.],
                     view: 0,
                     external,
+                    own: None,
                 },
                 &[],
                 &[Emission {

@@ -364,6 +364,7 @@ mod tests {
             right: [1., 0., 0.],
             view: 0,
             external: false,
+            own: Some(0),
         }
     }
     fn clips() -> BTreeMap<String, Arc<Clip>> {
