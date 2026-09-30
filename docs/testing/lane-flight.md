@@ -187,62 +187,74 @@ minimum speed for 1 G.
 
 `opinionated`, requested by John; rules in the
 [takeoff spec](../spec/takeoff-ground-contact.md#weight-scaled-stall-speed). The polygon's
-slow edges apply at the empty weight and grow with the square root of the weight.
-Reference weight: the empty weight, from the game's own data (the loaded-elevator
-percentage counts loading from zero fuel and stores). Trying reference weights of 0.6 to
-1.0 times the empty weight against John's figures for all twelve types showed no single
-fraction that brings every aircraft within 10 percent: 1.0 is the best overall and the one
-the data supports, and lower fractions push the F/A-18D, Rafale and A-4E 20 to 40
-percent too high to help the F-22 and Su-25. Nothing is tuned per aircraft.
+slow edges apply at a reference weight and grow with the square root of the weight over
+it. The first version used the empty weight for every aircraft. It could not bring every
+aircraft within 10 percent of John's figures: no single fraction of the empty weight (0.6
+to 1.6 tried) does, because a fraction low enough to help the F-22 family and Su-25 puts the
+F/A-18D, Rafale and A-4E 20 to 40 percent too high, and a high one does the reverse. Since
+2026-09-30 (`fitted`, an agent decision, John's decisions 1 and 2 of the aircraft pass) each
+aircraft has its own fraction of its empty weight, keyed by the aircraft's identity
+(`STALL_REFERENCE_FRACTIONS`, `AircraftModel::stall_reference_fraction`, the table in the
+[takeoff spec](../spec/takeoff-ground-contact.md#reference-fraction-per-aircraft-fitted)).
+A lower fraction means faster liftoff and approach. The X-31, with no figure from John,
+keeps 1.00.
 
 Liftoff at the default loadout (calm, sea level, UKR airport 1, full flaps, afterburner,
-back stick 0.35), before (`--retail-stall-speeds`) and after, against John's figures where
+back stick 0.35), with the imported speeds (`--retail-stall-speeds`), with one reference for
+every aircraft (the empty weight, before 2026-09-30) and now, against John's figures where
 he gave them:
 
-| Aircraft | Gross lb | Scale | Liftoff before (kt / ft) | Liftoff after (kt / ft) | John's liftoff |
-| --- | ---: | ---: | ---: | ---: | :---: |
-| F/A-18D | 41,838 | 1.35 | 112 / 780 | 147 / 1,383 | - |
-| Rafale C | 32,092 | 1.37 | 112 / 588 | 149 / 1,056 | - |
-| F-14D | 64,511 | 1.27 | 91 / 607 | 114 / 948 | - |
-| A-4E | 22,026 | 1.43 | 94 / 847 | 132 / 1,716 | - |
-| X-31 | 28,620 | 1.33 | 121 / 597 | 156 / 1,001 | - |
-| MiG-29 | 31,895 | 1.33 | 111 / 506 | 143 / 851 | - |
-| Su-27 | 57,920 | 1.27 | 97 / 429 | 120 / 659 | 135 to 150 (12 percent low) |
-| MiG-21 | 18,018 | 1.19 | 101 / 662 | 118 / 911 | - |
-| Su-25 | 69,875 | 1.29 | 73 / 513 | 93 / 836 | 130 to 145 (29 percent low) |
-| MiG-23 | 39,413 | 1.29 | 99 / 748 | 126 / 1,219 | - |
-| Su-35 | 69,054 | 1.31 | 97 / 523 | 124 / 855 | - |
-| F-22, F-22N, F/A-XX | 57,800 | 1.39 | 78 / 207 | 103 / 359 | 130 to 150 (21 percent low) |
+| Aircraft | Gross lb | Scale now | Liftoff, imported (kt / ft) | Liftoff, one reference (kt / ft) | Liftoff now (kt / ft) | John's liftoff |
+| --- | ---: | ---: | ---: | ---: | ---: | :---: |
+| F/A-18D | 41,838 | 1.17 | 112 / 780 | 147 / 1,383 | 129 / 1,050 | - |
+| Rafale C | 32,092 | 1.17 | 112 / 588 | 149 / 1,056 | 128 / 781 | - |
+| F-14D | 64,511 | 1.38 | 91 / 607 | 114 / 948 | 123 / 1,107 | - |
+| A-4E | 22,026 | 1.30 | 94 / 847 | 132 / 1,716 | 121 / 1,427 | - |
+| X-31 | 28,620 | 1.33 | 121 / 597 | 156 / 1,001 | 156 / 1,001 | - |
+| MiG-29 | 31,895 | 1.21 | 111 / 506 | 143 / 851 | 132 / 719 | - |
+| Su-27 | 57,920 | 1.37 | 97 / 429 | 120 / 659 | 128 / 757 | 135 to 150 (5 percent low) |
+| MiG-21 | 18,018 | 1.39 | 101 / 662 | 118 / 911 | 136 / 1,224 | - |
+| Su-25 | 69,875 | 1.74 | 73 / 513 | 93 / 836 | 123 / 1,506 | 130 to 145 (5 percent low) |
+| MiG-23 | 39,413 | 1.46 | 99 / 748 | 126 / 1,219 | 142 / 1,552 | - |
+| Su-35 | 69,054 | 1.34 | 97 / 523 | 124 / 855 | 127 / 897 | - |
+| F-22, F-22N, F/A-XX | 57,800 | 2.14 | 78 / 207 | 103 / 359 | 128 / 559 | 130 to 150 (2 percent low) |
 
 Approach speed of the scripted landing (flaps down, 65 percent internal fuel, stores as
 loaded; 1.3 times the flapped, scaled stall speed and never under 1.05 times the loaded
-minimum for 1 G) before (full fuel, 1.3 times the polygon edge) and after, against the
-figures John gave:
+minimum for 1 G, capped at 166 kt, 0.85 times the landing limit) with the imported speeds
+(full fuel, 1.3 times the polygon edge), with one reference and now, against the figures
+John gave:
 
-| Aircraft | Before (kt) | After (kt) | Figure (kt) | Off by |
-| --- | ---: | ---: | :---: | ---: |
-| F/A-18D | 154 | 156 | 135 | +15 percent |
-| Rafale C | 154 | 158 | 130 to 140 | +17 percent |
-| F-14D | 131 | 125 | 130 to 140 | -8 percent |
-| A-4E | 139 | 149 | 130 to 140 | +10 percent |
-| X-31 | 166 | 166 | (research aircraft) | - |
-| MiG-29 | 154 | 154 | 135 to 145 | +10 percent |
-| Su-27 | 139 | 132 | 120 to 135 | in range |
-| MiG-21 | 154 | 137 | 160 to 170 | -17 percent |
-| Su-25 | 100 | 97 | 125 to 140 | -27 percent |
-| MiG-23 | 139 | 134 | 150 to 165 | -14 percent |
-| Su-35 | 139 | 136 | 135 to 145 | in range |
-| F-22, F-22N, F/A-XX | 92 | 102 | 135 to 145 | -27 percent |
+| Aircraft | Imported (kt) | One reference (kt) | Now (kt) | Figure (kt) | Off by now |
+| --- | ---: | ---: | ---: | :---: | ---: |
+| F/A-18D | 154 | 156 | 135 | 135 | in range |
+| Rafale C | 154 | 158 | 135 | 130 to 140 | in range |
+| F-14D | 131 | 125 | 135 | 130 to 140 | in range |
+| A-4E | 139 | 148 | 136 | 130 to 140 | in range |
+| X-31 | 166 | 166 | 166 (cap) | (research aircraft) | - |
+| MiG-29 | 154 | 154 | 140 | 135 to 145 | in range |
+| Su-27 | 139 | 132 | 142 | 120 to 135 | +5 percent |
+| MiG-21 | 154 | 137 | 160 | 160 to 170 | in range |
+| Su-25 | 100 | 97 | 131 | 125 to 140 | in range |
+| MiG-23 | 139 | 134 | 152 | 150 to 165 | in range |
+| Su-35 | 139 | 136 | 139 | 135 to 145 | in range |
+| F-22, F-22N, F/A-XX | 92 | 102 | 148 | 135 to 145 | +2 percent |
 
-Aircraft outside 10 percent: the F-22 family, Su-25, MiG-21 and MiG-23 are low because their
-imported polygon edges are low (the F-22's and Su-25's 1 G edges are 71 and 77 knots against
-the F/A-18D's 118.5) and the empty-weight reference already gives the largest scale the data
-allows; the F/A-18D and Rafale approach speeds are 15 to 17 percent high because their
-default loadout carries 5,000 to 7,600 pounds of stores that the landing keeps. To bring
-the low group into range the reference weight would have to be below the empty weight, which
-would put the F/A-18D, Rafale and A-4E 20 percent or more too high. The rule and the numbers
-are for John to change; `STALL_REFERENCE_WEIGHT_FRACTION` in `flight.rs` is the single
-constant.
+Eight of the eleven figures are inside John's range and the other three are within 5
+percent of it, against 2 of 11 with one reference. The F/A-18D's 135.1 kt against a single
+figure of 135 counts as in. The Su-27 is the one aircraft the model cannot fit both ways:
+John's liftoff (135 to 150 kt) and approach (120 to 135 kt) ranges put its approach at or
+below its liftoff, and the scripted approach is about 1.1 times the liftoff at every
+fraction, so 0.86 takes the middle (John's decision 2). The nine aircraft with no liftoff
+figure are fitted to their approach only, and their liftoff comes out 4 to 15 percent under
+it. The battery's windows for these figures are `KNOWN_LIFTOFF` and `KNOWN_APPROACH` in
+`tools/battery_scenarios/flight.py`, re-recorded on 2026-09-30 (plus or minus 6 percent
+around the recorded value, on top of John's range plus or minus 10 percent).
+
+Each fraction was chosen at least 0.02 clear of the liftoff jumps that appear when the
+model's G rows cross at a larger scale (the X-31 between 0.94 and 0.95, the MiG-21 between
+0.68 and 0.69 and the Su-25 between 0.52 and 0.53, measured by sweeping every fraction 0.06
+either side; the Su-25's 0.55 is the closest).
 
 **Combat-speed G (correction, 2026-09-29).** The first version scaled every row of the
 polygon, which counted the weight twice (the edges, then the loaded-elevator divisor) and left a
@@ -275,35 +287,41 @@ G limit at the top row's own speed (corner speed) at 5,000 ft with the same weig
 
 (The MiG-21 and Su-35 have no top row at 5,000 ft, so they have no corner figure there.) The
 pull now equals the imported value for every aircraft and the corner G is within 2 percent
-of it (the F/A-18D's small difference is the divisor at the moment of measuring); the liftoff and
-approach speeds in the tables above are unchanged. The G limit against speed at gross weight
+of it (the F/A-18D's small difference is the divisor at the moment of measuring); measured again
+with the per-aircraft fractions of 2026-09-30, every held pull and every corner G is the same.
+The G limit against speed at gross weight
 (default loadout, UKR airport 1, calm, 5,000 ft, full back stick), imported speeds / now:
 
 | Speed (kt) | F/A-18D | F-22 | Su-27 |
 | ---: | :---: | :---: | :---: |
-| 100 | 0.81 / 0.75 | 1.20 / 0.82 | 1.00 / 0.85 |
-| 150 | 1.33 / 0.93 | 2.22 / 1.31 | 1.60 / 1.22 |
-| 200 | 1.51 / 1.31 | 2.96 / 2.96 | 1.69 / 1.69 |
-| 250 | 2.26 / 1.51 | 4.44 / 4.44 | 3.38 / 3.38 |
-| 300 | 3.02 / 3.02 | 5.92 / 5.92 | 4.23 / 4.23 |
-| 350 | 4.52 / 4.52 | 6.66 / 6.66 | 5.07 / 5.07 |
-| 400 | 6.03 / 6.03 | 6.66 / 6.66 | 6.76 / 6.76 |
-| 450 and up | 6.79 / 6.79 | 6.66 / 6.66 | 7.61 / 7.61 |
+| 100 | 0.84 / 0.84 | 1.03 / 0.76 | 0.86 / 0.86 |
+| 150 | 1.32 / 1.16 | 2.28 / 0.76 | 1.57 / 0.86 |
+| 200 | 1.67 / 1.67 | 3.04 / 2.66 | 1.73 / 1.57 |
+| 250 | 2.51 / 2.51 | 4.56 / 4.56 | 3.45 / 3.45 |
+| 300 | 3.35 / 3.35 | 6.08 / 6.08 | 4.32 / 4.32 |
+| 350 | 5.02 / 5.02 | 6.84 / 6.84 | 5.18 / 5.18 |
+| 400 | 6.70 / 6.70 | 6.84 / 6.84 | 6.91 / 6.91 |
+| 450 and up | 7.53 / 7.53 | 6.84 / 6.84 | 7.77 / 7.77 |
 
-So the weight now costs G only at the slow speeds where the F/A-18D's 2 G and 3 G edges lie (up to
-about 250 kt), where a heavy aircraft really is lift-limited, and nothing at combat speed.
+So the weight now costs G only at the slow speeds where the low G rows lie (up to about 200 to
+250 kt), where a heavy aircraft really is lift-limited, and nothing at combat speed. With the
+per-aircraft fractions the clean aircraft (no flaps, 5,000 ft, default load) first pulls 1 G at
+150 kt (F/A-18D, Rafale, A-4E, Su-25), 175 kt (F-14D, MiG-29, Su-27, MiG-23, Su-35) or 200 kt
+(X-31, MiG-21, F-22 family), in 25 kt steps, against 100 to 150 kt with the imported speeds: the
+F-22 cannot hold level flight clean below about 200 kt, the direct cost of lifting off at 128 kt
+(the flaps lower this by a quarter).
 
 **Short strips.** The roll to liftoff at full afterburner is longer for every aircraft, most
-for the heavy loadouts. From the Santa Fe start (`--theater APA --ground-start 3`, a strip
-of about 1,074 ft; San Carlos is the same length) the liftoff runs are, before and after: F/A-18D
-823 to 1,440 ft, Rafale C 620 to 1,099, A-4E 908 to 1,803, MiG-23 796 to 1,282, X-31 626 to
-1,040, F-14D 650 to 1,000, MiG-21 702 to 956, Su-35 555 to 896, Su-25 560 to 895, MiG-29 532 to
-886, Su-27 454 to 689 and the F-22 family 222 to 379. So the F/A-18D, Rafale, A-4E and MiG-23
-no longer lift off within the strip (they use the flat airport square past its end) and the
-X-31 barely does; the rest still do. The AI takeoffs on those strips were already known
-failures (lane-ai item 11) and roll further off the end. Landing rollouts shorten slightly
-(the flare from 60 ft touches down nearer the threshold), for example the F/A-18D stops 3,623 ft
-past the threshold against 3,956 ft, so the 5,532 ft UKR runway still works for all twelve.
+for the heavy loadouts and for the ones whose fraction is under 1. From the Santa Fe start
+(`--theater APA --ground-start 3`, a strip of about 1,074 ft, 1,020 ft of paved run from a solo
+start slot; San Carlos is the same length) the liftoff runs are, with the imported speeds and now:
+F/A-18D 823 to 1,098 ft, Rafale C 620 to 816, F-14D 650 to 1,164, A-4E 908 to 1,507, X-31 626 to
+1,040, MiG-29 532 to 751, Su-27 454 to 790, MiG-21 702 to 1,278, Su-25 560 to 1,588, MiG-23 796 to
+1,622, Su-35 555 to 940 and the F-22 family 222 to 584. So the F/A-18D, F-14D, A-4E, X-31, MiG-21,
+Su-25 and MiG-23 no longer lift off within the paved strip (they roll on past its end); the
+Rafale, MiG-29, Su-27, Su-35 and F-22 family still do. The AI takeoffs on those strips were already
+known failures (lane-ai item 11). Landing rollouts shorten slightly (the flare from 60 ft touches
+down nearer the threshold), so the 5,532 ft UKR runway still works for all twelve.
 
 **Other users of the stall speed.** The flight model, the stall warning and departure
 behaviour, the autopilot, the ejection G check, the flight envelope window (the drawn slow

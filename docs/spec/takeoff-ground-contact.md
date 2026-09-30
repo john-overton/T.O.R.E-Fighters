@@ -39,19 +39,25 @@ weight-scaled stall speed below, which John requested on 2026-09-29.
 ## Weight-scaled stall speed
 
 `opinionated`, requested by John on 2026-09-29 after the F-22, Su-27 and Su-25
-lifted off at 78, 97 and 73 knots; the reference weight and every number here
-are agent decisions. This is a deliberate departure from the retail polygon data,
+lifted off at 78, 97 and 73 knots; the reference weights and every number here
+are agent decisions, and the per-aircraft table below is `fitted` (2026-09-30,
+one reference per aircraft, John's decisions 1 and 2 of the aircraft pass). This
+is a deliberate departure from the retail polygon data,
 made because real fighters need markedly more speed to fly when loaded. Hybrid
 adapter only; the legacy adapter is unchanged, and `--retail-stall-speeds`
 turns the rule off for the whole run.
 
 - The imported envelope polygon keeps its meaning as the aircraft's speed limits
-  **at its reference weight**, which is its **empty weight** (no fuel, no
-  stores). The reference is taken from the game's own data: the imported
-  loaded-elevator percentage takes away G in proportion to fuel and stores
-  divided by the empty weight, so the polygon is the aircraft with a loading of
-  zero.
-- The scale is `sqrt(W / W_ref)`, with `W` the aircraft's instantaneous weight
+  **at its reference weight**, which is its **empty weight times a fitted
+  fraction that is different for each aircraft** (table below). The empty
+  weight is taken from the game's own data: the imported loaded-elevator
+  percentage takes away G in proportion to fuel and stores divided by the empty
+  weight, so the polygon is the bare aircraft with a loading of zero, and a
+  fraction of 1 would keep it there. The fraction is keyed by the aircraft's own identity (its flight model,
+  so the F-22, F-22N and F/A-XX share one), never by its weight, and is read
+  the same for the player and every AI aircraft
+  (`AircraftModel::stall_reference_fraction`).
+- The scale is `sqrt(W / W_ref)`, with `W_ref` the reference weight and `W` the aircraft's instantaneous weight
   (empty weight, fuel, and carried stores and ammunition), so fuel burn,
   jettisoned stores and expended ordnance all change it. It is finite for any
   weight (the weight is held to a quarter of the reference at the least).
@@ -80,12 +86,56 @@ turns the rule off for the whole run.
   make a loaded aircraft need a little more than the scaled stall speed to hold
   1 G, which is the speed the model takes off at.
 
-Results at the default loadout, sea level, full flaps and afterburner, and against
-John's figures for the three aircraft he named, are in the
-[flight lane page](../testing/lane-flight.md#weight-scaled-stall-speed-2026-09-29).
-One reference weight cannot bring every aircraft within 10 percent of the
-published figures: the F-22 family, Su-25, MiG-21 and MiG-23 stay low because
-their imported polygons are; see there.
+### Reference fraction per aircraft (fitted)
+
+`fitted`, an agent decision (2026-09-30) fitted to John's unsourced liftoff and
+approach ranges (plausibility figures, not retail or real-aircraft data). The
+reference weight is the empty weight times the fraction, so a **lower fraction
+means faster liftoff and approach and a longer roll**. Equivalent to a speed
+factor of `1 / sqrt(fraction)` on the imported edges at the empty weight.
+
+| Aircraft | Fraction | Speed factor | Liftoff (kt / ft) | Approach (kt) | John's liftoff | John's approach |
+| --- | ---: | ---: | ---: | ---: | :---: | :---: |
+| F/A-18D | 1.33 | 0.87 | 129 / 1,050 | 135 | none | 135 |
+| Rafale C | 1.38 | 0.85 | 128 / 781 | 135 | none | 130 to 140 |
+| F-14D | 0.85 | 1.08 | 123 / 1,107 | 135 | none | 130 to 140 |
+| A-4E | 1.20 | 0.91 | 121 / 1,427 | 136 | none | 130 to 140 |
+| X-31 | 1.00 | 1.00 | 156 / 1,001 | 166 (probe cap) | none | none |
+| MiG-29 | 1.20 | 0.91 | 132 / 719 | 140 | none | 135 to 145 |
+| Su-27 | 0.86 | 1.08 | 128 / 757 | 142 | 135 to 150 | 120 to 135 |
+| MiG-21 | 0.73 | 1.17 | 136 / 1,224 | 160 | none | 160 to 170 |
+| Su-25 | 0.55 | 1.35 | 123 / 1,506 | 131 | 130 to 145 | 125 to 140 |
+| MiG-23 | 0.78 | 1.13 | 142 / 1,552 | 152 | none | 150 to 165 |
+| Su-35 | 0.95 | 1.03 | 127 / 897 | 139 | none | 135 to 145 |
+| F-22, F-22N, F/A-XX | 0.42 | 1.54 | 128 / 559 | 148 | 130 to 150 | 135 to 145 |
+
+- Liftoff is at the default loadout, sea level, calm air, UKR airport 1, full
+  flaps and afterburner; approach is the scripted landing at 65 percent internal
+  fuel. Both are measured by the battery's flight lane
+  ([results](../testing/lane-flight.md#weight-scaled-stall-speed-2026-09-29)).
+- Every approach speed John gave is inside 10 percent of his range, and eight of
+  eleven are inside it. The Su-27 is where the model cannot meet both of his
+  ranges (his approach is at or below his liftoff, the model's approach is about
+  1.1 times its liftoff at every fraction): the middle fraction, 0.86, leaves the
+  liftoff 5 percent low and the approach 5 percent high (John's decision 2, 2026-09-30).
+  The three liftoff figures are within 6 percent. The nine aircraft with no
+  liftoff figure are fitted to their approach range only, so their liftoff is
+  whatever the model gives (4 to 15 percent under their approach speed); the
+  X-31 has no figure at all and keeps 1.00.
+- Combat-speed G is still the imported one for every aircraft (the fade at the 4 G
+  row), and the low-speed floor moves: with no flaps at 5,000 ft the speed at
+  which the default-loaded aircraft first pulls 1 G is now 150 kt (F/A-18D, Rafale, A-4E),
+  175 kt (F-14D, MiG-29, Su-27, MiG-23, Su-35), 200 kt (X-31, MiG-21, F-22 family)
+  and 150 kt for the Su-25 (25 kt steps; the imported speeds give 100 to 150 kt).
+- Each fraction sits clear of the places where the liftoff speed jumps as the
+  model's G rows cross (measured by sweeping each fraction 0.06 either side: the
+  X-31 jumps down between 0.94 and 0.95, the MiG-21 between 0.68 and 0.69 and the
+  Su-25 between 0.52 and 0.53; the Su-25's 0.55 is the closest, 0.02 above its
+  jump, so any change to it should be re-swept).
+- A longer roll on a short strip: from the 1,074 ft strips (a solo start has
+  1,020 ft of paved run) the F/A-18D, F-14D, A-4E, X-31, MiG-21, Su-25 and MiG-23
+  now roll past the paved end before liftoff (1,098, 1,164, 1,507, 1,040, 1,278,
+  1,588 and 1,622 ft at Santa Fe); the rest lift off inside it.
 
 ## Hybrid flap and lift rules
 

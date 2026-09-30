@@ -401,16 +401,23 @@ hybrid adapter turns them into the highest and lowest G it will deliver:
 
 ### Weight-scaled stall speed
 
-`opinionated`, requested by John on 2026-09-29; the reference weight and the
+`opinionated`, requested by John on 2026-09-29; the reference weights and the
 numbers are agent decisions ([rules](spec/takeoff-ground-contact.md#weight-scaled-stall-speed)).
-The polygon's slow edges for the 0 G to 2 G rows are the aircraft's speeds at its empty
-weight and grow with the square root of its weight (fuel, stores, ordnance), fading out at
+The polygon's slow edges for the 0 G to 2 G rows are the aircraft's speeds at its
+reference weight (its empty weight times a fitted fraction, one per aircraft) and grow
+with the square root of its weight over that (fuel, stores, ordnance), fading out at
 the 4 G row so that the G limit above about twice the stall speed is the imported one (the
 loaded-elevator divisor already carries the weight there), in the hybrid adapter only.
 The fast edge, the overspeed rule and the ceiling rules do not change; full flaps
 still take 25 percent off the 1 G stall speed; the loaded-elevator divisor stays.
 `--retail-stall-speeds` (developer switch) restores the imported speeds at every
-weight. It is the same rule for all fourteen aircraft: nothing is tuned per aircraft.
+weight. The rule is the same for all fourteen aircraft, but the reference fraction is
+`fitted` per aircraft (2026-09-30, to John's unsourced liftoff and approach ranges; a lower
+fraction means faster liftoff and approach): F/A-18D 1.33, Rafale C 1.38, F-14D 0.85,
+A-4E 1.20, X-31 1.00, MiG-29 1.20, Su-27 0.86, MiG-21 0.73, Su-25 0.55, MiG-23 0.78,
+Su-35 0.95 and the F-22 family 0.42
+(`STALL_REFERENCE_FRACTIONS` in `tore-sim/src/models/mod.rs`, read through
+`AircraftModel::stall_reference_fraction` for the player and the AI alike).
 
 ### Limits of the world and the ground
 
