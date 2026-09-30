@@ -1,17 +1,20 @@
-//! The shared plane step against the whole tick: a copy of a human-flown
-//! plane, taken from the `World` halfway through a mission and stepped only
-//! with [`plane::OwnPlane::step`], stays identical to the `World`'s cockpit to
-//! the last bit (docs/ARCHITECTURE.md, "One step for a human's plane").
+//! The shared plane step and the exact state against the whole tick: a
+//! human-flown plane's exact state is coded halfway through a mission and
+//! decoded into a fresh copy, which, stepped only with
+//! [`plane::OwnPlane::step`], stays identical to the `World`'s cockpit to the
+//! last bit, its own state hash included (docs/ARCHITECTURE.md, "One step for
+//! a human's plane").
 //!
 //! The copy is fed each tick only what a network client would have: the
 //! seat's input, the ground objects standing before the tick, the weather
 //! clock's reading after it, and the ownship terms and combat events the
 //! `World`'s tick produced. It flies over a terrain of its own, whose weather
-//! clock never moves. Synthetic fixtures only.
+//! clock never moves, with an aircraft type of its own. Synthetic fixtures
+//! only.
 
 use super::crowd::{E_HUMAN, F_HUMAN, crowded_mission, inputs};
-use super::plane::{OwnPlane, PlaneTick, WeatherReading};
-use super::tick_tests::{DRONES, airport, mission, place_drone, script};
+use super::plane::{ExactState, OwnPlane, OwnshipTerms, PlaneTick, WeatherReading};
+use super::tick_tests::{DRONES, airport, mission, place_drone, player_aircraft, script};
 use super::*;
 use tore_input::{PilotCommand, PilotInput, Switch};
 use tore_sim::combat::live::Event;
@@ -20,18 +23,61 @@ use tore_sim::combat::live::Event;
 const COPY_AT: usize = 600;
 const END: usize = 1200;
 
-/// A copy of what `world`'s cockpit keeps of `plane`'s step.
-fn own_plane_of(world: &World, plane: PlaneId) -> OwnPlane {
-    let cockpit = cockpit_of(world, plane);
-    OwnPlane {
-        plane: plane.0,
-        flight: cockpit.flight.clone(),
-        previous_flight: cockpit.previous_flight.clone(),
-        turbulence: cockpit.turbulence,
-        turbulence_rng: cockpit.turbulence_rng.clone(),
-        edge_message_at: cockpit.edge_message_at,
-        overspeed_message_at: cockpit.overspeed_message_at,
-    }
+/// The terms `plane` took in the tick that made `out`.
+fn terms_of(out: &TickOutput, plane: PlaneId) -> Option<OwnshipTerms> {
+    out.terms
+        .iter()
+        .find(|(id, _)| *id == plane)
+        .map(|(_, terms)| *terms)
+}
+
+/// The exact state of `world`'s cockpit of `plane`, with the terms of the
+/// last tick.
+fn exact_of(world: &World, plane: PlaneId, out: &TickOutput) -> ExactState {
+    ExactState::of(
+        &OwnPlane::of(cockpit_of(world, plane)),
+        terms_of(out, plane).as_ref(),
+    )
+}
+
+/// The copy a client would make: `world`'s plane coded with no baseline and
+/// decoded with the aircraft type `model`, checked equal and with the same
+/// hash.
+fn decoded_copy(
+    world: &World,
+    plane: PlaneId,
+    out: &TickOutput,
+    model: &tore_sim::models::AircraftModel,
+) -> OwnPlane {
+    let exact = exact_of(world, plane, out);
+    let bytes = exact.encode(None).unwrap();
+    let decoded = ExactState::decode(&bytes, None, model).unwrap();
+    assert_eq!(decoded, exact);
+    assert_eq!(decoded.hash().unwrap(), exact.hash().unwrap());
+    assert!(decoded.flight.research.is_some());
+    assert_ne!(
+        decoded.flight.stall_scale(),
+        1.,
+        "the stall speeds were never scaled"
+    );
+    decoded.into_own_plane(plane.0).0
+}
+
+/// Codes `world`'s plane against `base`, its exact state one snapshot back,
+/// decodes it against the same, and returns the new state and the bytes it
+/// took.
+fn against_baseline(
+    world: &World,
+    plane: PlaneId,
+    out: &TickOutput,
+    base: &ExactState,
+    model: &tore_sim::models::AircraftModel,
+) -> (ExactState, usize) {
+    let exact = exact_of(world, plane, out);
+    let bytes = exact.encode(Some(base)).unwrap();
+    let decoded = ExactState::decode(&bytes, Some(base), model).unwrap();
+    assert_eq!(decoded, exact);
+    (exact, bytes.len())
 }
 
 fn cockpit_of(world: &World, plane: PlaneId) -> &Cockpit {
@@ -53,6 +99,19 @@ fn standing(world: &World) -> Vec<u32> {
         .filter(|target| target.hp > 0)
         .map(|target| target.id)
         .collect()
+}
+
+/// The fixtures fly the legacy model; a human flies the hybrid one by
+/// default, with its random stream and weight-scaled stall speeds.
+fn fly_hybrid(world: &mut World, plane: PlaneId) {
+    let index = world
+        .cockpits
+        .iter()
+        .position(|cockpit| cockpit.plane == plane)
+        .unwrap();
+    let cockpit = &mut world.cockpits[index];
+    cockpit.flight.enable_research(1).unwrap();
+    cockpit.previous_flight = cockpit.flight.clone();
 }
 
 /// The terrain the copy flies over: the tick fixture's, built again.
@@ -90,44 +149,37 @@ fn step_copy(
     copy.flight.systems.messages.clear();
 }
 
-/// Fails at the first line where the two differ. `Debug` prints every
-/// floating-point value so that it reads back to the same bits, and it
-/// includes the flight's trace, which equality leaves out.
-fn assert_same(tick: usize, what: &str, copy: &impl std::fmt::Debug, world: &impl std::fmt::Debug) {
-    let (copy, world) = (format!("{copy:#?}"), format!("{world:#?}"));
-    if copy != world {
-        let (line, (a, b)) = copy
-            .lines()
-            .zip(world.lines())
-            .enumerate()
-            .find(|(_, (a, b))| a != b)
-            .unwrap_or((0, ("(length)", "(length)")));
-        panic!("tick {tick}: the copy's {what} differs at line {line}: copy `{a}`, world `{b}`");
-    }
-}
-
-fn assert_copy_matches(tick: usize, copy: &OwnPlane, world: &World) {
-    let cockpit = cockpit_of(world, PlaneId(copy.plane));
-    assert_same(tick, "flight", &copy.flight, &cockpit.flight);
-    assert_same(
-        tick,
-        "previous flight",
-        &copy.previous_flight,
-        &cockpit.previous_flight,
-    );
-    assert_same(tick, "turbulence", &copy.turbulence, &cockpit.turbulence);
-    assert_same(
-        tick,
-        "turbulence stream",
-        &copy.turbulence_rng,
-        &cockpit.turbulence_rng,
-    );
+/// The copy and the cockpit are equal and code to the same bits: the same
+/// own state hash, and the same flight at the start of the tick.
+fn assert_copy_matches(tick: usize, copy: &OwnPlane, world: &World, out: &TickOutput) {
+    let plane = PlaneId(copy.plane);
+    let cockpit = cockpit_of(world, plane);
+    let terms = terms_of(out, plane);
+    assert_eq!(copy.flight, cockpit.flight, "tick {tick}: the flight");
+    assert_eq!(copy.turbulence, cockpit.turbulence, "tick {tick}");
+    assert_eq!(copy.turbulence_rng, cockpit.turbulence_rng, "tick {tick}");
     assert_eq!(copy.edge_message_at, cockpit.edge_message_at, "tick {tick}");
     assert_eq!(
         copy.overspeed_message_at, cockpit.overspeed_message_at,
         "tick {tick}"
     );
-    assert_eq!(copy.flight, cockpit.flight, "tick {tick}");
+    assert_eq!(
+        ExactState::of(copy, terms.as_ref()).hash().unwrap(),
+        ExactState::of(&OwnPlane::of(cockpit), terms.as_ref())
+            .hash()
+            .unwrap(),
+        "tick {tick}: the own state hash",
+    );
+    let bits = |flight: &flight::State| {
+        let mut w = tore_codec::BitWriter::new();
+        flight.write_exact(&mut w, None).unwrap();
+        w.finish()
+    };
+    assert_eq!(
+        bits(&copy.previous_flight),
+        bits(&cockpit.previous_flight),
+        "tick {tick}: the flight at the start of the tick",
+    );
 }
 
 /// The single-player tick mission: low over rising ground, so turbulence acts;
@@ -135,7 +187,9 @@ fn assert_copy_matches(tick: usize, copy: &OwnPlane, world: &World) {
 #[test]
 fn a_copy_of_the_single_player_plane_steps_like_the_world() {
     let mut world = mission();
+    fly_hybrid(&mut world, PlaneId(0));
     let terrain = own_terrain();
+    let model = tore_sim::models::AircraftModel::for_aircraft(&player_aircraft()).unwrap();
     let config = world.combat.own().configuration().clone();
     let mut out = TickOutput::default();
     let mut copy = None;
@@ -147,7 +201,7 @@ fn a_copy_of_the_single_player_plane_steps_like_the_world() {
             _ => {}
         }
         if tick == COPY_AT {
-            copy = Some(own_plane_of(&world, PlaneId(0)));
+            copy = Some(decoded_copy(&world, PlaneId(0), &out, &model));
         }
         let mut input = script(tick);
         input.tick = world.tick();
@@ -157,7 +211,7 @@ fn a_copy_of_the_single_player_plane_steps_like_the_world() {
             let before = copy.turbulence;
             step_copy(copy, &input, &standing, &world, &out, &terrain, &config);
             turbulence_moved |= copy.turbulence != before;
-            assert_copy_matches(tick, copy, &world);
+            assert_copy_matches(tick, copy, &world, &out);
         }
     }
     assert!(turbulence_moved, "turbulence never acted on the copy");
@@ -233,7 +287,10 @@ fn our_pilot(tick: usize) -> PilotInput {
 #[test]
 fn a_copy_of_a_human_wingman_steps_like_the_world_through_a_fight() {
     let mut world = crowded_mission();
+    fly_hybrid(&mut world, F_HUMAN);
     let terrain = own_terrain();
+    let model =
+        tore_sim::models::AircraftModel::for_aircraft(&crate::test_support::aircraft()).unwrap();
     let config = world
         .combat
         .state
@@ -244,6 +301,8 @@ fn a_copy_of_a_human_wingman_steps_like_the_world_through_a_fight() {
     let mut out = TickOutput::default();
     let mut copy = None;
     let (mut fired, mut damaged) = (0, 0);
+    let mut snapshot: Option<ExactState> = None;
+    let mut sizes = Vec::new();
     for tick in 0..END {
         for start in BURSTS {
             if tick + 1 == start {
@@ -257,7 +316,7 @@ fn a_copy_of_a_human_wingman_steps_like_the_world_through_a_fight() {
             }
         }
         if tick == COPY_AT {
-            copy = Some(own_plane_of(&world, F_HUMAN));
+            copy = Some(decoded_copy(&world, F_HUMAN, &out, &model));
         }
         let step_inputs = inputs(&world, |seat| SeatInput {
             pilot: if seat == SEAT {
@@ -277,7 +336,7 @@ fn a_copy_of_a_human_wingman_steps_like_the_world_through_a_fight() {
         world.step(&step_inputs, &mut out).unwrap();
         if let Some(copy) = &mut copy {
             step_copy(copy, &input, &standing, &world, &out, &terrain, &config);
-            assert_copy_matches(tick, copy, &world);
+            assert_copy_matches(tick, copy, &world, &out);
             for event in &out.events {
                 match event {
                     Event::Fired { aircraft, .. } if *aircraft == F_HUMAN.0 => fired += 1,
@@ -288,8 +347,29 @@ fn a_copy_of_a_human_wingman_steps_like_the_world_through_a_fight() {
                 }
             }
         }
+        // Every fourth tick from the copy on, the host's exact state coded
+        // against the one a snapshot before, as the wire sends it.
+        if tick >= COPY_AT && tick % 4 == 0 {
+            let exact = match &snapshot {
+                Some(base) => {
+                    let (exact, size) = against_baseline(&world, F_HUMAN, &out, base, &model);
+                    sizes.push(size);
+                    exact
+                }
+                None => exact_of(&world, F_HUMAN, &out),
+            };
+            snapshot = Some(exact);
+        }
     }
     let copy = copy.unwrap();
+    let mean = sizes.iter().sum::<usize>() as f64 / sizes.len().max(1) as f64;
+    eprintln!(
+        "exact own state against one snapshot back, ticks 604 to 1,200: {} to {} bytes, mean \
+         {mean:.0}; {} bytes with no baseline at the end",
+        sizes.iter().min().unwrap(),
+        sizes.iter().max().unwrap(),
+        exact_of(&world, F_HUMAN, &out).encode(None).unwrap().len(),
+    );
     assert!(fired > 0, "our plane never fired after the copy was taken");
     assert!(
         damaged > 1,

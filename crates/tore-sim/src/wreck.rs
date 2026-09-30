@@ -161,6 +161,26 @@ impl Wreck {
     }
 }
 
+crate::flight::exact::exact_enum!(Phase {
+    Falling = 0,
+    Grounded = 1,
+    Exploded = 2,
+});
+crate::flight::exact::exact_struct!(Power {
+    acceleration,
+    engine_count,
+    fuel_seconds,
+});
+crate::flight::exact::exact_struct!(Wreck {
+    phase,
+    ticks,
+    polls,
+    angular_rates,
+    power,
+    bias,
+    explosion_rng,
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;

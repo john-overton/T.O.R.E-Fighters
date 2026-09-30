@@ -1909,9 +1909,9 @@ combat, the AI bridge, the debrief and the recorder.
 Design for stage D of the [multiplayer plan](multiplayer-plan.md#stages),
 written by the lead on 2026-09-30, revised the same day after an independent
 review, and reviewed by John the same day: his answers are in the guide's
-[decisions](MULTIPLAYER.md#decisions). Slices D1 (`tore-codec`) and D3a
-(`tore-import`) are built so far, and from D4 the shared step for a human's
-plane (see the [slice table](#how-stage-d-lands)).
+[decisions](MULTIPLAYER.md#decisions). Slices D1 (`tore-codec`), D3a
+(`tore-import`) and D4 (the shared step for a human's plane and its exact
+state) are built so far (see the [slice table](#how-stage-d-lands)).
 Every choice here is an agent decision unless it is credited to John. The three
 follow-up specs the plan assigns to stage D are:
 
@@ -2158,6 +2158,56 @@ terms of its latest snapshot and keeps them until the next one: they change
 only when the plane fires, is hit or fails, and the host then sends the exact
 state (below). The standing ground objects come from the host's destruction
 events.
+
+#### The exact state of a human's plane
+
+*Built (D4).* `world::plane::ExactState` is everything the step reads and
+writes that is not the mission's fixed data: the flight state, the cockpit's
+turbulence state and random stream, the two message clocks and the ownship
+terms the plane last took. It codes against an optional baseline, an earlier
+exact state of the same plane the reader also has, and its hash is FNV-1a 64
+of its coding with no baseline, the own state hash of the
+[snapshot header](formats/net-protocol.md#the-own-aircraft).
+
+- **Coded:** every field of the flight state, the private ones included (the
+  hybrid model's state and random stream, the weight-scaled stall factor,
+  `lift_g`, the systems with their queued messages, the autopilot, the escape
+  and the wreck, the armed ejection), in `tore-sim` beside each type
+  (`flight::exact`). Each 64-bit value is the exclusive-or with the baseline's
+  (`tore-codec`), so an unchanged field costs one bit; smaller integers and
+  enums are coded the same way as 64-bit patterns, flags as one bit.
+- **Not coded:** the write-only trace, which equality ignores and the next
+  step rewrites; the flight at the start of the tick, which the next step
+  overwrites before it reads it (a decoded plane starts with it equal to the
+  flight); and the imported tables. The decoder takes the aircraft type's
+  flight model as the import builds it and rebuilds the weight-scaled envelope
+  polygons from it and the coded scale with the step's own code. The native
+  research adapter is refused.
+- **Every field named.** Each coder destructures its struct and builds it
+  back with every field listed and no `..`, so a field added to any part of
+  the state without coding it fails to compile. The two random-stream and
+  clock types in `tore-formats` gained accessors for their raw parts, for
+  this restore only (lead-approved, 2026-09-30).
+- *Agent decisions:* the coding choices above, that is, small values as
+  64-bit patterns against the baseline's, the message clocks and queued
+  messages coded, the flight at the start of the tick and the ownship's
+  configuration left out.
+- **Measured:** an airborne hybrid-model plane codes to 331 bytes with no
+  baseline and 204 to 226 against its state 4 ticks earlier (tore-sim test);
+  with the turbulence stream and terms, the crowd fixture's human wingman
+  through its fight costs 163 to 257 bytes, mean 209, against the exact state
+  one snapshot back, and 478 bytes with no baseline. That sits at the low
+  end of the protocol's 200 to 350 byte estimate.
+
+The acceptance test (`world/plane_tests.rs`) codes a plane at tick 600 with no
+baseline, decodes it into a fresh copy with an aircraft type of its own, and
+steps the copy to tick 1,200 beside the `World`: for the single-player tick
+mission and for a crowd wingman that fires, is hit and is shot down, both on
+the hybrid model, the copy equals the cockpit, has the same own state hash and
+the same flight at the start of the tick on every tick. Round trips of states
+on the ground, airborne, damaged, as a wreck and after ejection, each flying on
+identically for two seconds, and decoding of truncated, damaged and random
+bytes without a panic, are in `tore-sim`.
 
 ### The host session
 
@@ -2431,7 +2481,7 @@ risky refactors, as John asked; the rest are Sonnet.
 | D2 Transport | `mp/d-net` | Opus | D1 | `tore-net`: packets, handshake, acks and round trip, reliable ordered messages, statistics, UDP and the simulator | On the simulator at 300 ms and 5 percent loss with duplicates and reordering: the handshake completes, 10,000 reliable messages arrive once and in order, a 64 KB message arrives whole, the round trip estimate is within 5 percent and the loss estimate within 1 point; a challenge is never larger than its request; a seeded packet fuzz never panics; two real sockets on 127.0.0.1 connect |
 | D3a Import library | `mp/d-import` | Sonnet | | **Built (D3a).** `tore-import` out of the app: data folder, pack, media detection, import | Single-player baseline SAME; the app imports and loads as before; `cargo tree -p tore-import` has no winit, wgpu or cpal; where both a 1.0 and a 1.02F import are available, the simulation resources of a sample mission hash the same |
 | D3b Mission as data | `mp/d-mission` | Sonnet | D3a | `MissionSpec` and its text form; `World::new` with single-player seating; the creator builds through it | Single-player baseline SAME; the spec round-trips through text; a headless test builds a single-player mission from synthetic resources and steps it |
-| D4 Own-plane step and exact state | `mp/d-own-state` | Opus | D1 | The shared per-plane step (built); an exact coder and hash for a human plane's flight, turbulence and ownship terms, every field destructured | Single-player baseline SAME; a plane stepped by `World` and a copy stepped by the shared function from a decoded state, with the same inputs and terms, stay bit-identical for 1,200 ticks; adding a field to the state without coding it fails to compile |
+| D4 Own-plane step and exact state | `mp/d-own-state` | Opus | D1 | The shared per-plane step; an exact coder and hash for a human plane's flight, turbulence and ownship terms, every field destructured | Single-player baseline SAME; a plane stepped by `World` and a copy stepped by the shared function from a decoded state, with the same inputs and terms, stay bit-identical for 1,200 ticks; adding a field to the state without coding it fails to compile. **Built (D4):** see [one step for a human's plane](#one-step-for-a-humans-plane) and [its exact state](#the-exact-state-of-a-humans-plane); an airborne plane's exact state costs about 200 bytes against a baseline one snapshot back |
 | D5a Flight frame | `mp/d-frame` | Sonnet | D3b | The flight frame with its plane id; the screens, views and sounds read it; no "aircraft 0 is the player" in presentation; the picture for any seat | Single-player baseline SAME and every GPU capture byte-identical; a test builds the picture for a second seat of the crowd fixture with that seat's plane as the player |
 | D5b Cockpit readout | `mp/d-readout` | Sonnet | D5a | The cockpit readout and its builder; the HUD, weapon HUD, scope, RWR, target window, map and music read it | Single-player baseline SAME and every capture byte-identical; readouts for two seats of the crowd fixture each name their own plane's stores, contacts and damage |
 | D3c Open seating | `mp/d-open` | Opus | D5a | `Seating::Open`: plane 0 on the AI, a tick with no human, combat with no ownship | Single-player baseline SAME; a headless test builds an open mission with every plane on the AI, steps it 1,200 ticks, then a seat takes plane 0, flies, and gives it back |

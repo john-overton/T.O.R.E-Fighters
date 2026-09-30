@@ -213,16 +213,7 @@ const AI_ALTITUDE: f64 = 1500.;
 pub(super) fn mission() -> World {
     let mut terrain = world();
     terrain.airport_scene = airport();
-    let mut profile = aircraft();
-    // The fixture aircraft has no turbulence sensitivity of its own.
-    profile.fields.insert(
-        "turbulencePercent".into(),
-        Token {
-            kind: "word".into(),
-            value: "100".into(),
-            scaled: false,
-        },
-    );
+    let profile = player_aircraft();
     let mut flight = flight::State::new(&profile, [0., PLAYER_ALTITUDE, -2000.]).unwrap();
     flight.speed = 600.;
     let mut combat = fixtures::combat(Vec::new(), Vec::new());
@@ -296,6 +287,21 @@ pub(super) fn mission() -> World {
         // The step never reads the setup.
         setup: Setup::default(),
     }
+}
+
+/// The player's aircraft: the fixture aircraft, which has no turbulence
+/// sensitivity of its own, given some.
+pub(super) fn player_aircraft() -> tore_formats::aircraft::Aircraft {
+    let mut profile = aircraft();
+    profile.fields.insert(
+        "turbulencePercent".into(),
+        Token {
+            kind: "word".into(),
+            value: "100".into(),
+            scaled: false,
+        },
+    );
+    profile
 }
 
 /// The drones' target ids, one per burst.

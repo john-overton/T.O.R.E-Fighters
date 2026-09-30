@@ -14,10 +14,16 @@
 //! the terrain, the ground objects still standing, the weather clock's reading
 //! at the tick, the plane's ownship terms and its combat configuration, and the
 //! tick's combat events.
+//!
+//! [`ExactState`] is what the step reads and writes of the plane itself,
+//! coded bit for bit against an optional baseline, with the own state hash a
+//! snapshot carries.
 
 use crate::{WorldResult, terrain::Terrain};
+use tore_codec::{BitReader, BitWriter, CodecError};
 use tore_formats::flight_model::clock_rng::NativeRng;
 use tore_sim::combat::live::{self, DAMAGE_SECTIONS, DamageSection, Event};
+use tore_sim::flight::exact::{Exact, ExactError};
 use tore_sim::models::FlightModel;
 use tore_sim::{flight, turbulence::Turbulence};
 
@@ -416,5 +422,181 @@ impl OwnPlane {
             take_event(&mut self.flight, self.plane, event);
         }
         Ok(warnings)
+    }
+}
+
+impl OwnPlane {
+    /// A copy of what `cockpit` keeps of its plane's step.
+    pub fn of(cockpit: &super::Cockpit) -> Self {
+        Self {
+            plane: cockpit.plane.0,
+            flight: cockpit.flight.clone(),
+            previous_flight: cockpit.previous_flight.clone(),
+            turbulence: cockpit.turbulence,
+            turbulence_rng: cockpit.turbulence_rng.clone(),
+            edge_message_at: cockpit.edge_message_at,
+            overspeed_message_at: cockpit.overspeed_message_at,
+        }
+    }
+}
+
+impl Exact for OwnshipTerms {
+    fn write(&self, w: &mut BitWriter, base: Option<&Self>) -> Result<(), CodecError> {
+        let OwnshipTerms {
+            subsystem_counts,
+            radar_failed,
+            visual_failed,
+            infrared_failed,
+            ecm_failed,
+            payload_lbs,
+            bay_demand,
+            hp,
+            damage_section,
+            damage_amounts,
+        } = self;
+        subsystem_counts.write(w, base.map(|b| &b.subsystem_counts))?;
+        radar_failed.write(w, base.map(|b| &b.radar_failed))?;
+        visual_failed.write(w, base.map(|b| &b.visual_failed))?;
+        infrared_failed.write(w, base.map(|b| &b.infrared_failed))?;
+        ecm_failed.write(w, base.map(|b| &b.ecm_failed))?;
+        payload_lbs.write(w, base.map(|b| &b.payload_lbs))?;
+        bay_demand.write(w, base.map(|b| &b.bay_demand))?;
+        hp.write(w, base.map(|b| &b.hp))?;
+        damage_section.write(w, base.map(|b| &b.damage_section))?;
+        damage_amounts.write(w, base.map(|b| &b.damage_amounts))
+    }
+    fn read(r: &mut BitReader<'_>, base: Option<&Self>) -> Result<Self, CodecError> {
+        Ok(OwnshipTerms {
+            subsystem_counts: Exact::read(r, base.map(|b| &b.subsystem_counts))?,
+            radar_failed: Exact::read(r, base.map(|b| &b.radar_failed))?,
+            visual_failed: Exact::read(r, base.map(|b| &b.visual_failed))?,
+            infrared_failed: Exact::read(r, base.map(|b| &b.infrared_failed))?,
+            ecm_failed: Exact::read(r, base.map(|b| &b.ecm_failed))?,
+            payload_lbs: Exact::read(r, base.map(|b| &b.payload_lbs))?,
+            bay_demand: Exact::read(r, base.map(|b| &b.bay_demand))?,
+            hp: Exact::read(r, base.map(|b| &b.hp))?,
+            damage_section: Exact::read(r, base.map(|b| &b.damage_section))?,
+            damage_amounts: Exact::read(r, base.map(|b| &b.damage_amounts))?,
+        })
+    }
+}
+
+/// A human-flown plane's **exact state**: everything its step reads and
+/// writes that is not the mission's fixed data, coded bit for bit so a copy
+/// decoded from it steps exactly as the original (docs/formats/net-protocol.md,
+/// "The own aircraft"). The flight at the start of the tick is not part of it:
+/// the next step overwrites it before reading it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactState {
+    pub flight: flight::State,
+    pub turbulence: Turbulence,
+    pub turbulence_rng: NativeRng,
+    pub edge_message_at: Option<f64>,
+    pub overspeed_message_at: Option<f64>,
+    /// The ownship terms the plane last took from combat, or `None` when
+    /// combat keeps no ownship for it.
+    pub terms: Option<OwnshipTerms>,
+}
+
+impl ExactState {
+    /// The exact state of `plane` with the `terms` it last took.
+    pub fn of(plane: &OwnPlane, terms: Option<&OwnshipTerms>) -> Self {
+        Self {
+            flight: plane.flight.clone(),
+            turbulence: plane.turbulence,
+            turbulence_rng: plane.turbulence_rng.clone(),
+            edge_message_at: plane.edge_message_at,
+            overspeed_message_at: plane.overspeed_message_at,
+            terms: terms.copied(),
+        }
+    }
+
+    /// The plane `plane` restored from this state; the flight at the start
+    /// of the tick is the flight itself until the next step.
+    pub fn into_own_plane(self, plane: u32) -> (OwnPlane, Option<OwnshipTerms>) {
+        let ExactState {
+            flight,
+            turbulence,
+            turbulence_rng,
+            edge_message_at,
+            overspeed_message_at,
+            terms,
+        } = self;
+        let own = OwnPlane {
+            plane,
+            previous_flight: flight.clone(),
+            flight,
+            turbulence,
+            turbulence_rng,
+            edge_message_at,
+            overspeed_message_at,
+        };
+        (own, terms)
+    }
+
+    /// Codes the state against `base`, an earlier exact state of the same
+    /// plane the reader also has, or against zero. Refuses the native
+    /// research adapter.
+    pub fn write(&self, w: &mut BitWriter, base: Option<&Self>) -> Result<(), ExactError> {
+        let ExactState {
+            flight,
+            turbulence,
+            turbulence_rng,
+            edge_message_at,
+            overspeed_message_at,
+            terms,
+        } = self;
+        flight.write_exact(w, base.map(|b| &b.flight))?;
+        turbulence.write(w, base.map(|b| &b.turbulence))?;
+        turbulence_rng.write(w, base.map(|b| &b.turbulence_rng))?;
+        edge_message_at.write(w, base.map(|b| &b.edge_message_at))?;
+        overspeed_message_at.write(w, base.map(|b| &b.overspeed_message_at))?;
+        terms.write(w, base.map(|b| &b.terms))?;
+        Ok(())
+    }
+
+    /// Reads a state [`Self::write`] wrote against the same `base`. `model`
+    /// is the plane's aircraft type as the import builds it.
+    pub fn read(
+        r: &mut BitReader<'_>,
+        base: Option<&Self>,
+        model: &tore_sim::models::AircraftModel,
+    ) -> Result<Self, ExactError> {
+        Ok(ExactState {
+            flight: flight::State::read_exact(r, base.map(|b| &b.flight), model)?,
+            turbulence: Exact::read(r, base.map(|b| &b.turbulence))?,
+            turbulence_rng: Exact::read(r, base.map(|b| &b.turbulence_rng))?,
+            edge_message_at: Exact::read(r, base.map(|b| &b.edge_message_at))?,
+            overspeed_message_at: Exact::read(r, base.map(|b| &b.overspeed_message_at))?,
+            terms: Exact::read(r, base.map(|b| &b.terms))?,
+        })
+    }
+
+    /// The state's bytes against `base`, padded to a whole byte.
+    pub fn encode(&self, base: Option<&Self>) -> Result<Vec<u8>, ExactError> {
+        let mut w = BitWriter::with_capacity(512);
+        self.write(&mut w, base)?;
+        Ok(w.finish())
+    }
+
+    /// The state in `bytes`, which [`Self::encode`] wrote against `base`;
+    /// anything but zero padding after it is an error.
+    pub fn decode(
+        bytes: &[u8],
+        base: Option<&Self>,
+        model: &tore_sim::models::AircraftModel,
+    ) -> Result<Self, ExactError> {
+        let mut r = BitReader::new(bytes);
+        let state = Self::read(&mut r, base, model)?;
+        if !r.only_zero_padding_left() {
+            return Err(CodecError::NonCanonical.into());
+        }
+        Ok(state)
+    }
+
+    /// FNV-1a 64 of the state coded with no baseline: the own state hash a
+    /// snapshot's header carries.
+    pub fn hash(&self) -> Result<u64, ExactError> {
+        Ok(tore_codec::fnv1a64(&self.encode(None)?))
     }
 }

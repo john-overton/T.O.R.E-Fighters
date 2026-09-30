@@ -292,11 +292,13 @@ and random stream, and the ownship terms the per-plane step reads (the
 subsystem hit counts, the sensor and jammer failures, the stores' weight,
 whether a release holds the bay open, hit points, the broken section and the
 damage in each section; the full list is in the
-[architecture](../ARCHITECTURE.md#one-step-for-a-humans-plane)).
+[architecture](../ARCHITECTURE.md#one-step-for-a-humans-plane)), and the
+turn-back and OVERSPEED message clocks.
 Every field is coded, the private ones included (the stall scale that depends
 on the weight's history, the hybrid model's random state, the systems, the
-autopilot, the wreck and the escape), except the write-only trace and the
-imported tables, which the client already has.
+autopilot, the wreck and the escape), except the write-only trace, the flight
+at the start of the tick and the imported tables, which the client already
+has ([details](../ARCHITECTURE.md#the-exact-state-of-a-humans-plane)).
 
 Every snapshot carries only its **hash** (in the header). The exact state goes
 in an **Own state** section, in its own packet beside the snapshot packet, when:
@@ -310,7 +312,9 @@ in an **Own state** section, in its own packet beside the snapshot packet, when:
 
 Each 64-bit number is coded as the exclusive-or with the same field of a
 baseline, with its leading zero bits counted, so an unchanged field costs one
-bit and a slowly changing one a few bytes: about 200 to 350 bytes in all. The
+bit and a slowly changing one a few bytes: about 200 to 350 bytes in all
+(measured in D4: about 160 to 260 bytes against a state one snapshot back, and
+under 500 with no baseline). The
 baseline is an earlier exact state the client has acknowledged, named by how
 many packets back it was (5 bits, 1 to 31); 0 means no baseline. The client
 decodes it bit for bit.

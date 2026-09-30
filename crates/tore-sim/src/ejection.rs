@@ -365,6 +365,23 @@ impl State {
     }
 }
 
+crate::flight::exact::exact_enum!(Phase {
+    Seat = 0,
+    Freefall = 1,
+    Inflating = 2,
+    Parachute = 3,
+    Landed = 4,
+    Impact = 5,
+});
+crate::flight::exact::exact_struct!(Escape {
+    position,
+    velocity,
+    heading,
+    phase,
+    ticks,
+    inflation_started,
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;

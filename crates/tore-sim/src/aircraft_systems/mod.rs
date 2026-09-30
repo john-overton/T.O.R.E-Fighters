@@ -12,6 +12,8 @@ pub use fuel::Fuel;
 pub use pilot::Pilot;
 pub use structure::{LossCause, RegionalEffects, Structure, regional_effects};
 
+/// The most systems messages queued between drains; later ones are dropped.
+pub const MAX_MESSAGES: usize = 64;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Systems {
     /// Source occurrence counters are provenance and duplicate-delivery guards.
@@ -104,7 +106,7 @@ impl Systems {
         self.notify(cause.message());
     }
     pub fn notify(&mut self, message: impl Into<String>) {
-        if self.messages.len() < 64 {
+        if self.messages.len() < MAX_MESSAGES {
             self.messages.push(message.into());
         }
     }
@@ -211,5 +213,17 @@ impl Systems {
         )
     }
 }
+crate::flight::exact::exact_struct!(Systems {
+    counts,
+    engine,
+    fluids,
+    fuel,
+    controls,
+    structure,
+    pilot,
+    last_impact_notice,
+    messages,
+});
+
 #[cfg(test)]
 mod tests;

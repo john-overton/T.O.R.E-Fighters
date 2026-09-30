@@ -446,6 +446,24 @@ impl Research {
     }
 }
 
+crate::flight::exact::exact_struct!(Research {
+    departure,
+    spinning,
+    spin_rate,
+    on_ground,
+    severity_f8,
+    stall_active,
+    clock,
+    rng,
+    elapsed,
+    landings,
+});
+crate::flight::exact::exact_struct!(Landings {
+    count,
+    score,
+    airborne_ticks,
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;

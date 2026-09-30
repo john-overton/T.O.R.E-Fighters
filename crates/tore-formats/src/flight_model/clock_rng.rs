@@ -17,6 +17,22 @@ impl NativeRng {
             table: [0; 32],
         })
     }
+    /// The generator's whole state: seed, shuffle value and table. For
+    /// restoring an exact copy of a state (the multiplayer own-plane coder)
+    /// only; nothing in the simulation reads it.
+    pub fn raw_parts(&self) -> (i32, i32, [i32; 32]) {
+        (self.seed, self.shuffle_value, self.table)
+    }
+    /// A generator with exactly the state [`Self::raw_parts`] returned. For
+    /// exact state restore only. Any parts are accepted: [`Self::below`]
+    /// reports a shuffle index outside the table as an error.
+    pub fn from_raw_parts(seed: i32, shuffle_value: i32, table: [i32; 32]) -> Self {
+        Self {
+            seed,
+            shuffle_value,
+            table,
+        }
+    }
     fn step(seed: i32) -> i32 {
         let quotient = seed / -127773;
         let value = seed
@@ -95,6 +111,16 @@ pub struct FixedClock {
     remainder: u16,
 }
 impl FixedClock {
+    /// The ticks carried to the next advance, below 120. For exact state
+    /// restore only.
+    pub fn remainder(&self) -> u16 {
+        self.remainder
+    }
+    /// A clock carrying `remainder`, which must be below 120 as every clock
+    /// is. For exact state restore only.
+    pub fn from_remainder(remainder: u16) -> Option<Self> {
+        (remainder < 120).then_some(Self { remainder })
+    }
     pub fn advance(&mut self, paused: bool) -> i16 {
         if paused {
             return 0;

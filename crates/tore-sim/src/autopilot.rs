@@ -158,6 +158,19 @@ impl Autopilot {
     }
 }
 
+crate::flight::exact::exact_enum!(Mode {
+    Off = 0,
+    Heading = 1,
+    Waypoint = 2,
+});
+crate::flight::exact::exact_struct!(NavigationTarget { number, position });
+crate::flight::exact::exact_struct!(Autopilot {
+    mode,
+    heading,
+    altitude,
+    target,
+});
+
 #[cfg(test)]
 mod tests {
     use super::*;

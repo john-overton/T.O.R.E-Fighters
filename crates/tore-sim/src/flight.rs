@@ -1,4 +1,5 @@
 //! Deterministic 120 Hz free-flight adapter. PT facts are recovered; integration is authored.
+pub mod exact;
 pub mod trace;
 use crate::attitude::{Basis, cross, dot, unit};
 use crate::models::{Conditions, FlightModel};
@@ -663,15 +664,26 @@ impl State {
                 std::sync::Arc::new(self.model.configuration().aerodynamics.envelopes.clone())
             })
             .clone();
+        let configuration = self.scaled_configuration(&raw, target);
+        if self.model.set_configuration(configuration).is_ok() {
+            self.envelope_scale = target;
+        }
+    }
+    /// The model's configuration with the `raw` envelope polygons scaled for
+    /// `scale`: what [`State::update_stall_scale`] installs, and what the exact
+    /// decoder rebuilds.
+    fn scaled_configuration(
+        &self,
+        raw: &[tore_formats::aircraft::Envelope],
+        scale: f64,
+    ) -> crate::models::config::Configuration {
         let mut configuration = self.model.configuration().clone();
         let top = raw.iter().map(|e| e.g).max().unwrap_or(1);
         configuration.aerodynamics.envelopes = raw
             .iter()
-            .map(|e| scale_left_edge(e, row_scale(e.g, top, target)))
+            .map(|e| scale_left_edge(e, row_scale(e.g, top, scale)))
             .collect();
-        if self.model.set_configuration(configuration).is_ok() {
-            self.envelope_scale = target;
-        }
+        configuration
     }
     /// The imported polygons, before the weight scaling.
     pub fn retail_envelopes(&self) -> &[tore_formats::aircraft::Envelope] {

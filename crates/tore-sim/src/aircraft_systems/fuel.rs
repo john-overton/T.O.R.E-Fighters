@@ -39,3 +39,9 @@ impl Fuel {
         *internal = (*internal - pounds).max(0.);
     }
 }
+
+crate::flight::exact::exact_struct!(Fuel {
+    external,
+    initial_external,
+    leaks,
+});

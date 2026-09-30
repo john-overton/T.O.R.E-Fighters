@@ -92,3 +92,11 @@ impl Controls {
         })
     }
 }
+
+crate::flight::exact::exact_struct!(Controls {
+    throttle_lock,
+    authority,
+    bias,
+    damaged_linkage,
+    unstable,
+});
