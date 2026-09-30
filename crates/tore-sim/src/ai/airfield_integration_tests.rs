@@ -1820,3 +1820,81 @@ fn the_new_lead_engages_a_hostile_it_sees() {
     assert_eq!(opportunity.home, None);
     assert_eq!(opportunity.last_contact_tick + 1, mission.tick());
 }
+
+#[test]
+fn wingmen_still_waiting_to_take_off_stay_parked_when_their_wing_goes_home() {
+    let mut mission = AiMission::new();
+    mission.push(parked(1, 1, [40., 0., -3250.]));
+    mission.push(parked(2, 2, [-40., 0., -3500.]));
+    mission.set_external_leader(Side(1), 0, HUMAN);
+    mission.start_in_formation();
+    let template = hornet(99, 0, [0.; 3], 0.);
+    let mut leader = human(&template, 0., 1_000.);
+    step(&mut mission, Some(leader.clone()));
+    // The human is lost on the runway before anyone has taken off.
+    leader.alive = false;
+    for _ in 0..(120 * 120) {
+        step(&mut mission, Some(leader.clone()));
+    }
+    assert_eq!(
+        mission
+            .opportunity(Side(1), 0)
+            .and_then(|o| o.home)
+            .map(|(_, reason)| reason),
+        Some(crate::ai::opportunity::HomeReason::NothingKnown)
+    );
+    for id in [1, 2] {
+        assert_eq!(
+            mission.actor(id).unwrap().airfield_phase(),
+            Some(Phase::Waiting),
+            "aircraft {id}"
+        );
+    }
+}
+
+#[test]
+fn a_stood_down_wingman_does_not_hold_up_its_sides_return_to_base() {
+    let mut mission = AiMission::new();
+    mission.push(parked(1, 1, [40., 0., -3250.]));
+    let mut other = hornet(3, 0, [0., 6_000., -60_000.], 0.);
+    other.identity.wing = 2;
+    other.set_home_runway(Some(runway()));
+    mission.push(other);
+    mission.set_external_leader(Side(1), 0, HUMAN);
+    mission.start_in_formation();
+    let template = hornet(99, 0, [0.; 3], 0.);
+    let mut leader = human(&template, 0., 1_000.);
+    let mut hostile = object(&template, 2);
+    hostile.id = 50;
+    hostile.position = [0., 0., 400_000.];
+    hostile.on_ground = true;
+    step(&mut mission, Some(leader.clone()));
+    leader.alive = false;
+    for _ in 0..120 {
+        let world: Vec<_> = world(&mission, Some(leader.clone()))
+            .into_iter()
+            .chain([hostile.clone()])
+            .collect();
+        mission
+            .step_with_surface(&world, &|x, z| surface(x, z).height, &surface, TimeOfDay(0))
+            .unwrap();
+    }
+    assert_eq!(
+        mission.actor(1).unwrap().airfield_phase(),
+        Some(Phase::Waiting)
+    );
+    // The last enemy goes down: the other wing still goes home.
+    hostile.alive = false;
+    hostile.destroyed = true;
+    let world: Vec<_> = world(&mission, Some(leader))
+        .into_iter()
+        .chain([hostile])
+        .collect();
+    mission
+        .step_with_surface(&world, &|x, z| surface(x, z).height, &surface, TimeOfDay(0))
+        .unwrap();
+    assert_eq!(
+        mission.actor(3).unwrap().landing_order().map(|o| o.reason),
+        Some(LandingReason::Ordered)
+    );
+}

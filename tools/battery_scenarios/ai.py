@@ -51,6 +51,9 @@ HIT_REACTION_CODES = frozenset(
 EVENT = re.compile(r"^t=(\d+) \(([\d.]+)s\) (?:destroyed: (\S+ \d-\d)|(\S+ \d-\d) pilot ejected)", re.M)
 HAZARDS = re.compile(r"^AI probe liftoff gaps: \[(.*?)\] hazards_open=(\d+)", re.M)
 PHASES = re.compile(r"^AI probe phases: (\S+ \d-\d): (.*)$", re.M)
+# The AI probe's line for a wing whose human leader was lost (John's decision
+# of 2026-09-30, docs/spec/ai.md "Mission of opportunity after a lost human leader").
+OPPORTUNITY_HOME = re.compile(r"^t=\d+ \([\d.]+s\) mission of opportunity: (\S+ \d-\d) leads, returning to base \((.*)\)$", re.M)
 
 
 # Anomaly kinds that are real but wait on a decision (docs/testing/lane-ai.md,
@@ -125,8 +128,13 @@ def probe_problems(
     if ground and hazards and int(hazards.group(2)) > 0:
         problems.append(f"ground hazards still open at the end: {hazards.group(2)}")
     if ground:
+        # A wingman still waiting to take off when its wing gave up its
+        # mission of opportunity and went home stays parked (docs/spec/ai.md).
+        stood_down = bool(OPPORTUNITY_HOME.search(output))
         for label, phases in PHASES.findall(output):
             names = [p.split("@")[0] for p in phases.split()]
+            if stood_down and set(names) == {"Waiting"}:
+                continue
             if need_takeoff and "ClimbOut" not in names and "Airborne" not in names:
                 problems.append(f"{label} never took off: {phases[:160]}")
             if need_landing and label in actors and actors[label][1] and not any(n in names for n in ("Rollout", "Landed", "Parked", "TaxiIn")):
@@ -245,9 +253,6 @@ def checker(**kw) -> Callable[[str], list[str]]:
 
 LAND_ORDER = re.compile(r'^t=(\d+) order=LandAtSelected reply="(.*)"$', re.M)
 PLAYER_DOWN = re.compile(r"^t=(\d+) \([\d.]+s\) player: .*crashed=true", re.M)
-# The AI probe's line for a wing whose human leader was lost (John's decision
-# of 2026-09-30, docs/spec/ai.md "Mission of opportunity after a lost human leader").
-OPPORTUNITY_HOME = re.compile(r"^t=\d+ \([\d.]+s\) mission of opportunity: (\S+ \d-\d) leads, returning to base \((.*)\)$", re.M)
 LANDED_PHASES = ("Rollout", "Landed", "Parked", "TaxiIn")
 
 

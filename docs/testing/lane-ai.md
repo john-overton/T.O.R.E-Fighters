@@ -99,7 +99,9 @@ the AI that takes the lead flies a
 (John, 2026-09-30). These probes have no enemy, so the new lead must print
 `mission of opportunity: ... returning to base (no enemy position known)` and
 land at its home runway, and the scenario's landing checks apply as for a
-living player (no aircraft may leave the map). Since the probe runs the full
+living player (no aircraft may leave the map). In any ground start, a wingman
+still waiting to take off when its wing goes home stays parked, and the
+takeoff check excuses it. Since the probe runs the full
 mission tick, the scripted player crashes 17 s after takeoff from Simferopol,
 so the two `ai-ground-land-selected-*` scenarios take this branch.
 

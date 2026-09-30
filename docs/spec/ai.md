@@ -498,8 +498,10 @@ had no order or route and flew straight on until the world edge removed it.
   seeing a hostile aircraft, or the lead having a target). The wing then
   returns to base through the [ordinary return to base](#return-to-base-when-the-mission-is-over):
   each airborne AI member with a home runway lands there, and a lead with none
-  flies home and holds. It does not take up the search again. Bingo fuel and
-  damage send an aircraft home earlier, as always.
+  flies home and holds. A member still waiting to take off stays parked, since
+  it would only take off to land again (it does not hold up its side's own
+  return to base either); one already taxiing goes on, takes off and lands. The wing does not take up the search again. Bingo fuel and damage
+  send an aircraft home earlier, as always.
 - **Unchanged.** A wing led by AI from the start keeps its own succession: when
   an AI leader is lost, the next member leads and nothing else changes. A wing
   that took up a mission of opportunity keeps it when its AI lead is lost in

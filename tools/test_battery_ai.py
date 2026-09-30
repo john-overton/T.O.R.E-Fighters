@@ -155,6 +155,12 @@ class LandOrderTests(unittest.TestCase):
         whole = ai.checker(ground=True, need_takeoff=True)
         self.assertTrue(any("outside the world" in p for p in self.check(text, whole=whole)))
 
+    def test_a_wingman_still_waiting_when_the_wing_goes_home_stays_parked(self):
+        parked = "AI probe phases: Friendly 1-4: Waiting@0.0s\n"
+        text = CLEAN + self.DOWN + self.LANDED + parked
+        self.assertTrue(any("1-4 never took off" in p for p in ai.probe_problems(text, ground=True, need_takeoff=True)))
+        self.assertEqual(ai.probe_problems(text + self.HOME, ground=True, need_takeoff=True), [])
+
     def test_a_crashed_player_must_not_be_obeyed(self):
         self.assertTrue(any("already crashed" in p for p in self.check(CLEAN + self.DOWN + self.ACCEPTED)))
 

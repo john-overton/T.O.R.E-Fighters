@@ -1622,7 +1622,8 @@ through `Controller::set_wing_search` and flies it with the lost-contact search
 (`MotionBranch::Search` with `opportunity: true`), after its own lost contact
 and never as a target. When the search ends, `AiMission::send_home` (the same
 call the mission's return to base uses) lands every airborne member at its
-home runway, or flies a lead with none home. The numbers are agent decisions,
+home runway, or flies a lead with none home, and `airfield_clearance` keeps a
+member still in `Phase::Waiting` parked. The numbers are agent decisions,
 in the [AI spec](spec/ai.md#mission-of-opportunity-after-a-lost-human-leader).
 A wing led by AI from the start is untouched. The AI probe prints a
 `mission of opportunity:` line whenever what the wing does changes.

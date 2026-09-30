@@ -1703,10 +1703,12 @@ impl AiMission {
                 continue;
             }
             // A side with aircraft still departing has only just begun.
+            // A member parked for good because its wing went home is not.
             let departing = self.actors.iter().any(|a| {
                 a.identity.side == side
                     && a.alive()
                     && a.airfield.as_ref().is_some_and(|s| s.is_departure())
+                    && !self.stood_down(a)
             });
             if !self.hostiles_seen.contains(&side) || !alive_on(side) || departing {
                 continue;
@@ -1773,6 +1775,19 @@ impl AiMission {
         self.opportunities
             .iter()
             .find(|o| o.side == side && o.wing == wing)
+    }
+
+    /// A member still waiting to take off when its wing has given up its
+    /// mission of opportunity and gone home: it stays parked (agent decision,
+    /// 2026-09-30), since it would only take off to land again.
+    fn stood_down(&self, actor: &AiActor) -> bool {
+        actor
+            .airfield
+            .as_ref()
+            .is_some_and(|s| s.phase() == super::airfield::Phase::Waiting)
+            && self
+                .opportunity(actor.identity.side, actor.identity.wing)
+                .is_some_and(|o| o.home.is_some())
     }
 
     /// Every wing's mission of opportunity, in the order they began.
@@ -3240,11 +3255,13 @@ impl AiMission {
         };
 
         // Turn gate: every earlier wing member past its first taxiway leg;
-        // a human leader must be airborne.
-        let turn = wingmates().all(|a| {
-            a.identity.member >= member || a.airfield.as_ref().is_none_or(|s| !s.holds_followers())
-        }) && external_leader
-            .is_none_or(|leader| actor.identity.is_leader() || !leader.on_ground);
+        // a human leader must be airborne; a member stood down stays parked.
+        let turn = !self.stood_down(actor)
+            && wingmates().all(|a| {
+                a.identity.member >= member
+                    || a.airfield.as_ref().is_none_or(|s| !s.holds_followers())
+            })
+            && external_leader.is_none_or(|leader| actor.identity.is_leader() || !leader.on_ground);
 
         // Runway-free gate.
         let spot = sequence.takeoff_spot();
