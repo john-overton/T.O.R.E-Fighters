@@ -1445,6 +1445,29 @@ impl AiWings {
             .collect()
     }
 
+    /// The AI aircraft that are alive, have `plane` as their target and carry a
+    /// guided air-to-air store that is ready (not inhibited, not spent). The
+    /// situation music reads it as "a missile is being aimed at you".
+    /// Read-only (docs/spec/flight-music.md).
+    pub fn aiming_at(&self, plane: u32) -> Vec<u32> {
+        use tore_sim::ai::weapon_service::{self, Rounds, TargetClass};
+        self.mission
+            .actors()
+            .iter()
+            .filter(|actor| {
+                actor.alive()
+                    && actor.controller().target() == Some(plane)
+                    && actor.stations().iter().any(|s| {
+                        s.guided
+                            && !s.store.inhibited
+                            && weapon_service::store_eligible(s.capability, TargetClass::Air)
+                            && !matches!(s.store.rounds, Rounds::Finite(0))
+                    })
+            })
+            .map(|actor| actor.id())
+            .collect()
+    }
+
     /// Recent B47 deliveries, newest last, as (receiving actor, missile id).
     pub fn threat_reports(&self) -> &[(u32, u32)] {
         &self.threat_reports
@@ -3401,17 +3424,25 @@ mod tests {
             assert!(!wings.objective_for_player(id));
         }
         let mut group_one = crate::target_window::Readout::new(
-            &targets[2],
+            &crate::readout::TargetRow::of(&targets[2]),
             wings.mission.actor(3).unwrap().flight(),
             "TEST".into(),
         );
-        group_one.with_activity(&wings, PLAYER_ID);
+        group_one.with_brief(&crate::target_window::TargetBrief::of(
+            &wings,
+            PLAYER_ID,
+            group_one.id,
+        ));
         let mut group_two = crate::target_window::Readout::new(
-            &targets[4],
+            &crate::readout::TargetRow::of(&targets[4]),
             wings.mission.actor(5).unwrap().flight(),
             "TEST".into(),
         );
-        group_two.with_activity(&wings, PLAYER_ID);
+        group_two.with_brief(&crate::target_window::TargetBrief::of(
+            &wings,
+            PLAYER_ID,
+            group_two.id,
+        ));
         assert_eq!(
             group_one.objective,
             Some(crate::target_window::TargetObjective::Destroy)

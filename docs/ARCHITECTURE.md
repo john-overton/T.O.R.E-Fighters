@@ -2499,22 +2499,72 @@ inbound-threat view), the RWR tone, the flight music (which now also counts
 only its own plane's damage, where it counted every ownship's), the target
 window's viewer, the map, the scope, the weapon HUD, the status line and the
 damage report. The app's own reads of the first ownship (`state.own()`,
-`own_view()`) became reads of the frame's plane through `state.ownship(plane)`
-and `state.view(plane)` (`combat_view::PlaneState::own_of` and `view_of`), which
-slice D5b replaces with the cockpit readout. `ai_wings::PLAYER_ID` is no longer read by the screens; it stays in the AI wings
-module and two headless probes. Left as they were, on purpose:
+`own_view()`) became reads of the frame's plane, which slice D5b then replaced
+with the cockpit readout (below). `ai_wings::PLAYER_ID` is no longer read by the
+screens; it stays in the AI wings module and two headless probes. Left as they
+were, on purpose:
 the headless probes, the ordnance and combat smoke checks and the replay
 recorder, which build a combat with one ownship and have no presented seat.
 
-Two things the screens still assume, both for a later slice. The sound
-engine's own-aircraft marker, `SourceId::Aircraft(0)` in `tore_sim::acoustics`,
-is fixed in `tore-sim`; the app labels the presented plane's source with it
-whatever its id, and gives a real plane 0 that is not presented a reserved id
-(agent decision, a workaround until `Listener` names its own aircraft). The
-scene the camera views are built from (`Scene::new`) still lists the AI
-aircraft and ground objects of combat's target rows, so another human's plane
-is not a subject of the F6 and F7 views until the scene is built from the
-frame's picture, which the client (D8) needs.
+One thing the screens still assume, for a later slice: the scene the camera
+views are built from (`Scene::new`) still lists the AI aircraft and ground
+objects of combat's target rows, so another human's plane is not a subject of
+the F6 and F7 views until the scene is built from the frame's picture, which the
+client (D8) needs.
+
+*Built (D5b, the readout).* `tore_world::readout::CockpitReadout` is the
+plain-data readout, with no reference into combat. `World::cockpit_readout(seat,
+launcher)` builds it (`Combat::cockpit_readout(plane, launcher, wings, cockpit)`
+does the work; `readout::build` is its body), and `FlightFrame::readout` holds
+it, built by `World::flight_frame` from the launcher of the flight the frame
+presents. Every list has a limit (`MAX_CONTACTS` and the others in
+`readout.rs`); a longer one keeps the entries nearest the plane. The groups are
+the wire's:
+
+| Group | Holds |
+| --- | --- |
+| Header | The plane and the combat tick (the warning tone's clock) |
+| `stores` | The selected station, arming, launch mode, the rounds at every station (failed ones marked) and which stations were loaded at the start |
+| `seeker` | The mounted seeker's status, target and observation, and the tone it plays |
+| `estimates` | Readiness, guidance available, can lock, the HUD's observation, maximum range, favourable firing band, in range, hit percentage and the flight seconds to the target |
+| `targets` | The designated identity, and the displayed and view targets (the view target is the sight hold) as rows: identity, aircraft, position, velocity, hit points and damage by section |
+| `sensors` | The sensors' step count, selected and acquired target and its track status, which channels are installed and operating, the radar's track range, radar and infrared contacts (with world positions), stale plots, noise strobes and the contacts' trails |
+| `visual` | Visual contacts |
+| `map` | Map contacts with whether a visual return identified them, whether they fly, and what an identified aircraft is |
+| `rwr` | Passive emitters, the threat service's missile records, the missiles in flight aimed at the plane (for the warning tone and the music) and the seeker classes of the locks the AI holds on it |
+| `damage` | Hit points, damage, the subsystem hit counts, the five failure flags and the plane's shots, hits and kills |
+| `countermeasures` | Chaff and flares left |
+| `airport` | NAV mode and the tower's service (selected airport, clearance, which runways are down) |
+| `target_window` | What the AI says of the displayed target: the objective, and whether it is a fixture or an AI pilot with its activity and skill and whether it aims at the viewer |
+| `music` | The designated target when it is a live enemy aircraft, the AI aircraft aiming a missile at the plane, and the mission result and home latch |
+
+What stays out of it, because the client has it or it is the picture's: the
+loadout (`FlightFrame::config`, the weapon records of the plane's stations,
+changed only when the stores are loaded), the airport scene, the roster's sides
+and names, the weapon rules, and the target rows the camera views are built from.
+Single player builds it every rendered frame from the frame's interpolated
+flight, where the weapon HUD and the target cue draw; the instruments, the
+scope's reprojection and the target window's bearing use the flight as the last
+tick left it, as before; and the seeker tone is the readout of the tick frame,
+as before. Per-tick readers (the RWR tone, the situation music, the view rig's
+target, the navigation page) read the readout of the tick's frame. The app
+reads it in `weapon_hud`, `scope`, `combat_view`, `flight_map`, `flight_views`,
+`flight_music`, `rwr_tone` and the redraw; `combat_view::PlaneState` is gone.
+The airport group holds a clone of the plane's `airport::Service`, for the ILS
+guidance and the navigation page, which ask it questions every frame (agent
+decision: a clone keeps the guidance exact between ticks). What the wire needs
+of it is the selected airport, the clearance and which runways are down.
+Measured plain (every field at its natural width, no coding): a busy seat of the
+crowd fight is about 2.5 KB, of which the radar contacts and their trails are
+most; a contact is 77 bytes and a trail point 24 bytes at that width, and the
+wire's quantization and its changed-group bits are D6's to count against the
+200-byte budget.
+
+The sound's own aircraft is fixed: `tore_sim::acoustics::Listener::own` names
+the aircraft the listener flies, and `Passes::step` takes that aircraft's source
+as its own. `audio::spatial_sources` labels every source with its plane's id, and
+the replay's sources and listener use the recorded player's id, so the reserved
+`u32::MAX` relabel is gone.
 
 ### Hits and lag compensation
 
@@ -2681,7 +2731,7 @@ risky refactors, as John asked; the rest are Sonnet.
 | D3b Mission as data | `mp/d-mission` | Sonnet | D3a | **Built (D3b).** `MissionSpec` and its text form; `World::new` with single-player seating; the creator builds through it | Single-player baseline SAME; the spec round-trips through text; a headless test builds a single-player mission from synthetic resources and steps it |
 | D4 Own-plane step and exact state | `mp/d-own-state` | Opus | D1 | The shared per-plane step; an exact coder and hash for a human plane's flight, turbulence and ownship terms, every field destructured | Single-player baseline SAME; a plane stepped by `World` and a copy stepped by the shared function from a decoded state, with the same inputs and terms, stay bit-identical for 1,200 ticks; adding a field to the state without coding it fails to compile. **Built (D4):** see [one step for a human's plane](#one-step-for-a-humans-plane) and [its exact state](#the-exact-state-of-a-humans-plane); an airborne plane's exact state costs about 200 bytes against a baseline one snapshot back |
 | D5a Flight frame | `mp/d-frame` | Sonnet | D3b | The flight frame with its plane id; the screens, views and sounds read it; no "aircraft 0 is the player" in presentation; the picture for any seat | Single-player baseline SAME and every GPU capture byte-identical; a test builds the picture for a second seat of the crowd fixture with that seat's plane as the player. **Built (D5a):** see [the flight screen draws a frame](#the-flight-screen-draws-a-frame) |
-| D5b Cockpit readout | `mp/d-readout` | Sonnet | D5a | The cockpit readout and its builder; the HUD, weapon HUD, scope, RWR, target window, map and music read it | Single-player baseline SAME and every capture byte-identical; readouts for two seats of the crowd fixture each name their own plane's stores, contacts and damage |
+| D5b Cockpit readout | `mp/d-readout` | Sonnet | D5a | The cockpit readout and its builder; the HUD, weapon HUD, scope, RWR, target window, map and music read it | Single-player baseline SAME and every capture byte-identical; readouts for two seats of the crowd fixture each name their own plane's stores, contacts and damage. **Built (D5b):** see [the flight screen draws a frame](#the-flight-screen-draws-a-frame) |
 | D3c Open seating | `mp/d-open` | Opus | D5a | `Seating::Open`: plane 0 on the AI, a tick with no human, combat with no ownship | Single-player baseline SAME; a headless test builds an open mission with every plane on the AI, steps it 1,200 ticks, then a seat takes plane 0, flies, and gives it back. **Built (D3c):** see [open seating and no human](#a-mission-with-no-window); the run repeats to the bit, and two seats hand planes in both wings through a fight, the last leaving the mission with no human |
 | D6 Wire | `mp/d-wire` | Opus | D1, D3b, D4, D5b | `tore-session`'s messages: inputs, snapshots with acknowledged baselines, priorities and relevance, own-state hash and exact state, readouts, events (bursts and launches included), join messages, debrief | Every message round-trips; a snapshot decodes with any earlier packet lost; entities always get their share of the packet; a wire golden test fails when the bytes change without a protocol version bump; bytes per snapshot measured on the 15 against 15 mission against the [budget](multiplayer-plan.md#bandwidth-budget). **Built (D6), but the cockpit readout's coding, which waits for D5b:** seeded round trips of every section and message; a 3,000-snapshot run dropping, duplicating and reordering packets and acknowledgements rebuilds every entity exactly; 100,000 fuzzed bodies; the golden copy `crates/tore-session/wire-golden.txt`. On the 15 against 15 mission (29 other aircraft, up to 31 missiles in flight) the Snapshot section is 177 to 879 bytes, mean 350, and the whole download 11.7 KB/s before the readout and the messages ([details](formats/net-protocol.md#what-the-games-sections-settled)) |
 | D7 Host and server | `mp/d-host` | Opus | D2, D3c, D6 | The host session, its clock and input buffers; `tore-server` with its configuration, import and console | A server flies a 15 against 15 mission for 10 minutes with nobody connected under 20 percent of one core; scripted test clients join and leave 100 times without an error; late, early, missing and duplicated inputs are applied as specified |

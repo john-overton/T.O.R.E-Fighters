@@ -14,6 +14,7 @@ use crate::{
     camera::Camera,
     combat::{Combat, launcher, target_pose},
     flight,
+    frame::FlightFrame,
     render_snapshot::CombatArt,
     scenery::Scenery,
     sim_renderer::Contact,
@@ -26,27 +27,7 @@ use tore_sim::{
     attitude::{Basis, Vector},
     combat::live,
 };
-
-/// The reads of one human-flown plane's ownship and cockpit view the flight
-/// screen makes for the frame's plane (`FlightFrame::plane`), in place of the
-/// state's first ownship. The plane flies, so it has an ownship; the cockpit
-/// readout of slice D5b will replace these reads.
-pub(crate) trait PlaneState {
-    /// The ownship of `plane`.
-    fn own_of(&self, plane: u32) -> &live::Ownship;
-    /// The cockpit view of `plane`'s ownship.
-    fn view_of(&self, plane: u32) -> live::OwnshipView<'_>;
-}
-impl PlaneState for live::State {
-    fn own_of(&self, plane: u32) -> &live::Ownship {
-        self.ownship(plane)
-            .expect("the presented plane has an ownship")
-    }
-    fn view_of(&self, plane: u32) -> live::OwnshipView<'_> {
-        self.view(plane)
-            .expect("the presented plane has an ownship")
-    }
-}
+use tore_world::readout::{CockpitReadout, TargetRow};
 
 /// The art and models drawn for one [`Combat`].
 pub struct CombatView {
@@ -73,7 +54,14 @@ impl CombatView {
     /// stations of `plane`, the plane the screen presents, name.
     pub fn new(combat: &Combat, plane: u32, data: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
         let mut art = CombatArt::load(data)?;
-        art.add_weapon_shapes(combat.state.own_of(plane).configuration(), data);
+        art.add_weapon_shapes(
+            combat
+                .state
+                .ownship(plane)
+                .expect("the presented plane has an ownship")
+                .configuration(),
+            data,
+        );
         Ok(Self {
             art,
             models: Vec::new(),
@@ -149,17 +137,24 @@ impl CombatView {
         )
     }
 
-    /// The target window's camera on the displayed target of `plane`, at its
-    /// presented pose.
+    /// The target window's camera on the displayed target, at its presented
+    /// pose.
     pub fn target_camera(
         &self,
         combat: &Combat,
-        plane: u32,
+        readout: &CockpitReadout,
         player: &flight::State,
     ) -> Option<Camera> {
-        let target = combat.state.view_of(plane).display_target()?;
-        let (position, _) = self.pose(combat, target);
+        let target = readout.targets.display.as_ref()?;
+        let position = self.target_position(combat, target);
         Some(crate::target_preview::camera(player.position, position))
+    }
+
+    /// Where a displayed target is drawn this frame; one missing from the
+    /// snapshots is drawn where it is.
+    fn target_position(&self, combat: &Combat, target: &TargetRow) -> [f64; 3] {
+        self.presented_target(combat, target.id)
+            .map_or(target.position, |pose| pose.position)
     }
 
     /// Populate all six creator wings in `combat`, retaining their sides for
@@ -258,21 +253,18 @@ impl CombatView {
     pub fn afterburner_glows(
         &self,
         combat: &Combat,
-        plane: u32,
-        player: &flight::State,
+        frame: &FlightFrame,
     ) -> Vec<crate::countermeasure_renderer::Afterburner> {
+        let player = frame.presented();
         let mut glows = Vec::new();
-        if player.afterburner_active()
-            && player.escape.is_none()
-            && combat.state.own_of(plane).hp > 0
-        {
+        if player.afterburner_active() && player.escape.is_none() && frame.readout.damage.hp > 0 {
             glows.extend(crate::render_snapshot::afterburner_glow(
                 player.position,
                 [player.yaw, player.pitch, player.bank],
                 combat.contrail_offsets(),
             ));
         }
-        let player_type = combat.state.own_of(plane).configuration().aircraft;
+        let player_type = frame.config.aircraft;
         // Only the lit aircraft, blended as the picture blends them, so the
         // rest of the picture is not built again for the lights.
         let lit = RenderSnapshot {
@@ -301,14 +293,14 @@ impl CombatView {
     pub fn framed_target_camera(
         &self,
         combat: &Combat,
-        plane: u32,
+        readout: &CockpitReadout,
         player: &flight::State,
         aircraft: &Airframe,
         world: &Terrain,
         scenery: &Scenery,
     ) -> Option<Camera> {
-        let target = combat.state.view_of(plane).display_target()?;
-        let mut camera = self.target_camera(combat, plane, player)?;
+        let target = readout.targets.display.as_ref()?;
+        let mut camera = self.target_camera(combat, readout, player)?;
         if let Some(object) = combat.ground_object(target.id) {
             let bounds = object.bounds;
             let basis = Basis::new(bounds.heading, bounds.pitch, bounds.bank);
@@ -331,21 +323,19 @@ impl CombatView {
                 .find(|h| Some(h.profile.id) == target.aircraft)
                 .unwrap_or(aircraft);
             let mut pose = player.clone();
-            pose.wreck = target.wreck.clone();
-            pose.crashed = target.hp <= 0;
+            // A displayed target has hit points left: it has no wreck.
+            pose.wreck = None;
+            pose.crashed = false;
             let presented = self.presented_target(combat, target.id);
             let (position, angles) = presented.as_ref().map_or(
-                (target.position, target_pose(target, combat.ai_poses)),
+                (target.position, combat_target_attitude(combat, target)),
                 |p| (p.position, p.attitude),
             );
             pose.position = position;
             [pose.yaw, pose.pitch, pose.bank] = angles;
-            pose.damage_fraction = target.damage_fraction();
-            pose.damage_variant = target
-                .localized_damage
-                .structural_section
-                .map(|s| s as usize);
-            pose.damage_regions = target.localized_damage.fractions(target.initial_hp);
+            pose.damage_fraction = target.damage.fraction();
+            pose.damage_variant = target.damage.variant();
+            pose.damage_regions = target.damage.regions();
             pose.gear = 0.;
             pose.flaps = 0.;
             pose.exhaust = 0.;
@@ -370,37 +360,44 @@ impl CombatView {
     }
 }
 
+/// The attitude a displayed target is drawn in when the picture has no pose
+/// for it: from its row in combat, else level along its velocity.
+fn combat_target_attitude(combat: &Combat, target: &TargetRow) -> [f64; 3] {
+    combat
+        .state
+        .targets
+        .iter()
+        .find(|row| row.id == target.id)
+        .map_or(
+            [target.velocity[0].atan2(target.velocity[2]), 0., 0.],
+            |row| target_pose(row, combat.ai_poses),
+        )
+}
+
 /// `controls` are the seat's scope controls as they stand now, which the
 /// scope labels follow; the flight state takes them at the start of a tick.
 pub fn readout(
     combat: &Combat,
-    plane: u32,
+    config: &live::Configuration,
+    ro: &CockpitReadout,
     s: &flight::State,
     controls: tore_sim::sensors::Controls,
     rcs_scale: f64,
 ) -> crate::instruments::CombatReadout {
     // (source, name, rounds, selected, loaded at the start)
     let mut groups: Vec<(String, String, u32, bool, bool)> = Vec::new();
-    for (index, station) in combat
-        .state
-        .own_of(plane)
-        .configuration()
-        .stations
-        .iter()
-        .enumerate()
-    {
-        let selected =
-            combat.state.own_of(plane).armed && index == combat.state.own_of(plane).selected;
-        let loaded = combat.state.own_of(plane).was_loaded(index);
+    for (index, station) in config.stations.iter().enumerate() {
+        let selected = ro.stores.armed && index == ro.stores.selected();
+        let loaded = ro.stores.was_loaded(index);
         if let Some(group) = groups.iter_mut().find(|g| g.0 == station.weapon.source) {
-            group.2 += u32::from(combat.state.own_of(plane).rounds(index));
+            group.2 += u32::from(ro.stores.rounds(index));
             group.3 |= selected;
             group.4 |= loaded;
         } else {
             groups.push((
                 station.weapon.source.clone(),
                 station.weapon.hud_name.clone(),
-                u32::from(combat.state.own_of(plane).rounds(index)),
+                u32::from(ro.stores.rounds(index)),
                 selected,
                 loaded,
             ));
@@ -415,41 +412,39 @@ pub fn readout(
             .filter(|(_, _, count, selected, loaded)| *count > 0 || *selected || *loaded)
             .map(|(_, name, count, selected, _)| (name, count, selected))
             .collect(),
-        chaff: combat.state.own_of(plane).chaff,
-        flares: combat.state.own_of(plane).flares,
-        target: combat.state.view_of(plane).display_target().map(|target| {
+        chaff: ro.countermeasures.chaff,
+        flares: ro.countermeasures.flares,
+        target: ro.targets.display.as_ref().map(|target| {
             let name = combat
                 .ground_name(target.id)
                 .map(str::to_owned)
                 .or_else(|| target.aircraft.map(|id| id.label().to_owned()))
                 .unwrap_or_else(|| format!("CONTACT {}", target.id));
-            crate::target_window::Readout::new(target, s, name)
+            let mut window = crate::target_window::Readout::new(target, s, name);
+            if let Some(brief) = &ro.target_window {
+                window.with_brief(brief);
+            }
+            window
         }),
-        envelope_target: combat
-            .state
-            .view_of(plane)
-            .display_target()
-            .and_then(|target| {
-                combat
-                    .dummy_types()
-                    .iter()
-                    .find(|h| Some(h.profile.id) == target.aircraft)
-                    .map(|h| h.profile.envelopes.clone())
-            }),
-        scope: crate::scope::scope(&combat.state, plane, s, controls),
-        rcs: crate::scope::rcs(&combat.state, plane, s, rcs_scale),
-        rwr_failed: combat.state.own_of(plane).rwr_failed,
-        rwr: rwr_readout(combat, plane, s),
+        envelope_target: ro.targets.display.as_ref().and_then(|target| {
+            combat
+                .dummy_types()
+                .iter()
+                .find(|h| Some(h.profile.id) == target.aircraft)
+                .map(|h| h.profile.envelopes.clone())
+        }),
+        scope: crate::scope::scope(ro, s, controls),
+        rcs: crate::scope::rcs(config, ro, s, rcs_scale),
+        rwr_failed: ro.damage.rwr_failed,
+        rwr: rwr_readout(ro, s),
     }
 }
-fn rwr_readout(combat: &Combat, plane: u32, own: &flight::State) -> crate::scope::Rwr {
+fn rwr_readout(ro: &CockpitReadout, own: &flight::State) -> crate::scope::Rwr {
     use crate::scope::{EmitterKind, EmitterState, Indicator, Rwr, RwrEmitter, RwrMissile};
     use tore_sim::combat::threats::GuidanceClass;
-    let operating = !combat.state.own_of(plane).rwr_failed && own.systems.counts[32] <= 1;
+    let operating = !ro.damage.rwr_failed && own.systems.counts[32] <= 1;
     let emitters = if operating {
-        combat
-            .state
-            .own_of(plane)
+        ro.rwr
             .emitters
             .iter()
             .map(|emitter| RwrEmitter {
@@ -469,17 +464,16 @@ fn rwr_readout(combat: &Combat, plane: u32, own: &flight::State) -> crate::scope
     } else {
         Vec::new()
     };
-    let mut radar_indicator = if combat.state.own_of(plane).emitters.is_empty() || !operating {
+    let mut radar_indicator = if ro.rwr.emitters.is_empty() || !operating {
         Indicator::Off
     } else {
         Indicator::Detected
     };
     let mut infrared_indicator = Indicator::Off;
-    let missiles = combat
-        .state
-        .own_of(plane)
-        .missile_threats
-        .records()
+    let missiles = ro
+        .rwr
+        .missiles
+        .iter()
         .map(|record| {
             if !record.stale && record.targeting_receiver {
                 match record.guidance_class {
@@ -506,7 +500,7 @@ fn rwr_readout(combat: &Combat, plane: u32, own: &flight::State) -> crate::scope
         })
         .collect();
     let mut readout = Rwr {
-        tick: combat.state.own_of(plane).sensors.tick(),
+        tick: ro.sensors.tick,
         operating,
         emitters,
         missiles,
@@ -514,11 +508,9 @@ fn rwr_readout(combat: &Combat, plane: u32, own: &flight::State) -> crate::scope
         infrared_indicator,
     };
     readout.mark_supported_sources(
-        combat
-            .state
-            .own_of(plane)
-            .missile_threats
-            .records()
+        ro.rwr
+            .missiles
+            .iter()
             .filter(|r| {
                 !r.stale
                     && r.targeting_receiver
@@ -529,10 +521,9 @@ fn rwr_readout(combat: &Combat, plane: u32, own: &flight::State) -> crate::scope
     readout
 }
 
-pub fn equipment_damage_report(combat: &Combat, plane: u32) -> Vec<String> {
-    let config = combat.state.own_of(plane).configuration();
+pub fn equipment_damage_report(config: &live::Configuration, ro: &CockpitReadout) -> Vec<String> {
     (36..45)
-        .filter(|i| combat.state.own_of(plane).subsystem_counts[*i] > 0)
+        .filter(|i| ro.damage.subsystem_counts[*i] > 0)
         .map(|i| {
             let hardpoint = i - 36;
             if config.external_fuel_lbs[hardpoint] > 0. {
@@ -550,13 +541,13 @@ pub fn equipment_damage_report(combat: &Combat, plane: u32) -> Vec<String> {
             } else if hardpoint == config.ecm_hardpoint {
                 format!(
                     "Countermeasures: jammer {}, chaff {}, flares {}",
-                    if combat.state.own_of(plane).ecm_failed {
+                    if ro.damage.ecm_failed {
                         "failed"
                     } else {
                         "available"
                     },
-                    combat.state.own_of(plane).chaff,
-                    combat.state.own_of(plane).flares
+                    ro.countermeasures.chaff,
+                    ro.countermeasures.flares
                 )
             } else {
                 format!("Hardpoint {} equipment damaged", hardpoint + 1)
@@ -564,62 +555,54 @@ pub fn equipment_damage_report(combat: &Combat, plane: u32) -> Vec<String> {
         })
         .collect()
 }
-pub fn status(combat: &Combat, plane: u32, s: &flight::State) -> String {
-    let i = combat.state.own_of(plane).selected;
-    let target = combat
-        .state
-        .view_of(plane)
-        .designated()
-        .map_or("NO TARGET".into(), |id| {
-            combat
-                .state
-                .targets
-                .iter()
-                .find(|t| t.id == id)
-                .map_or("NO TARGET".into(), |t| {
-                    if t.hp == 0 {
-                        "DESTROYED".into()
-                    } else {
-                        format!(
-                            "{} HP {} {}",
-                            combat
-                                .ground_name(id)
-                                .map_or_else(|| format!("T{id}"), str::to_owned),
-                            t.hp,
-                            if combat.state.own_of(plane).configuration().stations[i]
-                                .weapon
-                                .seeker
-                                .signature
-                                == 0
-                            {
-                                "VISUAL"
-                            } else if combat.state.view_of(plane).can_lock(launcher(s)) {
-                                "LOCK"
-                            } else {
-                                "NO LOCK"
-                            }
-                        )
-                    }
-                })
-        });
-    let scope = crate::scope::scope(&combat.state, plane, s, s.sensors);
+pub fn status(
+    combat: &Combat,
+    config: &live::Configuration,
+    ro: &CockpitReadout,
+    s: &flight::State,
+) -> String {
+    let i = ro.stores.selected();
+    let target = ro.targets.designated.map_or("NO TARGET".into(), |id| {
+        combat
+            .state
+            .targets
+            .iter()
+            .find(|t| t.id == id)
+            .map_or("NO TARGET".into(), |t| {
+                if t.hp == 0 {
+                    "DESTROYED".into()
+                } else {
+                    format!(
+                        "{} HP {} {}",
+                        combat
+                            .ground_name(id)
+                            .map_or_else(|| format!("T{id}"), str::to_owned),
+                        t.hp,
+                        if config.stations[i].weapon.seeker.signature == 0 {
+                            "VISUAL"
+                        } else if ro.estimates.can_lock {
+                            "LOCK"
+                        } else {
+                            "NO LOCK"
+                        }
+                    )
+                }
+            })
+    });
+    let scope = crate::scope::scope(ro, s, s.sensors);
     format!(
         "{} {} {}  {} C{} HIT {} | HP {} SYS {} ECM {} T-JAM {} IN {} | {} {} {:.0}NM {} CONTACTS{}{}",
-        combat.state.own_of(plane).configuration().stations[i]
-            .weapon
-            .name,
-        combat.state.own_of(plane).rounds(i),
-        combat.state.view_of(plane).readiness(launcher(s)).label(),
+        config.stations[i].weapon.name,
+        ro.stores.rounds(i),
+        ro.estimates.readiness.label(),
         target,
         live::damage_class(combat.state.range_category),
         combat.state.history.last().map_or(0, |hit| hit.applied),
-        combat.state.own_of(plane).hp,
-        combat
-            .state
-            .own_of(plane)
+        ro.damage.hp,
+        ro.damage
             .last_subsystem
             .map_or("--".into(), |i| i.to_string()),
-        if combat.state.own_of(plane).ecm_failed {
+        if ro.damage.ecm_failed {
             "FAIL"
         } else if launcher(s).jammer {
             "ON"
@@ -1228,7 +1211,24 @@ pub(crate) mod render_hash_tests {
             let (position, angles) = view.pose(&combat, target);
             expected.extend(glow(position, angles, offsets));
         }
-        let glows = view.afterburner_glows(&combat, combat.own_id(), &player);
+        let picture = RenderSnapshot::default();
+        let (smoke, devices) = (Default::default(), Default::default());
+        let frame = FlightFrame {
+            seat: tore_world::seats::SeatId(0),
+            plane: tore_world::seats::PlaneId(combat.own_id()),
+            flight: &player,
+            previous: &player,
+            presented: std::borrow::Cow::Borrowed(&player),
+            picture: &picture,
+            smoke: [&smoke, &smoke],
+            devices: &devices,
+            config: combat.state.own().configuration(),
+            readout: combat
+                .cockpit_readout(combat.own_id(), launcher(&player), None, None)
+                .unwrap(),
+            tick_cues: &[],
+        };
+        let glows = view.afterburner_glows(&combat, &frame);
         assert_eq!(glows, expected);
         // Both of the player's type's engines, the Rafale's none and the
         // F-14's one light the scene.
@@ -1337,7 +1337,10 @@ mod empty_station_tests {
         c.state.own_mut().advance_from_empty(guns_only, unlimited);
     }
     fn listed(c: &Combat, f: &flight::State) -> Vec<(String, u32, bool)> {
-        readout(c, c.own_id(), f, f.sensors, 1.).weapons
+        let ro = c
+            .cockpit_readout(c.own_id(), launcher(f), None, None)
+            .unwrap();
+        readout(c, c.state.own().configuration(), &ro, f, f.sensors, 1.).weapons
     }
     #[test]
     fn an_emptied_station_stays_empty_and_is_not_listed() {

@@ -2,12 +2,12 @@
 //! observable; this module only reprojects shared observations for drawing and
 //! picking. It can never make a hidden target selectable, and it carries
 //! bearing and intensity for received noise rather than an emitter's range.
-use crate::{combat_view::PlaneState, flight};
+use crate::flight;
 use tore_sim::{
     attitude::{Basis, Vector, dot},
-    combat::live,
     sensors::{self, passive},
 };
+use tore_world::readout::CockpitReadout;
 
 /// One plotted return. A stale plot is the final observation of a lost
 /// contact: visibly old, never selectable.
@@ -174,20 +174,15 @@ fn relative(basis: &Basis, from: Vector, to: Vector) -> (f64, f64) {
     )
 }
 
-pub fn scope(
-    state: &live::State,
-    plane: u32,
-    s: &flight::State,
-    controls: sensors::Controls,
-) -> Scope {
-    let sensors = &state.own_of(plane).sensors;
+pub fn scope(readout: &CockpitReadout, s: &flight::State, controls: sensors::Controls) -> Scope {
+    let sensors = &readout.sensors;
     let basis = Basis::new(s.yaw, s.pitch, s.bank);
     // Labels and the plotted scale follow the player's own controls, so they
     // never lag a step behind the switch that was just pressed. Contacts and
     // weapon support stay with the simulation that produced them.
     let channel = controls.channel;
-    let selected = sensors.selected();
-    let acquired = sensors.acquired();
+    let selected = sensors.selected;
+    let acquired = sensors.acquired;
     let plot = |c: &sensors::Contact, stale: bool, trail: Vec<(f64, f64)>| Contact {
         id: c.id,
         bearing_rad: c.bearing_rad,
@@ -202,14 +197,14 @@ pub fn scope(
         trail,
     };
     let mut contacts: Vec<Contact> = sensors
-        .contacts()
+        .contacts
         .iter()
         .map(|c| {
             let trail = sensors
                 .trail(c.id)
                 .iter()
-                .map(|sample| {
-                    let (bearing, distance) = relative(&basis, s.position, sample.position);
+                .map(|position| {
+                    let (bearing, distance) = relative(&basis, s.position, *position);
                     (bearing, distance)
                 })
                 .collect();
@@ -218,7 +213,7 @@ pub fn scope(
         .collect();
     contacts.extend(
         sensors
-            .plots()
+            .plots
             .iter()
             .filter(|p| p.channel == channel)
             .map(|p| Contact {
@@ -235,7 +230,7 @@ pub fn scope(
             }),
     );
     Scope {
-        tick: sensors.tick(),
+        tick: sensors.tick,
         channel: channel.label(),
         infrared: channel == sensors::Channel::Infrared,
         mode: sensors.mode_for(channel, &controls).map(|m| m.label()),
@@ -249,7 +244,7 @@ pub fn scope(
         history: controls.history,
         contacts,
         strobes: sensors
-            .display_strobes()
+            .strobes
             .iter()
             .map(|strobe| Strobe {
                 bearing_rad: strobe.bearing_rad,
@@ -259,12 +254,17 @@ pub fn scope(
             })
             .collect(),
         selected,
-        status: selected.map(|id| sensors.track_status(id).label()),
+        status: sensors.selected_support.map(|support| support.label()),
     }
 }
 
-pub fn rcs(state: &live::State, plane: u32, s: &flight::State, scale_nmi: f64) -> Rcs {
-    let signature = state.own_of(plane).configuration().sensors.signature;
+pub fn rcs(
+    config: &tore_sim::combat::live::Configuration,
+    readout: &CockpitReadout,
+    s: &flight::State,
+    scale_nmi: f64,
+) -> Rcs {
+    let signature = config.sensors.signature;
     let basis = Basis::new(s.yaw, s.pitch, s.bank);
     let configuration = sensors::Configuration {
         gear: s.gear,
@@ -273,11 +273,11 @@ pub fn rcs(state: &live::State, plane: u32, s: &flight::State, scale_nmi: f64) -
     };
     Rcs {
         contour: signature.exposure_contour(&basis, configuration, 5.),
-        emitters: state
-            .own_of(plane)
+        emitters: readout
+            .rwr
             .emitters
             .iter()
-            .filter(|_| !state.own_of(plane).rwr_failed)
+            .filter(|_| !readout.damage.rwr_failed)
             .map(|e| Emitter {
                 bearing_rad: e.bearing_rad,
                 distance_nmi: e.distance_nmi,

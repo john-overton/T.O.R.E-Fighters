@@ -1,0 +1,714 @@
+//! The cockpit readout: everything a seat's displays and cockpit sounds show
+//! that comes from its ownship, its sensors, its threat service, the AI or the
+//! mission, as plain data. D5b of the multiplayer plan; see
+//! docs/ARCHITECTURE.md, "The flight screen draws a frame".
+//!
+//! The host computes it from the simulation ([`World::cockpit_readout`]) and a
+//! launcher, the plane's position, attitude, speed and devices as the caller
+//! presents them: single player builds it every rendered frame from the
+//! interpolated flight, a server builds it at each snapshot from the tick's
+//! flight, and a client takes the newest one from a snapshot. The displays read
+//! this and never the ownship, so they draw the same from either source.
+//!
+//! It holds no references into combat. Its groups match the wire's
+//! ([`docs/formats/net-protocol.md`](../../../docs/formats/net-protocol.md)):
+//! each can be coded as changed or unchanged against a baseline. Every list is
+//! bounded by a limit below; a longer one keeps the entries nearest the plane.
+//! Contacts carry world positions, so a client draws them around its own
+//! predicted aircraft. Static loadout and mission data (the weapon records,
+//! the airport scene, the roster's sides and names) are not in it.
+
+use crate::{ai_wings::AiWings, snapshot::Damage, target_window::TargetBrief, world::Cockpit};
+use tore_formats::aircraft::AircraftId;
+use tore_sim::{
+    airport::Service,
+    attitude::Vector,
+    combat::{
+        live::{self, Launcher, Readiness, SeekerTone, Target},
+        missiles::{FiringBand, LaunchMode, TargetRole, seeker},
+        threats::ThreatRecord,
+    },
+    sensors::{self, Channel, Contact, Mode, Plot, Strobe, Support, passive},
+};
+
+/// Radar and infrared contacts kept: the nearest ones.
+pub const MAX_CONTACTS: usize = 128;
+/// Visual contacts kept.
+pub const MAX_VISUAL: usize = 64;
+/// Stale plots kept.
+pub const MAX_PLOTS: usize = 64;
+/// Received noise strobes kept.
+pub const MAX_STROBES: usize = 16;
+/// Map contacts kept.
+pub const MAX_MAP: usize = 512;
+/// Passive emitters the warning receiver lists.
+pub const MAX_EMITTERS: usize = 32;
+/// Missile threat records kept.
+pub const MAX_THREATS: usize = 16;
+/// Missiles aimed at the plane kept for the warning tone and the music.
+pub const MAX_INBOUND: usize = 16;
+/// AI aircraft listed as holding a lock or aiming a missile.
+pub const MAX_AI_THREATS: usize = 16;
+
+/// The readout of one seat's plane at one instant.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CockpitReadout {
+    /// The plane it is for.
+    pub plane: u32,
+    /// The combat tick it shows: the warning tone's clock.
+    pub tick: u64,
+    /// Stores and the selected station.
+    pub stores: Stores,
+    /// The mounted seeker and its tone.
+    pub seeker: SeekerReadout,
+    /// What the weapon page and HUD estimate for the selected station.
+    pub estimates: Estimates,
+    /// The designated, displayed and view targets.
+    pub targets: Targets,
+    /// Radar and infrared contacts, plots, strobes and trails.
+    pub sensors: SensorReadout,
+    /// Visual contacts.
+    pub visual: Vec<Contact>,
+    /// Map contacts.
+    pub map: Vec<MapRow>,
+    /// Warning receiver emitters and missile records, and what the warning
+    /// tone hears.
+    pub rwr: RwrReadout,
+    /// Damage, faults and failure flags, and the plane's score.
+    pub damage: DamageReadout,
+    /// Chaff and flares left.
+    pub countermeasures: Countermeasures,
+    /// The tower's service and NAV mode.
+    pub airport: AirportReadout,
+    /// What the target window says of the displayed target beyond its row.
+    pub target_window: Option<TargetBrief>,
+    /// The situation music's inputs and the mission result.
+    pub music: MusicReadout,
+}
+
+impl CockpitReadout {
+    /// Any current observation of this object, on the active scope channel or
+    /// visually. Channels are never collapsed into one another.
+    pub fn observation(&self, id: u32) -> Option<&Contact> {
+        self.sensors
+            .contact(id)
+            .or_else(|| self.visual.iter().find(|contact| contact.id == id))
+    }
+}
+
+/// Stores and selection.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Stores {
+    /// The selected station.
+    pub selected: u8,
+    /// Arming: a weapon selected and armed, not NAV or safe.
+    pub armed: bool,
+    pub launch_mode: LaunchMode,
+    /// Rounds at each station; bit 0x8000 marks a failed station.
+    pub ammo: Vec<u16>,
+    /// Which stations held something at the start of the mission, a bit each.
+    pub loaded: u32,
+}
+impl Stores {
+    /// The rounds at `station`.
+    pub fn rounds(&self, station: usize) -> u16 {
+        self.ammo[station] & 0x7fff
+    }
+    /// Whether `station` has failed.
+    pub fn failed(&self, station: usize) -> bool {
+        self.ammo[station] & 0x8000 != 0
+    }
+    /// Whether `station` was loaded at the start of the mission, whatever it
+    /// holds now.
+    pub fn was_loaded(&self, station: usize) -> bool {
+        self.loaded & (1 << station) != 0
+    }
+    /// The selected station's index.
+    pub fn selected(&self) -> usize {
+        usize::from(self.selected)
+    }
+}
+
+/// The mounted seeker.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SeekerReadout {
+    pub status: seeker::Status,
+    pub target: Option<u32>,
+    pub observation: Option<seeker::Observation>,
+    /// The tone the seeker plays now; none when it is silent.
+    pub tone: Option<SeekerTone>,
+}
+
+/// The weapon estimates for the selected station, from the launcher the
+/// readout was built for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Estimates {
+    pub readiness: Readiness,
+    /// The selected weapon's guidance is available (the radar is on for a
+    /// radar missile).
+    pub guidance_available: bool,
+    /// A lock could be taken now.
+    pub can_lock: bool,
+    /// What the HUD shows of the target or the boresight return.
+    pub observation: Option<seeker::Observation>,
+    /// Maximum range of the shot, feet.
+    pub max_range: Option<f64>,
+    /// The favourable firing band, feet.
+    pub band: Option<FiringBand>,
+    pub in_range: bool,
+    /// Estimated hit percentage.
+    pub hit_percent: u8,
+    /// Seconds the missile would fly to the observed target.
+    pub solution_seconds: Option<f64>,
+}
+
+/// Where a target is and how hurt: what the HUD square, the target window and
+/// its camera and the flight views read of it. The aircraft's hit points are
+/// above zero: a destroyed target is neither displayed nor viewed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TargetRow {
+    pub id: u32,
+    /// Exact aircraft identity; `None` for a ground object.
+    pub aircraft: Option<AircraftId>,
+    pub position: Vector,
+    /// Ground-relative velocity, feet per second.
+    pub velocity: Vector,
+    /// Hit points, the initial ones and the damage in each section.
+    pub damage: Damage,
+}
+impl TargetRow {
+    pub fn of(target: &Target) -> Self {
+        Self {
+            id: target.id,
+            aircraft: target.aircraft,
+            position: target.position,
+            velocity: target.velocity,
+            damage: Damage {
+                hp: target.hp,
+                initial_hp: target.initial_hp,
+                sections: target.localized_damage.amounts,
+                structural: target.localized_damage.structural_section,
+            },
+        }
+    }
+    /// Hit points left.
+    pub fn hp(&self) -> i32 {
+        self.damage.hp
+    }
+}
+
+/// The targets of the seat.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Targets {
+    /// The designated target's identity.
+    pub designated: Option<u32>,
+    /// The target the HUD square and target window follow: the designated
+    /// one, or with Easy targeting the last one after the sensors lose it.
+    pub display: Option<TargetRow>,
+    /// The target the flight views follow: the displayed one, or a dropped
+    /// selection the pilot can still see (the sight hold).
+    pub view: Option<TargetRow>,
+}
+
+/// Where a trail's samples are in [`SensorReadout::trail_points`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Trail {
+    pub id: u32,
+    pub start: u16,
+    pub len: u8,
+}
+
+/// Radar and infrared.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SensorReadout {
+    /// The sensors' own step count: the scope's noise phase and the blink
+    /// clock of the HUD.
+    pub tick: u64,
+    pub selected: Option<u32>,
+    pub acquired: Option<u32>,
+    /// The track status of the selected target.
+    pub selected_support: Option<Support>,
+    /// Whether the radar, infrared and visual channels are installed.
+    pub available: [bool; 3],
+    /// Whether they are installed, powered and undamaged.
+    pub operating: [bool; 3],
+    /// The radar's track range in nautical miles: inside it the scope says TWS.
+    pub radar_track_nmi: Option<f64>,
+    /// Contacts of the active channel.
+    pub contacts: Vec<Contact>,
+    /// The last observations of lost contacts.
+    pub plots: Vec<Plot>,
+    /// Received noise as the scope shows it, fading included.
+    pub strobes: Vec<Strobe>,
+    /// Which samples of `trail_points` belong to which contact.
+    pub trails: Vec<Trail>,
+    /// The positions the contacts were recorded at, oldest first.
+    pub trail_points: Vec<Vector>,
+}
+impl SensorReadout {
+    const fn slot(channel: Channel) -> usize {
+        match channel {
+            Channel::Radar => 0,
+            Channel::Infrared => 1,
+            Channel::Visual => 2,
+        }
+    }
+    /// Whether the channel is installed.
+    pub fn available(&self, channel: Channel) -> bool {
+        self.available[Self::slot(channel)]
+    }
+    /// Whether the channel is installed, powered and undamaged.
+    pub fn operating(&self, channel: Channel) -> bool {
+        self.operating[Self::slot(channel)]
+    }
+    /// The mode a channel would report for `controls`; the label follows the
+    /// player's own control, never a step behind it.
+    pub fn mode_for(&self, channel: Channel, controls: &sensors::Controls) -> Option<Mode> {
+        match channel {
+            Channel::Infrared | Channel::Visual => Some(Mode::Infrared),
+            Channel::Radar => self.radar_track_nmi.map(|track| {
+                if controls.range_nmi() <= track {
+                    Mode::Tws
+                } else {
+                    Mode::Rws
+                }
+            }),
+        }
+    }
+    /// The recorded positions of contact `id`, oldest first.
+    pub fn trail(&self, id: u32) -> &[Vector] {
+        self.trails
+            .iter()
+            .find(|trail| trail.id == id)
+            .map_or(&[][..], |trail| {
+                let start = usize::from(trail.start);
+                &self.trail_points[start..start + usize::from(trail.len)]
+            })
+    }
+    /// A contact of the active channel by identity.
+    pub fn contact(&self, id: u32) -> Option<&Contact> {
+        self.contacts.iter().find(|contact| contact.id == id)
+    }
+}
+
+/// One map contact.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MapRow {
+    pub contact: Contact,
+    /// A visual return identified it.
+    pub identified: bool,
+    pub airborne: bool,
+    /// What an identified aircraft is.
+    pub aircraft: Option<AircraftId>,
+}
+
+/// A missile aimed at the plane.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InboundMissile {
+    pub id: u32,
+    pub position: Vector,
+    /// The seeker class of the weapon: 2 infrared, 3 radar.
+    pub seeker_class: u8,
+    /// An AIM-120, which the tone and the music ignore beyond a range.
+    pub aim120: bool,
+}
+
+/// The warning receiver.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RwrReadout {
+    /// Passive emitters received this step.
+    pub emitters: Vec<passive::Emitter>,
+    /// The missile threat service's records.
+    pub missiles: Vec<ThreatRecord>,
+    /// Missiles in flight aimed at the plane, for the warning tone.
+    pub inbound: Vec<InboundMissile>,
+    /// The seeker classes of the missile locks the AI holds on the plane.
+    pub locks: Vec<u8>,
+}
+
+/// Damage, faults and failures.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DamageReadout {
+    pub hp: i32,
+    pub damage: i32,
+    pub subsystem_counts: [u8; 45],
+    pub last_subsystem: Option<u8>,
+    pub radar_failed: bool,
+    pub visual_failed: bool,
+    pub infrared_failed: bool,
+    pub rwr_failed: bool,
+    pub ecm_failed: bool,
+    /// Rounds fired, hits and kills.
+    pub shots: u32,
+    pub hits: u32,
+    pub kills: u32,
+}
+
+/// Chaff and flares.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Countermeasures {
+    pub chaff: u8,
+    pub flares: u8,
+}
+
+/// The tower's service and NAV mode.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AirportReadout {
+    /// NAV is selected instead of a weapon.
+    pub nav_mode: bool,
+    /// The plane's conversation with the tower: the selected airport, the
+    /// clearance and which runways are usable. Absent outside a mission core.
+    pub service: Option<Service>,
+}
+
+/// The situation music's inputs that only the host knows, and the mission
+/// result.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MusicReadout {
+    /// The designated target when it is a live enemy aircraft: its identity
+    /// and where it is.
+    pub designated_enemy: Option<(u32, Vector)>,
+    /// AI aircraft that have the plane as their target and a guided
+    /// air-to-air missile ready.
+    pub aiming: Vec<u32>,
+    /// The mission's result was reached.
+    pub succeeded: bool,
+    /// The home condition was reached this flight (latched).
+    pub home: bool,
+}
+
+/// The nearest `keep` entries of `rows` by `distance`, in their own order.
+fn nearest<T>(rows: &mut Vec<T>, keep: usize, distance: impl Fn(&T) -> f64) {
+    if rows.len() <= keep {
+        return;
+    }
+    let mut order: Vec<usize> = (0..rows.len()).collect();
+    order.sort_by(|a, b| distance(&rows[*a]).total_cmp(&distance(&rows[*b])));
+    order.truncate(keep);
+    order.sort_unstable();
+    let mut index = 0;
+    let mut wanted = order.into_iter().peekable();
+    rows.retain(|_| {
+        let keep = wanted.peek() == Some(&index);
+        if keep {
+            wanted.next();
+        }
+        index += 1;
+        keep
+    });
+}
+
+fn away(a: Vector, b: Vector) -> f64 {
+    (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
+}
+
+/// The readout of `plane` from combat, for `launcher`. `wings` is the AI, for
+/// its locks, aims and the target window; `cockpit` holds what the plane keeps
+/// outside combat (the tower and the mission result). `None` when the plane
+/// has no ownship.
+pub fn build(
+    state: &live::State,
+    plane: u32,
+    launcher: Launcher,
+    wings: Option<&AiWings>,
+    cockpit: Option<&Cockpit>,
+) -> Option<CockpitReadout> {
+    let view = state.view(plane)?;
+    let own = view.ownship();
+    let display = view.display_target();
+    let here = launcher.position;
+
+    let estimates = Estimates {
+        readiness: view.readiness(launcher),
+        guidance_available: view.guidance_available(launcher),
+        can_lock: view.can_lock(launcher),
+        observation: view.weapon_observation(launcher),
+        max_range: view.estimated_max_range(launcher),
+        band: view.favorable_firing_band(launcher),
+        in_range: view.in_estimated_range(launcher),
+        hit_percent: view.estimated_hit_percent(launcher),
+        solution_seconds: view.mounted_solution(launcher).map(|s| s.seconds),
+    };
+
+    let sensors = &own.sensors;
+    let mut contacts = sensors.contacts().to_vec();
+    nearest(&mut contacts, MAX_CONTACTS, |c| c.distance_ft);
+    let mut trails = Vec::new();
+    let mut trail_points = Vec::new();
+    for contact in &contacts {
+        let samples = sensors.trail(contact.id);
+        if !samples.is_empty() {
+            trails.push(Trail {
+                id: contact.id,
+                start: trail_points.len() as u16,
+                len: samples.len() as u8,
+            });
+            trail_points.extend(samples.iter().map(|sample| sample.position));
+        }
+    }
+    let mut plots = sensors.plots().to_vec();
+    nearest(&mut plots, MAX_PLOTS, |p| p.distance_ft);
+    let mut strobes = sensors.display_strobes();
+    strobes.truncate(MAX_STROBES);
+    let mut visual = sensors.visual().to_vec();
+    nearest(&mut visual, MAX_VISUAL, |c| c.distance_ft);
+    let mut map: Vec<MapRow> = sensors
+        .map_contacts()
+        .iter()
+        .map(|observed| MapRow {
+            contact: observed.contact,
+            identified: observed.identified,
+            airborne: observed.airborne,
+            aircraft: observed
+                .identified
+                .then(|| view.contact(observed.contact.id))
+                .flatten()
+                .and_then(|target| target.aircraft),
+        })
+        .collect();
+    nearest(&mut map, MAX_MAP, |row| away(row.contact.position, here));
+    let sensor_readout = SensorReadout {
+        tick: sensors.tick(),
+        selected: sensors.selected(),
+        acquired: sensors.acquired(),
+        selected_support: sensors.selected().map(|id| sensors.track_status(id)),
+        available: [Channel::Radar, Channel::Infrared, Channel::Visual]
+            .map(|channel| sensors.available(channel)),
+        operating: [Channel::Radar, Channel::Infrared, Channel::Visual]
+            .map(|channel| sensors.operating(channel)),
+        radar_track_nmi: sensors
+            .profiles
+            .radar
+            .as_ref()
+            .map(|radar| radar.track.maximum_nmi()),
+        contacts,
+        plots,
+        strobes,
+        trails,
+        trail_points,
+    };
+
+    let mut emitters = own.emitters.clone();
+    nearest(&mut emitters, MAX_EMITTERS, |e| {
+        e.distance_nmi.unwrap_or(f64::MAX)
+    });
+    let mut missiles: Vec<ThreatRecord> = own.missile_threats.records().copied().collect();
+    missiles.truncate(MAX_THREATS);
+    let mut inbound: Vec<InboundMissile> = state
+        .projectiles
+        .iter()
+        .filter(|p| p.incoming.is_some() && p.target == Some(plane))
+        .map(|p| {
+            let weapon = state.weapon(p);
+            InboundMissile {
+                id: p.id,
+                position: p.position,
+                seeker_class: weapon.seeker.signature,
+                aim120: weapon.source.eq_ignore_ascii_case("AIM120.JT"),
+            }
+        })
+        .collect();
+    nearest(&mut inbound, MAX_INBOUND, |m| away(m.position, here));
+    let mut locks = wings.map_or_else(Vec::new, |w| w.locks_on(plane));
+    locks.truncate(MAX_AI_THREATS);
+
+    // Live, the other side, and an aircraft. Without AI wings every
+    // non-friendly target (range and fixture aircraft) counts as the other
+    // side.
+    let designated_enemy = view
+        .designated()
+        .and_then(|id| view.contact(id))
+        .filter(|t| t.hp > 0 && t.role == TargetRole::Aircraft)
+        .filter(|t| {
+            wings.map_or(!own.friendlies.contains(&t.id), |w| {
+                w.slot(t.id).is_some_and(|slot| slot.side.is_enemy())
+            })
+        })
+        .map(|t| (t.id, t.position));
+    let mut aiming = wings.map_or_else(Vec::new, |w| w.aiming_at(plane));
+    aiming.truncate(MAX_AI_THREATS);
+    let status = cockpit.map(|cockpit| cockpit.result.status());
+
+    Some(CockpitReadout {
+        plane,
+        tick: state.tick(),
+        stores: Stores {
+            selected: own.selected as u8,
+            armed: own.armed,
+            launch_mode: own.launch_mode,
+            ammo: own.ammo.clone(),
+            loaded: (0..own.ammo.len())
+                .filter(|station| own.was_loaded(*station))
+                .fold(0, |mask, station| mask | 1 << station),
+        },
+        seeker: SeekerReadout {
+            status: own.mounted.status,
+            target: own.mounted.target,
+            observation: own.mounted.observation,
+            tone: view.seeker_tone(launcher),
+        },
+        estimates,
+        targets: Targets {
+            designated: view.designated(),
+            display: display.map(TargetRow::of),
+            view: view.view_target().map(TargetRow::of),
+        },
+        sensors: sensor_readout,
+        visual,
+        map,
+        rwr: RwrReadout {
+            emitters,
+            missiles,
+            inbound,
+            locks,
+        },
+        damage: DamageReadout {
+            hp: own.hp,
+            damage: own.damage,
+            subsystem_counts: own.subsystem_counts,
+            last_subsystem: own.last_subsystem.map(|i| i as u8),
+            radar_failed: own.radar_failed,
+            visual_failed: own.visual_failed,
+            infrared_failed: own.infrared_failed,
+            rwr_failed: own.rwr_failed,
+            ecm_failed: own.ecm_failed,
+            shots: own.shots,
+            hits: own.hits,
+            kills: own.kills,
+        },
+        countermeasures: Countermeasures {
+            chaff: own.chaff,
+            flares: own.flares,
+        },
+        airport: AirportReadout {
+            nav_mode: cockpit.is_some_and(|cockpit| cockpit.airport_nav_mode),
+            service: cockpit.map(|cockpit| cockpit.airport_service.clone()),
+        },
+        target_window: display
+            .zip(wings)
+            .map(|(target, wings)| TargetBrief::of(wings, plane, target.id)),
+        music: MusicReadout {
+            designated_enemy,
+            aiming,
+            succeeded: status.as_ref().is_some_and(|status| status.succeeded),
+            home: status.as_ref().is_some_and(|status| status.home),
+        },
+    })
+}
+
+/// Bits, counted plain: every field at its natural width with one tag bit for
+/// each option, and no coding at all.
+pub trait PlainBits {
+    fn plain_bits(&self) -> usize;
+}
+const VECTOR: usize = 3 * 64;
+fn option<T>(value: &Option<T>, bits: impl Fn(&T) -> usize) -> usize {
+    1 + value.as_ref().map_or(0, bits)
+}
+impl PlainBits for Contact {
+    fn plain_bits(&self) -> usize {
+        // id, channel, bearing, elevation, distance, position, velocity,
+        // eligible and destroyed.
+        32 + 2 + 3 * 64 + 2 * VECTOR + 2
+    }
+}
+impl PlainBits for TargetRow {
+    fn plain_bits(&self) -> usize {
+        // id, aircraft, position, velocity, hit points, initial, six
+        // sections, structural.
+        32 + option(&self.aircraft, |_| 16) + 2 * VECTOR + 2 * 32 + 6 * 32 + 4
+    }
+}
+impl CockpitReadout {
+    /// The plain bits of each group, in the order of the fields: header,
+    /// stores, seeker, estimates, targets, sensors, visual, map, rwr, damage,
+    /// countermeasures, airport, target window, music.
+    pub fn group_bits(&self) -> [(&'static str, usize); 14] {
+        let observation = |_: &seeker::Observation| 32 + 2 * VECTOR + 3 * 64;
+        let stores = 8 + 1 + 1 + 16 * self.stores.ammo.len() + 32;
+        let seeker = 4
+            + option(&self.seeker.target, |_| 32)
+            + option(&self.seeker.observation, observation)
+            + option(&self.seeker.tone, |_| 64 + 3);
+        let estimates = 5
+            + 1
+            + 1
+            + option(&self.estimates.observation, observation)
+            + option(&self.estimates.max_range, |_| 64)
+            + option(&self.estimates.band, |_| 128)
+            + 1
+            + 8
+            + option(&self.estimates.solution_seconds, |_| 64);
+        let targets = option(&self.targets.designated, |_| 32)
+            + option(&self.targets.display, PlainBits::plain_bits)
+            + option(&self.targets.view, PlainBits::plain_bits);
+        let sensors = &self.sensors;
+        let sensor_bits = 64
+            + option(&sensors.selected, |_| 32)
+            + option(&sensors.acquired, |_| 32)
+            + option(&sensors.selected_support, |_| 4)
+            + 6
+            + option(&sensors.radar_track_nmi, |_| 64)
+            + sensors
+                .contacts
+                .iter()
+                .map(PlainBits::plain_bits)
+                .sum::<usize>()
+            // id, channel, bearing, elevation, distance, position, age
+            + sensors.plots.len() * (32 + 2 + 3 * 64 + VECTOR + 32)
+            // id, bearing, elevation, received, width, floor
+            + sensors.strobes.len() * (32 + 5 * 64)
+            + sensors.trails.len() * (32 + 16 + 8)
+            + sensors.trail_points.len() * VECTOR;
+        let visual = self.visual.iter().map(PlainBits::plain_bits).sum::<usize>();
+        let map = self
+            .map
+            .iter()
+            .map(|row| row.contact.plain_bits() + 2 + option(&row.aircraft, |_| 16))
+            .sum::<usize>();
+        let rwr = &self.rwr;
+        let rwr_bits =
+            // id, bearing, distance, symbol, strength
+            rwr.emitters.len() * (32 + 64 + 1 + 64 + 2 + 64)
+            // id, source, tick, bearing, position, velocity, class, flags,
+            // radar bearing
+            + rwr.missiles.len() * (32 + 2 + 64 + 64 + 1 + VECTOR + 1 + VECTOR + 3 + 3 + 1 + 64)
+            + rwr.inbound.len() * (32 + VECTOR + 8 + 1)
+            + rwr.locks.len() * 8;
+        let damage = 32 + 32 + 45 * 8 + 9 + 5 + 3 * 32;
+        // NAV, then the selected airport and the clearance (airport, runway,
+        // end). The runways that are down are not counted: the service keeps
+        // them in a map of the scene's objects.
+        let airport = 1 + self
+            .airport
+            .service
+            .as_ref()
+            .map_or(0, |_| (1 + 32) + (1 + 32 + 32 + 1));
+        // id, objective, pilot kind, activity, skill, aims at the viewer
+        let window = option(&self.target_window, |_| 32 + 2 + 2 + 6 + 8 + 1);
+        let music = option(&self.music.designated_enemy, |_| 32 + VECTOR)
+            + 32 * self.music.aiming.len()
+            + 2;
+        [
+            ("header", 32 + 64),
+            ("stores", stores),
+            ("seeker", seeker),
+            ("estimates", estimates),
+            ("targets", targets),
+            ("sensors", sensor_bits),
+            ("visual", visual),
+            ("map", map),
+            ("rwr", rwr_bits),
+            ("damage", damage),
+            ("countermeasures", 16),
+            ("airport", airport),
+            ("target window", window),
+            ("music", music),
+        ]
+    }
+}
+impl PlainBits for CockpitReadout {
+    fn plain_bits(&self) -> usize {
+        self.group_bits().iter().map(|(_, bits)| bits).sum()
+    }
+}

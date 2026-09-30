@@ -9,13 +9,19 @@
 //! plane is plane 0. Nothing here draws.
 
 use crate::{
+    combat::launcher,
+    readout::CockpitReadout,
     seats::{PlaneId, SeatId},
     snapshot::RenderSnapshot,
     world::{Cue, World},
 };
 use std::borrow::Cow;
 use tore_sim::{
-    combat::{countermeasures::Devices, smoke::Smoke},
+    combat::{
+        countermeasures::Devices,
+        live::{Configuration, Launcher},
+        smoke::Smoke,
+    },
     flight,
 };
 
@@ -41,6 +47,14 @@ pub struct FlightFrame<'a> {
     pub smoke: [&'a Smoke; 2],
     /// Chaff cartridges and flares in the air.
     pub devices: &'a Devices,
+    /// What the plane carries and how its weapons and sensors are made: the
+    /// loadout, which changes only when the stores are loaded. Read the
+    /// stores left in `readout`.
+    pub config: &'a Configuration,
+    /// What the seat's displays and cockpit sounds show that only the host
+    /// knows, for the flight `presented` is (a tick's frame and a frozen
+    /// flight show the flight as the last tick left it).
+    pub readout: CockpitReadout,
     /// The cues of the tick this frame presents, every seat's; read them with
     /// [`FlightFrame::cues`]. Empty for a frame drawn between ticks.
     pub tick_cues: &'a [Cue],
@@ -139,6 +153,21 @@ impl World {
         }
     }
 
+    /// The cockpit readout of `seat`'s plane for `launcher`, the plane's
+    /// position, attitude, speed and devices as the caller presents them, or
+    /// `None` when the seat flies no plane. Single player builds it every
+    /// rendered frame from the interpolated flight; a host builds it at each
+    /// snapshot from the tick's flight.
+    pub fn cockpit_readout(&self, seat: SeatId, launcher: Launcher) -> Option<CockpitReadout> {
+        let cockpit = &self.cockpits[self.cockpit_of(seat)?];
+        self.combat.cockpit_readout(
+            cockpit.plane.0,
+            launcher,
+            self.ai_wings.as_ref(),
+            Some(cockpit),
+        )
+    }
+
     /// The flight frame of `seat`, or `None` when it flies no plane.
     ///
     /// `presented` is the plane's flight blended to this frame's instant, and
@@ -154,15 +183,24 @@ impl World {
         cues: &'a [Cue],
     ) -> Option<FlightFrame<'a>> {
         let cockpit = &self.cockpits[self.cockpit_of(seat)?];
+        let presented = presented.map_or(Cow::Borrowed(&cockpit.flight), Cow::Owned);
+        let readout = self.combat.cockpit_readout(
+            cockpit.plane.0,
+            launcher(&presented),
+            self.ai_wings.as_ref(),
+            Some(cockpit),
+        )?;
         Some(FlightFrame {
             seat,
             plane: cockpit.plane,
             flight: &cockpit.flight,
             previous: &cockpit.previous_flight,
-            presented: presented.map_or(Cow::Borrowed(&cockpit.flight), Cow::Owned),
+            presented,
             picture,
             smoke: [&self.combat.state.smoke, &self.combat.contrails],
             devices: &self.combat.state.devices,
+            config: self.combat.state.ownship(cockpit.plane.0)?.configuration(),
+            readout,
             tick_cues: cues,
         })
     }

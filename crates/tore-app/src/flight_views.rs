@@ -125,10 +125,11 @@ impl Scene {
             missiles,
         }
     }
-    /// The scene of the flight screen of the human who flies `plane`, in the
-    /// flight state `player`: that plane is the scene's player.
+    /// The scene of the flight screen `frame` is for, in the flight state
+    /// `player`: the frame's plane is the scene's player and the frame's view
+    /// target, which its readout names, is the selected target.
     pub fn new(
-        plane: u32,
+        frame: &crate::frame::FlightFrame,
         player: &flight::State,
         combat: &Combat,
         wings: Option<&crate::ai_wings::AiWings>,
@@ -136,16 +137,12 @@ impl Scene {
     ) -> Self {
         Self::from_parts(
             Body::new(
-                plane,
+                frame.plane.0,
                 player.view_position(),
                 player.velocity,
                 Basis::new(player.yaw, player.pitch, player.bank),
             ),
-            combat
-                .state
-                .view(plane)
-                .and_then(|view| view.view_target())
-                .map(|t| t.id),
+            frame.readout.targets.view.as_ref().map(|t| t.id),
             combat
                 .state
                 .targets

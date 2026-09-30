@@ -1,8 +1,7 @@
 //! Manual-style weapon symbols with fitted layout and simulation-owned state.
 use crate::{
-    combat,
-    combat_view::PlaneState,
-    flight,
+    combat, flight,
+    frame::FlightFrame,
     hud::{self, Paint},
 };
 use tore_formats::font::Font;
@@ -16,10 +15,10 @@ use tore_sim::{
 };
 
 /// Reserve the weapon readout area even for a safe gun, keeping flight text clear.
-pub fn active(state: &live::State, plane: u32) -> bool {
-    let weapon = &state.own_of(plane).configuration().stations[state.own_of(plane).selected].weapon;
+pub fn active(frame: &FlightFrame) -> bool {
+    let weapon = &frame.config.stations[frame.readout.stores.selected()].weapon;
     live::is_gun(weapon)
-        || (state.own_of(plane).armed && missiles::Profile::for_weapon(weapon).is_some())
+        || (frame.readout.stores.armed && missiles::Profile::for_weapon(weapon).is_some())
 }
 
 fn debug_point(point: (f64, f64), size: [f64; 2]) -> (f64, f64) {
@@ -69,20 +68,19 @@ fn boundary(basis: Basis, horizontal: f64, vertical: f64) -> Vec<Vector> {
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
     pixels: &mut [u8],
-    s: &flight::State,
-    state: &live::State,
-    plane: u32,
+    frame: &FlightFrame,
     font: &Font,
     color: [u8; 3],
     zoom: f64,
-    nav_mode: bool,
     target_friendly: bool,
     target_cue: bool,
 ) {
+    let s = frame.presented();
+    let ro = &frame.readout;
     if target_cue {
-        draw_target(pixels, s, state, plane, color, zoom, target_friendly);
+        draw_target(pixels, frame, color, zoom, target_friendly);
     }
-    if nav_mode {
+    if ro.airport.nav_mode {
         Paint {
             pixels,
             clip: hud::HUD_CLIP,
@@ -91,16 +89,14 @@ pub fn draw(
         .text(font, "NAV", 207, 259);
         return;
     }
-    if live::is_gun(
-        &state.own_of(plane).configuration().stations[state.own_of(plane).selected].weapon,
-    ) {
-        draw_gun(pixels, s, state, plane, font, color, zoom);
+    if live::is_gun(&frame.config.stations[ro.stores.selected()].weapon) {
+        draw_gun(pixels, frame, font, color, zoom);
         return;
     }
-    if !active(state, plane) {
+    if !active(frame) {
         return;
     }
-    let station = &state.own_of(plane).configuration().stations[state.own_of(plane).selected];
+    let station = &frame.config.stations[ro.stores.selected()];
     let w = &station.weapon;
     let Some(profile) = missiles::Profile::for_weapon(w) else {
         return;
@@ -111,15 +107,14 @@ pub fn draw(
         clip: hud::HUD_CLIP,
         color: [color[0], color[1], color[2], 255],
     };
-    let bore = state.view_of(plane).guidance_available(l)
-        && state.own_of(plane).launch_mode == LaunchMode::Boresight;
+    let bore = ro.estimates.guidance_available && ro.stores.launch_mode == LaunchMode::Boresight;
     let cap = if bore {
         profile.search_cap()
     } else {
         std::f64::consts::PI
     };
     let zone = &w.seeker.zones[0];
-    let cone = if !state.view_of(plane).guidance_available(l) {
+    let cone = if !ro.estimates.guidance_available {
         Vec::new()
     } else if bore {
         let angle = cap
@@ -160,20 +155,17 @@ pub fn draw(
             );
         }
     }
-    let observed = state.view_of(plane).weapon_observation(l);
-    let in_range = state.view_of(plane).in_estimated_range(l);
+    let observed = ro.estimates.observation;
+    let in_range = ro.estimates.in_range;
     if let Some(observation) = observed {
         let position = observation.position;
         if let Some((x, y)) = projected(missiles::sub(position, s.position), s, zoom) {
             let radar_in_range =
                 matches!(profile.guidance, Guidance::Active | Guidance::Supported) && in_range;
             if diamond_visible(
-                bore || matches!(
-                    state.own_of(plane).mounted.status,
-                    Status::Locked | Status::Pitbull
-                ),
+                bore || matches!(ro.seeker.status, Status::Locked | Status::Pitbull),
                 bore || radar_in_range,
-                state.own_of(plane).sensors.tick(),
+                ro.sensors.tick,
             ) {
                 for (a, b) in [
                     ((0., -7.), (7., 0.)),
@@ -187,7 +179,7 @@ pub fn draw(
         }
         let range = missiles::length(missiles::sub(position, s.position));
         let min = f64::from(w.seeker.zones[1].minimum_range);
-        let max = state.view_of(plane).estimated_max_range(l).unwrap_or(0.);
+        let max = ro.estimates.max_range.unwrap_or(0.);
         // Retail reference: range scale just inside the altitude tape.
         let text_width = |text: &str| {
             text.glyph_codes()
@@ -209,7 +201,7 @@ pub fn draw(
         paint.text(font, &maximum, right - text_width(&maximum), 218);
         paint.text(font, &minimum, right - text_width(&minimum), 284);
         if max > min
-            && let Some(band) = state.view_of(plane).favorable_firing_band(l)
+            && let Some(band) = ro.estimates.band
         {
             let scale_y =
                 |range: f64| bottom - (bottom - top) * ((range - min) / (max - min)).clamp(0., 1.);
@@ -218,7 +210,7 @@ pub fn draw(
             paint.line((x - 6., upper), (x, upper));
             paint.line((x - 6., lower), (x, lower));
         }
-        if max > min && (!bore || state.own_of(plane).sensors.tick() % 60 < 30) {
+        if max > min && (!bore || ro.sensors.tick % 60 < 30) {
             let y = bottom - (bottom - top) * ((range - min) / (max - min)).clamp(0., 1.);
             paint.line((x - 8., y - 3.), (x - 2., y));
             paint.line((x - 2., y), (x - 8., y + 3.));
@@ -228,18 +220,14 @@ pub fn draw(
     paint.text(font, "ARM", 207, 259);
     paint.text(
         font,
-        &format!(
-            "{} {}",
-            state.own_of(plane).rounds(state.own_of(plane).selected),
-            w.hud_name
-        ),
+        &format!("{} {}", ro.stores.rounds(ro.stores.selected()), w.hud_name),
         207,
         271,
     );
-    let ready = state.view_of(plane).readiness(l);
-    let percent = format!("{}%", state.view_of(plane).estimated_hit_percent(l));
+    let ready = ro.estimates.readiness;
+    let percent = format!("{}%", ro.estimates.hit_percent);
     paint.text(font, &percent, 207, 283);
-    if in_range && state.own_of(plane).sensors.tick() % 60 < 30 {
+    if in_range && ro.sensors.tick % 60 < 30 {
         let width: usize = percent
             .glyph_codes()
             .map(|c| font.glyphs[c as usize].advance)
@@ -325,28 +313,27 @@ fn target_cue(direction: Vector, basis: Basis, zoom: f64) -> Option<TargetCue> {
 }
 /// Whether the HUD draws the selected target's square itself, rather than an
 /// edge arrow.
-pub fn target_in_hud(s: &flight::State, state: &live::State, plane: u32, zoom: f64) -> bool {
-    state.view_of(plane).display_target().is_some_and(|target| {
-        matches!(
-            target_cue(
-                missiles::sub(target.position, s.position),
-                Basis::new(s.yaw, s.pitch, s.bank),
-                zoom,
-            ),
-            Some(TargetCue::Square(_))
-        )
-    })
+pub fn target_in_hud(frame: &FlightFrame, zoom: f64) -> bool {
+    let s = frame.presented();
+    frame
+        .readout
+        .targets
+        .display
+        .as_ref()
+        .is_some_and(|target| {
+            matches!(
+                target_cue(
+                    missiles::sub(target.position, s.position),
+                    Basis::new(s.yaw, s.pitch, s.bank),
+                    zoom,
+                ),
+                Some(TargetCue::Square(_))
+            )
+        })
 }
-fn draw_target(
-    pixels: &mut [u8],
-    s: &flight::State,
-    state: &live::State,
-    plane: u32,
-    color: [u8; 3],
-    zoom: f64,
-    friendly: bool,
-) {
-    let Some(target) = state.view_of(plane).display_target() else {
+fn draw_target(pixels: &mut [u8], frame: &FlightFrame, color: [u8; 3], zoom: f64, friendly: bool) {
+    let s = frame.presented();
+    let Some(target) = &frame.readout.targets.display else {
         return;
     };
     replay_target(pixels, s, target.position, color, zoom, friendly);
@@ -405,26 +392,20 @@ fn draw_target_box(paint: &mut Paint<'_>, (x, y): (f64, f64), friendly: bool) {
     }
 }
 
-fn draw_gun(
-    pixels: &mut [u8],
-    s: &flight::State,
-    state: &live::State,
-    plane: u32,
-    font: &Font,
-    color: [u8; 3],
-    zoom: f64,
-) {
+fn draw_gun(pixels: &mut [u8], frame: &FlightFrame, font: &Font, color: [u8; 3], zoom: f64) {
+    let s = frame.presented();
+    let ro = &frame.readout;
     let mut paint = Paint {
         pixels,
         clip: hud::HUD_CLIP,
         color: [color[0], color[1], color[2], 255],
     };
-    let station = &state.own_of(plane).configuration().stations[state.own_of(plane).selected];
+    let station = &frame.config.stations[ro.stores.selected()];
     paint.text(
         font,
         &format!(
             "{} {}",
-            state.own_of(plane).rounds(state.own_of(plane).selected),
+            ro.stores.rounds(ro.stores.selected()),
             station.weapon.hud_name
         ),
         207,
@@ -432,34 +413,27 @@ fn draw_gun(
     );
     paint.text(
         font,
-        if state.own_of(plane).armed {
-            "LCOS"
-        } else {
-            "SAFE"
-        },
+        if ro.stores.armed { "LCOS" } else { "SAFE" },
         207,
         259,
     );
     let l = combat::launcher(s);
-    if !state.own_of(plane).armed
+    if !ro.stores.armed
         || !l.alive
-        || state.own_of(plane).rounds(state.own_of(plane).selected) == 0
-        || state.view_of(plane).readiness(l) == live::Readiness::StationFailed
+        || ro.stores.rounds(ro.stores.selected()) == 0
+        || ro.estimates.readiness == live::Readiness::StationFailed
     {
         return;
     }
-    let observation = state
-        .view_of(plane)
-        .designated()
-        .and_then(|id| state.own_of(plane).sensors.observation(id))
+    let observation = ro
+        .targets
+        .designated
+        .and_then(|id| ro.observation(id))
         .filter(|c| !c.destroyed);
     let radar = observation
         .filter(|c| {
             c.channel == tore_sim::sensors::Channel::Radar
-                && state
-                    .own_of(plane)
-                    .sensors
-                    .operating(tore_sim::sensors::Channel::Radar)
+                && ro.sensors.operating(tore_sim::sensors::Channel::Radar)
                 && l.radar
         })
         .map(|c| gunsight::TargetObservation {
@@ -551,13 +525,13 @@ fn draw_gun_solution(
 /// when Pref > Weapon diagnostics? is on; the host gates drawing and clicks.
 pub fn debug(
     pixels: &mut [u8],
+    frame: &FlightFrame,
     state: &live::State,
-    plane: u32,
-    s: &flight::State,
     font: &Font,
     color: [u8; 3],
-    nav_mode: bool,
 ) {
+    let s = frame.presented();
+    let ro = &frame.readout;
     let mut paint = Paint {
         pixels,
         clip: (0, 0, 250, 96),
@@ -567,16 +541,14 @@ pub fn debug(
     paint.color = [color[0], color[1], color[2], 255];
     paint.text(
         font,
-        if nav_mode {
+        if ro.airport.nav_mode {
             "NAV"
-        } else if live::is_gun(
-            &state.own_of(plane).configuration().stations[state.own_of(plane).selected].weapon,
-        ) {
+        } else if live::is_gun(&frame.config.stations[ro.stores.selected()].weapon) {
             "GUN"
         } else if state.weapon_rules == missiles::Rules::Compatibility {
             "COMPATIBILITY"
         } else {
-            state.own_of(plane).launch_mode.label()
+            ro.stores.launch_mode.label()
         },
         4,
         4,
@@ -584,28 +556,27 @@ pub fn debug(
     paint.text(font, "[RELEASE LOCK]", 132, 4);
     paint.text(
         font,
-        if state.own_of(plane).armed {
-            state.own_of(plane).mounted.status.label()
+        if ro.stores.armed {
+            ro.seeker.status.label()
         } else {
             "SAFE"
         },
         4,
         18,
     );
-    let l = combat::launcher(s);
-    let details = if let Some(o) = state.view_of(plane).weapon_observation(l) {
+    let details = if let Some(o) = ro.estimates.observation {
         let closing = missiles::closure(s.position, s.velocity, o.position, o.velocity) / 1.68781;
         format!("R {:.1}NM C {closing:+.0}KT", o.range / missiles::NMI)
     } else {
         "R -- C --".into()
     };
     paint.text(font, &details, 4, 32);
-    let time = state
-        .view_of(plane)
-        .mounted_solution(l)
-        .map_or_else(|| "EST --".into(), |s| format!("EST {:.1}S", s.seconds));
+    let time = ro
+        .estimates
+        .solution_seconds
+        .map_or_else(|| "EST --".into(), |seconds| format!("EST {seconds:.1}S"));
     paint.text(font, &time, 4, 44);
-    if let Some(o) = state.view_of(plane).weapon_observation(l)
+    if let Some(o) = ro.estimates.observation
         && missiles::length(o.velocity) > 1e-9
     {
         let aspect = dot(
@@ -631,10 +602,7 @@ pub fn debug(
             .unwrap_or(f.profile.guidance_ticks)
             .saturating_sub(shot.age) as f64
             / 120.;
-        let motor = match missiles::phase(
-            &shot.weapon(state.own_of(plane).configuration()).movement,
-            shot.age,
-        ) {
+        let motor = match missiles::phase(&shot.weapon(frame.config).movement, shot.age) {
             tore_sim::combat::EnginePhase::BeforeIgnition => "WAIT",
             tore_sim::combat::EnginePhase::Powered => "BURN",
             tore_sim::combat::EnginePhase::Coast => "COAST",
@@ -644,7 +612,7 @@ pub fn debug(
             &format!(
                 "#{} {} {} {motor} {remaining:.0}S",
                 shot.id,
-                shot.weapon(state.own_of(plane).configuration()).hud_name,
+                shot.weapon(frame.config).hud_name,
                 if f.seeker.status == Status::Search && f.profile.guidance != Guidance::Active {
                     "SEARCH"
                 } else {

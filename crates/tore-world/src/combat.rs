@@ -281,6 +281,19 @@ impl Combat {
     fn first_row(&self) -> u32 {
         u32::from(!self.open)
     }
+    /// The cockpit readout of `plane` for `launcher`, or `None` when it has no
+    /// ownship. `wings` supplies the AI's part of the readout and `cockpit`
+    /// what the plane keeps outside combat (the tower and the mission result);
+    /// without them those parts are empty. See [`crate::readout`].
+    pub fn cockpit_readout(
+        &self,
+        plane: u32,
+        launcher: Launcher,
+        wings: Option<&crate::ai_wings::AiWings>,
+        cockpit: Option<&crate::world::Cockpit>,
+    ) -> Option<crate::readout::CockpitReadout> {
+        crate::readout::build(&self.state, plane, launcher, wings, cockpit)
+    }
     /// Player airborne startup convention: canonical gun selected and armed.
     pub fn apply_startup_weapons(&mut self) {
         let (guns_only, unlimited_ammo) = (

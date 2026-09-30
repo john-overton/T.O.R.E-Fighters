@@ -2,14 +2,62 @@
 //! target, built from simulation state with no clock, camera or drawing. The
 //! refresh timer and the target camera are in `target_preview`. See
 //! docs/spec/target-window.md.
-use crate::ai_wings::AiWings;
-use tore_sim::combat::live::Target;
+use crate::{ai_wings::AiWings, readout::TargetRow};
+use tore_sim::ai::controller::Activity;
 use tore_sim::flight::State;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TargetObjective {
     Survive,
     Destroy,
+}
+
+/// What the AI says about the displayed target: the part of the window that
+/// only the host knows. Part of the cockpit readout
+/// ([`crate::readout::CockpitReadout`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TargetBrief {
+    pub id: u32,
+    /// What the viewer's mission asks of the target.
+    pub objective: Option<TargetObjective>,
+    pub pilot: Pilot,
+}
+
+/// Who flies the displayed target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pilot {
+    /// Nobody the AI knows: a ground object, or no AI in the mission.
+    None,
+    /// A straight-flight fixture.
+    Dummy,
+    /// An AI pilot.
+    Ai {
+        activity: Activity,
+        /// The pilot's skill level.
+        skill: u8,
+        /// The pilot's chosen target is the viewer's plane.
+        aims_at_viewer: bool,
+    },
+}
+
+impl TargetBrief {
+    /// What the AI says of target `id` to the human who flies `viewer`.
+    pub fn of(wings: &AiWings, viewer: u32, id: u32) -> Self {
+        let pilot = match wings.mission().actor(id) {
+            None => Pilot::None,
+            Some(actor) if actor.is_dummy() => Pilot::Dummy,
+            Some(actor) => Pilot::Ai {
+                activity: actor.activity(),
+                skill: actor.controller().experience().level.level(),
+                aims_at_viewer: actor.controller().target() == Some(viewer),
+            },
+        };
+        Self {
+            id,
+            objective: wings.target_objective(viewer, id),
+            pilot,
+        }
+    }
 }
 
 pub struct Readout {
@@ -25,7 +73,7 @@ pub struct Readout {
     pub skill: Option<u8>,
 }
 impl Readout {
-    pub fn new(target: &Target, player: &State, name: String) -> Self {
+    pub fn new(target: &TargetRow, player: &State, name: String) -> Self {
         let offset: [f64; 3] = std::array::from_fn(|i| target.position[i] - player.position[i]);
         let bearing = clock_bearing(offset[0].atan2(offset[2]) - player.yaw);
         let altitude = elevation_label(offset);
@@ -33,7 +81,7 @@ impl Readout {
         Self {
             id: target.id,
             name,
-            damage: damage_fraction(target.hp, target.initial_hp),
+            damage: damage_fraction(target.damage.hp, target.damage.initial_hp),
             bearing: format!("{bearing}:00{altitude}"),
             metric: metric(player.ticks, norm(offset), norm(target.velocity)),
             objective: None,
@@ -43,29 +91,31 @@ impl Readout {
             skill: None,
         }
     }
-    pub fn with_activity(&mut self, wings: &AiWings, viewer: u32) {
-        self.objective = wings.target_objective(viewer, self.id);
-        let Some(actor) = wings.mission().actor(self.id) else {
-            return;
-        };
-        if actor.is_dummy() {
-            self.activity = "DUMMY 400 KTS".into();
-            self.goal = "N";
-            self.skill = None;
-            self.player_goal = false;
-            return;
+    /// Adds what the host knows of the target.
+    pub fn with_brief(&mut self, brief: &TargetBrief) {
+        self.objective = brief.objective;
+        match brief.pilot {
+            Pilot::None => {}
+            Pilot::Dummy => {
+                self.activity = "DUMMY 400 KTS".into();
+                self.goal = "N";
+                self.skill = None;
+                self.player_goal = false;
+            }
+            Pilot::Ai {
+                activity,
+                skill,
+                aims_at_viewer,
+            } => {
+                self.activity = activity.label().to_ascii_uppercase();
+                self.skill = Some(skill);
+                (self.goal, self.player_goal) = activity_goal(activity, aims_at_viewer);
+            }
         }
-        self.activity = actor.activity().label().to_ascii_uppercase();
-        self.skill = Some(actor.controller().experience().level.level());
-        (self.goal, self.player_goal) =
-            activity_goal(actor.activity(), actor.controller().target());
     }
 }
-fn activity_goal(
-    activity: tore_sim::ai::controller::Activity,
-    target: Option<u32>,
-) -> (&'static str, bool) {
-    use tore_sim::ai::controller::Activity;
+/// The goal letter of an activity, and whether it is an attack on the viewer.
+fn activity_goal(activity: Activity, aims_at_viewer: bool) -> (&'static str, bool) {
     let goal = match activity {
         Activity::Pursuing | Activity::Attacking => "A",
         Activity::Defending | Activity::Evading | Activity::Breaking => "E",
@@ -83,10 +133,7 @@ fn activity_goal(
         | Activity::ReturningToBase
         | Activity::OutOfFuel => "N",
     };
-    (
-        goal,
-        goal == "A" && target == Some(crate::ai_wings::PLAYER_ID),
-    )
+    (goal, goal == "A" && aims_at_viewer)
 }
 /// User-requested ten-degree threshold from the world horizontal plane.
 /// Comparing rise against run * tan(10 degrees) also handles overhead targets
@@ -150,32 +197,38 @@ mod tests {
     #[test]
     fn goals_only_underline_confirmed_player_attacks() {
         use tore_sim::ai::controller::Activity;
-        assert_eq!(activity_goal(Activity::Attacking, Some(0)), ("A", true));
-        assert_eq!(activity_goal(Activity::Attacking, Some(7)), ("A", false));
-        assert_eq!(activity_goal(Activity::Pursuing, None), ("A", false));
+        assert_eq!(activity_goal(Activity::Attacking, true), ("A", true));
+        assert_eq!(activity_goal(Activity::Attacking, false), ("A", false));
+        assert_eq!(activity_goal(Activity::Pursuing, false), ("A", false));
         // Selected attack target does not identify the threat being evaded.
-        assert_eq!(activity_goal(Activity::Evading, Some(0)), ("E", false));
-        assert_eq!(activity_goal(Activity::Searching, Some(0)), ("N", false));
-        assert_eq!(activity_goal(Activity::Acquiring, Some(0)), ("N", false));
-        assert_eq!(activity_goal(Activity::Rejoining, Some(0)), ("N", false));
-        assert_eq!(activity_goal(Activity::ReturningToBase, None), ("N", false));
-        assert_eq!(activity_goal(Activity::Destroyed, None), ("C", false));
+        assert_eq!(activity_goal(Activity::Evading, true), ("E", false));
+        assert_eq!(activity_goal(Activity::Searching, true), ("N", false));
+        assert_eq!(activity_goal(Activity::Acquiring, true), ("N", false));
+        assert_eq!(activity_goal(Activity::Rejoining, true), ("N", false));
+        assert_eq!(
+            activity_goal(Activity::ReturningToBase, false),
+            ("N", false)
+        );
+        assert_eq!(activity_goal(Activity::Destroyed, false), ("C", false));
     }
     #[test]
     fn airfield_activities_use_the_manual_takeoff_and_land_codes() {
         use tore_sim::ai::controller::Activity;
         for activity in [Activity::Waiting, Activity::Taxiing, Activity::TakingOff] {
-            assert_eq!(activity_goal(activity, Some(0)), ("T", false));
+            assert_eq!(activity_goal(activity, true), ("T", false));
         }
         for activity in [
             Activity::HoldingMarshal,
             Activity::Landing,
             Activity::Landed,
         ] {
-            assert_eq!(activity_goal(activity, Some(0)), ("L", false));
+            assert_eq!(activity_goal(activity, true), ("L", false));
         }
         // Returning to base is a withdrawal, not yet a landing phase.
-        assert_eq!(activity_goal(Activity::ReturningToBase, None), ("N", false));
+        assert_eq!(
+            activity_goal(Activity::ReturningToBase, false),
+            ("N", false)
+        );
     }
     #[test]
     fn clock_wrap_and_cardinal_bearings() {

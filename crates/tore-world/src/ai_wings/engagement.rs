@@ -458,9 +458,14 @@ mod tests {
         assert!(wings.objective_for_player(3));
         assert!(!wings.objective_for_player(1));
         let actor = wings.mission.actor(3).unwrap();
-        let mut readout =
-            crate::target_window::Readout::new(&targets[2], actor.flight(), "TEST".into());
-        readout.with_activity(&wings, PLAYER_ID);
+        let mut readout = crate::target_window::Readout::new(
+            &crate::readout::TargetRow::of(&targets[2]),
+            actor.flight(),
+            "TEST".into(),
+        );
+        readout.with_brief(&crate::target_window::TargetBrief::of(
+            &wings, PLAYER_ID, readout.id,
+        ));
         assert_eq!(
             readout.objective,
             Some(crate::target_window::TargetObjective::Destroy)

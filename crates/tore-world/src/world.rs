@@ -41,6 +41,8 @@ mod open_tests;
 pub mod plane;
 #[cfg(test)]
 mod plane_tests;
+#[cfg(test)]
+mod readout_tests;
 pub use commands::{MissionCommand, OrderOutcome, OrderReply, Settings};
 #[cfg(test)]
 mod succession_tests;

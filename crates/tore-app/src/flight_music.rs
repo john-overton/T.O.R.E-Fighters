@@ -12,16 +12,13 @@
 //! entry ([`Step::journal`]). The score the mixer then plays is decided in
 //! the audio device and is not visible here.
 use crate::{
-    ai_wings::{AiWings, outcome},
-    combat_view::PlaneState,
     comms::journal::{Audience, Cause, Entry, Music, Origin, Outcome, Source},
     flight,
     frame::FlightFrame,
     situation::{self, AIM_MEMORY_S, AIM120_IGNORE_FT, AIR_RANGE_FT, HIT_HOLD_S},
     terrain::Terrain,
 };
-use tore_sim::ai::weapon_service::{self, Rounds, TargetClass};
-use tore_sim::combat::{live, missiles::TargetRole};
+use tore_sim::combat::live;
 
 pub struct Step {
     pub now: f64,
@@ -70,18 +67,9 @@ impl Observer {
 
     /// One step for the screen of the human the frame is for: its plane's
     /// damage, designated target, inbound missiles and the AI aircraft aimed
-    /// at it.
-    pub fn step(
-        &mut self,
-        frame: &FlightFrame,
-        combat: &live::State,
-        events: &[live::Event],
-        wings: Option<&AiWings>,
-        world: &Terrain,
-        // The mission result and home latch, from the mission core's tracker
-        // for this plane.
-        status: &outcome::Status,
-    ) -> Step {
+    /// at it, and the mission result and home latch, all from the frame's
+    /// readout.
+    pub fn step(&mut self, frame: &FlightFrame, events: &[live::Event], world: &Terrain) -> Step {
         let (plane, flight) = (frame.plane.0, frame.flight);
         let now = self.steps as f64 * flight::DT;
         self.steps += 1;
@@ -94,20 +82,12 @@ impl Observer {
             self.hit_at = Some(now);
         }
 
-        // Designated target: live, the other side, and an aircraft. Without AI
-        // wings every non-friendly target (range and fixture aircraft) counts
-        // as the other side.
-        let designated_target = combat
-            .view_of(plane)
-            .designated()
-            .and_then(|id| combat.targets.iter().find(|t| t.id == id && t.hp > 0))
-            .filter(|t| t.role == TargetRole::Aircraft)
-            .filter(|t| {
-                wings.map_or(!combat.own_of(plane).friendlies.contains(&t.id), |w| {
-                    w.slot(t.id).is_some_and(|slot| slot.side.is_enemy())
-                })
-            })
-            .map(|t| (t.id, distance(t.position, position)));
+        // Designated target: live, the other side, and an aircraft, as the
+        // readout decided.
+        let music = &frame.readout.music;
+        let designated_target = music
+            .designated_enemy
+            .map(|(id, target)| (id, distance(target, position)));
         let designated = designated_target.map(|(_, range)| range);
         let air_target = designated.is_some_and(|range| range < AIR_RANGE_FT);
         let far_target = designated.is_some_and(|range| range >= AIR_RANGE_FT);
@@ -117,39 +97,22 @@ impl Observer {
         // which still carries a usable guided air-to-air store. The 1 s
         // final-attack memory has no TORE equivalent; 4 s is always used.
         // Every such aircraft is listed for the journal.
-        let aiming: Vec<u32> = wings.map_or_else(Vec::new, |w| {
-            w.mission()
-                .actors()
-                .iter()
-                .filter(|actor| {
-                    actor.alive()
-                        && actor.controller().target() == Some(plane)
-                        && actor.stations().iter().any(|s| {
-                            s.guided
-                                && !s.store.inhibited
-                                && weapon_service::store_eligible(s.capability, TargetClass::Air)
-                                && !matches!(s.store.rounds, Rounds::Finite(0))
-                        })
-                })
-                .map(|actor| actor.id())
-                .collect()
-        });
+        let aiming: Vec<u32> = music.aiming.clone();
         if !aiming.is_empty() {
             self.aim.refresh(now, AIM_MEMORY_S);
         }
 
         // Missiles guided at the player, counted every step; an AIM-120
         // farther than 30,380 ft is not counted.
-        let inbound_ids: Vec<u32> = combat
-            .projectiles
+        let inbound_ids: Vec<u32> = frame
+            .readout
+            .rwr
+            .inbound
             .iter()
-            .filter(|p| {
-                p.incoming.is_some()
-                    && p.target == Some(plane)
-                    && !(combat.weapon(p).source.eq_ignore_ascii_case("AIM120.JT")
-                        && distance(p.position, position) > AIM120_IGNORE_FT)
+            .filter(|missile| {
+                !(missile.aim120 && distance(missile.position, position) > AIM120_IGNORE_FT)
             })
-            .map(|p| p.id)
+            .map(|missile| missile.id)
             .collect();
         let inbound = !inbound_ids.is_empty();
 
@@ -167,13 +130,13 @@ impl Observer {
         });
 
         let inputs = situation::Inputs {
-            succeeded: status.succeeded,
+            succeeded: music.succeeded,
             ejected: flight.escape.is_some(),
             launching,
             air_target,
             hit_recently: self.hit.active(now),
             danger: far_target || self.aim.active(now) || inbound,
-            home: status.home,
+            home: music.home,
             deck,
         };
         let journal = self.journal(now, inputs, designated_target, aiming, inbound_ids);
@@ -240,7 +203,11 @@ mod tests {
         smoke: tore_sim::combat::smoke::Smoke,
         devices: tore_sim::combat::countermeasures::Devices,
     }
-    fn test_frame<'a>(parts: &'a Parts, flight: &'a flight::State) -> FlightFrame<'a> {
+    fn test_frame<'a>(
+        parts: &'a Parts,
+        flight: &'a flight::State,
+        combat: &'a live::State,
+    ) -> FlightFrame<'a> {
         FlightFrame {
             seat: crate::seats::SeatId(0),
             plane: crate::seats::PlaneId(0),
@@ -250,6 +217,15 @@ mod tests {
             picture: &parts.picture,
             smoke: [&parts.smoke, &parts.smoke],
             devices: &parts.devices,
+            config: combat.own().configuration(),
+            readout: tore_world::readout::build(
+                combat,
+                0,
+                crate::combat::launcher(flight),
+                None,
+                None,
+            )
+            .unwrap(),
             tick_cues: &[],
         }
     }
@@ -263,14 +239,7 @@ mod tests {
         let mut observer = Observer::new();
         let parts = Parts::default();
         let step = |observer: &mut Observer, combat: &live::State, events: &[live::Event]| {
-            observer.step(
-                &test_frame(&parts, &flight),
-                combat,
-                events,
-                None,
-                &world,
-                &outcome::Status::default(),
-            )
+            observer.step(&test_frame(&parts, &flight, combat), events, &world)
         };
         let first = step(
             &mut observer,
@@ -316,14 +285,7 @@ mod tests {
         let mut observer = Observer::new();
         let parts = Parts::default();
         let step = |observer: &mut Observer, combat: &live::State, events: &[live::Event]| {
-            observer.step(
-                &test_frame(&parts, &flight),
-                combat,
-                events,
-                None,
-                &world,
-                &outcome::Status::default(),
-            )
+            observer.step(&test_frame(&parts, &flight, combat), events, &world)
         };
         let music = |step: &Step| match &step.journal[..] {
             [entry] => match &entry.origin.cause {

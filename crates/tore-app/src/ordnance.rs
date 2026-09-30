@@ -1190,9 +1190,23 @@ fn validate_removed_stores(
                 )
                 .into());
             }
-            let listed =
-                crate::combat_view::readout(&combat, combat.own_id(), &flight, flight.sensors, 1.)
-                    .weapons;
+            let readout = combat
+                .cockpit_readout(
+                    combat.own_id(),
+                    crate::combat::launcher(&flight),
+                    None,
+                    None,
+                )
+                .expect("the ordnance check's plane has an ownship");
+            let listed = crate::combat_view::readout(
+                &combat,
+                combat.state.own().configuration(),
+                &readout,
+                &flight,
+                flight.sensors,
+                1.,
+            )
+            .weapons;
             let carried: std::collections::BTreeSet<&str> = combat
                 .state
                 .own()

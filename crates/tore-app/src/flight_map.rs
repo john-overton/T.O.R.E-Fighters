@@ -1,6 +1,5 @@
 //! Opinionated map presentation. Knowledge comes from simulation observations.
 use crate::{
-    combat_view::PlaneState,
     flight,
     hud::Paint,
     menu::{Canvas, Sprite},
@@ -9,7 +8,8 @@ use crate::{
 };
 use tore_formats::text::GlyphCodes;
 use tore_formats::{font::Font, theater::CELL_FEET};
-use tore_sim::{combat::live, sensors::FEET_PER_NAUTICAL_MILE as NMI};
+use tore_sim::sensors::FEET_PER_NAUTICAL_MILE as NMI;
+use tore_world::readout::CockpitReadout;
 
 const AREA: (i32, i32, i32, i32) = (12, 30, 476, 408);
 const INK: [u8; 4] = [232, 232, 218, 255];
@@ -302,8 +302,7 @@ impl Map {
         world: &Terrain,
         scenery: &Scenery,
         state: &flight::State,
-        combat: &live::State,
-        plane: u32,
+        readout: &CockpitReadout,
         font: &Font,
         sprites: &std::collections::BTreeMap<String, Sprite>,
     ) {
@@ -380,7 +379,7 @@ impl Map {
                 label(pixels, font, name, (x, y + 12), INK, &mut labels);
             }
         }
-        let contacts = combat.own_of(plane).sensors.map_contacts();
+        let contacts = &readout.map;
         for observed in contacts
             .iter()
             .filter(|c| c.airborne)
@@ -415,12 +414,9 @@ impl Map {
             };
             let (x, y) = place_marker(pixels, point, &mut markers, &mut labels);
             let identified = observed.identified;
-            let target = identified
-                .then(|| combat.targets.iter().find(|t| t.id == contact.id))
-                .flatten();
             let name = if identified {
-                target
-                    .and_then(|t| t.aircraft)
+                observed
+                    .aircraft
                     .map(|a| a.label())
                     .or_else(|| {
                         world
@@ -453,8 +449,8 @@ impl Map {
         }
         // Passive noise has no measured location. Show its direction at ownship.
         if let Some((x, y)) = projection.point(state.position) {
-            for emitter in combat
-                .own_of(plane)
+            for emitter in readout
+                .rwr
                 .emitters
                 .iter()
                 .filter(|e| e.distance_nmi.is_none() && self.filters.shows(Category::Emitters))
