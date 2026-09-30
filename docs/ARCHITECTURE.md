@@ -1407,7 +1407,7 @@ incoming round belongs to no aircraft and is credited to nobody. The ownship's
 own score (`hits`, `kills`) still counts hits on AI rows only, as before.
 
 A loss with no shooter credits nobody (lead's decision, 2026-09-29): a
-human-flown aircraft lost to the map edge, to overspeed or to belly wear is
+human-flown aircraft lost to the map edge or to overspeed is
 recorded as lost without credit (`Ledger::lose_without_credit`, in
 `Combat::step_all`) even when a shooter hit it earlier, as an AI aircraft lost
 that way is (`AiWings::lose_uncredited`). An ordinary crash still goes to the
@@ -1434,7 +1434,7 @@ aircraft whose pilot is still aboard can change hands.
    AI's equipment failures become the ownship's failure flags.
 4. The weapon follows a flight start's rule (the gun if it carries something,
    else the first loaded station Guns only allows, else NAV, the bug bash's
-   rule), belly wear not yet a whole hit point stays owed, and the AI's current
+   rule), and the AI's current
    target is designated if the aircraft's sensors hold it (*agent proposal*).
    The autopilot is off, and the human's controls apply from this tick.
 5. If the aircraft leads its wing, the human becomes the wing's leader and the
@@ -1847,21 +1847,21 @@ combat, the AI bridge, the debrief and the recorder.
   re-measured in their own commits, each difference explained.
 - **The bug bash's player rules apply to every human-flown plane.** They went
   in the commit that makes that state per seat, not onto seat 0 alone:
-  - The tick's rules (world-edge warning and loss, OVERSPEED message, belly wear)
-    run for each cockpit in `World::step`, and their messages are cues addressed
-    to that seat.
+  - The tick's rules (world-edge warning and loss, OVERSPEED message)
+    run for each cockpit in `World::step`, and their messages, and the gear ground
+    sensor's, are cues addressed to that seat.
   - Combat state the bug bash added (empty stations and the selection ring,
-    start-up weapon selection, belly wear, `Invulnerable`) lives on each
+    start-up weapon selection, `Invulnerable`) lives on each
     `Ownship`, with the loss causes on each.
   - The kill ledger credits nobody for a loss with no shooter (world edge,
-    overspeed, belly wear), for any aircraft, humans included, even if a shooter
+    overspeed), for any aircraft, humans included, even if a shooter
     hit it earlier. The AI kill credit of stage B does not bring credit back for
     these.
   - The debrief's Cause row and friendly-objective side are per seat, and the
     recorder writes the loss cause and external fuel for each recorded seat.
   - The AI's return to base, traffic avoidance and wing abort see every human
     plane, and a human-led wing stays with its human. The AI's world-edge and
-    belly-wear losses credit nobody.
+    overspeed losses credit nobody.
   - The HUD's BAY and time-rate readouts and the flight-start rules read the
     presented seat's state.
 - **Lead succession.** Both branches had built it. Multiplayer's rule kept

@@ -49,7 +49,7 @@ each and the windowed ones five to eight seconds. See "Runtime" at the end for t
 | `spinrecover-*`, `stallrecover-*` | 28 | The manual's spin and stall recovery procedures recover every aircraft that can enter a spin or stall (X-31 and the F-22 family cannot spin: their data says so). |
 | `climb-*`, `sprint-*` | 28 | How far past its own envelope an aircraft goes (never past the 1.5 times overspeed loss line), and that full-afterburner level flight settles near the top speed. |
 | `overspeed-*` | 28 | Every aircraft is lost at 1.6 times its top speed with cause overspeed, and an afterburner dive from 40,000 ft never passes 1.52 times ([overspeed](../spec/overspeed.md)). |
-| `belly-*` | 28 | Gear up at 80 knots on the roll: an aircraft too slow to fly slides on its belly and wears; gear up once airborne is a normal retraction ([gear on the ground](../spec/gear-on-the-ground.md)). |
+| `belly-*` | 28 | The gear key at 80 knots on the roll is refused by the ground sensor (one message, gear still down); the same key once airborne is a normal retraction ([gear on the ground](../spec/gear-on-the-ground.md)). The names keep "belly" from the slide they replaced. |
 | `fault*` | 73 | Every system fault 0..44 on three aircraft in a pull, all 45 at once, and one after another, in every aircraft. |
 | `combatsmoke-*`, `combatevidence-*`, `missileacceptance-*` | 40 | The headless combat smoke (default slots, five damage classes, jettison, radar power, incoming missiles, jammer), the same smoke with per-slot combat tapes written and replayed to the identical state, and the missile reach probes (the F-14 and Su-35 tables are left to the slow set, below). |
 | `livefire-*`, `cheat-unlimited-ammo-*`, `cheat-damage-*`, `countermeasures-*` | about 90 | Windowed: fire every weapon slot of every aircraft (ammunition never negative or over capacity, drops by exactly what was fired, other stations untouched, surface weapons refuse the practice aircraft), Unlimited ammo, the three Damage modes, and chaff and flare counts against capacity. |
@@ -307,7 +307,7 @@ past the threshold against 3,956 ft, so the 5,532 ft UKR runway still works for 
 
 **Other users of the stall speed.** The flight model, the stall warning and departure
 behaviour, the autopilot, the ejection G check, the flight envelope window (the drawn slow
-edges follow the weight), the belly rule, the scripted landing probe and the crew callouts all
+edges follow the weight), the scripted landing probe and the crew callouts all
 read the scaled speeds. The HUD landing-speed brackets are not implemented in the game, so
 there is nothing to update. The AI reads the same scaled speeds through the model's
 configuration without any change to `tore-sim/src/ai`. **AI needs a follow-up** (in the AI agent's files, which this change leaves alone). Twelve

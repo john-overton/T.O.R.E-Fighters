@@ -79,8 +79,6 @@ turns the rule off for the whole run.
   any speed, the scaling moves where the wing runs out of lift. The two together
   make a loaded aircraft need a little more than the scaled stall speed to hold
   1 G, which is the speed the model takes off at.
-- The belly rule calls an aircraft not in its lift envelope when it is below its
-  scaled clean stall speed.
 
 Results at the default loadout, sea level, full flaps and afterburner, and against
 John's figures for the three aircraft he named, are in the

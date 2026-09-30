@@ -414,13 +414,15 @@ weight. It is the same rule for all fourteen aircraft: nothing is tuned per airc
 
 ### Limits of the world and the ground
 
-Two more `opinionated` rules, both requested by John on 2026-09-29 with agent-decided
-numbers: an aircraft is lost 105 nautical miles beyond the nearest point of the map,
-with a turn-back warning from 100 ([world edge](spec/world-edge.md)); and retracting
-the gear on the ground below stall speed settles the aircraft on its belly, a strong
-brake with airframe wear, while retraction at rotation speed or airborne is unchanged
-([gear on the ground](spec/gear-on-the-ground.md)). Both, like overspeed, end in the
-ordinary structural-failure or hit-point path, and a loss records its cause.
+An `opinionated` rule requested by John on 2026-09-29 with agent-decided numbers: an
+aircraft is lost 105 nautical miles beyond the nearest point of the map, with a
+turn-back warning from 100 ([world edge](spec/world-edge.md)). Like overspeed it ends
+in the ordinary structural-failure or hit-point path, and a loss records its cause.
+
+On the ground the gear cannot be raised while the main wheels carry weight, as in
+retail: the gear key does nothing and T.O.R.E shows `Ground sensor preventing gear
+retraction` on each refused press. Once the wheels leave the ground the key works as
+before ([gear on the ground](spec/gear-on-the-ground.md)).
 
 ## Telemetry record
 
