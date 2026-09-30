@@ -115,21 +115,45 @@ class ShortStripTests(unittest.TestCase):
 
 
 class LandOrderTests(unittest.TestCase):
-    """Lead succession: a crashed player's land order is refused, a flying one's is accepted."""
+    """Lead succession: a crashed player's land order is refused, a flying one's
+    is accepted. After the player is lost the new AI lead flies a mission of
+    opportunity, which with no enemy is a return to base (John, 2026-09-30)."""
 
     DOWN = "t=2017 (16.8s) player: on_ground=false gear=false crashed=true agl=85 kt=202 x=1 z=2 hdg=8 terrain_agl=85\n"
     REFUSED = 't=12000 order=LandAtSelected reply="Wing order unavailable: you are not leading your wing"\n'
     ACCEPTED = 't=12000 order=LandAtSelected reply="Land at Simferopol: 1 landing"\n'
+    HOME = "t=2017 (16.8s) mission of opportunity: Friendly 1-2 leads, returning to base (no enemy position known)\n"
+    LANDED = "AI probe phases: Friendly 1-2: Waiting@0.0s ClimbOut@57.5s Airborne@83.7s Approach@83.7s Final@377.4s Rollout@409.3s Parked@729.0s\n"
+    FLYING = "AI probe phases: Friendly 1-2: Waiting@0.0s ClimbOut@57.5s Airborne@83.7s\n"
 
     def check(self, text, whole=None):
         return ai.land_order_checker(whole or (lambda output: ["did not land"]))(text)
 
-    def test_a_crashed_player_is_refused_and_the_landing_is_not_required(self):
-        self.assertEqual(self.check(CLEAN + self.DOWN + self.REFUSED), [])
+    def passes(self, output):
+        return []
 
-    def test_the_lead_flying_off_the_map_is_allowed_after_the_refusal(self):
-        text = CLEAN + self.DOWN + self.REFUSED + "AI probe anomaly: t=5 (0.0s) outside the world: Friendly 1-2 x=-5 z=1\n"
-        self.assertEqual(self.check(text), [])
+    def test_a_crashed_player_is_refused_and_the_new_lead_lands_at_home(self):
+        self.assertEqual(self.check(CLEAN + self.DOWN + self.REFUSED + self.HOME + self.LANDED, whole=self.passes), [])
+
+    def test_the_landing_checks_apply_after_the_refusal(self):
+        self.assertEqual(self.check(CLEAN + self.DOWN + self.REFUSED + self.HOME + self.LANDED), ["did not land"])
+
+    def test_the_new_lead_must_return_to_base(self):
+        problems = self.check(CLEAN + self.DOWN + self.REFUSED + self.FLYING, whole=self.passes)
+        self.assertTrue(any("never returned to base" in p for p in problems), problems)
+
+    def test_the_new_lead_must_land(self):
+        problems = self.check(CLEAN + self.DOWN + self.REFUSED + self.HOME + self.FLYING, whole=self.passes)
+        self.assertTrue(any("never landed" in p for p in problems), problems)
+
+    def test_the_new_lead_has_no_enemy_to_search_for(self):
+        text = CLEAN + self.DOWN + self.REFUSED + self.HOME.replace("no enemy position known", "search time up") + self.LANDED
+        self.assertTrue(any("wrong reason" in p for p in self.check(text, whole=self.passes)))
+
+    def test_the_lead_may_no_longer_fly_off_the_map(self):
+        text = CLEAN + self.DOWN + self.REFUSED + self.HOME + self.LANDED + "AI probe anomaly: t=5 (0.0s) outside the world: Friendly 1-2 x=-5 z=1\n"
+        whole = ai.checker(ground=True, need_takeoff=True)
+        self.assertTrue(any("outside the world" in p for p in self.check(text, whole=whole)))
 
     def test_a_crashed_player_must_not_be_obeyed(self):
         self.assertTrue(any("already crashed" in p for p in self.check(CLEAN + self.DOWN + self.ACCEPTED)))

@@ -538,9 +538,16 @@ pub fn motion_branch(
         }
         MotionBranch::OrderedMotion => ("ordered maneuver", String::new()),
         MotionBranch::Search {
-            contact, orbiting, ..
+            contact,
+            orbiting,
+            opportunity,
+            ..
         } => (
-            "investigating a contact",
+            if *opportunity {
+                "searching for the enemy"
+            } else {
+                "investigating a contact"
+            },
             format!(
                 "{} last seen at {}, {}",
                 who(contact.id),

@@ -92,11 +92,16 @@ never lands; or the same radio line repeats three times in five seconds.
 
 The scripted player leads the wing, and a probe that orders the wing to land
 (`ai-ground-land-selected-*`, `ai-ils-terrain-*`) follows lead succession: a
-player still flying must be obeyed and the pair must land, but once the player
-has crashed the order must be refused with "you are not leading your wing" and
-no landing is due. Since the probe runs the full mission tick, the scripted
-player crashes 17 s after takeoff from Simferopol, so the two
-`ai-ground-land-selected-*` scenarios take the refusal branch.
+player still flying must be obeyed and the pair must land. Once the player has
+crashed the order must be refused with "you are not leading your wing", and
+the AI that takes the lead flies a
+[mission of opportunity](../spec/ai.md#mission-of-opportunity-after-a-lost-human-leader)
+(John, 2026-09-30). These probes have no enemy, so the new lead must print
+`mission of opportunity: ... returning to base (no enemy position known)` and
+land at its home runway, and the scenario's landing checks apply as for a
+living player (no aircraft may leave the map). Since the probe runs the full
+mission tick, the scripted player crashes 17 s after takeoff from Simferopol,
+so the two `ai-ground-land-selected-*` scenarios take this branch.
 
 ## Bugs found and fixed
 
@@ -422,13 +427,16 @@ Ivano-Frankivs'k (UKR 5, 6, 8, 12; hills about 1,900 to 2,000 ft above the
 path 13,000 to 28,000 ft out). `ai-ils-terrain-*` orders a pair to land at
 each and fails a crash, a threshold crossing below 10 ft or above 300 ft,
 or more than 540 s on the gates. On the multiplayer branch's lead succession
-(approved by John 2026-09-28) the checks bend once for Kharkiv and
-Ivano-Frankivs'k (UKR 6 and 12): the scripted player flies into a hill 60 s
-after takeoff, the wing's next member leads, and the player's land order is
-refused with "you are not leading your wing" (the bug bash's renumbering used to
-accept it). The scenario then requires that refusal and only the takeoff and the
-general checks; the AI lead has no order and flies straight on, out of the map
-after about 9 minutes. A player still flying must be obeyed and the landing is
+(approved by John 2026-09-28) the scripted player flies into a hill 60 s
+after takeoff at Kharkiv (UKR 6) and 40 s after takeoff at Ivano-Frankivs'k
+(UKR 12), the wing's next member leads, and the player's land order is refused
+with "you are not leading your wing". Before the aircraft pass the scenario then
+required only that refusal, the takeoff and the general checks, and the AI lead
+flew straight on, out of the map after about 9 minutes. With the mission of
+opportunity (John, 2026-09-30) the new lead returns to base and lands, and the
+landing checks apply again: at both airports it crosses the threshold 64 ft up
+and is parked about 650 s after the start.
+A player still flying must be obeyed and the landing is
 checked as before. All seven pass: every one lands on the
 near end, which the airports' landing anchors choose (spec-derived), so the
 AI never flies the UKR and Amiens far ends; threshold crossings 64 to 119 ft

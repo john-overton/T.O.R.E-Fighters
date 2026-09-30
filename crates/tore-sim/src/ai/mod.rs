@@ -33,6 +33,7 @@ pub mod incoming_fire;
 pub mod launch;
 pub mod mission;
 pub mod motion;
+pub mod opportunity;
 pub mod pursuit;
 pub mod route;
 pub mod steering;

@@ -1609,6 +1609,26 @@ flight re-forms on the new leader.
   `Chatter::Leadership` event, and the radio journals it (`Cause::Leadership`).
   For an AI new leader that is all there is.
 
+*Mission of opportunity (aircraft pass, John's decision of 2026-09-30).* When
+a human's lead passes to an AI aircraft, `refresh_leaders` starts an
+`ai::opportunity::Opportunity` for the wing (`AiMission::begin_opportunity`):
+the wing's AI members get free engagement and lose any recall, or, under
+weapons hold or self-defense, the wing goes home at once. Each step,
+`AiMission::fly_opportunities` runs right after the first leadership check: it
+pools the hostile aircraft every living member sees or remembers
+(`awareness::Memory`), and `Opportunity::step` keeps one last known point per
+enemy aircraft and picks the one to search. The lead's controller gets it
+through `Controller::set_wing_search` and flies it with the lost-contact search
+(`MotionBranch::Search` with `opportunity: true`), after its own lost contact
+and never as a target. When the search ends, `AiMission::send_home` (the same
+call the mission's return to base uses) lands every airborne member at its
+home runway, or flies a lead with none home. The numbers are agent decisions,
+in the [AI spec](spec/ai.md#mission-of-opportunity-after-a-lost-human-leader).
+A wing led by AI from the start is untouched. The AI probe prints a
+`mission of opportunity:` line whenever what the wing does changes.
+*Agent decision:* the rule is the same for every seat, since it keys on a
+human's lead passing to AI, and no seat hears anything new.
+
 A human new leader hears "You're the Wingleader now" (`^WNGLDR`, already
 imported) five seconds later, spoken by the previous leader if that pilot is
 still alive, for example after ejecting (retail: "voiced only when the previous

@@ -1350,6 +1350,9 @@ pub struct AiMission {
     hostiles_seen: Vec<super::targeting::Side>,
     /// External leaders seen airborne, so a later touchdown reads as landing.
     airborne_seen: Vec<u32>,
+    /// The mission of opportunity of every wing whose human leader was lost
+    /// and whose lead passed to an AI aircraft (John, 2026-09-30).
+    opportunities: Vec<super::opportunity::Opportunity>,
     /// Write-only journal of messages between aircraft. No decision reads
     /// it; the host drains it with [`Self::take_journal`].
     journal: thought::Journal,
@@ -1381,6 +1384,7 @@ impl AiMission {
             priority_landing: Default::default(),
             hostiles_seen: Vec::new(),
             airborne_seen: Vec::new(),
+            opportunities: Vec::new(),
             journal: thought::Journal::default(),
         }
     }
@@ -1716,36 +1720,170 @@ impl AiMission {
                 .map(|a| a.identity.wing)
                 .filter(|wing| self.external_leader(side, *wing).is_some())
                 .collect();
-            let mut ids: Vec<u32> = Vec::new();
-            for a in self.actors.iter_mut().filter(|a| {
-                a.identity.side == side
-                    && a.alive()
-                    && !a.identity.human_controlled
-                    && a.airfield.is_none()
-                    && a.landing_order.is_none()
-                    && !a.bugged_out
-                    && !a.flight.research.as_ref().is_some_and(|r| r.on_ground)
-                    && !human_led.contains(&a.identity.wing)
-            }) {
-                if a.home_runway.is_some() {
-                    ids.push(a.id());
-                } else if a.identity.is_leader() && !a.controller.mission_complete() {
-                    // No runway: the leader flies home and holds; its
-                    // wingmen stay in formation on it.
-                    a.controller.set_mission_complete(true);
+            self.send_home(|a| a.identity.side == side && !human_led.contains(&a.identity.wing));
+        }
+    }
+
+    /// Send home every airborne AI aircraft `pick` names that is not already
+    /// taking off, landing, recovering or bugged out: one with a home runway
+    /// is ordered to land there through the ordinary landing sequence, and a
+    /// leader with none flies the B48 return-to-base path to its launch point
+    /// and holds there, its wingmen in formation on it. Cheap to repeat every
+    /// tick: an aircraft already on its way is left alone.
+    fn send_home(&mut self, pick: impl Fn(&AiActor) -> bool) {
+        let mut ids: Vec<u32> = Vec::new();
+        for a in self.actors.iter_mut().filter(|a| {
+            a.alive()
+                && !a.identity.human_controlled
+                && a.airfield.is_none()
+                && a.landing_order.is_none()
+                && !a.bugged_out
+                && !a.flight.research.as_ref().is_some_and(|r| r.on_ground)
+                && pick(a)
+        }) {
+            if a.home_runway.is_some() {
+                ids.push(a.id());
+            } else if a.identity.is_leader() && !a.controller.mission_complete() {
+                // No runway: the leader flies home and holds; its
+                // wingmen stay in formation on it.
+                a.controller.set_mission_complete(true);
+            }
+        }
+        for id in ids {
+            let Some(runway) = self.actor(id).and_then(|a| a.home_runway) else {
+                continue;
+            };
+            let _ = self.order(
+                id,
+                super::wing::WingRequest::Land(super::airfield::LandingOrder {
+                    runway,
+                    reason: super::airfield::LandingReason::Ordered,
+                }),
+            );
+        }
+    }
+
+    /// The mission of opportunity of a wing whose human leader was lost, if
+    /// it flies one.
+    pub fn opportunity(
+        &self,
+        side: super::targeting::Side,
+        wing: u8,
+    ) -> Option<&super::opportunity::Opportunity> {
+        self.opportunities
+            .iter()
+            .find(|o| o.side == side && o.wing == wing)
+    }
+
+    /// Every wing's mission of opportunity, in the order they began.
+    pub fn opportunities(&self) -> &[super::opportunity::Opportunity] {
+        &self.opportunities
+    }
+
+    /// Opinionated (John, 2026-09-30): an AI aircraft took the lead of a wing
+    /// from a lost human, so the wing takes up a mission of opportunity
+    /// ([`super::opportunity`]). A wing cleared to attack flies it under free
+    /// engagement: the lost leader's task (a patrol, an escort of the human,
+    /// an intercept) and any recall it gave end with it. A wing under weapons
+    /// hold or self-defense keeps its rules and returns to base at once. Agent
+    /// decisions, in docs/spec/ai.md.
+    fn begin_opportunity(&mut self, side: super::targeting::Side, wing: u8, leader: u32) {
+        if self.opportunity(side, wing).is_some() {
+            return;
+        }
+        let mut opportunity = super::opportunity::Opportunity::new(side, wing, self.tick);
+        let cleared = self.actor(leader).is_some_and(|a| {
+            !matches!(
+                a.assignment.stance,
+                engagement::Stance::WeaponsHold | engagement::Stance::SelfDefense
+            )
+        });
+        if cleared {
+            let free = engagement::Assignment::default();
+            for actor in self
+                .actors
+                .iter_mut()
+                .filter(|a| a.identity.side == side && a.identity.wing == wing)
+            {
+                if actor.assignment != free {
+                    actor.set_assignment(free.clone());
+                }
+                actor.formation_order_tick = None;
+            }
+        } else {
+            opportunity.go_home(self.tick, super::opportunity::HomeReason::NotCleared);
+        }
+        self.opportunities.push(opportunity);
+    }
+
+    /// One tick of every wing's mission of opportunity: pool what the wing's
+    /// members know of hostile aircraft, hand the leader the point to search,
+    /// and send the wing home once the search is over.
+    fn fly_opportunities(&mut self, world: &[WorldObject]) {
+        use super::opportunity::{Plan, Sighting};
+        for index in 0..self.opportunities.len() {
+            let (side, wing) = (
+                self.opportunities[index].side,
+                self.opportunities[index].wing,
+            );
+            let Some(leader) = self
+                .wing_leader(side, wing)
+                .and_then(|id| self.actor(id))
+                .filter(|a| a.alive())
+            else {
+                continue;
+            };
+            let leader_id = leader.id();
+            let leader_position = leader.flight.position;
+            let leader_engaged = leader.controller.target().is_some();
+            let mut sightings: Vec<Sighting> = Vec::new();
+            for member in self
+                .actors
+                .iter()
+                .filter(|a| a.alive() && a.identity.side == side && a.identity.wing == wing)
+            {
+                let current = member.awareness.current_observations().map(|s| (s, true));
+                let remembered = member.awareness.remembered().map(|s| (s, false));
+                for (snapshot, current) in current.chain(remembered) {
+                    let target = &snapshot.target;
+                    if target.side == side || !target.is_aircraft || !target.valid {
+                        continue;
+                    }
+                    sightings.push(Sighting {
+                        id: target.id,
+                        position: target.position,
+                        observed_tick: snapshot.last_observed_tick,
+                        current,
+                    });
                 }
             }
-            for id in ids {
-                let Some(runway) = self.actor(id).and_then(|a| a.home_runway) else {
-                    continue;
-                };
-                let _ = self.order(
-                    id,
-                    super::wing::WingRequest::Land(super::airfield::LandingOrder {
-                        runway,
-                        reason: super::airfield::LandingReason::Ordered,
-                    }),
-                );
+            let alive = |id: u32| world.iter().any(|o| o.id == id && o.alive && !o.destroyed);
+            let plan = self.opportunities[index].step(
+                self.tick,
+                leader_position,
+                &sightings,
+                leader_engaged,
+                &alive,
+            );
+            let point = match plan {
+                Plan::Search(point) => Some(SearchContact {
+                    id: point.id,
+                    position: point.position,
+                    observed_tick: point.observed_tick,
+                }),
+                Plan::Engage | Plan::Home(_) => None,
+            };
+            for actor in self
+                .actors
+                .iter_mut()
+                .filter(|a| a.identity.side == side && a.identity.wing == wing)
+            {
+                actor
+                    .controller
+                    .set_wing_search(point.filter(|_| actor.id() == leader_id));
+            }
+            if matches!(plan, Plan::Home(_)) {
+                self.send_home(|a| a.identity.side == side && a.identity.wing == wing);
             }
         }
     }
@@ -1841,6 +1979,7 @@ impl AiMission {
         self.track_airborne(world);
         // Lead passes on this tick, before anyone decides who to follow.
         self.refresh_leaders(world, &mut output);
+        self.fly_opportunities(world);
 
         let traffic: Vec<_> = world
             .iter()
@@ -2142,6 +2281,11 @@ impl AiMission {
                 entry.reformed = true;
             }
             self.crown(side, wing, leader, &members, world, true);
+            // A human's lead passed to an AI aircraft: the wing flies a
+            // mission of opportunity (John, 2026-09-30).
+            if self.actor(previous).is_none() && self.actor(leader).is_some() {
+                self.begin_opportunity(side, wing, leader);
+            }
             output.leadership.push(LeadershipChange {
                 tick: self.tick,
                 side,
@@ -2802,7 +2946,14 @@ impl AiMission {
                 .map(|launcher| (actor_id, *launcher)),
         );
         if let Some(mut activity) = batch.activity {
-            if actor.neutral && matches!(activity, Activity::Idle | Activity::Searching) {
+            // A neutral aircraft waits in formation, unless it leads its
+            // wing's mission of opportunity search.
+            let wing_search =
+                activity == Activity::Searching && actor.controller.wing_search().is_some();
+            if actor.neutral
+                && matches!(activity, Activity::Idle | Activity::Searching)
+                && !wing_search
+            {
                 activity = Activity::Formation;
             }
             actor.activity = activity;

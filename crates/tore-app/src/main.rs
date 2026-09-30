@@ -5594,6 +5594,43 @@ fn probe_label(bridge: &ai_wings::AiWings, id: u32) -> String {
     )
 }
 
+/// Print what each wing that lost its human leader is doing on its mission
+/// of opportunity, whenever that changes (John, 2026-09-30).
+fn print_opportunity_notes(tick: u64, wings: &ai_wings::AiWings, notes: &mut Vec<String>) {
+    let label = |id: u32| {
+        wings
+            .slots()
+            .iter()
+            .find(|slot| slot.id == id)
+            .map_or_else(|| format!("aircraft {id}"), |slot| slot.label())
+    };
+    let mission = wings.mission();
+    for (index, opportunity) in mission.opportunities().iter().enumerate() {
+        let leader = mission
+            .wing_leader(opportunity.side, opportunity.wing)
+            .map_or_else(|| "nobody".to_owned(), label);
+        // Contact on the latest step (the mission's tick has moved past it).
+        let in_contact = opportunity.last_contact_tick + 1 == mission.tick()
+            && opportunity.last_contact_tick > opportunity.started_tick;
+        let doing = match (opportunity.home, opportunity.searching) {
+            (Some((_, reason)), _) => format!("returning to base ({})", reason.label()),
+            _ if in_contact => "enemy in contact".to_owned(),
+            (None, Some(id)) => format!("searching where {} was last seen", label(id)),
+            // Only before its first step: the lead has just passed.
+            (None, None) => "taking the lead".to_owned(),
+        };
+        let note = format!("mission of opportunity: {leader} leads, {doing}");
+        if notes.get(index) != Some(&note) {
+            println!("t={tick} ({:.1}s) {note}", tick as f64 / 120.);
+            if index < notes.len() {
+                notes[index] = note;
+            } else {
+                notes.push(note);
+            }
+        }
+    }
+}
+
 /// Deterministic test projectile, using the selected aircraft's imported gun.
 /// AAA is a stationary ground-source firing fixture, not a ground AI actor.
 fn inject_probe_threat(
@@ -5883,6 +5920,8 @@ fn ai_probe_run(
         &airfields,
     )?;
     let mut formation_trace = formation_trace::start(&mut bridge)?;
+    // The last line printed for each wing's mission of opportunity.
+    let mut opportunity_notes: Vec<String> = Vec::new();
     combat.ai_poses = !bridge.is_empty();
     if script.researched && flight.research.is_none() {
         flight.enable_research(1)?;
@@ -6167,6 +6206,9 @@ fn ai_probe_run(
             formation_trace::drain(&mut formation_trace, wings);
         }
         stepped?;
+        if let Some(wings) = &mission.ai_wings {
+            print_opportunity_notes(tick, wings, &mut opportunity_notes);
+        }
         if let Some(error) = &output.fault {
             return Err(error.clone().into());
         }

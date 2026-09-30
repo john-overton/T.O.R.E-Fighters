@@ -349,6 +349,9 @@ pub enum MotionBranch {
         contact: SearchContact,
         distance_ft: f64,
         orbiting: bool,
+        /// The wing's mission of opportunity after its human leader was
+        /// lost, rather than this aircraft's own lost contact.
+        opportunity: bool,
     },
     /// An Ace gave up a search after two minutes.
     SearchAbandoned {

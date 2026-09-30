@@ -364,6 +364,17 @@ fn activity_reason(look: &Look, activity: Activity) -> String {
             }
         }
         Activity::Searching => match (fresh, trace.motion.branch) {
+            (
+                true,
+                MotionBranch::Search {
+                    contact,
+                    opportunity: true,
+                    ..
+                },
+            ) => format!(
+                "leading a mission of opportunity after the lead was lost: searching where {} was last seen",
+                who(contact.id)
+            ),
             (true, MotionBranch::Search { contact, .. }) => {
                 format!("investigating {}, last seen earlier", who(contact.id))
             }

@@ -462,6 +462,49 @@ to land stops, as the wing abort does. When the AI takes the lead nothing is
 said; the radio call a human who takes the lead hears is in the
 [architecture guide](../ARCHITECTURE.md#lead-succession).
 
+### Mission of opportunity after a lost human leader
+
+**Opinionated: the rule is John's of 2026-09-30; every number and edge below
+is an agent decision (fitted).** When a wing's human leader is lost and the
+lead passes to an AI aircraft (no living human is left in the wing), the wing
+"continues on with the mission of opportunity and visual based on last known
+enemy locations, if they can't find anything then RTB's". Before, the new lead
+had no order or route and flew straight on until the world edge removed it.
+
+- **Taking it up.** On the tick the AI takes the lead, every AI member of the
+  wing is given free engagement, and any recall the lost leader gave ends with
+  it. The lost leader's task (a patrol around its start point, an escort of the
+  human, an intercept of one aircraft) ends too. A wing under weapons hold or
+  self-defense keeps those rules: it is not cleared to hunt, so it returns to
+  base at once.
+- **Engaging.** A hostile aircraft the new lead detects releases the wing to
+  engage, as for any AI leader.
+- **Searching.** With no hostile in contact, the lead searches by eye where
+  the enemy was last seen. The wing pools what its members know: every hostile
+  aircraft each member sees now or remembers in its awareness memory (its own
+  sightings and sensor tracks), one point per enemy aircraft at its latest
+  known position. The pooled points outlast each pilot's own memory. A
+  destroyed aircraft is dropped, as from each pilot's memory. The lead flies to
+  the nearest point, circles over it (the lost-contact search: straight to the
+  point, then a level clockwise circle of 0.75 nm radius once within 1 nm) and
+  counts it searched after **60 s** within **2 nm** of it; then the next
+  nearest. A hostile a member sees now is searched first, and a newer sighting
+  of an aircraft makes its point worth searching again. The wingmen stay in
+  formation on the lead. The lead's own lost contact, if it has one, comes
+  first, as before.
+- **Returning to base.** The search ends when no point is left to search (or
+  the wing knew of none), or after **10 minutes** without a hostile in contact
+  (counted from the lead passing, or from the wing's last contact: any member
+  seeing a hostile aircraft, or the lead having a target). The wing then
+  returns to base through the [ordinary return to base](#return-to-base-when-the-mission-is-over):
+  each airborne AI member with a home runway lands there, and a lead with none
+  flies home and holds. It does not take up the search again. Bingo fuel and
+  damage send an aircraft home earlier, as always.
+- **Unchanged.** A wing led by AI from the start keeps its own succession: when
+  an AI leader is lost, the next member leads and nothing else changes. A wing
+  that took up a mission of opportunity keeps it when its AI lead is lost in
+  turn. Nothing is said on the radio.
+
 ### Traffic avoidance
 
 **Opinionated, requested by John on 2026-09-29; the numbers are agent
@@ -1098,6 +1141,7 @@ through `Controller::fallbacks`.
 | `mission` | Actor-owned sensors, stores, flight model and decision state; ammunition debited before a launch event | Missile physics deliberately not duplicated; the host realises each launch |
 | `damage` | [Authored fault responses](systems-damage.md#ai-pilot-response-to-faults): recovery commitment, power protection/restart, maneuver limits and fire danger | Original AI procedures; unreachable or missing recovery runway and irrecoverable failures can still be fatal |
 | `launch` | Quick Mission launch payload: side, wing, member, aircraft, resolved experience and the enemy-skill override | Nothing; loadout carriage stays with the host |
+| `opportunity` | [Mission of opportunity after a lost human leader](#mission-of-opportunity-after-a-lost-human-leader): the wing's pooled last known enemy positions, the search order, dwell and time limit, and when it returns to base (opinionated, fitted numbers) | Nothing; the rule is an opinionated addition |
 
 Fitted and opinionated choices are listed in each file's module comment and in
 the [provenance summary](../behavior-provenance.md).

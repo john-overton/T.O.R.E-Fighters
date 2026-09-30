@@ -1586,3 +1586,237 @@ fn wounded_aircraft_of_every_profile_defend_then_resume_recovery_without_hidden_
         }
     }
 }
+
+/// A wingman of the human `HUMAN` flying level at 6,000 ft, with a home
+/// runway, and the human alongside it.
+fn wing_of_a_human() -> (AiMission, WorldObject) {
+    let mut mission = AiMission::new();
+    let mut wingman = hornet(1, 1, [0., 6_000., -60_000.], 0.);
+    wingman.set_home_runway(Some(runway()));
+    mission.push(wingman);
+    mission.set_external_leader(Side(1), 0, HUMAN);
+    mission.start_in_formation();
+    let mut human = object(mission.actor(1).unwrap(), 1);
+    human.id = HUMAN;
+    human.human_controlled = true;
+    human.position = [-600., 6_000., -59_400.];
+    (mission, human)
+}
+
+/// A hostile aircraft the wingman remembers seeing at `position` on this tick.
+fn remember_hostile(mission: &mut AiMission, id: u32, position: [f64; 3]) {
+    let tick = mission.tick();
+    let actor = mission.actor_mut(1).unwrap();
+    let target = TargetView {
+        id,
+        side: Side(2),
+        position,
+        heading_deg: 0.,
+        pitch_deg: 0.,
+        speed: ScalarSpeed(500.),
+        maximum_speed: ScalarSpeed(1_000.),
+        is_aircraft: true,
+        is_fighter: true,
+        human_controlled: false,
+        valid: true,
+        type_allowed: true,
+        seeker_eligible: true,
+        wing_attackers: 0,
+        terrain_blocked: false,
+        sensor_supported: true,
+    };
+    actor.awareness.observe(
+        tick,
+        &[awareness::Observation {
+            target,
+            velocity: [0.; 3],
+            source: ObservationSource::Visual,
+        }],
+    );
+}
+
+/// An enemy aircraft alive for the whole test, so the mission is not over
+/// and the ordinary return to base never starts. It stands on the ground far
+/// away, where the sensorless test aircraft (which see every air target)
+/// cannot see it.
+fn distant_enemy(template: &AiActor) -> WorldObject {
+    let mut hostile = object(template, 2);
+    hostile.id = 50;
+    hostile.position = [0., 0., 400_000.];
+    hostile.on_ground = true;
+    hostile
+}
+
+fn step_with(mission: &mut AiMission, extra: &[WorldObject]) -> MissionOutput {
+    let world: Vec<_> = world(mission, None)
+        .into_iter()
+        .chain(extra.iter().cloned())
+        .collect();
+    mission
+        .step_with_surface(&world, &|x, z| surface(x, z).height, &surface, TimeOfDay(0))
+        .unwrap()
+}
+
+#[test]
+fn an_ai_that_takes_the_lead_from_a_lost_human_and_knows_no_enemy_returns_to_base() {
+    // John, 2026-09-30: with nothing to search for, the new lead goes home.
+    let (mut mission, mut human) = wing_of_a_human();
+    let enemy = distant_enemy(mission.actor(1).unwrap());
+    for _ in 0..120 {
+        step_with(&mut mission, &[human.clone(), enemy.clone()]);
+    }
+    assert!(mission.opportunities().is_empty());
+    assert_eq!(mission.actor(1).unwrap().landing_order(), None);
+    human.alive = false;
+    step_with(&mut mission, &[human.clone(), enemy.clone()]);
+    assert_eq!(mission.wing_leader(Side(1), 0), Some(1));
+    step_with(&mut mission, &[human, enemy]);
+    let opportunity = mission.opportunity(Side(1), 0).unwrap();
+    assert_eq!(
+        opportunity.home.map(|(_, reason)| reason),
+        Some(crate::ai::opportunity::HomeReason::NothingKnown)
+    );
+    assert_eq!(
+        mission.actor(1).unwrap().landing_order().map(|o| o.reason),
+        Some(LandingReason::Ordered)
+    );
+}
+
+#[test]
+fn the_new_lead_searches_the_enemys_last_known_position_then_returns_to_base() {
+    use crate::ai::opportunity::{DWELL_TICKS, HomeReason};
+    let (mut mission, mut human) = wing_of_a_human();
+    // The lost human had its wing on a patrol; the mission of opportunity
+    // replaces it with free engagement.
+    mission
+        .actor_mut(1)
+        .unwrap()
+        .set_assignment(engagement::Assignment {
+            role: engagement::Role::CombatAirPatrol,
+            ..Default::default()
+        });
+    let enemy = distant_enemy(mission.actor(1).unwrap());
+    let last_seen = [30_000., 6_000., -50_000.];
+    remember_hostile(&mut mission, enemy.id, last_seen);
+    step_with(&mut mission, &[human.clone(), enemy.clone()]);
+    human.alive = false;
+    step_with(&mut mission, &[human.clone(), enemy.clone()]);
+    assert_eq!(
+        *mission.actor(1).unwrap().assignment(),
+        engagement::Assignment::default()
+    );
+    let horizontal = |mission: &AiMission| {
+        let p = mission.actor(1).unwrap().flight().position;
+        (p[0] - last_seen[0]).hypot(p[2] - last_seen[2])
+    };
+    let start = horizontal(&mission);
+    let mut arrived = None;
+    let mut closest = f64::INFINITY;
+    for tick in 0..(180 * 120) {
+        step_with(&mut mission, &[human.clone(), enemy.clone()]);
+        let actor = mission.actor(1).unwrap();
+        assert!(!actor.flight().crashed);
+        let opportunity = mission.opportunity(Side(1), 0).unwrap();
+        if opportunity.home.is_some() {
+            break;
+        }
+        assert_eq!(actor.activity(), Activity::Searching, "tick {tick}");
+        assert_eq!(
+            actor.controller().wing_search().map(|c| c.id),
+            Some(enemy.id)
+        );
+        closest = closest.min(horizontal(&mission));
+        if arrived.is_none() && opportunity.arrived_tick.is_some() {
+            arrived = Some(tick);
+        }
+    }
+    let arrived = arrived.expect("reached the last known position");
+    assert!(start > 25_000., "{start:.0}");
+    assert!(closest < 6_076., "circled over it: closest {closest:.0} ft");
+    let opportunity = mission.opportunity(Side(1), 0).unwrap();
+    let (home_tick, reason) = opportunity.home.expect("the search ended");
+    assert_eq!(reason, HomeReason::AllSearched);
+    assert!(home_tick - opportunity.started_tick >= DWELL_TICKS + arrived as u64 - 1);
+    let actor = mission.actor(1).unwrap();
+    assert_eq!(
+        actor.landing_order().map(|o| o.reason),
+        Some(LandingReason::Ordered)
+    );
+    assert_eq!(actor.controller().wing_search(), None);
+}
+
+#[test]
+fn a_wing_under_weapons_hold_returns_to_base_when_its_human_is_lost() {
+    use crate::ai::opportunity::HomeReason;
+    let (mut mission, mut human) = wing_of_a_human();
+    let hold = engagement::Assignment {
+        stance: engagement::Stance::WeaponsHold,
+        ..Default::default()
+    };
+    mission.actor_mut(1).unwrap().set_assignment(hold.clone());
+    let enemy = distant_enemy(mission.actor(1).unwrap());
+    remember_hostile(&mut mission, enemy.id, [30_000., 6_000., -50_000.]);
+    step_with(&mut mission, &[human.clone(), enemy.clone()]);
+    human.alive = false;
+    step_with(&mut mission, &[human.clone(), enemy.clone()]);
+    step_with(&mut mission, &[human, enemy]);
+    assert_eq!(
+        mission
+            .opportunity(Side(1), 0)
+            .and_then(|o| o.home)
+            .map(|(_, reason)| reason),
+        Some(HomeReason::NotCleared)
+    );
+    let actor = mission.actor(1).unwrap();
+    assert_eq!(*actor.assignment(), hold, "its rules stay");
+    assert_eq!(
+        actor.landing_order().map(|o| o.reason),
+        Some(LandingReason::Ordered)
+    );
+}
+
+#[test]
+fn an_ai_led_wing_that_loses_its_leader_keeps_its_own_succession() {
+    // Only a lost human starts a mission of opportunity.
+    let mut mission = AiMission::new();
+    let mut leader = hornet(1, 0, [0., 6_000., -60_000.], 0.);
+    leader.set_home_runway(Some(runway()));
+    mission.push(leader);
+    let mut wingman = hornet(2, 1, [600., 6_000., -60_600.], 0.);
+    wingman.set_home_runway(Some(runway()));
+    mission.push(wingman);
+    mission.start_in_formation();
+    let enemy = distant_enemy(mission.actor(1).unwrap());
+    step_with(&mut mission, std::slice::from_ref(&enemy));
+    mission.actor_mut(1).unwrap().set_alive(false);
+    for _ in 0..120 {
+        step_with(&mut mission, std::slice::from_ref(&enemy));
+    }
+    assert_eq!(mission.wing_leader(Side(1), 0), Some(2));
+    assert!(mission.opportunities().is_empty());
+    assert_eq!(mission.actor(2).unwrap().landing_order(), None);
+}
+
+#[test]
+fn the_new_lead_engages_a_hostile_it_sees() {
+    let (mut mission, mut human) = wing_of_a_human();
+    let mut enemy = distant_enemy(mission.actor(1).unwrap());
+    enemy.on_ground = false;
+    enemy.position = [0., 6_000., -30_000.];
+    step_with(&mut mission, &[human.clone(), enemy.clone()]);
+    // Under its human leader the wingman holds formation and does not attack.
+    assert_eq!(mission.actor(1).unwrap().controller().target(), None);
+    human.alive = false;
+    let mut engaged = None;
+    for tick in 0..240 {
+        step_with(&mut mission, &[human.clone(), enemy.clone()]);
+        if mission.actor(1).unwrap().controller().target() == Some(enemy.id) {
+            engaged = Some(tick);
+            break;
+        }
+    }
+    assert!(engaged.is_some(), "the new lead never engaged");
+    let opportunity = mission.opportunity(Side(1), 0).unwrap();
+    assert_eq!(opportunity.home, None);
+    assert_eq!(opportunity.last_contact_tick + 1, mission.tick());
+}

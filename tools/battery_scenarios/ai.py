@@ -245,6 +245,10 @@ def checker(**kw) -> Callable[[str], list[str]]:
 
 LAND_ORDER = re.compile(r'^t=(\d+) order=LandAtSelected reply="(.*)"$', re.M)
 PLAYER_DOWN = re.compile(r"^t=(\d+) \([\d.]+s\) player: .*crashed=true", re.M)
+# The AI probe's line for a wing whose human leader was lost (John's decision
+# of 2026-09-30, docs/spec/ai.md "Mission of opportunity after a lost human leader").
+OPPORTUNITY_HOME = re.compile(r"^t=\d+ \([\d.]+s\) mission of opportunity: (\S+ \d-\d) leads, returning to base \((.*)\)$", re.M)
+LANDED_PHASES = ("Rollout", "Landed", "Parked", "TaxiIn")
 
 
 def land_order_checker(whole: Callable[[str], list[str]]) -> Callable[[str], list[str]]:
@@ -252,9 +256,9 @@ def land_order_checker(whole: Callable[[str], list[str]]) -> Callable[[str], lis
     John 2026-09-28). The scripted player is the wing's leader. While it flies
     the order is accepted and `whole` (the landing checks) must pass. Once it
     has crashed the wing's next member leads and the human's order is refused
-    with "you are not leading your wing"; the AI lead has no order to land on,
-    so only the takeoff and the general checks apply, and its straight flight
-    may leave the map."""
+    with "you are not leading your wing". The new lead then flies a mission of
+    opportunity (John, 2026-09-30); these probes have no enemy, so it must
+    return to base at once and land there, and `whole` must pass as well."""
 
     def check(output: str) -> list[str]:
         order = LAND_ORDER.search(output)
@@ -266,10 +270,17 @@ def land_order_checker(whole: Callable[[str], list[str]]) -> Callable[[str], lis
             problems.append("a player who had already crashed still gave the land order and it was accepted")
         if refused and not gone:
             problems.append("the land order was refused although the player still led the wing")
+        problems.extend(whole(output))
         if gone:
-            problems.extend(probe_problems(output, ground=True, need_takeoff=True, allow_anomalies=("outside the world",)))
-        else:
-            problems.extend(whole(output))
+            home = OPPORTUNITY_HOME.search(output)
+            if not home:
+                problems.append("the AI that took the lead from the lost player never returned to base")
+            elif home.group(2) != "no enemy position known":
+                problems.append(f"the new lead returned to base for the wrong reason: {home.group(2)}")
+            else:
+                phases = dict(PHASES.findall(output)).get(home.group(1), "")
+                if not any(f"{name}@" in phases for name in LANDED_PHASES):
+                    problems.append(f"the new lead {home.group(1)} returned to base but never landed: {phases[:160]}")
         return problems
 
     return check
@@ -457,7 +468,8 @@ def scenarios() -> list[Scenario]:
                          # pair is expected to be down inside the run. Since the probe runs
                          # the full mission tick the scripted player crashes 17 s after
                          # takeoff from Simferopol, so under lead succession the order is
-                         # refused and no landing is due (land_order_checker).
+                         # refused and the new lead returns to base and lands there
+                         # (land_order_checker).
                          ticks=90000, timeout=1800,
                          check=land_order_checker(checker(ground=True, need_takeoff=True, need_landing=size == 2))))
         # Bug out is ignored while taking off (spec), so order it once the wing is up.

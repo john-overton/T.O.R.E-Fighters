@@ -763,6 +763,11 @@ pub struct Controller {
     search_started_tick: Option<u64>,
     search_orbit_altitude_ft: Option<f64>,
     completed_search: Option<SearchContact>,
+    /// Opinionated (John, 2026-09-30): the wing's mission of opportunity
+    /// search point, a hostile's last known position, flown like a lost
+    /// contact when this aircraft has none of its own
+    /// ([`super::opportunity`]).
+    wing_search: Option<SearchContact>,
     defense_motion: Option<DefenseMotion>,
     defense_motion_id: Option<u64>,
     mission_target: Option<Option<u32>>,
@@ -863,6 +868,30 @@ impl Controller {
         self.search_contact = contact;
     }
 
+    /// Supply the wing's mission of opportunity search point, or `None`. It is
+    /// searched as a lost contact is, without the Ace's two-minute limit, and
+    /// only while this aircraft has no lost contact of its own to
+    /// investigate. Like that contact it never becomes a target.
+    pub fn set_wing_search(&mut self, contact: Option<SearchContact>) {
+        if self.wing_search.map(|c| c.id) != contact.map(|c| c.id)
+            && self
+                .search_contact
+                .is_none_or(|own| self.completed_search == Some(own))
+        {
+            if self.active.is_some_and(|active| active.search) {
+                self.active = None;
+            }
+            self.search_started_tick = None;
+            self.search_orbit_altitude_ft = None;
+        }
+        self.wing_search = contact;
+    }
+
+    /// The wing's mission of opportunity search point, if any.
+    pub fn wing_search(&self) -> Option<SearchContact> {
+        self.wing_search
+    }
+
     /// Supply one immutable mission snapshot before advancing this controller.
     pub fn set_formation_observation(&mut self, traffic: Vec<super::formation::Traffic>) {
         self.formation_traffic = traffic;
@@ -955,6 +984,7 @@ impl Controller {
             search_started_tick: None,
             search_orbit_altitude_ft: None,
             completed_search: None,
+            wing_search: None,
             defense_motion: None,
             defense_motion_id: None,
             mission_target: None,
@@ -2282,21 +2312,26 @@ impl Controller {
 
     /// Investigate one frozen observation without turning it into a live
     /// target. Outside one nautical mile the actor flies to the observation;
-    /// inside it flies a fitted, bounded clockwise level orbit.
+    /// inside it flies a fitted, bounded clockwise level orbit. Without a
+    /// lost contact of its own, the wing's mission of opportunity point is
+    /// searched the same way.
     fn search_motion(
         &mut self,
         frame: &DecisionFrame<'_>,
         clock: CommandClock,
         batch: &mut IntentBatch,
     ) -> Result<bool> {
-        let Some(contact) = self.search_contact else {
-            return Ok(false);
+        let own = self
+            .search_contact
+            .filter(|contact| self.completed_search != Some(*contact));
+        let (contact, opportunity) = match (own, self.wing_search) {
+            (Some(contact), _) => (contact, false),
+            (None, Some(contact)) => (contact, true),
+            (None, None) => return Ok(false),
         };
-        if self.completed_search == Some(contact) {
-            return Ok(false);
-        }
         let started = *self.search_started_tick.get_or_insert(frame.tick);
-        if self.experience.level == super::Experience::Ace
+        if !opportunity
+            && self.experience.level == super::Experience::Ace
             && frame.tick.saturating_sub(started) >= ACE_SEARCH_LIMIT_TICKS
         {
             if self.active.is_some_and(|active| active.search) {
@@ -2406,6 +2441,7 @@ impl Controller {
             distance_ft: spatial,
             // Only the fly-to branch steers at the contact itself.
             orbiting: steering_point.is_none(),
+            opportunity,
         };
         Ok(true)
     }
