@@ -50,6 +50,8 @@ impl Navigation {
                 airport.allegiance == Allegiance::Friendly
                     || (airport.allegiance == Allegiance::Neutral && airport.neutral_permission)
             })
+            // A short strip is not on the list (John, 2026-09-30).
+            .filter(|airport| !scene.airport_is_short_strip(airport))
             .filter_map(|airport| {
                 let runway = airport
                     .runway_objects
@@ -141,7 +143,7 @@ mod tests {
                 approach_center: bounds.center,
                 elevation_ft: 0.,
                 heading: 0.,
-                length_ft: 1000.,
+                length_ft: 6000.,
             });
             scene.airports.push(Airport {
                 id,
@@ -176,6 +178,30 @@ mod tests {
         assert_eq!(nav.entries()[nav.index().unwrap()].id, 1);
         assert_eq!(nav.control(2), None);
         assert!(nav.entries().is_empty());
+    }
+
+    #[test]
+    fn a_short_strip_is_not_on_the_airport_list() {
+        let mut scene = scene();
+        let service = Service::new(&scene).unwrap();
+        let mut nav = Navigation::default();
+        nav.refresh(&scene, &service, [0.; 3]);
+        let before = nav.airports.iter().map(|e| e.id).collect::<Vec<_>>();
+        assert!(before.contains(&2));
+        // A 1,074 ft strip (John, 2026-09-30) leaves the list the player cycles.
+        scene
+            .runways
+            .iter_mut()
+            .find(|r| r.airport == 2)
+            .unwrap()
+            .length_ft = 1_074.;
+        nav.refresh(&scene, &service, [0.; 3]);
+        let after = nav.airports.iter().map(|e| e.id).collect::<Vec<_>>();
+        assert_eq!(
+            after,
+            before.into_iter().filter(|id| *id != 2).collect::<Vec<_>>()
+        );
+        assert_eq!(nav.control(2), Some(after[0]));
     }
 
     #[test]

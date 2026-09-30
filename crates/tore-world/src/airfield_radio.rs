@@ -635,7 +635,12 @@ fn approach_runway(f: &flight::State, world: &Terrain, service: &Service) -> Opt
                 || (a.allegiance == tore_sim::airport::Allegiance::Neutral && a.neutral_permission)
         })
         .flat_map(|a| &a.runway_objects)
-        .filter(|id| service.usable(**id) && !world.airport_scene.vertical_pad(**id))
+        .filter(|id| {
+            service.usable(**id)
+                && !world.airport_scene.vertical_pad(**id)
+                // The tower does not work a short strip (John, 2026-09-30).
+                && !world.airport_scene.short_strip(**id)
+        })
         .filter_map(|id| world.airport_scene.runway(*id))
         .filter(|r| {
             f.position[1] - r.elevation_ft < 4000.

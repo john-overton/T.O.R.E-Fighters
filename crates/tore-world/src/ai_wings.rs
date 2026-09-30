@@ -720,11 +720,13 @@ impl Airfields {
                 continue;
             }
             // Spec-derived: conventional aircraft never land on a vertical
-            // pad, so none is anyone's home.
+            // pad, so none is anyone's home. Opinionated, John 2026-09-30: nor
+            // is a short strip (under `SHORT_STRIP_FT`), so no AI aircraft
+            // picks one as its home runway, landing field or return point.
             for runway in airport
                 .runway_objects
                 .iter()
-                .filter(|id| !scene.vertical_pad(**id))
+                .filter(|id| !scene.vertical_pad(**id) && !scene.short_strip(**id))
                 .filter_map(|id| scene.runway(*id))
             {
                 runways.push(HomeRunway {

@@ -81,6 +81,9 @@ pub struct QuickMission {
     start_modes: Vec<String>,
     airport_names: Vec<Vec<String>>,
     airport_objects: Vec<Vec<u32>>,
+    /// Per theater, the short strips (object id and name) kept off the
+    /// ground-start list: no start there for the player or any wing.
+    short_strips: Vec<Vec<(u32, String)>>,
     selector: Option<usize>,
     cursor: usize,
     scroll: usize,
@@ -159,11 +162,13 @@ impl QuickMission {
             .collect();
         let mut airport_names = Vec::new();
         let mut airport_objects = Vec::new();
+        let mut short_strips = Vec::new();
         let mut definitions = BTreeMap::new();
         for code in &theater_codes {
-            let (names, ids) = Self::airports_in(code, data, &mut definitions);
+            let (names, ids, short) = Self::airports_in(code, data, &mut definitions);
             airport_names.push(names);
             airport_objects.push(ids);
+            short_strips.push(short);
         }
         Self {
             debrief: None,
@@ -171,6 +176,7 @@ impl QuickMission {
             start_modes: vec!["Airborne".into(), "Ground".into()],
             airport_names,
             airport_objects,
+            short_strips,
             hover: None,
             pressed: None,
             right_pressed: None,
@@ -197,33 +203,53 @@ impl QuickMission {
             shift: false,
         }
     }
-    /// The airport names and object ids of one theater layout.
+    /// The ground-start airports of one theater layout (names and object ids),
+    /// and the short strips left off that list. `fitted`, agent decision
+    /// 2026-09-30, for John's decision of the same day: an airport whose runway
+    /// is under `tore_sim::airport::SHORT_STRIP_FT` is no ground start, for the
+    /// player or any wing. `definitions` caches, per object type, whether it is
+    /// an airport and its runway length.
     fn airports_in(
         code: &str,
         data: &BTreeMap<String, Vec<u8>>,
-        definitions: &mut BTreeMap<String, bool>,
-    ) -> (Vec<String>, Vec<u32>) {
+        definitions: &mut BTreeMap<String, (bool, Option<f64>)>,
+    ) -> (Vec<String>, Vec<u32>, Vec<(u32, String)>) {
         let name = format!("{code}.MM");
         let mut names = Vec::new();
         let mut ids = Vec::new();
+        let mut short = Vec::new();
         if let Some(bytes) = data.get(&name)
             && let Ok(layout) = tore_formats::mission::Layout::parse(&name, bytes)
         {
             for p in layout.placements {
-                let airport = *definitions.entry(p.object_type.clone()).or_insert_with(|| {
-                    data.get(&p.object_type)
-                        .and_then(|b| tore_formats::static_object::Definition::parse(b).ok())
-                        .is_some_and(|d| {
-                            d.main_shape.is_some() && d.callbacks.iter().any(|c| c == "_STRIPProc")
-                        })
-                });
+                let (airport, length) =
+                    *definitions.entry(p.object_type.clone()).or_insert_with(|| {
+                        let airport = data
+                            .get(&p.object_type)
+                            .and_then(|b| tore_formats::static_object::Definition::parse(b).ok())
+                            .is_some_and(|d| {
+                                d.main_shape.is_some()
+                                    && d.callbacks.iter().any(|c| c == "_STRIPProc")
+                            });
+                        let length = airport
+                            .then(|| tore_world::terrain::strip_length_ft(data, &p.object_type))
+                            .flatten();
+                        (airport, length)
+                    });
                 if airport {
-                    names.push(p.name.unwrap_or(p.object_type));
-                    ids.push(0x4000_0000 + p.key.ordinal);
+                    let id = 0x4000_0000 + p.key.ordinal;
+                    let label = p.name.unwrap_or(p.object_type);
+                    // A strip whose shape cannot be measured stays listed.
+                    if length.is_some_and(tore_sim::airport::short_strip_length) {
+                        short.push((id, label));
+                    } else {
+                        names.push(label);
+                        ids.push(id);
+                    }
                 }
             }
         }
-        (names, ids)
+        (names, ids, short)
     }
     /// Developer option: add one imported `~` layout variant (or, with
     /// `all`, every one) after the base theaters so a probe can run the
@@ -238,9 +264,10 @@ impl QuickMission {
             if only.is_some_and(|only| only != code) || self.theater_codes.contains(&code) {
                 continue;
             }
-            let (names, ids) = Self::airports_in(&code, data, &mut definitions);
+            let (names, ids, short) = Self::airports_in(&code, data, &mut definitions);
             self.airport_names.push(names);
             self.airport_objects.push(ids);
+            self.short_strips.push(short);
             self.theater_codes.push(code.clone());
             self.theater_catalog.push(code);
             self.options.fields[13].push(label);
@@ -540,6 +567,15 @@ impl QuickMission {
             .flatten()
     }
     pub fn choose_ground_runway(&mut self, object: u32) -> Result<(), String> {
+        if let Some((_, name)) = self
+            .short_strips
+            .get(self.draft.values[13])
+            .and_then(|list| list.iter().find(|(id, _)| *id == object))
+        {
+            return Err(format!(
+                "{name} is a short strip: no ground start there. Choose a longer runway or Airborne."
+            ));
+        }
         let index = self.airport_objects[self.draft.values[13]]
             .iter()
             .position(|id| *id == object)
@@ -1726,6 +1762,26 @@ mod tests {
         assert!(q.unsupported().unwrap().contains("No imported runways"));
         q.apply(33, 0);
         assert!(q.unsupported().is_none());
+    }
+    #[test]
+    fn a_short_strip_is_no_ground_start() {
+        let mut q = setup();
+        q.airport_names[0] = vec!["Long Field".into()];
+        q.airport_objects[0] = vec![0x4000_0000];
+        q.short_strips[0] = vec![(0x4000_0003, "Goose Green".into())];
+        // The short strip is not in the list the creator offers.
+        assert_eq!(q.values(34).len(), 1);
+        let error = q.choose_ground_runway(0x4000_0003).unwrap_err();
+        assert!(
+            error.contains("Goose Green") && error.contains("short strip"),
+            "{error}"
+        );
+        assert!(!q.ground_start());
+        q.choose_ground_runway(0x4000_0000).unwrap();
+        assert_eq!(q.ground_runway(), Some(0x4000_0000));
+        // Something that is neither keeps the old message.
+        let error = q.choose_ground_runway(0x4000_0999).unwrap_err();
+        assert!(error.contains("No imported runway matches"), "{error}");
     }
     #[test]
     fn tab_reaches_ground_controls_without_focusing_hidden_airport() {

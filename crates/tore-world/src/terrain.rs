@@ -199,6 +199,49 @@ pub struct Stance {
     pub runway: bool,
 }
 
+/// A runway's length in feet from its shape's extent along the runway (`min_z`
+/// to `max_z`, scaled) and the STRIP anchor 0x11 midpoint's position along it:
+/// the run from the anchor to the far end when the anchor lies inside the
+/// shape, else the whole extent.
+pub fn runway_length_ft(min_z: f64, max_z: f64, anchor_z: Option<f64>) -> f64 {
+    match anchor_z {
+        Some(anchor) if anchor < max_z && anchor >= min_z => max_z - anchor,
+        _ => ((max_z - min_z) * 0.5).max(1.0) * 2.0,
+    }
+}
+
+/// The runway length of an airport object type (a STRIP definition such as
+/// `AIRPORT.OT`), read from the imported resources, or `None` when the type is
+/// not an airport or its shape cannot be read. The same length the airport
+/// scene gives the runway of a placement of this type, without building the
+/// theater: the Quick Mission creator uses it to keep short strips off its
+/// ground-start list (`tore_sim::airport::SHORT_STRIP_FT`).
+pub fn strip_length_ft(resources: &BTreeMap<String, Vec<u8>>, object_type: &str) -> Option<f64> {
+    let definition =
+        tore_formats::static_object::Definition::parse(resources.get(object_type)?).ok()?;
+    if !definition.callbacks.iter().any(|name| name == "_STRIPProc") {
+        return None;
+    }
+    let shape_bytes = resources.get(definition.main_shape.as_ref()?)?;
+    let shape = tore_formats::shape::Shape::scenery(shape_bytes).ok()?;
+    let scale = tore_formats::shape::object_scale(shape_bytes).ok()?;
+    let (mut min, mut max) = (f64::INFINITY, f64::NEG_INFINITY);
+    for point in shape.faces.iter().flat_map(|face| &face.positions) {
+        // The shape's third coordinate is the runway's forward axis.
+        min = min.min(f64::from(point[1]));
+        max = max.max(f64::from(point[1]));
+    }
+    if !min.is_finite() || !max.is_finite() {
+        return None;
+    }
+    let anchor = tore_formats::shape::contact_boxes(shape_bytes)
+        .ok()
+        .flatten()
+        .and_then(|boxes| boxes.iter().find(|b| b.id == 0x11).map(|b| b.midpoint()[2]))
+        .map(f64::from);
+    Some(runway_length_ft(min * scale, max * scale, anchor))
+}
+
 impl Placements {
     pub fn load(resources: &BTreeMap<String, Vec<u8>>, code: &str) -> WorldResult<Self> {
         let layout_name = format!("{code}.MM");
@@ -585,8 +628,9 @@ impl Terrain {
                             + basis.up[2] * (center[2] - support_origin[2]))
                             / basis.up[1];
                 }
-                let mut length_ft = half[2] * 2.0;
-                if let Some(anchor) = sources.runway_anchors.get(&placement.object_type)
+                let anchor = sources.runway_anchors.get(&placement.object_type);
+                let length_ft = runway_length_ft(min[2], max[2], anchor.map(|a| a[2]));
+                if let Some(anchor) = anchor
                     && anchor[2] < max[2]
                     && anchor[2] >= min[2]
                 {
@@ -596,7 +640,6 @@ impl Terrain {
                             + basis.right[axis] * local[0]
                             + basis.forward[axis] * local[2]
                     });
-                    length_ft = max[2] - anchor[2];
                 }
                 if let Some(found) =
                     sources
@@ -808,6 +851,26 @@ pub const EDGE_DESTROY_NM: f64 = 105.;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_runway_is_measured_from_the_anchor_to_the_far_end() {
+        // The anchor inside the shape: the run from it to the far end.
+        assert_eq!(runway_length_ft(-600., 600., Some(-537.)), 1_137.);
+        // No anchor, or one outside the shape: the whole extent.
+        assert_eq!(runway_length_ft(-600., 600., None), 1_200.);
+        assert_eq!(runway_length_ft(-600., 600., Some(700.)), 1_200.);
+        assert_eq!(runway_length_ft(-600., 600., Some(-700.)), 1_200.);
+        // The far end itself is outside, the near end inside.
+        assert_eq!(runway_length_ft(-600., 600., Some(600.)), 1_200.);
+        assert_eq!(runway_length_ft(-600., 600., Some(-600.)), 1_200.);
+        // The smallest extent the scene gives a runway is two feet.
+        assert_eq!(runway_length_ft(0., 0.5, None), 2.);
+    }
+    #[test]
+    fn strip_length_needs_an_airport_definition_in_the_resources() {
+        assert_eq!(strip_length_ft(&BTreeMap::new(), "AIRPORT.OT"), None);
+        let junk = BTreeMap::from([("AIRPORT.OT".to_string(), vec![0u8; 8])]);
+        assert_eq!(strip_length_ft(&junk, "AIRPORT.OT"), None);
+    }
     #[test]
     fn the_map_edge_distance_is_measured_from_the_nearest_point_of_the_rectangle() {
         // 209 by 201 cells of 8,192 ft: the map runs 0..1,703,936 by 0..1,638,400.

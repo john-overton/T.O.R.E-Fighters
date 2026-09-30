@@ -1248,22 +1248,17 @@ impl App {
             "sensor-infrared" => Command::SensorInfrared,
             "sensor-history" => Command::SensorHistory,
             "airport-next" => {
-                let next = self
-                    .world
-                    .terrain
-                    .airport_scene
+                // Short strips are not on the list (John, 2026-09-30).
+                let scene = &self.world.terrain.airport_scene;
+                let mut listed = scene
                     .airports
                     .iter()
-                    .map(|a| a.id)
+                    .filter(|a| !scene.airport_is_short_strip(a))
+                    .map(|a| a.id);
+                let next = listed
+                    .clone()
                     .find(|id| Some(*id) > self.world.cockpits[OWN].airport_service.selected())
-                    .or_else(|| {
-                        self.world
-                            .terrain
-                            .airport_scene
-                            .airports
-                            .first()
-                            .map(|a| a.id)
-                    });
+                    .or_else(|| listed.next());
                 next.map_or(Command::None, |id| {
                     Command::Airport(tore_sim::airport::Command::SelectAirport(id))
                 })
@@ -9336,6 +9331,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             world.airport_scene.objects.len(),
             world.airport_scene.objects.len()
         );
+        for runway in &world.airport_scene.runways {
+            println!(
+                "airport runway: airport={} name={:?} length_ft={:.0} short_strip={}",
+                runway.airport,
+                runway.name,
+                runway.length_ft,
+                runway.short_strip()
+            );
+        }
     }
     if validate_creator {
         // TORE_CREATOR_STAGE=loadouts|matrix|render (render includes the input fuzz) runs one part of the probe.

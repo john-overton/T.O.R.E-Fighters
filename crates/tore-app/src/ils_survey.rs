@@ -88,7 +88,9 @@ pub fn check_path(theater: &str, world: &Terrain, clearance_ft: f64) -> Vec<Stri
     let scene = &world.airport_scene;
     let mut problems = Vec::new();
     for runway in &scene.runways {
-        if scene.vertical_pad(runway.object) {
+        // A pad has no conventional approach, and the tower gives no ILS for
+        // a short strip (John, 2026-09-30).
+        if scene.vertical_pad(runway.object) || runway.short_strip() {
             continue;
         }
         for end in [ApproachEnd::Near, ApproachEnd::Far] {

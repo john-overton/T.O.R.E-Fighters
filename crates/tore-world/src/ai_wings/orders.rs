@@ -84,6 +84,11 @@ impl AiWings {
             .and_then(|id| scene.airports.iter().find(|a| a.id == id))
             .ok_or("Wing order unavailable: no airport selected (Shift-A selects one)")?;
         let name = &airport.name;
+        if scene.airport_is_short_strip(airport) {
+            return Err(format!(
+                "Wing order unavailable: {name} is a short strip your wingmen cannot land on"
+            ));
+        }
         match airport.allegiance {
             Allegiance::Hostile => {
                 return Err(format!("Wing order unavailable: {name} is hostile"));
@@ -111,7 +116,11 @@ impl AiWings {
                 airport
                     .runway_objects
                     .iter()
-                    .filter(|id| service.usable(**id) && !scene.vertical_pad(**id))
+                    .filter(|id| {
+                        service.usable(**id)
+                            && !scene.vertical_pad(**id)
+                            && !scene.short_strip(**id)
+                    })
                     .filter_map(|id| scene.runway(*id))
                     .min_by(|a, b| {
                         b.length_ft
@@ -1235,6 +1244,46 @@ mod landing_tests {
         assert!(AiWings::landing_site(&scene, &BTreeMap::new(), &service).is_err());
     }
 
+    /// John, 2026-09-30: a short strip is off the tower's list, so a wing is
+    /// never sent to land on one.
+    #[test]
+    fn wingmen_never_land_on_a_short_strip() {
+        let mut scene = scene();
+        // The tower will not even select an airport whose runways are all short.
+        let (object, runway) = strip(1005, 11, 130_000., 1_074.);
+        scene.objects.push(object);
+        scene.runways.push(runway);
+        scene.airports.push(Airport {
+            id: 11,
+            name: "Goose Green".into(),
+            runway_objects: vec![1005],
+            allegiance: Allegiance::Friendly,
+            neutral_permission: false,
+        });
+        let mut service = Service::new(&scene).unwrap();
+        select(&scene, &mut service, 11);
+        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service).unwrap_err();
+        assert!(err.contains("no airport selected"), "{err}");
+        // An airport that shrank under a selection already made is refused too.
+        select(&scene, &mut service, 7);
+        scene.runways[0].length_ft = 1_074.;
+        scene.runways[1].length_ft = 1_074.;
+        let err = AiWings::landing_site(&scene, &BTreeMap::new(), &service).unwrap_err();
+        assert!(err.contains("short strip"), "{err}");
+        // A long runway beside a short one is still used, the short one never.
+        scene.runways[0].length_ft = 10_000.;
+        let site = AiWings::landing_site(&scene, &BTreeMap::new(), &service).unwrap();
+        assert_eq!(site.runway.object, 1000);
+        // No side takes a short strip as home.
+        let fields = Airfields::from_scene(&scene, None);
+        assert!(
+            fields
+                .runways
+                .iter()
+                .all(|r| r.view.object != 1001 && r.view.object != 1005)
+        );
+    }
+
     /// Regression, found at Goose Green (LFA, 2026-09-23): wingmen sent to
     /// land on a vertical pad crashed. Conventional aircraft never land on
     /// one (DTSTRP), so the wing lands on the airport's other runway, and an
@@ -1242,7 +1291,8 @@ mod landing_tests {
     #[test]
     fn wingmen_never_land_on_a_vertical_pad() {
         let mut scene = scene();
-        let (mut pad, pad_runway) = strip(1004, 7, 20_000., 800.);
+        // Long enough not to be a short strip, so the pad rule is what bites.
+        let (mut pad, pad_runway) = strip(1004, 7, 20_000., 2_400.);
         pad.object_type = "DTSTRP.OT".into();
         scene.objects.push(pad);
         scene.runways.push(pad_runway);

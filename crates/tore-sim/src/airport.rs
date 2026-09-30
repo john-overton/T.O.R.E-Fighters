@@ -22,6 +22,20 @@ pub fn glide_path_height_ft(before_threshold_ft: f64) -> f64 {
 pub fn threshold_crossing_height_ft() -> f64 {
     glide_path_height_ft(0.0)
 }
+/// The longest runway a strip can have and still count as a short strip,
+/// feet. `fitted`, agent decision 2026-09-30 (John decided on 2026-09-30 that
+/// short strips leave the Quick Mission takeoff choice and the in-flight
+/// airport list; the number is the agent's): the 22 strips of Cuba, the
+/// Falklands, Pakistan, Panama and the Persian Gulf are about 1,074 ft and
+/// every other airport in the retail theaters is 4,060 ft or longer, so any
+/// line inside that gap picks the same airports. 2,000 ft sits well clear of
+/// both. A runway under it is too short for any aircraft's takeoff run at a
+/// normal load, for the player and far more for a wing.
+pub const SHORT_STRIP_FT: f64 = 2_000.0;
+/// Whether a runway of `length_ft` is a short strip.
+pub fn short_strip_length(length_ft: f64) -> bool {
+    length_ft < SHORT_STRIP_FT
+}
 pub const LANDING_SPEED_FPS: f64 = 30.0 * 6_076.12 / 3_600.0;
 pub const LANDING_TICKS: u16 = 240;
 
@@ -153,6 +167,10 @@ impl Runway {
                     / up[1],
         )
     }
+    /// A short strip (see [`SHORT_STRIP_FT`]): nobody starts or lands here.
+    pub fn short_strip(&self) -> bool {
+        short_strip_length(self.length_ft)
+    }
     pub fn departure_pose(&self) -> ([f64; 3], f64) {
         let mut position = self.threshold(ApproachEnd::Near);
         let inset = (self.length_ft * 0.05).min(100.);
@@ -226,6 +244,30 @@ impl Scene {
     }
     pub fn runway(&self, id: ObjectId) -> Option<&Runway> {
         self.runways.iter().find(|r| r.object == id)
+    }
+    /// Whether a runway object is on a short strip (see [`SHORT_STRIP_FT`]).
+    /// An object that is not a known runway is not.
+    pub fn short_strip(&self, runway: ObjectId) -> bool {
+        self.runway(runway).is_some_and(Runway::short_strip)
+    }
+    /// Whether every runway of the airport is a short strip. An airport with
+    /// no runway in the scene is not: the scene says nothing about it.
+    pub fn airport_is_short_strip(&self, airport: &Airport) -> bool {
+        let mut runways = airport
+            .runway_objects
+            .iter()
+            .filter_map(|id| self.runway(*id));
+        let Some(first) = runways.next() else {
+            return false;
+        };
+        first.short_strip() && runways.all(Runway::short_strip)
+    }
+    /// Whether airport `id` is a short strip.
+    pub fn airport_id_is_short_strip(&self, id: u32) -> bool {
+        self.airports
+            .iter()
+            .find(|a| a.id == id)
+            .is_some_and(|a| self.airport_is_short_strip(a))
     }
     /// A vertical-landing pad (the DTSTRP type, type flags `$108021`), where
     /// conventional aircraft can neither take off nor land
@@ -480,7 +522,7 @@ impl Service {
         let a = scene.airports.iter().find(|a| a.id == airport)?;
         a.runway_objects
             .iter()
-            .filter(|id| self.usable(**id))
+            .filter(|id| self.usable(**id) && !scene.short_strip(**id))
             .filter_map(|id| {
                 scene.runway(*id).map(|r| {
                     let near = distance2(aircraft.position, r.threshold(ApproachEnd::Near));
@@ -504,7 +546,9 @@ impl Service {
             Command::SelectAirport(id) => {
                 self.clearance = None;
                 self.landing_ticks = 0;
-                if scene.airports.iter().any(|a| a.id == id) {
+                // A short strip is not on the tower's list (John, 2026-09-30).
+                if scene.airports.iter().any(|a| a.id == id) && !scene.airport_id_is_short_strip(id)
+                {
                     self.selected = Some(id);
                     Reply::Selected { airport: id }
                 } else {
@@ -1091,5 +1135,46 @@ mod tests {
             s.earliest_object_hit([101., 100., -6000.], [101., 100., 6000.]),
             None
         );
+    }
+    #[test]
+    fn a_short_strip_is_off_the_tower_and_the_guidance() {
+        // The retail strips are 1,074 ft and every other airport is 4,060 ft or
+        // longer; the line sits in the gap.
+        assert!(short_strip_length(1_074.));
+        assert!(!short_strip_length(4_060.));
+        assert!(!short_strip_length(SHORT_STRIP_FT));
+        let mut s = scene();
+        assert!(!s.short_strip(1000));
+        assert!(!s.airport_id_is_short_strip(7));
+        s.runways[0].length_ft = 1_074.;
+        assert!(s.short_strip(1000));
+        assert!(s.airport_id_is_short_strip(7));
+        assert!(s.airport_is_short_strip(&s.airports[0]));
+        // An unknown runway or airport is not a short strip.
+        assert!(!s.short_strip(9));
+        assert!(!s.airport_id_is_short_strip(99));
+        let mut service = Service::new(&s).unwrap();
+        let p = plane(-20_000., 2_000.);
+        // The airport cannot be selected, so no clearance follows.
+        assert_eq!(
+            service.command(&s, p, Command::SelectAirport(7)),
+            vec![Event::Reply(Reply::Declined {
+                airport: None,
+                reason: DeclineReason::NoAirport
+            })]
+        );
+        assert_eq!(service.selected(), None);
+        assert_eq!(
+            service.command(&s, p, Command::RequestLanding),
+            vec![Event::Reply(Reply::Declined {
+                airport: None,
+                reason: DeclineReason::NoAirport
+            })]
+        );
+        // Automatic guidance never picks it, even lined up on its centre line.
+        assert!(service.guidance(&s, p).is_none());
+        // The same field at full length is served as before.
+        s.runways[0].length_ft = 10_000.;
+        assert!(service.guidance(&s, p).is_some());
     }
 }
