@@ -4675,17 +4675,45 @@ impl ProbeScript {
 }
 
 /// The scripted human leader of the AI probe. `fitted` test harness (agent
-/// decision, 2026-09-23), not game behaviour: the same full-power, 0.35
-/// pitch rotation as `--maneuver takeoff` until 50 ft above the ground, then
-/// gear and flaps up and a 10 degree nose-up hold to 3,000 ft above the
-/// ground, where the player's own heading-and-altitude autopilot takes over.
+/// decision, 2026-09-23, extended 2026-09-30), not game behaviour: the same
+/// full-power, 0.35 pitch rotation as `--maneuver takeoff` until 50 ft above
+/// the ground, then gear up, flaps up once the clean wing carries the aircraft,
+/// and a 10 degree nose-up hold to 3,000 ft above the ground, where the
+/// player's own heading-and-altitude autopilot takes over. It flies as the AI's
+/// own departure does, so that every aircraft reaches a safe cruise: it steers
+/// back to the runway line if the roll drifts, eases its pitch to keep 1 G
+/// flight above the aircraft's own minimum speed for the current flaps, pulls up
+/// to clear terrain ahead, and climbs again from the cruise if the ground
+/// ahead rises to meet it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProbePilot {
+enum ProbePhase {
     Roll,
-    Climb,
+    /// Airborne with the gear up; `flaps_up` once the flaps have been raised.
+    Climb {
+        flaps_up: bool,
+    },
     Cruise,
     Home,
     Away,
+}
+
+/// The scripted leader: its phase and its last look at the terrain ahead.
+#[derive(Clone, Debug)]
+struct ProbePilot {
+    phase: ProbePhase,
+    terrain: ProbeTerrain,
+}
+
+/// What the terrain along the heading ahead asks of the scripted leader.
+#[derive(Clone, Copy, Debug, Default)]
+struct ProbeTerrain {
+    /// Tick of the last look, so that it is taken a few times a second.
+    looked_at: Option<u64>,
+    /// The steepest flight path, in degrees above the horizon, that clears
+    /// every sample by [`PROBE_TERRAIN_CLEARANCE_FT`].
+    need_deg: f64,
+    /// The highest surface sampled, feet above sea level.
+    highest_ft: f64,
 }
 
 /// The scripted gear-up for the `takeoff-gear-early` (at 80 knots with the
@@ -4723,8 +4751,154 @@ const PROBE_CLEAN_AGL_FT: f64 = 50.;
 const PROBE_CLIMB_PITCH_DEG: f64 = 10.;
 /// Height above the ground at which the scripted leader levels off.
 const PROBE_CRUISE_AGL_FT: f64 = 3_000.;
+/// The steepest nose-up attitude the scripted leader asks for over terrain.
+const PROBE_MAX_CLIMB_PITCH_DEG: f64 = 25.;
+/// How far ahead, in seconds of flight, the scripted leader reads the terrain.
+const PROBE_TERRAIN_LOOKAHEAD_S: f64 = 45.;
+/// The least distance, in feet, it reads ahead at any speed.
+const PROBE_TERRAIN_MIN_REACH_FT: f64 = 12_000.;
+/// Spacing of the terrain samples along the heading, feet.
+const PROBE_TERRAIN_STEP_FT: f64 = 500.;
+/// Ticks between two looks at the terrain (four a second).
+const PROBE_TERRAIN_EVERY_TICKS: u64 = 30;
+/// Clearance the climb aims to keep over the highest ground ahead, feet.
+const PROBE_TERRAIN_CLEARANCE_FT: f64 = 500.;
+/// The cruise altitude must be this far over the ground ahead to level off.
+const PROBE_LEVEL_OFF_MARGIN_FT: f64 = 1_000.;
+/// In the cruise, ground closer than this under the aircraft ahead means climb.
+const PROBE_RECLIMB_MARGIN_FT: f64 = 600.;
+/// Speed over the aircraft's 1 G minimum at which the climb holds its full
+/// pitch; below it the pitch eases off to level flight at
+/// [`PROBE_LEVEL_SPEED_FLOOR`].
+const PROBE_SPEED_MARGIN: f64 = 1.12;
+const PROBE_LEVEL_SPEED_FLOOR: f64 = 1.02;
+/// Speed over the clean wing's 1 G minimum at which the flaps come up.
+const PROBE_FLAPS_UP_MARGIN: f64 = 1.05;
+/// The roll steers back to the runway line when it is this far off the
+/// heading, degrees, or off the line, feet.
+const PROBE_ROLL_HEADING_DEADBAND_DEG: f64 = 2.;
+const PROBE_ROLL_LINE_DEADBAND_FT: f64 = 15.;
+/// The nosewheel's steering authority, as the AI's takeoff roll assumes it.
+const PROBE_NOSEWHEEL_YAW_RATE_RAD_S: f64 = 0.3;
+const PROBE_NOSEWHEEL_FULL_SPEED_FPS: f64 = 40.;
+
+/// The rudder for a takeoff roll, from the heading error (degrees, runway
+/// minus nose, positive turns right), the distance right of the runway line
+/// (feet) and the speed (feet per second). Zero while the roll is within
+/// [`PROBE_ROLL_HEADING_DEADBAND_DEG`] and [`PROBE_ROLL_LINE_DEADBAND_FT`], so a
+/// roll that stays true is untouched. Otherwise the heading rule and nosewheel
+/// authority the AI's own roll uses: aim up to 5 degrees back toward the line.
+fn roll_rudder(heading_error_deg: f64, cross_ft: f64, speed_fps: f64) -> f64 {
+    let wrap = |degrees: f64| (degrees + 180.).rem_euclid(360.) - 180.;
+    let off = wrap(heading_error_deg);
+    if off.abs() <= PROBE_ROLL_HEADING_DEADBAND_DEG && cross_ft.abs() <= PROBE_ROLL_LINE_DEADBAND_FT
+    {
+        return 0.;
+    }
+    let toward_line = (-cross_ft).atan2(400.).to_degrees().clamp(-5., 5.);
+    let error = wrap(off + toward_line);
+    let limit = tore_sim::ai::steering::GROUND_TURN_RATE_FLOOR_DEG_PER_S;
+    let rate = error.clamp(-limit, limit).to_radians();
+    let authority =
+        PROBE_NOSEWHEEL_YAW_RATE_RAD_S * (speed_fps / PROBE_NOSEWHEEL_FULL_SPEED_FPS).clamp(0., 1.);
+    (rate / authority.max(0.05)).clamp(-1., 1.)
+}
+
+/// The nose-up attitude of the climb, degrees: 10, raised to clear ground that
+/// needs `need_deg` of flight path (plus the angle of attack and two degrees),
+/// to at most 25, and eased toward level as `speed_ratio` (speed over the
+/// aircraft's 1 G minimum with its present flaps) falls from
+/// [`PROBE_SPEED_MARGIN`] to [`PROBE_LEVEL_SPEED_FLOOR`].
+fn climb_pitch_for(need_deg: f64, angle_of_attack_deg: f64, speed_ratio: f64) -> f64 {
+    let target = PROBE_CLIMB_PITCH_DEG
+        .max(need_deg + angle_of_attack_deg + 2.)
+        .min(PROBE_MAX_CLIMB_PITCH_DEG);
+    let ease = ((speed_ratio - PROBE_LEVEL_SPEED_FLOOR)
+        / (PROBE_SPEED_MARGIN - PROBE_LEVEL_SPEED_FLOOR))
+        .clamp(0., 1.);
+    target * ease
+}
 
 impl ProbePilot {
+    fn new() -> Self {
+        Self {
+            phase: ProbePhase::Roll,
+            terrain: ProbeTerrain::default(),
+        }
+    }
+
+    /// Read the terrain along the heading, four times a second.
+    fn look(&mut self, tick: u64, flight: &flight::State, world: &terrain::Terrain) {
+        if self
+            .terrain
+            .looked_at
+            .is_some_and(|at| tick < at + PROBE_TERRAIN_EVERY_TICKS)
+        {
+            return;
+        }
+        let [x, y, z] = flight.position;
+        let [vx, _, vz] = flight.velocity;
+        let along = vx.hypot(vz);
+        // The track once it is moving; the nose before that.
+        let (dx, dz) = if along > 100. {
+            (vx / along, vz / along)
+        } else {
+            (flight.yaw.sin(), flight.yaw.cos())
+        };
+        let reach = (along * PROBE_TERRAIN_LOOKAHEAD_S).max(PROBE_TERRAIN_MIN_REACH_FT);
+        let mut need = f64::MIN;
+        let mut highest = f64::MIN;
+        let mut d = PROBE_TERRAIN_STEP_FT;
+        while d <= reach {
+            let height = world.surface(x + dx * d, z + dz * d).height;
+            highest = highest.max(height);
+            need = need.max(((height + PROBE_TERRAIN_CLEARANCE_FT - y) / d).atan());
+            d += PROBE_TERRAIN_STEP_FT;
+        }
+        self.terrain = ProbeTerrain {
+            looked_at: Some(tick),
+            need_deg: need.to_degrees().max(0.),
+            highest_ft: highest,
+        };
+    }
+
+    /// The rudder that brings a drifting takeoff roll back to the runway line,
+    /// zero while it holds it.
+    fn roll_yaw(flight: &flight::State, ground: &mission_layout::GroundLayout) -> f64 {
+        let course = ground.heading;
+        let [x, _, z] = flight.position;
+        let start = ground
+            .slots
+            .first()
+            .copied()
+            .unwrap_or(ground.runway.center);
+        roll_rudder(
+            course.to_degrees() - flight.yaw.to_degrees(),
+            (x - start[0]) * course.cos() - (z - start[2]) * course.sin(),
+            flight
+                .speed
+                .max(flight.velocity[0].hypot(flight.velocity[2])),
+        )
+    }
+
+    /// The pitch attitude the climb asks for: 10 degrees, more where the ground
+    /// ahead needs it, less where the speed is short of the aircraft's own
+    /// 1 G minimum with its present flaps.
+    fn climb_pitch_deg(&self, flight: &flight::State) -> f64 {
+        let [vx, vy, vz] = flight.velocity;
+        let path = vy.atan2(vx.hypot(vz)).to_degrees();
+        let minimum = flight.minimum_level_speed(flight.position[1], flight.flaps);
+        climb_pitch_for(
+            self.terrain.need_deg,
+            flight.pitch.to_degrees() - path,
+            if minimum > 0. {
+                flight.speed / minimum
+            } else {
+                f64::INFINITY
+            },
+        )
+    }
+
     fn fly(
         &mut self,
         tick: u64,
@@ -4737,21 +4911,44 @@ impl ProbePilot {
         use flight::{PilotCommand::*, Switch};
         let [x, y, z] = flight.position;
         let agl = y - world.surface(x, z).height;
-        match *self {
-            Self::Roll => {
+        if !matches!(self.phase, ProbePhase::Roll | ProbePhase::Home) {
+            self.look(tick, flight, world);
+        }
+        match self.phase {
+            ProbePhase::Roll => {
                 keys.pitch = 0.35;
+                if let Some(ground) = ground {
+                    keys.yaw = Self::roll_yaw(flight, ground);
+                }
                 if agl > PROBE_CLEAN_AGL_FT {
-                    keys.commands = vec![Set(Switch::Gear, false), Set(Switch::Flaps, false)];
-                    *self = Self::Climb;
-                    println!("t={tick} player: airborne, gear and flaps up");
+                    // The flaps wait until the clean wing carries the aircraft.
+                    let clean = flight.minimum_level_speed(y, 0.) * PROBE_FLAPS_UP_MARGIN;
+                    let flaps_up = flight.speed >= clean;
+                    keys.commands = vec![Set(Switch::Gear, false)];
+                    if flaps_up {
+                        keys.commands.push(Set(Switch::Flaps, false));
+                        println!("t={tick} player: airborne, gear and flaps up");
+                    } else {
+                        println!("t={tick} player: airborne, gear up, flaps held for speed");
+                    }
+                    self.phase = ProbePhase::Climb { flaps_up };
                 }
             }
-            Self::Climb => {
-                let error = PROBE_CLIMB_PITCH_DEG - flight.pitch.to_degrees();
+            ProbePhase::Climb { flaps_up } => {
+                if !flaps_up
+                    && flight.speed >= flight.minimum_level_speed(y, 0.) * PROBE_FLAPS_UP_MARGIN
+                {
+                    keys.commands = vec![Set(Switch::Flaps, false)];
+                    self.phase = ProbePhase::Climb { flaps_up: true };
+                    println!("t={tick} player: flaps up");
+                }
+                let error = self.climb_pitch_deg(flight) - flight.pitch.to_degrees();
                 keys.pitch =
                     (0.08 * error - 0.3 * flight.pitch_rate.to_degrees() / 10.).clamp(-1., 1.);
                 keys.roll = (-flight.bank.to_degrees() / 30.).clamp(-1., 1.);
-                if agl > PROBE_CRUISE_AGL_FT {
+                if agl > PROBE_CRUISE_AGL_FT
+                    && y >= self.terrain.highest_ft + PROBE_LEVEL_OFF_MARGIN_FT
+                {
                     keys.pitch = 0.;
                     keys.roll = 0.;
                     keys.commands = vec![
@@ -4759,13 +4956,13 @@ impl ProbePilot {
                         Throttle(0.85),
                         Set(Switch::Autopilot, true),
                     ];
-                    *self = Self::Cruise;
+                    self.phase = ProbePhase::Cruise;
                     println!("t={tick} player: levelling off at {agl:.0} ft AGL, autopilot on");
                 }
             }
-            Self::Cruise => {
-                if let (Some((from, _)), Some(ground)) = (script.home, ground)
-                    && tick >= from
+            ProbePhase::Cruise => {
+                if let (Some((from, until)), Some(ground)) = (script.home, ground)
+                    && (from..until).contains(&tick)
                 {
                     let centre = ground.runway.center;
                     flight.autopilot.set_navigation_target(Some(
@@ -4779,23 +4976,55 @@ impl ProbePilot {
                         Throttle(0.6),
                         Set(Switch::WaypointAutopilot, true),
                     ];
-                    *self = Self::Home;
+                    self.phase = ProbePhase::Home;
                     println!("t={tick} player: gear down, flying over the departure airfield");
+                } else {
+                    self.climb_over_terrain(tick, flight, keys, y);
                 }
             }
-            Self::Home => {
+            ProbePhase::Home => {
                 if script.home.is_some_and(|(_, until)| tick >= until) {
                     keys.commands = vec![
                         Set(Switch::Gear, false),
                         Throttle(0.85),
                         Set(Switch::Autopilot, true),
                     ];
-                    *self = Self::Away;
+                    self.phase = ProbePhase::Away;
                     println!("t={tick} player: gear up, leaving the airfield");
                 }
             }
-            Self::Away => {}
+            ProbePhase::Away => self.climb_over_terrain(tick, flight, keys, y),
         }
+    }
+
+    /// In the cruise on the autopilot's held altitude: if the ground ahead
+    /// rises to within reach of it, hand back to the climb, at full power.
+    fn climb_over_terrain(
+        &mut self,
+        tick: u64,
+        flight: &flight::State,
+        keys: &mut flight::PilotInput,
+        y: f64,
+    ) {
+        use flight::{PilotCommand::*, Switch};
+        if y >= self.terrain.highest_ft + PROBE_RECLIMB_MARGIN_FT {
+            return;
+        }
+        let afterburner = flight
+            .model()
+            .configuration()
+            .propulsion
+            .afterburner_thrust_lbf
+            > 0.;
+        keys.commands = vec![Set(Switch::Autopilot, false), Throttle(1.)];
+        if afterburner {
+            keys.commands.push(Set(Switch::Burner, true));
+        }
+        self.phase = ProbePhase::Climb { flaps_up: true };
+        println!(
+            "t={tick} player: ground ahead at {:.0} ft, climbing from {y:.0} ft",
+            self.terrain.highest_ft
+        );
     }
 }
 
@@ -6057,7 +6286,7 @@ fn ai_probe_run(
             .afterburner_thrust_lbf
             > 0.;
     }
-    let mut pilot = ProbePilot::Roll;
+    let mut pilot = ProbePilot::new();
     let mut watch = ProbeWatch {
         trace: script.trace_ticks,
         ..Default::default()
@@ -10992,6 +11221,44 @@ mod probe_tests {
         for bad in ["", "x", "600:", "600:0", "600:-1", "600:3601", "-1:10"] {
             assert!(ProbeScript::parse_attack(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_probe_pilot_climbs_ten_degrees_and_eases_off_only_when_slow() {
+        // Room over the ground and speed to spare: the old 10 degree hold.
+        assert_eq!(climb_pitch_for(0., 3., 1.5), PROBE_CLIMB_PITCH_DEG);
+        assert_eq!(climb_pitch_for(2., 5., 1.12), PROBE_CLIMB_PITCH_DEG);
+        // Short of the aircraft's 1 G minimum: halfway is half the pitch,
+        // and at or under the floor the climb is level.
+        let halfway = (PROBE_SPEED_MARGIN + PROBE_LEVEL_SPEED_FLOOR) / 2.;
+        assert!((climb_pitch_for(0., 3., halfway) - PROBE_CLIMB_PITCH_DEG / 2.).abs() < 1e-9);
+        assert_eq!(climb_pitch_for(0., 3., PROBE_LEVEL_SPEED_FLOOR), 0.);
+        assert_eq!(climb_pitch_for(0., 3., 0.8), 0.);
+        // Rising ground asks for more, as far as 25 degrees and no further.
+        assert_eq!(climb_pitch_for(8., 4., 1.5), 14.);
+        assert_eq!(climb_pitch_for(40., 4., 1.5), PROBE_MAX_CLIMB_PITCH_DEG);
+        // Speed still comes first when the ground asks for more.
+        assert_eq!(climb_pitch_for(40., 4., PROBE_LEVEL_SPEED_FLOOR), 0.);
+    }
+
+    #[test]
+    fn the_probe_roll_steers_only_when_it_has_drifted() {
+        // On the line and on the heading, or within the dead bands: no rudder.
+        assert_eq!(roll_rudder(0., 0., 100.), 0.);
+        assert_eq!(roll_rudder(1.5, 10., 100.), 0.);
+        assert_eq!(roll_rudder(-1.5, -10., 100.), 0.);
+        // Nose left of the runway (error positive) turns right, and back.
+        assert!(roll_rudder(10., 0., 100.) > 0.);
+        assert!(roll_rudder(-10., 0., 100.) < 0.);
+        // Off the line to the right with the nose straight: steer left.
+        assert!(roll_rudder(0., 100., 100.) < 0.);
+        assert!(roll_rudder(0., -100., 100.) > 0.);
+        // The nosewheel has no authority when stopped, so the command is
+        // bounded, and it saturates at full deflection.
+        assert!(roll_rudder(30., 0., 0.).abs() <= 1.);
+        assert_eq!(roll_rudder(30., 0., 100.), 1.);
+        // Wrapped: 350 degrees of error is 10 degrees the other way.
+        assert!(roll_rudder(350., 0., 100.) < 0.);
     }
 
     #[test]
