@@ -73,9 +73,15 @@ def probe_problems(
     ground: bool = False,
     need_takeoff: bool = False,
     need_landing: bool = False,
+    player_flies: bool = False,
 ) -> list[str]:
-    """Impossible or inconsistent states in one AI probe's output."""
+    """Impossible or inconsistent states in one AI probe's output. With
+    `player_flies` the scripted player must end alive: only for probes with no
+    enemy near, where its takeoff and climb-out are all that can bring it down."""
     problems: list[str] = []
+    if player_flies and re.search(r"^player crashed=true", output, re.M):
+        crash = PLAYER_DOWN.search(output)
+        problems.append("the scripted player crashed" + (f" at tick {crash.group(1)}" if crash else ""))
     inv = INVARIANTS.search(output)
     if not inv:
         problems.append("no 'AI probe invariants' line (probe did not finish?)")
@@ -256,14 +262,19 @@ PLAYER_DOWN = re.compile(r"^t=(\d+) \([\d.]+s\) player: .*crashed=true", re.M)
 LANDED_PHASES = ("Rollout", "Landed", "Parked", "TaxiIn")
 
 
-def land_order_checker(whole: Callable[[str], list[str]]) -> Callable[[str], list[str]]:
-    """A probe that orders the wing to land, under lead succession (approved by
-    John 2026-09-28). The scripted player is the wing's leader. While it flies
-    the order is accepted and `whole` (the landing checks) must pass. Once it
-    has crashed the wing's next member leads and the human's order is refused
-    with "you are not leading your wing". The new lead then flies a mission of
-    opportunity (John, 2026-09-30); these probes have no enemy, so it must
-    return to base at once and land there, and `whole` must pass as well."""
+def land_order_checker(whole: Callable[[str], list[str]], *, player_lost: bool = False) -> Callable[[str], list[str]]:
+    """A probe that orders the wing to land. The scripted player is the wing's
+    leader and must still be flying when it gives the order (the probe's pilot
+    survives its takeoff and climb-out, docs/testing/lane-ai.md), so the order
+    must be accepted and `whole` (the landing checks) must pass. A player who
+    crashed first would hand the lead to the wing's next member and refuse the
+    order ("you are not leading your wing"): that is reported, never excused.
+
+    With `player_lost` the probe loses the player on purpose (`--probe-lose-player`)
+    and lead succession applies (approved by John 2026-09-28): the order is
+    refused, the new lead flies a mission of opportunity (John, 2026-09-30),
+    and as these probes have no enemy it must return to base at once and land
+    there, and `whole` must pass as well."""
 
     def check(output: str) -> list[str]:
         order = LAND_ORDER.search(output)
@@ -271,10 +282,21 @@ def land_order_checker(whole: Callable[[str], list[str]]) -> Callable[[str], lis
         gone = bool(order and down and int(down.group(1)) <= int(order.group(1)))
         refused = bool(order and "not leading your wing" in order.group(2))
         problems: list[str] = []
+        if not player_lost:
+            if down:
+                problems.append(f"the scripted player crashed at tick {down.group(1)}, so the wing was not led by a living player")
+            if not order:
+                problems.append("the land order was never given")
+            elif refused:
+                problems.append("the land order was refused although the player led the wing")
+            problems.extend(whole(output))
+            return problems
         if gone and not refused:
             problems.append("a player who had already crashed still gave the land order and it was accepted")
         if refused and not gone:
             problems.append("the land order was refused although the player still led the wing")
+        if not gone:
+            problems.append("the probe was to lose the player before the land order and did not")
         problems.extend(whole(output))
         if gone:
             home = OPPORTUNITY_HOME.search(output)
@@ -492,17 +514,15 @@ def scenarios() -> list[Scenario]:
                                                               "--probe-wing-order", f"{12000 * size // 2}:land-selected", "--separation", "200", "--probe-wing-only"],
                          # A wing's approach over the hills south of Simferopol takes about
                          # 400 s per aircraft (lane doc, "Needs a decision"), so only the
-                         # pair is expected to be down inside the run. Since the probe runs
-                         # the full mission tick the scripted player crashes 17 s after
-                         # takeoff from Simferopol, so under lead succession the order is
-                         # refused and the new lead returns to base and lands there
-                         # (land_order_checker).
+                         # pair is expected to be down inside the run. The scripted player
+                         # survives its climb-out and leads the wing, so its order is
+                         # accepted and the landing is checked (land_order_checker).
                          ticks=90000, timeout=1800,
                          check=land_order_checker(checker(ground=True, need_takeoff=True, need_landing=size == 2))))
         # Bug out is ignored while taking off (spec), so order it once the wing is up.
         out.append(probe(f"ground-bug-out-wing{size}", ["--ground-start", GROUND_AIRPORT, "--probe-wing-size", str(size), "--maneuver", "takeoff",
                                                         "--probe-wing-order", f"{6000 * size}:bug-out", "--separation", "200", "--probe-wing-only"],
-                         ticks=48000, timeout=1800, check=checker(ground=True, need_takeoff=True)))
+                         ticks=48000, timeout=1800, check=checker(ground=True, need_takeoff=True, player_flies=True)))
         out.append(probe(f"ground-fight-wing{size}", ["--ground-start", GROUND_AIRPORT, "--probe-wing-size", str(size), "--maneuver", "takeoff",
                                                       "--separation", "20", "--probe-attack", "6000:10"], ticks=24000, timeout=1800,
                          check=checker(ground=True, need_takeoff=True)))
@@ -579,7 +599,7 @@ def scenarios() -> list[Scenario]:
     out.append(probe("known-f22-leader-wingman-ukr3", [
         "--theater", "UKR", "--aircraft", "f22", "--ground-start", "3",
         "--maneuver", "takeoff", "--probe-wing-size", "2", "--probe-wing-only"],
-        ticks=9000, check=checker(ground=True, need_takeoff=True)))
+        ticks=9000, check=checker(ground=True, need_takeoff=True, player_flies=True)))
     out.append(probe("regress-gun-missile-flap-su35", ["--aircraft", "su35", "--probe-enemy-aircraft", "mig29",
                                                        "--probe-enemy-skill", "average", "--probe-fight", "5:5",
                                                        "--separation", "10", "--probe-attack", "100:8"],
@@ -643,7 +663,7 @@ def scenarios() -> list[Scenario]:
         out.append(probe(f"theater-{theater.lower()}-land-pair", where + [
             "--ground-start", "1", "--probe-wing-size", "2", "--maneuver", "takeoff",
             "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
-            ticks=108000, timeout=2400, check=checker(ground=True, need_takeoff=True, need_landing=True)))
+            ticks=108000, timeout=2400, check=checker(ground=True, need_takeoff=True, need_landing=True, player_flies=True)))
     # Runway ends whose 3 degree path meets terrain in the last 5 nm
     # (`--validate-ils` prints them as `ils-terrain:`; docs/testing/ils.md):
     # a pair ordered to land must land without hitting the ground and must
@@ -676,7 +696,7 @@ def scenarios() -> list[Scenario]:
                 "--theater", theater, "--ground-start", airport, "--aircraft", aircraft,
                 "--probe-friendly-aircraft", aircraft, "--probe-wing-size", "2", "--maneuver", "takeoff",
                 "--separation", "100", "--probe-wing-only"],
-                ticks=18000, timeout=1800, check=checker(ground=True, need_takeoff=True)))
+                ticks=18000, timeout=1800, check=checker(ground=True, need_takeoff=True, player_flies=True)))
     for theater in ("PGU", "VLA"):
         out.append(probe(f"long-15v15-{theater.lower()}", ["--theater", theater, *fight(15, 15, "--separation", "20", *attack)],
                          ticks=216000, timeout=3600, check=checker(allow_anomalies=("outside the world",))))

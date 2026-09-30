@@ -940,8 +940,11 @@ def check_climbout(output: str) -> list[str]:
     problems = []
     if "player crashed=false" not in output:
         problems.append("the player crashed or the probe did not finish")
-    if "player: airborne, gear and flaps up" not in output:
+    # An aircraft short of speed for its clean wing keeps its flaps down until it has it.
+    if not re.search(r"player: airborne, gear (and flaps )?up", output):
         problems.append("never got airborne")
+    if "flaps held for speed" in output and "player: flaps up" not in output:
+        problems.append("the flaps were held for speed and never came up")
     if "levelling off at" not in output:
         problems.append("never reached cruise height")
     if not re.search(r"AI probe liftoff gaps: \[\] hazards_open=0", output):

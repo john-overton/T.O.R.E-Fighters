@@ -114,10 +114,29 @@ class ShortStripTests(unittest.TestCase):
                 self.assertFalse(is_short_strip(*found), f"fuzz seed {seed} starts on a short strip")
 
 
+class PlayerFliesTests(unittest.TestCase):
+    """Probes with no enemy near require the scripted player to survive its climb-out."""
+
+    CRASHED = "player crashed=true gear=false x=1.0 y=2.0 z=3.0 hdg=8.0\n"
+    DOWN = "t=2017 (16.8s) player: on_ground=false gear=false crashed=true agl=85 kt=202 x=1 z=2 hdg=8 terrain_agl=85\n"
+
+    def test_a_crashed_player_fails_only_when_asked(self):
+        text = CLEAN + self.DOWN + self.CRASHED
+        self.assertEqual(ai.probe_problems(text), [])
+        problems = ai.probe_problems(text, player_flies=True)
+        self.assertEqual(problems, ["the scripted player crashed at tick 2017"])
+
+    def test_a_flying_player_passes(self):
+        text = CLEAN + "player crashed=false gear=false x=1.0 y=2.0 z=3.0 hdg=8.0\n"
+        self.assertEqual(ai.probe_problems(text, player_flies=True), [])
+
+
 class LandOrderTests(unittest.TestCase):
-    """Lead succession: a crashed player's land order is refused, a flying one's
-    is accepted. After the player is lost the new AI lead flies a mission of
-    opportunity, which with no enemy is a return to base (John, 2026-09-30)."""
+    """The scripted player leads a living wing: its land order is accepted and
+    the landing is checked. A probe that loses the player on purpose
+    (`player_lost`) follows lead succession: the order is refused and the new AI
+    lead flies a mission of opportunity, which with no enemy is a return to base
+    (John, 2026-09-30)."""
 
     DOWN = "t=2017 (16.8s) player: on_ground=false gear=false crashed=true agl=85 kt=202 x=1 z=2 hdg=8 terrain_agl=85\n"
     REFUSED = 't=12000 order=LandAtSelected reply="Wing order unavailable: you are not leading your wing"\n'
@@ -126,8 +145,11 @@ class LandOrderTests(unittest.TestCase):
     LANDED = "AI probe phases: Friendly 1-2: Waiting@0.0s ClimbOut@57.5s Airborne@83.7s Approach@83.7s Final@377.4s Rollout@409.3s Parked@729.0s\n"
     FLYING = "AI probe phases: Friendly 1-2: Waiting@0.0s ClimbOut@57.5s Airborne@83.7s\n"
 
-    def check(self, text, whole=None):
-        return ai.land_order_checker(whole or (lambda output: ["did not land"]))(text)
+    def check(self, text, whole=None, lost=True):
+        return ai.land_order_checker(whole or (lambda output: ["did not land"]), player_lost=lost)(text)
+
+    def flying(self, text, whole=None):
+        return self.check(text, whole, lost=False)
 
     def passes(self, output):
         return []
@@ -174,10 +196,25 @@ class LandOrderTests(unittest.TestCase):
     def test_a_crashed_player_must_not_be_obeyed(self):
         self.assertTrue(any("already crashed" in p for p in self.check(CLEAN + self.DOWN + self.ACCEPTED)))
 
-    def test_a_flying_player_must_be_obeyed_and_the_landing_checked(self):
-        self.assertEqual(self.check(CLEAN + self.ACCEPTED, whole=lambda output: []), [])
-        self.assertEqual(self.check(CLEAN + self.ACCEPTED), ["did not land"])
-        self.assertTrue(any("still led the wing" in p for p in self.check(CLEAN + self.REFUSED, whole=lambda output: [])))
+    def test_a_lost_player_probe_must_lose_the_player(self):
+        problems = self.check(CLEAN + self.ACCEPTED, whole=self.passes)
+        self.assertTrue(any("did not" in p for p in problems), problems)
+
+    def test_a_flying_player_is_obeyed_and_the_landing_is_checked(self):
+        self.assertEqual(self.flying(CLEAN + self.ACCEPTED, whole=self.passes), [])
+        self.assertEqual(self.flying(CLEAN + self.ACCEPTED), ["did not land"])
+
+    def test_a_crashed_player_is_reported_not_excused_when_it_should_fly(self):
+        text = CLEAN + self.DOWN + self.REFUSED + self.HOME + self.LANDED
+        problems = self.flying(text, whole=self.passes)
+        self.assertTrue(any("scripted player crashed" in p for p in problems), problems)
+        self.assertTrue(any("refused although the player led" in p for p in problems), problems)
+
+    def test_an_order_that_was_never_given_is_reported(self):
+        self.assertTrue(any("never given" in p for p in self.flying(CLEAN, whole=self.passes)))
+
+    def test_the_flying_player_must_not_be_refused(self):
+        self.assertTrue(any("still led the wing" in p for p in self.check(CLEAN + self.REFUSED, whole=self.passes)))
 
 
 if __name__ == "__main__":
