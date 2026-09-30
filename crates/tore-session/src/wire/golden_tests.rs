@@ -45,6 +45,15 @@ fn lines() -> Vec<(String, String)> {
             hex(&message.encode().unwrap()),
         ));
     }
+    // Added under protocol 1 before anything shipped (the lead, 2026-09-30).
+    let ended = super::messages::Message::MissionEnded(super::messages::MissionEnded {
+        reason: super::messages::EndReason::EndedByServer,
+        next_in_seconds: Some(30),
+    });
+    out.push((
+        "message-11-ended-by-server".into(),
+        hex(&ended.encode().unwrap()),
+    ));
     out
 }
 

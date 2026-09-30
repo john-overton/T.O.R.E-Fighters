@@ -193,6 +193,9 @@ pub enum EndReason {
     EveryoneLeft,
     TimeLimit,
     ServerStopping,
+    /// The server's operator ended the mission (the console's `end` or
+    /// `restart`).
+    EndedByServer,
 }
 
 /// The host ended the mission (host to client).
@@ -562,6 +565,7 @@ impl Message {
                     EndReason::EveryoneLeft => 0,
                     EndReason::TimeLimit => 1,
                     EndReason::ServerStopping => 2,
+                    EndReason::EndedByServer => 3,
                 };
                 let _ = w.write_bits(reason, 2);
                 bits::write_option(&mut w, m.next_in_seconds, |w, s| {
@@ -686,7 +690,7 @@ impl Message {
                     0 => EndReason::EveryoneLeft,
                     1 => EndReason::TimeLimit,
                     2 => EndReason::ServerStopping,
-                    _ => return Err(WireError::Invalid("end reason")),
+                    _ => EndReason::EndedByServer,
                 };
                 Self::MissionEnded(MissionEnded {
                     reason,

@@ -254,7 +254,7 @@ debrief, leaving.
 | Notice | host to client | A line of text for the HUD, for example "Mission restarts in 30 seconds" |
 | Leave | client to host | The player ends the mission |
 | Debrief | host to client | The seat's debrief report as the single-player debrief shows it |
-| Mission ended | host to client | Why (every human left, time limit, server stopping) and seconds until the next mission, if any; the host disconnects the player once it and the debrief are acknowledged |
+| Mission ended | host to client | Why (every human left, time limit, server stopping, ended by the server's operator) and seconds until the next mission, if any; the host disconnects the player once it and the debrief are acknowledged |
 
 ## What the transport settled
 
@@ -675,7 +675,9 @@ A roster plane is its id, side, wing (2 bits), place in the wing, aircraft
 (4 bits) and pilot (the AI, or a seat and callsign). The Debrief mirrors the
 game's debrief report field for field (the damage as a 64-bit float, the ten
 kill rows and the eight shot tallies). Mission ended carries its reason in 2
-bits (every human left, time limit, server stopping) and the seconds to the
+bits (every human left 0, time limit 1, server stopping 2, ended by the
+server's operator 3, which slice D7 added under protocol 1 before anything
+shipped) and the seconds to the
 next mission, if any.
 
 ## Limits
