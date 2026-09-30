@@ -1034,20 +1034,22 @@ Decisions (John, 2026-09-29 and 2026-09-30):
    nothing. T.O.R.E adds a message, "Ground sensor preventing gear retraction"
    (`opinionated`). This replaces the belly slide that the gear key started on
    the runway (battery report, section 3.9, item 3).
+6. **The wingman who takes over carries on.** When an AI wingman takes the lead
+   from a lost human, it continues with a mission of opportunity: it searches by
+   eye around the enemy's last known positions, and if it finds nothing it
+   returns to base (John, 2026-09-30). Before, it flew straight on until the
+   world edge removed it.
 
 Also in the pass: the AI probe's scripted pilot must survive its takeoff and
 climb-out (after takeoff it crashes at Simferopol, and into a hill at UKR 6), so
 the landing scenarios test a living player.
 
-Open: what an AI wingman who takes the lead from a lost human does when the wing
-has no order and nothing to engage. Today it flies straight on until the world
-edge removes it; the recommendation is to return to base.
-
 Acceptance: liftoff and approach speeds for every aircraft recorded against
 John's figures, with the flight lane's liftoff and approach checks re-recorded;
 combat-speed G unchanged for all 14 aircraft; no short strip offered for a ground
 start or in flight, with every theater keeping at least one airport; the gear key
-on the ground shows the message and the gear stays down; the whole battery
+on the ground shows the message and the gear stays down; an AI that takes the
+lead from a lost human searches and then returns to base; the whole battery
 passing, its checks updated for these decisions; the single-player baseline
 differences explained as planned changes; the specs and lane pages updated.
 
