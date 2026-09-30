@@ -57,7 +57,7 @@ each and the windowed ones five to eight seconds. See "Runtime" at the end for t
 | `devices-*` | 14 | Gear, flaps, airbrake and hook stay within 0..1, never move against their command and take the aircraft's own deployment time; an aircraft with no hook does not lower one. |
 | `eject-*`, `ejectionpose-*` | 70 | The seat and parachute at 5,000 ft and 250 ft in every aircraft; windowed frames of the three ejection poses. |
 | `autopilot-*`, `waypoint-*`, `fuelout-*` | 42 | Heading and altitude hold from a 25 degree bank, waypoint steering, and running out of fuel. |
-| `climbout-*` | 30 | The scripted leader's takeoff, gear and flaps up, and cruise, for every aircraft alone and for a wing of five from every base theater. |
+| `climbout-*` | 30 | The scripted leader's takeoff, gear and flaps up (the A-4E and Su-25 hold the flaps a moment for speed), and cruise, for every aircraft alone and for a wing of five from every base theater. |
 | `edge-*`, `terrain-*` | 160 | Flying out over each of the four map edges at 20,000 ft for 200 s (still flying), `edge-lost-*` flying on until the aircraft is lost 105 nm past the map with cause out of bounds ([world edge](../spec/world-edge.md)), and a spin or roll at 90 ft over every theater. |
 | `weather*-*`, `hour*-*`, `groundstart-*`, `damage-*`, `bay-*` | about 250 | Windowed frames of every weather condition in every base theater, every hour of the day in three theaters, every aircraft at a ground start, and the damage and F-22 bay fixtures, each checked for a blank or flat frame. |
 | `loadout-*` | 56 | Round two: every aircraft with `--loadout none` and `--loadout guns` takes off and lands on a long runway like any other and carries less than its default load. |

@@ -1040,9 +1040,11 @@ Decisions (John, 2026-09-29 and 2026-09-30):
    returns to base (John, 2026-09-30). Before, it flew straight on until the
    world edge removed it.
 
-Also in the pass: the AI probe's scripted pilot must survive its takeoff and
-climb-out (after takeoff it crashes at Simferopol, and into a hill at UKR 6), so
-the landing scenarios test a living player.
+Also in the pass: the AI probe's scripted pilot survives its takeoff and
+climb-out from every ground start the battery uses (slice P5: it holds the
+runway line, respects the aircraft's minimum speed and clears the terrain
+ahead), so the landing scenarios test a living player. See
+[the scripted pilot](testing/lane-ai.md).
 
 Acceptance: liftoff and approach speeds for every aircraft recorded against
 John's figures, with the flight lane's liftoff and approach checks re-recorded;

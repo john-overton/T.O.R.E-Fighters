@@ -91,19 +91,50 @@ ground start leaves a hazard open, a wingman never takes off or (for the pair)
 never lands; or the same radio line repeats three times in five seconds.
 
 The scripted player leads the wing, and a probe that orders the wing to land
-(`ai-ground-land-selected-*`, `ai-ils-terrain-*`) follows lead succession: a
-player still flying must be obeyed and the pair must land. Once the player has
-crashed the order must be refused with "you are not leading your wing", and
-the AI that takes the lead flies a
+(`ai-ground-land-selected-*`, `ai-ils-terrain-*`) requires a living leader: the
+order must be accepted, the pair must land, and a scripted player that has
+crashed is reported, never excused (a crashed leader would hand the wing to its
+next member and get "you are not leading your wing"). The probes with no enemy
+near (`ai-takeoff-*`, the bug-out and land-pair probes) also require the player
+to end alive.
+
+A probe that needs a lost player (`lost-lead-*`) loses it on purpose with
+`--probe-lose-player TICK`, which crashes the scripted player's aircraft at that
+tick (test harness only). Then lead succession applies: the order is refused with
+"you are not leading your wing", and the AI that takes the lead flies a
 [mission of opportunity](../spec/ai.md#mission-of-opportunity-after-a-lost-human-leader)
-(John, 2026-09-30). These probes have no enemy, so the new lead must print
+(John, 2026-09-30). With no enemy and no route the new lead must print
 `mission of opportunity: ... returning to base (no enemy position known)` and
-land at its home runway, and the scenario's landing checks apply as for a
-living player (no aircraft may leave the map). In any ground start, a wingman
-still waiting to take off when its wing goes home stays parked, and the
-takeoff check excuses it. Since the probe runs the full
-mission tick, the scripted player crashes 17 s after takeoff from Simferopol,
-so the two `ai-ground-land-selected-*` scenarios take this branch.
+land at its home runway, and the landing checks apply as for a living player
+(no aircraft may leave the map). In any ground start, a wingman still waiting
+to take off when its wing goes home stays parked, and the takeoff check excuses
+it.
+
+**The scripted pilot** (`ProbePilot` in `crates/tore-app/src/main.rs`, a `fitted`
+test harness, agent decision 2026-09-23 and 2026-09-30) flies the takeoff and
+climb-out the way the AI's own departure does, so every aircraft from every
+ground start reaches a safe cruise. Rolling, it holds the runway line (rudder
+only if it is more than 2 degrees off the runway heading or 15 ft off the line,
+so a roll that stays true is untouched). At 50 ft it raises the gear, and the
+flaps once the speed is 1.05 times the clean wing's 1 G minimum (the A-4E and
+Su-25 hold them a couple of seconds). In the climb it holds 10 degrees nose-up
+but eases toward level flight as its speed falls from 1.12 to 1.02 times the
+aircraft's own 1 G minimum for its current flaps (`State::minimum_level_speed`),
+and raises the nose, up to 25 degrees, to clear the highest ground within 45 s
+ahead by 500 ft. It levels off (autopilot on) at 3,000 ft above the ground once
+it is 1,000 ft over that ground, and in the cruise it hands back to the climb,
+at full power, if the ground ahead rises to within 600 ft of its altitude. What
+went wrong before, by cause:
+
+| Symptom | Cause |
+| --- | --- |
+| The player flew into a hill 40 to 60 s after takeoff (UKR 6 and 12, the home probe) or 18 minutes into a long cruise (the full landing probe) | The pilot held 10 degrees and then the autopilot's altitude and never looked at the terrain; the hills ahead rise more than it climbs |
+| The player left the runway and hit high ground at the end of the runway 11 s after starting (KURILE 3) | The roll had no rudder and turned 20 degrees off the runway, 350 ft off the line, before it was airborne |
+| Every scripted takeoff at Simferopol flew about 8 degrees off the runway heading before P5 | The same unsteered roll, in a smaller way where nothing was in the way; the leader now flies the runway heading |
+
+The Simferopol crash of the older record (16.8 s after takeoff, 85 ft) does not
+happen on this base: the fitted stall speeds (P1) removed it. Turbulence was not
+the cause (`TORE_TURBULENCE=0` changed nothing).
 
 ## Bugs found and fixed
 
@@ -451,18 +482,14 @@ the threshold) and the far ends of Donets'k, Kharkiv, L'viv and
 Ivano-Frankivs'k (UKR 5, 6, 8, 12; hills about 1,900 to 2,000 ft above the
 path 13,000 to 28,000 ft out). `ai-ils-terrain-*` orders a pair to land at
 each and fails a crash, a threshold crossing below 10 ft or above 300 ft,
-or more than 540 s on the gates. On the multiplayer branch's lead succession
-(approved by John 2026-09-28) the scripted player flies into a hill 60 s
-after takeoff at Kharkiv (UKR 6) and 40 s after takeoff at Ivano-Frankivs'k
-(UKR 12), the wing's next member leads, and the player's land order is refused
-with "you are not leading your wing". Before the aircraft pass the scenario then
-required only that refusal, the takeoff and the general checks, and the AI lead
-flew straight on, out of the map after about 9 minutes. With the mission of
-opportunity (John, 2026-09-30) the new lead returns to base and lands, and the
-landing checks apply again: at both airports it crosses the threshold 64 ft up
-and is parked about 650 s after the start.
-A player still flying must be obeyed and the landing is
-checked as before. All seven pass: every one lands on the
+or more than 540 s on the gates. The scripted player is a living leader for all seven (its pilot clears the hills
+after UKR 6 and 12 and the high ground at KURILE 3), so each landing order is
+accepted and the landing is checked. (Before the pilot work the player flew into
+a hill 60 s after takeoff at Kharkiv and 40 s at Ivano-Frankivs'k, the wing's
+next member led, and the order was refused; with the mission of opportunity that
+lead returned to base and landed, 64 ft over the threshold, parked about 650 s
+after the start. That branch is still tested, with a deliberately lost player,
+by `land_order_checker(player_lost=True)`.) All seven pass: every one lands on the
 near end, which the airports' landing anchors choose (spec-derived), so the
 AI never flies the UKR and Amiens far ends; threshold crossings 64 to 119 ft
 (KURILE 3 holds level over its high ground), 240 to 284 s from the first
