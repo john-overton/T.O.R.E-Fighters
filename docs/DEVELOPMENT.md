@@ -129,6 +129,11 @@ Run the window smoke test on a display-capable host for rendering changes.
 
 ## Everyday checks
 
+While you work, iterate with the quick check, which runs only what your change can
+affect in about five minutes: `python3 tools/quick_check.py`. See
+[testing tiers](testing/README.md#testing-tiers). The list below is what must pass
+before a merge or a push.
+
 Run from the repository root:
 
 ```sh

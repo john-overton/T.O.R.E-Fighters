@@ -184,6 +184,11 @@ controlled, so a clone without that step has no hook at all.
 Run these before finishing, from the repository root. Full details and
 platform-specific setup are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
+While you iterate, run `python3 tools/quick_check.py` (about five minutes: format,
+clippy and tests for the crates you touched, and the battery scenarios the change can
+affect; see [testing tiers](docs/testing/README.md#testing-tiers)). It is an aid only:
+the check list below stays the merge requirement.
+
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
