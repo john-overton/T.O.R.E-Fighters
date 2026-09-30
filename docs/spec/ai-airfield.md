@@ -31,6 +31,15 @@ anchors the AI uses them exactly as below. Without anchors (a runway known only
 by its centre, heading and length) the AI uses the fitted runway-only fallback
 described in each section.
 
+## Short strips
+
+Opinionated, John 2026-09-30. A runway under 2,000 ft (the 22 strips of about
+1,074 ft, [short strips](airports.md#short-strips)) is nobody's home runway or
+landing field, and no wing starts on one, so no AI aircraft takes off from or
+lands at a short strip. A wing ordered to land at the selected airport is refused
+one. An aircraft's home is the nearest runway that its side may use and that is
+not a short strip.
+
 ## Quick Mission taxiway queue
 
 John requested on 2026-09-23 that Quick Mission wingmen begin queued near the

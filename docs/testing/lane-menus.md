@@ -49,11 +49,11 @@ for size and blankness, and were also looked at by the agent that wrote them.
 
 `--validate-creator` (`TORE_CREATOR_STAGE=loadouts|matrix|render` runs one part):
 
-- **Matrix** (`quick_mission/matrix.rs`): about 11,600 setups started through the same
+- **Matrix** (`quick_mission/matrix.rs`): about 11,500 setups started through the same
   steps a flown mission takes (the creator's own refusal check, the wing launch,
   ground layout, layout plan, altitude check, combat build, flight restart, AI wing
   build, group orders). It sweeps every theater layout with every separation and
-  altitude, every runway with wings of one to five, every weather choice on every
+  altitude, every runway with wings of one to five (the 22 short strips are not on the list, so 110 fewer setups since 2026-09-30), every weather choice on every
   source theater, every player aircraft against every enemy aircraft, every wing's
   count, skill and aircraft, a sample of the whole wing-count product, every group
   order with survival on and off, every mission preset, and every other dropdown

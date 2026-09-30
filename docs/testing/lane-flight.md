@@ -320,8 +320,10 @@ F/A-18D 823 to 1,098 ft, Rafale C 620 to 816, F-14D 650 to 1,164, A-4E 908 to 1,
 1,622, Su-35 555 to 940 and the F-22 family 222 to 584. So the F/A-18D, F-14D, A-4E, X-31, MiG-21,
 Su-25 and MiG-23 no longer lift off within the paved strip (they roll on past its end); the
 Rafale, MiG-29, Su-27, Su-35 and F-22 family still do. The AI takeoffs on those strips were already
-known failures (lane-ai item 11). Landing rollouts shorten slightly (the flare from 60 ft touches
-down nearer the threshold), so the 5,532 ft UKR runway still works for all twelve.
+known failures (lane-ai item 11). Since 2026-09-30 a Quick Mission never starts on such a strip
+(lane-ai item 11); these developer `--headless-flight --ground-start` runs, which measure the
+flight model and not a mission, still start there. Landing rollouts shorten slightly (the flare
+from 60 ft touches down nearer the threshold), so the 5,532 ft UKR runway still works for all twelve.
 
 **Other users of the stall speed.** The flight model, the stall warning and departure
 behaviour, the autopilot, the ejection G check, the flight envelope window (the drawn slow
@@ -373,7 +375,7 @@ None of these is defined in the specs, the manual text or the feature matrix, so
    roll can run past the runway's end on the flat square, and rolling off the paved strip is never
    penalised. The airport spec calls this "fitted contact" and says terrain outside is unchanged,
    so it is by design; whether a narrower landing area is wanted is a decision.
-5. **The small airstrips (about 1,000 ft) accept any aircraft.** Round two searched the specs, the airport spec and the manual for a minimum runway length and found none (the code only refuses a start when the runway cannot park the whole wing). A ground start and takeoff work for a Su-25 or an F-22 there.
+5. **The small airstrips (about 1,000 ft) accept any aircraft.** Changed (John, 2026-09-30): a Quick Mission ground start is no longer offered on a runway under 2,000 ft (the 22 strips), so no aircraft or wing starts there. Round two had searched the specs, the airport spec and the manual for a minimum runway length and found none, so the rule is John's, not retail's ([short strips](../spec/airports.md#short-strips)).
 6. **Combat tapes do not record everything the host does.** A replayed tape shows the player alive
    after a flight that crashed, because the host turns a crashed flight into a dead player and the
    tape does not record that. Only the developer replay uses tapes; the mission recordings of

@@ -214,17 +214,9 @@ low-level class: `ai-big-a4e-vs-f22n-researched`, `ai-big-x31-vs-faxx-researched
 `ai-known-f22-leader-wingman-ukr3`, fuzz seeds 14, 32 and 53 and
 `ai-damaged-fault04-hit` and `-gun` now pass, and their markers are gone.
 
-- `ai-theater-apa-takeoff-a3` (Santa Fe) and `ai-theater-lfa-takeoff-a3` (San
-  Carlos): these ground starts use 1,074 ft strips; each wingman's takeoff roll
-  runs off the end onto the grass at 70 to 90 kt before it lifts off, leaving
-  the probe's hazard open (item 11 below).
 - `ai-theater-cub-takeoff-a1` (Key West, near the north edge): the airborne
   friendly wing starts on the runway heading, north, has no route and leaves
   the map after 163 s while the enemy is still alive (item 5 below).
-- Fuzz seeds 89, 149, 180, 296, 309, 316, 338 and 399 (most only with
-  `TORE_AI_FUZZ=all`): ground starts on the 1,074 ft strips, as above. Seeds
-  28, 183 and 266 pass since the AI speed limits (see "Weight-scaled stall
-  speeds").
 - Activity flapping and pitch-stick oscillation at a weapon's envelope edge,
   and mid-air collisions, are reported but allowed (see above and below);
   regression scenarios check strictly.
@@ -276,9 +268,13 @@ record with what changed (see "Sixth round" above).
 10. **"Land at selected airport" for an aircraft still on the ground.**
     Changed (John, 2026-09-29): it answers unable and stays in its departure
     (`042662f`).
-11. **Short strips.** Quick Mission ground starts accept 1,074 ft strips
-    (Santa Fe, San Carlos), and fighters then roll off the end onto grass
-    before lifting off. No spec sets a minimum runway for an aircraft.
+11. **Short strips.** Changed (John, 2026-09-30): the 22 airstrips of about
+    1,074 ft are no ground start and leave the in-flight airport list (see
+    "Short strips" below). The two theater takeoffs that started on one
+    (`ai-theater-apa-takeoff-a3`, `ai-theater-lfa-takeoff-a3`) now start on the
+    next airport that is not (`-a7`, `-a4`), and the eight fuzz seeds that
+    started on one (89, 149, 180, 296, 309, 316, 338, 399) start on that
+    airport too, so their known-failure markers are gone.
 12. **Airborne starts inside the terrain.** Changed (John, 2026-09-29): raised
     to at least 5,000 ft MSL and 1,000 ft above the ground (`219f981`).
 13. **Slow damaged approaches.** A damaged Rafale recovering at 158 kt spent
@@ -334,6 +330,39 @@ as such in the specs:
 Windowed captures (this lane is headless only), theater layout variants
 (the `~` maps; only the 16 base theaters), Windows and macOS, and a retail
 comparison.
+
+### Short strips (aircraft pass, 2026-09-30)
+
+John decided that the 22 airstrips of about 1,074 ft are no ground start and
+leave the in-flight airport list ([rule](../spec/airports.md#short-strips), item
+11 above). What the lane does about it:
+
+- `tools/battery_scenarios/_strips.py` lists each theater's short strips (from
+  `TORE_AIRPORT_PROBE=1 tore-app --quick-mission --snapshot X.ppm --theater CODE`,
+  which prints `airport runway: ... short_strip=` for every runway) and
+  `ground_airport(theater, n)` moves a ground start to the next airport that is
+  not one. The AI probe's `--ground-start N` refuses a short strip, so a scenario
+  or fuzz seed must not name one.
+- `ai-theater-apa-takeoff-a3` and `ai-theater-lfa-takeoff-a3` are now
+  `ai-theater-apa-takeoff-a7` (Chitre, 7,246 ft) and
+  `ai-theater-lfa-takeoff-a4` (Walker Creek, 7,246 ft). Their known-failure markers are gone.
+- The fuzz seeds that drew a ground start on a strip (89, 113, 149, 180, 296, 309,
+  316, 338, 399; all in Panama or the Falklands) keep every other draw and start
+  on the next long airport. The eight marked as known failures now pass and are
+  unmarked; 113 passed before and still does.
+- A unit test (`tools/test_battery_ai.py`, `ShortStripTests`) checks that no AI
+  scenario and none of the 400 fuzz seeds starts on a short strip.
+
+Run of the lane's theater, takeoff, ground, ILS-terrain, long-ground, record,
+determinism and all 400 fuzz scenarios (`TORE_AI_FUZZ=all`, `--jobs 6
+--windows 1`): 557 of 558 passed. The one failure is `ai-fuzz-0163`
+(`~IRAF`, an airborne 15 against 10 on the legacy model): the radio repeats
+"Get this guy off me" 3 times in 5 s. It is not from the strip change: the
+multiplayer branch's tip before this change (a31d66a) prints the same lines, and
+this build's output for that seed is identical to it apart from timestamps
+(`~IRAF` has no short strip). It passed on the main-based builds of 2026-09-29, so
+it began with the multiplayer branch's radio changes; it is not marked here
+because the lead owns that branch's known failures.
 
 ### Sixth round (2026-09-29, John's decisions)
 

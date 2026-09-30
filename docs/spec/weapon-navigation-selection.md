@@ -49,7 +49,7 @@ Agent choices: list airports nearest first by horizontal distance to their
 nearest usable runway center, breaking ties by airport ID. Keep selection by ID
 as distances change. Eligible airports are friendly, or neutral with landing
 permission, and must have a usable runway. Hostile, unknown, unpermitted neutral
-and disabled airports are excluded. This denotes landing eligibility, not a
+and disabled airports are excluded, and so are the short airstrips (a runway under 2,000 ft, John 2026-09-30; [short strips](airports.md#short-strips)). This denotes landing eligibility, not a
 promise of freedom from nearby threats. The existing base-layout host explicitly
 assigns neutral landing permission; mission allegiance is not inferred.
 

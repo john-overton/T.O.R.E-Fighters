@@ -834,7 +834,8 @@ stays and is counted in the reply. Land at selected airport sends the addressed
 wingmen to the airport the tower has selected (Shift-N): the runway you are
 cleared for there, or else its longest usable runway. Hostile, unknown or
 unpermitted neutral airports and airports with no usable runway are refused
-with a message. A bugged-out wingman no longer answers any order; later orders
+with a message. The 22 short airstrips (a runway under 2,000 ft) are not on the
+Shift-N list, so a wing is never sent to one. A bugged-out wingman no longer answers any order; later orders
 skip it and say so. Both orders print the call ("Bug out", "Land at Field")
 without voice, because the reviewed radio catalog has no recording for them.
 Bug out is ignored on the ground, during takeoff, or from landing marshal

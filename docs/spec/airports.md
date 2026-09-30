@@ -131,6 +131,46 @@ unpermitted neutral airports (agent decisions, 2026-09-23). The AI approach,
 marshal and landing rules are in [AI airfield sequences](ai-airfield.md); the
 keys are in [input](../INPUT.md#player-wing-orders).
 
+## Short strips
+
+John decided on 2026-09-30 that the short airstrips take no part in ground
+starts or in the tower's service. There are 22 of them, each with a runway of
+about 1,074 ft: Cuba (La Coloma, Al Turas, Camino De Tobac, Deleite, Real
+Campina, Siguanea), the Falklands (Goose Green, San Carlos), Pakistan (Kotaddu,
+Chor, Akli, Nagaur), Panama (Santiago, Santa Fe, Toncri, Crawford, Rio Sidre) and
+the Persian Gulf (Bandar E Laft, Gahkom, Minab, Chah Logh, Fannuj). Every other
+airport in the sixteen theaters has a runway of 4,060 ft or more, and the
+imported `~` layout variants have no short strip.
+
+**The rule (opinionated, John 2026-09-30; the number is `fitted`, agent decision
+2026-09-30).** An airport is a short strip when its longest runway is under
+2,000 ft (`tore_sim::airport::SHORT_STRIP_FT`). Any line between 1,074 and
+4,060 ft picks the same 22 airports; 2,000 ft sits well clear of both. The
+length is the runway's own (`Runway::length_ft`, measured from the STRIP anchor
+to the far end of the shape), so the rule needs no list of names.
+
+What follows from it:
+
+- **The player.** The airport list that Shift-N cycles and the NAV page's airport
+  mode leave the short strips out, so they can be neither selected nor chosen for
+  guidance. The tower refuses to select one ("no airport selected") and gives no
+  landing clearance or ILS for it, whatever the aircraft is doing: automatic
+  guidance never picks one, and the tower's approach cues never work one. The strips are still drawn, still on the map, still hit by weapons
+  and can still be flown over or landed on by hand.
+- **The wing.** Land at the selected airport (Alt-L) never sends a wing to a short
+  strip. If one were somehow selected the order is refused, "is a short strip
+  your wingmen cannot land on".
+- **The AI.** No AI aircraft on either side takes a short strip as its home
+  runway, landing field or return point (the same list as a vertical pad, which is
+  also nobody's home). See [AI home airfields](quick-mission-menu.md#home-airfields).
+- **Ground starts.** A short strip is not offered as a ground start
+  ([Quick Mission](quick-mission-menu.md#player-ground-start)).
+
+The map keeps showing every airfield, since it marks landmarks, not services.
+The developer `--headless-flight ... --ground-start N` takeoff and landing runs
+still start on any airport, short strips included: they measure the flight model,
+not a mission.
+
 ## Integration choices
 
 Proposed agent choice: use typed world instances, stable source identities,
