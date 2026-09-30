@@ -243,6 +243,12 @@ pub fn gun_rewind(tick: u64, view: Option<crate::seats::SeatView>) -> u16 {
 }
 
 impl Combat {
+    /// The sortie number that sets each aircraft's contrail height. A host
+    /// sends it in the Mission message so a client draws contrails at the same
+    /// heights.
+    pub fn contrail_sortie(&self) -> u64 {
+        self.contrail_sortie
+    }
     /// The aircraft a host with one flight flies: its first ownship. For free
     /// flight, the range, the AI probe and the loadout screen, which always
     /// have one; it panics with none, so the build, the tick and the handoff

@@ -287,6 +287,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-world/src/combat.rs", ("flight-combat", "ai-fights", "ai-damage", "combat-tapes"), "combat in the world"),
     _r("crates/tore-world/src/combat_tape.rs", ("combat-tapes", "flight-combat"), "combat tapes"),
     _r("crates/tore-world/src/terrain.rs", ("airports", "flight-environment", "ai-airfield", "menus-creator"), "terrain and airport lists"),
+    _r("crates/tore-world/src/debrief.rs", ("menus-screens", "ai-fights"), "debrief evaluator"),
     _r("crates/tore-world/src/seats.rs", ("ai-lead", "ai-fights"), "seats"),
     _r("crates/tore-world/src/frame.rs", ("flight-views", "instruments", "replay-recording"), "the flight frame"),
     _r("crates/tore-world/src/readout.rs", ("instruments", "flight-combat", "replay-live"), "the cockpit readout"),

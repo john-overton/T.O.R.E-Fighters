@@ -241,7 +241,8 @@ than reconstructing the original executable's combat tick.
 `combat::ledger` records every projectile from its first step to its outcome
 (hit with damage, missed, spoofed by a decoy, jammed), keyed by shooter,
 intended target and retail weapon class, plus credited kills and each target's
-last attacker. Nothing in flight reads it. The app's `debrief.rs` turns it into
+last attacker. Nothing in flight reads it. The evaluator in `tore_world::debrief`
+turns it into a report, and the app's `debrief.rs` keeps the screen that draws
 the post-mission pages; `ai_wings.rs` (in `tore-world`) supplies the intended target of AI gun rounds and
 reports decoyed missiles. See the [debrief spec](spec/debrief.md).
 
@@ -1082,7 +1083,7 @@ moved the simulation set into `tore-world`. Both are done. The splits:
 - Quick Mission setup apart from the creator's UI: `mission_layout.rs` holds
   the mission layout, ground layout, runway poses and map bounds, and
   `quick_mission.rs` keeps the creator's screen (done in this stage); the debrief evaluator (`capture`, `report`) apart from its
-  pages; the target window's data apart from its refresh clock (`target_window.rs`
+  pages (done in D7a: the evaluator lives in `tore_world::debrief` so a dedicated server can build each seat's report, and the app's `debrief.rs` keeps the screen and re-exports it); the target window's data apart from its refresh clock (`target_window.rs`
   keeps the data, `target_preview.rs` the clock and camera; done in this stage). The temporary re-exports these two splits left in `quick_mission.rs` and `target_window.rs` are gone: combat, its view and `world.rs` name `mission_layout` and `target_preview` directly.
 - File writers and environment-variable reads leave simulation code, and `log`
   calls become output. The formation trace is done: `AiWings` collects its rows
@@ -1732,7 +1733,7 @@ where the bug bash renumbered them.
   and the first other member of its wing as the wingman column. The full
   multiplayer results screen is stage F.
 
-  *Built (B5 step 1).* `debrief::capture(&World, SeatId)` builds the report of
+  *Built (B5 step 1).* `tore_world::debrief::capture(&World, SeatId)` builds the report of
   the plane the seat flies (`None` for a seat that flies none). The pilot column
   is that plane: its hit points come from its ownship and its pilot state from
   its cockpit's flight. The wingman column is `debrief::wingman_of`, the first
