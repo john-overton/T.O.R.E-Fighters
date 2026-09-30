@@ -425,6 +425,8 @@ flowchart TD
 - Then the rest of F, then I, J, K and L.
 - G and H can each run alongside D to F once B has landed. H must land before K. Stage C (built) only brought main and the bug bash into the branch, so it is not a feature stage.
 - I's protocol work can start any time after D.
+- Before stage D the branch also takes the single-player
+  [aircraft pass](ROADMAP.md#1i-aircraft-pass) (John, 2026-09-30).
 
 **Exit.** The roadmap's exit stands: a multiplayer Quick Mission completed across
 separate clients, with evidence recorded. The full-scope acceptance proposed

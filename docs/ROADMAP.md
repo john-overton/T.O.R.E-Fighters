@@ -25,6 +25,7 @@ T.O.R.E-Fighters in the Repo - Tasteful Opinionated Reverse Engineered
   - [1f. Sensors and weapons](#1f-sensors-and-weapons)
   - [1g. Installer and first-run import](#1g-installer-and-first-run-import)
   - [1h. Cheats](#1h-cheats)
+  - [1i. Aircraft pass](#1i-aircraft-pass)
 - [Milestone 2: Multiplayer](#milestone-2-multiplayer)
 - [Milestone 3: Missions and campaigns](#milestone-3-missions-and-campaigns)
 - [Milestone 4: Tools](#milestone-4-tools)
@@ -999,6 +1000,56 @@ specification await John's review.
 
 Deliverable: each cheat toggles mid-flight from the menu, shows On or Off, and
 survives Restart.
+
+### 1i. Aircraft pass
+
+Planned 2026-09-30 at John's request, from what the
+[overnight battery](baselines/battery-2026-09-28.md) left open. It is built on
+the multiplayer branch after its stage C and before stage D. The measured
+options it chose from are in the battery report's section 4 and the pass notes.
+
+Decisions (John, 2026-09-29 and 2026-09-30):
+
+1. **A fitted stall-speed reference for each aircraft.** The weight-scaled
+   stall speed keeps its rule, and each aircraft gets its own reference weight,
+   fitted to John's liftoff and approach figures (unsourced, used as a
+   plausibility range). Measured on a scratch build: every approach within 10
+   percent of his figures (8 of 11 inside the range), liftoff for the Su-27,
+   Su-25 and F-22 family within 6 percent, and combat-speed G at the retail value
+   for all 14 aircraft. The cost: the F-22 family needs about 200 kt to hold level
+   flight clean, against 150 kt. The X-31, with no figure, keeps today's
+   reference. `fitted`.
+2. **The Su-27 in the middle.** John's liftoff (135 to 150 kt) and approach (120
+   to 135 kt) figures cannot both be met in this model, which puts its approach
+   at about 1.1 times its liftoff. The fitted value gives about 128 kt and 142 kt.
+3. **No short strips for a ground start.** The 22 airstrips of about 1,074 ft (in
+   Cuba, the Falklands, Pakistan, Panama and the Persian Gulf) are no longer
+   offered in the Quick Mission takeoff choice, so neither the player nor an AI
+   wingman starts on one. This settles the strip questions for the player, the
+   wingmen and wings of two or more.
+4. **No short strips in flight.** They also leave the in-flight airport list:
+   navigation, landing guidance and the wing's land order.
+5. **The gear stays down on the ground.** As in retail, the gear cannot be
+   raised while the aircraft has weight on its wheels, and the gear key does
+   nothing. T.O.R.E adds a message, "Ground sensor preventing gear retraction"
+   (`opinionated`). This replaces the belly slide that the gear key started on
+   the runway (battery report, section 3.9, item 3).
+
+Also in the pass: the AI probe's scripted pilot must survive its takeoff and
+climb-out (after takeoff it crashes at Simferopol, and into a hill at UKR 6), so
+the landing scenarios test a living player.
+
+Open: what an AI wingman who takes the lead from a lost human does when the wing
+has no order and nothing to engage. Today it flies straight on until the world
+edge removes it; the recommendation is to return to base.
+
+Acceptance: liftoff and approach speeds for every aircraft recorded against
+John's figures, with the flight lane's liftoff and approach checks re-recorded;
+combat-speed G unchanged for all 14 aircraft; no short strip offered for a ground
+start or in flight, with every theater keeping at least one airport; the gear key
+on the ground shows the message and the gear stays down; the whole battery
+passing, its checks updated for these decisions; the single-player baseline
+differences explained as planned changes; the specs and lane pages updated.
 
 ## Milestone 2: Multiplayer
 
