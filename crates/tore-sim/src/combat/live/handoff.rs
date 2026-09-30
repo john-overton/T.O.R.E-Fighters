@@ -504,4 +504,66 @@ mod tests {
         assert_eq!(scale_hp(0, 100, 30), 0);
         assert_eq!(scale_hp(100, 100, 30), 30);
     }
+
+    /// A human who gives its plane back while its rounds are in the air: the
+    /// rounds fly on with their own copy of the weapon, and combat steps on
+    /// with no ownship at all, as an open mission does (D3c).
+    #[test]
+    fn given_back_rounds_fly_on_and_combat_steps_with_no_ownship() {
+        let mut state = fixture(false);
+        let gun = tore_formats::aircraft::AircraftId::F18.gun();
+        let mut config = state.own().configuration().clone();
+        config.stations[0].weapon.source = gun.into();
+        state.own_mut().config.stations[0].weapon.source = gun.into();
+        state
+            .add_ownship(Ownship::new(5, state.own().side, config.clone(), true).unwrap())
+            .unwrap();
+        let input = |held| super::super::OwnshipInput {
+            aircraft: 5,
+            held,
+            launcher: launcher(),
+        };
+        for _ in 0..20 {
+            state.step(&[input(true)], |_, _| 0.);
+        }
+        assert!(
+            state
+                .projectiles
+                .iter()
+                .any(|p| p.owner == 5 && p.weapon.is_none())
+        );
+        state.remove_ownship(5).unwrap();
+        let rounds: Vec<_> = state.projectiles.iter().filter(|p| p.owner == 5).collect();
+        assert!(!rounds.is_empty());
+        assert!(
+            rounds
+                .iter()
+                .all(|p| p.weapon.as_ref() == Some(&config.stations[p.station].weapon))
+        );
+        // The last ownship goes too, and the rounds fly on to the end.
+        state.remove_ownship(0).unwrap();
+        assert!(state.ownships().is_empty());
+        for _ in 0..600 {
+            state.step(&[], |_, _| 0.);
+        }
+        assert!(state.projectiles.iter().all(|p| p.owner != 5));
+    }
+
+    /// An open mission's aircraft rows count from 0: plane 0 is a row.
+    #[test]
+    fn an_open_mission_numbers_its_rows_from_zero() {
+        let mut state = super::super::State::open_mission();
+        assert!(state.ownships().is_empty());
+        let config = config();
+        for _ in 0..2 {
+            state.add_dummy(
+                &config,
+                [0., 5000., 0.],
+                Basis::new(0., 0., 0.),
+                super::super::Side(1),
+            );
+        }
+        let ids: Vec<u32> = state.targets.iter().map(|t| t.id).collect();
+        assert_eq!(ids, [0, 1]);
+    }
 }

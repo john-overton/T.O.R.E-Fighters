@@ -1824,6 +1824,15 @@ impl State {
             rewinds: BTreeMap::new(),
         }
     }
+    /// A state with no ownship whose aircraft rows count from 0: an open
+    /// mission, where the AI flies plane 0 too and humans add their ownships
+    /// by handoff.
+    pub fn open_mission() -> Self {
+        Self {
+            next_target_id: 0,
+            ..Self::without_ownships()
+        }
+    }
     /// A state with one ownship, on aircraft 0: single player's arrangement,
     /// and the one most tests use.
     pub fn new(config: Configuration, external: bool) -> Result<Self> {
@@ -1856,13 +1865,25 @@ impl State {
         }
     }
     /// Takes an aircraft's ownship out, with its stores, damage and
-    /// countermeasures, when its human gives it back.
+    /// countermeasures, when its human gives it back. Its rounds still in the
+    /// air keep flying: each takes its own copy of the weapon record its
+    /// station held, as the AI's rounds carry theirs.
     pub fn remove_ownship(&mut self, aircraft: u32) -> Option<Ownship> {
         let index = self
             .ownships
             .binary_search_by_key(&aircraft, |o| o.aircraft)
             .ok()?;
-        Some(self.ownships.remove(index))
+        let ownship = self.ownships.remove(index);
+        for projectile in &mut self.projectiles {
+            if projectile.owner == aircraft && projectile.weapon.is_none() {
+                projectile.weapon = ownship
+                    .config
+                    .stations
+                    .get(projectile.station)
+                    .map(|station| station.weapon.clone());
+            }
+        }
+        Some(ownship)
     }
     /// The human-flown aircraft, in aircraft id order.
     pub fn ownships(&self) -> &[Ownship] {
