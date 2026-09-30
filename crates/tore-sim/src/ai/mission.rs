@@ -1353,6 +1353,9 @@ pub struct AiMission {
     /// The mission of opportunity of every wing whose human leader was lost
     /// and whose lead passed to an AI aircraft (John, 2026-09-30).
     opportunities: Vec<super::opportunity::Opportunity>,
+    /// Each wing's remaining waypoints, in order, as the host last gave them
+    /// ([`Self::set_wing_route`]).
+    routes: Vec<(super::targeting::Side, u8, Vec<[f64; 3]>)>,
     /// Write-only journal of messages between aircraft. No decision reads
     /// it; the host drains it with [`Self::take_journal`].
     journal: thought::Journal,
@@ -1385,6 +1388,7 @@ impl AiMission {
             hostiles_seen: Vec::new(),
             airborne_seen: Vec::new(),
             opportunities: Vec::new(),
+            routes: Vec::new(),
             journal: thought::Journal::default(),
         }
     }
@@ -1790,6 +1794,26 @@ impl AiMission {
                 .is_some_and(|o| o.home.is_some())
     }
 
+    /// The waypoints a wing still has to fly, in order, in world feet: the
+    /// human leader's remaining route, or an AI wing's own. A wing whose
+    /// human leader is lost flies them after its search for the enemy
+    /// ([`super::opportunity`]). An empty list clears the route. Hosts with
+    /// no mission route (Quick Mission today) never call this.
+    pub fn set_wing_route(&mut self, side: super::targeting::Side, wing: u8, route: Vec<[f64; 3]>) {
+        self.routes.retain(|(s, w, _)| (*s, *w) != (side, wing));
+        if !route.is_empty() {
+            self.routes.push((side, wing, route));
+        }
+    }
+
+    /// The waypoints a wing still has to fly, empty when it has none.
+    pub fn wing_route(&self, side: super::targeting::Side, wing: u8) -> &[[f64; 3]] {
+        self.routes
+            .iter()
+            .find(|(s, w, _)| (*s, *w) == (side, wing))
+            .map_or(&[], |(_, _, route)| route.as_slice())
+    }
+
     /// Every wing's mission of opportunity, in the order they began.
     pub fn opportunities(&self) -> &[super::opportunity::Opportunity] {
         &self.opportunities
@@ -1806,7 +1830,12 @@ impl AiMission {
         if self.opportunity(side, wing).is_some() {
             return;
         }
-        let mut opportunity = super::opportunity::Opportunity::new(side, wing, self.tick);
+        let mut opportunity = super::opportunity::Opportunity::new(
+            side,
+            wing,
+            self.tick,
+            self.wing_route(side, wing).to_vec(),
+        );
         let cleared = self.actor(leader).is_some_and(|a| {
             !matches!(
                 a.assignment.stance,
@@ -1886,16 +1915,20 @@ impl AiMission {
                     position: point.position,
                     observed_tick: point.observed_tick,
                 }),
-                Plan::Engage | Plan::Home(_) => None,
+                Plan::Engage | Plan::Route(_) | Plan::Home(_) => None,
+            };
+            let waypoint = match plan {
+                Plan::Route(point) => Some(point),
+                _ => None,
             };
             for actor in self
                 .actors
                 .iter_mut()
                 .filter(|a| a.identity.side == side && a.identity.wing == wing)
             {
-                actor
-                    .controller
-                    .set_wing_search(point.filter(|_| actor.id() == leader_id));
+                let leads = actor.id() == leader_id;
+                actor.controller.set_wing_search(point.filter(|_| leads));
+                actor.controller.set_wing_route(waypoint.filter(|_| leads));
             }
             if matches!(plan, Plan::Home(_)) {
                 self.send_home(|a| a.identity.side == side && a.identity.wing == wing);
@@ -2963,8 +2996,9 @@ impl AiMission {
         if let Some(mut activity) = batch.activity {
             // A neutral aircraft waits in formation, unless it leads its
             // wing's mission of opportunity search.
-            let wing_search =
-                activity == Activity::Searching && actor.controller.wing_search().is_some();
+            let wing_search = activity == Activity::Searching
+                && (actor.controller.wing_search().is_some()
+                    || actor.controller.wing_route().is_some());
             if actor.neutral
                 && matches!(activity, Activity::Idle | Activity::Searching)
                 && !wing_search

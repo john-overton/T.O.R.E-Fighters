@@ -768,6 +768,9 @@ pub struct Controller {
     /// contact when this aircraft has none of its own
     /// ([`super::opportunity`]).
     wing_search: Option<SearchContact>,
+    /// Opinionated (John, 2026-09-30): the wing's next waypoint once its
+    /// mission of opportunity search is over ([`super::opportunity`]).
+    wing_route: Option<[f64; 3]>,
     defense_motion: Option<DefenseMotion>,
     defense_motion_id: Option<u64>,
     mission_target: Option<Option<u32>>,
@@ -892,6 +895,18 @@ impl Controller {
         self.wing_search
     }
 
+    /// Supply the waypoint the wing flies once its mission of opportunity
+    /// search is over, or `None`. It is flown only while this aircraft has
+    /// no target, no lost contact and no search point.
+    pub fn set_wing_route(&mut self, waypoint: Option<[f64; 3]>) {
+        self.wing_route = waypoint;
+    }
+
+    /// The waypoint of the wing's mission of opportunity, if any.
+    pub fn wing_route(&self) -> Option<[f64; 3]> {
+        self.wing_route
+    }
+
     /// Supply one immutable mission snapshot before advancing this controller.
     pub fn set_formation_observation(&mut self, traffic: Vec<super::formation::Traffic>) {
         self.formation_traffic = traffic;
@@ -985,6 +1000,7 @@ impl Controller {
             search_orbit_altitude_ft: None,
             completed_search: None,
             wing_search: None,
+            wing_route: None,
             defense_motion: None,
             defense_motion_id: None,
             mission_target: None,
@@ -2249,6 +2265,14 @@ impl Controller {
         {
             return Ok(());
         }
+        if reason.is_none()
+            && !recovering
+            && target.is_none()
+            && self.recipient.target_order != Some(wing::TargetOrder::HoldFire)
+            && self.route_motion(frame, clock, batch)?
+        {
+            return Ok(());
+        }
         // An active maneuver keeps flying until its completion rule fires.
         if let Some(active) = self.active {
             let finished = match active.intent.completion {
@@ -2443,6 +2467,72 @@ impl Controller {
             orbiting: steering_point.is_none(),
             opportunity,
         };
+        Ok(true)
+    }
+
+    /// Fly toward the wing's mission of opportunity waypoint with the B48
+    /// route command: its altitude (no leader jitter, so no draw) at cruise
+    /// speed. The climb or dive toward that altitude is bounded to 20 degrees
+    /// (fitted, as the mission rejoin).
+    fn route_motion(
+        &mut self,
+        frame: &DecisionFrame<'_>,
+        clock: CommandClock,
+        batch: &mut IntentBatch,
+    ) -> Result<bool> {
+        let Some(point) = self.wing_route else {
+            return Ok(false);
+        };
+        let dx = point[0] - frame.own.position[0];
+        let dz = point[2] - frame.own.position[2];
+        let distance_ft = dx.hypot(dz);
+        let command = route::route_command(
+            &route::RouteInputs {
+                waypoint: Some(route::Waypoint {
+                    altitude_ft: point[1],
+                    speed: route::cruise_speed(&frame.own.limits),
+                    landing: false,
+                    distance_ft,
+                }),
+                has_airport: false,
+                wing_leader: false,
+                limits: frame.own.limits,
+            },
+            &mut self.random,
+        )?;
+        let route::RouteCommand::Fly {
+            altitude_ft, speed, ..
+        } = command
+        else {
+            return Ok(false);
+        };
+        let heading = if distance_ft > f64::EPSILON {
+            dx.atan2(dz).to_degrees()
+        } else {
+            frame.own.heading_deg
+        };
+        let pitch = (altitude_ft - frame.own.position[1])
+            .atan2(distance_ft.max(1.0))
+            .to_degrees()
+            .clamp(-20., 20.);
+        let request = MotionRequest::new(
+            heading.round() as i32,
+            PitchRequest::Explicit(pitch.round() as i32),
+            Bank::Unconstrained,
+            SpeedRequest::Explicit(speed),
+            Duration::Timed(3),
+        );
+        self.pursuit = None;
+        batch.motion = Some(self.resolve(
+            frame,
+            clock,
+            request,
+            None,
+            None,
+            &mut IntentBatch::default(),
+        )?);
+        batch.activity = Some(Activity::Searching);
+        self.trace.0.motion.branch = MotionBranch::WingRoute { point, distance_ft };
         Ok(true)
     }
 

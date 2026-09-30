@@ -375,6 +375,10 @@ fn activity_reason(look: &Look, activity: Activity) -> String {
                 "leading a mission of opportunity after the lead was lost: searching where {} was last seen",
                 who(contact.id)
             ),
+            (true, MotionBranch::WingRoute { .. }) => {
+                "leading a mission of opportunity: nothing found, flying the wing's waypoints"
+                    .to_owned()
+            }
             (true, MotionBranch::Search { contact, .. }) => {
                 format!("investigating {}, last seen earlier", who(contact.id))
             }

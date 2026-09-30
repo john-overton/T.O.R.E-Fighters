@@ -1373,6 +1373,27 @@ impl AiWings {
         &self.mission
     }
 
+    /// The remaining waypoints of the wing aircraft `plane` flies in (a human
+    /// or an AI aircraft), in order, world feet. A wing whose human leader is
+    /// lost flies them after its search for the enemy
+    /// ([`AiMission::set_wing_route`]). Quick Mission has no mission route
+    /// yet, so only the probe calls this.
+    pub fn set_wing_route(&mut self, plane: u32, route: Vec<[f64; 3]>) {
+        let wing = self
+            .humans
+            .iter()
+            .find(|h| h.id == plane)
+            .map(|h| (side_of(h.side), h.wing))
+            .or_else(|| {
+                self.mission
+                    .actor(plane)
+                    .map(|a| (a.identity().side, a.identity().wing))
+            });
+        if let Some((side, wing)) = wing {
+            self.mission.set_wing_route(side, wing, route);
+        }
+    }
+
     /// The seeker class (2 infrared, 3 radar) of each missile lock an enemy
     /// holds on aircraft `id`: its target is that aircraft and its weapon
     /// service has passed the lock check with a guided store chosen, and is

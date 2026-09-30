@@ -1620,9 +1620,16 @@ pools the hostile aircraft every living member sees or remembers
 enemy aircraft and picks the one to search. The lead's controller gets it
 through `Controller::set_wing_search` and flies it with the lost-contact search
 (`MotionBranch::Search` with `opportunity: true`), after its own lost contact
-and never as a target. When the search ends, `AiMission::send_home` (the same
-call the mission's return to base uses) lands every airborne member at its
-home runway, or flies a lead with none home, and `airfield_clearance` keeps a
+and never as a target. When the search is over the lead flies the wing's
+remaining waypoints (`Plan::Route`, `Controller::set_wing_route`,
+`MotionBranch::WingRoute`), which the host hands over with
+`AiMission::set_wing_route` (`AiWings::set_wing_route` by aircraft) and the
+opportunity copies when the lead passes. *No host has a route yet:* Quick
+Mission imports no mission route and the AI flies none, so only the probe's
+`--probe-wing-route` calls it (agent decision: the plumbing waits for route
+import rather than inventing routes). With no waypoint left,
+`AiMission::send_home` (the same call the mission's return to base uses) lands
+every airborne member at its home runway, or flies a lead with none home, and `airfield_clearance` keeps a
 member still in `Phase::Waiting` parked. The numbers are agent decisions,
 in the [AI spec](spec/ai.md#mission-of-opportunity-after-a-lost-human-leader).
 A wing led by AI from the start is untouched. The AI probe prints a

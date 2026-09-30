@@ -468,8 +468,11 @@ said; the radio call a human who takes the lead hears is in the
 is an agent decision (fitted).** When a wing's human leader is lost and the
 lead passes to an AI aircraft (no living human is left in the wing), the wing
 "continues on with the mission of opportunity and visual based on last known
-enemy locations, if they can't find anything then RTB's". Before, the new lead
-had no order or route and flew straight on until the world edge removed it.
+enemy locations, if they can't find anything then RTB's", and, asked what a
+wing that knows no enemy does: "Ideally it's go after enemy first, if no enemy
+or threat found, then waypoints, if no waypoints, then direct RTB." Before, the
+new lead had no order or route and flew straight on until the world edge
+removed it.
 
 - **Taking it up.** On the tick the AI takes the lead, every AI member of the
   wing is given free engagement, and any recall the lost leader gave ends with
@@ -492,16 +495,31 @@ had no order or route and flew straight on until the world edge removed it.
   of an aircraft makes its point worth searching again. The wingmen stay in
   formation on the lead. The lead's own lost contact, if it has one, comes
   first, as before.
-- **Returning to base.** The search ends when no point is left to search (or
-  the wing knew of none), or after **10 minutes** without a hostile in contact
-  (counted from the lead passing, or from the wing's last contact: any member
-  seeing a hostile aircraft, or the lead having a target). The wing then
+- **The search ends** when no point is left to search (or the wing knew of
+  none), or after **10 minutes** without a hostile in contact (counted from
+  the lead passing, or from the wing's last contact: any member seeing a
+  hostile aircraft, or the lead having a target).
+- **Waypoints.** The lead then flies the wing's remaining waypoints in order:
+  the lost human's route from the waypoint it was flying to, or the wing's own
+  route. It heads for each at the waypoint's altitude and cruise speed (the
+  B48 route command, climbing or diving at most 20 degrees), and a waypoint is
+  done once it is behind the aircraft (B48: the direction to it has turned to
+  within 45 degrees of the opposite of where it lay when it became current).
+  The wing still engages anything it detects, and a new contact reopens the
+  search; the route resumes when that search is over. *Today no wing has
+  waypoints:* Quick Mission has no mission route (the NAV page shows
+  `NO WAYPOINTS`, [navigation selection](weapon-navigation-selection.md)) and
+  AI wings fly none, so the wing goes straight home. The rule takes effect
+  once mission routes are imported; the AI probe can hand the player's wing a
+  route to test it.
+- **Returning to base.** With no waypoint left, or none at all, the wing
   returns to base through the [ordinary return to base](#return-to-base-when-the-mission-is-over):
   each airborne AI member with a home runway lands there, and a lead with none
   flies home and holds. A member still waiting to take off stays parked, since
   it would only take off to land again (it does not hold up its side's own
-  return to base either); one already taxiing goes on, takes off and lands. The wing does not take up the search again. Bingo fuel and damage
-  send an aircraft home earlier, as always.
+  return to base either); one already taxiing goes on, takes off and lands.
+  The wing does not take up the search again. Bingo fuel and damage send an
+  aircraft home earlier, as always.
 - **Unchanged.** A wing led by AI from the start keeps its own succession: when
   an AI leader is lost, the next member leads and nothing else changes. A wing
   that took up a mission of opportunity keeps it when its AI lead is lost in
@@ -1143,7 +1161,7 @@ through `Controller::fallbacks`.
 | `mission` | Actor-owned sensors, stores, flight model and decision state; ammunition debited before a launch event | Missile physics deliberately not duplicated; the host realises each launch |
 | `damage` | [Authored fault responses](systems-damage.md#ai-pilot-response-to-faults): recovery commitment, power protection/restart, maneuver limits and fire danger | Original AI procedures; unreachable or missing recovery runway and irrecoverable failures can still be fatal |
 | `launch` | Quick Mission launch payload: side, wing, member, aircraft, resolved experience and the enemy-skill override | Nothing; loadout carriage stays with the host |
-| `opportunity` | [Mission of opportunity after a lost human leader](#mission-of-opportunity-after-a-lost-human-leader): the wing's pooled last known enemy positions, the search order, dwell and time limit, and when it returns to base (opinionated, fitted numbers) | Nothing; the rule is an opinionated addition |
+| `opportunity` | [Mission of opportunity after a lost human leader](#mission-of-opportunity-after-a-lost-human-leader): the wing's pooled last known enemy positions, the search order, dwell and time limit, the waypoint leg, and when it returns to base (opinionated, fitted numbers) | Nothing; the rule is an opinionated addition |
 
 Fitted and opinionated choices are listed in each file's module comment and in
 the [provenance summary](../behavior-provenance.md).

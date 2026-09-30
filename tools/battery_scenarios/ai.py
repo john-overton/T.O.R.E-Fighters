@@ -291,6 +291,28 @@ def land_order_checker(whole: Callable[[str], list[str]]) -> Callable[[str], lis
     return check
 
 
+OPPORTUNITY = re.compile(r"^t=\d+ \([\d.]+s\) mission of opportunity: (\S+ \d-\d) leads, (.*)$", re.M)
+
+
+def lost_lead_route_checker(output: str) -> list[str]:
+    """The player is lost with no enemy known: the new lead flies both of the
+    wing's waypoints in order, then returns to base and lands."""
+    problems = probe_problems(output, ground=True, need_takeoff=True)
+    notes = [doing for _, doing in OPPORTUNITY.findall(output)]
+    wanted = [
+        "flying its waypoints, 2 left (no enemy position known)",
+        "flying its waypoints, 1 left (no enemy position known)",
+        "returning to base (waypoints flown)",
+    ]
+    if notes != wanted:
+        problems.append(f"mission of opportunity went {notes}, expected {wanted}")
+    home = OPPORTUNITY_HOME.search(output)
+    phases = dict(PHASES.findall(output)).get(home.group(1), "") if home else ""
+    if not any(f"{name}@" in phases for name in LANDED_PHASES):
+        problems.append(f"the new lead never landed: {phases[:160]}")
+    return problems
+
+
 def rerun_same(args: list[str]) -> Callable[[str], list[str]]:
     """Determinism: run the same probe again on a fresh profile copy and compare."""
 
@@ -639,6 +661,15 @@ def scenarios() -> list[Scenario]:
             "--theater", theater, "--ground-start", airport, "--probe-wing-size", "2", "--maneuver", "takeoff",
             "--probe-wing-order", "18000:land-selected", "--separation", "200", "--probe-wing-only"],
             ticks=120000, timeout=2400, check=land_order_checker(lands_without_hanging)))
+    # The new lead flies the lost player's waypoints, then goes home (John,
+    # 2026-09-30). It needs the scripted player to crash, as it does 60 s
+    # after takeoff at Kharkiv; the AI probe pilot work (roadmap 1i) may
+    # change that.
+    out.append(probe("lost-lead-route-ukr-a6", [
+        "--theater", "UKR", "--ground-start", "6", "--probe-wing-size", "2", "--maneuver", "takeoff",
+        "--separation", "200", "--probe-wing-only",
+        "--probe-wing-route", "8:8:8000", "--probe-wing-route", "0:16:8000"],
+        ticks=120000, timeout=2400, check=lost_lead_route_checker))
     for theater, airport in (("UKR", "1"), ("PGU", "2"), ("FRA", "3"), ("NSK", "5")):
         for aircraft in AIRCRAFT:
             out.append(probe(f"takeoff-{theater.lower()}-a{airport}-{aircraft}", [

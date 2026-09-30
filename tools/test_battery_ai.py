@@ -161,6 +161,16 @@ class LandOrderTests(unittest.TestCase):
         self.assertTrue(any("1-4 never took off" in p for p in ai.probe_problems(text, ground=True, need_takeoff=True)))
         self.assertEqual(ai.probe_problems(text + self.HOME, ground=True, need_takeoff=True), [])
 
+    def test_the_lost_lead_flies_the_route_then_lands(self):
+        route = (
+            "t=7119 (59.3s) mission of opportunity: Friendly 1-2 leads, flying its waypoints, 2 left (no enemy position known)\n"
+            "t=25608 (213.4s) mission of opportunity: Friendly 1-2 leads, flying its waypoints, 1 left (no enemy position known)\n"
+            "t=43672 (363.9s) mission of opportunity: Friendly 1-2 leads, returning to base (waypoints flown)\n"
+        )
+        self.assertEqual(ai.lost_lead_route_checker(CLEAN + self.DOWN + route + self.LANDED), [])
+        problems = ai.lost_lead_route_checker(CLEAN + self.DOWN + self.HOME + self.LANDED)
+        self.assertTrue(any("expected" in p for p in problems), problems)
+
     def test_a_crashed_player_must_not_be_obeyed(self):
         self.assertTrue(any("already crashed" in p for p in self.check(CLEAN + self.DOWN + self.ACCEPTED)))
 

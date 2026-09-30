@@ -1674,7 +1674,9 @@ fn an_ai_that_takes_the_lead_from_a_lost_human_and_knows_no_enemy_returns_to_bas
     let opportunity = mission.opportunity(Side(1), 0).unwrap();
     assert_eq!(
         opportunity.home.map(|(_, reason)| reason),
-        Some(crate::ai::opportunity::HomeReason::NothingKnown)
+        Some(crate::ai::opportunity::HomeReason::SearchOver(
+            crate::ai::opportunity::SearchEnd::NothingKnown
+        ))
     );
     assert_eq!(
         mission.actor(1).unwrap().landing_order().map(|o| o.reason),
@@ -1735,7 +1737,10 @@ fn the_new_lead_searches_the_enemys_last_known_position_then_returns_to_base() {
     assert!(closest < 6_076., "circled over it: closest {closest:.0} ft");
     let opportunity = mission.opportunity(Side(1), 0).unwrap();
     let (home_tick, reason) = opportunity.home.expect("the search ended");
-    assert_eq!(reason, HomeReason::AllSearched);
+    assert_eq!(
+        reason,
+        HomeReason::SearchOver(crate::ai::opportunity::SearchEnd::AllSearched)
+    );
     assert!(home_tick - opportunity.started_tick >= DWELL_TICKS + arrived as u64 - 1);
     let actor = mission.actor(1).unwrap();
     assert_eq!(
@@ -1841,7 +1846,9 @@ fn wingmen_still_waiting_to_take_off_stay_parked_when_their_wing_goes_home() {
             .opportunity(Side(1), 0)
             .and_then(|o| o.home)
             .map(|(_, reason)| reason),
-        Some(crate::ai::opportunity::HomeReason::NothingKnown)
+        Some(crate::ai::opportunity::HomeReason::SearchOver(
+            crate::ai::opportunity::SearchEnd::NothingKnown
+        ))
     );
     for id in [1, 2] {
         assert_eq!(
@@ -1895,6 +1902,49 @@ fn a_stood_down_wingman_does_not_hold_up_its_sides_return_to_base() {
         .unwrap();
     assert_eq!(
         mission.actor(3).unwrap().landing_order().map(|o| o.reason),
+        Some(LandingReason::Ordered)
+    );
+}
+
+#[test]
+fn with_no_enemy_found_the_new_lead_flies_the_wings_waypoints_then_returns_to_base() {
+    // John, 2026-09-30: "go after enemy first, if no enemy or threat found,
+    // then waypoints, if no waypoints, then direct RTB".
+    use crate::ai::opportunity::HomeReason;
+    let (mut mission, mut human) = wing_of_a_human();
+    let route = vec![[25_000., 7_000., -40_000.], [25_000., 7_000., -5_000.]];
+    mission.set_wing_route(Side(1), 0, route.clone());
+    let enemy = distant_enemy(mission.actor(1).unwrap());
+    step_with(&mut mission, &[human.clone(), enemy.clone()]);
+    human.alive = false;
+    step_with(&mut mission, &[human.clone(), enemy.clone()]);
+    let mut flown = Vec::new();
+    for tick in 0..(300 * 120) {
+        step_with(&mut mission, &[human.clone(), enemy.clone()]);
+        let actor = mission.actor(1).unwrap();
+        assert!(!actor.flight().crashed);
+        if mission.opportunity(Side(1), 0).unwrap().home.is_some() {
+            break;
+        }
+        let waypoint = actor.controller().wing_route().expect("flying the route");
+        assert_eq!(actor.activity(), Activity::Searching, "tick {tick}");
+        if flown.last() != Some(&waypoint) {
+            flown.push(waypoint);
+        }
+    }
+    assert_eq!(flown, route, "both waypoints in order");
+    let opportunity = mission.opportunity(Side(1), 0).unwrap();
+    assert_eq!(
+        opportunity.home.map(|(_, reason)| reason),
+        Some(HomeReason::RouteFlown)
+    );
+    let p = mission.actor(1).unwrap().flight().position;
+    assert!(
+        (p[0] - route[1][0]).hypot(p[2] - route[1][2]) < 10_000.,
+        "went home from the last waypoint, {p:?}"
+    );
+    assert_eq!(
+        mission.actor(1).unwrap().landing_order().map(|o| o.reason),
         Some(LandingReason::Ordered)
     );
 }

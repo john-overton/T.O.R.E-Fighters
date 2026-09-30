@@ -353,6 +353,12 @@ pub enum MotionBranch {
         /// lost, rather than this aircraft's own lost contact.
         opportunity: bool,
     },
+    /// Flying the wing's waypoints after its mission of opportunity search
+    /// found nothing.
+    WingRoute {
+        point: [f64; 3],
+        distance_ft: f64,
+    },
     /// An Ace gave up a search after two minutes.
     SearchAbandoned {
         contact: SearchContact,

@@ -559,6 +559,13 @@ pub fn motion_branch(
                 }
             ),
         ),
+        MotionBranch::WingRoute { distance_ft, .. } => (
+            "flying the wing's waypoints",
+            format!(
+                "nothing found on the search; next waypoint {:.1} nm",
+                distance_ft / 6_076.12
+            ),
+        ),
         MotionBranch::SearchAbandoned { contact } => (
             "search abandoned",
             format!("an Ace gives up on {} after two minutes", who(contact.id)),
@@ -601,7 +608,7 @@ pub fn branch_code(controller: &ControllerTrace, actor: &ActorTrace) -> u8 {
         MotionBranch::SearchBearing { .. } => 4,
         MotionBranch::OrderedApproach { .. } => 5,
         MotionBranch::OrderedMotion => 6,
-        MotionBranch::Search { .. } => 7,
+        MotionBranch::Search { .. } | MotionBranch::WingRoute { .. } => 7,
         MotionBranch::SearchAbandoned { .. } => 8,
         MotionBranch::Formation(_) => 9,
         MotionBranch::ActiveContinues | MotionBranch::NotYetDue | MotionBranch::NewManeuver => 10,

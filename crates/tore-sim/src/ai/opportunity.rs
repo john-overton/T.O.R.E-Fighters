@@ -8,17 +8,24 @@
 //! [`docs/spec/ai.md`](../../../../docs/spec/ai.md), "Mission of opportunity
 //! after a lost human leader".
 //!
+//! John added on 2026-09-30: "Ideally it's go after enemy first, if no enemy
+//! or threat found, then waypoints, if no waypoints, then direct RTB."
+//!
 //! The wing engages any hostile aircraft it detects (the ordinary leader
 //! release). With none in contact its leader searches by eye: it flies to the
 //! nearest hostile position the wing knows (its members' sightings and sensor
 //! tracks, kept in their awareness memory) and circles over it for
-//! [`DWELL_TICKS`]; then the next. The search ends, and the wing returns to
-//! base, when nothing is left to search or when [`SEARCH_LIMIT_TICKS`] pass
-//! without a hostile in contact. This module holds the wing's state and the
+//! [`DWELL_TICKS`]; then the next. The search is over when nothing is left to
+//! search or when [`SEARCH_LIMIT_TICKS`] pass without a hostile in contact.
+//! The leader then flies the wing's remaining waypoints in order (B48: a
+//! waypoint is done once it is behind the aircraft), still engaging what it
+//! meets; a new contact reopens the search. With no waypoint left, or none at
+//! all, the wing returns to base. This module holds the wing's state and the
 //! decision; [`super::mission`] feeds it and flies the result.
 
 use super::TICKS_PER_SECOND;
 use super::awareness::FEET_PER_NAUTICAL_MILE;
+use super::route::{Octant, octant, waypoint_behind};
 use super::targeting::Side;
 
 /// Fitted: the leader has reached a search point within 2 nm of it
@@ -28,9 +35,9 @@ pub const ARRIVAL_FT: f64 = 2.0 * FEET_PER_NAUTICAL_MILE;
 /// Fitted: time spent circling over one point before it counts as searched,
 /// about one and a half turns of the search circle.
 pub const DWELL_TICKS: u64 = 60 * TICKS_PER_SECOND;
-/// Fitted: the search gives up and the wing returns to base after this long
-/// with no hostile aircraft in contact, counted from the moment the AI took
-/// the lead or from the wing's last contact.
+/// Fitted: the search is over after this long with no hostile aircraft in
+/// contact, counted from the moment the AI took the lead or from the wing's
+/// last contact.
 pub const SEARCH_LIMIT_TICKS: u64 = 10 * 60 * TICKS_PER_SECOND;
 
 /// A hostile aircraft's last known position, as the wing knows it.
@@ -56,12 +63,9 @@ pub struct Sighting {
     pub current: bool,
 }
 
-/// Why the wing gave up its mission of opportunity and returned to base.
+/// Why the search for the enemy ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum HomeReason {
-    /// The wing flies under weapons hold or self-defense, so it has no
-    /// mission of opportunity to fly.
-    NotCleared,
+pub enum SearchEnd {
     /// The wing knew of no hostile aircraft to look for.
     NothingKnown,
     /// Every known position was searched and nothing was found.
@@ -70,13 +74,34 @@ pub enum HomeReason {
     SearchTimeUp,
 }
 
+impl SearchEnd {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NothingKnown => "no enemy position known",
+            Self::AllSearched => "every last known position searched",
+            Self::SearchTimeUp => "search time up",
+        }
+    }
+}
+
+/// Why the wing gave up its mission of opportunity and returned to base.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HomeReason {
+    /// The wing flies under weapons hold or self-defense, so it has no
+    /// mission of opportunity to fly.
+    NotCleared,
+    /// The search ended and the wing had no waypoint to fly.
+    SearchOver(SearchEnd),
+    /// The search ended and the wing flew its last waypoint.
+    RouteFlown,
+}
+
 impl HomeReason {
     pub fn label(self) -> &'static str {
         match self {
             Self::NotCleared => "not cleared to attack",
-            Self::NothingKnown => "no enemy position known",
-            Self::AllSearched => "every last known position searched",
-            Self::SearchTimeUp => "search time up",
+            Self::SearchOver(end) => end.label(),
+            Self::RouteFlown => "waypoints flown",
         }
     }
 }
@@ -88,6 +113,8 @@ pub enum Plan {
     Engage,
     /// Search this position.
     Search(LastKnown),
+    /// The search is over: fly to this waypoint.
+    Route([f64; 3]),
     /// Return to base. Stays so for the rest of the mission.
     Home(HomeReason),
 }
@@ -107,12 +134,22 @@ pub struct Opportunity {
     pub searching: Option<u32>,
     /// When the leader reached the point being searched.
     pub arrived_tick: Option<u64>,
+    /// Set while the search is over: the tick and why. A new contact clears it.
+    pub search_over: Option<(u64, SearchEnd)>,
+    /// The wing's waypoints still to fly, in order, world feet.
+    pub route: Vec<[f64; 3]>,
+    /// B48: the sector opposite the direction to the current waypoint when it
+    /// became current; the waypoint is behind once the direction turns there.
+    pub route_sector: Option<Octant>,
+    /// The leader has flown toward at least one waypoint.
+    pub route_started: bool,
     /// Set once the wing returns to base: the tick and the reason.
     pub home: Option<(u64, HomeReason)>,
 }
 
 impl Opportunity {
-    pub fn new(side: Side, wing: u8, tick: u64) -> Self {
+    /// A new mission of opportunity with the wing's remaining waypoints.
+    pub fn new(side: Side, wing: u8, tick: u64, route: Vec<[f64; 3]>) -> Self {
         Self {
             side,
             wing,
@@ -121,6 +158,10 @@ impl Opportunity {
             points: Vec::new(),
             searching: None,
             arrived_tick: None,
+            search_over: None,
+            route,
+            route_sector: None,
+            route_started: false,
             home: None,
         }
     }
@@ -139,12 +180,35 @@ impl Opportunity {
             .map(|p| p.id)
     }
 
-    /// Give up the search and return to base.
+    /// Give up the mission and return to base.
     pub fn go_home(&mut self, tick: u64, reason: HomeReason) -> Plan {
         self.home.get_or_insert((tick, reason));
         self.searching = None;
         self.arrived_tick = None;
         Plan::Home(self.home.expect("just set").1)
+    }
+
+    /// The waypoint to fly now, dropping those already behind the leader.
+    fn next_waypoint(&mut self, leader_position: [f64; 3]) -> Option<[f64; 3]> {
+        while let Some(&point) = self.route.first() {
+            let current = octant(point[0] - leader_position[0], point[2] - leader_position[2]);
+            let behind = match (current, self.route_sector) {
+                // Directly over it.
+                (Err(_), _) => true,
+                (Ok(current), Some(stored)) => waypoint_behind(current, stored),
+                (Ok(current), None) => {
+                    self.route_sector = Some(current.opposite());
+                    false
+                }
+            };
+            if !behind {
+                self.route_started = true;
+                return Some(point);
+            }
+            self.route.remove(0);
+            self.route_sector = None;
+        }
+        None
     }
 
     /// One tick of the mission of opportunity.
@@ -154,11 +218,11 @@ impl Opportunity {
     /// destroyed aircraft is dropped from the wing's memory, as from each
     /// member's). `leader_engaged` is true while the leader has a target.
     ///
-    /// A hostile in sight, or a target, holds the search clock. The search
-    /// goes to the nearest hostile a member sees now, otherwise it keeps to
-    /// the point it chose until that point is searched, then takes the
-    /// nearest point not yet searched. The leader flies the search only while
-    /// it has no target of its own.
+    /// A hostile in sight, or a target, holds the search clock and reopens a
+    /// search that was over. The search goes to the nearest hostile a member
+    /// sees now, otherwise it keeps to the point it chose until that point is
+    /// searched, then takes the nearest point not yet searched. The leader
+    /// flies the search, or the route, only while it has no target of its own.
     pub fn step(
         &mut self,
         tick: u64,
@@ -204,8 +268,44 @@ impl Opportunity {
         let in_contact = leader_engaged || in_sight.is_some();
         if in_contact {
             self.last_contact_tick = tick;
-        } else if tick.saturating_sub(self.last_contact_tick) >= SEARCH_LIMIT_TICKS {
-            return self.go_home(tick, HomeReason::SearchTimeUp);
+            if self.search_over.take().is_some() {
+                // Back to the enemy; the route resumes afterwards.
+                self.route_sector = None;
+            }
+        }
+        if self.search_over.is_none()
+            && let Some(plan) = self.search(tick, leader_position, in_sight, in_contact)
+        {
+            return plan;
+        }
+        let end = self.search_over.expect("the search is over").1;
+        match self.next_waypoint(leader_position) {
+            Some(point) => Plan::Route(point),
+            None if self.route_started => self.go_home(tick, HomeReason::RouteFlown),
+            None => self.go_home(tick, HomeReason::SearchOver(end)),
+        }
+    }
+
+    /// The search for the enemy: the plan while it goes on, or `None` once it
+    /// is over (recorded in [`Self::search_over`]).
+    fn search(
+        &mut self,
+        tick: u64,
+        leader_position: [f64; 3],
+        in_sight: Option<u32>,
+        in_contact: bool,
+    ) -> Option<Plan> {
+        let horizontal = |point: &LastKnown| {
+            (point.position[0] - leader_position[0]).hypot(point.position[2] - leader_position[2])
+        };
+        let end = |this: &mut Self, end: SearchEnd| {
+            this.search_over = Some((tick, end));
+            this.searching = None;
+            this.arrived_tick = None;
+            None
+        };
+        if !in_contact && tick.saturating_sub(self.last_contact_tick) >= SEARCH_LIMIT_TICKS {
+            return end(self, SearchEnd::SearchTimeUp);
         }
         if in_sight.is_some() && in_sight != self.searching {
             self.searching = in_sight;
@@ -240,10 +340,10 @@ impl Opportunity {
             .searching
             .and_then(|id| self.points.iter().find(|p| p.id == id))
         {
-            Some(point) => Plan::Search(*point),
-            None if in_contact => Plan::Engage,
-            None if self.points.is_empty() => self.go_home(tick, HomeReason::NothingKnown),
-            None => self.go_home(tick, HomeReason::AllSearched),
+            Some(point) => Some(Plan::Search(*point)),
+            None if in_contact => Some(Plan::Engage),
+            None if self.points.is_empty() => end(self, SearchEnd::NothingKnown),
+            None => end(self, SearchEnd::AllSearched),
         }
     }
 }
@@ -276,18 +376,27 @@ mod tests {
 
     #[test]
     fn a_wing_that_knows_no_enemy_returns_to_base_at_once() {
-        let mut wing = Opportunity::new(Side(1), 0, 100);
+        let mut wing = Opportunity::new(Side(1), 0, 100, Vec::new());
         let plan = wing.step(100, [0.; 3], &[], false, &alive);
-        assert_eq!(plan, Plan::Home(HomeReason::NothingKnown));
-        assert_eq!(wing.home, Some((100, HomeReason::NothingKnown)));
+        assert_eq!(
+            plan,
+            Plan::Home(HomeReason::SearchOver(SearchEnd::NothingKnown))
+        );
+        assert_eq!(
+            wing.home,
+            Some((100, HomeReason::SearchOver(SearchEnd::NothingKnown)))
+        );
         // It stays at home even if a sighting arrives later.
         let plan = wing.step(101, [0.; 3], &[seen(ENEMY, 0., 50_000., 101)], true, &alive);
-        assert_eq!(plan, Plan::Home(HomeReason::NothingKnown));
+        assert_eq!(
+            plan,
+            Plan::Home(HomeReason::SearchOver(SearchEnd::NothingKnown))
+        );
     }
 
     #[test]
     fn the_nearest_last_known_position_is_searched_first_then_the_next() {
-        let mut wing = Opportunity::new(Side(1), 0, 0);
+        let mut wing = Opportunity::new(Side(1), 0, 0, Vec::new());
         let far = seen(ENEMY, 0., 90_000., 0);
         let near = seen(ENEMY + 1, 30_000., 0., 0);
         let plan = wing.step(1, [0.; 3], &[far, near], false, &alive);
@@ -320,17 +429,20 @@ mod tests {
 
     #[test]
     fn nothing_found_at_every_point_sends_the_wing_home() {
-        let mut wing = Opportunity::new(Side(1), 0, 0);
+        let mut wing = Opportunity::new(Side(1), 0, 0, Vec::new());
         let point = seen(ENEMY, 0., 20_000., 0);
         let over = [0., 0., 20_000.];
         wing.step(1, over, &[point], false, &alive);
         let plan = wing.step(1 + DWELL_TICKS, over, &[point], false, &alive);
-        assert_eq!(plan, Plan::Home(HomeReason::AllSearched));
+        assert_eq!(
+            plan,
+            Plan::Home(HomeReason::SearchOver(SearchEnd::AllSearched))
+        );
     }
 
     #[test]
     fn a_newer_sighting_moves_the_point_and_makes_it_worth_searching_again() {
-        let mut wing = Opportunity::new(Side(1), 0, 0);
+        let mut wing = Opportunity::new(Side(1), 0, 0, Vec::new());
         let over = [0., 0., 20_000.];
         let old = seen(ENEMY, 0., 20_000., 0);
         wing.step(1, over, &[old], false, &alive);
@@ -353,7 +465,7 @@ mod tests {
 
     #[test]
     fn contact_holds_the_search_clock_and_its_absence_ends_the_search() {
-        let mut wing = Opportunity::new(Side(1), 0, 0);
+        let mut wing = Opportunity::new(Side(1), 0, 0, Vec::new());
         let far = seen(ENEMY, 0., 5_000_000., 0);
         // The leader's own target counts as contact, even with nothing to search.
         assert_eq!(wing.step(10, [0.; 3], &[], true, &alive), Plan::Engage);
@@ -369,13 +481,13 @@ mod tests {
         ));
         assert_eq!(
             wing.step(limit, [0.; 3], &[far], false, &alive),
-            Plan::Home(HomeReason::SearchTimeUp)
+            Plan::Home(HomeReason::SearchOver(SearchEnd::SearchTimeUp))
         );
     }
 
     #[test]
     fn a_hostile_in_sight_now_is_searched_before_older_points() {
-        let mut wing = Opportunity::new(Side(1), 0, 0);
+        let mut wing = Opportunity::new(Side(1), 0, 0, Vec::new());
         let near = seen(ENEMY, 0., 10_000., 0);
         assert!(matches!(
             wing.step(1, [0.; 3], &[near], false, &alive),
@@ -394,9 +506,92 @@ mod tests {
 
     #[test]
     fn a_destroyed_aircraft_is_not_searched_for() {
-        let mut wing = Opportunity::new(Side(1), 0, 0);
+        let mut wing = Opportunity::new(Side(1), 0, 0, Vec::new());
         let gone = |id: u32| id != ENEMY;
         let plan = wing.step(1, [0.; 3], &[seen(ENEMY, 0., 20_000., 0)], false, &gone);
-        assert_eq!(plan, Plan::Home(HomeReason::NothingKnown));
+        assert_eq!(
+            plan,
+            Plan::Home(HomeReason::SearchOver(SearchEnd::NothingKnown))
+        );
+    }
+
+    #[test]
+    fn with_no_enemy_known_the_wing_flies_its_waypoints_then_goes_home() {
+        let route = vec![[0., 8_000., 60_000.], [60_000., 8_000., 60_000.]];
+        let mut wing = Opportunity::new(Side(1), 0, 0, route.clone());
+        // Flying north toward the first waypoint.
+        for z in [0., 20_000., 59_000.] {
+            assert_eq!(
+                wing.step(1, [0., 8_000., z], &[], false, &alive),
+                Plan::Route(route[0])
+            );
+        }
+        assert_eq!(
+            wing.search_over.map(|(_, end)| end),
+            Some(SearchEnd::NothingKnown)
+        );
+        // Past it: on to the second.
+        assert_eq!(
+            wing.step(2, [0., 8_000., 61_000.], &[], false, &alive),
+            Plan::Route(route[1])
+        );
+        assert_eq!(wing.route.len(), 1);
+        assert_eq!(
+            wing.step(3, [30_000., 8_000., 61_000.], &[], false, &alive),
+            Plan::Route(route[1])
+        );
+        assert_eq!(
+            wing.step(4, [61_000., 8_000., 60_500.], &[], false, &alive),
+            Plan::Home(HomeReason::RouteFlown)
+        );
+        assert!(wing.route.is_empty());
+    }
+
+    #[test]
+    fn the_route_comes_after_the_search() {
+        let route = vec![[0., 8_000., -80_000.]];
+        let mut wing = Opportunity::new(Side(1), 0, 0, route.clone());
+        let point = seen(ENEMY, 0., 20_000., 0);
+        let over = [0., 0., 20_000.];
+        assert!(matches!(
+            wing.step(1, over, &[point], false, &alive),
+            Plan::Search(_)
+        ));
+        assert_eq!(
+            wing.step(1 + DWELL_TICKS, over, &[point], false, &alive),
+            Plan::Route(route[0])
+        );
+        assert_eq!(
+            wing.search_over.map(|(_, end)| end),
+            Some(SearchEnd::AllSearched)
+        );
+    }
+
+    #[test]
+    fn a_contact_on_the_route_reopens_the_search_then_the_route_resumes() {
+        let route = vec![[0., 8_000., 80_000.]];
+        let mut wing = Opportunity::new(Side(1), 0, 0, route.clone());
+        assert_eq!(
+            wing.step(1, [0.; 3], &[], false, &alive),
+            Plan::Route(route[0])
+        );
+        let spotted = in_sight(ENEMY, 10_000., 30_000., 100);
+        assert!(matches!(
+            wing.step(100, [0., 0., 20_000.], &[spotted], false, &alive),
+            Plan::Search(p) if p.id == ENEMY
+        ));
+        assert_eq!(wing.search_over, None);
+        assert_eq!(
+            wing.step(200, [0., 0., 25_000.], &[], true, &alive),
+            Plan::Search(wing.points[0])
+        );
+        // Lost again, the last known point searched: back to the route.
+        let remembered = seen(ENEMY, 10_000., 30_000., 100);
+        let over = [10_000., 0., 30_000.];
+        wing.step(300, over, &[remembered], false, &alive);
+        assert_eq!(
+            wing.step(300 + DWELL_TICKS, over, &[remembered], false, &alive),
+            Plan::Route(route[0])
+        );
     }
 }
