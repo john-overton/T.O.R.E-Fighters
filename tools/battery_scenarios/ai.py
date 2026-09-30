@@ -446,9 +446,12 @@ def scenarios() -> list[Scenario]:
                                                               "--probe-wing-order", f"{12000 * size // 2}:land-selected", "--separation", "200", "--probe-wing-only"],
                          # A wing's approach over the hills south of Simferopol takes about
                          # 400 s per aircraft (lane doc, "Needs a decision"), so only the
-                         # pair is expected to be down inside the run.
+                         # pair is expected to be down inside the run. Since the probe runs
+                         # the full mission tick the scripted player crashes 17 s after
+                         # takeoff from Simferopol, so under lead succession the order is
+                         # refused and no landing is due (land_order_checker).
                          ticks=90000, timeout=1800,
-                         check=checker(ground=True, need_takeoff=True, need_landing=size == 2)))
+                         check=land_order_checker(checker(ground=True, need_takeoff=True, need_landing=size == 2))))
         # Bug out is ignored while taking off (spec), so order it once the wing is up.
         out.append(probe(f"ground-bug-out-wing{size}", ["--ground-start", GROUND_AIRPORT, "--probe-wing-size", str(size), "--maneuver", "takeoff",
                                                         "--probe-wing-order", f"{6000 * size}:bug-out", "--separation", "200", "--probe-wing-only"],

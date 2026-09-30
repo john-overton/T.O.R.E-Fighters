@@ -90,6 +90,14 @@ an aircraft flew into the ground with no weapon hit, ejection or fault; a
 ground start leaves a hazard open, a wingman never takes off or (for the pair)
 never lands; or the same radio line repeats three times in five seconds.
 
+The scripted player leads the wing, and a probe that orders the wing to land
+(`ai-ground-land-selected-*`, `ai-ils-terrain-*`) follows lead succession: a
+player still flying must be obeyed and the pair must land, but once the player
+has crashed the order must be refused with "you are not leading your wing" and
+no landing is due. Since the probe runs the full mission tick, the scripted
+player crashes 17 s after takeoff from Simferopol, so the two
+`ai-ground-land-selected-*` scenarios take the refusal branch.
+
 ## Bugs found and fixed
 
 | Symptom | Cause | Fix |
