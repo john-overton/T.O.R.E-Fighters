@@ -18,11 +18,11 @@ use tore_formats::aircraft::AircraftId;
 use tore_sim::acoustics::Emission;
 use tore_sim::combat::live::{DeviceRelease, EffectKind};
 use tore_world::comms;
-use tore_world::seats::SeatId;
+use tore_world::seats::{PlaneId, SeatId};
 use tore_world::snapshot::{
     AircraftPose, DebrisPose, Draw, EffectPose, MarkPose, PilotPose, ProjectilePose, RenderSnapshot,
 };
-use tore_world::world::{Cue, OrderReply, Release};
+use tore_world::world::{Cue, OrderReply, Release, World};
 
 fn level(value: f64) -> u8 {
     if value.is_finite() {
@@ -114,11 +114,33 @@ fn velocity_between(now: [f64; 3], then: Option<[f64; 3]>, ticks: u64) -> [f64; 
     }
 }
 
+/// The picture the seat flying `plane` draws, built from `world` after a
+/// step: its plane is the picture's player and every other plane, plane 0
+/// and the other human-flown ones included, is a target
+/// ([`tore_world::combat::Combat::snapshot`]). `None` when no cockpit flies
+/// `plane`.
+pub fn seat_picture(world: &World, plane: PlaneId) -> Option<RenderSnapshot> {
+    let cockpit = world
+        .cockpits
+        .iter()
+        .find(|cockpit| cockpit.plane == plane)?;
+    world.combat.state.ownship(plane.0)?;
+    Some(
+        world
+            .combat
+            .snapshot(plane.0, &cockpit.flight, world.ai_wings.as_ref()),
+    )
+}
+
 /// Every entity of `current` a client flying `player` draws: every aircraft
-/// but its own, every missile, bomb and rocket (gun rounds are burst events),
-/// every debris piece, and every ejected pilot but its own (its escape is
-/// part of its plane's exact state). Debris and pilots take their velocity
-/// from `previous`, the picture a tick or more before.
+/// but its own (plane 0 included when another seat flies it), every missile,
+/// bomb and rocket (gun rounds are burst events), every debris piece, and
+/// every ejected pilot but its own (its escape is part of its plane's exact
+/// state). `current` is the seat's picture ([`seat_picture`]); a picture
+/// built for another plane serves too, since its player pose is taken as an
+/// aircraft like any other. Debris and pilots take their velocity from
+/// `previous`, the seat's picture a tick or more before. The entities come
+/// in key order.
 pub fn entities(
     current: &RenderSnapshot,
     previous: Option<&RenderSnapshot>,
@@ -195,6 +217,7 @@ pub fn entities(
             )),
         });
     }
+    out.sort_by_key(Entity::key);
     Ok(out)
 }
 
@@ -342,5 +365,107 @@ pub fn countermeasure_event(release: &DeviceRelease) -> WireEvent {
         attitude: attitude(release.release.basis.angles()),
         number: release.number,
         left: release.left,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tore_world::mission::{MissionSpec, Skill, Start};
+    use tore_world::seats::SeatInput;
+    use tore_world::test_support::resources::{THEATER, resources};
+    use tore_world::world::{MissionCommand, Seating, TickOutput};
+
+    fn aircraft_ids(entities: &[Entity]) -> Vec<u32> {
+        entities
+            .iter()
+            .filter(|e| e.state.kind() == EntityKind::Aircraft)
+            .map(|e| e.id)
+            .collect()
+    }
+
+    fn spec() -> MissionSpec {
+        let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+        spec.wings[0].count = 2;
+        spec.wings[3].count = 2;
+        spec.wings[3].skill = Skill::Average;
+        spec.separation_nm = 2;
+        spec.start = Start::Airborne {
+            altitude_ft: 10_000,
+        };
+        spec
+    }
+
+    /// Steps `world` 30 ticks, `takes` handing planes to seats on the first.
+    fn fly(world: &mut World, takes: &[(u8, u32)], seats: &[u8]) {
+        let mut out = TickOutput::default();
+        let take: Vec<MissionCommand> = takes
+            .iter()
+            .map(|&(seat, plane)| MissionCommand::Take {
+                seat: SeatId(seat),
+                plane: PlaneId(plane),
+            })
+            .collect();
+        for tick in 0..30 {
+            let inputs: Vec<SeatInput> = seats
+                .iter()
+                .map(|&seat| SeatInput {
+                    seat: SeatId(seat),
+                    tick: world.tick(),
+                    ..SeatInput::default()
+                })
+                .collect();
+            let mission: &[MissionCommand] = if tick == 0 { &take } else { &[] };
+            world
+                .step_with(mission, &inputs, &mut out, |_, _| Ok(()))
+                .unwrap();
+        }
+    }
+
+    /// The aircraft the seat flying `plane` is sent.
+    fn sent_to(world: &World, plane: u32) -> Vec<Entity> {
+        let picture = seat_picture(world, PlaneId(plane)).unwrap();
+        entities(&picture, None, plane, &mut NameTable::new()).unwrap()
+    }
+
+    fn check_plane_0_reaches(world: &World, plane: u32) {
+        let lead = sent_to(world, plane)
+            .into_iter()
+            .find(|e| e.id == 0 && e.state.kind() == EntityKind::Aircraft)
+            .expect("plane 0 is sent to the other seat");
+        let cockpit = world
+            .cockpits
+            .iter()
+            .find(|c| c.plane == PlaneId(0))
+            .unwrap();
+        assert_eq!(
+            *lead.state.motion(),
+            Motion::of(cockpit.flight.position, cockpit.flight.velocity)
+        );
+    }
+
+    #[test]
+    fn each_seat_gets_every_plane_but_its_own() {
+        // Single player's mission with a second seat in plane 1.
+        let map = resources();
+        let mut world = World::new(&spec(), &map, Seating::SinglePlayer).unwrap();
+        fly(&mut world, &[(1, 1)], &[0, 1]);
+        assert!(
+            seat_picture(&world, PlaneId(2)).is_none(),
+            "the AI flies plane 2"
+        );
+        assert_eq!(aircraft_ids(&sent_to(&world, 0)), [1, 2, 3]);
+        assert_eq!(aircraft_ids(&sent_to(&world, 1)), [0, 2, 3]);
+        check_plane_0_reaches(&world, 1);
+
+        // An open mission, as a server runs one: nobody at first, then two
+        // seats in planes 0 and 1.
+        let mut world = World::new(&spec(), &map, Seating::Open).unwrap();
+        fly(&mut world, &[], &[]);
+        assert!(seat_picture(&world, PlaneId(0)).is_none(), "no human yet");
+        fly(&mut world, &[(1, 0), (2, 1)], &[1, 2]);
+        assert_eq!(aircraft_ids(&sent_to(&world, 0)), [1, 2, 3]);
+        assert_eq!(aircraft_ids(&sent_to(&world, 1)), [0, 2, 3]);
+        check_plane_0_reaches(&world, 1);
     }
 }

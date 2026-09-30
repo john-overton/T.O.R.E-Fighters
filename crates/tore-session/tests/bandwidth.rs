@@ -168,7 +168,7 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
     let mut last_own_state_tick = 0u64;
     let mut peak_entities = BTreeMap::new();
     let ticks = MINUTES * 60 * 120;
-    let mut previous_picture = world.combat.render_snapshot().clone();
+    let mut previous_picture = from_world::seat_picture(&world, player).unwrap();
     for _ in 0..ticks {
         let tick = world.tick();
         let input = SeatInput {
@@ -188,7 +188,7 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
         world.step(&[input], &mut out).expect("the tick steps");
         let tick = world.tick() - 1;
         let tick32 = tick as u32;
-        let picture = world.combat.render_snapshot().clone();
+        let picture = from_world::seat_picture(&world, player).unwrap();
 
         // The tick's events for seat 0, as a host sorts them.
         let mut events: Vec<(WireEvent, bool)> = Vec::new();
