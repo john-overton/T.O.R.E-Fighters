@@ -7,6 +7,7 @@ for problems and writes one results folder per run. See docs/testing/README.md.
     python3 tools/battery.py --list
     python3 tools/battery.py --lane ai --jobs 8
     python3 tools/battery.py --scenario 'ai-fight-*' --keep-going
+    python3 tools/battery.py --changed --budget 120      # only what the changes since the merge base can affect
 
 Every scenario gets its own copy of an imported data folder (a copy-on-write
 copy where the filesystem supports it), so runs cannot disturb each other or
@@ -33,6 +34,8 @@ from typing import Callable, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import battery_selection as selection  # noqa: E402
 
 LANES = ("menus", "flight", "ai", "replay")
 
@@ -279,12 +282,26 @@ def write_summary(run_dir: Path, results: list[Result], started: float) -> None:
     (run_dir / "summary.md").write_text("\n".join(lines) + "\n")
 
 
+def choose_changed(opts: argparse.Namespace, scenarios: list[Scenario]) -> tuple[list[Scenario], list[str]]:
+    """Narrows `scenarios` to what the changed files can affect and prints the plan."""
+    base = selection.default_base(ROOT) if opts.changed == "auto" else opts.changed
+    changed = selection.changed_files(ROOT, base, opts.head)
+    durations = selection.load_durations(Path(opts.out), [s.name for s in scenarios])
+    budget = opts.budget if opts.budget is not None else selection.DEFAULT_BUDGET
+    plan = selection.plan_for(
+        changed, scenarios, durations, budget, opts.jobs, opts.windows, opts.with_windows,
+        base=f"{base}{' to ' + opts.head if opts.head else ''}",
+    )
+    print(selection.format_plan(plan, None if opts.plan else 8), flush=True)
+    return plan.scenarios, plan.unit_tests
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--list", action="store_true", help="list scenarios and exit")
     ap.add_argument("--lane", action="append", choices=LANES, help="run only this lane (repeatable)")
     ap.add_argument("--scenario", action="append", help="glob on scenario names (repeatable)")
-    ap.add_argument("--jobs", type=int, default=6, help="scenarios at once (default 6)")
+    ap.add_argument("--jobs", type=int, default=None, help="scenarios at once (default 6; with --changed, half the cores, 4 to 12)")
     ap.add_argument("--windows", type=int, default=3, help="windowed scenarios at once (default 3)")
     ap.add_argument("--bin", default=str(ROOT / "target" / "debug" / "tore-app"))
     ap.add_argument("--profile", default=str(ROOT / ".local" / "bugbash-data"), help="imported data folder to clone per scenario")
@@ -292,19 +309,51 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--timeout-scale", type=float, default=1.0)
     ap.add_argument("--keep-data", action="store_true", help="keep each scenario's data folder (replays, logs)")
     ap.add_argument("--tag", default="", help="suffix for the run folder name")
+    ap.add_argument(
+        "--changed", nargs="?", const="auto", metavar="REF",
+        help="run only the scenarios the files changed since REF can affect (default REF: the merge base with "
+        "`multiplayer`, or HEAD~1 on it); prints what it chose and why. See docs/testing/README.md",
+    )
+    ap.add_argument("--head", metavar="REF", help="with --changed: compare REF to the base instead of the working tree")
+    ap.add_argument("--budget", type=float, default=None, help="with --changed: wall-clock seconds to fit the choice into (default 120)")
+    ap.add_argument("--with-windows", choices=("auto", "yes", "no"), default="auto", help="with --changed: windowed scenarios; auto means only when the change touches rendering or windowed input")
+    ap.add_argument("--plan", action="store_true", help="with --changed: print the choice and stop")
+    ap.add_argument("--no-unit-tests", action="store_true", help="with --changed: skip the Python unit tests it names for the battery's own files")
     opts = ap.parse_args(argv)
+    if opts.jobs is None:
+        opts.jobs = selection.default_jobs() if opts.changed is not None else 6
+    if opts.changed is None and (opts.budget is not None or opts.head or opts.plan):
+        ap.error("--budget, --head and --plan need --changed")
 
     scenarios = load_scenarios()
     if opts.lane:
         scenarios = [s for s in scenarios if s.lane in opts.lane]
     if opts.scenario:
         scenarios = [s for s in scenarios if any(fnmatch.fnmatch(s.name, g) for g in opts.scenario)]
+    if opts.changed is not None:
+        try:
+            scenarios, unit_tests = choose_changed(opts, scenarios)
+        except RuntimeError as e:
+            print(f"--changed: {e}", file=sys.stderr)
+            return 2
+        if opts.plan:
+            return 0
+        if unit_tests and not opts.no_unit_tests:
+            code = subprocess.run(
+                [sys.executable, "-m", "unittest", *unit_tests], cwd=ROOT / "tools"
+            ).returncode
+            if code:
+                print("unit tests for the battery's own files failed", file=sys.stderr)
+                return 1
     if opts.list:
         for s in scenarios:
             print(f"{s.lane:8} {'window' if s.window else '      '} {s.name}")
         print(f"{len(scenarios)} scenarios")
         return 0
     if not scenarios:
+        if opts.changed is not None:
+            print("Nothing to run: no scenario can be affected by these changes.")
+            return 0
         print("no scenarios selected", file=sys.stderr)
         return 2
     if not Path(opts.bin).exists():
