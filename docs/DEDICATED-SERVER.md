@@ -118,7 +118,9 @@ start, so a typo never passes silently.
 A Quick Mission written as text: the same fields the Quick Mission creator
 sets, with names instead of list positions, so a file works on any import.
 It is the text form of `MissionSpec` ([architecture](ARCHITECTURE.md#a-mission-with-no-window)),
-the same text the server sends every joining player.
+the same text the server sends every joining player. The reader is
+`MissionSpec::from_text` in `tore-world`, and a test parses the example below
+straight out of this guide, so the two stay in step.
 
 ```text
 tore-mission 1
@@ -137,21 +139,31 @@ objective enemy 2 intercept friendly 1
 cheats none
 ```
 
+One `key value` line each; everything after a `#` is a comment and blank
+lines do not count. An error names its line, for example `line 4: `MOON` is not
+a theater`. An unknown key, theater, aircraft, skill, name or out-of-range
+value is refused, so a typo never passes silently; so is a line that appears
+twice.
+
 | Line | Meaning |
 | --- | --- |
 | `tore-mission 1` | The file's version; always first |
-| `theater CODE` | One of the sixteen theater codes the creator offers: `BAL`, `CUB`, `EGY`, `LFA`, `FRA`, `GRE`, `IRA`, `KURILE`, `TVIET`, `SPA`, `APA`, `PGU`, `NSK`, `WTA`, `UKR`, `VLA` |
-| `condition NAME` | `clear`, `cloudy`, `foggy`, `dawn`, `sunset` or `night` |
-| `time-of-day HH:MM`, `wind KNOTS FROM`, `cloud-deck FEET` | Optional weather overrides, as the game's `TORE_WEATHER_TIME`, `TORE_WIND` and `TORE_CLOUD_ALTITUDE` set them |
-| `start airborne FEET` | 5,000, 10,000, 20,000 or 40,000 ft, the creator's choices |
-| `start ground RUNWAY` | A ground start from a runway object; `--check` lists the theater's runways by number and airport name |
-| `separation-nm N` | 1, 2, 5, 10, 20, 50, 100, 150, 200 or 300, the creator's choices |
-| `preset NAME` | The AI's standing orders: `free`, `cap`, `intercept`, `escort`, `self-defense` or `hold` |
-| `guns-only yes/no` | The creator's air combat setting |
-| `wing SIDE N AIRCRAFT COUNT SKILL` | Up to three wings a side. The aircraft is its exact identity, one of `F18.PT` (the F/A-18D), `RAFALE.PT` (the Rafale C), `F14.PT`, `A4E.PT`, `F31.PT` (the X-31), `MIG29.PT`, `SU27.PT`, `MIG21.PT`, `SU25.PT`, `MIG23.PT`, `SU35.PT`, `F22.PT`, `F22N.PT` (the F-22N) or `faxx` (the F/A-XX); skills are `novice`, `average`, `experienced`, `ace` or `dummy`. Friendly wing 1 holds 1 to 5 aircraft, the others 0 to 5 |
-| `objective SIDE N NAME [SIDE N]` | A wing's objective: `inherit`, `free`, `cap`, `intercept` or `escort` another wing, `self-defense`, `hold` |
-| `survive SIDE N yes/no` | The wing must survive |
-| `cheats LIST` | `none`, or a list of the game's cheat names; they apply to every player |
+| `theater CODE` | Required. One of the sixteen theater codes the creator offers: `BAL`, `CUB`, `EGY`, `LFA`, `FRA`, `GRE`, `IRA`, `KURILE`, `TVIET`, `SPA`, `APA`, `PGU`, `NSK`, `WTA`, `UKR`, `VLA` |
+| `condition NAME` | `clear` (the default), `cloudy`, `foggy`, `dawn`, `sunset` or `night`: the weather, the clock and the cloud deck the creator's choice sets |
+| `time-of-day HH:MM`, `wind HEADING FEET-PER-SECOND`, `cloud-deck FEET` | Optional weather overrides of the condition's own, as the game's `TORE_WEATHER_TIME`, `TORE_WIND` and `TORE_CLOUD_ALTITUDE` set them: the wind is written as they write it, a heading of -360 to 360 degrees and a speed of 0 to 200 feet a second, and the cloud deck is 0 to 400,000 feet |
+| `start airborne FEET` | 5,000 (the default), 10,000, 20,000 or 40,000 ft, the creator's choices |
+| `start ground RUNWAY [FEET]` | A ground start from a runway object, by its number in the theater's layout (the object's id is 1,073,741,824 plus it; `--check` lists the theater's runways by number and airport name). The optional altitude is the creator's altitude setting, which a ground start keeps for its airborne aircraft to clear the ground (5,000 by default). A ground start needs the hybrid flight model for humans |
+| `separation-nm N` | 1, 2, 5 (the default), 10, 20, 50, 100, 150, 200 or 300, the creator's choices |
+| `preset NAME` | The AI's standing orders: `free` (the default), `cap`, `intercept`, `escort`, `self-defense` or `hold` |
+| `guns-only yes/no` | The creator's air combat setting; `no` by default. With the standard load it leaves the guns loaded and unloads the missiles |
+| `wing SIDE N AIRCRAFT COUNT SKILL` | Up to three wings a side; `wing friendly 1` is required. The aircraft is its exact identity, one of `F18.PT` (the F/A-18D), `RAFALE.PT` (the Rafale C), `F14.PT`, `A4E.PT`, `F31.PT` (the X-31), `MIG29.PT`, `SU27.PT`, `MIG21.PT`, `SU25.PT`, `MIG23.PT`, `SU35.PT`, `F22.PT`, `F22N.PT` (the F-22N) or `faxx` (the F/A-XX); skills are `novice`, `average`, `experienced`, `ace` or `dummy`. Friendly wing 1 holds 1 to 5 aircraft, the others 0 to 5. A wing with no line has no aircraft |
+| `objective SIDE N NAME [SIDE N]` | A wing's objective: `inherit` (the default, the preset), `free`, `cap`, `intercept` or `escort` another wing (an enemy wing for `intercept`, another wing of its own side for `escort`), `self-defense`, `hold` |
+| `survive SIDE N yes/no` | The wing must survive; `no` by default |
+| `cheats LIST` | `none` (the default), or a list of the game's cheats: `unlimited-ammo`, `unlimited-fuel`, `no-spins`, `no-turbulence`, `extra-g`, `ignore-weapon-weights`, `no-sun-whiteout`, `no-g-effects`, `no-screen-shake`, `no-crashes`, `easy-aiming`, `ignore-midair-collisions`, `easy-targeting`, `guns-only`, `damage=invulnerable`, `damage=realistic` and `enemy-ai=LEVEL` (`novice`, `average`, `experienced` or `ace`); they apply to every player |
+| `flight-model human hybrid/legacy`, `flight-model ai standard/hybrid` | The flight models: the hybrid model for humans (the default, and the only one a networked mission uses) and `hybrid` for every AI aircraft (the default here). `legacy` and `standard` are the single-player game's own settings |
+| `enemy-skill novice/average/none` | The game's `--enemy-skill`: every enemy wing at one level. `none` by default |
+| `fixture-wings yes/no` | The game's `--fixture-wings` development setting: straight-flight fixtures instead of AI wings. A server does not use it |
+| `loadout fuel POUNDS`, `loadout cheat yes/no`, `loadout station N WEAPON COUNT QUANTITY` | The loadout of plane 0 for a single-player start, as the creator's Load Ordnance page leaves it: the fuel, the loadout screen's Cheat, and one line for every station, in the aircraft's station order, naming its weapon's resource, its capacity and what it carries. **Used only by the game, not by a server**: a networked plane carries its aircraft's standard load, so a server's file leaves them out (stage F lets a player choose) |
 
 Planes are numbered as in the game: plane 0 is the lead of friendly wing 1,
 then every other aircraft in wing order. `--check` prints the list. Every
@@ -160,6 +172,13 @@ the plane they take; choosing a loadout before flight is stage F. Every AI
 aircraft flies the hybrid flight model in a networked mission (John,
 2026-09-28). Until the stage F lobby lets the creator save one, mission files
 are written by hand.
+
+Writing a spec back out (`MissionSpec::to_text`) gives the same lines in this
+order, leaving out the ones at their default, and reading that text gives the
+same spec. *Agent decisions:* the wind line writes the game's units rather than
+knots so nothing is rounded; the optional altitude on a ground start, the flight
+model, enemy skill, fixture wings and loadout lines are the parser's additions
+for the game's own use of the same text.
 
 ## The mission lifecycle
 

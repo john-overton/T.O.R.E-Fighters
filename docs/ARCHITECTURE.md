@@ -1031,8 +1031,9 @@ baselines byte for byte:
 4. Move the simulation half of a flight's start (`FreeFlight`, which is also
    restart) into `World::restart`, from a `Setup` that the creator fills when
    the player presses Fly, so a restart no longer reads the creator's UI state.
-   A `World::new` that builds a mission with no app at all follows the A2
-   splits, since combat is still built from the aircraft's render model.
+   A `World::new` that builds a mission with no app at all followed the A2
+   splits, since combat was still built from the aircraft's render model; it is
+   stage D's slice D3b (see [a mission with no window](#a-mission-with-no-window)).
 5. Switch the AI probe to `World::step` (re-recorded output).
 6. Add the full-tick fingerprint.
 
@@ -1042,7 +1043,9 @@ moved the simulation set into `tore-world`. Both are done. The splits:
 - `Airframe`: the aircraft type the simulation needs apart from the render
   model. Done: `AircraftType` (`aircraft_type.rs`) holds the profile, flight
   model, sensors and the engine outlet points that contrails and afterburner
-  lights use, and `start` for the player's flight. `Airframe` (`aircraft.rs`)
+  lights use, and `start` for the player's flight. `AircraftType::load` reads
+  the simulation half from the resources (D3b); `Airframe::load` calls it and
+  adds what only the drawn model gives, the engine outlets. `Airframe` (`aircraft.rs`)
   holds an `Arc<AircraftType>` beside the art, cockpit, HUD, animation rig and
   damage art, and dereferences to it. `World::restart`, `Combat::new`,
   `Combat::with_loadout` and the combat smoke harness take `&AircraftType`.
@@ -1910,8 +1913,9 @@ Design for stage D of the [multiplayer plan](multiplayer-plan.md#stages),
 written by the lead on 2026-09-30, revised the same day after an independent
 review, and reviewed by John the same day: his answers are in the guide's
 [decisions](MULTIPLAYER.md#decisions). Slices D1 (`tore-codec`), D2
-(`tore-net`), D3a (`tore-import`) and D4 (the shared step for a human's plane
-and its exact state) are built so far (see the [slice table](#how-stage-d-lands)).
+(`tore-net`), D3a (`tore-import`), D3b (the mission as data) and D4 (the shared
+step for a human's plane and its exact state) are built so far (see the
+[slice table](#how-stage-d-lands)).
 Every choice here is an agent decision unless it is credited to John. The three
 follow-up specs the plan assigns to stage D are:
 
@@ -2030,31 +2034,80 @@ simulation and data crates as one box.)
 
 ### A mission with no window
 
-**The mission as data.** A `MissionSpec` (`tore-world`) is a Quick Mission
-written with stable names instead of the creator's list positions, which
-differ between installs: the theater code, the condition (clear, cloudy,
-foggy, dawn, sunset, night) and any resolved weather overrides (time of day,
-wind, cloud deck), the start (airborne altitude, or the runway object for a
-ground start), the separation, six wings (side, aircraft by its selection key
-such as `F18.PT`, or `faxx` for the F/A-XX, which shares `F22N.PT` with the
-F-22N, count and skill), the preset and group objectives, guns only, the
-cheats in force, the flight models (the hybrid model for the humans,
-`AllHybrid` for the AI in every networked mission, John 2026-09-28) and the
-loadout of plane 0 when a player flies it from the start. It has a text form of
-`key value` lines like the preference files, which the server's mission file
-uses and a host sends to every joining client.
+**The mission as data.** *Built (D3b).* A `MissionSpec`
+(`tore_world::mission`) is a Quick Mission written with stable names instead of
+the creator's list positions, which differ between installs: the theater code,
+the condition (clear, cloudy, foggy, dawn, sunset, night) and any resolved
+weather overrides (time of day, wind, cloud deck), the start (airborne
+altitude, or the runway object for a ground start), the separation, six wings
+(aircraft by its selection key such as `F18.PT`, or `faxx` for the F/A-XX,
+which shares `F22N.PT` with the F-22N, count and skill), the preset and group
+objectives and survival, guns only, the cheats in force, the flight models (the
+hybrid model for the humans, `AllHybrid` for the AI in every networked mission,
+John 2026-09-28) and the loadout of plane 0 when a player flies it from the
+start. It has a text form of `key value` lines like the preference files
+(`MissionSpec::from_text` and `to_text`), which the server's
+[mission file](DEDICATED-SERVER.md#the-mission-file) uses and a host sends to
+every joining client. Parsing refuses anything out of range and names the
+line, and a test parses the guide's own example, so the two cannot drift.
+Things the game sets by flag or by environment variable and a server has no use
+for (`--enemy-skill`, `--fixture-wings`, `--legacy-flight`, the weather
+overrides, the loadout) are fields too, with the creator's defaults when a file
+leaves them out. *Agent decision:* a ground start keeps the creator's altitude
+setting, because the creator's check that airborne aircraft clear the ground
+reads it even then.
 
-**Building it.** `World::new(&MissionSpec, &Resources, Seating)` builds the
-mission with no app: the terrain for the theater and condition, the aircraft
-types (the simulation half of today's `Airframe::load`, about fifteen lines:
-parse, identity check, sensors, flight model), the layout, combat and the AI
-wings. `Seating::SinglePlayer` is today's mission: seat 0 flies plane 0 with
-the player's loadout. The creator's Fly button builds a `MissionSpec` from the
-screen and calls the same constructor, so single player and the server share
-one path and the single-player baseline guards it. `World::restart` rebuilds
-from the spec. The AI probe moves onto the constructor only where its output
-stays SAME; its default-load combat and its own start keep their own path
-otherwise.
+**Building it.** *Built (D3b).* `World::new(&MissionSpec, &dyn ResourceSource,
+Seating)` builds the mission with no app: the terrain for the theater and
+condition under the spec's weather overrides, the aircraft types, the player's
+loadout, the layout and the clearance checks, combat and the AI wings, and then
+the start, which is `World::restart` run once,
+exactly as the creator's Fly button and `restart` did by hand before. The
+creator's refusals keep their text (guns only with a missile loaded, ground
+start without the hybrid model, altitude under the terrain).
+`Seating::SinglePlayer` is today's mission: seat 0 flies plane 0 with the
+loadout the spec gives it. `World::build` is the same with the caller's
+`Hooks` and returns what the start reported beside the world; the game passes
+its own drawn-model loader so that one load of each aircraft type serves both
+halves, the player's already loaded type, and the loadout screen's weapon
+display names (the simulation's weapon rows carry them, and the screens print
+them). A caller that goes on to call `restart` starts the mission a second
+time, so the game's Fly builds the world, swaps it in and runs only its own
+presentation resets. The creator turns its draft into a spec
+(`QuickMission::mission_spec`), single player and the server share the one
+path, and the single-player baseline guards it. The simulation half of
+loading an aircraft is `AircraftType::load` (`load_type` for an `Arc`): parse,
+identity check, sensors, flight model. The engine outlets come from the drawn
+shape, so the game's `Airframe::load` sets them on what `load` returns and a
+headless host leaves them empty; a client works them out from its own art.
+
+```mermaid
+flowchart LR
+  draft["Creator draft<br/>(list positions)"] --> spec["MissionSpec<br/>(stable names)"]
+  file["Mission file<br/>(text form)"] --> spec
+  spec --> build["World::build<br/>terrain, types, loadout,<br/>layout, combat, AI, start"]
+  res["Resources<br/>(ResourceReads)"] --> build
+  hooks["Hooks: type loader,<br/>weapon labels"] -.-> build
+  build --> world["World"]
+  build --> manifest["Content manifest<br/>(names read, hashes)"]
+  world --> view["The game draws it:<br/>CombatView, Scenery"]
+```
+
+`World::restart` still rebuilds the flight from the `Setup` and the combat the
+build made, as it did from the creator's (the population and the accepted
+layout persist in combat, which is what a restart of a Quick Mission has
+always reused); to rebuild a mission from its spec, which is what a server
+does when a mission ends and the next begins, call `World::new` again.
+*Correction to the design*, which said restart rebuilds from the spec. The
+build applies the spec's cheats through the same `Settings` command the flight
+menu sends, and only when they are not the defaults, so a build that set the
+AI's guns only is not undone by a command that says nothing. The AI probe
+stays on its own path, on purpose: it builds its combat from the aircraft's
+default load rather than a creator loadout, edits the creator's draft in place
+for its geometry flags, sets up probe-only formation tracing, scripted starts
+and pilots between the steps of the build, and never restarts (its `Setup`
+carries no AI). Moving it would need probe hooks in the middle of
+`World::build` for no gain, since `World::new` is now the headless path.
 
 **Open seating and no human.** `Seating::Open` is a networked mission: the AI
 flies every plane, plane 0 included, and humans take planes by
@@ -2068,9 +2121,17 @@ one" goes, since a presenter names its seat. This also lifts stage B's known
 limit that the lowest-numbered human plane cannot be given back.
 
 **Resources and the content check.** `tore-import` loads the pack into the
-same name-to-bytes map the app uses today. `World::new` reads it through a
-`Resources` view that notes every name it reads. The sorted names with an
-FNV-1a 64 hash of each resource's bytes are the mission's **content manifest**.
+same name-to-bytes map the app uses today. *Built (D3b).* `World::new` reads it
+through `ResourceSource`, a read-only lookup that the plain map and
+`ResourceReads` both provide (*agent decision:* the view is `ResourceReads`, so
+as not to clash with `tore_import::Resources`, the map's name). `ResourceReads`
+notes every name the build asks for, present or not, and
+`ResourceReads::manifest` gives the sorted names with an FNV-1a 64 hash of each
+resource's bytes: the mission's **content manifest**. A name the build asked for
+that the import lacks has no hash, so a file one side has and the other lacks
+is a difference too, and `Manifest::differences` names them. The theater
+catalog the terrain reads to label the theater opens every theater grid, so
+all sixteen `.T2` files are in the manifest.
 A client builds the same mission from its own import and compares manifests at
 join. Only what the simulation reads is compared, so a 1.0 disc import and a
 1.02F import play together: slice D3a compared the two imports resource by
@@ -2480,7 +2541,7 @@ risky refactors, as John asked; the rest are Sonnet.
 | D1 Codec | `mp/d-codec` | Sonnet | | `tore-codec`: bits, variable-length integers, quantizers, FNV-1a, CRC-32 | Round trips at every width; a bounded reader never panics on 100,000 seeded random inputs; known CRC-32 and FNV-1a test vectors. **Built (D1):** also the bucketed signed coding, exact floats against a baseline and short strings; the readers reject every non-canonical form |
 | D2 Transport | `mp/d-net` | Opus | D1 | `tore-net`: packets, handshake, acks and round trip, reliable ordered messages, statistics, UDP and the simulator | On the simulator at 300 ms and 5 percent loss with duplicates and reordering: the handshake completes, 10,000 reliable messages arrive once and in order, a 64 KB message arrives whole, the round trip estimate is within 5 percent and the loss estimate within 1 point; a challenge is never larger than its request; a seeded packet fuzz never panics; two real sockets on 127.0.0.1 connect. **Built (D2):** 10,000 messages each way and 64 KB arrive in 25 simulated seconds; the round trip reads 286 to 306 ms across 20 seeds, mostly a little low under reordering; the loss estimate equals the loss over the packets it judged, 4.6 and 5.7 percent over the run; the fuzz reaches bad-packet and protocol-error endings; IPv6 loopback works too. [Wire details the build settled](formats/net-protocol.md#what-the-transport-settled) |
 | D3a Import library | `mp/d-import` | Sonnet | | **Built (D3a).** `tore-import` out of the app: data folder, pack, media detection, import | Single-player baseline SAME; the app imports and loads as before; `cargo tree -p tore-import` has no winit, wgpu or cpal; where both a 1.0 and a 1.02F import are available, the simulation resources of a sample mission hash the same |
-| D3b Mission as data | `mp/d-mission` | Sonnet | D3a | `MissionSpec` and its text form; `World::new` with single-player seating; the creator builds through it | Single-player baseline SAME; the spec round-trips through text; a headless test builds a single-player mission from synthetic resources and steps it |
+| D3b Mission as data | `mp/d-mission` | Sonnet | D3a | **Built (D3b).** `MissionSpec` and its text form; `World::new` with single-player seating; the creator builds through it | Single-player baseline SAME; the spec round-trips through text; a headless test builds a single-player mission from synthetic resources and steps it |
 | D4 Own-plane step and exact state | `mp/d-own-state` | Opus | D1 | The shared per-plane step; an exact coder and hash for a human plane's flight, turbulence and ownship terms, every field destructured | Single-player baseline SAME; a plane stepped by `World` and a copy stepped by the shared function from a decoded state, with the same inputs and terms, stay bit-identical for 1,200 ticks; adding a field to the state without coding it fails to compile. **Built (D4):** see [one step for a human's plane](#one-step-for-a-humans-plane) and [its exact state](#the-exact-state-of-a-humans-plane); an airborne plane's exact state costs about 200 bytes against a baseline one snapshot back |
 | D5a Flight frame | `mp/d-frame` | Sonnet | D3b | The flight frame with its plane id; the screens, views and sounds read it; no "aircraft 0 is the player" in presentation; the picture for any seat | Single-player baseline SAME and every GPU capture byte-identical; a test builds the picture for a second seat of the crowd fixture with that seat's plane as the player |
 | D5b Cockpit readout | `mp/d-readout` | Sonnet | D5a | The cockpit readout and its builder; the HUD, weapon HUD, scope, RWR, target window, map and music read it | Single-player baseline SAME and every capture byte-identical; readouts for two seats of the crowd fixture each name their own plane's stores, contacts and damage |
