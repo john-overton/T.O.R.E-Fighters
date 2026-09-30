@@ -2421,6 +2421,61 @@ reads the frame's plane instead, and `Combat::snapshot` builds the picture for
 any seat. The view rig learns of every missile launch from launch events, so a
 missile that lives less than one snapshot is still the F12 view's last missile.
 
+*Built (D5a, the frame).* `tore_world::frame::FlightFrame` is the plain-data
+frame, with nothing in it that draws:
+
+| Field | What it holds |
+| --- | --- |
+| `seat`, `plane` | The presented seat and the plane it flies |
+| `flight`, `previous` | The plane's flight as the last tick left it, and at the start of that tick |
+| `presented` | The flight to draw: `flight` and `previous` blended to the frame's instant, or `flight` for a tick's frame and a frozen flight |
+| `picture` | The presented `RenderSnapshot` for the seat: its plane is the `player` pose and every other aircraft is a target |
+| `smoke`, `devices` | The puffs of hits, wrecks and motors and the contrails; chaff and flares |
+| `tick_cues` | The cues of the tick being presented; `cues()` yields the seat's own and the mission-wide ones with their place in the tick |
+
+The fields borrow, because the smoke holds tens of thousands of puffs;
+`presented` is a `Cow`. `World::flight_frame(seat, presented, picture, cues)`
+fills a frame from the `World`, and `World::presented_flight(seat, alpha)`
+makes the blended flight. The app owns the tick fraction and the interpolated
+picture (`CombatView::presented`), so it passes both in; a client session will
+pass what its own clock and interpolation give. The redraw builds one frame
+after the tick loop and every camera, panel, HUD and sound below reads it. The
+per-tick presenter builds a short-lived frame for each thing it reads, because
+it also calls methods that need the app mutably.
+
+`Combat::snapshot(plane, flight, wings)` is the picture for any plane that has
+an ownship: that plane is the player pose, in the flight given, and every
+other human-flown plane, the first one too, is an ordinary target drawn from
+the pose its last step left (combat now keeps a pose for every ownship, not
+only the ones after the first). `restart_render`, `advance_render` and
+`refresh_render` take the plane as well. The mission's render history is built
+for one plane, `World::picture_plane()`, the first cockpit's (agent decision):
+a host that serves other seats builds theirs with `snapshot`.
+
+The "aircraft 0 is the player" reads are gone from the screens: the view rig
+(`Scene::new(plane, ..)`, `Rig::for_plane(plane)`: the scene's player body,
+the wing group of the player, what counts as the player's own missile and the
+inbound-threat view), the RWR tone, the flight music (which now also counts
+only its own plane's damage, where it counted every ownship's), the target
+window's viewer, the map, the scope, the weapon HUD, the status line and the
+damage report. The app's own reads of the first ownship (`state.own()`,
+`own_view()`) became reads of the frame's plane through `state.ownship(plane)`
+and `state.view(plane)` (`combat_view::PlaneState::own_of` and `view_of`), which
+slice D5b replaces with the cockpit readout. `ai_wings::PLAYER_ID` is no longer read by the screens; it stays in the AI wings
+module and two headless probes. Left as they were, on purpose:
+the headless probes, the ordnance and combat smoke checks and the replay
+recorder, which build a combat with one ownship and have no presented seat.
+
+Two things the screens still assume, both for a later slice. The sound
+engine's own-aircraft marker, `SourceId::Aircraft(0)` in `tore_sim::acoustics`,
+is fixed in `tore-sim`; the app labels the presented plane's source with it
+whatever its id, and gives a real plane 0 that is not presented a reserved id
+(agent decision, a workaround until `Listener` names its own aircraft). The
+scene the camera views are built from (`Scene::new`) still lists the AI
+aircraft and ground objects of combat's target rows, so another human's plane
+is not a subject of the F6 and F7 views until the scene is built from the
+frame's picture, which the client (D8) needs.
+
 ### Hits and lag compensation
 
 *Built (D9).* The host decides every hit. Missiles, rockets and bombs are
@@ -2585,7 +2640,7 @@ risky refactors, as John asked; the rest are Sonnet.
 | D3a Import library | `mp/d-import` | Sonnet | | **Built (D3a).** `tore-import` out of the app: data folder, pack, media detection, import | Single-player baseline SAME; the app imports and loads as before; `cargo tree -p tore-import` has no winit, wgpu or cpal; where both a 1.0 and a 1.02F import are available, the simulation resources of a sample mission hash the same |
 | D3b Mission as data | `mp/d-mission` | Sonnet | D3a | **Built (D3b).** `MissionSpec` and its text form; `World::new` with single-player seating; the creator builds through it | Single-player baseline SAME; the spec round-trips through text; a headless test builds a single-player mission from synthetic resources and steps it |
 | D4 Own-plane step and exact state | `mp/d-own-state` | Opus | D1 | The shared per-plane step; an exact coder and hash for a human plane's flight, turbulence and ownship terms, every field destructured | Single-player baseline SAME; a plane stepped by `World` and a copy stepped by the shared function from a decoded state, with the same inputs and terms, stay bit-identical for 1,200 ticks; adding a field to the state without coding it fails to compile. **Built (D4):** see [one step for a human's plane](#one-step-for-a-humans-plane) and [its exact state](#the-exact-state-of-a-humans-plane); an airborne plane's exact state costs about 200 bytes against a baseline one snapshot back |
-| D5a Flight frame | `mp/d-frame` | Sonnet | D3b | The flight frame with its plane id; the screens, views and sounds read it; no "aircraft 0 is the player" in presentation; the picture for any seat | Single-player baseline SAME and every GPU capture byte-identical; a test builds the picture for a second seat of the crowd fixture with that seat's plane as the player |
+| D5a Flight frame | `mp/d-frame` | Sonnet | D3b | The flight frame with its plane id; the screens, views and sounds read it; no "aircraft 0 is the player" in presentation; the picture for any seat | Single-player baseline SAME and every GPU capture byte-identical; a test builds the picture for a second seat of the crowd fixture with that seat's plane as the player. **Built (D5a):** see [the flight screen draws a frame](#the-flight-screen-draws-a-frame) |
 | D5b Cockpit readout | `mp/d-readout` | Sonnet | D5a | The cockpit readout and its builder; the HUD, weapon HUD, scope, RWR, target window, map and music read it | Single-player baseline SAME and every capture byte-identical; readouts for two seats of the crowd fixture each name their own plane's stores, contacts and damage |
 | D3c Open seating | `mp/d-open` | Opus | D5a | `Seating::Open`: plane 0 on the AI, a tick with no human, combat with no ownship | Single-player baseline SAME; a headless test builds an open mission with every plane on the AI, steps it 1,200 ticks, then a seat takes plane 0, flies, and gives it back |
 | D6 Wire | `mp/d-wire` | Opus | D1, D3b, D4, D5b | `tore-session`'s messages: inputs, snapshots with acknowledged baselines, priorities and relevance, own-state hash and exact state, readouts, events (bursts and launches included), join messages, debrief | Every message round-trips; a snapshot decodes with any earlier packet lost; entities always get their share of the packet; a wire golden test fails when the bytes change without a protocol version bump; bytes per snapshot measured on the 15 against 15 mission against the [budget](multiplayer-plan.md#bandwidth-budget) |
