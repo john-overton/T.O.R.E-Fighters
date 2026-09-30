@@ -1046,6 +1046,19 @@ runway line, respects the aircraft's minimum speed and clears the terrain
 ahead), so the landing scenarios test a living player. See
 [the scripted pilot](testing/lane-ai.md).
 
+Current (2026-09-30): built on the multiplayer branch in five slices, each
+checked against the single-player baseline. The stall table
+(`STALL_REFERENCE_FRACTIONS`) gives the numbers above. A short strip is an
+airport whose longest runway is under 2,000 ft (`fitted`: the 22 strips are
+1,074 ft and every other airport is 4,060 ft or longer); every theater keeps at
+least three ground-start airports. The ground sensor replaced the belly slide,
+whose code went with it. The new lead's waypoint step works, but no mission has
+waypoints yet (Quick Mission imports no route), so in play it searches and then
+goes home. The probe pilot now holds the runway against the wind, climbs over
+the terrain ahead and survives every start, and a probe option
+(`--probe-lose-player`) loses the player on purpose where a scenario tests the
+new lead.
+
 Acceptance: liftoff and approach speeds for every aircraft recorded against
 John's figures, with the flight lane's liftoff and approach checks re-recorded;
 combat-speed G unchanged for all 14 aircraft; no short strip offered for a ground

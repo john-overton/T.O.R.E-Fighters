@@ -330,24 +330,13 @@ behaviour, the autopilot, the ejection G check, the flight envelope window (the 
 edges follow the weight), the scripted landing probe and the crew callouts all
 read the scaled speeds. The HUD landing-speed brackets are not implemented in the game, so
 there is nothing to update. The AI reads the same scaled speeds through the model's
-configuration without any change to `tore-sim/src/ai`. **AI needs a follow-up** (in the AI agent's files, which this change leaves alone). Twelve
-AI lane scenarios fail with the rule on and pass with `--retail-stall-speeds`: the landings
-`ai-ground-land-selected-wing2`, `ai-rtb-after-win` and the six `ai-theater-*-land-pair`
-(gre, ira, kurile, lfa, ukr, tviet), and `ai-long-guns-3v3`, `ai-long-15v15`, `ai-fuzz-0028` and
-`ai-fuzz-0043` (an aircraft flies into the ground undamaged). Cause: the AI's
-`speed_limits().minimum` is the lowest left edge of any envelope row, including the 0 G and
-negative G rows, which lies 20 to 30 percent under the 1 G stall speed (raw 143 ft/s, 85 kt,
-for the F/A-18D; 114 kt scaled). The final speed (`APPROACH_SPEED_FACTOR` 1.1 times that,
-capped at 174 kt) is 125 kt, while the loaded minimum speed for 1 G with full flaps at that
-weight (`State::minimum_level_speed`) is about 140 kt, so the wingman decelerates through it
-and sinks. The retail speeds only worked with a smaller margin. A candidate fix, tested here
-but not committed (it is in the AI's file): in `AiActor::speed_limits` (`ai/mission.rs`) raise
-`minimum` to at least `self.flight.minimum_level_speed(altitude, 1.0)`. With it the two
-landing scenarios, the six land pairs, `ai-rtb-after-win` and `ai-long-15v15` pass again;
-`ai-long-guns-3v3`, `ai-fuzz-0028` and `ai-fuzz-0043` still fly into the ground (low-speed
-combat that also needs a look), and the rest of the lane was not re-run with it. The patch is
-kept as `.local/ai-minimum-speed.patch`. AI takeoffs are unaffected (all 56 `ai-takeoff-*` pass: the
-roll only lasts longer).
+configuration without any change to `tore-sim/src/ai`. The AI follow-up this rule needed is done: the AI lane retuned its speed
+limits during the bug bash (`4e47944`, `0057684`: the minimum never below the 1 G level-flight
+speed, the maximum never above the fastest row that leaves 1.2 G, a final lift margin of 1.15 G;
+the twelve scenarios that failed first are listed in the
+[battery report](../baselines/battery-2026-09-28.md), section 2). With the per-aircraft stall
+references of the aircraft pass (2026-09-30) the whole AI lane passes. AI takeoffs are
+unaffected (the roll only lasts longer).
 
 ## Needs a decision
 
