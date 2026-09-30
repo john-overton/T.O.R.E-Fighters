@@ -1109,14 +1109,7 @@ impl Combat {
                     }
                 }
             }
-            let hp = |state: &live::State| state.ownship(aircraft).map_or(0, |own| own.hp);
-            let alive = hp(&self.state) > 0;
-            let scrape = s.take_belly_scrape();
-            if scrape > 0. {
-                self.state.scrape_damage(aircraft, scrape, &mut events);
-            }
-            // Worn out by a belly slide: no shooter caused it.
-            let mut uncredited = alive && hp(&self.state) == 0;
+            let mut uncredited = false;
             if s.systems.fatal() {
                 s.crashed = true;
             }
@@ -1125,7 +1118,7 @@ impl Combat {
             {
                 events.push(event);
                 // Lost to its own structure (overspeed, the map edge).
-                uncredited |= s.systems.structure.cause.is_some();
+                uncredited = s.systems.structure.cause.is_some();
             }
             // A loss with no shooter credits nobody, even after an earlier hit,
             // as for an AI aircraft (lead's decision, 2026-09-29).
@@ -1332,7 +1325,7 @@ mod tests {
 
     /// An AI's hit on a human-flown aircraft is credited to the AI (John,
     /// 2026-09-29), but not when the aircraft is then lost with no shooter:
-    /// to overspeed, the map edge or belly wear (lead's decision, 2026-09-29).
+    /// to overspeed or the map edge (lead's decision, 2026-09-29).
     #[test]
     fn an_ai_hit_is_not_credited_for_a_loss_with_no_shooter() {
         use tore_sim::aircraft_systems::LossCause;
@@ -1368,7 +1361,7 @@ mod tests {
         assert!(c.state.ledger.kills().iter().all(|k| k.victim != own));
     }
 
-    /// A human-flown aircraft lost to overspeed, the map edge or belly wear
+    /// A human-flown aircraft lost to overspeed or the map edge
     /// credits nobody, even when a shooter hit it earlier; an ordinary crash
     /// still goes to the last shooter (lead's decision, 2026-09-29).
     #[test]
@@ -1380,7 +1373,6 @@ mod tests {
             Some(LossCause::Overspeed),
             Some(LossCause::OutOfBounds),
             None,
-            Some(LossCause::Overspeed),
         ]
         .into_iter()
         .enumerate()
@@ -1395,15 +1387,10 @@ mod tests {
                 aircraft: true,
             };
             c.state.ledger.damaged(hit);
-            match (case, cause) {
-                (2, None) => f.add_belly_scrape(1.),
-                (_, Some(cause)) => {
-                    f.systems.destroy(cause);
-                    f.crashed = true;
-                }
-                _ => unreachable!(),
-            }
-            if case == 3 {
+            if let Some(cause) = cause {
+                f.systems.destroy(cause);
+                f.crashed = true;
+            } else {
                 // An ordinary crash with no cause of its own.
                 f.systems = tore_sim::aircraft_systems::Systems::new(
                     c.state.own().configuration().engines,
@@ -1413,7 +1400,7 @@ mod tests {
             }
             c.step(&mut f, &world).unwrap();
             assert_eq!(c.state.own().hp, 0, "case {case}");
-            if case == 3 {
+            if cause.is_none() {
                 assert_eq!(c.state.ledger.credit(own), Some(hit));
             } else {
                 assert_eq!(c.state.ledger.credit(own), None, "case {case}");

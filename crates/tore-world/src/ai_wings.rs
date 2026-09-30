@@ -569,9 +569,7 @@ pub struct AiWings {
     ai_shots: BTreeMap<u32, u32>,
     /// Last observed hit points per actor, for the damage mirror.
     last_hp: BTreeMap<u32, i32>,
-    /// Hit points owed to belly scrape wear, below one whole point, by actor.
-    scrape_carry: BTreeMap<u32, f64>,
-    /// Aircraft lost this tick to overspeed or belly wear: no shooter earns
+    /// Aircraft lost this tick to overspeed: no shooter earns
     /// them (see [`AiWings::lose_uncredited`]).
     uncredited_losses: std::collections::BTreeSet<u32>,
     pub ejection_events: Vec<(u32, String, bool)>,
@@ -1110,7 +1108,6 @@ impl AiWings {
             chatter: Vec::new(),
             watch,
             last_hp: BTreeMap::new(),
-            scrape_carry: BTreeMap::new(),
             uncredited_losses: Default::default(),
             last_activity: BTreeMap::new(),
             reports: reports::Reports::default(),
@@ -1137,18 +1134,6 @@ impl AiWings {
     /// Take AI aircraft `id` out of the AI, for a human to fly. The others
     /// keep their order. The combat target row stays where it is: the caller
     /// turns it into the human's own record.
-    /// Belly scrape wear owed by an AI aircraft and not yet a whole hit point,
-    /// taken out for a handoff to a human.
-    pub fn take_scrape_carry(&mut self, id: u32) -> f64 {
-        self.scrape_carry.remove(&id).unwrap_or(0.)
-    }
-    /// The wear an aircraft brings back from a human (see
-    /// [`Self::take_scrape_carry`]).
-    pub fn set_scrape_carry(&mut self, id: u32, carry: f64) {
-        if carry > 0. {
-            self.scrape_carry.insert(id, carry);
-        }
-    }
     pub fn remove_actor(&mut self, id: u32) -> Option<RemovedActor> {
         let slot = *self.slot(id)?;
         let actor = self.mission.remove_actor(id)?;
@@ -2048,33 +2033,6 @@ impl AiWings {
             .step_with_surface(&objects, terrain, surface, now)
             .map_err(|e| e.to_string())?;
 
-        // Belly scrape wear from a gear-up slide is airframe damage with no
-        // attacker, so no kill is credited when it finishes the aircraft.
-        // `opinionated` (requested by John, 2026-09-29).
-        for slot in &self.slots {
-            let Some(actor) = self.mission.actor_mut(slot.id) else {
-                continue;
-            };
-            let scrape = actor.flight_mut().take_belly_scrape();
-            if scrape <= 0. {
-                continue;
-            }
-            let Some(target) = targets.iter_mut().find(|t| t.id == slot.id) else {
-                continue;
-            };
-            if target.hp <= 0 {
-                continue;
-            }
-            let carry = self.scrape_carry.entry(slot.id).or_insert(0.);
-            *carry += scrape * f64::from(target.initial_hp.max(1));
-            let whole = carry.floor();
-            *carry -= whole;
-            target.hp = (target.hp - whole as i32).max(0);
-            if target.hp == 0 {
-                // The wear finished it: nobody who shot at it earlier gets it.
-                self.uncredited_losses.insert(slot.id);
-            }
-        }
         for slot in &self.slots {
             let Some(actor) = self.mission.actor(slot.id) else {
                 continue;
@@ -2821,7 +2779,7 @@ impl AiWings {
         }
     }
 
-    /// Records the aircraft lost this tick to overspeed or to belly scrape wear
+    /// Records the aircraft lost this tick to overspeed
     /// as lost without credit, exactly like the map edge: whoever shot at them
     /// earlier is not rewarded for a crash it did not cause (requested by John,
     /// 2026-09-29). The debrief still counts them as lost aircraft. Returns the
@@ -4697,7 +4655,7 @@ mod tests {
     }
 
     #[test]
-    fn an_ai_aircraft_finished_by_overspeed_or_belly_wear_credits_nobody() {
+    fn an_ai_aircraft_finished_by_overspeed_or_the_map_edge_credits_nobody() {
         use tore_sim::aircraft_systems::LossCause;
         use tore_sim::combat::ledger::{Kill, Ledger};
         // Enemy 3 was shot at by the player earlier in every case.
@@ -4707,27 +4665,14 @@ mod tests {
             category: 0x8000,
             aircraft: true,
         };
-        for cause in [
-            Some(LossCause::Overspeed),
-            None,
-            Some(LossCause::OutOfBounds),
-        ] {
+        for cause in [LossCause::Overspeed, LossCause::OutOfBounds] {
             let (mut wings, mut targets) = build(None);
             run(&mut wings, &mut targets, 10);
             let mut ledger = Ledger::default();
             ledger.damaged(hit);
-            if let Some(cause) = cause {
-                let flight = wings.mission.actor_mut(3).unwrap().flight_mut();
-                flight.systems.destroy(cause);
-                flight.crashed = true;
-            } else {
-                wings
-                    .mission
-                    .actor_mut(3)
-                    .unwrap()
-                    .flight_mut()
-                    .add_belly_scrape(1.);
-            }
+            let flight = wings.mission.actor_mut(3).unwrap().flight_mut();
+            flight.systems.destroy(cause);
+            flight.crashed = true;
             run(&mut wings, &mut targets, 2);
             assert_eq!(targets[2].hp, 0, "{cause:?}");
             assert_eq!(wings.lose_uncredited(&mut ledger), [3], "{cause:?}");

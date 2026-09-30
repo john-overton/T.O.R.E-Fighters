@@ -202,14 +202,16 @@ class LossTests(unittest.TestCase):
         self.assertTrue(flight.check_combat_g(line.format("5.10"), "f18"))
         self.assertEqual(set(flight.PULL_G_RETAIL), set(flight.AIRCRAFT))
 
-    def test_belly_checks(self):
-        roll = "gear_pulled=true belly_wear_percent={} gear=0.00\nticks=9000 speed_kt=4.7 altitude_ft=8.0 fuel_lb=1.0 crashed=false\n"
-        self.assertEqual(flight.check_belly_early(roll.format("27.1") + EXTREMES, "f18"), [])
-        self.assertTrue(flight.check_belly_early(roll.format("0.000") + EXTREMES, "f18"))
-        self.assertEqual(flight.check_belly_early(roll.format("0.000") + EXTREMES, "f22"), [])
-        air = "takeoff_complete=true airport_ground_ft=0\ngear_pulled=true belly_wear_percent=0.000 gear=0.55\n"
-        self.assertEqual(flight.check_belly_airborne(air + EXTREMES), [])
-        self.assertTrue(flight.check_belly_airborne(air.replace("0.000", "1.500") + EXTREMES))
+    def test_ground_sensor_checks(self):
+        roll = "gear_pulled=true ground_sensor_refusals={} gear={}\nticks=9000 speed_kt=300.0 altitude_ft=8000.0 fuel_lb=1.0 crashed={}\n"
+        self.assertEqual(flight.check_belly_early(roll.format(1, "1.00", "false") + EXTREMES, "f18"), [])
+        self.assertTrue(flight.check_belly_early(roll.format(0, "1.00", "false") + EXTREMES, "f18"))
+        self.assertTrue(flight.check_belly_early(roll.format(1, "0.00", "false") + EXTREMES, "f22"))
+        self.assertTrue(flight.check_belly_early(roll.format(1, "1.00", "true") + EXTREMES, "f22"))
+        air = "takeoff_complete=true airport_ground_ft=0\ngear_pulled=true ground_sensor_refusals={} gear={}\n"
+        self.assertEqual(flight.check_belly_airborne(air.format(0, "0.55") + EXTREMES), [])
+        self.assertTrue(flight.check_belly_airborne(air.format(1, "0.55") + EXTREMES))
+        self.assertTrue(flight.check_belly_airborne(air.format(0, "1.00") + EXTREMES))
 
     def test_the_debrief_cause_suffix_still_parses(self):
         line = "AI probe debrief: Lost Ok elapsed=10s player[Dead damage=100% kills=[] ff=0 a2a=0/0 dmg=0 gun=0/0 enemy_aam=0/0 enemy_gun=0/0 cause=overspeed] wingman[-]"

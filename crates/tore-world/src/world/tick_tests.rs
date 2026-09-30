@@ -1349,6 +1349,50 @@ fn every_cockpits_systems_messages_are_drained_into_its_seat() {
     }
 }
 
+/// The ground sensor's refusal is a message for the seat that pressed the gear
+/// key, and only that seat: the plane with weight on its wheels keeps its gear
+/// down, and the other seat's plane raises its gear in the air without a word.
+#[test]
+fn a_refused_gear_press_is_a_message_for_its_own_seat_only() {
+    let mut world = two_ownship_mission();
+    let mut out = TickOutput::default();
+    for cockpit in &mut world.cockpits {
+        cockpit.flight.enable_research(1).unwrap();
+        cockpit.flight.gear_down = true;
+        cockpit.flight.gear = 1.;
+    }
+    // Seat 1's plane has weight on its wheels; seat 0's is flying.
+    world.cockpits[1]
+        .flight
+        .research
+        .as_mut()
+        .unwrap()
+        .on_ground = true;
+    assert!(world.cockpits[1].flight.weight_on_wheels());
+    assert!(!world.cockpits[0].flight.weight_on_wheels());
+    let tick = world.tick();
+    let inputs: Vec<_> = (0..2)
+        .map(|n| SeatInput {
+            seat: SeatId(n),
+            tick,
+            pilot: tore_input::PilotInput {
+                commands: vec![tore_input::PilotCommand::Set(
+                    tore_input::Switch::Gear,
+                    false,
+                )],
+                ..Default::default()
+            },
+            ..SeatInput::default()
+        })
+        .collect();
+    world.step(&inputs, &mut out).unwrap();
+    let message = tore_sim::flight::GROUND_SENSOR_MESSAGE;
+    assert_eq!(messages_for(&out, SeatId(1)), [message], "{:?}", out.cues);
+    assert!(!messages_for(&out, SeatId(0)).contains(&message));
+    assert!(world.cockpits[1].flight.gear_down);
+    assert!(!world.cockpits[0].flight.gear_down);
+}
+
 /// A plane's airburst reads "Your aircraft exploded" to its own seat and
 /// "Destroyed aircraft exploded" to every other, as single player reads it
 /// for the first aircraft and the rest.

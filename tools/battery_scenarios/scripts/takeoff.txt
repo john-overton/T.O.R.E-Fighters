@@ -1,4 +1,4 @@
-# Ground start: release the brakes, afterburner, rotate (stick back from 8 s), gear and flaps up once airborne (a gear-up on the ground would settle the aircraft on its belly), then ask the tower for landing.
+# Ground start: release the brakes, afterburner, rotate (stick back from 8 s), gear and flaps up once airborne (the ground sensor refuses the gear key while the wheels carry weight), then ask the tower for landing.
 wait 1
 key b
 key 6

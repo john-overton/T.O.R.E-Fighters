@@ -9018,7 +9018,6 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let mut stall_recovery =
             (maneuver == "stall-recover").then(|| flight_probe::StallRecovery::new(&state));
         let mut gear_pulled = false;
-        let mut belly_wear = 0.;
         let mut takeoff_start: Option<attitude::Vector> = None;
         let mut rotation: Option<f64> = None;
         let mut liftoff: Option<(u64, f64, f64)> = None;
@@ -9079,7 +9078,6 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             if let Some(error) = state.native_fault() {
                 return Err(error.into());
             }
-            belly_wear += state.take_belly_scrape();
             if takeoff_start.is_none() {
                 takeoff_start = Some(state.position);
             }
@@ -9183,9 +9181,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             }
         }
         if maneuver.starts_with("takeoff-gear") {
+            let refusals = state
+                .systems
+                .messages
+                .iter()
+                .filter(|m| m.as_str() == flight::GROUND_SENSOR_MESSAGE)
+                .count();
             println!(
-                "gear_pulled={gear_pulled} belly_wear_percent={:.3} gear={:.2}",
-                belly_wear * 100.,
+                "gear_pulled={gear_pulled} ground_sensor_refusals={refusals} gear={:.2}",
                 state.gear
             );
         }

@@ -577,12 +577,11 @@ fn a_taken_wing_leader_leads_and_the_wingman_flies_on_it() {
     assert!(formating(&world, 2));
 }
 
-/// The bug bash's start-up rule and belly wear go with a handoff: a taken
-/// plane whose gun is empty starts on its first loaded station, or on NAV
-/// under Guns only, with the NAV mode to match; and wear not yet a whole hit
-/// point moves with the aircraft both ways.
+/// The bug bash's start-up rule goes with a handoff: a taken plane whose gun
+/// is empty starts on its first loaded station, or on NAV under Guns only,
+/// with the NAV mode to match.
 #[test]
-fn a_handoff_keeps_the_start_up_rule_and_the_belly_wear_owed() {
+fn a_handoff_keeps_the_start_up_rule() {
     for guns_only in [false, true] {
         let mut world = armed_mission();
         world.combat.state.cheats.guns_only = guns_only;
@@ -600,7 +599,6 @@ fn a_handoff_keeps_the_start_up_rule_and_the_belly_wear_owed() {
             .actor_mut(WINGMAN.0)
             .unwrap()
             .set_stations(stations);
-        wings.set_scrape_carry(WINGMAN.0, 0.4);
         fly(&mut world, &[0], 10);
         world.take_plane(SeatId(1), WINGMAN).unwrap();
         let own = world.combat.state.ownship(WINGMAN.0).unwrap();
@@ -611,16 +609,6 @@ fn a_handoff_keeps_the_start_up_rule_and_the_belly_wear_owed() {
             assert!(own.armed && own.selected != gun && own.rounds(own.selected) > 0);
         }
         assert_eq!(cockpit(&world, WINGMAN).airport_nav_mode, !own.armed);
-        assert_eq!(own.scrape_carry(), 0.4);
-        world.give_back_plane(SeatId(1)).unwrap();
-        assert_eq!(
-            world
-                .ai_wings
-                .as_mut()
-                .unwrap()
-                .take_scrape_carry(WINGMAN.0),
-            0.4
-        );
     }
 }
 

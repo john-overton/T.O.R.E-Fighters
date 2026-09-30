@@ -1598,40 +1598,35 @@ def overspeed_scenarios() -> list[Scenario]:
     return out
 
 
-# Aircraft whose thrust carries them through the belly slide from 80 knots to their
-# weight-scaled liftoff speed (the F-22 family: about 99 kt, with about 1 percent wear).
-# Every other aircraft is below its stall speed at 80 knots, slides, slows and wears.
-BELLY_FLIES = {"f22", "f22n", "faxx"}
-
-
 def check_belly_early(output: str, ac: str) -> list[str]:
-    """Gear up at 80 knots with the wheels down (docs/spec/gear-on-the-ground.md):
-    the aircraft settles on its belly, slows and wears the airframe; one whose
-    lift already carries it at that speed retracts as usual."""
+    """Gear up pressed at 80 knots with weight on the wheels (docs/spec/gear-on-the-ground.md):
+    the ground sensor refuses it, the gear stays down and the aircraft is not lost.
+    Every aircraft, however fast it is at 80 knots, is refused while it rolls."""
     problems = extremes_problems(output, engine_off_ok=True)
     n = _plain_numbers(output)
-    wear = float(n.get("belly_wear_percent", "nan"))
     if n.get("gear_pulled") != "true":
         return problems + ["the script never pulled the gear up"]
     if n.get("crashed") == "true":
-        problems.append("a belly slide on a runway crashed the aircraft")
-    if ac in BELLY_FLIES:
-        return problems
-    if not wear > 2.0:
-        problems.append(f"gear up at 80 knots wore the airframe by only {wear} percent")
+        problems.append("the aircraft crashed on the runway")
+    if n.get("ground_sensor_refusals") != "1":
+        problems.append(f"expected one ground sensor message, saw {n.get('ground_sensor_refusals')}")
+    if n.get("gear") != "1.00":
+        problems.append(f"the gear did not stay down (gear={n.get('gear')})")
     return problems
 
 
 def check_belly_airborne(output: str) -> list[str]:
-    """Gear up once airborne is a normal retraction, with no scrape."""
+    """Gear up once airborne is a normal retraction, with no ground sensor message."""
     problems = extremes_problems(output, engine_off_ok=True)
     n = _plain_numbers(output)
     if "takeoff_complete=true" not in output:
         problems.append("did not take off")
-    if float(n.get("belly_wear_percent", "nan")) != 0.0:
-        problems.append("an airborne gear retraction scraped the belly")
+    if n.get("ground_sensor_refusals") != "0":
+        problems.append("an airborne gear retraction was refused by the ground sensor")
     if n.get("gear_pulled") != "true":
         problems.append("the script never pulled the gear up")
+    if n.get("gear") == "1.00":
+        problems.append("the gear did not come up")
     return problems
 
 

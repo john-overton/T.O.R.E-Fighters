@@ -688,8 +688,6 @@ pub struct Rolling {
     pub ground_speed_fps: f64,
     /// Elevator at or below neutral, so the nose settled toward the runway.
     pub nose_settling: bool,
-    /// The gear is not fully down on the ground: the belly is scraping.
-    pub belly: bool,
 }
 
 /// A graded landing.

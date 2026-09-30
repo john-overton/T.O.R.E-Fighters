@@ -958,8 +958,6 @@ pub struct Ownship {
     pub hits: u32,
     pub kills: u32,
     pending_damage: bool,
-    /// Hit points owed to belly scrape wear that have not yet added up to one.
-    scrape_carry: f64,
     previous_position: Option<Vector>,
     triggers: Vec<PlayerTrigger>,
     gun_cadence: Vec<GunCadence>,
@@ -1182,7 +1180,6 @@ impl Ownship {
             rwr_failed: false,
             ecm_failed: false,
             pending_damage: false,
-            scrape_carry: 0.,
             previous_position: None,
             external,
             range_estimate: None,
@@ -1316,14 +1313,6 @@ impl Ownship {
         for (loaded, ammo) in self.ever_loaded.iter_mut().zip(&self.ammo) {
             *loaded |= ammo & 0x7fff != 0;
         }
-    }
-    /// Belly scrape wear owed and not yet a whole hit point, which a handoff
-    /// carries between the AI and a human.
-    pub fn scrape_carry(&self) -> f64 {
-        self.scrape_carry
-    }
-    pub fn set_scrape_carry(&mut self, carry: f64) {
-        self.scrape_carry = carry;
     }
     /// Whether a station was loaded at the start of the mission, whatever it
     /// holds now.
@@ -2403,26 +2392,6 @@ impl State {
                 aircraft: own.aircraft,
             });
         }
-    }
-    /// Belly scrape wear from sliding on the ground with the gear not down:
-    /// `fraction` of the ownship's airframe, carried until it makes a whole
-    /// hit point. Invulnerable spares a human-flown aircraft. `opinionated`
-    /// (requested by John, 2026-09-29; docs/spec/gear-on-the-ground.md).
-    pub fn scrape_damage(&mut self, aircraft: u32, fraction: f64, events: &mut Vec<Event>) {
-        if fraction <= 0. || self.cheats.invulnerable() {
-            return;
-        }
-        self.with_ownship(aircraft, |state, own| {
-            if own.hp <= 0 {
-                return;
-            }
-            own.scrape_carry += fraction * f64::from(own.config.damage_capacity);
-            let whole = own.scrape_carry.floor();
-            if whole >= 1. {
-                own.scrape_carry -= whole;
-                state.damage_ownship(own, whole as i32, events);
-            }
-        });
     }
     /// Realistic damage: a hit may fault a subsystem, and accumulated
     /// damage brings on the faults the aircraft's thresholds call for.
@@ -6464,32 +6433,6 @@ mod tests {
                 | Event::OwnshipDestroyed { aircraft: 0 }
                 | Event::OwnshipDamaged { .. }
         )));
-    }
-    #[test]
-    fn belly_scrape_wears_hit_points_in_whole_points_and_invulnerable_spares_it() {
-        let mut s = fixture(false);
-        let full = s.own().config.damage_capacity;
-        let capacity = f64::from(full);
-        let mut events = Vec::new();
-        // Half a hit point is carried, not lost or rounded up.
-        s.scrape_damage(0, 0.5 / capacity, &mut events);
-        assert_eq!(s.own().hp, full);
-        s.scrape_damage(0, 0.5 / capacity, &mut events);
-        assert_eq!(s.own().hp, full - 1);
-        assert!(matches!(
-            events.as_slice(),
-            [Event::OwnshipDamaged {
-                aircraft: 0,
-                amount: 1
-            }]
-        ));
-        s.scrape_damage(0, 1., &mut events);
-        assert_eq!(s.own().hp, 0);
-        assert!(events.contains(&Event::OwnshipDestroyed { aircraft: 0 }));
-        let mut spared = fixture(false);
-        spared.cheats.damage = crate::cheats::Damage::Invulnerable;
-        spared.scrape_damage(0, 1., &mut Vec::new());
-        assert_eq!(spared.own().hp, full);
     }
     #[test]
     fn detection_launch_and_inflight_lock_loss_are_distinct() {

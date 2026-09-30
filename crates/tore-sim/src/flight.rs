@@ -6,6 +6,8 @@ use tore_formats::aircraft::Aircraft;
 pub use tore_input::{PilotCommand, PilotInput, Switch};
 pub use trace::FlightTrace;
 pub const DT: f64 = 1.0 / 120.0;
+/// The message shown when the gear key is pressed with weight on the wheels.
+pub const GROUND_SENSOR_MESSAGE: &str = "Ground sensor preventing gear retraction";
 /// Share of its top speed at which the cockpit starts to shake, and the share at
 /// which the shake is at its clear maximum (agent decisions on numbers John
 /// asked for, 2026-09-29).
@@ -155,11 +157,6 @@ pub struct State {
     pub cheats: crate::cheats::Cheats,
     /// Fading body [roll, pitch, yaw] rates from a missile blast, rad/s.
     pub jolt: [f64; 3],
-    /// Airframe wear from sliding on the belly, as a share of the aircraft's hit
-    /// points, not yet taken by the host (see [`State::take_belly_scrape`]).
-    pub belly_scrape: f64,
-    /// The belly-scraping message has been given for this slide.
-    pub(crate) belly_reported: bool,
     /// Write-only record of the last step. Read it through [`State::trace`].
     pub(crate) trace: trace::Slot,
 }
@@ -280,8 +277,6 @@ impl State {
             ticks: 0,
             cheats: Default::default(),
             jolt: [0.; 3],
-            belly_scrape: 0.,
-            belly_reported: false,
             trace: Default::default(),
         }
     }
@@ -488,6 +483,12 @@ impl State {
     pub fn hook_available(&self) -> bool {
         self.model.configuration().hook_available
     }
+    /// Weight is on the main wheels: the researched contact model has the
+    /// aircraft rolling on the ground. The legacy adapter has no ground
+    /// contact, so it never reports it.
+    pub fn weight_on_wheels(&self) -> bool {
+        self.research.as_ref().is_some_and(|r| r.on_ground)
+    }
     pub fn command(&mut self, command: PilotCommand) {
         if command == PilotCommand::Eject {
             self.request_ejection();
@@ -539,6 +540,19 @@ impl State {
             }
             self.autopilot
                 .select(switch, setting, self.yaw, self.position[1]);
+            return;
+        }
+        // The ground sensor: with weight on the wheels the gear cannot be
+        // raised, for every aircraft and every seat, as in the retail game.
+        // The message is T.O.R.E's addition, given on each refused press
+        // (`opinionated`, requested by John, 2026-09-30;
+        // docs/spec/gear-on-the-ground.md).
+        if switch == Switch::Gear
+            && self.gear_down
+            && !setting.unwrap_or(!self.gear_down)
+            && self.weight_on_wheels()
+        {
+            self.systems.notify(GROUND_SENSOR_MESSAGE);
             return;
         }
         let target = match switch {
@@ -740,16 +754,6 @@ impl State {
                 .destroy(crate::aircraft_systems::LossCause::Overspeed);
             self.crashed = true;
         }
-    }
-    /// Adds airframe wear as a share of the hit points, as a belly slide does;
-    /// for hosts and tests that need the wear without the slide.
-    pub fn add_belly_scrape(&mut self, fraction: f64) {
-        self.belly_scrape += fraction.max(0.);
-    }
-    /// The airframe wear since the last call, as a share of the aircraft's hit
-    /// points, for the host to take from the combat hit points.
-    pub fn take_belly_scrape(&mut self) -> f64 {
-        std::mem::take(&mut self.belly_scrape)
     }
     pub fn step(&mut self, input: &PilotInput, ground: impl Fn(f64, f64) -> f64) {
         self.step_surface(input, |x, z| {
@@ -1733,14 +1737,6 @@ impl State {
             self.position[i] += self.velocity[i] * DT;
         }
         let surface = ground(self.position[0], self.position[2]);
-        // A belly slide below stall speed carries the whole aircraft: lift
-        // cannot be holding it up, whatever the elevator is asking for.
-        // `opinionated` (requested by John, 2026-09-29).
-        let wheel_load_fraction = if self.gear < 0.99 && self.speed < clean_stall {
-            wheel_load_fraction.max(crate::research::BELLY_MINIMUM_LOAD)
-        } else {
-            wheel_load_fraction
-        };
         if let Some(mut r) = self.research.take() {
             r.contact(
                 self,
@@ -2243,66 +2239,113 @@ mod tests {
         high.step(&PilotInput::default(), |_, _| 0.);
         assert_eq!(high.overspeed_ratio(), None);
     }
+    /// With weight on the wheels the gear key does nothing but give the
+    /// ground-sensor message, on each press, for a Set and a Toggle alike.
     #[test]
-    fn retracting_the_gear_on_the_ground_slides_on_the_belly_and_wears_the_airframe() {
-        let roll = |gear_up: bool| {
-            let mut s = State::new(&profile(), [0., 0., 0.]).unwrap();
-            s.enable_research(1).unwrap();
-            s.start_on_runway([0., 0., 0.], 0.).unwrap();
-            s.brake_out = false;
-            s.brake = 0.;
-            s.throttle = 0.;
-            s.speed = 135.; // about 80 knots, too slow to fly
-            s.velocity = [0., 0., 135.];
-            let surface = |_, _| crate::research::Surface::runway(0.);
-            let mut wear = 0.;
-            for tick in 0..120 * 12 {
-                let input = PilotInput {
-                    commands: if gear_up && tick == 0 {
-                        vec![PilotCommand::Set(Switch::Gear, false)]
-                    } else {
-                        vec![]
-                    },
+    fn the_ground_sensor_keeps_the_gear_down_with_weight_on_the_wheels() {
+        let mut s = State::new(&profile(), [0., 0., 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        s.start_on_runway([0., 0., 0.], 0.).unwrap();
+        s.brake_out = false;
+        s.brake = 0.;
+        s.throttle = 0.;
+        s.speed = 135.; // about 80 knots, too slow to fly
+        s.velocity = [0., 0., 135.];
+        let surface = |_, _| crate::research::Surface::runway(0.);
+        let mut presses = 0;
+        for tick in 0..120 * 12 {
+            let commands = match tick {
+                0 | 240 => {
+                    presses += 1;
+                    vec![PilotCommand::Set(Switch::Gear, false)]
+                }
+                120 | 360 => {
+                    presses += 1;
+                    vec![PilotCommand::Toggle(Switch::Gear)]
+                }
+                _ => vec![],
+            };
+            s.step_surface(
+                &PilotInput {
+                    commands,
                     ..Default::default()
-                };
-                s.step_surface(&input, surface);
-                wear += s.take_belly_scrape();
-            }
-            (s, wear)
-        };
-        let (wheels, wheels_wear) = roll(false);
-        let (belly, belly_wear) = roll(true);
-        assert_eq!(wheels_wear, 0.);
-        assert!(belly.research.as_ref().unwrap().on_ground && !belly.crashed);
-        assert!(
-            belly.speed < 1. && wheels.speed > 60.,
-            "{} {}",
-            belly.speed,
-            wheels.speed
-        );
-        // A 80 knot slide wears a noticeable part of the airframe, well short of all of it.
-        assert!((0.05..0.5).contains(&belly_wear), "{belly_wear}");
-        assert!(belly.systems.messages.iter().any(|m| m.contains("belly")));
-        // Sliding slower wears less.
-        let mut slow = State::new(&profile(), [0., 0., 0.]).unwrap();
-        slow.enable_research(1).unwrap();
-        slow.start_on_runway([0., 0., 0.], 0.).unwrap();
-        slow.brake_out = false;
-        slow.speed = 90.;
-        slow.velocity = [0., 0., 90.];
-        slow.gear_down = false;
-        slow.gear = 0.;
-        let mut slow_wear = 0.;
-        for _ in 0..120 * 12 {
-            slow.step_surface(&PilotInput::default(), |_, _| {
-                crate::research::Surface::runway(0.)
-            });
-            slow_wear += slow.take_belly_scrape();
+                },
+                surface,
+            );
+            assert!(s.gear_down && s.gear == 1., "tick {tick}");
         }
-        assert!(
-            slow_wear > 0. && slow_wear < belly_wear,
-            "{slow_wear} {belly_wear}"
+        assert!(s.weight_on_wheels() && !s.crashed);
+        assert_eq!(presses, 4);
+        let refusals = s
+            .systems
+            .messages
+            .iter()
+            .filter(|m| m.as_str() == GROUND_SENSOR_MESSAGE)
+            .count();
+        assert_eq!(refusals, presses, "{:?}", s.systems.messages);
+        assert_eq!(
+            GROUND_SENSOR_MESSAGE,
+            "Ground sensor preventing gear retraction"
         );
+        // Nothing else was said during the roll.
+        assert_eq!(s.systems.messages.len(), presses);
+        // Gear down and already-down requests are not refused.
+        s.systems.messages.clear();
+        s.command(PilotCommand::Set(Switch::Gear, true));
+        s.command(PilotCommand::Toggle(Switch::Flaps));
+        assert!(s.systems.messages.is_empty());
+    }
+    /// The key works as before once the main wheels leave the ground: refused
+    /// through the takeoff roll, accepted in the air.
+    #[test]
+    fn the_gear_key_works_again_once_the_wheels_leave_the_ground() {
+        let mut s = State::new(&profile(), [0., 0., 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        s.start_on_runway([0., 0., 0.], 0.).unwrap();
+        s.brake_out = false;
+        s.brake = 0.;
+        s.throttle = 1.;
+        s.burner = true;
+        let surface = |_, _| crate::research::Surface::runway(0.);
+        let mut refused = 0;
+        let mut liftoff = None;
+        for tick in 0..120 * 60 {
+            let on_wheels = s.weight_on_wheels();
+            let pull = s.speed > 180.;
+            let mut input = PilotInput {
+                pitch: if pull { 1. } else { 0. },
+                ..Default::default()
+            };
+            if tick % 60 == 0 {
+                input.commands = vec![PilotCommand::Set(Switch::Gear, false)];
+            }
+            s.step_surface(&input, surface);
+            if tick % 60 == 0 && on_wheels {
+                assert!(
+                    s.gear_down,
+                    "tick {tick}: gear raised with weight on wheels"
+                );
+                refused += 1;
+            }
+            if !s.weight_on_wheels() && liftoff.is_none() {
+                liftoff = Some(tick);
+            }
+            if liftoff.is_some_and(|t| tick > t + 240) {
+                break;
+            }
+        }
+        assert!(refused > 0 && liftoff.is_some(), "{refused} {liftoff:?}");
+        assert!(!s.gear_down && s.gear < 1., "gear {}", s.gear);
+        assert!(!s.crashed);
+    }
+    /// The legacy adapter has no ground contact, so nothing holds its gear.
+    #[test]
+    fn the_legacy_adapter_has_no_ground_sensor() {
+        let mut s = State::new(&profile(), [0., 0., 0.]).unwrap();
+        assert!(s.research.is_none() && !s.weight_on_wheels());
+        s.gear_down = true;
+        s.command(PilotCommand::Set(Switch::Gear, false));
+        assert!(!s.gear_down && s.systems.messages.is_empty());
     }
     #[test]
     fn retracting_the_gear_in_the_air_is_normal() {
@@ -2315,8 +2358,13 @@ mod tests {
             s.step(&PilotInput::default(), |_, _| 0.);
         }
         assert_eq!(s.gear, 0.);
-        assert_eq!(s.belly_scrape, 0.);
-        assert!(!s.crashed && s.systems.messages.iter().all(|m| !m.contains("belly")));
+        assert!(
+            !s.crashed
+                && s.systems
+                    .messages
+                    .iter()
+                    .all(|m| m != GROUND_SENSOR_MESSAGE)
+        );
     }
     #[test]
     fn direct_ground_crash_finishes_in_the_same_tick() {

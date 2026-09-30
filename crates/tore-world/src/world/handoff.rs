@@ -182,8 +182,6 @@ impl World {
             self.combat.state.cheats.unlimited_ammo,
         );
         let airport_nav_mode = !ownship.armed;
-        // Belly wear the AI had not yet turned into a hit point stays owed.
-        ownship.set_scrape_carry(wings.take_scrape_carry(id));
         let row = self.combat.state.targets.remove(index);
         if let Err(error) = self
             .combat
@@ -306,7 +304,6 @@ impl World {
             .ok_or_else(|| format!("plane {id} has no ownship"))?
             .clone();
         let flight = &self.cockpits[index].flight;
-        let carry = ownship.scrape_carry();
         let handback = ownship.into_ai(AiPose {
             launcher: combat::launcher(flight),
             on_ground: flight.research.as_ref().is_some_and(|r| r.on_ground),
@@ -335,9 +332,6 @@ impl World {
             config: Some(handback.configuration),
         })?;
         // From here nothing fails.
-        if let Some(wings) = self.ai_wings.as_mut() {
-            wings.set_scrape_carry(id, carry);
-        }
         self.cockpits.remove(index);
         self.combat.remove_ownship(id);
         let row = handback.row;

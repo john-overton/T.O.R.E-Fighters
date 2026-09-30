@@ -1078,7 +1078,7 @@ mod tests {
         );
     }
     #[test]
-    fn overspeed_belly_and_edge_losses_credit_no_kill_for_the_player_or_an_enemy() {
+    fn overspeed_and_edge_losses_credit_no_kill_for_the_player_or_an_enemy() {
         use tore_sim::aircraft_systems::LossCause;
         use tore_sim::combat::ledger::Kill;
         let mut ledger = Ledger::default();
@@ -1091,7 +1091,7 @@ mod tests {
                 aircraft: true,
             });
         }
-        // Enemy 10 is then lost to overspeed, belly wear or the map edge alike:
+        // Enemy 10 is then lost to overspeed or the map edge alike:
         // the ledger holds no credit for it.
         ledger.lose_without_credit(10);
         let mut end = ending(&ledger);

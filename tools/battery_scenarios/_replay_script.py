@@ -162,15 +162,16 @@ def takeoff_any_check(work: Path, output: str) -> list[str]:
 
 
 def belly_check(work: Path, output: str) -> list[str]:
-    """Gear up at about 45 knots with the wheels down: a belly slide, not a takeoff."""
+    """Gear up pressed at about 45 knots with weight on the wheels: the ground sensor
+    refuses it with a message and the gear stays down."""
     events, samples = load(work)
     problems = []
-    if count(events, "aircraft.took_off", 0):
-        problems.append("the player took off with the gear coming up at 45 knots")
-    if not any("belly" in (e.get("text") or "") for e in events):
-        problems.append("no belly scraping message")
-    if samples and samples[-1]["devices"]["gear"] > 0.5:
-        problems.append("the gear did not come up")
+    if not any("Ground sensor preventing gear retraction" in (e.get("text") or "") for e in events):
+        problems.append("no ground sensor message")
+    if count(events, "aircraft.crashed", 0):
+        problems.append("the player crashed")
+    if any(sample["devices"]["gear"] < 0.99 for sample in samples):
+        problems.append("the gear moved with weight on the wheels")
     return problems
 
 

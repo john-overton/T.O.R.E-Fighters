@@ -1,5 +1,6 @@
-# Ground start: brakes off, full power, gear up at about 45 knots with the wheels still down, then
-# pulse the stick back. The aircraft is too slow to fly, so it must settle on its belly and slide.
+# Ground start: brakes off, full power, gear key at about 45 knots with the wheels still down, then
+# pulse the stick back. The ground sensor refuses the gear key, so the gear stays down and the
+# message is shown.
 wait 1
 key b
 key 6
