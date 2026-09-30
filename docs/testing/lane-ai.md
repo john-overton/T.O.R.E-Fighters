@@ -129,8 +129,8 @@ went wrong before, by cause:
 | Symptom | Cause |
 | --- | --- |
 | The player flew into a hill 40 to 60 s after takeoff (UKR 6 and 12, the home probe) or 18 minutes into a long cruise (the full landing probe) | The pilot held 10 degrees and then the autopilot's altitude and never looked at the terrain; the hills ahead rise more than it climbs |
-| The player left the runway and hit high ground at the end of the runway 11 s after starting (KURILE 3) | The roll had no rudder and turned 20 degrees off the runway, 350 ft off the line, before it was airborne |
-| Every scripted takeoff at Simferopol flew about 8 degrees off the runway heading before P5 | The same unsteered roll, in a smaller way where nothing was in the way; the leader now flies the runway heading |
+| The player left the runway and hit high ground at the end of the runway 11 s after starting (KURILE 3) | The roll had no rudder and the mission's wind turned it 20 degrees off the runway, 350 ft off the line, before it was airborne (with `TORE_WIND=0,0` it holds the runway) |
+| Every scripted takeoff at Simferopol flew about 8 degrees off the runway heading before P5 | The same wind on the same unsteered roll, where nothing was in the way; the leader now flies the runway heading |
 
 The Simferopol crash of the older record (16.8 s after takeoff, 85 ft) does not
 happen on this base: the fitted stall speeds (P1) removed it. Turbulence was not
