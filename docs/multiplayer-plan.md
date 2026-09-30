@@ -13,7 +13,9 @@ the mission core is the `tore-world` crate, stepped by the app, and it holds
 any number of human seats beside the AI, with handoff between them. Stage D and
 the later stages are not built yet. The design of stages A and B (types, tick order, handoff rules) is in the
 [architecture guide](ARCHITECTURE.md#mission-core-and-seats), written and
-approved by John on 2026-09-28. Sequencing is in the [roadmap](ROADMAP.md#milestone-2-multiplayer). What players
+approved by John on 2026-09-28. Stage D's design (crates, host and client,
+slices) is in the [architecture guide](ARCHITECTURE.md#network-sessions) with
+its three follow-up specs, written and reviewed by John on 2026-09-30. Sequencing is in the [roadmap](ROADMAP.md#milestone-2-multiplayer). What players
 experience is in the [multiplayer guide](MULTIPLAYER.md). What Fighters
 Anthology did is in the [retail multiplayer spec](spec/multiplayer.md).
 
@@ -183,15 +185,19 @@ starts exist for that wing only; there are no carrier starts.
 ### Crates
 
 All new code uses only the Rust standard library. No new dependencies are
-proposed, in line with the project's small-dependency rule.
+proposed, in line with the project's small-dependency rule. Stage D's design
+adds three library crates the table below did not have (`tore-codec`,
+`tore-import`, `tore-session`); the [architecture guide](ARCHITECTURE.md#crates)
+lists them and why.
 
 | Crate | Kind | Holds | Depends on |
 | --- | --- | --- | --- |
 | `tore-world` (new) | library | The mission core: `World`, seats, per-tick inputs and outputs, mission setup from a Quick Mission, checkpoints, and the simulation glue that lives in `tore-app` today: combat composition, the AI bridge, terrain queries, airport service and radio call generation | tore-sim, tore-formats, tore-input |
-| `tore-net` (new) | library | UDP transport, reliability and channels, connection handshake, message and snapshot coding, the network simulator for tests, UPnP/NAT-PMP/PCP, master server protocol | std only |
-| `tore-server` (new) | binary | Dedicated server: config file, headless import, runs `World` with the network server | tore-world, tore-net, tore-formats |
+| `tore-net` (new) | library | UDP transport, reliability and channels, connection handshake, the network simulator for tests, UPnP/NAT-PMP/PCP, master server protocol | tore-codec (std only) |
+| `tore-codec`, `tore-import`, `tore-session` (new, stage D) | libraries | Bit coding and hashes; the data folder and import; the game's wire messages, host session and client session ([details](ARCHITECTURE.md#crates)) | std, tore-formats; tore-world and tore-net |
+| `tore-server` (new) | binary | Dedicated server: config file, headless import, runs `World` with the network server ([guide](DEDICATED-SERVER.md)) | tore-session, tore-import |
 | `tore-master` (new) | binary | Master server: listings, heartbeats, hole-punch introductions, relay, telemetry | tore-net |
-| `tore-app` | existing | Rendering, audio, menus, lobby and browser screens, client prediction and interpolation, observer mode | adds tore-world, tore-net |
+| `tore-app` | existing | Rendering, audio, menus, lobby and browser screens, client prediction and interpolation, observer mode | adds tore-world, tore-session, tore-import |
 
 Arrows point from a crate to what it depends on. The picture is simplified: the
 existing simulation and data crates are one box, `tore-app` keeps its existing
@@ -286,10 +292,13 @@ sequenceDiagram
 ### Lag compensation
 
 The host keeps a one-second history of every aircraft's position and attitude.
-A gun round fired by a human is tested against targets as they were
-`rtt/2 + interpolation delay` ticks earlier, as the shooter saw them. The rewind
-is capped at 250 ms, so a player on a very slow link cannot hit targets that
-have long since moved. Missiles are not rewound.
+A gun round fired by a human is tested against targets as they were when the
+shooter saw them. The rewind is capped at 250 ms, so a player on a very slow
+link cannot hit targets that have long since moved. Missiles are not rewound.
+Stage D's design corrects the rewind: measured from the tick the input applies
+to, it is the whole round trip plus the interpolation delay, not half the round
+trip, and the 250 ms cap applies to the part beyond the delay
+([architecture](ARCHITECTURE.md#hits-and-lag-compensation)).
 
 ## Host migration: exact checkpoints
 
@@ -360,6 +369,7 @@ Agent estimates, to be replaced by measurements in stages D and H.
 | --- | --- | --- |
 | One remote aircraft per snapshot | about 20 bytes | Replays measure 10 to 12 bytes per aircraft per tick; snapshots are 4 ticks apart and delta against an older acknowledged state |
 | Full 30-aircraft snapshot | about 750 bytes | Fits one 1,200-byte packet |
+| The player's own aircraft and cockpit readout per snapshot | 8 bytes of own-state hash and up to 200 bytes of readout per snapshot; 200 to 350 bytes of exact own state when needed and at least once a second; unmeasured | Stage D's client checks its own aircraft against a hash and receives the exact state only when it cannot match, plus the cockpit's readouts (contacts, RWR, weapon estimates) that only the host can compute ([architecture](ARCHITECTURE.md#the-flight-screen-draws-a-frame)). The host upload rows below are from before the readout; stage D measures them |
 | Client download | about 22 KB/s (175 kbit/s) before relevance filtering | 30 snapshots a second |
 | Client upload | 2 to 4 KB/s | Inputs sent 60 times a second, each packet repeating recent unacknowledged ticks |
 | Host upload, 4-player co-op | about 0.5 Mbit/s | 3 clients |
@@ -385,8 +395,8 @@ Sizes are relative: S, M, L, XL.
 | A. Mission core | **Built 2026-09-28.** **A1:** gather the mission state into one `World` inside `tore-app` with one `step`, moving the live loop body over unchanged in order. The windowed loop and `--ai-probe-ticks` call it; `--headless-flight` stays the isolated flight-model probe. **A2:** split what mixes simulation with presentation, then move `World` and its simulation glue into `crates/tore-world`. Commit sequence in the [architecture guide](ARCHITECTURE.md#how-stage-a-lands). | A1: existing golden fingerprints, replay export goldens and flight tests are unchanged, and a new headless full-tick fingerprint pins the order from then on. The AI probe switching to the full tick (it gains weather, turbulence and airport service) is a separate commit with re-blessed probe output. A2: `cargo tree -p tore-world` shows no wgpu, winit or cpal. | L |
 | B. Seats | **Built 2026-09-29.** One aircraft record for every aircraft with an AI or human pilot. The player-only combat state becomes per-aircraft. Tick-stamped `SeatInput`. A gun round can hit any aircraft except its shooter, and a missile or bomb any aircraft once armed (John, 2026-09-28), subject to friendly fire. AI to human handoff and back, keeping pose, fuel, stores and damage. Radio listener, orders and debrief per seat. Lead succession, to a human in the flight if there is one, otherwise the next AI member (John, 2026-09-28), with "You're the Wingleader now". A multiplayer mission option that puts every aircraft on the hybrid flight model (John, 2026-09-28). | Single-player goldens unchanged, or any one-tick timing shift documented. A headless test flies two humans in each of two wings through a fight. Handoff tests show no jump in position or speed and keep fuel and stores. Succession tests cover a human lead and an AI lead. AI air combat on the hybrid model is checked with AI probe runs against the legacy baseline. | XL |
 | C. Merge main with the bug bash | **Built 2026-09-29.** The 66 multiplayer commits of stages A and B were rebuilt one by one on `main` after the overnight bug bash (81dee6b), in segments, each ending at a checkpoint, so history stays linear and every commit builds. The bug bash's player rules were carried per seat: every human-flown aircraft follows them, not only seat 0 (see [how stage C landed](ARCHITECTURE.md#how-stage-c-landed)). Multiplayer's lead succession replaced the bug bash's renumbering (John, 2026-09-29). | Every multiplayer commit rebuilt on main and building. Refactor checkpoints SAME against the new baseline, and the planned changes (art, result call, hit rule, succession, order call, AI credit, no credit for a loss with no shooter) re-measured, every difference explained. The bug bash's battery on the tip: same results as on main apart from those planned changes. | L |
-| D. Network foundation and dedicated server | `tore-net`: transport, handshake with build and protocol version, reliable and unreliable channels, statistics, network simulator. Snapshot coder with acknowledged-baseline deltas; every packet decodes on its own; full keyframes for joiners. Real-time server driver, input jitter buffer, snapshots at 30 Hz (setting). Client prediction, correction smoothing, interpolation, clock sync. Missile hits by the host; gun lag compensation. `tore-server` runs a Quick Mission from its config file; a development `--connect` flag joins it. Network diagnostics recorded in replays. | A dedicated server and two clients on a LAN complete a Quick Mission with AI. Under the simulator at 50, 150 and 300 ms round trip with 0, 2 and 5 percent loss, corrections to the own aircraft and smoothness of others stay within limits set in the follow-up spec. Bandwidth measured against the budget above. Headless bot clients run in CI. | XL |
-| E. Player-hosted | The core runs on a real-time thread inside the host's game; the host's seat is fed directly; the renderer reads snapshots. Single player keeps the render-loop driver. | A host and one remote client complete a mission. Dragging, minimizing or stalling the host's window does not freeze the client. | M |
+| D. Network foundation and dedicated server | **Designed and reviewed 2026-09-30:** [design and slices](ARCHITECTURE.md#network-sessions), [wire protocol](formats/net-protocol.md), [netcode numbers](MULTIPLAYER.md#netcode-numbers), [dedicated server](DEDICATED-SERVER.md). `tore-net`: transport, handshake with build and protocol version, reliable and unreliable channels, statistics, network simulator. Snapshot coder with acknowledged-baseline deltas; every packet decodes on its own; full keyframes for joiners. Real-time server driver, input jitter buffer, snapshots at 30 Hz (setting). Client prediction, correction smoothing, interpolation, clock sync. Missile hits by the host; gun lag compensation. `tore-server` runs a Quick Mission from its config file; a development `--connect` flag joins it. Each client keeps a capture of what the network brought and a diagnostics log (John, 2026-09-30). | A dedicated server and two clients on a LAN complete a Quick Mission with AI. Under the simulator at 50, 150 and 300 ms round trip with 0, 2 and 5 percent loss, corrections to the own aircraft and smoothness of others stay within the [limits](MULTIPLAYER.md#netcode-numbers). Bandwidth measured against the budget above. Headless bot clients run in CI. | XL |
+| E. Player-hosted | The core runs on a real-time thread inside the host's game; the host's seat is fed directly; the renderer reads snapshots. Single player keeps the render-loop driver. Networked flights become replays: a client's capture converts into a replay smoothed through its updates with hindsight, carrying the network diagnostics (John, 2026-09-30). | A host and one remote client complete a mission. Dragging, minimizing or stalling the host's window does not freeze the client. | M |
 | F. Lobby through the Quick Mission creator | Multi menu (host, join by address, player setup). Callsigns and suffixes, King and Host roles, slot picking, every lobby control in the guide, including retail's revival and scoring settings. Lobby and flight chat with retail's keys and receivers. Reply and request keys for human wingmen, with the [controls list](CONTROLS.md) updated. Friend-or-foe cues. Airborne start, join in progress, kick and release, slot locks, PvP sides, friendly fire, respawn rules, basic observer view, no pause or time compression, locked realism, multiplayer debrief. Starts with research into retail multiplayer screen art. **F-lite** is the subset needed to play: join by address, pick a slot, start. | Players join by address, pick slots, fly and debrief together; a late joiner takes an AI aircraft in flight; a kicked player's aircraft returns to AI; a PvP session ends on its kill limit. | L |
 | G. Flight data link and radio backing | Per-aircraft capability table for the twelve ported aircraft. Shared picture at 4 Hz, locks and assignments sent at once. Radar, target window, HUD and sort warning cues. AI reads and writes the picture instead of reading other controllers. Voice-only assignments for older aircraft with bearing and range from the receiver. Wing and battle-net frequencies. Replay events. Works in single player. | Single-player flights with AI wingmen show the cues and voice the assignments. A mixed flight gets what its least capable member can receive. | L |
 | H. Exact checkpoints | `World::checkpoint` and `World::restore` for all mutable state, as listed above. Encoders destructure every field. Size, encoding time and tick cost measured; delta coding against the previous checkpoint if the size needs it. | The equivalence test passes bit for bit on every CI platform over the listed scenarios. A field added without encoding fails to compile. Measured checkpoint size and catch-up time recorded against the budget. | XL |
@@ -442,9 +452,10 @@ Each one is written at the start of its stage:
 | Stage | Spec | Home |
 | --- | --- | --- |
 | A, B | Mission core and seats: types, tick order, handoff rules | [Architecture](ARCHITECTURE.md#mission-core-and-seats), written 2026-09-28 |
-| D | Wire protocol: packets, channels, handshake and snapshot encoding | `docs/formats/net-protocol.md` (new) |
-| D | Netcode numbers: interpolation delay, correction thresholds and smoothing, lag compensation cap, relevance bands | [Multiplayer guide](MULTIPLAYER.md) |
-| D | Dedicated server: config file, import, running and ports | `docs/DEDICATED-SERVER.md` (new) |
+| D | Wire protocol: packets, channels, handshake and snapshot encoding | [net-protocol.md](formats/net-protocol.md), written and reviewed 2026-09-30 |
+| D | Netcode numbers: interpolation delay, correction thresholds and smoothing, lag compensation cap, relevance bands | [Multiplayer guide](MULTIPLAYER.md#netcode-numbers), written and reviewed 2026-09-30 |
+| D | Dedicated server: config file, import, running and ports | [DEDICATED-SERVER.md](DEDICATED-SERVER.md), written and reviewed 2026-09-30 |
+| D | Design: crates, host and client, the flight frame, slices | [Architecture](ARCHITECTURE.md#network-sessions), written and reviewed 2026-09-30 |
 | F | Lobby screens and flows, including the retail art research | [Multiplayer guide](MULTIPLAYER.md) and [retail spec](spec/multiplayer.md) |
 | G | Data link: capability table, cues, AI use, calls, frequencies | `docs/DATALINK.md` (new) |
 | H | Checkpoint format, coverage rules and the equivalence scenarios | `docs/formats/checkpoint.md` (new) |
@@ -514,6 +525,19 @@ Still open:
 
 - **Randomness.** Whether to add `getrandom` for rejoin tokens. Not needed until
   stage K.
+
+For stage D, asked and answered on 2026-09-30 (the answers are in the guide's
+[decisions](MULTIPLAYER.md#decisions)):
+
+- **Menus on a client** (D8): nothing pauses; the controls go neutral while
+  the pause or Esc menu is up.
+- **Relevance bands** (D6): 30 updates a second for what is near or tracked,
+  twice a second for the rest, smoothed so it never jitters.
+- **Recordings of networked flights** (D8): a capture and a diagnostics log in
+  stage D; captures convert to smoothed replays in stage E.
+- **The LAN acceptance** (D11): agents smoke-test on the development machine,
+  then John tests on three machines, macOS, Linux and Windows.
+- The design's agent proposals were approved as written.
 
 The guide's [open questions](MULTIPLAYER.md#open-questions) can be settled at
 the start of the stage that needs them.

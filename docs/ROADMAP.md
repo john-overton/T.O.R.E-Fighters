@@ -1102,6 +1102,8 @@ Work, in the plan's stage order:
   on main, with the bug bash's player rules applying to every human-flown plane.
 - D, E: network foundation, dedicated server and player-hosted games. Then
   F-lite, the first playable checkpoint: two players flying co-op on a LAN.
+  Stage D's design (reviewed by John on 2026-09-30) is in the
+  [architecture guide](ARCHITECTURE.md#network-sessions).
 - F: lobby through the Quick Mission creator.
 - G: flight data link and radio backing, also in single player.
 - H: exact checkpoints of the whole mission, which John chose on 2026-09-28 so

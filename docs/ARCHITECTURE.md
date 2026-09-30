@@ -1902,3 +1902,508 @@ combat, the AI bridge, the debrief and the recorder.
 - **Later moves onto `main` rebase this branch itself.** rerere holds only the
   conflict hunks of the replay, not a whole resolved history, so a later bug-bash
   fix is rebased onto the rebuilt branch, not replayed from stage A again.
+
+## Network sessions
+
+Design for stage D of the [multiplayer plan](multiplayer-plan.md#stages),
+written by the lead on 2026-09-30, revised the same day after an independent
+review, and reviewed by John the same day: his answers are in the guide's
+[decisions](MULTIPLAYER.md#decisions). Nothing in this section is built yet.
+Every choice here is an agent decision unless it is credited to John. The three
+follow-up specs the plan assigns to stage D are:
+
+- the wire protocol: [net-protocol.md](formats/net-protocol.md);
+- the netcode numbers: [multiplayer guide](MULTIPLAYER.md#netcode-numbers);
+- the dedicated server: [DEDICATED-SERVER.md](DEDICATED-SERVER.md).
+
+In short:
+
+- A **host** runs the mission's `World` on a fixed 120 Hz clock that, once the
+  mission flies, never pauses. In stage D the host is the dedicated server,
+  `tore-server`, a program with no window, GPU or audio. Stage E puts the same
+  host inside a player's game.
+- A **client** is a player's game joined to a host. It loads the mission from
+  its own import, flies its own aircraft ahead of the host with its own inputs
+  (prediction), draws everything else a little in the past between the host's
+  snapshots (interpolation), and shows the cockpit readouts the host computes
+  for it.
+- The flight screen stops reading the simulation directly. It draws a
+  **flight frame**: the player's plane and flight state, the picture of the
+  mission, the cockpit readout and the tick's cues. Single player fills the
+  frame from its own `World`; a client fills it from its session. That is how
+  one set of screens serves both.
+- Single player does not change. Every slice must compare SAME with the
+  single-player baseline; stage D plans no single-player behaviour change.
+
+### Surveys behind the design
+
+Three read-only surveys at `2ada9f8` (kept in the lead's local notes, not
+committed) found:
+
+- **No mission can be built without the game app.** `World` has no
+  constructor: the creator's Fly button, the AI probe and the tests each
+  assemble one by hand in `tore-app` (`Action::MissionFly`, `ai_probe_run`),
+  with the creator's list indices, the drawn aircraft (`Airframe::load`) and
+  `CombatView` in the path. The import (`assets.rs`, `media_source.rs`) lives
+  in the app binary, which links the audio library, so a Linux server without
+  ALSA could not even start it.
+- **The tick assumes a human.** `World::step_with` refuses a tick with no
+  human-flown plane; combat's `own()` and `own_id()` panic without an ownship
+  and serve "the first ownship" as the presented one; the tick's picture and
+  one radio path read `cockpits[0]`. Plane 0 is never an AI actor or a combat
+  target row: the creator removes the player's slot from Friendly Wing 1, and
+  plane 0 starts from the player's start and layout.
+- **The screens read live simulation state.** The HUD, weapon HUD, scope, RWR,
+  target window, weapon page, map, seeker tone, RWR tone and situation music
+  read the ownship's private combat state and run simulation logic on it
+  (`OwnshipView::readiness`, `estimated_hit_percent`, `seeker_tone` and
+  others), about 180 call sites. Several are evaluated every frame from the
+  frame's interpolated flight, not once a tick. Many places assume that the
+  player is aircraft 0.
+- **A human plane's part of the tick is small but not only the flight
+  model.** One hybrid flight step takes well under a microsecond and needs the
+  flight state, the pilot input and the terrain under the aircraft. Around it
+  the tick adds building contact (which ground objects still stand),
+  turbulence (the cockpit's own state and random stream, and the weather
+  clock's reading), the world-edge and OVERSPEED rules, and, every tick, what
+  combat writes back: the payload (stores less the external fuel burned), the
+  bay held open for a release, radar and jammer forced off by failures, and
+  the damage figures. The flight state is 3,256 bytes, 1,512 of them a
+  write-only trace.
+- **A full mission is cheap to host.** The AI probe's 15 against 15 fight (30
+  aircraft) steps in 1.1 to 1.2 ms per tick on the development machine
+  (release build, Ryzen 9 7900X): about 14 percent of one core at 120 Hz.
+- **The replay coder is a model, not a library.** Its quantization steps and
+  bounded reader fit, but it is byte oriented, private to `tore-replay` and
+  predicts each tick from the one before, so one lost packet would break it.
+
+### Crates
+
+Stage D adds five crates, all on the standard library only. No new external
+dependency.
+
+| Crate | Kind | Holds | Depends on |
+| --- | --- | --- | --- |
+| `tore-codec` | library | Bit writer and bounded bit reader, variable-length integers, quantizers, FNV-1a and CRC-32. Shared by the wire, the exact own-plane coder and, in stage H, the checkpoints | std only |
+| `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator | tore-codec |
+| `tore-import` | library | The data folder, the import pack's reader and writer, media detection and the import itself, moved out of `tore-app` so a server can import and load without the game | tore-formats |
+| `tore-session` | library | The game's side of networking: the wire messages, the host session (clock, inputs, snapshots, joins), the client session (prediction, interpolation, clock steering, readouts) and the headless bot client | tore-world, tore-net, tore-codec |
+| `tore-server` | binary | The dedicated server: configuration, import, logging and the console | tore-session, tore-import |
+
+`tore-sim` and `tore-world` gain `tore-codec` for the exact own-plane state and
+the readout coding. `tore-app` gains `tore-session` and `tore-import`. The plan's
+`tore-master` is stage I. *Agent decision:* the plan listed `tore-net` and
+`tore-server` for stage D; `tore-codec` keeps the simulation crates from
+depending on a network crate, `tore-import` keeps the audio library out of the
+server, and `tore-session` keeps sockets and threads out of `tore-world`, whose
+[rules for mission state](#rules-for-mission-state) forbid them.
+
+```mermaid
+flowchart TD
+  app["tore-app<br/>the game"]
+  server["tore-server (new)<br/>dedicated server"]
+  session["tore-session (new)<br/>host, client, wire"]
+  import["tore-import (new)<br/>data folder and import"]
+  net["tore-net (new)<br/>transport, std only"]
+  world["tore-world<br/>mission core"]
+  sim["tore-sim, tore-formats<br/>and tore-input"]
+  codec["tore-codec (new)<br/>bits and hashes"]
+  app --> session
+  app --> import
+  server --> session
+  server --> import
+  session --> world
+  session --> net
+  net --> codec
+  world --> sim
+  world --> codec
+  sim --> codec
+  import --> sim
+```
+
+(`tore-import` depends on `tore-formats` only; the diagram draws the existing
+simulation and data crates as one box.)
+
+### A mission with no window
+
+**The mission as data.** A `MissionSpec` (`tore-world`) is a Quick Mission
+written with stable names instead of the creator's list positions, which
+differ between installs: the theater code, the condition (clear, cloudy,
+foggy, dawn, sunset, night) and any resolved weather overrides (time of day,
+wind, cloud deck), the start (airborne altitude, or the runway object for a
+ground start), the separation, six wings (side, aircraft by its selection key
+such as `F18.PT`, or `faxx` for the F/A-XX, which shares `F22N.PT` with the
+F-22N, count and skill), the preset and group objectives, guns only, the
+cheats in force, the flight models (the hybrid model for the humans,
+`AllHybrid` for the AI in every networked mission, John 2026-09-28) and the
+loadout of plane 0 when a player flies it from the start. It has a text form of
+`key value` lines like the preference files, which the server's mission file
+uses and a host sends to every joining client.
+
+**Building it.** `World::new(&MissionSpec, &Resources, Seating)` builds the
+mission with no app: the terrain for the theater and condition, the aircraft
+types (the simulation half of today's `Airframe::load`, about fifteen lines:
+parse, identity check, sensors, flight model), the layout, combat and the AI
+wings. `Seating::SinglePlayer` is today's mission: seat 0 flies plane 0 with
+the player's loadout. The creator's Fly button builds a `MissionSpec` from the
+screen and calls the same constructor, so single player and the server share
+one path and the single-player baseline guards it. `World::restart` rebuilds
+from the spec. The AI probe moves onto the constructor only where its output
+stays SAME; its default-load combat and its own start keep their own path
+otherwise.
+
+**Open seating and no human.** `Seating::Open` is a networked mission: the AI
+flies every plane, plane 0 included, and humans take planes by
+[handoff](#handoff-between-the-ai-and-a-human). That needs work in several
+places: plane 0 becomes an AI actor and a combat target row (its model lookup
+by `id - 1` goes), Friendly Wing 1 keeps its full count, plane 0 starts from
+the spawn plan like its wingmen, the ground-start wing parks whether or not a
+human is in it, the tick runs with no cockpit, and combat runs with no ownship:
+`own()` and `own_id()` stop panicking, and "the first ownship is the presented
+one" goes, since a presenter names its seat. This also lifts stage B's known
+limit that the lowest-numbered human plane cannot be given back.
+
+**Resources and the content check.** `tore-import` loads the pack into the
+same name-to-bytes map the app uses today. `World::new` reads it through a
+`Resources` view that notes every name it reads. The sorted names with an
+FNV-1a 64 hash of each resource's bytes are the mission's **content manifest**.
+A client builds the same mission from its own import and compares manifests at
+join. Only what the simulation reads is compared, so a 1.0 disc import and a
+1.02F import, which differ in menu and HUD resources, are expected to play
+together; entries the import derives from `FA.EXE` (the radio phrases) could
+still differ by build, so slice D3a compares both imports' manifests before the
+design claims it. A difference is refused with the names of the files that
+differ.
+
+**What a joining client also needs.** The host tick, from which the weather
+clock's reading follows (its seconds of day and ticks are a function of the
+tick and the mission's start time), and the combat's contrail sortie number,
+which sets each aircraft's contrail height. Both travel in the Mission message.
+
+### One step for a human's plane
+
+The per-plane part of the tick moves into one function in `tore-world` that
+`World::step` calls for every cockpit and a client calls for its own plane:
+the pilot's input, the flight step over the terrain, building contact against
+the standing ground objects, turbulence from the cockpit's own state and the
+weather clock's reading at that tick, the world edge and OVERSPEED, and, after
+combat, the write-backs that depend only on a few **ownship terms**: the stores'
+weight, whether a release holds the bay open, the radar and jammer failures,
+hit points against the damage capacity, and the damaged section and regions.
+Single player keeps its results exactly: the function is today's code in
+today's order, moved.
+
+On the host the ownship terms come from combat each tick. A client uses the
+terms of its latest snapshot and keeps them until the next one: they change
+only when the plane fires, is hit or fails, and the host then sends the exact
+state (below). The standing ground objects come from the host's destruction
+events.
+
+### The host session
+
+`tore_session::Host` owns the `World`, the network endpoint and one record per
+connection: its seat, its input buffer, what it has acknowledged and its queue
+of events. It is driven by a fixed clock: once the mission flies, 120 ticks a
+second of real time, never paused, never compressed. Before that, a server
+set to wait for its first player holds the mission at tick 0 and sends no
+snapshots, so no client's clock depends on it. If the process falls behind it
+runs up to 30 ticks in one go to catch up and logs that the server is
+overloaded; it never skips simulated time.
+
+Each tick the host:
+
+1. Applies joins and departures as `MissionCommand::Take` and `GiveBack`.
+2. Takes each seated player's input for this tick from that player's input
+   buffer: stick, throttle, trigger, scope controls, commands and the tick the
+   player's screen showed (for [lag compensation](#hits-and-lag-compensation)).
+   A late or missing input repeats the player's last stick, throttle, trigger
+   and scope controls with no commands; commands that arrive late are applied
+   on the next tick, in order, never dropped.
+3. Steps the `World` with every seat's input.
+4. Sorts the tick's output: each seat's cues, releases and order replies go to
+   that seat's event queue, mission-wide events (effects, marks, destroyed
+   objects, ejections, launches, gun bursts, countermeasure releases, sounds)
+   to every queue.
+5. Notes, for each seat, whether this tick did anything to its plane that the
+   player's game cannot foresee: a repeated input, a command applied at
+   another tick, a hit, a blast, a release, a change of ownship terms.
+
+Every fourth tick (30 a second, John 2026-09-28) it builds one snapshot packet
+per connection: a hash of that player's own plane state; that player's
+[cockpit readout](#the-flight-screen-draws-a-frame); the player's
+unacknowledged events; and every other aircraft, missile, debris piece and
+ejected pilot, coded against what the player has acknowledged, with room kept
+for them. When the player's game cannot have predicted its plane exactly (step
+5), when it reports a mismatch, and at least once a second, the host also sends
+the plane's exact state in a second packet. The
+[wire protocol](formats/net-protocol.md#snapshots) has the rules.
+
+The dedicated server runs the host on its main thread: it waits on the socket
+with a short timeout, steps due ticks and sends due packets. Stage E runs the
+same host on a thread inside the game.
+
+### The client session
+
+`tore_session::Client` joins a host, loads the mission and then, every frame:
+
+- **Predicts its own aircraft.** It runs [its plane's step](#one-step-for-a-humans-plane)
+  with the player's inputs, one tick per 1/120 s of its own clock, and keeps
+  the inputs, commands and states of the last second. Each snapshot carries a
+  hash of the host's state of the plane at an earlier tick N; the client
+  compares it with the hash of its own state for tick N. Equal, which is the
+  normal case on the same platform when the host applied the same inputs,
+  means nothing to do. When they differ, the client reports it and the host
+  sends the exact state. When an exact state arrives, the client restarts from
+  it at its tick, steps its stored inputs and commands again up to now, and
+  slides the drawn aircraft from where it was to the corrected place within
+  about 150 ms, so a small correction does not jump. Stick and throttle values
+  are quantized before the client steps them, so the host steps exactly what
+  the client stepped.
+- **Keeps its clock ahead of the host.** Inputs for tick T must reach the host
+  before it steps T. The host reports, in each snapshot, the smallest margin by
+  which the player's inputs arrived; the client runs its clock up to 2 percent
+  fast or slow to keep that margin, over the last two seconds, at one tick plus
+  one input packet's interval, and one interval more while loss is high, so a
+  single lost packet costs nothing.
+- **Draws everything else in the past.** Other aircraft, missiles, debris and
+  pilots are drawn at a render time a little behind the newest snapshot, about
+  100 ms, between the two snapshots around it (a cubic curve through their
+  positions and velocities, attitude turned the short way). The delay adapts
+  to how steadily snapshots arrive. When one is late the client continues along
+  the last motion for up to 250 ms, then holds. Far entities, which the host
+  sends only twice a second (John, 2026-09-30), are drawn further in the past,
+  their own update interval plus the normal delay, so they follow the same
+  smooth curve and never need guessing ahead; whatever the player's view
+  follows is always sent at the full rate. The HUD's target box, the
+  target views and the gunsight's lead use a target's drawn pose, the one lag
+  compensation judges hits against.
+- **Rebuilds what the host does not send.** Smoke, contrails and the fire
+  columns of crash sites are regenerated from the drawn aircraft, missiles and
+  marks with the simulation's own rules; chaff and flares are flown again from
+  their release events, as the replay viewer already does; explosions and hit
+  flashes age locally from their spawn; other aircraft's gun rounds are drawn
+  from burst events, and its own at once from its trigger. None of these change
+  the simulation, which the host alone runs.
+- **Presents the cues addressed to it**: HUD lines, radio calls with their
+  recordings, the tower, weapon release sounds, rumble, the mission result
+  calls, and the debrief the host sends when the player leaves.
+
+A client cannot pause or compress time. The Esc menu, the map and the settings
+screens draw over the running flight, and while the pause or Esc menu is up, or
+the window has lost focus, the controls go neutral: stick centred, throttle
+held, trigger released (John, 2026-09-30). The Restart key is refused in a
+session with a message. End Mission leaves the session with the player's
+debrief.
+
+```mermaid
+flowchart TD
+  input["The player's input"] --> predict["Step the own aircraft<br/>one tick at a time"]
+  predict --> send["Send inputs to the host,<br/>repeated until acknowledged"]
+  snapshot["A snapshot arrives"] --> reconcile{"Own state at tick N<br/>equals the host's?"}
+  reconcile -->|"no"| redo["Restart from the host's state,<br/>re-step the inputs, blend the view"]
+  redo --> predict
+  snapshot --> buffer["Store the other aircraft<br/>by tick"]
+  buffer --> interp["Draw them about 100 ms<br/>in the past"]
+  predict --> frame["Fill the flight frame"]
+  interp --> frame
+  frame --> screen["Draw, play sound, rumble"]
+```
+
+### The flight screen draws a frame
+
+Today the flight screen reads `World` directly. Stage D puts one plain-data
+**flight frame** between them:
+
+| Part | Single player fills it from | A client fills it from |
+| --- | --- | --- |
+| The presented seat and its plane id | seat 0 and plane 0 | the seat and plane the host gave it |
+| The plane's flight state now and at the start of the tick | the cockpit | its prediction |
+| The mission picture: every other aircraft, ground object, missile, round, effect, mark, debris piece and pilot | `RenderSnapshot` as today, built for the presented seat | interpolated entities and local effects |
+| Smoke, contrails, chaff and flares | combat | regenerated locally |
+| The cockpit readout | built from `World` for the seat, every frame as today | the newest readout in a snapshot |
+| The tick's cues and launches for the seat | `TickOutput` | events from the host |
+| Mission data that never changes: terrain, aircraft types, ground objects, the roster's slots, sides and names, the weapon rules and range mode | `World` | the client's copy of the mission |
+
+The **cockpit readout** is what the seat's displays show, computed where the
+simulation state lives: stores and the selected station, arming, readiness,
+the seeker's state and tone, the estimated ranges, hit percentage and firing
+band, the designated, displayed and view targets, radar, infrared and visual
+contacts with their trails, the map contacts, RWR emitters and missile records,
+the RWR tone's inbound missiles and locks, damage and faults, chaff and flares,
+shots, hits and kills, the airport service's state, NAV mode, the target
+window's readout, the situation music's inputs and the mission result. Contacts
+are sent with their positions in the world, so the client draws them around its
+predicted aircraft. The friendly list the designation keys skip follows from
+the roster's sides.
+
+`tore-world` builds it (`World::cockpit_readout(seat, launcher)`) from the
+seat's ownship and a launcher, the plane's position, attitude and speed. Single
+player builds it every frame from the frame's interpolated flight, exactly
+where the weapon HUD and the seeker tone compute today, so its captures stay
+byte-identical; a host builds it at each snapshot from the tick's flight.
+
+Every "aircraft 0 is the player" assumption in the screens (the view rig's
+player body and missile owner, the RWR tone's owner, the target window's
+viewer, spatial sound's own aircraft, `ai_wings::PLAYER_ID` in presentation)
+reads the frame's plane instead, and `Combat::snapshot` builds the picture for
+any seat. The view rig learns of every missile launch from launch events, so a
+missile that lives less than one snapshot is still the F12 view's last missile.
+
+### Hits and lag compensation
+
+The host decides every hit. Missiles, rockets and bombs are simulated only on
+the host and are not rewound (John, 2026-09-28).
+
+Gun rounds fired by a human are tested against targets **as the shooter saw
+them** (John, 2026-09-28). Each seat's input names the host tick its screen
+showed (V) for the tick the input is for (T). Because the player's game runs
+ahead of the host and draws other aircraft behind it, `T - V` is the whole round
+trip plus the interpolation delay plus the input margin. *Correction to the
+plan*, whose estimate of half the round trip plus the delay measured from the
+input's arrival was too small. A round fired on tick T carries a rewind of
+`T - V` ticks, of which the part beyond the interpolation delay is capped at 30
+ticks (250 ms), as the plan capped latency: a player on a very slow link is
+judged against where targets were 250 ms plus the delay ago, never earlier.
+The rewind is at most 60 ticks (500 ms).
+
+On every tick of its flight the round's hit search uses each aircraft's hit
+volume from `now - rewind` instead of the current one. The history lives in
+combat, inside `World`, since the hit search runs in `World::step`: one second
+of hit volumes for every aircraft. It is mission state, so stage H's
+checkpoints will carry it. `SeatInput` gains the view tick. Ground objects do
+not move and need no history. The AI's rounds and every round in single player
+have a rewind of 0 and take today's path, unchanged.
+
+A client draws its own tracers at once from its trigger and its predicted
+aircraft, and other aircraft's bursts from the host's burst events (shooter,
+gun, first and last tick). A missile appears on the client when the host
+launches it, one round trip after the trigger (about 0.15 s at 150 ms), since
+only the host knows whether the launch was ready.
+
+### Joining, leaving and the end of a mission
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant H as Host
+  C->>H: Connect request (protocol, build, padded)
+  H->>C: Challenge (cookie)
+  C->>H: Challenge answer (cookie, callsign, password)
+  H->>C: Accepted (session, tick rates)
+  H->>C: Mission (spec text, content manifest)
+  C->>C: Load the mission from its own import, compare manifests
+  C->>H: Ready (wanted plane, or any)
+  H->>H: Take the plane at the next tick
+  H->>C: Seated (seat, plane, exact state, loadout, roster)
+  H->>C: Full snapshot, then snapshots 30 a second
+  C->>H: Inputs 60 a second
+  Note over C,H: The player ends the mission
+  C->>H: Leave
+  H->>H: Give the plane back to the AI
+  H->>C: Debrief, then disconnect
+```
+
+- **Which plane.** Until the stage F lobby, a joining player asks for a plane
+  by id (`--slot`) or takes the first free friendly plane, Friendly Wing 1's
+  lead first. The server's configuration lists the planes open to humans
+  (default: every friendly plane). A plane that is destroyed, has lost its
+  pilot or is flown by a human cannot be taken.
+- **Callsigns.** A callsign already in use gets a suffix (`Viper_2`, John
+  2026-09-28), shortened first if the whole would pass 15 characters.
+- **Loadout.** A player keeps the loadout of the aircraft they take, the late
+  joiner's rule of the [guide](MULTIPLAYER.md#slots-ai-fill-and-handoff).
+  Choosing one on the Load Ordnance screen before the mission is stage F.
+- **Leaving.** End Mission sends Leave; the host builds the player's debrief
+  (`debrief::capture` for the seat), sends it, and gives the plane back to the
+  AI. A player whose packets stop for 5 seconds is dropped the same way. A
+  destroyed plane stays destroyed; the seat can end the mission as in single
+  player. Respawns are stage F.
+- **The end.** When the host ends the mission, every seated player gets
+  "Mission ended" and their debrief, and is then disconnected; players join
+  again for the next mission. The dedicated server's rules for starting,
+  ending and restarting are in the [server guide](DEDICATED-SERVER.md#the-mission-lifecycle).
+- **Settings.** The mission's cheats come from the server's mission file and
+  apply to everyone. On a client the Cheats menu keeps only the settings that
+  change nothing but its own screen (no sun whiteout, no G effects, no screen
+  shake). The retail stall-speed switch (`--retail-stall-speeds`) is a
+  developer option for the whole process: a server refuses to start with it
+  and a client refuses to join with it, so every machine flies one
+  configuration.
+- **Builds.** John's rule is that the build must match
+  ([guide](MULTIPLAYER.md#compatibility-handshake)). *Agent decision on what
+  that means:* two tagged release builds match when their versions are equal;
+  any other build must have the same commit, since compile-time tuning (for
+  example the stall reference fractions) changes the simulation and would make
+  every prediction wrong.
+
+### Recordings and diagnostics
+
+John decided on 2026-09-30 that in stage D a client does not record a mission
+replay live (the recorder reads the host's AI and combat state, which a client
+does not have). Instead each networked flight keeps:
+
+- a **capture**: every packet the client received, with its arrival time, and
+  every input it sent, in a file beside the replays, kept and pruned by the
+  replays' own auto-delete rules. It is what the client knew, complete, so the
+  client session can be run again from it offline, exactly;
+- a **diagnostics log** (`logs/net-<date>.tsv` in the data folder): once a
+  second the round trip, loss, snapshot arrival spread, input margin,
+  interpolation delay, corrections made and bytes each way, plus every join,
+  drop and refusal.
+
+In stage E a capture **converts into a replay** (John, 2026-09-30): every
+aircraft follows a smooth curve through every update the client received,
+using hindsight, instead of what the player saw live with its guesses ahead;
+the own aircraft follows the host's states and the prediction between them;
+events, radio and effects come from the host's events. The replay carries the
+diagnostics. The dedicated server logs the same figures for every player.
+
+### How stage D lands
+
+Slices, each on its own `mp/d-<topic>` branch and worktree, merged by the lead
+with the quick check per change and the check list plus the single-player
+baseline at merge. "Opus" slices are networking, concurrency, determinism or
+risky refactors, as John asked; the rest are Sonnet.
+
+| Slice | Branch | Model | After | Work | Acceptance |
+| --- | --- | --- | --- | --- | --- |
+| D1 Codec | `mp/d-codec` | Sonnet | | `tore-codec`: bits, variable-length integers, quantizers, FNV-1a, CRC-32 | Round trips at every width; a bounded reader never panics on 100,000 seeded random inputs; known CRC-32 and FNV-1a test vectors |
+| D2 Transport | `mp/d-net` | Opus | D1 | `tore-net`: packets, handshake, acks and round trip, reliable ordered messages, statistics, UDP and the simulator | On the simulator at 300 ms and 5 percent loss with duplicates and reordering: the handshake completes, 10,000 reliable messages arrive once and in order, a 64 KB message arrives whole, the round trip estimate is within 5 percent and the loss estimate within 1 point; a challenge is never larger than its request; a seeded packet fuzz never panics; two real sockets on 127.0.0.1 connect |
+| D3a Import library | `mp/d-import` | Sonnet | | `tore-import` out of the app: data folder, pack, media detection, import | Single-player baseline SAME; the app imports and loads as before; `cargo tree -p tore-import` has no winit, wgpu or cpal; where both a 1.0 and a 1.02F import are available, the simulation resources of a sample mission hash the same |
+| D3b Mission as data | `mp/d-mission` | Sonnet | D3a | `MissionSpec` and its text form; `World::new` with single-player seating; the creator builds through it | Single-player baseline SAME; the spec round-trips through text; a headless test builds a single-player mission from synthetic resources and steps it |
+| D4 Own-plane step and exact state | `mp/d-own-state` | Opus | D1 | The shared per-plane step; an exact coder and hash for a human plane's flight, turbulence and ownship terms, every field destructured | Single-player baseline SAME; a plane stepped by `World` and a copy stepped by the shared function from a decoded state, with the same inputs and terms, stay bit-identical for 1,200 ticks; adding a field to the state without coding it fails to compile |
+| D5a Flight frame | `mp/d-frame` | Sonnet | D3b | The flight frame with its plane id; the screens, views and sounds read it; no "aircraft 0 is the player" in presentation; the picture for any seat | Single-player baseline SAME and every GPU capture byte-identical; a test builds the picture for a second seat of the crowd fixture with that seat's plane as the player |
+| D5b Cockpit readout | `mp/d-readout` | Sonnet | D5a | The cockpit readout and its builder; the HUD, weapon HUD, scope, RWR, target window, map and music read it | Single-player baseline SAME and every capture byte-identical; readouts for two seats of the crowd fixture each name their own plane's stores, contacts and damage |
+| D3c Open seating | `mp/d-open` | Opus | D5a | `Seating::Open`: plane 0 on the AI, a tick with no human, combat with no ownship | Single-player baseline SAME; a headless test builds an open mission with every plane on the AI, steps it 1,200 ticks, then a seat takes plane 0, flies, and gives it back |
+| D6 Wire | `mp/d-wire` | Opus | D1, D3b, D4, D5b | `tore-session`'s messages: inputs, snapshots with acknowledged baselines, priorities and relevance, own-state hash and exact state, readouts, events (bursts and launches included), join messages, debrief | Every message round-trips; a snapshot decodes with any earlier packet lost; entities always get their share of the packet; a wire golden test fails when the bytes change without a protocol version bump; bytes per snapshot measured on the 15 against 15 mission against the [budget](multiplayer-plan.md#bandwidth-budget) |
+| D7 Host and server | `mp/d-host` | Opus | D2, D3c, D6 | The host session, its clock and input buffers; `tore-server` with its configuration, import and console | A server flies a 15 against 15 mission for 10 minutes with nobody connected under 20 percent of one core; scripted test clients join and leave 100 times without an error; late, early, missing and duplicated inputs are applied as specified |
+| D8 Client, bot and `--connect` | `mp/d-client` | Opus | D5b, D6, D7 | The client session: join, prediction, reconciliation, smoothing, interpolation (the slow entities' longer delay included), clock steering, local effects, neutral controls in menus; the headless bot (the client session with a scripted pilot); the game's `--connect`; the capture and the diagnostics log | On the simulator with no loss, one platform and no hit, the prediction never differs from the host; two bots fly a 5-minute fight against a server; a windowed client flies against a server on this machine through `tools/agent-run.sh` |
+| D9 Lag compensation | `mp/d-lagcomp` | Opus | D4 | The hit-volume history in combat, the view tick in `SeatInput`, rewound gun hit tests | Single-player baseline SAME; a burst aimed at the drawn position of a target crossing at 500 knots, with a 150 ms round trip and a 100 ms interpolation delay, hits with compensation and misses without; the cap holds |
+| D10 Matrix and measurements | `mp/d-bots` | Sonnet | D8, D9 | The simulator matrix as a test, a CI job with a server and two bots, load and bandwidth at 2, 8, 15 and 30 humans | The [matrix limits](MULTIPLAYER.md#netcode-numbers) hold; CI passes on all three platforms; `docs/baselines/net-<date>.md` records the matrix, bandwidth against the budget and host CPU per human |
+| D11 LAN acceptance | lead, then John | Opus | all | Agents smoke-test a dedicated server with a windowed client and a bot on the development machine; then John flies it on three machines on his LAN, macOS, Linux and Windows (John, 2026-09-30); docs brought to built | The plan's stage D acceptance, with evidence from both |
+
+```mermaid
+flowchart TD
+  D1["D1 Codec"] --> D2["D2 Transport"]
+  D1 --> D4["D4 Own-plane step"]
+  D3a["D3a Import library"] --> D3b["D3b Mission as data"]
+  D3b --> D5a["D5a Flight frame"]
+  D5a --> D5b["D5b Cockpit readout"]
+  D5a --> D3c["D3c Open seating"]
+  D4 --> D6["D6 Wire"]
+  D5b --> D6
+  D4 --> D9["D9 Lag compensation"]
+  D2 --> D7["D7 Host and server"]
+  D3c --> D7
+  D6 --> D7
+  D7 --> D8["D8 Client, bot, --connect"]
+  D8 --> D10["D10 Matrix and measurements"]
+  D9 --> D10
+  D10 --> D11["D11 LAN acceptance"]
+```
+
+D1, D3a and D4 start together (D4 moves the shared step first and takes the
+codec when D1 merges); D2 follows D1. D3b, D5a, D5b and D3c
+all edit `main.rs` or combat's first-ownship code, so they run in that order,
+each rebased on the one before; D5b and D3c may overlap once D5a has taken the
+app off `own()`. D9 changes combat's hit search, so it rebases on D3c.

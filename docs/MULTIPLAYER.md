@@ -374,7 +374,8 @@ foundation for later large battles and live campaigns.
 A dedicated server simulates flight models, terrain and weapons from the retail
 data, so its operator must import their own copy of Fighters Anthology, the same
 way the game does. Nothing derived from retail media is ever sent over the
-network.
+network. How to set one up and run it: [dedicated server guide](DEDICATED-SERVER.md)
+(stage D design, not built yet).
 
 ## Networking
 
@@ -439,6 +440,97 @@ contacts update less often.
 **Hit authority.** Missiles are resolved by the host. Gun hits are resolved by
 the host after rewinding targets to where the shooter saw them (lag
 compensation).
+
+### Netcode numbers
+
+Stage D design of 2026-09-30, reviewed by John the same day
+([decisions](#decisions)). Every number is an *agent proposal* unless it is
+credited to John; stage D measures them and its baseline replaces the
+estimates. How they are used is in the
+[architecture guide](ARCHITECTURE.md#network-sessions), and the bytes in the
+[wire protocol](formats/net-protocol.md).
+
+**Rates.**
+
+| Item | Value | Source |
+| --- | --- | --- |
+| Simulation | 120 ticks a second | John, 2026-09-28 |
+| Snapshots | 30 a second (every fourth tick); a server setting of 10, 12, 15, 20, 24, 30, 40 or 60, the rates that divide 120 | John, 2026-09-28; the other rates are an agent proposal |
+| Inputs | Up to 60 packets a second, each repeating every unacknowledged tick up to 24 ticks (200 ms) | Agent proposal |
+| Keepalive | At least 10 packets a second each way | Agent proposal |
+| Packet size | At most 1,200 bytes | Guide |
+
+**Clocks, delays and smoothing.**
+
+| Item | Value |
+| --- | --- |
+| Input margin | The client keeps its clock ahead of the host so that the smallest margin by which its inputs arrived over the last 2 seconds is 1 tick plus one input packet's interval (3 ticks, 25 ms, at 60 packets a second), and one interval more while loss over the last 10 seconds is above 1 percent; a single lost packet then costs nothing |
+| Clock steering | The client's clock runs between 0.98 and 1.02 times real time; it jumps only when more than 250 ms off |
+| Missing input | The host repeats the player's last stick, throttle, trigger and scope controls with no commands; a command that arrives late is applied on the next tick |
+| Interpolation delay | Starts at 100 ms and adapts between 50 and 250 ms, keeping the drawn time at least 2 ticks behind the newest snapshot over the last 2 seconds, or 6 ticks while loss over the last 10 seconds is above 1 percent |
+| Interpolation | A cubic curve through two snapshots' positions and velocities; attitude turns the short way between them |
+| Extrapolation | Up to 250 ms along the last motion when a snapshot is late, then the aircraft holds |
+| Own aircraft check | Every snapshot carries a hash of the host's state of the player's plane at tick N, compared with the prediction for tick N; equal means no correction. The exact state follows when the host knows the prediction cannot match, when the client reports a mismatch, and at least once a second |
+| Correction blend | The drawn aircraft slides from its old path to the corrected one with a 50 ms time constant: 95 percent of the way within 150 ms |
+| Snap | No blend when the correction is over 100 ft or 20 degrees, or when the player is seated |
+| Too small to show | A correction under 0.01 ft and 0.01 degrees is applied without a visible blend (last-digit differences between platforms) |
+| Across platforms | A client on another operating system or processor than the host differs in the last digits every tick, so it reports a mismatch at each snapshot and receives the exact state every time: about 6 to 10 KB/s more, with corrections too small to show |
+
+**Hits.**
+
+| Item | Value | Source |
+| --- | --- | --- |
+| Missiles, rockets, bombs | Decided by the host, not rewound | John, 2026-09-28 |
+| Gun rounds from a human | Tested against targets as the shooter's screen showed them: the rewind is the whole round trip plus the interpolation delay plus the input margin | John, 2026-09-28; the formula corrects the plan's estimate |
+| Lag compensation cap | The part of the rewind beyond the interpolation delay is capped at 250 ms (30 ticks), so the whole rewind is at most 500 ms; the host keeps 1 second of history | Plan (250 ms for latency); agent proposal (how it applies, history) |
+| Own tracers | Drawn at once on the shooter's screen; a missile appears when the host launches it, one round trip after the trigger | Agent proposal |
+
+**Relevance.** How often each client hears about each entity (John,
+2026-09-30: 30 a second near, twice a second for the rest, smoothed):
+
+| Band | Rate | Priority weight |
+| --- | --- | --- |
+| The player's own flight, anything within 20 nm, anything a friendly sensor tracks, any missile aimed at the player, any missile within 10 nm, and whatever the player's view follows (the target, wing, external and fly-by views' subject) | Every snapshot (30 a second) | 1 |
+| Everything else | Twice a second | 1/15 |
+
+A band is a priority, not a hard rate: an entity waits only when the packet is
+full. In a 30-aircraft LAN mission everything is expected to fit every time.
+The view rule is an *agent decision*, so that an aircraft the player watches is
+never a twice-a-second one.
+
+**Smoothing the slow ones** (John asked that they never jitter; the method is
+an *agent decision*). An entity sent twice a second is drawn further in the
+past than the others: its own update interval plus the normal delay, about
+600 ms, on the same curve through its updates, so the client never has to guess
+ahead of it and it moves as smoothly as a near one. When an entity changes band
+its delay slides to the new one at no more than a tenth of real time (half a
+second of delay over five seconds), so its speed never visibly jumps. At 20 nm
+and beyond, being half a second in the past is invisible; radar, RWR and the
+target window come from the host's own readout, not from the drawn aircraft.
+
+**Connections.**
+
+| Item | Value |
+| --- | --- |
+| Connecting | The client repeats each handshake step every 250 ms and gives up after 10 seconds |
+| Dropped player | 5 seconds without a valid packet; the AI takes the plane at once |
+| Players per server | A setting, default 30 (John, 2026-09-28); a co-op mission seats at most its 15 friendly planes |
+| Default port | UDP 26900, a setting |
+
+**Stage D acceptance limits.** A server and two headless bot clients fly a
+scripted 5-minute fight in the network simulator, once per combination of
+round trip (50, 150 and 300 ms, with arrival spread of plus or minus 10 percent
+of the one-way delay) and loss (0, 2 and 5 percent each way, plus 1 percent
+duplicated packets):
+
+| Measure | Limit |
+| --- | --- |
+| Own aircraft, same platform, with no late input and no hit, blast or weapon release in the last second | No correction at all: the prediction equals the host bit for bit |
+| Own aircraft, all snapshots | At least 99 percent need no visible correction at up to 2 percent loss, 97 percent at 5 percent; outside the second after a hit, blast or release, 99 percent of corrections are under 1 ft |
+| Other aircraft | The drawn position against the host's at the same moment: 99 percent of frames within 1 ft at no loss, 3 ft at 2 percent and 10 ft at 5 percent |
+| Extrapolated frames | Under 1 percent at 2 percent loss, under 3 percent at 5 percent |
+| Inputs the host had to repeat | Under 0.5 percent of ticks at up to 2 percent loss, under 2 percent at 5 percent, after the first 5 seconds |
+| Bandwidth | Measured each way per player and recorded against the [plan's budget](multiplayer-plan.md#bandwidth-budget) |
 
 ### Transport
 
@@ -561,15 +653,22 @@ Made by John on 2026-09-29 at the stage B review
 | Kill credit | Every shooter is credited: an AI that shoots down a human-flown aircraft gets the kill in the debrief and the mission recording, as a human does. Single player too |
 | Merge from main | When the bug bash lands on main, merging it into the multiplayer work is its own stage, a new C, and the later stages move down one letter. Built 2026-09-29 ([how stage C landed](ARCHITECTURE.md#how-stage-c-landed)) |
 
+Made by John on 2026-09-30 at the stage D design review
+([architecture](ARCHITECTURE.md#network-sessions)):
+
+| Question | Decision |
+| --- | --- |
+| Menus in a networked flight | Nothing pauses. While the pause or Esc menu is up the controls go neutral (stick centred, throttle held, trigger released); a window that loses focus counts as paused (agent reading). Whether the AI takes over after a while stays open for stage F |
+| Relevance | 30 updates a second for what is near or tracked, twice a second for everything else, smoothed so those never jitter ([netcode numbers](#netcode-numbers)) |
+| Recordings of networked flights | In stage D each client keeps a capture of what the network brought, with a diagnostics log, instead of recording a replay live. A capture converts into a replay whose aircraft follow a smooth curve through every update received, using hindsight, rather than what the player saw live; the conversion comes in stage E. Until then this replaces the 2026-09-28 rule that each machine records its own replay |
+| Stage D acceptance | Agents smoke-test a dedicated server with clients on the development machine; John then tests on three machines on his LAN, macOS, Linux and Windows |
+| Stage D agent proposals | Approved as designed: the five new crates, UDP port 26900, the server's mission lifecycle, the build match rule, a joining player keeps the plane's loadout, own tracers at once and own missiles when the host launches them, 1.0 and 1.02F imports together once verified, and the retail stall-speed switch refused in networked play |
+
 ## Open questions
 
 From the feature spec. Mission start, PvP scoring and collisions were settled by
 John on 2026-09-28 (see [decisions](#decisions)).
 
-- **Relevance bands:** which aircraft each client receives at the full 30 Hz and
-  which at reduced rates, by distance and sensor range. *Agent proposal:* 30 Hz
-  for your own flight, anything within 20 nm, anything any friendly sensor
-  tracks and any missile aimed at you; 10 Hz from 20 to 60 nm; 2 Hz beyond.
 - **Master server abuse limits:** rate limiting and fake listing protection.
   *Agent proposal:* a listing must first answer a challenge sent to its address;
   heartbeats and queries are rate-limited per address; listings expire after
@@ -581,10 +680,14 @@ Raised while planning (2026-09-28):
 - **Menu, focus loss and controller loss in flight.** With no pause, what does
   the aircraft do? *Agent proposal:* the pilot's controls return to neutral
   while the menu is open, and after 10 seconds without input the AI flies the
-  aircraft until the player touches the controls again.
+  aircraft until the player touches the controls again. John settled the first
+  half on 2026-09-30 (neutral controls, [decisions](#decisions)); the AI
+  takeover is still open, for stage F.
 - **Dedicated server King.** *Agent proposal:* the first human to join a
   dedicated server becomes King, unless its config file fixes the mission and
-  locks the settings.
+  locks the settings. Stage D's server always takes its mission and settings
+  from its files ([server guide](DEDICATED-SERVER.md)); the King arrives with
+  the stage F lobby.
 - **No eligible host.** If every peer can connect only through the relay, no one
   can be the calculated host. *Agent proposal:* the King sees a plain warning
   and can pin a relayed host anyway, or use a dedicated server.
