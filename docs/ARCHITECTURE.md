@@ -13,7 +13,7 @@ The M0 environment supports the M1a menu slice, the M1b renderer across all 16 t
 | Component | Choice | Purpose |
 | --- | --- | --- |
 | Language | Rust 2024, compiler 1.91.1 | Reproducible native builds |
-| Workspace | `crates/tore-app`, `tore-formats`, `tore-import`, `tore-extract`, `tore-sim`, `tore-input`, `tore-input-native`, `tore-diagnostics-native`, `tore-replay`, `tore-world`, `tore-codec` | Desktop shell and entry point, plus the format, import, extraction, simulation, input, mission recording, mission core and network encoding (standard library only) crates |
+| Workspace | `crates/tore-app`, `tore-formats`, `tore-import`, `tore-extract`, `tore-sim`, `tore-input`, `tore-input-native`, `tore-diagnostics-native`, `tore-replay`, `tore-world`, `tore-codec`, `tore-net` | Desktop shell and entry point, plus the format, import, extraction, simulation, input, mission recording, mission core, network encoding and network transport (both standard library only) crates |
 | Window/input | `winit` 0.30 | Native window lifecycle and input |
 | Graphics | `wgpu` 27 | Metal on macOS; native backends for Windows/Linux |
 | Diagnostic facade | Existing `log` 0.4 and `tracing` 0.1 | Bounded app/backend logs without a logging framework |
@@ -1909,9 +1909,9 @@ combat, the AI bridge, the debrief and the recorder.
 Design for stage D of the [multiplayer plan](multiplayer-plan.md#stages),
 written by the lead on 2026-09-30, revised the same day after an independent
 review, and reviewed by John the same day: his answers are in the guide's
-[decisions](MULTIPLAYER.md#decisions). Slices D1 (`tore-codec`), D3a
-(`tore-import`) and D4 (the shared step for a human's plane and its exact
-state) are built so far (see the [slice table](#how-stage-d-lands)).
+[decisions](MULTIPLAYER.md#decisions). Slices D1 (`tore-codec`), D2
+(`tore-net`), D3a (`tore-import`) and D4 (the shared step for a human's plane
+and its exact state) are built so far (see the [slice table](#how-stage-d-lands)).
 Every choice here is an agent decision unless it is credited to John. The three
 follow-up specs the plan assigns to stage D are:
 
@@ -1989,7 +1989,7 @@ dependency.
 | Crate | Kind | Holds | Depends on |
 | --- | --- | --- | --- |
 | `tore-codec` | library | Bit writer and bounded bit reader, variable-length integers, quantizers, FNV-1a and CRC-32. Shared by the wire, the exact own-plane coder and, in stage H, the checkpoints | std only |
-| `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator | tore-codec |
+| `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator. **Built (D2).** The host and client are state machines that never read a clock or touch a socket: the caller passes the time in, feeds them datagrams and sends what they give, over a UDP socket or the simulator (agent decision) | tore-codec |
 | `tore-import` | library | The data folder, the import pack's reader and writer, media detection and the import itself, moved out of `tore-app` so a server can import and load without the game. *Built (D3a).* | tore-formats |
 | `tore-session` | library | The game's side of networking: the wire messages, the host session (clock, inputs, snapshots, joins), the client session (prediction, interpolation, clock steering, readouts) and the headless bot client | tore-world, tore-net, tore-codec |
 | `tore-server` | binary | The dedicated server: configuration, import, logging and the console | tore-session, tore-import |
@@ -2478,7 +2478,7 @@ risky refactors, as John asked; the rest are Sonnet.
 | Slice | Branch | Model | After | Work | Acceptance |
 | --- | --- | --- | --- | --- | --- |
 | D1 Codec | `mp/d-codec` | Sonnet | | `tore-codec`: bits, variable-length integers, quantizers, FNV-1a, CRC-32 | Round trips at every width; a bounded reader never panics on 100,000 seeded random inputs; known CRC-32 and FNV-1a test vectors. **Built (D1):** also the bucketed signed coding, exact floats against a baseline and short strings; the readers reject every non-canonical form |
-| D2 Transport | `mp/d-net` | Opus | D1 | `tore-net`: packets, handshake, acks and round trip, reliable ordered messages, statistics, UDP and the simulator | On the simulator at 300 ms and 5 percent loss with duplicates and reordering: the handshake completes, 10,000 reliable messages arrive once and in order, a 64 KB message arrives whole, the round trip estimate is within 5 percent and the loss estimate within 1 point; a challenge is never larger than its request; a seeded packet fuzz never panics; two real sockets on 127.0.0.1 connect |
+| D2 Transport | `mp/d-net` | Opus | D1 | `tore-net`: packets, handshake, acks and round trip, reliable ordered messages, statistics, UDP and the simulator | On the simulator at 300 ms and 5 percent loss with duplicates and reordering: the handshake completes, 10,000 reliable messages arrive once and in order, a 64 KB message arrives whole, the round trip estimate is within 5 percent and the loss estimate within 1 point; a challenge is never larger than its request; a seeded packet fuzz never panics; two real sockets on 127.0.0.1 connect. **Built (D2):** 10,000 messages each way and 64 KB arrive in 25 simulated seconds; the round trip reads 286 to 306 ms across 20 seeds, mostly a little low under reordering; the loss estimate equals the loss over the packets it judged, 4.6 and 5.7 percent over the run; the fuzz reaches bad-packet and protocol-error endings; IPv6 loopback works too. [Wire details the build settled](formats/net-protocol.md#what-the-transport-settled) |
 | D3a Import library | `mp/d-import` | Sonnet | | **Built (D3a).** `tore-import` out of the app: data folder, pack, media detection, import | Single-player baseline SAME; the app imports and loads as before; `cargo tree -p tore-import` has no winit, wgpu or cpal; where both a 1.0 and a 1.02F import are available, the simulation resources of a sample mission hash the same |
 | D3b Mission as data | `mp/d-mission` | Sonnet | D3a | `MissionSpec` and its text form; `World::new` with single-player seating; the creator builds through it | Single-player baseline SAME; the spec round-trips through text; a headless test builds a single-player mission from synthetic resources and steps it |
 | D4 Own-plane step and exact state | `mp/d-own-state` | Opus | D1 | The shared per-plane step; an exact coder and hash for a human plane's flight, turbulence and ownship terms, every field destructured | Single-player baseline SAME; a plane stepped by `World` and a copy stepped by the shared function from a decoded state, with the same inputs and terms, stay bit-identical for 1,200 ticks; adding a field to the state without coding it fails to compile. **Built (D4):** see [one step for a human's plane](#one-step-for-a-humans-plane) and [its exact state](#the-exact-state-of-a-humans-plane); an airborne plane's exact state costs about 200 bytes against a baseline one snapshot back |

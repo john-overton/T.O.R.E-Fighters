@@ -9,7 +9,10 @@
 > <!-- tore-header v2 -->
 
 Design of 2026-09-30 for stage D of the [multiplayer plan](../multiplayer-plan.md#stages),
-reviewed by John the same day; **nothing here is built yet.** This is T.O.R.E's own
+reviewed by John the same day. The transport, from [Overview](#overview) to
+[Reliable messages](#reliable-messages), is built in `tore-net` (slice D2; [what
+the build settled](#what-the-transport-settled)); the game's sections, from
+[Inputs](#inputs) on, are not built yet. This is T.O.R.E's own
 protocol. Fighters Anthology's wire format is unknown
 ([retail spec](../spec/multiplayer.md)) and nothing here tries to match it.
 Every choice below is an agent decision unless it is credited to John. How the
@@ -24,6 +27,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Connecting](#connecting)
 - [Acknowledgements and round trip](#acknowledgements-and-round-trip)
 - [Reliable messages](#reliable-messages)
+- [What the transport settled](#what-the-transport-settled)
 - [Inputs](#inputs)
 - [Snapshots](#snapshots)
 - [Events](#events)
@@ -58,7 +62,7 @@ Every packet starts with a byte-aligned header:
 
 | Field | Size | Meaning |
 | --- | --- | --- |
-| Checksum | 32 bits | CRC-32 (IEEE) over the protocol id followed by every byte after this field |
+| Checksum | 32 bits | CRC-32 (IEEE) over the protocol id followed by every byte after this field, least significant byte first |
 | Kind | 8 bits | One of the kinds below |
 
 The protocol id is not sent. It is the 8 bytes `TORE-NET` followed by the
@@ -85,10 +89,10 @@ A **Payload** packet, the only kind once connected, continues:
 | Sequence | 16 bits | This packet's number in its direction, wrapping |
 | Ack | 16 bits | The newest sequence received from the other side |
 | Ack bits | 32 bits | Bit i set: sequence `ack - 1 - i` was received |
-| Ack delay | 16 bits | Time from receiving `ack` to sending this packet, in units of 16 microseconds (at most about 1 s) |
+| Ack delay | 16 bits | Time from receiving `ack` to sending this packet, in units of 16 microseconds (at most 65,534 units, about 1 s); 65,535 means nothing has been received yet, and the ack and ack bits mean nothing (agent decision, D2) |
 | Sections | rest | Each: kind 8 bits, length 16 bits (bytes), body |
 
-The payload header is 21 bytes with the checksum and kind. Section kinds:
+The payload header is 19 bytes with the checksum and kind. Section kinds:
 
 | Section | Kind | Direction |
 | --- | --- | --- |
@@ -98,9 +102,10 @@ The payload header is 21 bytes with the checksum and kind. Section kinds:
 | [Events](#events) | 4 | host to client |
 | [Own state](#the-own-aircraft) | 5 | host to client |
 
-An empty Payload is a keepalive. A section of an unknown kind, a length that
-runs past the packet or a body that fails its own checks drops the whole
-packet; such packets are counted, and 50 of them within 5 seconds from one
+An empty Payload is a keepalive. A section of an unknown kind, a second
+Messages section, a length that runs past the packet, an acknowledgement of a
+sequence never sent, or a body that fails its own checks drops the whole
+packet, unacknowledged; such packets are counted, and 50 of them within 5 seconds from one
 connection end it.
 
 ## Connecting
@@ -113,7 +118,7 @@ sequenceDiagram
   participant C as Client
   participant H as Host
   C->>H: Connect request, padded to 1,000 bytes
-  H->>C: Challenge with a cookie, about 30 bytes
+  H->>C: Challenge with a cookie, 21 bytes
   C->>H: Challenge answer, cookie echoed, padded
   alt accepted
     H->>C: Accepted, connection id and rates
@@ -124,26 +129,37 @@ sequenceDiagram
 
 | Packet | Fields |
 | --- | --- |
-| Connect request | protocol version (16), game version (string), game commit (string), client nonce (64), zero padding to 1,000 bytes |
-| Challenge | client nonce (64), cookie (64) |
-| Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), zero padding to 1,000 bytes |
-| Accepted | connection id (32, random), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 4 by default), host tick now (32) |
-| Refuse | reason (8), text (string, up to 200 bytes) |
-| Disconnect | connection id (32), reason (8); sent three times |
+| Connect request | protocol version (16), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
+| Challenge | client nonce (64), cookie (64); 21 bytes |
+| Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), zero padding to 1,000 bytes |
+| Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 4 by default), host tick now (32); 31 bytes |
+| Refuse | client nonce (64), reason (8), text (string, up to 200 bytes) |
+| Disconnect | connection id (32), reason (8); sent three times at once; 10 bytes |
+
+A request or answer that is not exactly 1,000 bytes, or whose padding is not
+zero, is dropped. Accepted and Refuse carry the client's nonce, and the client
+takes neither without it, so a stranger who cannot see the traffic cannot
+refuse or misdirect a join; the game version and commit are repeated in the
+answer because the host's accept decision needs them and it keeps no state
+between the two (agent decisions, D2, which also moved the nonce ahead of the
+strings).
 
 The **cookie** is a keyed hash of the client's address and port, its nonce
 and the current 10-second time slot, with a key drawn at host start from the
 standard library's randomly seeded hasher. The host accepts the current and
 the previous slot. It keeps no record of a client until a Challenge answer
 with a good cookie arrives. A repeated Challenge answer from the same address
-and nonce gets the same Accepted again, never a second connection. The
+and nonce gets the same Accepted again, never a second connection. A good
+answer with a new nonce from an address that already has a connection replaces
+it: the game restarted on the same port (agent decision, D2). The
 connection id is drawn the same way as the cookie's key. A callsign already in
 use gets a suffix (`Viper_2`), shortened first if the whole would pass 15
 characters.
 
 A client resends its current step every 250 ms and gives up after 10 seconds
-("no answer from the server"). The host answers at most 20 connect requests a
-second from one address and 200 in all.
+("no answer from the server"). The host answers at most 20 connect requests
+and answers a second from one IP address and 200 in all, counted per whole
+second of its clock.
 
 **Refusal reasons**, each with a plain-language text the client shows:
 
@@ -163,9 +179,10 @@ needs a code.
 The content check happens after the mission loads, as a reliable message
 (below), because only then can the client compare.
 
-**Disconnect reasons:** the player left, timeout (5 seconds without a valid
-packet), too many bad packets, protocol error (a message out of its window),
-content mismatch, server stopping.
+**Disconnect reasons** (the codes are an agent decision, D2): 1 the player
+left, 2 timeout (5 seconds without a valid packet), 3 too many bad packets,
+4 protocol error (a message ahead of its window, or fragments that do not fit
+together), 5 content mismatch, 6 server stopping, 7 kicked.
 
 ## Acknowledgements and round trip
 
@@ -173,14 +190,23 @@ content mismatch, server stopping.
   `a - b` taken modulo 65,536 is between 1 and 32,767.
 - Every packet acknowledges the newest sequence received and the 32 before it.
   A sent packet is **delivered** when an acknowledgement names it and **lost**
-  when 33 newer packets are acknowledged without it.
+  when 33 newer packets are acknowledged without it. A packet already received,
+  or more than 32 behind the newest, is dropped unread: it could not be
+  acknowledged.
 - **Round trip.** When an acknowledgement names a new newest packet, the
   sample is `now - (time that packet was sent) - ack delay`. It is smoothed as
-  TCP does (gain 1/8 for the mean, 1/4 for the mean deviation).
+  TCP does (gain 1/8 for the mean, 1/4 for the mean deviation). Before the
+  first sample it is taken as 250 ms; a client whose Challenge answer went out
+  once takes the wait for Accepted as its first sample (agent decisions, D2).
+  Under reordering the estimate runs a little low, since the newest packet,
+  the only one whose delay comes back, is more often a fast one: readings of
+  286 to 306 ms, most below 300, on a 300 ms path with arrivals spread by
+  plus or minus 15 ms (20 seeds).
 - **Loss** is lost over lost plus delivered, over the last 5 seconds.
 - **Arrival spread** is measured on snapshot packets (host to client) and on
   input packets (client to host) from the tick each carries, in the manner of
-  RFC 3550's interarrival jitter.
+  RFC 3550's interarrival jitter. The transport does not read ticks: the
+  session gives it each packet's send time, from its tick, and arrival time.
 - Each side sends at least 10 packets a second; with nothing else to say it
   sends an empty Payload.
 
@@ -196,14 +222,20 @@ debrief, leaving.
   more than `max(1.25 × round trip, 30 ms)` ago. The packet remembers which
   messages it carried; when the packet is delivered, they are acknowledged.
 - The receiver hands messages over in id order, holds early ones within the
-  window and drops duplicates. An id beyond the window is a protocol error.
+  window and drops duplicates. An id 256 or more ahead of the next one to hand
+  over is a protocol error. An id behind it is a duplicate however far back,
+  since a packet that waited on the way can carry an id the sender's window has
+  since left far behind (32 packets carry at most 8,160 new ids, so no real
+  duplicate is 32,768 back).
 - **Large messages** (the mission, the seated state, the roster, the debrief)
   are split into fragments of up to 256 bytes, each its own message; the first
-  carries the total length (at most 64 KB, which the window of 256 holds whole).
-  Ordered delivery puts them back together.
+  carries the total length in its record header (at most 64 KB, which the
+  window of 256 holds whole). Ordered delivery puts them back together.
 - During flight the Messages section takes at most 256 bytes of a snapshot
-  packet, so one fragment always fits and snapshots keep flowing; before
-  seating it may fill the packet.
+  packet, and before seating it may fill the packet. The budget is the
+  session's per connection; the first due message goes whenever it fits the
+  packet, even past the budget, so a whole fragment always moves and
+  snapshots keep flowing.
 
 **Message kinds:**
 
@@ -220,6 +252,62 @@ debrief, leaving.
 | Leave | client to host | The player ends the mission |
 | Debrief | host to client | The seat's debrief report as the single-player debrief shows it |
 | Mission ended | host to client | Why (every human left, time limit, server stopping) and seconds until the next mission, if any; the host disconnects the player once it and the debrief are acknowledged |
+
+## What the transport settled
+
+Details slice D2 (`crates/tore-net`) decided where the design left them open.
+Each is an agent decision unless it says otherwise.
+
+**The Messages section** (kind 1) is bit packed: a record count (8 bits, 1 to
+255), then each record, then zero bits to the byte boundary.
+
+| Field | Bits | Present |
+| --- | --- | --- |
+| Id | 16 | always |
+| Part | 2 | always: 0 a whole message, 1 the first fragment, 2 a later fragment |
+| Kind | 8 | whole message and first fragment |
+| Total length less one | 16 | first fragment only; the total is 257 to 65,536 bytes |
+| Body length | 9 | always: a whole message 0 to 256, a first fragment exactly 256, a later one 1 to 256 |
+| Body | 8 a byte | always |
+
+**Who decides what.** The host refuses a different protocol version (code 1)
+and, past its connection limit (a setting, default 30), "server full" (code 3)
+by itself. Every other decision goes to the session through one call with the
+join's details (address, versions, build, callsign, password), which accepts
+with the session id, rates and tick, or refuses with a code and text. Making
+a callsign unique is the session's job. The session also checks its own
+sections before anything in a packet is applied: a section it rejects drops
+the whole packet unacknowledged and counts it as bad, so nothing the session
+could not read is ever treated as delivered.
+
+**Pace and limits.**
+
+- A packet of due messages alone goes out at most 120 times a second; the
+  session's own packets carry messages too. Without the pace a burst of
+  messages sent every millisecond let packets be overtaken by more than 32
+  newer ones and dropped as too old on a 300 ms path.
+- A sender queues at most 8,192 messages, fragments counted one each (2 MB);
+  past that, sending is refused and the session waits.
+- One read of a socket takes at most 1,024 datagrams, so a flood cannot hold
+  the host's loop.
+- A Disconnect's three copies go out together.
+
+**Events.** Every Payload a side sends is reported back as delivered or lost
+by its sequence, which the snapshot baselines and the event queue need.
+Every connection that ends, and every join that fails, reports exactly one
+reason: no answer, refused with its code and text, disconnected with its
+reason and whether the other side said so, or (on the host) replaced.
+
+**Time and randomness.** Nothing in the transport reads a clock: the caller
+passes the time in, which lets the simulator run faster than real time. A real
+endpoint draws its nonce, connection ids and cookie key from the standard
+library's randomly seeded hasher, each value from a fresh one; tests and the
+simulator can seed them instead, which makes a whole session repeat exactly.
+
+**The simulator** joins in-process endpoints by one-way links with a latency,
+arrivals spread uniformly within plus or minus a width (reordering follows),
+loss, duplication and optional burst loss (two states, good and bad), on a
+virtual clock. It can record every datagram with its fate and arrival times.
 
 ## Inputs
 
@@ -481,7 +569,10 @@ watch the network can read it. What the protocol does guard against:
 
 - **Spoofed connections and reflection.** The cookie makes a client prove it
   receives at its address before the host keeps anything, and a Challenge is
-  about 30 bytes against a 1,000-byte request.
+  21 bytes against a 1,000-byte request; no host reply to a handshake packet
+  is larger than it.
+- **Forged answers.** Accepted and Refuse carry the client's nonce, so only
+  someone who sees the traffic can refuse or misdirect a join.
 - **Blind injection.** Once connected, a packet must carry the connection's
   32-bit id and a valid checksum.
 - **Malformed packets.** Every decoder is bounded and returns an error instead

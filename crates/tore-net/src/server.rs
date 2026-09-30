@@ -1,0 +1,670 @@
+//! The host's side: the stateless handshake and every connection.
+
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::io;
+use std::net::{IpAddr, SocketAddr};
+use std::time::Duration;
+
+use crate::connection::{
+    CloseReason, Connection, ConnectionId, DisconnectReason, Event, RefuseReason, SendError, Stats,
+};
+use crate::entropy::{CookieKey, Entropy, Rng};
+use crate::packet::{
+    self, Accepted, Challenge, MAX_DATAGRAM, MAX_REFUSE_TEXT, Packet, PacketKind, Refuse,
+};
+use crate::{
+    COOKIE_SLOT, Counters, Datagrams, MAX_SECTION_KIND, RATE_LIMIT_PER_ADDRESS, RATE_LIMIT_TOTAL,
+    Transmit,
+};
+
+/// The host's settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerConfig {
+    /// The protocol version, kept by the caller (`tore-session`).
+    pub protocol_version: u16,
+    /// Connections at most; a join beyond it is refused as "server full"
+    /// before the gate is asked.
+    pub max_connections: usize,
+    /// The highest section kind a Payload may carry (5 in protocol 1).
+    pub max_section_kind: u8,
+    /// Where secrets come from; [`Entropy::System`] on a real network.
+    pub entropy: Entropy,
+}
+
+impl ServerConfig {
+    /// Defaults for `protocol_version`: 30 connections, section kinds up to
+    /// 5, system entropy.
+    pub fn new(protocol_version: u16) -> Self {
+        Self {
+            protocol_version,
+            max_connections: 30,
+            max_section_kind: MAX_SECTION_KIND,
+            entropy: Entropy::System,
+        }
+    }
+}
+
+/// What a client told the host when it asked to join.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectDetails {
+    /// The address and port it joins from.
+    pub address: SocketAddr,
+    /// Its protocol version (equal to the host's by the time the gate sees
+    /// it).
+    pub protocol_version: u16,
+    /// Its game version string.
+    pub game_version: String,
+    /// The commit its build stamps.
+    pub game_commit: String,
+    /// 1 to 15 printable ASCII characters. Making it unique (`Viper_2`) is
+    /// the caller's job.
+    pub callsign: String,
+    /// The password it gave; may be empty.
+    pub password: String,
+}
+
+/// What the host tells an accepted client, besides its connection id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AcceptInfo {
+    /// The session's id.
+    pub session_id: u64,
+    /// Ticks per second (120).
+    pub ticks_per_second: u8,
+    /// Ticks between snapshots.
+    pub ticks_per_snapshot: u8,
+    /// The host's tick now.
+    pub host_tick: u32,
+}
+
+/// The gate's answer to a join.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Decision {
+    /// Let the client in.
+    Accept(AcceptInfo),
+    /// Turn it away with a reason and a text of up to 200 bytes (longer
+    /// text is cut at a character boundary).
+    Refuse {
+        /// The reason code.
+        reason: RefuseReason,
+        /// The text the player sees.
+        text: String,
+    },
+}
+
+/// The caller's decisions during [`Server::receive`]: whether to accept a
+/// join, and whether a Payload's own sections pass their checks.
+///
+/// A closure `FnMut(&ConnectDetails) -> Decision` is a gate that accepts
+/// every section.
+pub trait Gate {
+    /// Accept or refuse a join whose cookie is good. Called once per new
+    /// connection; a repeated answer gets the same Accepted without asking.
+    fn accept(&mut self, details: &ConnectDetails) -> Decision;
+
+    /// Checks one of the caller's sections (kind 2 and up) before anything in
+    /// the packet is applied. False drops the whole packet, unacknowledged,
+    /// and counts it as bad. It must not change the caller's state: the
+    /// section arrives again as an [`Event::Payload`].
+    fn check_section(&mut self, connection: ConnectionId, kind: u8, body: &[u8]) -> bool {
+        let _ = (connection, kind, body);
+        true
+    }
+}
+
+impl<F: FnMut(&ConnectDetails) -> Decision> Gate for F {
+    fn accept(&mut self, details: &ConnectDetails) -> Decision {
+        self(details)
+    }
+}
+
+/// Something that happened on the host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerEvent {
+    /// A join was accepted.
+    Connected {
+        /// The new connection.
+        connection: ConnectionId,
+        /// What the client sent.
+        details: ConnectDetails,
+    },
+    /// A connection ended. Every connection ends with exactly one of these.
+    Closed {
+        /// The connection.
+        connection: ConnectionId,
+        /// Its address.
+        address: SocketAddr,
+        /// Why.
+        reason: CloseReason,
+    },
+    /// Something on an established connection.
+    Connection {
+        /// The connection.
+        connection: ConnectionId,
+        /// What.
+        event: Event,
+    },
+}
+
+struct Entry {
+    connection: Connection,
+    nonce: u64,
+    accepted: Vec<u8>,
+}
+
+/// Connect requests and answers answered per address and in all, per whole
+/// second of the host's clock.
+#[derive(Debug, Default)]
+struct RateLimiter {
+    second: u64,
+    total: u32,
+    per_address: HashMap<IpAddr, u32>,
+}
+
+impl RateLimiter {
+    fn allow(&mut self, now: Duration, address: IpAddr) -> bool {
+        let second = now.as_secs();
+        if second != self.second {
+            self.second = second;
+            self.total = 0;
+            self.per_address.clear();
+        }
+        if self.total >= RATE_LIMIT_TOTAL {
+            return false;
+        }
+        let count = self.per_address.entry(address).or_insert(0);
+        if *count >= RATE_LIMIT_PER_ADDRESS {
+            return false;
+        }
+        *count += 1;
+        self.total += 1;
+        true
+    }
+}
+
+/// The host: answers joins without keeping state until a client proves its
+/// address, then keeps one connection per client.
+///
+/// It is driven entirely by the caller, which passes the time in: feed it
+/// datagrams with [`Server::receive`], call [`Server::update`] often (every
+/// tick), send what [`Server::poll_transmit`] gives, and handle
+/// [`Server::poll_event`].
+pub struct Server {
+    config: ServerConfig,
+    rng: Rng,
+    cookie_key: CookieKey,
+    entries: BTreeMap<SocketAddr, Entry>,
+    ids: HashMap<u32, SocketAddr>,
+    limiter: RateLimiter,
+    out: VecDeque<Transmit>,
+    events: VecDeque<ServerEvent>,
+    counters: Counters,
+}
+
+impl Server {
+    /// A host with no connections.
+    pub fn new(config: ServerConfig) -> Self {
+        let mut rng = Rng::new(config.entropy);
+        let cookie_key = CookieKey::new(config.entropy, &mut rng);
+        Self {
+            config,
+            rng,
+            cookie_key,
+            entries: BTreeMap::new(),
+            ids: HashMap::new(),
+            limiter: RateLimiter::default(),
+            out: VecDeque::new(),
+            events: VecDeque::new(),
+            counters: Counters::default(),
+        }
+    }
+
+    /// The settings.
+    pub fn config(&self) -> &ServerConfig {
+        &self.config
+    }
+
+    /// Datagrams dropped before reaching a connection, by cause.
+    pub fn counters(&self) -> &Counters {
+        &self.counters
+    }
+
+    /// The established connections, in address order.
+    pub fn connections(&self) -> impl Iterator<Item = ConnectionId> + '_ {
+        self.entries.values().map(|e| ConnectionId(e.connection.id))
+    }
+
+    /// A connection's address.
+    pub fn address(&self, connection: ConnectionId) -> Option<SocketAddr> {
+        self.ids.get(&connection.0).copied()
+    }
+
+    /// A connection's statistics.
+    pub fn stats(&self, connection: ConnectionId) -> Option<Stats> {
+        self.entry(connection).map(|e| e.connection.stats())
+    }
+
+    /// Caps the Messages section of each packet to this connection (the
+    /// first due message is always sent if it fits the packet). The default
+    /// is the whole packet; 256 during flight.
+    pub fn set_message_budget(&mut self, connection: ConnectionId, bytes: usize) {
+        if let Some(e) = self.entry_mut(connection) {
+            e.connection.set_message_budget(bytes);
+        }
+    }
+
+    /// Notes when a packet that arrived at `received` was sent, in the
+    /// sender's time (for example the tick it carries), for the arrival
+    /// spread statistic.
+    pub fn note_arrival(&mut self, connection: ConnectionId, sent: Duration, received: Duration) {
+        if let Some(e) = self.entry_mut(connection) {
+            e.connection.note_arrival(sent, received);
+        }
+    }
+
+    fn entry(&self, connection: ConnectionId) -> Option<&Entry> {
+        self.entries.get(self.ids.get(&connection.0)?)
+    }
+
+    fn entry_mut(&mut self, connection: ConnectionId) -> Option<&mut Entry> {
+        let address = *self.ids.get(&connection.0)?;
+        self.entries.get_mut(&address)
+    }
+
+    /// The next event, oldest first.
+    pub fn poll_event(&mut self) -> Option<ServerEvent> {
+        self.events.pop_front()
+    }
+
+    /// The next datagram to send, oldest first.
+    pub fn poll_transmit(&mut self) -> Option<Transmit> {
+        self.out.pop_front()
+    }
+
+    /// Queues a reliable message.
+    pub fn send_message(
+        &mut self,
+        connection: ConnectionId,
+        kind: u8,
+        body: &[u8],
+    ) -> Result<(), SendError> {
+        let entry = self
+            .entry_mut(connection)
+            .ok_or(SendError::UnknownConnection)?;
+        entry.connection.send_message(kind, body)
+    }
+
+    /// Sends a Payload with the caller's sections (kinds 2 and up) and
+    /// whatever reliable messages are due and fit. Returns its sequence, which
+    /// a later [`Event::Delivered`] or [`Event::Lost`] names.
+    pub fn send_payload(
+        &mut self,
+        now: Duration,
+        connection: ConnectionId,
+        sections: &[(u8, &[u8])],
+    ) -> Result<u16, SendError> {
+        let address = *self
+            .ids
+            .get(&connection.0)
+            .ok_or(SendError::UnknownConnection)?;
+        let entry = self
+            .entries
+            .get_mut(&address)
+            .ok_or(SendError::UnknownConnection)?;
+        let result = entry.connection.send_payload(now, sections, &mut self.out);
+        self.collect(address);
+        result
+    }
+
+    /// Ends a connection from the host's side.
+    pub fn disconnect(&mut self, connection: ConnectionId, reason: DisconnectReason) {
+        let Some(address) = self.ids.get(&connection.0).copied() else {
+            return;
+        };
+        if let Some(entry) = self.entries.get_mut(&address) {
+            entry.connection.close(reason, &mut self.out);
+        }
+        self.collect(address);
+    }
+
+    /// Ends every connection, for example with
+    /// [`DisconnectReason::ServerStopping`].
+    pub fn disconnect_all(&mut self, reason: DisconnectReason) {
+        let ids: Vec<ConnectionId> = self.connections().collect();
+        for id in ids {
+            self.disconnect(id, reason);
+        }
+    }
+
+    /// Timeouts, keepalives and due messages for every connection.
+    pub fn update(&mut self, now: Duration) {
+        let addresses: Vec<SocketAddr> = self.entries.keys().copied().collect();
+        for address in addresses {
+            if let Some(entry) = self.entries.get_mut(&address) {
+                entry.connection.update(now, &mut self.out);
+            }
+            self.collect(address);
+        }
+    }
+
+    /// Takes one datagram from `from`.
+    pub fn receive<G: Gate + ?Sized>(
+        &mut self,
+        now: Duration,
+        from: SocketAddr,
+        datagram: &[u8],
+        gate: &mut G,
+    ) {
+        let (kind, body) = match packet::open(datagram, self.config.protocol_version) {
+            Ok(opened) => opened,
+            Err(_) => {
+                self.counters.invalid += 1;
+                return;
+            }
+        };
+        match kind {
+            PacketKind::ConnectRequest => self.on_request(now, from, datagram.len(), body),
+            PacketKind::ChallengeAnswer => self.on_answer(now, from, datagram.len(), body, gate),
+            PacketKind::Payload => self.on_payload(now, from, datagram.len(), body, gate),
+            PacketKind::Disconnect => self.on_disconnect(from, body),
+            PacketKind::Challenge | PacketKind::Accepted | PacketKind::Refuse => {
+                self.counters.unexpected += 1;
+            }
+        }
+    }
+
+    fn send(&mut self, to: SocketAddr, packet: &Packet) {
+        match packet.encode(self.config.protocol_version) {
+            Ok(datagram) => self.out.push_back(Transmit { to, datagram }),
+            Err(_) => self.counters.unexpected += 1,
+        }
+    }
+
+    fn refuse(&mut self, to: SocketAddr, nonce: u64, reason: RefuseReason, text: &str) {
+        let refuse = Packet::Refuse(Refuse {
+            nonce,
+            reason: reason.code(),
+            text: truncate(text, MAX_REFUSE_TEXT).to_owned(),
+        });
+        self.send(to, &refuse);
+    }
+
+    fn slot(now: Duration) -> u64 {
+        now.as_secs() / COOKIE_SLOT.as_secs()
+    }
+
+    fn on_request(&mut self, now: Duration, from: SocketAddr, len: usize, body: &[u8]) {
+        let version = self.config.protocol_version;
+        let Ok(request) = packet::decode_connect_request(len, body, version) else {
+            self.counters.malformed += 1;
+            return;
+        };
+        if !self.limiter.allow(now, from.ip()) {
+            self.counters.rate_limited += 1;
+            return;
+        }
+        if request.protocol_version != version {
+            let text = format!(
+                "This server uses network protocol version {version}, and your game uses version {}. Both must be the same.",
+                request.protocol_version
+            );
+            self.refuse(from, request.nonce, RefuseReason::ProtocolVersion, &text);
+            return;
+        }
+        let cookie = self.cookie_key.cookie(from, request.nonce, Self::slot(now));
+        self.send(
+            from,
+            &Packet::Challenge(Challenge {
+                nonce: request.nonce,
+                cookie,
+            }),
+        );
+    }
+
+    fn on_answer<G: Gate + ?Sized>(
+        &mut self,
+        now: Duration,
+        from: SocketAddr,
+        len: usize,
+        body: &[u8],
+        gate: &mut G,
+    ) {
+        let Ok(answer) = packet::decode_challenge_answer(len, body) else {
+            self.counters.malformed += 1;
+            return;
+        };
+        if !self.limiter.allow(now, from.ip()) {
+            self.counters.rate_limited += 1;
+            return;
+        }
+        let slot = Self::slot(now);
+        let good = [slot, slot.wrapping_sub(1)]
+            .iter()
+            .any(|&s| self.cookie_key.cookie(from, answer.nonce, s) == answer.cookie);
+        if !good {
+            self.counters.bad_cookie += 1;
+            return;
+        }
+        let replacing = match self.entries.get(&from) {
+            Some(entry) if entry.nonce == answer.nonce => {
+                let datagram = entry.accepted.clone();
+                self.out.push_back(Transmit { to: from, datagram });
+                return;
+            }
+            Some(_) => true,
+            None => false,
+        };
+        let others = self.entries.len() - usize::from(replacing);
+        if others >= self.config.max_connections {
+            let text = format!(
+                "The server is full ({} players).",
+                self.config.max_connections
+            );
+            self.refuse(from, answer.nonce, RefuseReason::ServerFull, &text);
+            return;
+        }
+        let details = ConnectDetails {
+            address: from,
+            protocol_version: self.config.protocol_version,
+            game_version: answer.game_version,
+            game_commit: answer.game_commit,
+            callsign: answer.callsign,
+            password: answer.password,
+        };
+        let info = match gate.accept(&details) {
+            Decision::Accept(info) => info,
+            Decision::Refuse { reason, text } => {
+                self.refuse(from, answer.nonce, reason, &text);
+                return;
+            }
+        };
+        if replacing && let Some(old) = self.entries.remove(&from) {
+            self.ids.remove(&old.connection.id);
+            self.events.push_back(ServerEvent::Closed {
+                connection: ConnectionId(old.connection.id),
+                address: from,
+                reason: CloseReason::Replaced,
+            });
+        }
+        let id = self.new_connection_id();
+        let accepted = Packet::Accepted(Accepted {
+            nonce: answer.nonce,
+            connection: id,
+            session_id: info.session_id,
+            ticks_per_second: info.ticks_per_second,
+            ticks_per_snapshot: info.ticks_per_snapshot,
+            host_tick: info.host_tick,
+        });
+        let Ok(accepted) = accepted.encode(self.config.protocol_version) else {
+            return;
+        };
+        self.out.push_back(Transmit {
+            to: from,
+            datagram: accepted.clone(),
+        });
+        let connection = Connection::new(
+            id,
+            from,
+            self.config.protocol_version,
+            self.config.max_section_kind,
+            now,
+            None,
+        );
+        self.entries.insert(
+            from,
+            Entry {
+                connection,
+                nonce: answer.nonce,
+                accepted,
+            },
+        );
+        self.ids.insert(id, from);
+        self.events.push_back(ServerEvent::Connected {
+            connection: ConnectionId(id),
+            details,
+        });
+    }
+
+    fn new_connection_id(&mut self) -> u32 {
+        loop {
+            let id = self.rng.next_u64() as u32;
+            if id != 0 && !self.ids.contains_key(&id) {
+                return id;
+            }
+        }
+    }
+
+    fn on_payload<G: Gate + ?Sized>(
+        &mut self,
+        now: Duration,
+        from: SocketAddr,
+        len: usize,
+        body: &[u8],
+        gate: &mut G,
+    ) {
+        let Ok((header, rest)) = packet::decode_payload_header(body) else {
+            self.counters.malformed += 1;
+            return;
+        };
+        let Some(entry) = self.entries.get_mut(&from) else {
+            self.counters.unknown_address += 1;
+            return;
+        };
+        if entry.connection.id != header.connection {
+            self.counters.stale += 1;
+            return;
+        }
+        let id = ConnectionId(header.connection);
+        let sections = packet::decode_sections(rest);
+        let mut check = |kind: u8, body: &[u8]| gate.check_section(id, kind, body);
+        entry
+            .connection
+            .receive(now, header, sections, len, &mut check, &mut self.out);
+        self.collect(from);
+    }
+
+    fn on_disconnect(&mut self, from: SocketAddr, body: &[u8]) {
+        let Ok(disconnect) = packet::decode_disconnect(body) else {
+            self.counters.malformed += 1;
+            return;
+        };
+        let Some(entry) = self.entries.get_mut(&from) else {
+            self.counters.unknown_address += 1;
+            return;
+        };
+        if entry.connection.id != disconnect.connection {
+            self.counters.stale += 1;
+            return;
+        }
+        entry
+            .connection
+            .peer_closed(DisconnectReason::from_code(disconnect.reason));
+        self.collect(from);
+    }
+
+    /// Moves a connection's events out and removes it once closed.
+    fn collect(&mut self, address: SocketAddr) {
+        let Some(entry) = self.entries.get_mut(&address) else {
+            return;
+        };
+        let connection = ConnectionId(entry.connection.id);
+        while let Some(event) = entry.connection.events.pop_front() {
+            self.events
+                .push_back(ServerEvent::Connection { connection, event });
+        }
+        if let Some(reason) = entry.connection.closed.clone() {
+            self.entries.remove(&address);
+            self.ids.remove(&connection.0);
+            self.events.push_back(ServerEvent::Closed {
+                connection,
+                address,
+                reason,
+            });
+        }
+    }
+
+    /// Reads every datagram waiting on `socket` (at most 1,024 per call) and
+    /// takes each.
+    pub fn receive_from<D: Datagrams + ?Sized, G: Gate + ?Sized>(
+        &mut self,
+        socket: &mut D,
+        now: Duration,
+        gate: &mut G,
+    ) -> io::Result<usize> {
+        let mut buf = [0u8; MAX_DATAGRAM + 1];
+        let mut count = 0;
+        while count < crate::MAX_RECEIVE_BATCH {
+            let Some((len, from)) = socket.recv_datagram(&mut buf)? else {
+                break;
+            };
+            self.receive(now, from, &buf[..len], gate);
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    /// Sends every queued datagram. Keeps going past a failed send and
+    /// returns the first error.
+    pub fn transmit<D: Datagrams + ?Sized>(&mut self, socket: &mut D) -> io::Result<()> {
+        crate::datagram::transmit_all(&mut self.out, socket)
+    }
+}
+
+/// `text` cut to at most `max` bytes at a character boundary.
+fn truncate(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_respects_characters() {
+        assert_eq!(truncate("abc", 5), "abc");
+        assert_eq!(truncate("abcdef", 3), "abc");
+        assert_eq!(truncate("aé", 2), "a");
+    }
+
+    #[test]
+    fn limiter_caps_per_address_and_in_all() {
+        let mut limiter = RateLimiter::default();
+        let a: IpAddr = "10.0.0.1".parse().unwrap();
+        let now = Duration::from_millis(1500);
+        let allowed = (0..30).filter(|_| limiter.allow(now, a)).count();
+        assert_eq!(allowed, RATE_LIMIT_PER_ADDRESS as usize);
+        let mut total = allowed;
+        for i in 0..250u32 {
+            let ip = IpAddr::from([10, 1, (i >> 8) as u8, i as u8]);
+            total += usize::from(limiter.allow(now, ip));
+        }
+        assert_eq!(total, RATE_LIMIT_TOTAL as usize);
+        assert!(limiter.allow(Duration::from_millis(2000), a));
+    }
+}

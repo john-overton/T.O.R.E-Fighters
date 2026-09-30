@@ -1998,6 +1998,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tore-net"
+version = "0.1.3"
+dependencies = [
+ "tore-codec",
+]
+
+[[package]]
 name = "tore-replay"
 version = "0.1.3"
 
