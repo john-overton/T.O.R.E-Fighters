@@ -73,6 +73,41 @@ class ProbeCheckTests(unittest.TestCase):
         self.assertTrue(all(n.startswith("ai-") for n in names))
         self.assertGreater(len(names), 300)
 
+class ShortStripTests(unittest.TestCase):
+    """John, 2026-09-30: no ground start on a short strip, so no AI scenario or fuzz seed uses one."""
+
+    def test_a_short_strip_moves_to_the_next_airport_that_is_not(self):
+        from battery_scenarios._strips import SHORT_STRIPS, ground_airport, is_short_strip
+
+        self.assertEqual(sum(len(v) for v in SHORT_STRIPS.values()), 22)
+        self.assertEqual(ground_airport("APA", 1), 1)
+        self.assertEqual(ground_airport("APA", 3), 7)
+        self.assertEqual(ground_airport("LFA", 2), 4)
+        self.assertEqual(ground_airport("UKR", 3), 3)
+        self.assertEqual(ground_airport("~APAF", 2), 2)
+        self.assertTrue(is_short_strip("CUB", 13) and not is_short_strip("CUB", 1))
+
+    def test_no_scenario_and_no_fuzz_seed_starts_on_a_short_strip(self):
+        from battery_scenarios import _ai_fuzz
+        from battery_scenarios._strips import is_short_strip
+
+        def theater_and_airport(args):
+            if "--ground-start" not in args:
+                return None
+            theater = args[args.index("--theater") + 1] if "--theater" in args else "UKR"
+            return theater, int(args[args.index("--ground-start") + 1])
+
+        for s in ai.scenarios():
+            found = theater_and_airport(s.args)
+            if found:
+                self.assertFalse(is_short_strip(*found), f"{s.name} starts on a short strip")
+        for seed in _ai_fuzz.SEEDS:
+            args, _, _ = _ai_fuzz.config(seed)
+            found = theater_and_airport(args)
+            if found:
+                self.assertFalse(is_short_strip(*found), f"fuzz seed {seed} starts on a short strip")
+
+
 class LandOrderTests(unittest.TestCase):
     """Lead succession: a crashed player's land order is refused, a flying one's is accepted."""
 

@@ -20,6 +20,7 @@ from typing import Callable, Optional
 from battery import ROOT, Scenario
 
 from battery_scenarios import _ai_fuzz
+from battery_scenarios._strips import ground_airport
 
 AIRCRAFT = ["f18", "rafale", "f14", "a4e", "x31", "mig29", "su27", "mig21", "su25", "mig23", "su35", "f22", "f22n", "faxx"]
 SKILLS = ["novice", "average", "experienced", "ace"]
@@ -334,16 +335,11 @@ def fight(f: int, e: int, *extra: str) -> list[str]:
     return ["--probe-fight", f"{f}:{e}", *extra]
 
 
-_STRIP = "1,074 ft strip, the roll runs off the end (docs/testing/lane-ai.md, decision 11)"
-
 # Failures that are understood and documented in docs/testing/lane-ai.md. Each
 # turns red when it starts to pass, so the entry gets removed with the fix.
+# (The 1,074 ft strip failures are gone: short strips are no ground start, John
+# 2026-09-30, so no scenario or fuzz seed starts on one. See `_strips.py`.)
 KNOWN_FAILURES = {
-    "ai-theater-apa-takeoff-a3": _STRIP,
-    "ai-theater-lfa-takeoff-a3": _STRIP,
-    # Mostly only with TORE_AI_FUZZ=all (checked 2026-09-29; seed 89 since
-    # the weight-scaled stall speeds).
-    **{f"ai-fuzz-{seed:04d}": _STRIP for seed in (89, 149, 180, 296, 309, 316, 338, 399)},
     "ai-theater-cub-takeoff-a1": "friendly wing with no route leaves the map on a Key West ground start (docs/testing/lane-ai.md, decision 5)",
 }
 
@@ -586,7 +582,10 @@ def scenarios() -> list[Scenario]:
         where = ["--theater", theater]
         out.append(probe(f"theater-{theater.lower()}-fight-4v4", where + fight(4, 4, "--separation", "5", *attack)))
         out.append(probe(f"theater-{theater.lower()}-fight-8v8-noattack", where + fight(8, 8, "--separation", "10"), ticks=9600))
-        for airport in ("1", "3"):
+        for wanted in (1, 3):
+            # A short strip is no ground start (John, 2026-09-30): the next
+            # airport that is one takes its place, and names the scenario.
+            airport = str(ground_airport(theater, wanted))
             out.append(probe(f"theater-{theater.lower()}-takeoff-a{airport}", where + [
                 "--ground-start", airport, "--probe-wing-size", "3", "--maneuver", "takeoff", "--separation", "50"],
                 ticks=24000, timeout=1800, check=checker(ground=True, need_takeoff=True)))
