@@ -1,5 +1,5 @@
 # Ground start on any aircraft: brakes off, full power, pulse the stick back from 7.5 s until airborne (the weight-scaled stall speed
-# gives liftoff at 100 to 160 knots, up to 16 s of roll; this longer version is for the A-4E, which has no afterburner), gear and flaps up once airborne, then level off.
+# gives liftoff at 100 to 160 knots, up to 16 s of roll; this longer version is for the A-4E and the Su-25, which have no afterburner), gear and flaps up once airborne, then level off.
 wait 1
 key b
 key 6

@@ -182,8 +182,8 @@ def check_takeoff(output: str) -> list[str]:
 def liftoff_problems(output: str) -> list[str]:
     """The wheels leave the ground at the speed the weight-scaled model gives.
     Two checks. The imported 1 G edge bounds it (0.75 to 1.9 times, since the
-    stall speed grows with the square root of the weight above the edge's
-    empty-weight reference, docs/spec/takeoff-ground-contact.md). And it lands
+    stall speed grows with the square root of the weight over the aircraft's
+    fitted reference weight, docs/spec/takeoff-ground-contact.md). And it lands
     within 5 percent below to 12 percent above the loaded minimum speed for 1 G
     with full flaps that the probe prints as `min_level_flaps_kt`, which is
     the rule the model follows."""
@@ -209,14 +209,13 @@ APPROACH_TARGET = {
     "su27": (120, 135), "mig21": (160, 170), "su25": (125, 140), "mig23": (150, 165), "su35": (135, 145),
     "f22": (135, 145), "f22n": (135, 145), "faxx": (135, 145),
 }
-# Where one rule (the polygon's edge is the stall speed at the empty weight) is
-# more than 10 percent off the target, the figure the model gives, kept as a
-# regression window of plus or minus 6 percent (docs/testing/lane-flight.md).
-KNOWN_LIFTOFF = {"su27": 119.5, "su25": 92.9, "f22": 102.5, "f22n": 102.5, "faxx": 102.5}
-KNOWN_APPROACH = {
-    "f18": 155.8, "rafale": 158.3, "mig21": 136.9, "su25": 97.0, "mig23": 134.4, "f22": 102.0,
-    "f22n": 102.0, "faxx": 102.0,
-}
+# The figures the model gives with the fitted per-aircraft stall references
+# (`STALL_REFERENCE_FRACTIONS`, 2026-09-30), for the aircraft whose figure is not
+# exactly inside John's range, kept as a regression window of plus or minus 6
+# percent (docs/testing/lane-flight.md). All of them are within 10 percent of the
+# range, so the range's own window already holds them; these record the values.
+KNOWN_LIFTOFF = {"su27": 128.1, "su25": 123.0, "f22": 127.7, "f22n": 127.7, "faxx": 127.7}
+KNOWN_APPROACH = {"f18": 135.1, "su27": 142.2, "f22": 148.5, "f22n": 148.5, "faxx": 148.5}
 # Internal fuel of each aircraft's default load, pounds.
 INTERNAL_FUEL_LB = {
     "f18": 11220, "rafale": 9900, "f14": 15741, "a4e": 4434, "x31": 9975, "mig29": 13000, "su27": 19000,

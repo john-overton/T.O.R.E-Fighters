@@ -396,9 +396,10 @@ def scenarios() -> list[Scenario]:
     takeoffs = [
         build(
             f"takeoff-{ac}",
-            # The A-4E has no afterburner and needs 16 s of roll at its weight-scaled
-            # liftoff speed, so its script keeps climbing 3.5 s longer.
-            "takeoff-slow.txt" if ac == "a4e" else "takeoff-any.txt",
+            # The A-4E and the Su-25 have no afterburner and need 15 to 16 s of roll
+            # at their fitted, weight-scaled liftoff speeds (the Su-25 lifts off at
+            # about 15 s and climbs slowly), so their script keeps climbing longer.
+            "takeoff-slow.txt" if ac in ("a4e", "su25") else "takeoff-any.txt",
             [*quick, "--ground-start", "1", "--aircraft", ac, "--researched-flight"],
             takeoff_any_check,
         )
