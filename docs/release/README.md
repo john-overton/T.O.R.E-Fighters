@@ -7,6 +7,7 @@ pushed ([releasing](../RELEASING.md)).
 
 | Release | Title |
 | --- | --- |
+| [v0.1.3](v0.1.3.md) | Bug Bash, Overspeed, World Edge and Loaded Takeoffs |
 | [v0.1.2](v0.1.2.md) | Explosions, Sound Prefs, Smarter AI and Flight Views |
 | [v0.1.1](v0.1.1.md) | Replays, Flares, Chaff and Quality of Life |
 | [v0.1.0](v0.1.0.md) | Quick Mission Creator |

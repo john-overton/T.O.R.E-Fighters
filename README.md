@@ -12,7 +12,7 @@
   <a href="rust-toolchain.toml"><img alt="Rust 1.91.1 pinned" src="https://img.shields.io/badge/rust-1.91.1-b7410e?logo=rust&logoColor=white"></a>
   <a href="docs/DEVELOPMENT.md"><img alt="Linux, Windows and macOS" src="https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS-2f6f9f"></a>
   <a href="LICENSE"><img alt="GNU General Public License v3.0" src="https://img.shields.io/badge/license-GPL--3.0-1f6feb"></a>
-  <a href="docs/ROADMAP.md"><img alt="Milestone 1 released as v0.1.2, multiplayer next" src="https://img.shields.io/badge/milestone-M1%20released%2C%20M2%20next-orange"></a>
+  <a href="docs/ROADMAP.md"><img alt="Milestone 1 released as v0.1.3, multiplayer next" src="https://img.shields.io/badge/milestone-M1%20released%2C%20M2%20next-orange"></a>
 </p>
 
 <p align="center">
@@ -126,7 +126,7 @@ recovered yet, T.O.R.E uses a documented approximation labelled *fitted*. See
 
 ## What works today
 
-Version 0.1.2 completes most of [Milestone 1](docs/ROADMAP.md#milestone-1-faithful-quick-fight):
+Version 0.1.3 completes most of [Milestone 1](docs/ROADMAP.md#milestone-1-faithful-quick-fight):
 a quick fight from the original main menu, through Quick Mission setup and
 flight, to the debrief.
 
@@ -139,9 +139,8 @@ mission systems that are not built yet are refused before launch.
 
 **Aircraft and theaters.** Thirteen aircraft: F/A-18D, F-14D, A-4E, X-31 EFM,
 Rafale C, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N
-([roster and limits](docs/spec/roster-aircraft.md)). All 16 theaters and their
-59 retail map variants, with original terrain, artwork, scenery, weather and
-day/night palettes. Every base theater has airports with runways, targetable
+([roster and limits](docs/spec/roster-aircraft.md)). All 16 theaters, with
+original terrain, artwork, scenery, weather and day/night palettes. Every base theater has airports with runways, targetable
 buildings, tower radio and ILS guidance.
 
 **Flight.** Cockpit and HUD that adapt to the window shape, instrument windows,
@@ -160,7 +159,8 @@ decoy missiles, damage, smoke, debris, blackout and redout.
 **AI.** Up to six wings and 29 AI aircraft per Quick Mission, each with its
 own sensors, weapons, fuel and flight model, at four skill levels. They search,
 engage, defend against missiles, fly formation, follow wing orders, take off
-and land in turn, and head home when fuel runs low ([AI spec](docs/spec/ai.md)).
+and land in turn, and head home when fuel runs low or the fight is won
+([AI spec](docs/spec/ai.md)).
 
 **Sound.** Radio chatter and wingman replies, a two-seat crew voice, and
 in-flight music picked by the original's situation rules, all from your own
