@@ -710,7 +710,8 @@ only read: the menu's camera changes go through the ordinary view commands.
 ## Mission core and seats
 
 Design for stages A and B of the [multiplayer plan](multiplayer-plan.md#stages),
-written 2026-09-28. **Stages A and B are built.** The section is rewritten as
+written 2026-09-28. **Stages A and B are built, and stage C rebuilt them on main
+with the bug bash** ([how stage C landed](#how-stage-c-landed)). The section is rewritten as
 the stages land. John approved the design on 2026-09-28 with the decisions
 credited to him below; every other choice is an agent decision. His decisions
 are also in the [multiplayer guide](MULTIPLAYER.md#decisions).
@@ -989,12 +990,12 @@ the markers and `WingEjection` are read whatever the seat.
   flight-model probe, and the component probes (`--flight-probe-ticks`,
   `--countermeasure-preview`, `--combat-probe-ticks`, `--replay-combat`,
   `--combat-smoke`, `--ai-roster-probe-ticks`) keep testing one component each.
-- **Later:** the dedicated server (stage C) and the player-hosted game's thread
-  (stage D) drive the same `step` from a fixed 120 Hz clock that never pauses.
+- **Later:** the dedicated server (stage D) and the player-hosted game's thread
+  (stage E) drive the same `step` from a fixed 120 Hz clock that never pauses.
 
 #### Rules for mission state
 
-These make exact checkpoints (stage G) possible. They apply to everything in
+These make exact checkpoints (stage H) possible. They apply to everything in
 `tore-world` and to all new mission state from stage B on:
 
 - No file handles, sockets, threads, locks, `Rc`/`RefCell` or stored closures.
@@ -1685,10 +1686,10 @@ where the bug bash renumbered them.
   for the other cockpits until B1 lands.
 - **Orders.** Alt-key orders from a seat whose aircraft leads its wing go to that
   wing, to human and AI members alike. A human wingman gets the order as text and
-  the recording. Reply and request keys for human wingmen are stage E.
+  the recording. Reply and request keys for human wingmen are stage F.
 - **Debrief.** Built for each seat, with that seat's aircraft as the pilot column
   and the first other member of its wing as the wingman column. The full
-  multiplayer results screen is stage E.
+  multiplayer results screen is stage F.
 
   *Built (B5 step 1).* `debrief::capture(&World, SeatId)` builds the report of
   the plane the seat flies (`None` for a seat that flies none). The pilot column
@@ -1824,3 +1825,50 @@ applies when play resumes (stage B).
    - The fight test found one bug, fixed in its own commit: a hit by one ownship on
      another never reached the ledger (see [hit tests and friendly
      fire](#hit-tests-and-friendly-fire)).
+
+### How stage C landed
+
+Stage C (built 2026-09-29) brought the overnight bug bash into the multiplayer
+work. The bug bash had gone to `main` (81dee6b) while stages A and B were
+written against the old `main`, and both had reshaped the same code: the tick,
+combat, the AI bridge, the debrief and the recorder.
+
+- **Rebuilt, not merged.** The 66 multiplayer commits were replayed one by one on
+  the new `main`, so history stays linear and every commit builds. The bug bash's
+  code moved along with each refactor: where stage A moved the tick, combat or the
+  recorder, the bug bash's edits to that code went to the new place in the same
+  commit.
+- **Segment by segment.** The replay ran in segments, each ending at a checkpoint:
+  the build, the tests and the behaviour baseline, compared with a canonical
+  recording of the new chain. Refactor segments had to be SAME. The planned
+  changes (listed under [single-player guarantee](#single-player-guarantee)) were
+  re-measured in their own commits, each difference explained.
+- **The bug bash's player rules apply to every human-flown plane.** They went
+  in the commit that makes that state per seat, not onto seat 0 alone:
+  - The tick's rules (world-edge warning and loss, OVERSPEED message, belly wear)
+    run for each cockpit in `World::step`, and their messages are cues addressed
+    to that seat.
+  - Combat state the bug bash added (empty stations and the selection ring,
+    start-up weapon selection, belly wear, `Invulnerable`) lives on each
+    `Ownship`, with the loss causes on each.
+  - The kill ledger credits nobody for a loss with no shooter (world edge,
+    overspeed, belly wear), for any aircraft, humans included, even if a shooter
+    hit it earlier. The AI kill credit of stage B does not bring credit back for
+    these.
+  - The debrief's Cause row and friendly-objective side are per seat, and the
+    recorder writes the loss cause and external fuel for each recorded seat.
+  - The AI's return to base, traffic avoidance and wing abort see every human
+    plane, and a human-led wing stays with its human. The AI's world-edge and
+    belly-wear losses credit nobody.
+  - The HUD's BAY and time-rate readouts and the flight-start rules read the
+    presented seat's state.
+- **Lead succession.** Both branches had built it. Multiplayer's rule kept
+  (John, 2026-09-29): every aircraft keeps its number and callsign, a human in the
+  flight leads before an AI member, and a human is told. The bug bash's
+  renumbering was retired, and its one extra behaviour was ported: a wingman that
+  was following the lost leader in to land stops, since the new leader must not
+  keep the landing. In single player, AI wings pick the same new leader but keep
+  their numbers.
+- **Later moves onto `main` rebase this branch itself.** rerere holds only the
+  conflict hunks of the replay, not a whole resolved history, so a later bug-bash
+  fix is rebased onto the rebuilt branch, not replayed from stage A again.

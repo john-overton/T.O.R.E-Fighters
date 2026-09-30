@@ -1030,14 +1030,16 @@ Retail Fighters Anthology's own multiplayer is recorded in the
 Work, in the plan's stage order:
 - A, B: one mission core outside the app, and seats so several humans fly in one
   mission and aircraft pass between AI and humans.
-- C, D: network foundation, dedicated server and player-hosted games. Then
-  E-lite, the first playable checkpoint: two players flying co-op on a LAN.
-- E: lobby through the Quick Mission creator.
-- F: flight data link and radio backing, also in single player.
-- G: exact checkpoints of the whole mission, which John chose on 2026-09-28 so
+- C: the bug bash merged in (built 2026-09-29): the multiplayer commits rebuilt
+  on main, with the bug bash's player rules applying to every human-flown plane.
+- D, E: network foundation, dedicated server and player-hosted games. Then
+  F-lite, the first playable checkpoint: two players flying co-op on a LAN.
+- F: lobby through the Quick Mission creator.
+- G: flight data link and radio backing, also in single player.
+- H: exact checkpoints of the whole mission, which John chose on 2026-09-28 so
   host migration is seamless.
-- H, I: master server, server browser and connectivity.
-- J, K: host selection, migration, rejoin and compatibility hardening.
+- I, J: master server, server browser and connectivity.
+- K, L: host selection, migration, rejoin and compatibility hardening.
 - Keep single player deterministic in headless simulation at 120 Hz. Networked
   play is host-authoritative, because results are not bit-identical across
   platforms.

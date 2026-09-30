@@ -239,7 +239,8 @@ record with what changed (see "Sixth round" above).
    approximation of the input-only controller.
 4. **Leaderless wingmen after a fight.** Changed (John, 2026-09-29): leader
    succession (`7366700`), and after the fight the wing returns to base
-   (`475cafc`).
+   (`475cafc`). Later (John, 2026-09-29): in the multiplayer work this succession was replaced by
+   multiplayer's lead succession ([lead succession](../ARCHITECTURE.md#lead-succession)).
 5. **Aircraft with no route leave the map.** Changed in part (John,
    2026-09-29): once no hostile aircraft remains, wings go home and land, or
    fly back to their launch point and hold (`475cafc`). While hostile aircraft
