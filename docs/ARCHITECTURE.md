@@ -3190,7 +3190,12 @@ up once and had settled (two seconds with no correction) within 4 seconds of
 coming back (in four runs), while the King had no correction during the stall, still held
 the crown and both flew on; with the bound set to 3 seconds a stalled guest
 sent 2 keepalives and was dropped as silent 7.2 seconds into its stall, and
-learned it on coming back. The transport's own tests (`tore-net`'s
+learned it on coming back. A windowed run (release builds, the game joined
+to `tore-server` on loopback, the machine building the workspace in release
+for the first 50 seconds) took nine input-script `shot` steps 2 seconds
+apart: seven of them held the game's loop long enough for keepalives (3 to 5
+each, 26 in all, one stall past 5 seconds, which used to drop the player),
+and the player was never dropped and left by its own Leave. The transport's own tests (`tore-net`'s
 `tests/keepalive.rs`, on the simulator) keep a stall of 15 seconds, refuse a
 keepalive from another address, with another id or of another version, and
 check that the host answers none.
