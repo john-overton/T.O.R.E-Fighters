@@ -172,8 +172,11 @@ impl KeptAlive {
     }
 
     fn start(&mut self, client: &Client, transport: &Transport) {
-        let (Transport::Udp(socket), Some(datagram)) = (transport, client.keepalive_datagram())
-        else {
+        // Over the link (the hosting game's own connection) there is none.
+        let Transport::Udp(socket) = transport else {
+            return;
+        };
+        let Some(datagram) = client.keepalive_datagram() else {
             return;
         };
         let started = socket
