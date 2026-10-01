@@ -5,7 +5,11 @@
 //! Sleeping is coarse: on Windows a sleep of a millisecond can last 15, so the
 //! wait sleeps until a little before the deadline and spins for the rest. The
 //! host catches up any tick a late wake-up missed (agent decision; the margins
-//! are fitted, not measured on Windows).
+//! are fitted). Slice EF-X measured the wait on the CI runners: on Linux and
+//! Windows it wakes for a 120 Hz tick a few microseconds late, at most 1.2 ms;
+//! on macOS, whose timer coalescing lets a background process's sleep slip by
+//! up to 75 ms, 1 to 8 ms late on average and up to 36 ms (docs/ARCHITECTURE.md,
+//! "Sleep and wait accuracy on each system").
 
 use std::time::Duration;
 

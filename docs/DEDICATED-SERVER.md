@@ -545,9 +545,28 @@ file only. The figures line also carries the bytes
 sent to and received from that player since it joined. A log file that cannot
 be written is reported once on the console and the server carries on without
 it. The clock the run loop waits on sleeps until 0.4 ms (2 ms on Windows, whose
-sleep is coarse) before each deadline and then spins; the host catches up any
-tick a late wake-up missed (agent decision; the margins are not measured on
-Windows).
+sleep can be coarse) before each deadline and then spins; the host catches up
+any tick a late wake-up missed (agent decision).
+
+**How late the loop wakes (measured on the CI runners, EF-X, 2026-10-01).**
+On Linux and Windows a sleep lasts what it asks: a 16 ms sleep took 16.1 to
+16.4 ms on average and at most 16.9, a 1 ms one 1.06 to 1.08 ms, and the loop
+woke for a 120 Hz tick under 4 microseconds late on average, at most 1.2 ms
+on Windows. **On macOS it can be far worse:** on both macOS runners a 16 ms
+sleep took 27 to 90 ms on average and up to 154 ms, a 1 ms one 2 to 8 ms, and
+the loop woke 1.2 to 7.5 ms late on average and up to 36 ms. The cause is
+macOS's timer coalescing for a process it does not treat as in the
+foreground: the runners' processes run at utility QoS, and the kernel then
+lets a timer slip by up to 75 ms (`kern.timer_coalesce_tier3_ns_max`). Raising
+the thread's QoS did not change it; a real-time (time-constraint) thread did
+(16.04 ms). The same is likely, not measured, for a `tore-server` that launchd
+starts and for a hosting game that App Nap slows while its window is hidden or
+minimised. Players would then see the host's aircraft move unevenly. A fix
+(that real-time policy, or keeping App Nap off, for the host thread and this
+loop) is planned as its own slice. **Until then, on a Mac, keep a hosting
+game in the foreground, and run `tore-server` from Terminal.** On a real Mac
+a program run from Terminal or in the foreground is expected to wake on time
+(not measured: there is no Mac here, only the CI runners).
 
 ## Ports and firewalls
 

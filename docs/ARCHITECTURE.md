@@ -3779,6 +3779,38 @@ and `any_refuses_a_port_another_socket_holds_for_ipv4`, and
 `hosting_tests.rs`'s `the_search_and_the_host_share_the_game_port_one_after_the_other`,
 which failed on macOS and Windows before.
 
+### Sleep and wait accuracy on each system (EF-X)
+
+*Measured (EF-X, 2026-10-01)* on the CI runners with a probe test (100
+sleeps of each length, and 360 ticks of a host's loop: wake at each 120 Hz
+tick or after `MAX_NAP`, through `tore_net::wait_until` with `SPIN_MARGIN`),
+three runs each, and a C probe on macOS; a range is the runs' spread:
+
+| Runner | 1 ms sleep, mean / worst | 16 ms sleep, mean / worst | 120 Hz tick, late mean / worst |
+| --- | --- | --- | --- |
+| ubuntu-22.04 | 1.06 / 1.08 ms | 16.10 to 16.11 / 16.29 ms | 0.14 / 0.45 µs |
+| windows-2022 | 1.08 / 1.53 ms | 16.32 / 16.87 ms | 0.2 to 3.7 µs / 1.2 ms |
+| macos-14 (Apple silicon) | 4.4 to 8.4 / 11.7 ms | 48 to 90 / 154 ms | 6.2 to 7.5 / 36 ms |
+| macos-15-intel | 1.9 to 6.5 / 10.1 ms | 27 to 66 / 142 ms | 1.2 to 2.1 / 20 ms |
+
+A Windows host has no such problem: the 2 ms spin margin is more than its
+sleeps need. The macOS runners' processes run at utility QoS (0x11) and
+the kernel's timer coalescing lets their timers slip by up to 75 ms
+(`kern.timer_coalesce_tier3_ns_max`). In a C probe on the same runners,
+user-interactive QoS and `taskpolicy -l 0 -t 0` changed nothing, and a Mach
+time-constraint thread policy made a 16 ms sleep last 16.04 ms (worst 17).
+So the hosted mission's acceptance test is judged against late inputs on
+macOS runners (every correction there followed one; making the sleeps that
+coarse on Linux gives the same picture), and its strict form is an ignored
+test. **Known risk:** a host thread or `tore-server` loop that macOS does not
+treat as foreground (App Nap on a hidden hosting game, a server started by
+launchd) is likely to wake that late too, which players would see as the
+host's aircraft moving unevenly. Not measured on a real Mac. The fix, a
+time-constraint policy or a latency-critical activity for the host thread
+and the server loop, is the lead's next slice; until then the
+[server guide](DEDICATED-SERVER.md) asks a Mac host to keep the game in the
+foreground and run `tore-server` from Terminal.
+
 ### The lobby
 
 A host has a new phase, **Lobby**, before Flying and after each mission. In it
@@ -4286,6 +4318,7 @@ second completes the plan's stage F and stage E's replays.
 | EF8 Lobby screen | Sonnet | EF2, EF4, EF6 | The lobby screen, the creator with Accept, Load Ordnance for one's own slot, the debrief and the return | A windowed run hosts, builds a mission, takes a slot, chats with a bot, starts, flies, ends and returns to the lobby. **Built (EF8):** see [the lobby screen as built](#the-lobby-screen-as-built-ef8) |
 | EF9 Acceptance | lead, then John | all | The lead's smoke test on this machine (a hosting game, a joining game, a bot); then John on three machines (macOS, Linux, Windows) | John flies with friends from the menus |
 | EF-K Keepalive | Opus | EF6 | A joined game whose loop is stalled is kept connected by a keepalive thread, under the connection's own identity, for at most a minute; protocol version 5 | A joined client stalled 15 seconds is not dropped and recovers; one stalled past the bound is dropped; a keepalive from elsewhere keeps nothing alive; the King is unaffected. **Built (EF-K):** see [a stalled game stays connected](#a-stalled-game-stays-connected-ef-k) |
+| EF-X CI on macOS and Windows | Opus | EF-K | Find and fix every macOS and Windows failure of `ci.yml` and `network.yml`, real platform behaviour or over-strict tests | One CI run green on all jobs; each system's game-port behaviour written down. **Built (EF-X):** see [the game port on each system](#the-game-port-on-each-system-ef-x) and [sleep and wait accuracy on each system](#sleep-and-wait-accuracy-on-each-system-ef-x); the macOS golden fingerprints were recorded again, Windows checkouts' CR LF line ends are read, and the real-time tests judge what a slow runner cannot change |
 
 **Phase 2: the rest of stage F, and stage E's replays.** The King's settings
 (co-op or PvP and sides, slot locks, password, join in progress, friendly fire,
