@@ -176,14 +176,14 @@ pub fn utc_text(time: SystemTime) -> String {
 }
 
 /// `2026-09-26_1540`, the start of a recording's file name.
-fn stamp(time: SystemTime) -> String {
+pub(crate) fn stamp(time: SystemTime) -> String {
     let [y, mo, d, h, mi, _] = utc(time);
     format!("{y:04}-{mo:02}-{d:02}_{h:02}{mi:02}")
 }
 
 /// Upper-case letters and digits only, at most 16, so a name part never
 /// holds a path separator or a character some file systems refuse.
-fn name_part(text: &str) -> String {
+pub(crate) fn name_part(text: &str) -> String {
     let part: String = text
         .chars()
         .filter(char::is_ascii_alphanumeric)
@@ -209,7 +209,13 @@ fn name_start(name: &str) -> Option<i64> {
 /// `-N` suffix, so a second flight in the same minute (`-2`) is the newer
 /// one. `None` when the name does not have the recording pattern.
 pub fn order_key(name: &str) -> Option<(i64, u32)> {
-    let stem = name.strip_suffix(&format!(".{EXTENSION}"))?;
+    order_key_for(name, EXTENSION)
+}
+
+/// [`order_key`] for files of another kind that are named the same way and
+/// kept by the same rules (a networked flight's capture).
+pub fn order_key_for(name: &str, extension: &str) -> Option<(i64, u32)> {
+    let stem = name.strip_suffix(&format!(".{extension}"))?;
     let (stem, suffix) = match stem.rsplit_once('-') {
         Some((head, n)) if head.len() > 10 && all(n, |c| c.is_ascii_digit()) && n.len() <= 4 => {
             (head, Some(n))
@@ -371,7 +377,7 @@ impl Library {
                     None => (file_name, false),
                 };
                 let start = order_key(&name)?;
-                if !has_magic(&path) {
+                if !has_magic(&path, MAGIC) {
                     return None;
                 }
                 let bytes = file.metadata().map_or(0, |m| m.len());
@@ -410,6 +416,18 @@ impl Library {
     /// The recordings [`Library::cleanup`] would delete now, deleting
     /// nothing: the Replays screen shows how many.
     pub fn plan(&self, settings: &Settings, now: SystemTime, protect: &[&Path]) -> Vec<PathBuf> {
+        self.plan_files(&Kind::REPLAY, settings, now, protect)
+    }
+
+    /// What the auto-delete rule would remove of the files of `kind`, in the
+    /// recordings folder, counted and aged among themselves.
+    pub(crate) fn plan_files(
+        &self,
+        kind: &Kind,
+        settings: &Settings,
+        now: SystemTime,
+        protect: &[&Path],
+    ) -> Vec<PathBuf> {
         if !settings.auto_delete {
             return Vec::new();
         }
@@ -423,6 +441,13 @@ impl Library {
         let now_s = now
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+        let recent = |file: &std::fs::DirEntry| {
+            file.metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_none_or(|age| age < LIVE_PARTIAL)
+        };
         let mut candidates: Vec<((i64, u32), String, PathBuf)> = dir
             .flatten()
             .filter_map(|file| {
@@ -432,24 +457,18 @@ impl Library {
                     Some(name) => (name.to_owned(), true),
                     None => (file_name, false),
                 };
-                let start = order_key(&name)?;
+                let start = order_key_for(&name, kind.extension)?;
                 if settings.kept.contains(&name)
                     || protected.contains(&path)
                     || !file.file_type().is_ok_and(|t| t.is_file())
-                    || !has_magic(&path)
+                    || !has_magic(&path, kind.magic)
                 {
                     return None;
                 }
-                if partial {
-                    let recent = file
-                        .metadata()
-                        .and_then(|m| m.modified())
-                        .ok()
-                        .and_then(|modified| now.duration_since(modified).ok())
-                        .is_none_or(|age| age < LIVE_PARTIAL);
-                    if recent {
-                        return None;
-                    }
+                // A `.partial` file, or a capture, written this recently may
+                // belong to a game that is still running.
+                if (partial || kind.skip_recent) && recent(&file) {
+                    return None;
                 }
                 Some((start, name, path))
             })
@@ -474,13 +493,30 @@ impl Library {
     }
 }
 
+/// A kind of file the recordings folder holds and the auto-delete rule may
+/// remove: how its name ends and its first bytes read.
+pub(crate) struct Kind {
+    pub extension: &'static str,
+    pub magic: &'static [u8; 8],
+    /// Leave alone any file written within the last ten minutes: it may be a
+    /// running game's. (A recording marks its running file with `.partial`.)
+    pub skip_recent: bool,
+}
+impl Kind {
+    const REPLAY: Kind = Kind {
+        extension: EXTENSION,
+        magic: MAGIC,
+        skip_recent: false,
+    };
+}
+
 /// Whether the file starts with the recording format's magic bytes.
-fn has_magic(path: &Path) -> bool {
+fn has_magic(path: &Path, magic: &[u8; 8]) -> bool {
     let mut head = [0; 8];
     std::fs::File::open(path)
         .and_then(|mut file| file.read_exact(&mut head))
         .is_ok()
-        && &head == MAGIC
+        && &head == magic
 }
 
 #[cfg(test)]
