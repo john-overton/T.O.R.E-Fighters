@@ -487,6 +487,18 @@ submits complete animated meshes so camera-hidden faces can cast shadows;
 stepped mode keeps the earlier face rejection and light maps. This does not
 interpret or execute original shadow-shape commands.
 
+## MiG-21 skin review
+
+On 2026-09-30, the reviewed 1.02F `MIG21.SH` import showed why exact polygon
+pairing did not suppress the underside from above: upper wing faces `2a2f`
+and `2d38` are complete quads, while the lower sides are split across several
+polygons, including `2a52`, `2a6d`, `2a8b`, `2df4`, `2e0f` and `2e2d`.
+Their stored vertical normals oppose one another, but their vertex lists cannot
+match as exact twins. The app therefore applies stored-normal visibility to
+this identity in smooth mode too, following the existing
+[panel contract](../spec/aircraft-animation.md#double-sided-panels). No mesh
+bytes or exported geometry are committed.
+
 ## Pilot escape shapes
 
 [EJECT.SH](ejection.md) uses a bounded chain of the reviewed word-state guards

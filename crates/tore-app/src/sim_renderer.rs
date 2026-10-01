@@ -232,8 +232,10 @@ impl Pipelines {
         surface_descriptor.label = Some("Static airport surfaces");
         surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("airport_solid_fragment");
         // Rendered terrain is recessed below the fixed airport plane. Neither
-        // slope nor constant depth bias may pull pavement over aircraft.
-        // Later coplanar artwork wins equal-depth samples without a world lift.
+        // slope nor constant depth bias may pull pavement over aircraft, so
+        // the solid pass uses none; the texture detail pass below is the one
+        // exception. Later coplanar artwork wins equal-depth samples without
+        // a world lift.
         surface_descriptor
             .depth_stencil
             .as_mut()
@@ -242,6 +244,15 @@ impl Pipelines {
         let airport_pipeline = device.create_render_pipeline(&surface_descriptor);
         surface_descriptor.label = Some("Static airport coplanar texture details");
         surface_descriptor.fragment.as_mut().unwrap().entry_point = Some("airport_fragment");
+        // One reversed-depth ULP resolves texture-on-pavement ties. This is
+        // the only surface pass with a bias: no slope bias, and no geometry or
+        // contact lift.
+        surface_descriptor
+            .depth_stencil
+            .as_mut()
+            .unwrap()
+            .bias
+            .constant = 1;
         let airport_decal_pipeline = device.create_render_pipeline(&surface_descriptor);
         surface_descriptor
             .depth_stencil

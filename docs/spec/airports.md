@@ -213,8 +213,22 @@ longitudinal span near -2748 through 3252 feet. That agrees with reviewed STRIP
 anchors near -2512 through 3090 feet and avoids an invisible support footprint.
 
 Runway support and the ILS datum use the authored airport ground elevation.
-Airport surfaces use no slope or constant depth bias. Either offset can pull
-pavement over an aircraft, at a grazing view or from a high overhead view.
+Airport surfaces use no slope depth bias, and only one pass uses any constant
+bias. A slope offset can pull pavement over an aircraft, at a grazing view or
+from a high overhead view, and so can a constant one on the solid pass. The
+textured detail pass is the single exception: it applies one reversed-depth ULP
+(constant bias 1, slope bias 0), which resolves the equal-depth ties between
+runway paint and the pavement under it, where the paint used to flicker in and
+out. It moves no geometry and no contact surface. The terrain shader's
+clip-space position is also marked invariant, so the solid and detail passes
+compute identical depths for shared vertices and every tie resolves the same
+way. Every other pass keeps zero bias. This is an agent decision, made for
+John's 2026-09-30 report of flickering runway paint and first made on a
+side branch. It was validated with the two ignored GPU regressions
+(`cargo test --locked -p tore-app gpu_airport_ -- --ignored`: pavement never
+hides an aircraft above it, and paint over pavement holds with distant and
+moving cameras) and with the `render-runway-paint-calm` capture scenario in the
+[flight lane](../testing/lane-flight.md#render-captures).
 Solid surfaces draw before textured detail, with equal-depth samples allowed
 so later coplanar art remains visible. Geometry still obeys ordinary depth
 occlusion. Distant, moving views must keep pavement above terrain separated

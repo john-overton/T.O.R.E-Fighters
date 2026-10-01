@@ -534,7 +534,8 @@ impl Airframe {
             })
         };
         // Smooth mode submits complete geometry for camera-independent shadows,
-        // hiding only the rear face of each double-sided panel.
+        // hiding only the rear face of each double-sided panel. The MiG-21's
+        // differently divided skins are the exception handled below.
         let hidden = if scenery.smooth_weather {
             crate::aircraft_animation::hidden_twins(&faces, facing)
         } else {
@@ -552,7 +553,14 @@ impl Airframe {
                 self.damage_art.surfaces(&f, &s.damage_regions, model_scale)
             };
             for f in surfaces {
-                if !scenery.smooth_weather && facing(&f) <= 0. {
+                // The MiG-21's upper and lower wing skins are divided into
+                // different polygons, so exact twin matching cannot pair them
+                // and the underside would show through the top. Its stored
+                // facing normals do oppose, so smooth mode culls by them too.
+                if (!scenery.smooth_weather
+                    || self.profile.id == tore_formats::aircraft::AircraftId::Mig21)
+                    && facing(&f) <= 0.
+                {
                     continue;
                 }
 

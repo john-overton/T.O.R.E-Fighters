@@ -89,6 +89,18 @@ aircraft drawn through the shared exterior model path. Stepped rendering keeps
 its full normal culling. Single-sided faces seen from behind still draw with
 smooth rendering; that difference from the original's culling is unchanged.
 
+The MiG-21 is the exception: smooth rendering culls its faces by stored normal
+as stepped rendering does. Its upper and lower wing skins are divided into
+different polygons, so exact twin matching cannot pair them and the underside
+showed through the top skin. Their stored normals do oppose, so the normal test
+separates them. This is an agent decision, a presentation fix for John's
+2026-09-30 report, first made on a side branch; flight, control-surface state
+and contact are unchanged. Shadows of the MiG-21 are now built from the faces
+that face the camera, so a shadow caster seen only from behind may drop out of
+that aircraft's shadow, a small departure from the camera-independent shadows
+of the other aircraft. Source evidence:
+[MiG-21 skin review](../formats/objects-and-shapes.md#mig-21-skin-review).
+
 ## F-22 main weapon bays
 
 Add a main-bay presentation with 1-second travel and 90-degree

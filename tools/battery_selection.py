@@ -143,7 +143,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
     "windowed-menus": ("captured windows: launches, terrain, previews, sizes", ("menus-window-*",)),
-    "flight-views": ("camera views and their rendering", ("replay-view-*",)),
+    "flight-views": ("camera views and their rendering", ("replay-view-*", "render-*")),
     # Replay lane.
     "replay-recording": (
         "recording, reading and corrupting replay files",
@@ -427,6 +427,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/test_battery.py", (), "the battery runner's tests", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/flight.py", LANE_SMOKE["flight"], "flight scenarios", unit_tests=("test_battery_flight",)),
     _r("tools/test_battery_flight.py", (), "flight scenario tests", unit_tests=("test_battery_flight",)),
+    _r("tools/battery_scenarios/render.py", ("flight-views",), "render capture scenarios", windowed=True, unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/ai.py", LANE_SMOKE["ai"], "AI scenarios", unit_tests=("test_battery_ai",)),
     _r("tools/battery_scenarios/_ai_fuzz.py", LANE_SMOKE["ai"], "AI fuzz scenarios", unit_tests=("test_battery_ai",)),
     _r("tools/_ai_fuzz_cmd.py", LANE_SMOKE["ai"], "AI fuzz command", unit_tests=("test_battery_ai",)),

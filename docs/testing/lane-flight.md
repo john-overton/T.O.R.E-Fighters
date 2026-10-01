@@ -13,7 +13,8 @@ flyable identities (`f18`, `rafale`, `f14`, `a4e`, `x31`, `mig29`, `su27`, `mig2
 `mig23`, `su35`, `f22`, `f22n`, `faxx`), and checks the weapons, countermeasures, systems and
 instruments that go with it. It was built in the 2026-09-28 overnight bug battery. The scenario
 file is [`tools/battery_scenarios/flight.py`](../../tools/battery_scenarios/flight.py); how the
-runner works is in the [testing overview](README.md).
+runner works is in the [testing overview](README.md). The two `render-*` capture scenarios live in
+[`tools/battery_scenarios/render.py`](../../tools/battery_scenarios/render.py).
 
 ## What it means for the game
 
@@ -35,7 +36,7 @@ python3 tools/battery.py --scenario 'flight-land-*' --jobs 6              # one 
 python3 tools/battery.py --scenario 'flight-livefire-f18-*' --windows 2   # windowed
 ```
 
-The whole lane is 3,089 scenarios, 394 of them windowed (through `tools/agent-run.sh`).
+The whole lane is 3,285 scenarios, 396 of them windowed (through `tools/agent-run.sh`).
 The headless ones take about a second each; the missile acceptance runs take up to five minutes
 each and the windowed ones five to eight seconds. See "Runtime" at the end for the measured time.
 
@@ -419,6 +420,22 @@ round two; the windowed `cheat-damage-*` scenarios cover system faults from inco
 the `--combat-command` sequences cover designation. Radar and infrared channel switching and
 target cycling with several targets in view are exercised only by the probe-attack leader
 (`attack-*`), not by a scripted key sequence.
+
+## Render captures
+
+`python3 tools/battery.py --scenario 'render-*'` runs two windowed captures
+(through the wrapper, one window at a time) that reproduce drawing faults. Each
+only checks that the frame is not blank, so look at the PPM it writes:
+
+| Scenario | What it shows | What to look for |
+| --- | --- | --- |
+| `render-mig21-upper-skin` | The MiG-21 in free flight, flight view 2, look `0,-12`, `TORE_WEATHER_TIME=11:00` | The upper wing is plain camouflage: no grey underside shape shows through it. |
+| `render-runway-paint-calm` | The F/A-18 on a UKR ground start (airport 1), takeoff maneuver, 1,300 probe ticks, flight view 1, `TORE_WEATHER_TIME=07:15`, `TORE_WIND=0,0` | The runway paint and joints are whole, with no flicker or z-fighting. |
+
+The synthetic GPU checks run separately with
+`cargo test --locked -p tore-app gpu_airport_ -- --ignored`. They test that
+pavement never hides an aircraft above it and that paint over pavement holds at
+distant and moving cameras.
 
 ## Runtime
 

@@ -100,7 +100,7 @@ fn aerial_perspective(color:vec3<f32>,direction:vec3<f32>,altitude:f32)->vec3<f3
  return cloud_occlusion(mix(color,horizon,air_opacity(length(direction),altitude)),direction,altitude);
 }
 struct VertexOut {
- @builtin(position) clip:vec4<f32>, @location(0) uv:vec2<f32>,
+ @builtin(position) @invariant clip:vec4<f32>, @location(0) uv:vec2<f32>,
  @location(1) @interpolate(flat) layer:f32, @location(2) color:vec3<f32>, @location(3) distance:f32, @location(4) @interpolate(flat) own_color:f32, @location(5) altitude:f32, @location(6) direction:vec3<f32>, @location(7) @interpolate(flat) fog_enabled:u32, @location(8) @interpolate(flat) light_row:i32, @location(9) terrain_normal:vec3<f32>,
  // Color before the weather's shade remaps, for flare light.
  @location(10) albedo:vec3<f32>

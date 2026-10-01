@@ -520,7 +520,9 @@ inside a composite runway shape never supplies the support-plane elevation.
 Terrain render triangles are split at airport footprint edges and recessed
 below the fixed support plane, with perimeter walls. Source terrain and physics
 queries are unchanged. Static solid and texture passes use ordered equal-depth
-tests without depth bias, so they cannot pull pavement in front of aircraft. A per-shape vertical normalization
+tests with no slope bias, and only the texture pass has any constant bias (one
+depth ULP, to settle paint ties), so they cannot pull pavement in front of
+aircraft. A per-shape vertical normalization
 aligns the dominant horizontal paving layer with the placement's runway plane;
 building height does not move that plane.
 
