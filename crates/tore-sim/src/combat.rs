@@ -5,6 +5,7 @@ use std::io::{Error, ErrorKind};
 pub mod blast;
 pub mod countermeasures;
 pub mod debris;
+pub mod gun_round;
 pub mod gunsight;
 pub mod ledger;
 pub mod loading;

@@ -515,7 +515,7 @@ snapshot's tick.
 | Mark | everyone | Crater or crash-site fire, position |
 | Ground destroyed | everyone | Ground object id |
 | Countermeasure | everyone | Aircraft, chaff or flare, the release geometry the replay viewer flies it from, number left |
-| Gun burst | everyone | Shooter, gun station, first tick, last tick (0 while still firing). *Built (D7a):* sent when the burst starts, and again from its first tick with its length once the station has fired no round for its weapon's round interval plus 2 ticks |
+| Gun burst | everyone | Shooter, gun station, first tick, last tick (0 while still firing). *Built (D7a):* sent when the burst starts, and again from its first tick with its length once the station has fired no round for its weapon's round interval plus 2 ticks. *Read by the client (D8c):* it makes the burst's rounds again from the first tick at the weapon's cadence ([the client session](../ARCHITECTURE.md#the-client-session)) |
 | Sound | everyone | Emission kind, position, the aircraft it came from |
 
 Recording stems, weapon and sound names are sent by their index in the

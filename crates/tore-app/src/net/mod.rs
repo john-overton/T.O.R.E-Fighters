@@ -5,6 +5,7 @@
 //! "Network sessions" and docs/DEDICATED-SERVER.md, "Joining from the game".
 pub mod debrief;
 pub mod files;
+pub mod guns;
 pub mod options;
 pub mod play;
 pub mod session;

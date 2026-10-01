@@ -4435,7 +4435,7 @@ pub fn is_gun(w: &Weapon) -> bool {
 
 const GUN_DISPERSION_HALF_ANGLE: f64 = 0.25_f64.to_radians();
 
-fn projectile_launch_direction(
+pub fn projectile_launch_direction(
     weapon: &Weapon,
     direction: Vector,
     id: u32,

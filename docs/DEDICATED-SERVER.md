@@ -282,7 +282,9 @@ throttle held and the trigger released. A plane that is refused (taken,
 destroyed, not open) is asked for again as any free plane. End Mission leaves:
 the host sends the debrief, which the game shows before the main menu. A drop,
 a refusal, a data mismatch or a server stopping is a plain message on the
-main menu. A client draws no gun rounds yet, though its hits count.
+main menu. A client draws gun rounds: its own at once from its trigger, and
+other aircraft's from the host's burst events. They are for the eye only; the
+host decides every hit.
 
 The game loads the mission from its own import and compares its content
 manifest with the server's: the names and hashes of every resource the

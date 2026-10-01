@@ -15,6 +15,7 @@ use crate::{
     aircraft_type::AircraftType,
     net::{
         files::{self, DatedLog},
+        guns::{self, Guns},
         options::ConnectOptions,
     },
     regen::{self, DeviceRelease, Effects, Motor},
@@ -106,6 +107,10 @@ pub struct NetSession {
     effects_tick: u64,
     /// Releases waiting for the next effects step.
     releases: Vec<DeviceRelease>,
+    /// The gun rounds the host does not send.
+    guns: Guns,
+    /// Whether the player's trigger was held at the last turn.
+    trigger: bool,
     /// Each weapon record's motor, parsed once.
     motors: RefCell<BTreeMap<String, Option<Motor>>>,
     /// Session events not yet taken by the game.
@@ -191,6 +196,8 @@ impl NetSession {
             effects: Effects::default(),
             effects_tick: 0,
             releases: Vec::new(),
+            guns: Guns::default(),
+            trigger: false,
             motors: RefCell::new(BTreeMap::new()),
             events: Vec::new(),
             left_at: None,
@@ -214,6 +221,7 @@ impl NetSession {
     /// events collect for [`NetSession::take_events`].
     pub fn pump(&mut self, controls: &Controls) {
         let now = self.clock.now();
+        self.trigger = controls.trigger;
         let _ = self.client.receive_from(now, &mut self.socket);
         self.client.update(now, controls);
         let _ = self.client.transmit(&mut self.socket);
@@ -287,6 +295,40 @@ impl NetSession {
         Some(frame)
     }
 
+    /// Adds the gun rounds the host does not send to `frame`'s picture: the
+    /// player's own from its trigger and its predicted aircraft, and other
+    /// aircraft's from the host's gun burst events.
+    pub fn step_guns(&mut self, frame: &mut ClientFrame, around: &GunContext<'_>) {
+        let ground = |x: f64, z: f64| f64::from(around.terrain.height(x as f32, z as f32));
+        let stations = |id: AircraftId| -> &[tore_sim::combat::live::Station] {
+            around
+                .configurations
+                .iter()
+                .find(|config| config.aircraft == id)
+                .map_or(&[][..], |config| config.stations.as_slice())
+        };
+        let inputs = guns::Inputs {
+            tick: frame.tick,
+            render_tick: frame.render_tick,
+            trigger: self.trigger,
+            plane: frame.plane.0,
+            own: crate::combat::launcher(&frame.presented),
+            stores: frame.readout.as_ref().map(guns::Stores::of),
+            config: &frame.config,
+            events: &frame.events,
+        };
+        let mut picture = std::mem::take(&mut frame.picture);
+        self.guns.step(
+            &inputs,
+            &guns::Around {
+                ground: &ground,
+                stations: &stations,
+            },
+            &mut picture,
+        );
+        frame.picture = picture;
+    }
+
     /// Steps the regenerated effects to client tick `to`, one step per tick
     /// since the last call (at most [`MAX_EFFECT_TICKS`]), each over
     /// `picture`, the newest the screen has; the releases the frames brought
@@ -328,6 +370,13 @@ impl NetSession {
             self.effects.step(picture, &surroundings, &releases);
         }
     }
+}
+
+/// What the gun rounds need that the frame does not say.
+pub struct GunContext<'a> {
+    pub terrain: &'a crate::terrain::Terrain,
+    /// The mission's usual loadout of each aircraft type.
+    pub configurations: &'a [tore_sim::combat::live::Configuration],
 }
 
 /// What the regenerated effects need that the picture does not say.

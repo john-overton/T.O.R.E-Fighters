@@ -18,7 +18,7 @@ use crate::{
     frame::FlightFrame,
     net::{
         debrief,
-        session::{EffectContext, NetSession},
+        session::{EffectContext, GunContext, NetSession},
     },
     scenery, seats, show_selected_weapon_page,
 };
@@ -373,9 +373,16 @@ impl App {
         let Some(session) = self.net.as_mut() else {
             return;
         };
-        let Some(frame) = session.frame() else {
+        let Some(mut frame) = session.frame() else {
             return;
         };
+        session.step_guns(
+            &mut frame,
+            &GunContext {
+                terrain: &self.world.terrain,
+                configurations: self.world.combat.dummy_configurations(),
+            },
+        );
         let flight = self.net_flight.as_mut().expect("a networked flight");
         let ticks = frame
             .tick

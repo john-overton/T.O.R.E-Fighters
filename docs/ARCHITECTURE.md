@@ -2519,10 +2519,51 @@ is in the picture or the regenerated devices, are dropped. Messages a session
 ends with are plain words on the main menu (kept 12 seconds), and a refused
 plane is asked for again as any free plane.
 
-*Not built:* a client draws no gun rounds. The host sends gun bursts as events
-and not the rounds, and drawing them needs the simulation's round flight
-(muzzle, spread, drop) rebuilt on the client; hits are the host's and still
-count. Smoke, contrails, chaff and flares are drawn.
+*Built (D8c, gun rounds).* A client draws gun rounds (`net/guns.rs`, with the
+round's rules in `tore_sim::combat::gun_round`). The host sends a burst as an
+event, not its rounds, so the client makes them again with the simulation's own
+rules: the muzzle (the station's mount on the aircraft), the spread
+(`live::projectile_launch_direction`), the launch speed, the way a round flies
+each tick (the speed command, the 120 Hz service cadence of 2 and 3 units, the
+fall, the life) and the cadence the gun releases rounds on. The rounds are
+cosmetic: they hit nothing on the client, and hits stay the host's. They join
+the picture each frame as ordinary `ProjectilePose`s with `gun: true` and the
+tracer flag (every third round), so the existing drawing shows them. Single
+player never runs any of it.
+
+- **The seat's own rounds** are drawn at once from its trigger, held while its
+  gun is selected and the newest readout says the weapon is ready, with the
+  readout's rounds less those the client has let go since the readout's tick.
+  `gun_round::Cadence` is combat's trigger and round schedule (the press, the
+  rounds waiting, the scaled deadline of the next), so the same rounds leave on
+  the same ticks as the host's. The rounds leave the aircraft as drawn (the
+  predicted, blended pose) and are flown by client ticks. When the host's burst
+  event for the seat's own plane arrives it is not drawn again.
+- **Other aircraft's rounds** come from the Gun burst events. A burst's first
+  round leaves on the event's tick, and the `n`th at the first tick at or after
+  `n` times the weapon's burst time (30 ticks a unit) over its physical rounds
+  (`gun_round::release_tick`: the host's cadence with no pause in the burst).
+  Each round is placed from the shooter's pose in the picture, taken back along
+  its velocity to the round's release tick, with the gun's station mount from
+  the mission's usual loadout of the shooter's aircraft type, and flown on to
+  the host tick the picture shows. A burst the host has not closed is drawn as
+  running on; the closing event (which names the burst by its first tick and
+  gives its length) takes back any round that overran it. Because the picture
+  is about 100 ms behind the host and a burst is closed within one round
+  interval and 3 ticks of its last round, a round that overran is rarely
+  drawn at all.
+- **Agent decisions (D8c).** The spread of a round is seeded with a number the
+  client counts for itself, because the host seeds it with the round's
+  projectile number, which no message carries: a client's rounds are on a
+  different line within the gun's 0.25 degree half-angle (at most about 26 feet
+  from the host's after a second of flight), and with the host's number the
+  same code gives the host's positions exactly (the test does both). An
+  aircraft's tracers keep the gun's running count of rounds across the bursts
+  the client has seen, starting at the first it saw. The shooter's loadout is
+  the aircraft type's usual one, since the wire does not carry another
+  player's. A burst of a shooter the picture does not hold is not drawn.
+  Rounds come in the picture with numbers far above the host's, so a camera or
+  the regenerated smoke never takes one for a host's projectile.
 
 *Built (D8b, the game's side that needs no session).* The game's flight
 screen has a session mode (`FlightUi::session`): no Pause, time compression or
@@ -2925,7 +2966,8 @@ fires on the tick.
 
 A client draws its own tracers at once from its trigger and its predicted
 aircraft, and other aircraft's bursts from the host's burst events (shooter,
-gun, first and last tick). A missile appears on the client when the host
+gun, first and last tick); *built (D8c)*, see [the client
+session](#the-client-session). A missile appears on the client when the host
 launches it, one round trip after the trigger (about 0.15 s at 150 ms), since
 only the host knows whether the launch was ready.
 
@@ -3064,7 +3106,7 @@ risky refactors, as John asked; the rest are Sonnet.
 | D3c Open seating | `mp/d-open` | Opus | D5a | `Seating::Open`: plane 0 on the AI, a tick with no human, combat with no ownship | Single-player baseline SAME; a headless test builds an open mission with every plane on the AI, steps it 1,200 ticks, then a seat takes plane 0, flies, and gives it back. **Built (D3c):** see [open seating and no human](#a-mission-with-no-window); the run repeats to the bit, and two seats hand planes in both wings through a fight, the last leaving the mission with no human |
 | D6 Wire | `mp/d-wire` | Opus | D1, D3b, D4, D5b | `tore-session`'s messages: inputs, snapshots with acknowledged baselines, priorities and relevance, own-state hash and exact state, readouts, events (bursts and launches included), join messages, debrief | Every message round-trips; a snapshot decodes with any earlier packet lost; entities always get their share of the packet; a wire golden test fails when the bytes change without a protocol version bump; bytes per snapshot measured on the 15 against 15 mission against the [budget](multiplayer-plan.md#bandwidth-budget). **Built (D6):** seeded round trips of every section and message; a 3,000-snapshot run dropping, duplicating and reordering packets and acknowledgements rebuilds every entity exactly; 100,000 fuzzed bodies; the golden copy `crates/tore-session/wire-golden.txt`. On the 15 against 15 mission (29 other aircraft, up to 31 missiles in flight) the Snapshot section is 177 to 879 bytes, mean 350, before the readout; the readout's record is 4 to 506 bytes, mean 52, against a plain size of mean 1,895; the whole download is 13.2 KB/s before the messages ([details](formats/net-protocol.md#what-the-games-sections-settled)) |
 | D7 Host and server | `mp/d-host` | Opus | D2, D3c, D6 | The host session, its clock and input buffers; `tore-server` with its configuration, import and console | A server flies a 15 against 15 mission for 10 minutes with nobody connected under 20 percent of one core; scripted test clients join and leave 100 times without an error; late, early, missing and duplicated inputs are applied as specified. **Host built (D7a):** [the host session](#the-host-session); each seat's cockpit readout goes in its snapshots (D6), and a seated client holds the host's readout of each snapshot tick exactly once the first second has brought it across; on the simulator scripted clients join, fly and leave 100 times with no error, each plane going back to the AI; a seated client's entities, own-state hashes and exact states match the host's world at every snapshot tick, with and without 5 percent loss and duplication; the 15 against 15 UKR mission with nobody connected flies 10 minutes at 1.46 ms a tick, 17.5 percent of one core (release, Ryzen 9 7900X), the world's own step alone costing the same within 2 percent; its first minute, while all 30 aircraft fight, costs 3.4 ms a tick (41 percent) with or without the host, the remaining minutes 1.2 to 1.3 ms. **Server half built (D7b, `mp/d-server`):** `tore-server`'s options, configuration file (every setting, default and range tested), import, `--check` (run on a real 1.02F import for the guide's example mission: 12 planes, 14 runways, a content digest; built through `Seating::Open`), start-up refusals (missing or stale import, a mission the import cannot build, a bad setting or mission line with its number, the retail stall-speed switch, a taken port), the run loop on a fake clock against a scripted host, the console, the status line and the log; and on 127.0.0.1 a scripted client (the transport's client and the wire's messages) joins over a real UDP socket, takes plane 0, flies, leaves, and the console's `quit` ends the server, with the log recording each step. The server ran the guide's mission with real data at 6 to 7 ms a tick in a debug build (not measured in release) |
-| D8 Client, bot and `--connect` | `mp/d-client` | Opus | D5b, D6, D7 | The client session: join, prediction, reconciliation, smoothing, interpolation (the slow entities' longer delay included), clock steering, local effects, neutral controls in menus; the headless bot (the client session with a scripted pilot); the game's `--connect`; the capture and the diagnostics log | On the simulator with no loss, one platform and no hit, the prediction never differs from the host; two bots fly a 5-minute fight against a server; a windowed client flies against a server on this machine through `tools/agent-run.sh`. **Client half built (D8a):** [the client session](#the-client-session) with the bot, the capture and the diagnostics log, headless; the game's `--connect` is D8b **Game half built (D8b):** `--connect` joins a server and flies it on the flight screen (the options and their checks, the session's turn, the frame the screen draws, the events presented, the regenerated smoke, contrails, chaff and flares, the session rules, the diagnostics and capture files with their pruning, End Mission and the debrief); gun rounds are not drawn. A windowed game flew three minutes against a `tore-server` beside a `tore-bot`, ended the mission and read its debrief |
+| D8 Client, bot and `--connect` | `mp/d-client` | Opus | D5b, D6, D7 | The client session: join, prediction, reconciliation, smoothing, interpolation (the slow entities' longer delay included), clock steering, local effects, neutral controls in menus; the headless bot (the client session with a scripted pilot); the game's `--connect`; the capture and the diagnostics log | On the simulator with no loss, one platform and no hit, the prediction never differs from the host; two bots fly a 5-minute fight against a server; a windowed client flies against a server on this machine through `tools/agent-run.sh`. **Client half built (D8a):** [the client session](#the-client-session) with the bot, the capture and the diagnostics log, headless; the game's `--connect` is D8b **Game half built (D8b):** `--connect` joins a server and flies it on the flight screen (the options and their checks, the session's turn, the frame the screen draws, the events presented, the regenerated smoke, contrails, chaff and flares, the session rules, the diagnostics and capture files with their pruning, End Mission and the debrief). **Gun rounds built (D8c):** see [the client session](#the-client-session). A windowed game flew three minutes against a `tore-server` beside a `tore-bot`, ended the mission and read its debrief |
 | D9 Lag compensation | `mp/d-lagcomp` | Opus | D4 | The hit-volume history in combat, the view tick in `SeatInput`, rewound gun hit tests | Single-player baseline SAME; a burst aimed at the drawn position of a target crossing at 500 knots, with a 150 ms round trip and a 100 ms interpolation delay, hits with compensation and misses without; the cap holds. **Built (D9):** see [hits and lag compensation](#hits-and-lag-compensation); missiles fired by the same seat carry no rewind |
 | D10 Matrix and measurements | `mp/d-matrix` | Sonnet | D8, D9 | The simulator matrix as a test, a CI job with a host and two bots, load and bandwidth at 2, 8, 15 and 30 humans | The [matrix limits](MULTIPLAYER.md#netcode-numbers) hold; CI passes on all three platforms; `docs/baselines/net-<date>.md` records the matrix, bandwidth against the budget and host CPU per human. **Built (D10):** the matrix is `client/matrix_tests.rs` in `tore-session`: nine cells (50, 150 and 300 ms against 0, 2 and 5 percent loss each way, 1 percent duplicates, arrivals spread by 10 percent) of a host and two bots on the synthetic fixtures, each judged on every limit of the acceptance table for each bot, the short form (60 simulated seconds a cell) in the normal suite and the five minutes an ignored test; every limit holds in every cell. The CI job (`.github/workflows/network.yml`, on Linux, Windows and macOS runners; only the Linux run has been seen) runs `tests/loopback.rs`: the host in the test process and two real `tore-bot` processes over loopback UDP with a synthetic import. Host cost and bandwidth with real data come from `tests/host_players.rs` (host processor time with 0, 2, 8, 15 and 30 bots on a 15 against 15 mission) and are in the [baseline](baselines/net-2026-09-30.md); the host change is that exact states wait for the Seated message's acknowledgement ([host session](#the-host-session)) |
 | D11 LAN acceptance | lead, then John | Opus | all | Agents smoke-test a dedicated server with a windowed client and a bot on the development machine; then John flies it on three machines on his LAN, macOS, Linux and Windows (John, 2026-09-30); docs brought to built | The plan's stage D acceptance, with evidence from both |
