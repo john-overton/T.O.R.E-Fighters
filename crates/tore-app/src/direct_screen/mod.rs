@@ -155,6 +155,9 @@ pub struct DirectScreen {
     searched_port: u16,
     /// The backdrop, drawn the first time the screen is.
     backdrop: std::cell::OnceCell<Vec<u8>>,
+    /// The screen's own frame cost, logged every 300 frames when
+    /// `TORE_DIRECT_TIMING` is set.
+    timing: Option<Timing>,
 }
 
 impl DirectScreen {
@@ -255,6 +258,7 @@ impl DirectScreen {
             pointer: None,
             searched_port: 0,
             backdrop: std::cell::OnceCell::new(),
+            timing: std::env::var_os("TORE_DIRECT_TIMING").map(|_| Timing::new()),
         };
         if !screen.settings.addresses.is_empty() {
             screen.say("Up and Down in Connect to pick an address you joined before.");
@@ -366,6 +370,15 @@ impl DirectScreen {
 
     /// [`DirectScreen::update`] at a given time on the search's clock.
     pub fn update_at(&mut self, now: Duration, session: bool) -> Outcome {
+        let started = self.timing.as_ref().map(|_| Instant::now());
+        let outcome = self.turn(now, session);
+        if let (Some(timing), Some(started)) = (&self.timing, started) {
+            timing.update.set(timing.update.get() + started.elapsed());
+        }
+        outcome
+    }
+
+    fn turn(&mut self, now: Duration, session: bool) -> Outcome {
         if self.session && !session {
             // The session ended (the game said why in Messages).
             self.search_failed = false;
@@ -1151,6 +1164,14 @@ impl DirectScreen {
 
     /// Draws the whole screen onto the 640 by 480 canvas.
     pub fn draw(&self, canvas: &mut Canvas) {
+        let started = self.timing.as_ref().map(|_| Instant::now());
+        self.draw_frame(canvas);
+        if let (Some(timing), Some(started)) = (&self.timing, started) {
+            timing.drew(started.elapsed());
+        }
+    }
+
+    fn draw_frame(&self, canvas: &mut Canvas) {
         let kit = &*self.kit;
         let backdrop = self.backdrop.get_or_init(|| {
             let mut pixels = vec![0u8; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
@@ -1177,6 +1198,55 @@ impl DirectScreen {
         if let Some(panel) = &self.panel {
             panel.draw(canvas, kit);
         }
+    }
+}
+
+/// The screen's own cost, for `TORE_DIRECT_TIMING=1`: every 300 frames the
+/// game's log gets the mean and worst time of the screen's update and draw
+/// (the window's present and the rest of the frame are not in it) and the
+/// frame rate over those frames.
+struct Timing {
+    frames: std::cell::Cell<u32>,
+    update: std::cell::Cell<Duration>,
+    draw: std::cell::Cell<Duration>,
+    worst: std::cell::Cell<Duration>,
+    since: std::cell::Cell<Instant>,
+}
+
+impl Timing {
+    const WINDOW: u32 = 300;
+
+    fn new() -> Self {
+        Self {
+            frames: Default::default(),
+            update: Default::default(),
+            draw: Default::default(),
+            worst: Default::default(),
+            since: std::cell::Cell::new(Instant::now()),
+        }
+    }
+
+    fn drew(&self, took: Duration) {
+        self.draw.set(self.draw.get() + took);
+        self.worst.set(self.worst.get().max(took));
+        let frames = self.frames.get() + 1;
+        self.frames.set(frames);
+        if frames < Self::WINDOW {
+            return;
+        }
+        let ms = |d: Duration| d.as_secs_f64() * 1000.;
+        log::info!(
+            "Direct Connection timing: {frames} frames, update {:.3} ms and draw {:.3} ms mean (draw worst {:.3} ms), {:.1} frames a second",
+            ms(self.update.get()) / f64::from(frames),
+            ms(self.draw.get()) / f64::from(frames),
+            ms(self.worst.get()),
+            f64::from(frames) / self.since.get().elapsed().as_secs_f64()
+        );
+        self.frames.set(0);
+        self.update.set(Duration::ZERO);
+        self.draw.set(Duration::ZERO);
+        self.worst.set(Duration::ZERO);
+        self.since.set(Instant::now());
     }
 }
 
