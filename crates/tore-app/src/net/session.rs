@@ -33,7 +33,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tore_formats::aircraft::AircraftId;
-use tore_net::{Datagrams, Entropy, LinkEnd, RealClock};
+use tore_net::{Datagrams, Entropy, Keepalive, KeepaliveConfig, LinkEnd, RealClock};
 use tore_session::{
     BuildId, Client, ClientConfig, ClientEvent, ClientFrame, Controls, wire::events::WireEvent,
 };
@@ -119,6 +119,91 @@ impl Datagrams for Transport {
     }
 }
 
+/// The keepalive thread of a game joined over UDP (slice EF-K): while the
+/// game's loop is stalled (a window dragged on Windows, a long frame, a
+/// screenshot), it tells the host once a second that the connection is
+/// alive, for at most a minute. It starts once the host has accepted the
+/// join, learns of every turn of the game's loop, and stops when the
+/// connection closes or the session is dropped. The hosting game's own
+/// connection, over the in-process link, has none: the host never drops it
+/// for silence (EF4).
+pub(crate) struct KeptAlive {
+    config: KeepaliveConfig,
+    thread: Option<Keepalive>,
+    /// The thread could not be started; the game carries on without it.
+    failed: bool,
+    /// Keepalives already noted in the log.
+    noted: u64,
+}
+
+impl KeptAlive {
+    pub(crate) fn new(config: KeepaliveConfig) -> Self {
+        Self {
+            config,
+            thread: None,
+            failed: false,
+            noted: 0,
+        }
+    }
+
+    /// After a turn of the game's loop, which has just sent what it had.
+    pub(crate) fn turned(&mut self, client: &Client, transport: &Transport) {
+        match client.phase() {
+            tore_session::ClientPhase::Connecting => {}
+            tore_session::ClientPhase::Closed => self.thread = None,
+            _ => match &self.thread {
+                Some(thread) => {
+                    thread.turned();
+                    let sent = thread.sent();
+                    if sent > self.noted {
+                        log::info!(
+                            "Network: the game was held up; its keepalive kept the connection \
+                             ({} keepalives, {} in all)",
+                            sent - self.noted,
+                            sent
+                        );
+                        self.noted = sent;
+                    }
+                }
+                None if !self.failed => self.start(client, transport),
+                None => {}
+            },
+        }
+    }
+
+    fn start(&mut self, client: &Client, transport: &Transport) {
+        let (Transport::Udp(socket), Some(datagram)) = (transport, client.keepalive_datagram())
+        else {
+            return;
+        };
+        let started = socket
+            .try_clone()
+            .and_then(|socket| Keepalive::start(socket, client.server(), datagram, self.config));
+        match started {
+            Ok(thread) => {
+                self.thread = Some(thread);
+                self.noted = 0;
+            }
+            Err(error) => {
+                self.failed = true;
+                log::warn!("Network: no keepalive thread ({error}); a stalled game may be dropped");
+            }
+        }
+    }
+
+    /// Whether the thread runs.
+    #[cfg(test)]
+    pub(crate) fn running(&self) -> bool {
+        self.thread.is_some()
+    }
+
+    /// Keepalives the thread has sent.
+    #[cfg(test)]
+    pub(crate) fn sent(&self) -> u64 {
+        self.thread.as_ref().map_or(0, Keepalive::sent)
+    }
+}
+
 /// Where and how a session joins: the host's address, the transport that
 /// reaches it, and what the player gives.
 pub struct Join {
@@ -180,6 +265,8 @@ impl Join {
 pub struct NetSession {
     pub client: Client,
     socket: Transport,
+    /// Speaks for the connection while the game's loop is stalled.
+    kept: KeptAlive,
     clock: RealClock,
     sink: Sink,
     /// Chaff, flares, smoke and contrails, stepped once per client tick.
@@ -290,6 +377,7 @@ impl NetSession {
         Ok(Self {
             client,
             socket,
+            kept: KeptAlive::new(KeepaliveConfig::default()),
             clock,
             sink,
             effects: Effects::default(),
@@ -411,6 +499,7 @@ impl NetSession {
         let _ = self.client.receive_from(now, &mut self.socket);
         self.client.update(now, controls);
         let _ = self.client.transmit(&mut self.socket);
+        self.kept.turned(&self.client, &self.socket);
         while let Some(event) = self.client.poll_event() {
             if let ClientEvent::Debrief(debrief) = &event {
                 self.debrief = Some((**debrief).clone());
@@ -693,3 +782,7 @@ mod tests {
         assert!(!flare);
     }
 }
+
+#[cfg(test)]
+#[path = "keepalive_tests.rs"]
+mod keepalive_tests;

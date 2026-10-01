@@ -236,6 +236,16 @@ flowchart TD
 - **Flying.** Players join and take free planes in flight and leave at any
   time. A player who leaves, or whose game goes silent for 5 seconds, gives
   the plane back to the AI at once; it is not held for a rejoin until stage K.
+  *Since EF-K* a game that is still running but whose loop is held up (a
+  window dragged on Windows, a long frame, a screenshot) is not silent: a
+  small thread of the game sends a
+  [keepalive](formats/net-protocol.md#keepalive) once a second for up to a
+  minute, and the player keeps the plane, which flies on with its last
+  controls. The log shows nothing for such a stall (the player's
+  once-a-minute figures show the inputs repeated, 120 for each second of it);
+  a game stalled for longer than a minute leaves with the usual "silent" line
+  about 65 seconds after it stopped
+  ([details](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k)).
   A destroyed plane stays destroyed; respawns are stage F.
 - **Ending.** The mission ends at the time limit, once the last player has been
   out of the flight for the empty timeout, or on the console's `end`. Every

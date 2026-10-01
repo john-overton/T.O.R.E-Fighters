@@ -415,6 +415,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/performance.rs", ("flight-maneuvers",), "performance counters"),
     _r("crates/tore-app/src/replay/*", ("replay-recording", "ai-regression", "replay-live"), "recording and replay screens"),
     _r("crates/tore-app/src/net/hosting*", (), "the game's host thread; only --host reaches it; no scenario yet"),
+    _r("crates/tore-app/src/net/keepalive_tests.rs", (), "the joined game's keepalive tests (real time, cargo test only); no scenario"),
     _r("crates/tore-app/src/widgets/*", ("menus-screens",), "the multiplayer widget kit; the Direct Connection screen draws it (menus-snap-direct*)", windowed=True),
     _r("crates/tore-app/src/direct_screen/*", ("menus-screens",), "the Direct Connection screen; its snapshot states are menus-snap-direct*", windowed=True),
     _r("crates/tore-app/src/lobby_screen/*", ("menus-screens",), "the lobby screen; its snapshot states are menus-snap-lobby*", windowed=True),

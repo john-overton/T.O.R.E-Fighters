@@ -2003,7 +2003,7 @@ dependency.
 | Crate | Kind | Holds | Depends on |
 | --- | --- | --- | --- |
 | `tore-codec` | library | Bit writer and bounded bit reader, variable-length integers, quantizers, FNV-1a and CRC-32. Shared by the wire, the exact own-plane coder and, in stage H, the checkpoints | std only |
-| `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator. **Built (D2).** The host and client are state machines that never read a clock or touch a socket: the caller passes the time in, feeds them datagrams and sends what they give, over a UDP socket or the simulator (agent decision). *Slice EF3 adds* the in-process link (`link`) a hosting game flies through, and takes from `tore-server`, unchanged, the dual-stack `ServerSocket` and the sleep-then-spin `wait_until`, which the dedicated server and the game's host thread now share ([the host inside the game](#the-host-inside-the-game-stage-e)). *EF4 adds* `Server::set_silence_exempt`, which a hosting game uses for its own player's connection ([the lobby](#the-lobby)) | tore-codec |
+| `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator. **Built (D2).** The host and client are state machines that never read a clock or touch a socket: the caller passes the time in, feeds them datagrams and sends what they give, over a UDP socket or the simulator (agent decision). *Slice EF3 adds* the in-process link (`link`) a hosting game flies through, and takes from `tore-server`, unchanged, the dual-stack `ServerSocket` and the sleep-then-spin `wait_until`, which the dedicated server and the game's host thread now share ([the host inside the game](#the-host-inside-the-game-stage-e)). *EF4 adds* `Server::set_silence_exempt`, which a hosting game uses for its own player's connection ([the lobby](#the-lobby)). *EF-K adds* the Keepalive packet and the `Keepalive` thread a joined game runs while its loop is stalled ([a stalled game stays connected](#a-stalled-game-stays-connected-ef-k)) | tore-codec |
 | `tore-import` | library | The data folder, the import pack's reader and writer, media detection and the import itself, moved out of `tore-app` so a server can import and load without the game. *Built (D3a).* | tore-formats |
 | `tore-session` | library | The game's side of networking: the wire messages, the host session (clock, inputs, snapshots, joins), the client session (prediction, interpolation, clock steering, readouts) and the headless bot client. *Wire built (D6)*: the module `wire` has every section and message, the cockpit readout's included, with each end's bookkeeping (acknowledged baselines, priorities, the event queue, the name table) and no clock or socket ([what it settled](formats/net-protocol.md#what-the-games-sections-settled)). *Host built (D7a)*: the module `host` ([the host session](#the-host-session)). *Client built (D8a)*: the modules `client` ([the client session](#the-client-session)) and `bot`, and the `tore-bot` program, which loads an import through `tore-import` | tore-world, tore-net, tore-codec, tore-import |
 | `tore-server` | binary | The dedicated server: configuration, import, logging and the console. **Built (D7b):** options, configuration file, `--import`, `--check`, start-up refusals, the real-time run loop, the console, status lines and the log, around `tore_session::Host`. The run loop drives the host through a small `Host` trait (`host.rs`) that `wiring.rs` implements with `tore_session::Host`, so the loop, console and log are tested against a scripted host on a fake clock (agent decision). Which build is a release is `app::is_release`, the stamped `TORE_BUILD_VERSION` tag, which the game's `--connect` (D8) must use too | tore-session, tore-import |
@@ -3050,7 +3050,9 @@ sequenceDiagram
   the plane back to the AI at the next tick. *Built (D7a):* the host then
   disconnects the player once the debrief is acknowledged, or after 5 seconds.
   A player whose packets stop for 5 seconds, or who is kicked, gives the plane
-  back the same way with no debrief. A
+  back the same way with no debrief; *since EF-K* a joined game whose loop is
+  merely stalled keeps its plane for up to a minute
+  ([below](#a-stalled-game-stays-connected-ef-k)). A
   destroyed plane stays destroyed; the seat can end the mission as in single
   player. Respawns are stage F. *EF4:* Leave ends the player's flight only:
   after the debrief the player is back in the lobby, still connected, and
@@ -3083,6 +3085,112 @@ sequenceDiagram
   any other build must have the same commit, since compile-time tuning (for
   example the stall reference fractions) changes the simulation and would make
   every prediction wrong.
+
+### A stalled game stays connected (EF-K)
+
+*Built (EF-K); agent decisions unless credited.* A host drops a connection
+it has heard nothing from for 5 seconds. A joined game's loop can stop for
+longer than that and still come back: EF6 and EF7 both saw a screenshot on a
+loaded machine stall a joined game past 5 seconds, and the host dropped it.
+A player whose window stalls should come back to their flight, not to a
+"disconnected" message.
+
+**What stalls the loop, by platform.** Read from the source of winit 0.30.13,
+the version in `Cargo.lock`, on 2026-10-01; none of it has been checked by a
+run on Windows or macOS yet. The game pumps its session only at the start of
+a redraw (`net_tick` on `RedrawRequested`, `net/play.rs`), and `about_to_wait`
+asks for the redraws, with `ControlFlow::WaitUntil` no later than the
+session's next wake, about 10 ms (`main.rs`).
+
+- **Windows.** Dragging the title bar or a border runs the system's modal
+  move and size loop inside `DefWindowProcW`. Winit emits `about_to_wait` and
+  honours `WaitUntil` only from its own wait (`wait_for_messages`,
+  `platform_impl/windows/event_loop.rs`), which does not run until the drag
+  ends. Window messages still arrive: each size change gives `Resized` and,
+  since the game asks for a redraw on every resize, a `RedrawRequested` that
+  pumps the session once. A move, a mouse button held still on the title bar,
+  and the title bar's right-click menu pump nothing for as long as they last.
+  Winit cancels the half-second pause of a plain click on the title bar (a
+  dummy mouse move posted on `WM_NCLBUTTONDOWN`; changelog 0.30, "fixed ~500
+  ms pause when clicking the title bar during continuous redraw") and its own
+  comment says the right-click menu's freeze is not cancelled. This is the
+  case that matters most: a player who holds the window for 5 seconds was
+  dropped.
+- **macOS.** Winit's run-loop observers and its wake-up timer are added in
+  the common run-loop modes (`platform_impl/macos/observer.rs`), which take in
+  the event-tracking mode AppKit runs during a live resize, and `drawRect:`
+  sends `RedrawRequested` at once (changelog 0.25, "emit RedrawRequested events
+  immediately while the window is being resized"), so a live resize should
+  keep the session turning. Whether moving the window by its title bar holds
+  the loop is AppKit's behaviour, which the source cannot show: unconfirmed.
+- **Linux**, X11 and Wayland: the window manager or the compositor moves and
+  resizes the window, and nothing in winit holds the loop.
+- **Everywhere:** a long frame, a mission load (`begin_session_flight` loads
+  the aircraft and builds the scenery on the loop) and an input script's
+  `shot` step (a blocking GPU read-back, then a PNG written on the loop).
+
+So the fix matters most on Windows, and is built for every platform.
+
+**The keepalive.** A game joined over UDP starts a small thread
+(`tore_net::Keepalive`, driven by `net::session::KeptAlive`) once the host
+accepts the join. It holds a clone of the game's own socket, so it speaks from
+the connection's address, and the connection's Keepalive packet (kind 10,
+nine bytes: the checksum, the kind and the connection id;
+[protocol](formats/net-protocol.md#keepalive), protocol 5). Every turn of the
+game's session tells it the loop has run.
+
+- **Rate.** It sends nothing while the loop turns. Once the loop has not
+  turned for 1 second it sends one keepalive, then one a second (it looks
+  every 250 ms). The game's own transport sends at least 10 packets a second,
+  so the thread only ever speaks in a stall.
+- **The bound.** It sends none once the loop has not turned for 60 seconds,
+  so a game that is truly hung is dropped as before, 5 seconds after its last
+  keepalive, about 65 seconds into the stall.
+- **Identity.** The packet carries the connection's id and is accepted only
+  from the connection's address, exactly what a Payload needs, so nobody else
+  can keep a connection alive and nothing new is open to a stranger. The host
+  counts it as hearing from the connection and nothing else (no
+  acknowledgement, round trip or rate statistic) and never answers it.
+- **Lifetime.** The thread starts once the session is past joining, stops
+  (and is joined) when the connection closes, a new one is started for a new
+  connection, and dropping the session stops it. It only sends: it never
+  reads the socket and never touches the client's state.
+- **The King** joins over the in-process link and has no keepalive: the host
+  exempts its connection from the timeout (EF4).
+- **The log.** When the loop comes back the game's log says how many
+  keepalives covered the stall ("Network: the game was held up; its
+  keepalive kept the connection (14 keepalives, 14 in all)"). The host logs
+  nothing for a stall; a game stalled past the bound leaves with the usual
+  "silent" line ([server guide](DEDICATED-SERVER.md#the-mission-lifecycle)).
+
+**What a 15-second stall looks like.**
+
+- *For the stalled player:* the picture freezes. When it comes back, their
+  plane is where the host flew it meanwhile, on the last stick, throttle,
+  trigger and scope controls the host had (stage D's rule for a late player:
+  a held trigger keeps firing, a held pull keeps pulling); the client takes
+  the host's newest state instead of stepping the backlog (a catch-up), and
+  everything else jumps to where it is now. Then, as the snapshots that waited
+  in the socket are read, a few blended corrections of the own plane show in
+  the first tenth of a second or so (none to ten in the tests, the largest
+  about 19 ft and 10 degrees, the last under a tenth of a foot), and none
+  after.
+- *For the others:* the player's plane flies on smoothly on those held
+  controls, the player stays in the roster and the lobby, and nobody is told
+  anything. Before EF-K the plane went back to the AI after 5 seconds and the
+  player was gone.
+
+**Measured** (`net/keepalive_tests.rs`, real time, a hosted game with its King
+over the link and a guest over loopback UDP, both pumped once a 16 ms frame):
+a guest stalled for 15 seconds sent 14 keepalives, was never dropped, caught
+up once and had settled (two seconds with no correction) within 4 seconds of
+coming back, while the King had no correction during the stall, still held
+the crown and both flew on; with the bound set to 3 seconds a stalled guest
+sent 2 keepalives and was dropped as silent 7.2 seconds into its stall, and
+learned it on coming back. The transport's own tests (`tore-net`'s
+`tests/keepalive.rs`, on the simulator) keep a stall of 15 seconds, refuse a
+keepalive from another address, with another id or of another version, and
+check that the host answers none.
 
 ### Recordings and diagnostics
 
@@ -3641,7 +3749,7 @@ it starts as its `start` setting says. *Agent decisions.*
   when the King is at the link's address, which the hosted game's `Linked`
   transport refuses to any socket datagram, so no remote player can claim it.
   A hosting window held still (dragged or resized on Windows, a long load, a
-  modal) stalls only that game: the mission flies on for everyone, the King's
+  modal; [what stalls the loop](#a-stalled-game-stays-connected-ef-k)) stalls only that game: the mission flies on for everyone, the King's
   plane with its last controls as any late player's, and when the window
   comes back the client catches up as after any stall. The connection cannot
   really go silent for good: if the game goes away, its host thread goes with
@@ -4099,6 +4207,7 @@ second completes the plan's stage F and stage E's replays.
 | EF7 Direct Connection screen | Sonnet | EF2, EF5 | The MULTI menu's rows and the screen of "Finding a game and joining" | Headless renders; a windowed run finds a host on this machine and joins it. **Built (EF7):** see [the Direct Connection screen as built](#the-direct-connection-screen-as-built-ef7) |
 | EF8 Lobby screen | Sonnet | EF2, EF4, EF6 | The lobby screen, the creator with Accept, Load Ordnance for one's own slot, the debrief and the return | A windowed run hosts, builds a mission, takes a slot, chats with a bot, starts, flies, ends and returns to the lobby. **Built (EF8):** see [the lobby screen as built](#the-lobby-screen-as-built-ef8) |
 | EF9 Acceptance | lead, then John | all | The lead's smoke test on this machine (a hosting game, a joining game, a bot); then John on three machines (macOS, Linux, Windows) | John flies with friends from the menus |
+| EF-K Keepalive | Opus | EF6 | A joined game whose loop is stalled is kept connected by a keepalive thread, under the connection's own identity, for at most a minute; protocol version 5 | A joined client stalled 15 seconds is not dropped and recovers; one stalled past the bound is dropped; a keepalive from elsewhere keeps nothing alive; the King is unaffected. **Built (EF-K):** see [a stalled game stays connected](#a-stalled-game-stays-connected-ef-k) |
 
 **Phase 2: the rest of stage F, and stage E's replays.** The King's settings
 (co-op or PvP and sides, slot locks, password, join in progress, friendly fire,
@@ -4125,6 +4234,8 @@ flowchart TD
   EF6 --> EF8
   EF7 --> EF9["EF9 Acceptance"]
   EF8 --> EF9
+  EF6 --> EFK["EF-K Keepalive"]
+  EFK --> EF9
 ```
 
 EF0 and EF3 start together. EF7 and EF8 both edit the menus and `main.rs`, so

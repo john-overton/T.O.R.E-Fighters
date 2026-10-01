@@ -512,7 +512,7 @@ estimates. How they are used is in the
 | Simulation | 120 ticks a second | John, 2026-09-28 |
 | Snapshots | 30 a second to each player (every fourth tick, each seat on its own tick of the four: seat number modulo 4, an agent decision so a full server does not build all at once); a server setting of 10, 12, 15, 20, 24, 30, 40 or 60, the rates that divide 120 | John, 2026-09-28; the other rates are an agent proposal |
 | Inputs | Up to 60 packets a second, each repeating every unacknowledged tick up to 24 ticks (200 ms) | Agent proposal |
-| Keepalive | At least 10 packets a second each way | Agent proposal |
+| Keepalive | At least 10 packets a second each way; a joined game whose loop is stalled sends a [Keepalive](formats/net-protocol.md#keepalive) once a second, for at most 60 seconds (EF-K) | Agent proposal |
 | Packet size | At most 1,200 bytes | Guide |
 
 **Clocks, delays and smoothing.**
@@ -573,7 +573,7 @@ target window come from the host's own readout, not from the drawn aircraft.
 | Item | Value |
 | --- | --- |
 | Connecting | The client repeats each handshake step every 250 ms and gives up after 10 seconds |
-| Dropped player | 5 seconds without a valid packet; the AI takes the plane at once |
+| Dropped player | 5 seconds without a valid packet; the AI takes the plane at once. A game whose loop is stalled (a window dragged, a long frame) keeps its plane for up to 60 seconds through its [keepalive](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k) (EF-K, agent decision) |
 | Players per server | A setting, default 30 (John, 2026-09-28); a co-op mission seats at most its 15 friendly planes |
 | Default port | UDP 26900, a setting |
 
