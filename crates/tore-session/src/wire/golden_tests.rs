@@ -28,6 +28,9 @@ fn lines() -> Vec<(String, String)> {
     let (full, delta) = samples::snapshots();
     out.push(("snapshot-full".into(), hex(&full)));
     out.push(("snapshot-delta".into(), hex(&delta)));
+    let (with_readout, against) = samples::readout_snapshots();
+    out.push(("snapshot-readout-full".into(), hex(&with_readout)));
+    out.push(("snapshot-readout-delta".into(), hex(&against)));
     out.push(("events".into(), hex(&samples::events().encode().unwrap())));
     // The own state's header; its body is the exact state's own coding,
     // which `tore-world` tests.

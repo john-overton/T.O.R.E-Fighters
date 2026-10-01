@@ -26,6 +26,7 @@ use tore_session::wire::messages::Message;
 use tore_session::wire::names::NameTable;
 use tore_session::wire::snapshot::SnapshotHeader;
 use tore_world::mission::{MissionSpec, Skill, Start};
+use tore_world::readout::PlainBits;
 use tore_world::seats::{PlaneId, SeatId, SeatInput};
 use tore_world::world::plane::{ExactState, OwnPlane, OwnshipTerms};
 use tore_world::world::{Seating, TickOutput, World};
@@ -77,6 +78,9 @@ struct Link {
     names_bytes: usize,
     total_bytes: usize,
     late_waits: usize,
+    readout: Stat,
+    readout_waiting: Stat,
+    part_bits: [usize; 26],
 }
 
 impl Link {
@@ -168,6 +172,8 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
     let mut last_own_state_tick = 0u64;
     let mut peak_entities = BTreeMap::new();
     let ticks = MINUTES * 60 * 120;
+    let mut plain = Stat::default();
+    let mut busiest = 0;
     let mut previous_picture = from_world::seat_picture(&world, player).unwrap();
     for _ in 0..ticks {
         let tick = world.tick();
@@ -319,6 +325,15 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
         let k = tick / TICKS_PER_SNAPSHOT;
         let own = world.cockpits[0].flight.position;
         let exact = ExactState::of(&OwnPlane::of(&world.cockpits[0]), terms.as_ref());
+        let readout = world
+            .cockpit_readout(
+                seat,
+                tore_world::combat::launcher(&world.cockpits[0].flight),
+            )
+            .expect("seat 0 flies");
+        plain.push(readout.plain_bits().div_ceil(8));
+        busiest =
+            busiest.max(readout.sensors.contacts.len() + readout.visual.len() + readout.map.len());
         let header = SnapshotHeader {
             tick: tick32,
             input_received: tick32,
@@ -356,9 +371,20 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
                 link.names_bytes += Message::Names(names).encode().unwrap().len();
             }
             let packet = host
-                .snapshot(&header, &with_relevance, link.messages)
+                .snapshot_with_readout(&header, &with_relevance, Some(&readout), link.messages)
                 .unwrap();
+            if let Some(report) = packet.readout {
+                link.readout.push(report.bits.div_ceil(8));
+                link.readout_waiting.push(report.waiting);
+                for (index, bits) in report.part_bits.iter().enumerate() {
+                    link.part_bits[index] += bits;
+                }
+            }
             let bytes = packet.bytes();
+            assert!(
+                bytes <= tore_net::MAX_DATAGRAM,
+                "snapshot {k}: a packet of {bytes} bytes"
+            );
             link.snapshot.push(packet.snapshot.len());
             if let Some(events) = &packet.events {
                 link.events.push(events.len());
@@ -393,6 +419,8 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
     }
 
     println!("peak entities per kind: {peak_entities:?}");
+    println!("{}", plain.line("readout plain bytes"));
+    println!("most scope, visual and map contacts at once: {busiest}");
     let seconds = (ticks as f64) / 120.;
     for link in &links {
         println!(
@@ -407,6 +435,8 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
             ("entity records sent", &link.entities_sent),
             ("of them in full", &link.entities_full),
             ("due entities waiting", &link.waiting),
+            ("readout record bytes", &link.readout),
+            ("readout changes waiting", &link.readout_waiting),
         ] {
             println!("{}", stat.line(name));
         }
@@ -414,6 +444,18 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
             "snapshots after the first second with an entity waiting: {}",
             link.late_waits
         );
+        let snapshots = link.readout.values.len().max(1) as f64;
+        let mut parts: Vec<String> = Vec::new();
+        for (index, part) in tore_session::wire::readout::PARTS.iter().enumerate() {
+            let mean = link.part_bits[index] as f64 / snapshots / 8.;
+            if mean >= 0.5 {
+                parts.push(format!(
+                    "{} {mean:.1}",
+                    tore_session::wire::readout::part_name(*part)
+                ));
+            }
+        }
+        println!("readout mean bytes by part: {}", parts.join(", "));
         println!(
             "names messages {} bytes; download {:.1} KB/s ({:.0} kbit/s) without the transport's messages",
             link.names_bytes,

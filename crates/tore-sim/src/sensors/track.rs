@@ -183,6 +183,29 @@ pub struct Strobe {
     pub sidelobe_floor: f64,
     line_of_sight: Vector,
 }
+impl Strobe {
+    /// A strobe as a display draws it, from what a networked client
+    /// receives. It has no line of sight, which only the host's sensors use
+    /// to couple strobes and contacts, so it never goes back into sensors.
+    pub fn presented(
+        id: u32,
+        bearing_rad: f64,
+        elevation_rad: f64,
+        received: f64,
+        half_width_rad: f64,
+        sidelobe_floor: f64,
+    ) -> Self {
+        Self {
+            id,
+            bearing_rad,
+            elevation_rad,
+            received,
+            half_width_rad,
+            sidelobe_floor,
+            line_of_sight: [0.; 3],
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sample {

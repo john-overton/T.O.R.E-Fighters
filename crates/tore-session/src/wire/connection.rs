@@ -18,12 +18,14 @@ use super::messages::Names;
 use super::names::{NameTable, ReceivedNames};
 use super::own_state::{self, OwnStateHeader, OwnStateReceiver, OwnStateSender};
 use super::priority::Relevance;
+use super::readout::{QReadout, ReadoutReceiver, ReadoutReport, ReadoutSender};
 use super::snapshot::{
     EntityReceiver, EntityReport, EntitySender, ReceivedSnapshot, SnapshotHeader, SnapshotSection,
 };
 use super::space::{self, Shares};
 use super::{SECTION_EVENTS, SECTION_INPUTS, SECTION_OWN_STATE, SECTION_SNAPSHOT, WireResult};
 use tore_sim::models::AircraftModel;
+use tore_world::readout::CockpitReadout;
 use tore_world::world::plane::ExactState;
 
 /// One snapshot packet's sections and what they held.
@@ -34,6 +36,8 @@ pub struct SnapshotPacket {
     pub shares: Shares,
     pub entities: EntityReport,
     pub events_report: EventsReport,
+    /// What the cockpit readout's record held, when there was a readout.
+    pub readout: Option<ReadoutReport>,
 }
 
 impl SnapshotPacket {
@@ -73,6 +77,7 @@ pub struct HostConnection {
     pub events: EventQueue,
     pub own: OwnStateSender,
     pub names: NameTable,
+    pub readout: ReadoutSender,
     staged: Staged,
 }
 
@@ -85,6 +90,7 @@ impl HostConnection {
             events: EventQueue::new(),
             own: OwnStateSender::new(),
             names: NameTable::new(),
+            readout: ReadoutSender::new(ticks_per_snapshot),
             staged: Staged::None,
         }
     }
@@ -105,9 +111,53 @@ impl HostConnection {
         entities: &[(Entity, Relevance)],
         messages: usize,
     ) -> WireResult<SnapshotPacket> {
+        self.snapshot_with_readout(header, entities, None, messages)
+    }
+
+    /// [`Self::snapshot`] with the seat's cockpit readout, built for the
+    /// snapshot's tick. The readout takes up to 200 bytes and leaves the rest
+    /// to the entities; when it had more to say it also takes whatever the
+    /// entities leave of their share. What does not fit waits for the next
+    /// packet ([`super::readout`]).
+    pub fn snapshot_with_readout(
+        &mut self,
+        header: &SnapshotHeader,
+        entities: &[(Entity, Relevance)],
+        readout: Option<&CockpitReadout>,
+        messages: usize,
+    ) -> WireResult<SnapshotPacket> {
         self.discard();
-        let shares = space::plan(0, self.events.waiting_bytes(), messages);
-        let (snapshot, entity_report) = self.entities.build(header, entities, shares.entities)?;
+        // The readout first, within its own share; what it leaves goes to the
+        // entities. If it had to leave changes out, it is coded again with
+        // whatever room the entities did not use.
+        let quantized = readout.map(|readout| QReadout::of(readout, header.tick));
+        let share_bits = space::READOUT_SHARE * 8;
+        let mut coded = quantized
+            .as_ref()
+            .map(|q| self.readout.build(header.tick, q, share_bits));
+        let readout_bytes = coded
+            .as_ref()
+            .map_or(0, |(bits, _)| bits.bit_len().div_ceil(8));
+        let shares = space::plan(readout_bytes, self.events.waiting_bytes(), messages);
+        let (records, mut entity_report) =
+            self.entities.select(header, entities, shares.entities)?;
+        if let (Some(q), Some((_, report))) = (&quantized, &coded)
+            && report.waiting > 0
+        {
+            let used = super::snapshot::entity_bits(&records)?;
+            let spare = (shares.entities * 8).saturating_sub(used);
+            if spare > 0 {
+                // The packet kept the first record's bytes for the readout.
+                coded = Some(
+                    self.readout
+                        .build(header.tick, q, readout_bytes * 8 + spare),
+                );
+            }
+        }
+        let snapshot =
+            super::snapshot::write_section(header, coded.as_ref().map(|(bits, _)| bits), &records)?;
+        let readout = coded;
+        entity_report.bytes = snapshot.len();
         // The events take what the entities left, keeping the messages'
         // room; the oldest may use that room too, so a long one is never
         // starved (the transport does the same for a long message).
@@ -121,6 +171,7 @@ impl HostConnection {
             shares,
             entities: entity_report,
             events_report,
+            readout: readout.map(|(_, report)| report),
         })
     }
 
@@ -139,6 +190,7 @@ impl HostConnection {
             Staged::Snapshot => {
                 self.entities.sent(sequence);
                 self.events.sent(sequence);
+                self.readout.sent(sequence);
             }
             Staged::OwnState => self.own.sent(sequence),
             Staged::None => {}
@@ -152,6 +204,7 @@ impl HostConnection {
             Staged::Snapshot => {
                 self.entities.discard();
                 self.events.discard();
+                self.readout.discard();
             }
             Staged::OwnState => self.own.discard(),
             Staged::None => {}
@@ -164,6 +217,7 @@ impl HostConnection {
         self.entities.delivered(sequence);
         self.events.delivered(sequence);
         self.own.delivered(sequence);
+        self.readout.delivered(sequence);
     }
 
     /// The transport reported the packet numbered `sequence` lost.
@@ -171,6 +225,7 @@ impl HostConnection {
         self.entities.lost(sequence);
         self.events.lost(sequence);
         self.own.lost(sequence);
+        self.readout.lost(sequence);
     }
 
     /// Checks an Inputs section before the transport accepts its packet.
@@ -186,6 +241,7 @@ pub struct ClientConnection {
     pub events: EventReceiver,
     pub own: OwnStateReceiver,
     pub names: ReceivedNames,
+    pub readout: ReadoutReceiver,
 }
 
 impl ClientConnection {
@@ -197,6 +253,7 @@ impl ClientConnection {
             events: EventReceiver::new(),
             own: OwnStateReceiver::new(),
             names: ReceivedNames::new(),
+            readout: ReadoutReceiver::new(ticks_per_snapshot),
         }
     }
 
@@ -212,10 +269,18 @@ impl ClientConnection {
         }
     }
 
-    /// Reads a Snapshot section.
+    /// Reads a Snapshot section: its entities, and its cockpit readout in
+    /// the wire's numbers (turn it into a `CockpitReadout` with
+    /// [`QReadout::readout`] around the client's own plane).
     pub fn snapshot(&mut self, body: &[u8]) -> WireResult<(SnapshotHeader, ReceivedSnapshot)> {
         let section = SnapshotSection::decode(body)?;
-        let received = self.entities.receive(&section);
+        let mut received = self.entities.receive(&section);
+        if let Some(raw) = &section.readout {
+            match self.readout.receive(raw, section.header.tick) {
+                Ok(readout) => received.readout = Some(readout),
+                Err(_) => received.readout_unresolved = true,
+            }
+        }
         Ok((section.header, received))
     }
 

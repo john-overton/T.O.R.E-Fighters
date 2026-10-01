@@ -15,6 +15,8 @@
 //!   baselines: [`snapshot::EntitySender`] on the host and
 //!   [`snapshot::EntityReceiver`] on the client.
 //! - [`priority`]: the relevance bands and the priority accumulator.
+//! - [`readout`]: the cockpit readout inside a snapshot, against the one
+//!   the client acknowledged.
 //! - [`space`]: how a snapshot packet's 1,200 bytes are shared.
 //! - [`events`]: the Events section, the host's queue and the client's
 //!   receiver.
@@ -39,10 +41,12 @@ pub mod messages;
 pub mod names;
 pub mod own_state;
 pub mod priority;
+pub mod readout;
 pub mod snapshot;
 pub mod space;
 
 mod bits;
+mod flat;
 
 #[cfg(test)]
 mod fuzz_tests;
@@ -50,6 +54,8 @@ mod fuzz_tests;
 mod golden_tests;
 #[cfg(test)]
 mod lossy_tests;
+#[cfg(test)]
+mod readout_tests;
 #[cfg(test)]
 mod round_trip_tests;
 #[cfg(test)]
@@ -62,7 +68,7 @@ use tore_codec::CodecError;
 /// transport's included. Any change to the bytes raises it; the wire golden
 /// test fails until it is raised and the committed copy refreshed
 /// (`TORE_UPDATE_WIRE_GOLDEN=1`).
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
 /// Section kinds after the transport's own Messages (kind 1).
 pub const SECTION_INPUTS: u8 = 2;

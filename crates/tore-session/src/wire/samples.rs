@@ -539,3 +539,207 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
         }),
     ]
 }
+
+/// A cockpit readout with every group and list filled, built by hand.
+pub fn readout() -> tore_world::readout::CockpitReadout {
+    use tore_sim::combat::live::{Readiness, SeekerTone};
+    use tore_sim::combat::missiles::{FiringBand, LaunchMode, seeker};
+    use tore_sim::combat::threats::{EvidenceSource, GuidanceClass, ThreatRecord};
+    use tore_sim::sensors::passive::{Emitter, Symbol};
+    use tore_sim::sensors::{Contact, Plot, Strobe, Support};
+    use tore_world::readout::*;
+    use tore_world::snapshot::Damage;
+    use tore_world::target_window::{Pilot, TargetBrief, TargetObjective};
+    let contact = |id: u32, x: f64| Contact {
+        id,
+        channel: Channel::Radar,
+        bearing_rad: 0.,
+        elevation_rad: 0.,
+        distance_ft: 0.,
+        position: [x, 12_000., -x * 2.],
+        velocity: [800., -10.25, 3.5],
+        track_eligible: id.is_multiple_of(2),
+        destroyed: false,
+    };
+    let observation = seeker::Observation {
+        id: 7,
+        position: [1_000.5, 9_000., -2_000.25],
+        velocity: [600., 1., -2.],
+        quality: 0.75,
+        off_axis: 0.0625,
+        range: 12_345.,
+    };
+    let row = TargetRow {
+        id: 7,
+        aircraft: Some(AircraftId::Su27),
+        position: [1_000.5, 9_000., -2_000.25],
+        velocity: [600., 1., -2.],
+        damage: Damage {
+            hp: 80,
+            initial_hp: 100,
+            sections: [0, 5, 0, 15, 0, 0],
+            structural: None,
+        },
+    };
+    CockpitReadout {
+        plane: 3,
+        tick: 401,
+        stores: Stores {
+            selected: 2,
+            armed: true,
+            launch_mode: LaunchMode::Boresight,
+            ammo: vec![578, 2, 0x8001, 4],
+            loaded: 0b1111,
+        },
+        seeker: SeekerReadout {
+            status: seeker::Status::Locked,
+            target: Some(7),
+            observation: Some(observation),
+            tone: Some(SeekerTone {
+                strength: 0.5,
+                ground: false,
+                radar: false,
+                locked: true,
+            }),
+        },
+        estimates: Estimates {
+            readiness: Readiness::Ready,
+            guidance_available: true,
+            can_lock: true,
+            observation: Some(observation),
+            max_range: Some(48_000.),
+            band: Some(FiringBand {
+                minimum: 3_000.,
+                maximum: 30_000.,
+            }),
+            in_range: true,
+            hit_percent: 72,
+            solution_seconds: Some(11.5),
+        },
+        targets: Targets {
+            designated: Some(7),
+            display: Some(row.clone()),
+            view: Some(row),
+        },
+        sensors: SensorReadout {
+            tick: 399,
+            selected: Some(7),
+            acquired: None,
+            selected_support: Some(Support::Tracked),
+            available: [true, true, true],
+            operating: [true, false, true],
+            radar_track_nmi: Some(20.),
+            contacts: vec![contact(7, 1_000.), contact(12, -40_000.)],
+            plots: vec![Plot {
+                id: 30,
+                channel: Channel::Infrared,
+                bearing_rad: 0.5,
+                elevation_rad: -0.125,
+                distance_ft: 60_000.,
+                position: [5., 6., 7.],
+                age: 120,
+            }],
+            strobes: vec![Strobe::presented(44, -1., 0.25, 0.5, 0.03125, 0.125)],
+            trails: vec![Trail {
+                id: 7,
+                start: 0,
+                len: 3,
+            }],
+            trail_points: vec![[0., 0., 0.], [10., 0., 5.], [20., 1., 10.]],
+        },
+        visual: vec![contact(12, -40_000.)],
+        map: vec![MapRow {
+            contact: contact(12, -40_000.),
+            identified: true,
+            airborne: true,
+            aircraft: Some(AircraftId::Mig29),
+        }],
+        rwr: RwrReadout {
+            emitters: vec![Emitter {
+                id: 12,
+                bearing_rad: 3.,
+                distance_nmi: Some(8.25),
+                symbol: Symbol::Aircraft,
+                received: 0.5,
+            }],
+            missiles: vec![ThreatRecord {
+                missile_id: 70_001,
+                source: EvidenceSource::Visual,
+                observed_tick: 380,
+                bearing_deg: -45.5,
+                position: Some([1., 2., 3.]),
+                velocity: Some([-1_500., 0., 2.]),
+                guidance_class: Some(GuidanceClass::Infrared),
+                targeting_receiver: true,
+                was_targeting_receiver: true,
+                stale: false,
+                radar_bearing_deg: None,
+            }],
+            inbound: vec![InboundMissile {
+                id: 70_001,
+                position: [1., 2., 3.],
+                seeker_class: 2,
+                aim120: false,
+            }],
+            locks: vec![3],
+        },
+        damage: DamageReadout {
+            hp: 90,
+            damage: 10,
+            subsystem_counts: std::array::from_fn(|i| (i % 3) as u8),
+            last_subsystem: Some(4),
+            radar_failed: false,
+            visual_failed: false,
+            infrared_failed: true,
+            rwr_failed: false,
+            ecm_failed: false,
+            shots: 300,
+            hits: 12,
+            kills: 1,
+        },
+        countermeasures: Countermeasures {
+            chaff: 30,
+            flares: 28,
+        },
+        airport: AirportReadout {
+            nav_mode: false,
+            service: None,
+        },
+        target_window: Some(TargetBrief {
+            id: 7,
+            objective: Some(TargetObjective::Destroy),
+            pilot: Pilot::Ai {
+                activity: tore_sim::ai::controller::Activity::Attacking,
+                skill: 3,
+                aims_at_viewer: true,
+            },
+        }),
+        music: MusicReadout {
+            designated_enemy: Some((7, [1_000.5, 9_000., -2_000.25])),
+            aiming: vec![7, 9],
+            succeeded: false,
+            home: false,
+        },
+    }
+}
+
+/// A snapshot carrying [`readout`] in full, then one carrying it moved on
+/// against the first, delivered.
+pub fn readout_snapshots() -> (Vec<u8>, Vec<u8>) {
+    let mut host = super::connection::HostConnection::new(4);
+    let first = readout();
+    let packet = host
+        .snapshot_with_readout(&header(400), &[], Some(&first), 0)
+        .unwrap();
+    host.sent(1);
+    host.delivered(1);
+    let mut second = readout();
+    second.tick += 4;
+    second.sensors.contacts[0].position[0] += 3_210.;
+    second.stores.ammo[0] -= 20;
+    second.sensors.contacts.pop();
+    let later = host
+        .snapshot_with_readout(&header(404), &[], Some(&second), 0)
+        .unwrap();
+    (packet.snapshot, later.snapshot)
+}

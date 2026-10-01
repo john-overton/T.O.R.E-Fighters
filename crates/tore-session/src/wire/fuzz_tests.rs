@@ -7,6 +7,7 @@ use super::events::EventsSection;
 use super::inputs::InputsSection;
 use super::messages::{Message, kind};
 use super::own_state::OwnStateReceiver;
+use super::readout::ReadoutReceiver;
 use super::snapshot::{EntityReceiver, SnapshotSection};
 use super::{SECTION_EVENTS, SECTION_OWN_STATE, SECTION_SNAPSHOT, samples};
 use tore_net::SplitMix64;
@@ -69,6 +70,7 @@ fn mutate(rng: &mut SplitMix64, sample: &[u8]) -> Vec<u8> {
 fn every_decoder_survives_random_and_mutated_bodies() {
     let inputs = samples::inputs().encode().unwrap();
     let (full, delta) = samples::snapshots();
+    let (readout_full, readout_delta) = samples::readout_snapshots();
     let events = samples::events().encode().unwrap();
     let messages: Vec<(u8, Vec<u8>)> = samples::messages(vec![7; 40])
         .iter()
@@ -103,16 +105,25 @@ fn every_decoder_survives_random_and_mutated_bodies() {
                 }
             }
             1 => {
-                let sample = if rng.below(2) == 0 { &full } else { &delta };
+                let sample = [&full, &delta, &readout_full, &readout_delta][rng.below(4) as usize];
                 let body = mutate(&mut rng, sample);
                 // A client that has the first snapshot, so records against
                 // it are applied too.
                 let mut client = EntityReceiver::new(4);
                 client.receive(&SnapshotSection::decode(&full).unwrap());
+                let mut readouts = ReadoutReceiver::new(4);
+                if let Some(raw) = SnapshotSection::decode(&readout_full).unwrap().readout {
+                    readouts.receive(&raw, 400).unwrap();
+                }
                 if let Ok(section) = SnapshotSection::decode(&body) {
                     decoded[1] += 1;
                     let _ = client.receive(&section);
                     let _ = client.entities();
+                    if let Some(raw) = &section.readout
+                        && let Ok(q) = readouts.clone().receive(raw, section.header.tick)
+                    {
+                        let _ = q.readout(section.header.tick, None, None);
+                    }
                 }
             }
             2 => {

@@ -14,7 +14,7 @@ reviewed by John the same day. The transport, from [Overview](#overview) to
 the build settled](#what-the-transport-settled)); the game's sections and
 messages, from [Inputs](#inputs) on, are built in `tore-session`'s `wire`
 module (slice D6; [what the build settled](#what-the-games-sections-settled)),
-except the cockpit readout's coding, which follows slice D5b. This is T.O.R.E's own
+the cockpit readout's coding included. This is T.O.R.E's own
 protocol. Fighters Anthology's wire format is unknown
 ([retail spec](../spec/multiplayer.md)) and nothing here tries to match it.
 Every choice below is an agent decision unless it is credited to John. How the
@@ -422,7 +422,8 @@ countermeasures; airport and NAV; target window; music inputs and mission
 result). Each group has a changed bit against the readout of the baseline
 snapshot; only changed groups are sent, and lists within a group (contacts,
 emitters) are coded entry by entry against the baseline's entry with the same
-id. Contact positions are world positions at the quantization below.
+id. Contact positions are world positions, in whole feet
+([as built](#the-cockpit-readout-as-built)).
 
 ### Entities
 
@@ -583,8 +584,9 @@ the [architecture](../ARCHITECTURE.md#the-host-session).
 
 ### Snapshots as built
 
-The section is the header (161 bits), one bit for the cockpit readout (0
-until its coding lands after slice D5b), then the four kinds in turn
+The section is the header (161 bits), one bit for the cockpit readout and,
+when it is set, the readout's record ([below](#the-cockpit-readout-as-built)),
+then the four kinds in turn
 (aircraft, projectiles, debris, pilots): each kind's count as a varint and
 its records in id order.
 
@@ -646,6 +648,62 @@ a pilot's is its escape phase (3 bits).
   waiting); the events take whatever the entities leave, and the oldest
   event may use the messages' room too, as a long message may, so it is
   never starved.
+
+### The cockpit readout as built
+
+The readout's record is the baseline (5 bits: snapshots back to the readout
+the client acknowledged, 1 to 31, or 0 for none, against the empty readout),
+then 26 parts, each behind a changed bit, in this order, which is also their
+importance: header (plane and tick), stores, countermeasures, damage, seeker,
+seeker observation, estimates, estimate observation, targets, displayed
+target, viewed target, airport, target window, music, designated enemy, AI
+locks, inbound missiles, threat records, emitters, sensor scalars, contacts,
+strobes, plots, trails, visual contacts, map. The client's `CockpitReadout`
+comes back from them (`QReadout::readout`).
+
+- **Scalar groups** (stores, damage, the seeker's status and tone, the
+  estimates, the target ids, the airport, the target window, the music's
+  flags and aims, the locks, the sensor flags) go whole when they changed: a
+  count and signed varints.
+- **Lists** (contacts, visual and map contacts, plots, strobes, emitters,
+  threat records, inbound missiles, and the target rows and seeker
+  observations as lists of at most one) go as the ids removed and the entries
+  that changed, in id order, each in full or against the baseline's entry
+  with its id: one bit and the differences of what moved, bucketed (2 to 24
+  bits or a varint), one bit and each slow field that changed. A position
+  with a velocity is predicted from it, as the entities' are, so an entry
+  flying as predicted is not sent at all.
+- **Trails** go as the points each dropped from the front of the baseline's
+  trail and the points it added, each a bucketed difference from the one
+  before.
+- **Room.** The readout takes up to 200 bytes and leaves the rest to the
+  entities; when it had more to say, it is coded again with whatever the
+  entities left of their share. What still does not fit waits: removals
+  first, then new entries, then the largest changes go, and the client keeps
+  the rest as the baseline predicts it, which the host's record of what the
+  client holds does too, so the next packet catches up from there.
+- **Steps.** Scope, visual, map, threat and inbound positions in whole feet
+  and velocities in 1/4 ft/s; target rows and seeker observations in 1/32 ft
+  and 1/64 ft/s, as the entities; plot and strobe angles 2^-12 of a turn;
+  emitter bearings 2^-8 of a turn (1.4 degrees), strengths 1/32 and
+  distances 1/8 nm, as coarse as the warning receiver draws them; threat
+  bearings 1/4 degree; qualities, strengths and floors 1/1024; small angles
+  1/4096 rad; ranges whole feet; nautical miles 1/64; seconds 1/64.
+- **Not sent.** A contact's bearing, elevation and distance, which the client
+  works out around its own predicted plane; the tower's reply and landing
+  count. The tower's service travels as its selected airport, its clearance
+  and the objects out of action; the client rebuilds a service that answers
+  the ILS as the host's does (`tore_sim::airport::Service::presented`). A
+  strobe is rebuilt without its line of sight, which only the host's sensors
+  use (`Strobe::presented`).
+- **Order.** Lists come back in id order, and a list holds one entry per id.
+
+Measured on the 15 against 15 mission with 100 ms acknowledgements: the
+readout's plain size is 471 to 13,145 bytes, mean 1,895; its record is 4 to
+506 bytes, mean 52 (the visual contacts 14 bytes, the map 10, contacts 8,
+emitters 7, threat records 6), with 2.7 changes waiting on average, mostly in
+the first second while the map and scope come across. Keeping no room for
+messages, 61 bytes on average.
 
 ### Events as built
 
@@ -715,7 +773,7 @@ Decoders check every count and length against these before reading on.
 ## Versions
 
 - The **protocol version** is one number in `tore-session`
-  (`wire::PROTOCOL_VERSION`, 1). Any change to the bytes raises it. A test
+  (`wire::PROTOCOL_VERSION`, 2 since the readout's coding). Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt`; when
   they differ it fails and says to raise the version and refresh the copy

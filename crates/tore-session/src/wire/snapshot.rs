@@ -24,6 +24,7 @@ use super::entity::{
     write_full,
 };
 use super::priority::Relevance;
+use super::readout::ReadoutRaw;
 use super::{WireError, WireResult};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use tore_codec::{BitReader, BitWriter};
@@ -105,6 +106,8 @@ pub struct Record {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SnapshotSection {
     pub header: SnapshotHeader,
+    /// The cockpit readout's record, when the player has a plane.
+    pub readout: Option<ReadoutRaw>,
     /// Records in kind order, then id order.
     pub records: Vec<Record>,
 }
@@ -151,16 +154,27 @@ fn id_bits_at_most(id: u32) -> usize {
 
 /// Writes the header, an empty readout slot and `records` (already in kind
 /// and id order, each body's bits written) into a section.
-fn write_section(
+pub(crate) fn write_section(
     header: &SnapshotHeader,
+    readout: Option<&BitWriter>,
     records: &[(EntityKey, BitWriter)],
 ) -> WireResult<Vec<u8>> {
     let mut w = BitWriter::with_capacity(1_200);
     header.write(&mut w);
-    // The cockpit readout's slot: none yet (slice D5b adds its coding).
-    w.write_bool(false);
+    // The cockpit readout: a presence bit, then its record.
+    w.write_bool(readout.is_some());
+    if let Some(readout) = readout {
+        bits::append(&mut w, readout);
+    }
     write_entities(&mut w, records)?;
     Ok(bits::finish(w))
+}
+
+/// The bits the entity part of a section takes: the counts and `records`.
+pub(crate) fn entity_bits(records: &[(EntityKey, BitWriter)]) -> WireResult<usize> {
+    let mut w = BitWriter::new();
+    write_entities(&mut w, records)?;
+    Ok(w.bit_len())
 }
 
 fn write_entities(w: &mut BitWriter, records: &[(EntityKey, BitWriter)]) -> WireResult<()> {
@@ -190,11 +204,11 @@ impl SnapshotSection {
     pub fn decode(bytes: &[u8]) -> WireResult<Self> {
         let mut r = BitReader::new(bytes);
         let header = SnapshotHeader::read(&mut r)?;
-        if r.read_bool()? {
-            return Err(WireError::Invalid(
-                "cockpit readout (not in this protocol version)",
-            ));
-        }
+        let readout = if r.read_bool()? {
+            Some(super::readout::read_record(&mut r)?)
+        } else {
+            None
+        };
         let mut records = Vec::new();
         for kind in EntityKind::ALL {
             let count = bits::read_count(&mut r, kind.limit(), "records")?;
@@ -223,7 +237,11 @@ impl SnapshotSection {
             }
         }
         bits::end(&mut r)?;
-        Ok(Self { header, records })
+        Ok(Self {
+            header,
+            readout,
+            records,
+        })
     }
 
     /// Writes a section of full records and removals, with no baselines:
@@ -245,7 +263,7 @@ impl SnapshotSection {
             records.push((*key, w));
         }
         records.sort_by_key(|(key, _)| *key);
-        write_section(header, &records)
+        write_section(header, None, &records)
     }
 }
 
@@ -314,6 +332,20 @@ impl EntitySender {
         entities: &[(Entity, Relevance)],
         budget: usize,
     ) -> WireResult<(Vec<u8>, EntityReport)> {
+        let (records, mut report) = self.select(header, entities, budget)?;
+        let bytes = write_section(header, None, &records)?;
+        report.bytes = bytes.len();
+        Ok((bytes, report))
+    }
+
+    /// Chooses the records of [`Self::build`] and stages them, leaving the
+    /// section to be written with a cockpit readout beside them.
+    pub(crate) fn select(
+        &mut self,
+        header: &SnapshotHeader,
+        entities: &[(Entity, Relevance)],
+        budget: usize,
+    ) -> WireResult<(Vec<(EntityKey, BitWriter)>, EntityReport)> {
         self.discard();
         let tick = header.tick;
         let mut present: HashMap<EntityKey, (&EntityState, &Relevance)> = HashMap::new();
@@ -431,11 +463,9 @@ impl EntitySender {
             .iter()
             .map(|(key, w, ..)| (*key, w.clone()))
             .collect();
-        let bytes = write_section(header, &records)?;
         let mut report = EntityReport {
             waiting,
             not_due,
-            bytes: bytes.len(),
             ..EntityReport::default()
         };
         let mut sent = Vec::with_capacity(chosen.len());
@@ -459,7 +489,7 @@ impl EntitySender {
             tick,
             records: sent,
         });
-        Ok((bytes, report))
+        Ok((records, report))
     }
 
     /// The staged section went out in the packet numbered `sequence`.
@@ -553,6 +583,12 @@ pub struct ReceivedSnapshot {
     /// apply to it: skipped. The host codes only against acknowledged
     /// states, so this stays empty unless something is wrong.
     pub unresolved: Vec<EntityKey>,
+    /// The seat's cockpit readout, when the snapshot carried one and its
+    /// baseline was held ([`super::connection::ClientConnection::snapshot`]
+    /// fills it).
+    pub readout: Option<super::readout::QReadout>,
+    /// The snapshot carried a readout whose baseline the client lacked.
+    pub readout_unresolved: bool,
 }
 
 /// The client's entity states: what each snapshot said about each entity,

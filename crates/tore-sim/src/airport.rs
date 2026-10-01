@@ -487,6 +487,41 @@ impl Service {
     pub fn selected(&self) -> Option<u32> {
         self.selected
     }
+    /// The scene's objects out of action (no hit points left), in id order:
+    /// with the selected airport and the clearance, what a networked client
+    /// needs to rebuild this service's guidance ([`Self::presented`]).
+    pub fn out_of_action(&self) -> impl Iterator<Item = ObjectId> + '_ {
+        self.health
+            .iter()
+            .filter(|(_, hp)| **hp <= 0)
+            .map(|(id, _)| *id)
+    }
+    /// A service as a networked client presents it: the scene's objects with
+    /// those in `out_of_action` down, the `selected` airport and the
+    /// `clearance` (airport, runway, end). It answers [`Self::guidance`] as
+    /// the host's does; it has no tower reply or landing count, which only
+    /// the host's service steps.
+    pub fn presented(
+        scene: &Scene,
+        selected: Option<u32>,
+        clearance: Option<(u32, ObjectId, ApproachEnd)>,
+        out_of_action: impl IntoIterator<Item = ObjectId>,
+    ) -> Result<Self, &'static str> {
+        let mut service = Self::new(scene)?;
+        for id in out_of_action {
+            if let Some(hp) = service.health.get_mut(&id) {
+                *hp = 0;
+                service.destroyed.insert(id);
+            }
+        }
+        service.selected = selected;
+        service.clearance = clearance.map(|(airport, runway, end)| Clearance {
+            airport,
+            runway,
+            end,
+        });
+        Ok(service)
+    }
     pub fn usable(&self, runway: ObjectId) -> bool {
         self.health.get(&runway).is_some_and(|hp| *hp > 0)
     }
