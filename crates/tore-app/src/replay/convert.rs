@@ -549,19 +549,7 @@ pub fn marks_at(marks: &[(u64, replay::EffectSpawn)], tick: u64) -> Vec<MarkPose
     alive
 }
 
-/// One chaff cartridge or flare as a recording keeps it: the releasing
-/// aircraft, the kind, the aircraft's exact position, velocity and attitude
-/// when it left, its number, which sets its look, and the combat tick after
-/// whose step it left.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DeviceRelease {
-    pub owner: u32,
-    /// [`live::EffectKind::Chaff`] or [`live::EffectKind::Flare`].
-    pub kind: live::EffectKind,
-    pub release: tore_sim::combat::countermeasures::Release,
-    pub number: u64,
-    pub tick: u64,
-}
+pub use crate::regen::DeviceRelease;
 
 /// `chaff` or `flare`, as the `decoy` field names them.
 pub fn decoy_name(kind: live::EffectKind) -> &'static str {

@@ -11,12 +11,12 @@
 //! play steps at most a second from one. Opinionated addition requested by
 //! John on 2026-09-26; the keying is an agent decision. See
 //! docs/REPLAYS.md.
-use crate::replay::convert::{self, DeviceRelease};
+use crate::regen::{self, DeviceRelease};
+use crate::replay::convert;
 use crate::terrain::Terrain;
 use std::collections::BTreeMap;
 use tore_replay::{TimedEvent, vocab::field, vocab::kind};
 use tore_sim::combat::countermeasures::Devices;
-use tore_sim::combat::live::EffectKind;
 
 /// The longest a device lives, in ticks: a flare burns for 3,600 and its
 /// last smoke puff fades within 361 more, and chaff lasts 2,400. With a
@@ -107,7 +107,6 @@ impl DeviceTrack {
     /// The devices after the step of `tick` and everything released after
     /// it, over `world`'s ground.
     pub fn at(&mut self, tick: u64, world: &Terrain) -> &Devices {
-        let ground = |x: f64, z: f64| f64::from(world.height(x as f32, z as f32));
         let Some(&(start, _)) = self
             .busy
             .iter()
@@ -134,9 +133,7 @@ impl DeviceTrack {
         };
         while at < tick {
             at += 1;
-            // Flare smoke drifts with the mission wind, as in flight.
-            devices.wind = world.wind();
-            devices.step(&ground);
+            regen::fly_devices(&mut devices, world);
             self.apply(at, &mut devices);
             if at.is_multiple_of(KEY_TICKS) && !self.keys.contains_key(&at) {
                 self.keys.insert(at, devices.clone());
@@ -162,14 +159,7 @@ impl DeviceTrack {
             .take_while(|(at, _)| *at == tick)
         {
             match change {
-                Change::Release(device) => {
-                    devices.continue_after(device.number.saturating_sub(1));
-                    if device.kind == EffectKind::Chaff {
-                        devices.release_chaff(device.release);
-                    } else {
-                        devices.release_flare(device.release);
-                    }
-                }
+                Change::Release(device) => regen::release_device(devices, device),
                 Change::Cleared => *devices = Devices::default(),
             }
         }
@@ -193,6 +183,7 @@ mod tests {
     use tore_replay::Event;
     use tore_sim::attitude::Basis;
     use tore_sim::combat::countermeasures::Release;
+    use tore_sim::combat::live::EffectKind;
 
     fn released(tick: u64, number: u64, kind: EffectKind, x: f64) -> TimedEvent {
         let device = DeviceRelease {

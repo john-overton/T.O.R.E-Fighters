@@ -58,6 +58,7 @@ mod probe_invariants;
 mod quick_mission;
 mod rafale_animation;
 mod reel;
+mod regen;
 mod render_snapshot;
 mod renderer;
 mod replay;
