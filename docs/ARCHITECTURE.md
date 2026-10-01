@@ -2747,7 +2747,8 @@ hooks. The lobby's calls are [the lobby's](#the-lobby).
   chase of the nearest aircraft of the other side within 3 nm, and 0.4-second
   gun bursts at any aircraft within 4,000 ft and 2 degrees of its flight path.
   `tore-bot` (`--connect`, `--data-dir`, `--count`, `--callsign`, `--slot`,
-  `--seconds`, `--password`) runs bots against a server over UDP and exits 0
+  `--seconds`, `--password`, and since EF6 `--say` and `--quick`, which send
+  chat lines) runs bots against a server over UDP and exits 0
   when every bot was seated, got its debrief and left.
 
 **Measured** (`client/tests.rs`, synthetic resources on the network
@@ -3186,8 +3187,8 @@ reviewed by John the same day; his answers are in the guide's
 [decisions](MULTIPLAYER.md#decisions). Built so far: slice EF0, the research
 and the dialog reader, slice EF1, the import of the art, slice EF2, the widget
 kit, slice EF3, the host inside the game, slice EF4, the lobby on the wire,
-slice EF5, discovery and addresses, and slice EF7, the Direct Connection screen
-(below); the rest is design.
+slice EF5, discovery and addresses, slice EF6, chat, and slice EF7, the Direct
+Connection screen (below); the rest is design.
 Every choice is an agent decision unless it is credited to John.
 
 John's direction (2026-10-01):
@@ -3801,7 +3802,7 @@ Chat goes through the host, which forwards each line to its receivers:
 | Target | The human flying the sender's designated target |
 
 - **Lobby:** the Messages box shows chat and system lines; a line at the
-  bottom of the panel takes text, Enter sends.
+  bottom of the panel takes text, Enter sends (to All).
 - **In flight** (John, 2026-10-01, kept simple): the `~` key (backtick on the
   same key) opens the chat line; while it is open Tab chooses the receiver,
   Enter sends and Esc closes it. Enter designates the nearest visible aircraft
@@ -3813,14 +3814,114 @@ Chat goes through the host, which forwards each line to its receivers:
   2026-10-01), apart from the HUD's messages at the bottom, each line coloured
   by who sent it and to whom: **green** for the player's own side (to the side,
   the wing or the player), **blue** for a line to everyone from the player's
-  side, **red** for a line from the enemy side. The window may use retail's
-  `MPSTATUS` art and font (EF0: retail uses them for the menus' connected-state
-  window, not in flight, so retail's in-flight pane is unknown and only a
-  reference).
-- Limits (*agent proposal*): 80 characters a line, five lines in five seconds
+  side, **red** for a line from the enemy side. Retail's `MPSTATUS` art and
+  font are the menus' connected-state window, not the flight pane (EF0), so
+  retail's in-flight pane is unknown and only a reference; EF6 did not use
+  them (below).
+- Limits (*agent proposal*, built in EF6): 80 characters a line, five lines in five seconds
   a player, observers never chat (John, 2026-09-28).
   Retail keeps `CHAT.TXT` text to 50 characters a line (EF0, S), shorter than
   this limit.
+
+*Built (EF6)*, on the wire, in the host and in the game. The messages are
+[kinds 25 and 26 of protocol 4](formats/net-protocol.md#chat-as-built); each
+choice below an agent decision unless credited.
+
+- **On the host** (`tore_session::host::chat`). A player's line goes to the host,
+  which trims it, checks it, routes it and logs it (`HostLog::Chat`: the
+  dedicated server writes `chat: Viper to friendlies (2 heard): Form up` to
+  its console and log, and the hosting game to its log). A player with no
+  plane, in the lobby (whether or not the mission is flying), sends to All
+  only and hears All only; a player flying hears every receiver. **All** goes
+  to every other connection, **Friendlies** and **Enemies** to the players
+  flying on the sender's side or the other, **Wing** to those in the sender's
+  wing, **Target** to the human flying the aircraft the sender has designated
+  (`world.combat.state.view(plane).designated()`, an aircraft only). The sender is sent its
+  own line back (retail's `YOU TO ALL`), so it sees what went out; then, if
+  no other player heard it, "No one hears you." An AI-flown target hears
+  nothing, so that is the case there; with nothing designated Target is
+  refused ("You have no target designated."). A departed player is no
+  longer a connection, and a plane the AI flies again has no human in it, so
+  neither hears anything. *Observers* (phase 2) will be refused all chat; today a player
+  with no plane is in the lobby, which sends to All as the lobby does (the
+  host's one place to refuse them is `Host::chat`).
+- **Limits.** 80 characters of printable ASCII (space to `~`, the retail
+  fonts' range), spaces trimmed from both ends, an empty line dropped
+  silently, five lines in five seconds a player (a sliding window over the
+  lines the host accepted; a refused line does not count), and the lobby's 20
+  requests a second. Every refusal is a system line to the sender alone and a
+  line in the log (the same words once a second at most). A quick message
+  names a number 1 to 12 and a sound name of at most 12 printable
+  characters ending `.5K` or `.11K`; otherwise it is refused.
+- **Quick messages.** `CHAT.TXT`'s twelve lines are read from the pack once at
+  start (`net::chat::load_quick_messages`) and an F key sends line n with its
+  own receiver (or the one the player has picked, for a line with none) and
+  its sound's name. The host forwards the sound to the receivers, who play it
+  as a cockpit effect; **the sender does not hear its own** (the retail
+  answer is unknown, EF0). A non-ASCII character of the file becomes `?`.
+- **The client** (`Client::chat`, `chat_quick`, `chat_send`, and
+  `ClientEvent::Chat`): a line the rules refuse before it is sent (empty, too
+  long, not printable ASCII, a receiver other than All before flight, not
+  connected) comes back as a `Refusal` for the caller to show; the host's
+  answers arrive as `ClientEvent::Chat` lines, the player's own among them
+  (`you`), and the host's words as system lines. The request is recorded in
+  the capture like a lobby request, so a replay sends it again.
+- **The flight's line** (`net/chat.rs`; `main.rs` calls it before the flight
+  takes a key). `~` (physical Backquote, or a `` ` `` or `~` the layout
+  prints) with no Ctrl, Alt or Super opens it while a networked flight shows,
+  no menu or map is up and the window has the focus. Opening lets go of every
+  held key (`Input::release_keys`), the trigger and the instrument press, as a
+  menu does; the joystick and the mouse go on flying. Open, every key press is
+  the line's; releases pass on to the flight. Tab goes round All, Friendlies,
+  Enemies, Wing, Target (Shift+Tab back); the receiver is kept between
+  openings and goes back to All when the flight ends. Enter sends and closes
+  the line (an empty one just closes); Esc closes it; F1 to F12 send the quick
+  message and close it. The key is a fixed row of the Controls screen ("Chat
+  line (network games only)", Communication) and not rebindable; the keys
+  while the line is open are in [the controls list](CONTROLS.md#built-in-controls-outside-the-tables).
+  Single player never opens it (the hook needs a networked flight).
+- **The window** (`Chat::draw`). The last 6 lines (after wrapping at 320 of
+  the 640-unit layer) at the top left, 5 layer units from the edges, in the
+  HUD font at the HUD's scale with its filtered edges, over a band of
+  translucent black (60 percent) so every colour reads on sky or ground. A
+  line stays 15 seconds and fades over the last 3; the band fades with the
+  brightest line. While the line is open the window shows the last 8 lines
+  whatever their age, then `SEND TO FRIENDLIES: text_` (the caret blinks twice
+  a second; blue to All, green to the others) and a dim key hint. Colours are
+  the message box's (`widgets::tone`), so the lobby and the flight agree:
+  green `[116, 232, 124]` for a line from the reader's side to the side, the
+  wing or the player; blue `[128, 176, 255]` to everyone from the reader's
+  side or the lobby; red `[255, 118, 104]` from the other side whatever the
+  receiver; pale grey `[214, 214, 208]` for the host's words. Retail's
+  `MPSTATUS` pane and `MPFONT` are not used: the pane is an opaque 333 by 80
+  black block that would hide a sixth of the top of the view. The window
+  covers the top-left instrument (SYSTEMS) of the cockpit view, as John's
+  placement requires.
+- **Lines read** `YOU TO ALL: text` for the player's own and `VIPER TO WING:
+  text` for another's (retail's `YOU TO ...` forms; retail shows only the
+  sender's name on a line from another, the receiver here tells the player
+  how it was meant); a line to the player's own plane as Target reads
+  `VIPER TO YOU`.
+- **The lobby's component** (`net/lobby_chat.rs`, for EF8 to place): a
+  `LobbyChat::new(messages_rect, field_at, chars)` holding the kit's
+  `MessageBox` and a retail edit control `TextField` (80 characters). `push`
+  takes a `ChatLine` in its colour, `system` the screen's own words, `key` and
+  `text_input` go to the line, `send(&kit, &mut client)` sends it to All, and
+  `draw` draws both with the focus. A headless render in a mock panel is the
+  ignored test `render_the_lobby_chat_in_a_mock_panel`.
+- **The bot** (`Bot::say_at`, `quick_at`; `tore-bot --say SECONDS,RECEIVER,TEXT`
+  and `--quick SECONDS,NUMBER`, both repeatable) sends its lines at their
+  times after its first update, a line to anyone but All waiting until it
+  flies, and prints every chat line it receives with the sender, the receiver
+  and a sound.
+- **Measured** (`client/chat_tests.rs`, synthetic resources on the simulator;
+  the host's Target test chooses the designation through a test seam, since
+  the synthetic import's radar sees nothing): routing for every receiver in
+  the lobby and in flight (two sides, two wings, a target flown by a human
+  and by the AI, no target, a player with no plane, a departed player), the
+  limits, the quick messages and the system line back to the sender. The
+  windowed run, its frame cost and the GPU comparison are in the EF6 row
+  below.
 
 ### How stages E and F land
 
@@ -3837,7 +3938,7 @@ second completes the plan's stage F and stage E's replays.
 | EF3 Host in the game | Opus | | **Built.** The host on a thread inside the game, the in-process link, the local client, lifecycle and the game's 120 Hz clock | A hosted mission with a bot flies with no correction on the host's own plane; a two-second window stall stalls nobody; the session ends cleanly on leave, quit and a host panic |
 | EF4 The lobby on the wire | Opus | EF3 | The host's lobby phase, slots, loadouts, ready and start, the King's mission, return to the lobby after a mission, the crown, kick; the dedicated server's lobby without a King; protocol version 3 | Simulator tests: players join a lobby, take slots, arm, ready, start, fly, return and fly again; the King's mission change reaches everyone; the wire golden test. **Built (EF4):** see [the lobby](#the-lobby); the crown stays the hosting player's (passing it is phase 2) |
 | EF5 Discovery and addresses | Sonnet | EF4 | The discovery query and answer, the search loop, names resolved off the screen's thread with every address tried, remembered addresses | A host is found on 127.0.0.1 and on this machine's network address; a different build is shown as such; no answer is larger than its query. **Built (EF5):** see [finding a game and joining](#finding-a-game-and-joining) |
-| EF6 Chat | Sonnet | EF4 | Chat on the wire with the host's routing, the lobby's box and line, the flight line and keys, the top-left chat window with its colours, `CHAT.TXT` quick messages, limits; `docs/CONTROLS.md` | Routing tests for every receiver; a windowed run types and receives chat in flight with a bot; the controls list test |
+| EF6 Chat | Sonnet | EF4 | Chat on the wire with the host's routing, the lobby's box and line, the flight line and keys, the top-left chat window with its colours, `CHAT.TXT` quick messages, limits; `docs/CONTROLS.md` | Routing tests for every receiver; a windowed run types and receives chat in flight with a bot; the controls list test. **Built (EF6):** see [chat](#chat) |
 | EF7 Direct Connection screen | Sonnet | EF2, EF5 | The MULTI menu's rows and the screen of "Finding a game and joining" | Headless renders; a windowed run finds a host on this machine and joins it. **Built (EF7):** see [the Direct Connection screen as built](#the-direct-connection-screen-as-built-ef7) |
 | EF8 Lobby screen | Sonnet | EF2, EF4, EF6 | The lobby screen, the creator with Accept, Load Ordnance for one's own slot, the debrief and the return | A windowed run hosts, builds a mission, takes a slot, chats with a bot, starts, flies, ends and returns to the lobby |
 | EF9 Acceptance | lead, then John | all | The lead's smoke test on this machine (a hosting game, a joining game, a bot); then John on three machines (macOS, Linux, Windows) | John flies with friends from the menus |

@@ -1218,6 +1218,24 @@ mod tests {
         assert_eq!(i.resolver.drain()[0].1, Action::Ui("zoom-out".into()));
     }
     #[test]
+    fn releasing_the_keys_lets_go_of_what_they_hold_and_the_stick_goes_on() {
+        // The chat line takes the keyboard (EF6): a key held when it opens
+        // stops driving the plane at once; its own release then finds
+        // nothing held.
+        let mut i = input("bind keyboard w pitch negative -1 0 1 0 1 1 100");
+        let keys = BTreeSet::new();
+        assert!(i.key("w", true, M::empty()));
+        assert_eq!(i.frame(&keys, 0.7).0.pitch, -1.);
+        i.release_keys();
+        assert_eq!(i.frame(&keys, 0.7).0.pitch, 0.);
+        assert!(!i.claimed("w"));
+        assert!(!i.key("w", false, M::empty()), "nothing left to release");
+        assert_eq!(i.frame(&keys, 0.7).0.pitch, 0.);
+        // A key pressed after it flies as before.
+        assert!(i.key("w", true, M::empty()));
+        assert_eq!(i.frame(&keys, 0.7).0.pitch, -1.);
+    }
+    #[test]
     fn pending_commands_are_consumed_once_and_dropped_on_pause() {
         let mut i = input("");
         let keys = BTreeSet::new();

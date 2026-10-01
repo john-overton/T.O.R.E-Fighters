@@ -54,7 +54,7 @@ const WIDTH: f64 = 320.;
 /// The gap to the left and top edges, in layer units.
 const MARGIN: f64 = 5.;
 /// The translucent band behind the text.
-const BACKING: f64 = 0.45;
+const BACKING: f64 = 0.6;
 /// The key hint under the open line.
 const HINT: &str = "TAB RECEIVER  ENTER SEND  ESC CANCEL  F1-F12 QUICK";
 /// What the open line's caret does each half second.
@@ -391,14 +391,15 @@ fn draw_lines(
     // The band follows the brightest line, so a fading window fades whole.
     let strongest = lines.iter().map(|l| l.2).fold(0., f64::max);
     darken(canvas, band, BACKING * strongest);
-    let columns = widest.ceil() as usize + 2;
     let rows = line_height.ceil() as usize + 2;
-    let mut cover = vec![0f64; columns * rows];
+    let mut cover = vec![0f64; widest.ceil() as usize * rows + 2 * rows];
     for (i, (text, colour, alpha)) in lines.iter().enumerate() {
-        // The line's own box, whole pixels: its top row is `y0`.
+        // The line's own box, whole pixels: its top row is `y0`, as wide as
+        // the line.
         let y = top + i as f64 * line_height;
         let (x0, y0) = (left.floor(), y.floor());
-        cover.fill(0.);
+        let columns = (text_width(font, text) as f64 * scale).ceil() as usize + 2;
+        cover[..columns * rows].fill(0.);
         let mut x = left - x0;
         let dy0 = y - y0;
         for ch in text.glyph_codes() {
@@ -416,7 +417,7 @@ fn draw_lines(
             }
             x += glyph.advance as f64 * scale;
         }
-        for (at, amount) in cover.iter().enumerate() {
+        for (at, amount) in cover[..columns * rows].iter().enumerate() {
             if *amount > 0. {
                 let (column, row) = (at % columns, at / columns);
                 canvas.blend(
@@ -835,5 +836,91 @@ mod tests {
                 .iter()
                 .all(|p| text_width(&font, p) <= 300)
         );
+    }
+
+    /// The window's frame cost with the real HUD font, closed (six lines)
+    /// and open, at three window sizes, from the imported pack:
+    ///
+    /// ```text
+    /// TORE_DATA_DIR=... cargo test --release -p tore-app --locked \
+    ///     net::chat::tests::time_chat_draw -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "timing; needs an imported data profile (TORE_DATA_DIR)"]
+    fn time_chat_draw() {
+        let dir = crate::assets::data_directory().expect("data directory");
+        let assets = crate::assets::Assets::load(&dir).expect("imported pack");
+        let font = Font::parse(&assets.theater_resources["HUD11.FNT"]).expect("HUD11.FNT");
+        let t0 = Instant::now();
+        let mut chat = Chat::default();
+        for (standing, receiver, text) in [
+            (
+                Standing::Own,
+                Receiver::All,
+                "VIPER TO ALL: ANYONE SEE THAT BANDIT AT TWO O'CLOCK HIGH",
+            ),
+            (
+                Standing::Own,
+                Receiver::Wing,
+                "COBRA TO WING: ON YOUR WING, BREAKING LEFT NOW",
+            ),
+            (
+                Standing::Enemy,
+                Receiver::All,
+                "RAVEN TO ALL: YOU WILL NOT MAKE IT HOME TONIGHT",
+            ),
+            (
+                Standing::Own,
+                Receiver::Friendlies,
+                "HAWK TO FRIENDLIES: I AM TAKING DAMAGE, RTB",
+            ),
+            (
+                Standing::Own,
+                Receiver::All,
+                "VIPER TO ALL: WORM HAS TURNED",
+            ),
+            (
+                Standing::Own,
+                Receiver::All,
+                "VIPER TO ALL: SPLASH ONE BANDIT!",
+            ),
+        ] {
+            chat.push(&line(standing, receiver, false, text), t0);
+        }
+        chat.system("No one hears you.", t0);
+        for [w, h] in [[1280u32, 960], [1920, 1080], [3840, 2160]] {
+            let mut canvas = FlightCanvas::default();
+            canvas.size = [w, h];
+            canvas.pixels = vec![0; (w * h * 4) as usize];
+            for open in [false, true] {
+                if open {
+                    chat.open(t0);
+                    typed(&mut chat, "ready when you are");
+                } else if chat.is_open() {
+                    chat.key("Escape", None, false, true);
+                }
+                for _ in 0..20 {
+                    chat.draw(&mut canvas, &font, t0);
+                }
+                let runs = 500;
+                let started = Instant::now();
+                for _ in 0..runs {
+                    canvas.pixels.fill(0);
+                    chat.draw(&mut canvas, &font, t0);
+                }
+                let each = started.elapsed() / runs;
+                // The clear is the benchmark's own: take it out.
+                let started = Instant::now();
+                for _ in 0..runs {
+                    canvas.pixels.fill(0);
+                }
+                let clear = started.elapsed() / runs;
+                println!(
+                    "{w}x{h} {}: {:?} a frame",
+                    if open { "line open" } else { "window only" },
+                    each.saturating_sub(clear)
+                );
+            }
+        }
     }
 }
