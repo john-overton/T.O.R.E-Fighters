@@ -18,6 +18,7 @@ tore-input-native = { path = "../tore-input-native" }
 tore-sim = { path = "../tore-sim" }
 tore-world = { path = "../tore-world" }
 tore-replay = { path = "../tore-replay" }
+tore-session = { path = "../tore-session" }
 cpal = "0.16"
 tore-formats = { path = "../tore-formats" }
 tore-import = { path = "../tore-import" }

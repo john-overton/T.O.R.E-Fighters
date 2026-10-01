@@ -58,6 +58,9 @@ impl Default for Draft {
 pub struct QuickMission {
     /// Results of the mission just flown, shown over the creator until OK.
     pub debrief: Option<crate::debrief::Debrief>,
+    /// The debrief is a multiplayer flight's, which has no creator to go
+    /// back to: closing it returns to the main menu.
+    pub debrief_to_menu: bool,
     pub ordnance: Option<crate::ordnance::Ordnance>,
     pub hover: Option<usize>,
     pressed: Option<usize>,
@@ -173,6 +176,7 @@ impl QuickMission {
         }
         Self {
             debrief: None,
+            debrief_to_menu: false,
             ordnance: None,
             start_modes: vec!["Airborne".into(), "Ground".into()],
             airport_names,
@@ -902,11 +906,15 @@ impl QuickMission {
         self.apply(id, previous);
         Action::Click
     }
-    /// Leaves the debrief for the creator, keeping the mission just flown.
+    /// Leaves the debrief for the creator, keeping the mission just flown, or
+    /// for the main menu after a multiplayer flight.
     fn close_debrief(&mut self) -> Action {
         self.debrief = None;
         self.hover = None;
         self.pressed = None;
+        if std::mem::take(&mut self.debrief_to_menu) {
+            return Action::Back;
+        }
         Action::Click
     }
     pub fn cancel(&mut self) {
@@ -1519,6 +1527,15 @@ pub fn hud(
 mod tests {
     use super::*;
     use tore_sim::ai::launch::legacy_pairs;
+    #[test]
+    fn a_multiplayer_debrief_returns_to_the_menu_and_a_single_player_one_to_the_creator() {
+        let mut q = setup();
+        assert_eq!(q.close_debrief(), Action::Click);
+        q.debrief_to_menu = true;
+        assert_eq!(q.close_debrief(), Action::Back);
+        // Once only: the next debrief is a single-player one again.
+        assert_eq!(q.close_debrief(), Action::Click);
+    }
     #[test]
     fn variant_selection_retains_layout_and_uses_base_country_and_target_lists() {
         let mut q = setup();

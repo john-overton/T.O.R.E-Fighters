@@ -7,5 +7,6 @@
 // tests run it all.
 #![allow(dead_code)]
 
+pub mod debrief;
 pub mod files;
 pub mod options;

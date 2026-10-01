@@ -47,21 +47,37 @@ pub struct CombatView {
     /// The render history `alpha` was set for; a restart replaces it, and the
     /// new history shows its newest snapshot until the frame sets a fraction.
     restarts: u64,
+    /// A networked client's picture, which it blends itself: when set, the
+    /// view shows it instead of combat's render history, which a client's
+    /// never-stepped copy of the mission does not keep.
+    picture: Option<RenderSnapshot>,
 }
 
 impl CombatView {
     /// The art for `combat`: the effect sheets and every weapon shape the
     /// stations of `plane`, the plane the screen presents, name.
     pub fn new(combat: &Combat, plane: u32, data: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
-        let mut art = CombatArt::load(data)?;
-        art.add_weapon_shapes(
+        Self::for_configuration(
+            combat,
             combat
                 .state
                 .ownship(plane)
                 .expect("the presented plane has an ownship")
                 .configuration(),
             data,
-        );
+        )
+    }
+
+    /// The art for `combat` and a presented plane whose loadout is
+    /// `configuration`: a networked client has it from the host, not from an
+    /// ownship of its own copy of the mission.
+    pub fn for_configuration(
+        combat: &Combat,
+        configuration: &live::Configuration,
+        data: &BTreeMap<String, Vec<u8>>,
+    ) -> AppResult<Self> {
+        let mut art = CombatArt::load(data)?;
+        art.add_weapon_shapes(configuration, data);
         Ok(Self {
             art,
             models: Vec::new(),
@@ -69,6 +85,7 @@ impl CombatView {
             shaped: 0,
             alpha: 1.,
             restarts: combat.render_restarts(),
+            picture: None,
         })
     }
 
@@ -81,14 +98,34 @@ impl CombatView {
         data: &BTreeMap<String, Vec<u8>>,
         models: Vec<Airframe>,
     ) -> AppResult<Self> {
-        let mut view = Self::new(combat, plane, data)?;
-        view.outlets = models
+        Self::new(combat, plane, data)?.with_drawn(combat, data, models)
+    }
+
+    /// [`CombatView::with_models`] for a presented plane whose loadout is
+    /// `configuration`.
+    #[allow(dead_code)] // The networked flight's view (D8b).
+    pub fn with_configuration(
+        combat: &Combat,
+        configuration: &live::Configuration,
+        data: &BTreeMap<String, Vec<u8>>,
+        models: Vec<Airframe>,
+    ) -> AppResult<Self> {
+        Self::for_configuration(combat, configuration, data)?.with_drawn(combat, data, models)
+    }
+
+    fn with_drawn(
+        mut self,
+        combat: &Combat,
+        data: &BTreeMap<String, Vec<u8>>,
+        models: Vec<Airframe>,
+    ) -> AppResult<Self> {
+        self.outlets = models
             .iter()
             .map(|model| model.kind.contrail_offsets.clone())
             .collect();
-        view.models = models;
-        view.load_weapon_shapes(combat, data);
-        Ok(view)
+        self.models = models;
+        self.load_weapon_shapes(combat, data);
+        Ok(self)
     }
 
     /// Sets the frame's fraction of the way from the previous tick to the
@@ -96,6 +133,13 @@ impl CombatView {
     pub fn present(&mut self, combat: &Combat, alpha: f64) {
         self.alpha = alpha;
         self.restarts = combat.render_restarts();
+    }
+
+    /// Shows `picture`, a networked client's, instead of combat's render
+    /// history from now on. A client calls this once a frame.
+    #[allow(dead_code)] // The networked flight's view (D8b).
+    pub fn show_picture(&mut self, picture: RenderSnapshot) {
+        self.picture = Some(picture);
     }
 
     /// The tick fraction in force for `combat`'s current render history.
@@ -110,6 +154,9 @@ impl CombatView {
     /// The picture for this frame: the last two snapshots at the frame's
     /// tick fraction.
     pub fn presented(&self, combat: &Combat) -> RenderSnapshot {
+        if let Some(picture) = &self.picture {
+            return picture.clone();
+        }
         interpolate(
             combat.previous_snapshot(),
             combat.render_snapshot(),
@@ -120,6 +167,9 @@ impl CombatView {
     /// One target at the frame's tick fraction; none when it is not in the
     /// snapshots.
     pub fn presented_target(&self, combat: &Combat, id: u32) -> Option<AircraftPose> {
+        if let Some(picture) = &self.picture {
+            return picture.target(id).cloned();
+        }
         let current = combat.current_target(id)?;
         Some(blend(
             combat.previous_target(id),
@@ -268,8 +318,10 @@ impl CombatView {
         // Only the lit aircraft, blended as the picture blends them, so the
         // rest of the picture is not built again for the lights.
         let lit = RenderSnapshot {
-            targets: combat
-                .render_snapshot()
+            targets: self
+                .picture
+                .as_ref()
+                .unwrap_or_else(|| combat.render_snapshot())
                 .targets
                 .iter()
                 .filter(|pose| pose.engine.flame)
@@ -886,6 +938,7 @@ pub(crate) mod render_hash_tests {
             shaped: 0,
             alpha: 1.,
             restarts: 0,
+            picture: None,
         }
     }
     /// A combat scene whose other aircraft are the types of `models`.
@@ -1237,6 +1290,33 @@ pub(crate) mod render_hash_tests {
         assert_eq!(
             glows.len(),
             3 + 2 * usize::from(player.afterburner_active())
+        );
+    }
+
+    /// A client's picture replaces combat's render history in the view.
+    #[test]
+    fn a_shown_picture_stands_in_for_combats_history() {
+        let player = player();
+        let (mut combat, mut view) = pair(models(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
+        let scene = scene(combat.state.own().configuration());
+        fixtures::load(&mut combat, &scene, true, &player);
+        view.present(&combat, 0.5);
+        let from_combat = view.presented(&combat);
+        assert!(!from_combat.targets.is_empty());
+        // A picture with one lit aircraft the combat knows nothing of.
+        let mut own = from_combat.targets[0].clone();
+        own.id = 4_242;
+        own.engine.flame = true;
+        let picture = RenderSnapshot {
+            targets: vec![own.clone()],
+            ..RenderSnapshot::default()
+        };
+        view.show_picture(picture.clone());
+        assert_eq!(view.presented(&combat), picture);
+        assert_eq!(view.presented_target(&combat, 4_242), Some(own));
+        assert_eq!(
+            view.presented_target(&combat, from_combat.targets[1].id),
+            None
         );
     }
 

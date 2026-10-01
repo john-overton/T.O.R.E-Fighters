@@ -1941,6 +1941,7 @@ dependencies = [
  "tore-input",
  "tore-input-native",
  "tore-replay",
+ "tore-session",
  "tore-sim",
  "tore-world",
  "tracing",
