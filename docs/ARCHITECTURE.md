@@ -3171,10 +3171,13 @@ game's session tells it the loop has run.
   a held trigger keeps firing, a held pull keeps pulling); the client takes
   the host's newest state instead of stepping the backlog (a catch-up), and
   everything else jumps to where it is now. Then, as the snapshots that waited
-  in the socket are read, a few blended corrections of the own plane show in
-  the first tenth of a second or so (none to ten in the tests, the largest
-  about 19 ft and 10 degrees, the last under a tenth of a foot), and none
-  after.
+  in the socket and the first fresh ones are read, the own plane may be
+  corrected a few times within about a fifth of a second (none to twelve
+  corrections in four runs of the test, the largest about 22 ft and 20
+  degrees, most of them blended, the last under a tenth of a foot), and none
+  after. Those come from the ticks between the state the client caught up to
+  and the present, which it predicted with controls the host had already
+  replaced with the held ones.
 - *For the others:* the player's plane flies on smoothly on those held
   controls, the player stays in the roster and the lobby, and nobody is told
   anything. Before EF-K the plane went back to the AI after 5 seconds and the
@@ -3184,7 +3187,7 @@ game's session tells it the loop has run.
 over the link and a guest over loopback UDP, both pumped once a 16 ms frame):
 a guest stalled for 15 seconds sent 14 keepalives, was never dropped, caught
 up once and had settled (two seconds with no correction) within 4 seconds of
-coming back, while the King had no correction during the stall, still held
+coming back (in four runs), while the King had no correction during the stall, still held
 the crown and both flew on; with the bound set to 3 seconds a stalled guest
 sent 2 keepalives and was dropped as silent 7.2 seconds into its stall, and
 learned it on coming back. The transport's own tests (`tore-net`'s
