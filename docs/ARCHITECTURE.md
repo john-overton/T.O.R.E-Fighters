@@ -2003,7 +2003,7 @@ dependency.
 | Crate | Kind | Holds | Depends on |
 | --- | --- | --- | --- |
 | `tore-codec` | library | Bit writer and bounded bit reader, variable-length integers, quantizers, FNV-1a and CRC-32. Shared by the wire, the exact own-plane coder and, in stage H, the checkpoints | std only |
-| `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator. **Built (D2).** The host and client are state machines that never read a clock or touch a socket: the caller passes the time in, feeds them datagrams and sends what they give, over a UDP socket or the simulator (agent decision). *Slice EF3 adds* the in-process link (`link`) a hosting game flies through, and takes from `tore-server`, unchanged, the dual-stack `ServerSocket` and the sleep-then-spin `wait_until`, which the dedicated server and the game's host thread now share ([the host inside the game](#the-host-inside-the-game-stage-e)). *EF4 adds* `Server::set_silence_exempt`, which a hosting game uses for its own player's connection ([the lobby](#the-lobby)). *EF-K adds* the Keepalive packet and the `Keepalive` thread a joined game runs while its loop is stalled ([a stalled game stays connected](#a-stalled-game-stays-connected-ef-k)) | tore-codec |
+| `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator. **Built (D2).** The host and client are state machines that never read a clock or touch a socket: the caller passes the time in, feeds them datagrams and sends what they give, over a UDP socket or the simulator (agent decision). *Slice EF3 adds* the in-process link (`link`) a hosting game flies through, and takes from `tore-server` the dual-stack `ServerSocket` (EF-X: it refuses a port another socket holds for IPv4 on every system, [the game port on each system](#the-game-port-on-each-system-ef-x)) and the sleep-then-spin `wait_until`, which the dedicated server and the game's host thread now share ([the host inside the game](#the-host-inside-the-game-stage-e)). *EF4 adds* `Server::set_silence_exempt`, which a hosting game uses for its own player's connection ([the lobby](#the-lobby)). *EF-K adds* the Keepalive packet and the `Keepalive` thread a joined game runs while its loop is stalled ([a stalled game stays connected](#a-stalled-game-stays-connected-ef-k)) | tore-codec |
 | `tore-import` | library | The data folder, the import pack's reader and writer, media detection and the import itself, moved out of `tore-app` so a server can import and load without the game. *Built (D3a).* | tore-formats |
 | `tore-session` | library | The game's side of networking: the wire messages, the host session (clock, inputs, snapshots, joins), the client session (prediction, interpolation, clock steering, readouts) and the headless bot client. *Wire built (D6)*: the module `wire` has every section and message, the cockpit readout's included, with each end's bookkeeping (acknowledged baselines, priorities, the event queue, the name table) and no clock or socket ([what it settled](formats/net-protocol.md#what-the-games-sections-settled)). *Host built (D7a)*: the module `host` ([the host session](#the-host-session)). *Client built (D8a)*: the modules `client` ([the client session](#the-client-session)) and `bot`, and the `tore-bot` program, which loads an import through `tore-import` | tore-world, tore-net, tore-codec, tore-import |
 | `tore-server` | binary | The dedicated server: configuration, import, logging and the console. **Built (D7b):** options, configuration file, `--import`, `--check`, start-up refusals, the real-time run loop, the console, status lines and the log, around `tore_session::Host`. The run loop drives the host through a small `Host` trait (`host.rs`) that `wiring.rs` implements with `tore_session::Host`, so the loop, console and log are tested against a scripted host on a fake clock (agent decision). Which build is a release is `app::is_release`, the stamped `TORE_BUILD_VERSION` tag, which the game's `--connect` (D8) must use too | tore-session, tore-import |
@@ -3741,6 +3741,43 @@ is an agent decision unless it is credited to John.
 - **Not built.** The baked "?" bar of the title picture does nothing (retail's
   second menu bar), the screen has no keyboard shortcut letters, and a name
   chosen from a callsign list (`CALLSIGN.DLG`) is not offered.
+
+### The game port on each system (EF-X)
+
+*Built (EF-X, 2026-10-01).* The search, a hosting game and the dedicated
+server share one UDP port, so what each system does when two sockets ask for
+it decides who gets the players' datagrams. Measured on the CI runners
+(ubuntu-22.04, macos-14, macos-15-intel, windows-2022) and on the development
+machine with a probe that binds the sockets in each order:
+
+| | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| `[::]` socket | dual-stack: takes IPv4, IPv4 broadcast included | dual-stack: takes IPv4, IPv4 broadcast included (macos-14; the Intel runner has no broadcast route) | IPv6 only |
+| `Listen::Any` binds | one socket, `[::]:port` | one socket, `[::]:port` | two, `[::]:port` and `0.0.0.0:port` |
+| `[::]` while a `0.0.0.0` socket (the search) holds the port | refused | **bound beside it**; IPv4 goes to the other socket | **bound beside it** |
+| `0.0.0.0` (the search) while `Listen::Any` holds the port | refused | refused | refused |
+| `[::]` while a `127.0.0.1` socket holds the port | refused | refused | bound, and `0.0.0.0` too |
+
+The third row was the defect: before EF-X, `ServerSocket::bind(Listen::Any)`
+took "address in use" on its IPv4 socket to mean its own IPv6 socket covered
+IPv4, so on macOS and Windows a host or server started while a search held
+the port came up on IPv6 alone and no IPv4 player reached it, while the
+search kept the port. Now, on "address in use", it frees its IPv6 socket and
+tries IPv4 alone: if that binds, the IPv6 socket was covering it and is
+bound again; if not, the port is refused on every system with "Cannot host
+on UDP port" (the game) or "Cannot listen on" (the server), as Linux always
+did. The search binds IPv4 only, so a search started after a host or server
+falls back to another port on every system and says so; the New button's
+order (stop the search, then host) is unchanged. One firewall rule for the
+game port still covers hosting, joining and discovery everywhere: the
+search's socket is the game port when it is free, and on Windows the IPv4
+socket beside the IPv6 one is what takes the broadcast question. The last
+row is Windows letting a wildcard socket share a port with a specific
+address; nothing of the game's binds `127.0.0.1` on the game port, so it is
+recorded only. Tests: `tore_net::socket`'s `any_binds_one_socket_or_two_on_one_port`
+and `any_refuses_a_port_another_socket_holds_for_ipv4`, and
+`hosting_tests.rs`'s `the_search_and_the_host_share_the_game_port_one_after_the_other`,
+which failed on macOS and Windows before.
 
 ### The lobby
 

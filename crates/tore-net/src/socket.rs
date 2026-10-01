@@ -1,12 +1,24 @@
 //! A server's UDP sockets, shared by the dedicated server and the game that
-//! hosts (moved here from `tore-server` in slice EF3, unchanged).
+//! hosts (moved here from `tore-server` in slice EF3).
 //!
 //! `Listen::Any` listens on every IPv4 and IPv6 address: one IPv6 socket that
 //! takes IPv4 as well where the system allows it (Linux and macOS), and an
-//! IPv4 socket beside it where it does not (Windows, and systems with no
-//! IPv6). The standard library cannot set the IPv6-only option, so the
-//! program tries the IPv6 socket first and treats "address in use" on the
-//! IPv4 one as the IPv6 socket already covering it.
+//! IPv4 socket beside it where it does not (Windows, whose IPv6 socket is
+//! IPv6 only, and systems with no IPv6). The standard library cannot set or
+//! read the IPv6-only option, so the program tries the IPv6 socket first,
+//! then the IPv4 one, and takes "address in use" on the IPv4 one to mean the
+//! IPv6 socket covers IPv4.
+//!
+//! That is only true when nothing else holds the port for IPv4. A socket on
+//! `0.0.0.0` (a game's search on the game port, a server listening on IPv4
+//! only) makes Linux refuse the IPv6 socket too, but macOS and Windows bind
+//! it beside the other socket, and IPv4 datagrams then go to the other
+//! socket: before slice EF-X the server listened on IPv6 alone there and
+//! IPv4 players never reached it. So on "address in use" the program frees
+//! its IPv6 socket and tries IPv4 alone: if that binds, the IPv6 socket was
+//! covering it and is bound again; if not, another socket holds the port and
+//! the bind fails, on every system (checked on the CI runners of all three,
+//! 2026-10-01).
 
 use crate::datagram::{Datagrams, bind_udp};
 use std::{
@@ -42,27 +54,7 @@ impl ServerSocket {
                 v6: Some(bind_udp(SocketAddr::new(IpAddr::V6(ip), port))?),
                 v4: None,
             }),
-            Listen::Any => {
-                let v6 = bind_udp(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), port));
-                let v4 = bind_udp(SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), port));
-                match (v6, v4) {
-                    (Ok(v6), Ok(v4)) => Ok(Self {
-                        v6: Some(v6),
-                        v4: Some(v4),
-                    }),
-                    // The IPv6 socket takes IPv4 traffic too.
-                    (Ok(v6), Err(error)) if error.kind() == io::ErrorKind::AddrInUse => Ok(Self {
-                        v6: Some(v6),
-                        v4: None,
-                    }),
-                    // No IPv6 on this machine.
-                    (Err(_), Ok(v4)) => Ok(Self {
-                        v6: None,
-                        v4: Some(v4),
-                    }),
-                    (Err(error), Err(_)) | (Ok(_), Err(error)) => Err(error),
-                }
-            }
+            Listen::Any => bind_any(port),
         }
     }
 
@@ -73,6 +65,46 @@ impl ServerSocket {
             .flatten()
             .filter_map(|socket| socket.local_addr().ok())
             .collect()
+    }
+}
+
+/// `Listen::Any`'s sockets on `port`; see the module documentation.
+fn bind_any(port: u16) -> io::Result<ServerSocket> {
+    let mut v6_address = SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), port);
+    let v6 = match bind_udp(v6_address) {
+        Ok(v6) => v6,
+        // Another socket holds the port (on Linux, an IPv4 one does too).
+        Err(error) if error.kind() == io::ErrorKind::AddrInUse => return Err(error),
+        // No IPv6 on this machine.
+        Err(_) => {
+            return Ok(ServerSocket {
+                v6: None,
+                v4: Some(bind_udp(SocketAddr::new(
+                    Ipv4Addr::UNSPECIFIED.into(),
+                    port,
+                ))?),
+            });
+        }
+    };
+    // Port 0 asks for any free port: the IPv4 socket takes the same one.
+    v6_address.set_port(v6.local_addr()?.port());
+    let v4_address = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), v6_address.port());
+    match bind_udp(v4_address) {
+        Ok(v4) => Ok(ServerSocket {
+            v6: Some(v6),
+            v4: Some(v4),
+        }),
+        Err(error) if error.kind() == io::ErrorKind::AddrInUse => {
+            // Whose is the IPv4 port: the IPv6 socket's own, or another's?
+            drop(v6);
+            drop(bind_udp(v4_address)?);
+            // The IPv6 socket took IPv4 too; take it again.
+            Ok(ServerSocket {
+                v6: Some(bind_udp(v6_address)?),
+                v4: None,
+            })
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -158,6 +190,52 @@ mod tests {
         client.send_to(b"x", ("127.0.0.1", port)).unwrap();
         let (bytes, _) = receive(&mut server).expect("an IPv4 datagram reaches `any`");
         assert_eq!(bytes, b"x");
+    }
+
+    /// `Listen::Any` on a free port: one dual-stack IPv6 socket on Linux and
+    /// macOS, an IPv6 socket and an IPv4 one on Windows, all on one port even
+    /// when port 0 asks for any (CI runners, 2026-10-01).
+    #[test]
+    fn any_binds_one_socket_or_two_on_one_port() {
+        let server = ServerSocket::bind(Listen::Any, 0).unwrap();
+        let addresses = server.local_addresses();
+        let port = addresses[0].port();
+        assert!(
+            addresses
+                .iter()
+                .all(|a| a.port() == port && a.ip().is_unspecified()),
+            "{addresses:?}"
+        );
+        if cfg!(any(target_os = "linux", target_os = "macos")) {
+            assert_eq!(addresses, [SocketAddr::from((Ipv6Addr::UNSPECIFIED, port))]);
+        }
+        if cfg!(windows) {
+            assert_eq!(
+                addresses,
+                [
+                    SocketAddr::from((Ipv6Addr::UNSPECIFIED, port)),
+                    SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)),
+                ]
+            );
+        }
+    }
+
+    /// A socket holding the port for IPv4, as a game's search holds the game
+    /// port, makes `Listen::Any` refuse the port on every system; macOS and
+    /// Windows would bind the IPv6 socket beside it (slice EF-X). The other
+    /// way round, `Listen::Any` keeps such a socket off its port.
+    #[test]
+    fn any_refuses_a_port_another_socket_holds_for_ipv4() {
+        let search = UdpSocket::bind("0.0.0.0:0").unwrap();
+        let port = search.local_addr().unwrap().port();
+        let refused = ServerSocket::bind(Listen::Any, port).expect_err("the port is held");
+        assert_eq!(refused.kind(), io::ErrorKind::AddrInUse);
+        drop(search);
+        let Ok(server) = ServerSocket::bind(Listen::Any, port) else {
+            return; // the port was taken in between; nothing to learn
+        };
+        assert!(!server.local_addresses().is_empty());
+        assert!(UdpSocket::bind(("0.0.0.0", port)).is_err());
     }
 
     /// Discovery's question to a host on the network is a datagram to the

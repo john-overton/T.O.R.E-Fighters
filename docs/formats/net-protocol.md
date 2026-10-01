@@ -297,11 +297,13 @@ this machine's own network address and to its loopback address, and listens
 for answers on the same socket, which is bound to the game port when that is
 free (so one firewall rule covers everything). Discovery is IPv4 only; IPv6 discovery, port
 mapping and the internet are stage J. A host on an IPv6 socket that also takes
-IPv4 receives IPv4 broadcast on Linux (checked on this machine with a query to
-the loopback network's broadcast address, which a firewall leaves alone); a
-platform that needs an IPv4 socket for it (Windows, per the standard library's
-note on dual-stack sockets) gets one from the server's socket code, which binds
-both. A machine's firewall may drop incoming broadcast on its real network
+IPv4 receives IPv4 broadcast on Linux and macOS (checked on this machine with
+a query to the loopback network's broadcast address, which a firewall leaves
+alone, and on the Linux and macos-14 CI runners with one to 255.255.255.255);
+Windows, whose IPv6 sockets are IPv6 only, gets an IPv4 socket beside it from
+the server's socket code, and that socket takes the broadcast (checked on the
+Windows CI runner, EF-X;
+[each system's sockets](../ARCHITECTURE.md#the-game-port-on-each-system-ef-x)). A machine's firewall may drop incoming broadcast on its real network
 interfaces: on the development machine (ufw active) a broadcast to its own
 interface never reached its own sockets, and a Windows firewall asks on first
 run

@@ -556,6 +556,15 @@ needed. For players on the internet, forward that UDP port on the router to the
 server; automatic port mapping, NAT traversal and the relay are stage J.
 Windows and macOS ask once whether the unsigned program may accept connections.
 
+The start line `Listening on UDP` shows the sockets. Listening on every
+address (the default), Linux and macOS listen with one IPv6 socket that takes
+IPv4 as well, `[::]:26900`; Windows, whose IPv6 sockets take IPv6 only,
+listens with two, `[::]:26900 and 0.0.0.0:26900`. Either way one firewall
+rule for the UDP port covers both. When another program holds the port for
+IPv4 (another server, or a game's Direct Connection screen on this machine),
+the server refuses to start on every system rather than listen on IPv6 alone
+([the game port on each system](ARCHITECTURE.md#the-game-port-on-each-system-ef-x)).
+
 ## Discovery and the firewall
 
 *Built (EF5).* The server, and a game that hosts, answer a discovery query on
@@ -574,13 +583,15 @@ UDP on the game port in. On the host's machine:
   allow 26900/udp`. On the development machine (ufw active)
   a broadcast to its own network interface never reached its own sockets, while
   one to the loopback network did; ufw's default deny is the likely cause (not
-  confirmed: checking needs root). The server's socket takes IPv4 broadcast
-  on its IPv6 socket (checked on Linux).
+  confirmed: checking needs root). The server's one IPv6 socket takes IPv4
+  and IPv4 broadcast (checked on Linux and on a macOS CI runner).
 - **Windows.** The first run asks whether the program may accept connections;
   allow it on the private network. The public-network profile blocks incoming
   broadcast. The server binds a separate IPv4 socket there, as it does for
-  joins, which is what receives the broadcast (not yet measured on Windows).
-- **macOS.** The same first-run question; allow incoming connections.
+  joins, which is what receives the broadcast (checked on a Windows CI
+  runner, EF-X).
+- **macOS.** The same first-run question; allow incoming connections. One
+  IPv6 socket takes IPv4 and the broadcast, as on Linux.
 
 The searching machine matters too. The search socket is bound to the game
 port itself when that port is free, so the same firewall rule that lets joins
@@ -592,7 +603,8 @@ development machine. When the game port is taken (this game is hosting, or a
 server runs on it) the search uses another port, the log says so, and answers
 to a broadcast may be dropped by such a firewall. The search holds the game
 port while it runs, so a server started on this machine meanwhile cannot bind
-it; the game's Direct Connection screen stops its search before it hosts.
+it (on every system since EF-X: before it, macOS and Windows started the
+server on IPv6 alone, where no IPv4 player reached it); the game's Direct Connection screen stops its search before it hosts.
 
 A machine on several networks (a laptop with Wi-Fi and a VPN) sends its
 question out of the default interface only; a host on another network is
