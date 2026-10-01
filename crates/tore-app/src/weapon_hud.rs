@@ -334,8 +334,20 @@ fn draw_target(
     let Some(target) = state.display_target() else {
         return;
     };
+    replay_target(pixels, s, target.position, color, zoom, friendly);
+}
+
+/// Same target cue, with position supplied by a recorded AI target selection.
+pub(crate) fn replay_target(
+    pixels: &mut [u8],
+    s: &flight::State,
+    position: Vector,
+    color: [u8; 3],
+    zoom: f64,
+    friendly: bool,
+) {
     let Some(cue) = target_cue(
-        missiles::sub(target.position, s.position),
+        missiles::sub(position, s.position),
         Basis::new(s.yaw, s.pitch, s.bank),
         zoom,
     ) else {
@@ -442,6 +454,41 @@ fn draw_gun(
     if let Some(range) = range {
         paint.text(font, &format!("R {:.2}", range / missiles::NMI), 402, 259);
     }
+    draw_gun_solution(pixels, s, color, zoom, solution, range);
+}
+
+/// Director presentation of the existing AI gun solution. No invented radar,
+/// ammunition or readiness readouts: only the computed pipper and range arc.
+pub(crate) fn replay_gunsight(
+    pixels: &mut [u8],
+    state: &flight::State,
+    color: [u8; 3],
+    zoom: f64,
+    gun: &tore_formats::weapons::Weapon,
+    mount: Vector,
+    target: gunsight::TargetObservation,
+) {
+    if let Ok(Some(solution)) =
+        gunsight::solve_observed(gun, &combat::launcher(state), mount, Some(target))
+    {
+        let range = missiles::length(missiles::sub(target.position, state.position));
+        draw_gun_solution(pixels, state, color, zoom, solution, Some(range));
+    }
+}
+
+fn draw_gun_solution(
+    pixels: &mut [u8],
+    s: &flight::State,
+    color: [u8; 3],
+    zoom: f64,
+    solution: gunsight::Solution,
+    range: Option<f64>,
+) {
+    let mut paint = Paint {
+        pixels,
+        clip: hud::HUD_CLIP,
+        color: [color[0], color[1], color[2], 255],
+    };
     let Some((x, y)) = projected(missiles::sub(solution.point, s.position), s, zoom) else {
         return;
     };

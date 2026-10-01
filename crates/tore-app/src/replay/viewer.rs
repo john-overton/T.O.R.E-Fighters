@@ -6,6 +6,7 @@
 //!
 //! The viewer owns its own world and aircraft models. Entering it points
 //! the renderer at them; leaving hands the renderer back to the game's.
+mod director;
 use crate::aircraft::Airframe;
 use crate::flight;
 use crate::flight_canvas::FlightCanvas;

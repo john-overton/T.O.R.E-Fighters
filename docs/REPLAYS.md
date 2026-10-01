@@ -1666,3 +1666,19 @@ headless workflow.
 - Tests use synthetic recordings only; golden outputs live in
   `crates/tore-replay/tests/golden` and are rewritten with
   `TORE_UPDATE_GOLDEN=1 cargo test --locked -p tore-replay`.
+
+## Promo reel capture
+
+`--reel-render REPLAY FRAME_PLAN OUTPUT.mkv` renders exact replay ticks without
+a window. Director-only HUD and cockpit views
+use recorded aircraft data, source cockpit art and recorded target selection.
+The gun pipper uses the existing ballistic solver with recorded visual target
+observations. The director can also capture the actual replay transport,
+timeline, labels and subtitles, with the declared playback speed and pause
+state. A row's FOV drives the engine's cockpit zoom, which scales scene, HUD and
+art together; an optional thirteenth column fixes the eye at a recorded tick.
+`--hud-layer` also writes the visible HUD symbols as a lossless layer, and each
+capture writes its speech as a stem beside the effects. `--reel-music DIR`
+exports the imported score phrases. The [TOML reel recipe](../tools/reel/README.md)
+drives these commands. Ordinary replay controls and recording behavior remain
+unchanged.

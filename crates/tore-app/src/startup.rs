@@ -43,6 +43,8 @@ fn interactive_arguments(args: impl Iterator<Item = OsString>) -> bool {
                     | "-V"
                     | "--import-only"
                     | "--headless-flight"
+                    | "--reel-render"
+                    | "--reel-music"
                     | "--snapshot"
                     | "--panel-snapshot"
                     | "--capture-terrain"

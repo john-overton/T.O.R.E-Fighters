@@ -62,6 +62,8 @@ struct Output { @builtin(position) position:vec4<f32>, @location(0) screen:vec2<
      hud_color*=aperture;
      // Original cockpit frame and mirrors are in front of the glass-clipped HUD.
      color=art_color+hud_color*(1.-art_color.a);
+     // Promo reel: size.w selects only the symbols the glass shows.
+     if cockpit.size.w>0. { color=hud_color*(1.-art_color.a); }
  }
  return color*cockpit.placement.w; // Premultiplied filtering/compositing preserves transparent edge colors.
 }

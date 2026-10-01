@@ -63,7 +63,20 @@ struct Mixer {
     engine_cues: Vec<Voice>,
     ui_voices: Vec<Voice>,
     radio: VecDeque<RadioVoice>,
+    /// Promo reel: offline capture keeps speech on its own stem, and
+    /// counts started recordings so the edit can cut between phrases.
+    radio_tap: Option<f32>,
+    radio_started: u64,
     volumes: Volumes,
+}
+/// Promo reel: one offline block of the effects mix and its speech stem.
+pub struct OfflineBlock {
+    /// Stereo little-endian f32 effects, engines and cockpit sounds.
+    pub effects: Vec<u8>,
+    /// Mono little-endian f32 radio and crew speech, at the mixer's level.
+    pub speech: Vec<u8>,
+    /// Sample offsets in this block where a speech recording started.
+    pub speech_starts: Vec<usize>,
 }
 /// The Sound/Music Prefs settings as mixer levels, each relative to TORE's
 /// own mix (1 at the slider's default, 0 off), and the stereo image
@@ -113,7 +126,7 @@ impl Volumes {
     };
 }
 pub struct Audio {
-    _stream: cpal::Stream,
+    _stream: Option<cpal::Stream>,
     mixer: Arc<Mutex<Mixer>>,
     clips: BTreeMap<String, Arc<Clip>>,
     radio_phrases: BTreeMap<String, String>,
@@ -381,6 +394,82 @@ impl Audio {
         scripts: &BTreeMap<String, Vec<u8>>,
         resources: &BTreeMap<String, Vec<u8>>,
     ) -> AppResult<Self> {
+        Self::create(sounds, scripts, resources, false)
+    }
+    /// Reel-only, deterministic mixer with no sound device or wall clock.
+    pub fn offline(
+        sounds: BTreeMap<String, Vec<u8>>,
+        scripts: &BTreeMap<String, Vec<u8>>,
+        resources: &BTreeMap<String, Vec<u8>>,
+    ) -> AppResult<Self> {
+        Self::create(sounds, scripts, resources, true)
+    }
+    pub fn offline_radio_active(&self) -> bool {
+        !self
+            .mixer
+            .lock()
+            .expect("offline audio mutex")
+            .radio
+            .is_empty()
+    }
+    pub fn offline_samples(&self, frames: usize) -> OfflineBlock {
+        let mut mixer = self.mixer.lock().expect("offline audio mutex");
+        let mut block = OfflineBlock {
+            effects: Vec::with_capacity(frames * 8),
+            speech: Vec::with_capacity(frames * 4),
+            speech_starts: Vec::new(),
+        };
+        for index in 0..frames {
+            let started = mixer.radio_started;
+            mixer.radio_tap = Some(0.);
+            for sample in mixer.frame(48_000.) {
+                block.effects.extend_from_slice(&sample.to_le_bytes());
+            }
+            let speech = mixer.radio_tap.unwrap_or_default().clamp(-1., 1.);
+            block.speech.extend_from_slice(&speech.to_le_bytes());
+            if mixer.radio_started != started {
+                block.speech_starts.push(index);
+            }
+        }
+        mixer.voices.retain(|v| !v.finished());
+        mixer.engine_cues.retain(|v| !v.finished());
+        mixer.ui_voices.retain(|v| !v.finished());
+        block
+    }
+    /// A flight score from its start, with the sample offset and source file
+    /// of each phrase the phrase player chose.
+    pub fn offline_music(&self, score: usize, frames: usize) -> (Vec<u8>, Vec<(usize, String)>) {
+        let mut mixer = self.mixer.lock().expect("offline audio mutex");
+        mixer.music.start(score);
+        let mut bytes = Vec::with_capacity(frames * 8);
+        let mut cues = Vec::new();
+        for index in 0..frames {
+            let phrases = mixer.music.phrases;
+            let sample = mixer.music.next(48_000.);
+            if mixer.music.phrases != phrases {
+                cues.push((index, mixer.music.phrase_name.clone().unwrap_or_default()));
+            }
+            bytes.extend_from_slice(&sample.to_le_bytes());
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        (bytes, cues)
+    }
+    /// One imported recording, resampled to 48 kHz mono f32 as the mixer plays it.
+    pub fn offline_clip(&self, name: &str) -> Option<Vec<u8>> {
+        let clip = self.clips.get(name)?.clone();
+        let mut voice = Voice { clip, position: 0. };
+        let mut bytes = Vec::new();
+        while !voice.finished() {
+            bytes.extend_from_slice(&voice.next(48_000., false).to_le_bytes());
+        }
+        Some(bytes)
+    }
+    fn create(
+        sounds: BTreeMap<String, Vec<u8>>,
+        scripts: &BTreeMap<String, Vec<u8>>,
+        resources: &BTreeMap<String, Vec<u8>>,
+        offline: bool,
+    ) -> AppResult<Self> {
         let clips = sounds
             .into_iter()
             .map(|(name, bytes)| {
@@ -398,7 +487,7 @@ impl Audio {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .subsec_nanos();
-        let music = music::Music::new(&clips, scripts, seed);
+        let music = music::Music::new(&clips, scripts, if offline { 1 } else { seed });
         let seeker_volume = std::env::var("TORE_SEEKER_VOLUME")
             .ok()
             .map(|v| v.parse::<f64>())
@@ -433,27 +522,34 @@ impl Audio {
             engine_cues: Vec::new(),
             ui_voices: Vec::with_capacity(8),
             radio: VecDeque::new(),
+            radio_tap: offline.then_some(0.),
+            radio_started: 0,
             // Stay silent until the app has restored the user's saved preferences.
             volumes: Volumes::SILENT,
         }));
-        let device = cpal::default_host()
-            .default_output_device()
-            .ok_or("no default audio output device")?;
-        let supported = device.default_output_config()?;
-        let config = supported.config();
-        let stream = match supported.sample_format() {
-            cpal::SampleFormat::F32 => build::<f32>(&device, &config, mixer.clone())?,
-            cpal::SampleFormat::I16 => build::<i16>(&device, &config, mixer.clone())?,
-            cpal::SampleFormat::U16 => build::<u16>(&device, &config, mixer.clone())?,
-            _ => return Err("unsupported audio device sample format".into()),
+        let stream = if offline {
+            None
+        } else {
+            let device = cpal::default_host()
+                .default_output_device()
+                .ok_or("no default audio output device")?;
+            let supported = device.default_output_config()?;
+            let config = supported.config();
+            let stream = match supported.sample_format() {
+                cpal::SampleFormat::F32 => build::<f32>(&device, &config, mixer.clone())?,
+                cpal::SampleFormat::I16 => build::<i16>(&device, &config, mixer.clone())?,
+                cpal::SampleFormat::U16 => build::<u16>(&device, &config, mixer.clone())?,
+                _ => return Err("unsupported audio device sample format".into()),
+            };
+            stream.play()?;
+            log::info!(
+                "Audio: {} ({} Hz, {} channels)",
+                device.name()?,
+                config.sample_rate.0,
+                config.channels
+            );
+            Some(stream)
         };
-        stream.play()?;
-        log::info!(
-            "Audio: {} ({} Hz, {} channels)",
-            device.name()?,
-            config.sample_rate.0,
-            config.channels
-        );
         let radio_phrases: BTreeMap<_, _> = tore_formats::radio::STEMS
             .iter()
             .filter_map(|(stem, _)| {
@@ -1281,7 +1377,14 @@ impl Mixer {
                 value += voice.next(rate, false) * 0.4 * v.overall * v.engine;
             }
             if let Some(voice) = self.radio.front_mut() {
-                value += voice.voice.next(rate, false) * 0.4 * v.overall * v.radio;
+                if voice.voice.position == 0. {
+                    self.radio_started += 1;
+                }
+                let speech = voice.voice.next(rate, false) * 0.4 * v.overall * v.radio;
+                match &mut self.radio_tap {
+                    Some(tap) => *tap += speech,
+                    None => value += speech,
+                }
                 if voice.voice.finished() {
                     self.radio.pop_front();
                 }
@@ -1687,12 +1790,50 @@ mod tests {
             engine_cues: Vec::new(),
             ui_voices: Vec::new(),
             radio: VecDeque::new(),
+            radio_tap: None,
+            radio_started: 0,
             volumes: Volumes {
                 flight_music: 0.,
                 other_music: 0.,
                 ..Volumes::FULL
             },
         }
+    }
+
+    #[test]
+    fn offline_tap_keeps_speech_off_the_effects_mix() {
+        let clip = |value| {
+            Arc::new(Clip {
+                samples: vec![value; 4],
+                rate: 4.,
+            })
+        };
+        let prepare = |tap: Option<f32>| {
+            let mut m = test_mixer();
+            m.stall = None;
+            m.radio_tap = tap;
+            m.voices.push(Voice {
+                clip: clip(160),
+                position: 0.,
+            });
+            m.radio.push_back(RadioVoice {
+                source: RadioSource::Wing,
+                voice: Voice {
+                    clip: clip(192),
+                    position: 0.,
+                },
+            });
+            m
+        };
+        let mut live = prepare(None);
+        let both = live.frame(4.);
+        let mut offline = prepare(Some(0.));
+        let effects = offline.frame(4.);
+        let speech = offline.radio_tap.unwrap();
+        assert!((both[0] - 0.3).abs() < 1e-6, "{both:?}");
+        assert!((effects[0] - 0.1).abs() < 1e-6, "{effects:?}");
+        assert!((speech - 0.2).abs() < 1e-6, "{speech}");
+        assert_eq!((live.radio_started, offline.radio_started), (1, 1));
     }
 
     #[test]

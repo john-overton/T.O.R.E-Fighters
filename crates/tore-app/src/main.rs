@@ -60,6 +60,7 @@ mod probe_invariants;
 mod quick_mission;
 mod radio_calls;
 mod rafale_animation;
+mod reel;
 mod render_snapshot;
 mod renderer;
 mod replay;
@@ -7315,6 +7316,14 @@ fn main() -> std::process::ExitCode {
 }
 
 fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Outcome> {
+    if std::env::args().nth(1).as_deref() == Some("--reel-render") {
+        reel::run()?;
+        return Ok(Outcome::Done);
+    }
+    if std::env::args().nth(1).as_deref() == Some("--reel-music") {
+        reel::music()?;
+        return Ok(Outcome::Done);
+    }
     diagnostics::stage("argument parsing and startup options");
     if matches!(session, Session::First) {
         println!("{}", version::label());

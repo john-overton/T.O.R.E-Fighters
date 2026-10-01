@@ -696,3 +696,7 @@ any aircraft can be flown by AI or a human, and all mutable simulation state
 gains exact checkpoints for host migration. Networking goes in a new `tore-net`
 crate. The [multiplayer plan](multiplayer-plan.md#architecture) has the crates,
 stages and diagrams. This section is replaced as the stages land.
+
+## Promo reel capture
+
+`reel.rs` and the replay viewer's `director` module render promo footage. They read complete recordings into the same presentation helpers and `SimRenderer`, using a surface-free wgpu device and GPU readback. They never advance aircraft or AI state. Python expands the checked shot timeline and sends exact recorded ticks and camera parameters; a second cockpit pass can read back the HUD symbols alone, and the offline mixer can keep speech on its own stem. See the [production recipe](../tools/reel/README.md).

@@ -230,3 +230,7 @@ uses `pause_flight`, and a replay has no music yet, although the recording
 keeps the situation inputs that `situation` takes. The seeker tone plays at
 its recorded loudness. What plays when, and the fitted loudness for older
 recordings, are in [replay sound](REPLAYS.md#sound).
+
+## Promo offline export
+
+The promo reel uses an `Audio::offline` constructor with no cpal stream and a fixed music seed. The director drives recorded cues and pulls exactly 800 stereo 48 kHz samples per video frame from the existing mixer, with radio and crew speech on a separate stem and the start of each speech recording logged. Finished one-shot voices are dropped after each frame, as the device callback does, so long captures keep their effects. `--reel-music` renders every score with the fixed seed, logs each phrase chosen and exports every phrase a score can choose. Source score music is a separate editorial bed. The [reel recipe](../tools/reel/README.md) documents the music edit, ducking, mastering and omitted probe audio.

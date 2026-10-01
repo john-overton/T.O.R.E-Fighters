@@ -377,6 +377,12 @@ impl CockpitRenderer {
             upload(queue, &self.hud, pixels);
         }
     }
+    /// Promo reel: the next draw emits only the visible HUD symbols, for a
+    /// separate symbol layer. Submit the normal picture first, since queue
+    /// writes precede submitted work; the next `update` restores it.
+    pub fn symbols_only(&self, queue: &wgpu::Queue) {
+        queue.write_buffer(&self.uniform, 28, &1f32.to_le_bytes());
+    }
     pub fn draw(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
         if !self.enabled {
             return;

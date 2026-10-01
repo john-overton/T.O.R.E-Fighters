@@ -41,6 +41,9 @@ pub struct Music {
     held: Option<u8>,
     /// Last fault reported, so a retried missing score is printed once.
     reported: Option<(Scene, Fault)>,
+    /// Promo reel: phrases started so far, and the source file of the latest.
+    pub(super) phrases: u64,
+    pub(super) phrase_name: Option<String>,
 }
 fn draw(rng: &mut u32, limit: u32) -> u32 {
     // Authored audio-only RNG, independent of authoritative flight state.
@@ -102,6 +105,8 @@ impl Music {
             hold: false,
             held: None,
             reported: None,
+            phrases: 0,
+            phrase_name: None,
         };
         result.restart();
         result
@@ -165,6 +170,12 @@ impl Music {
                     &self.brief
                 };
                 let clip = playlist[self.playlist_index].clone();
+                let names = if self.scene == Scene::Main {
+                    music::MAIN
+                } else {
+                    music::BRIEF
+                };
+                self.phrase_name = names.get(self.playlist_index).map(|n| n.to_string());
                 self.playlist_index = (self.playlist_index + 1) % playlist.len();
                 clip
             }
@@ -190,6 +201,7 @@ impl Music {
                                 return None;
                             }
                         }
+                        self.phrase_name = Some(prepared.score.filename(track));
                         prepared.clips[track as usize].clone()
                     }
                     Ok(None) => {
@@ -224,6 +236,7 @@ impl Music {
             let Some(clip) = self.phrase() else {
                 return 0.;
             };
+            self.phrases += 1;
             self.voice = Some(Voice {
                 position: overshoot * clip.rate,
                 clip,
@@ -311,6 +324,8 @@ mod tests {
             engine_cues: Vec::new(),
             ui_voices: Vec::new(),
             radio: std::collections::VecDeque::new(),
+            radio_tap: None,
+            radio_started: 0,
             volumes: super::super::Volumes::FULL,
         }
     }
