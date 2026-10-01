@@ -78,30 +78,29 @@ impl Player {
                 ClientEvent::Connection(_) => {}
             }
         }
-        if let Some(plane_tick) = self.seated.map(|_| self.now()) {
-            if self
+        let sending = self.seated.is_some()
+            && self
                 .last_inputs
-                .is_none_or(|last| plane_tick - last >= Duration::from_millis(16))
+                .is_none_or(|last| now - last >= Duration::from_millis(16));
+        if sending {
+            // Neutral controls a little ahead of the host's clock.
+            let newest = (self.now().as_secs_f64() * 120.0) as u32 + 120;
+            let frame = InputFrame::of(&Default::default(), false, Default::default());
+            let section = InputsSection {
+                newest_tick: newest,
+                frames: vec![frame; 24],
+                view_offset: 18,
+                interpolation_delay: 12,
+                view_subject: None,
+                mismatch: 0,
+                commands: Vec::new(),
+            };
+            if self
+                .client
+                .send_payload(now, &[(SECTION_INPUTS, &section.encode().unwrap())])
+                .is_ok()
             {
-                // Neutral controls a little ahead of the host's clock.
-                let newest = (self.now().as_secs_f64() * 120.0) as u32 + 120;
-                let frame = InputFrame::of(&Default::default(), false, Default::default());
-                let section = InputsSection {
-                    newest_tick: newest,
-                    frames: vec![frame; 24],
-                    view_offset: 18,
-                    interpolation_delay: 12,
-                    view_subject: None,
-                    mismatch: 0,
-                    commands: Vec::new(),
-                };
-                if self
-                    .client
-                    .send_payload(now, &[(SECTION_INPUTS, &section.encode().unwrap())])
-                    .is_ok()
-                {
-                    self.last_inputs = Some(plane_tick);
-                }
+                self.last_inputs = Some(now);
             }
         }
         let _ = self.client.transmit(&mut self.socket);
