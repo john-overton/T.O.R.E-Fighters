@@ -1,6 +1,7 @@
 //! Fixed sample contents of every section and message, shared by the golden,
 //! round-trip and fuzz tests.
 
+use super::chat::{ChatFrom, ChatLine, ChatSend, Quick, Receiver, Standing};
 use super::entity::{
     AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKey, EntityKind,
     EntityState, Motion, PilotState, ProjectileState, Status,
@@ -621,6 +622,39 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
                 }],
             },
         }),
+        Message::ChatSend(ChatSend::typed(
+            Receiver::Friendlies,
+            "Break left, bandit high",
+        )),
+        Message::ChatSend(ChatSend {
+            receiver: Receiver::Target,
+            text: "Missile inbound! Break!".into(),
+            quick: Some(Quick {
+                number: 11,
+                sound: Some("^MISSBRK.5K".into()),
+            }),
+        }),
+        Message::ChatLine(ChatLine {
+            from: ChatFrom::Player {
+                callsign: "Cobra".into(),
+                standing: Standing::Own,
+                you: false,
+            },
+            receiver: Receiver::Wing,
+            text: "Engaging".into(),
+            sound: None,
+        }),
+        Message::ChatLine(ChatLine {
+            from: ChatFrom::Player {
+                callsign: "Hawk".into(),
+                standing: Standing::Enemy,
+                you: false,
+            },
+            receiver: Receiver::Target,
+            text: "Eat hot lead".into(),
+            sound: Some("^HOTLEAD.5K".into()),
+        }),
+        Message::ChatLine(ChatLine::system("No one hears you.")),
     ]
 }
 

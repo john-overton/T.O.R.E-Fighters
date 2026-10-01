@@ -7,10 +7,14 @@
 //! and ready; the King's mission, start, kick and end of the mission; a
 //! refused request; the host's goodbye; and the flight number that keeps
 //! one flight's sections apart from the next's.
+//!
+//! Protocol 4 (slice EF6) adds chat: a player's line and the host's
+//! delivered line ([`super::chat`]).
 
 use super::bits::{
     self, read_count, read_long_str, read_str, read_u32, write_count, write_long_str, write_str,
 };
+use super::chat::{ChatLine, ChatSend};
 use super::names::ReceivedNames;
 use super::{WireError, WireResult, limits};
 use tore_codec::{BitReader, BitWriter};
@@ -50,6 +54,9 @@ pub mod kind {
     pub const FLIGHT_LOADOUTS: u8 = 22;
     // Kept for the phase 2 lobby, not sent yet: the King passes the crown
     // (23) and changes the lobby's settings (24).
+    // Protocol 4, chat (EF6). Player to host, then host to player:
+    pub const CHAT_SEND: u8 = 25;
+    pub const CHAT_LINE: u8 = 26;
 }
 
 /// Entries of a content manifest or a refusal's list.
@@ -476,6 +483,11 @@ pub enum Message {
     /// client): every player builds the lobby's mission again with them, so
     /// its copy holds the aircraft as the host flies them.
     FlightLoadouts(FlightLoadouts),
+    /// A player's chat line (client to host, protocol 4).
+    ChatSend(ChatSend),
+    /// A chat line the host delivers (host to client, protocol 4): another
+    /// player's, the reader's own sent back, or the host's words to it.
+    ChatLine(ChatLine),
 }
 
 /// A flight's loadouts and what they add to the content check.
@@ -950,6 +962,8 @@ impl Message {
             Self::Refused { .. } => kind::REFUSED,
             Self::Goodbye(_) => kind::GOODBYE,
             Self::FlightLoadouts(_) => kind::FLIGHT_LOADOUTS,
+            Self::ChatSend(_) => kind::CHAT_SEND,
+            Self::ChatLine(_) => kind::CHAT_LINE,
         }
     }
 
@@ -968,6 +982,7 @@ impl Message {
                 | Self::Start
                 | Self::Kick(_)
                 | Self::EndMission
+                | Self::ChatSend(_)
         )
     }
 
@@ -1117,6 +1132,8 @@ impl Message {
                 }
                 write_manifest(&mut w, &flight.manifest)?;
             }
+            Self::ChatSend(send) => send.write(&mut w),
+            Self::ChatLine(line) => line.write(&mut w),
         }
         let bytes = bits::finish(w);
         if bytes.len() > limits::MESSAGE {
@@ -1290,6 +1307,8 @@ impl Message {
                     manifest: read_manifest(r)?,
                 })
             }
+            kind::CHAT_SEND => Self::ChatSend(ChatSend::read(r)?),
+            kind::CHAT_LINE => Self::ChatLine(ChatLine::read(r)?),
             kind::GOODBYE => Self::Goodbye(match r.read_bits(2)? {
                 0 => Goodbye::Kicked(read_str(r)?),
                 1 => Goodbye::HostLeft,

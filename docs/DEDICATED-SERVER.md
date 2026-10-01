@@ -489,7 +489,9 @@ A status line every `status-interval` seconds:
 
 The log (`logs/server-<date>.log` in the data folder) records the start,
 every connection, refusal, seat change and departure with its reason, the
-mission's end, and once a minute each player's figures: the same round trip,
+mission's end, every chat line a player sends (*built, EF6*: `chat: Viper to
+friendlies (2 heard): Form up`, with the sender, the receiver and how many
+others heard it; a line the host refuses is a refusal line), and once a minute each player's figures: the same round trip,
 loss, snapshot arrival spread, input margin, inputs repeated and bytes each
 way that a player's game writes to its own
 [diagnostics log](ARCHITECTURE.md#recordings-and-diagnostics).

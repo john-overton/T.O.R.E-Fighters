@@ -16,8 +16,15 @@
 //! lobby and each mission change too. A bot that is the King
 //! ([`Bot::start_when_ready`]) starts the mission as soon as every player
 //! holding a slot is ready.
+//!
+//! Chat (slice EF6): a bot sends the lines it is told to
+//! ([`Bot::say_at`], [`Bot::quick_at`]) when their time comes, to its
+//! receivers once it may (a line to anyone but All waits until it flies).
+//! `tore-bot` prints every line its bots receive, with the receiver, so
+//! tests and the windowed run can see both directions.
 
 use crate::client::{Client, ClientFrame, Controls};
+use crate::wire::chat::{ChatSend, QuickMessage, Receiver, Refusal};
 use crate::wire::messages::RosterPlane;
 use std::collections::BTreeSet;
 use std::f64::consts::{PI, TAU};
@@ -189,6 +196,14 @@ pub struct Bot {
     pub start_when_ready: bool,
     /// The lobby state the last Start was asked for.
     asked: Option<crate::wire::messages::LobbyState>,
+    /// When the bot's first update was, which its chat times count from.
+    started: Option<Duration>,
+    /// Lines to send, each at a time after `started`.
+    chat: Vec<(Duration, ChatSend)>,
+    /// Lines the host's rules refused the bot, with why.
+    pub chat_refused: Vec<(String, Refusal)>,
+    /// Lines sent.
+    pub chat_sent: u64,
 }
 
 impl Bot {
@@ -202,6 +217,54 @@ impl Bot {
             frames: 0,
             start_when_ready: false,
             asked: None,
+            started: None,
+            chat: Vec::new(),
+            chat_refused: Vec::new(),
+            chat_sent: 0,
+        }
+    }
+
+    /// Sends `text` to `receiver` `after` the bot's first update.
+    pub fn say_at(&mut self, after: Duration, receiver: Receiver, text: &str) {
+        self.chat.push((after, ChatSend::typed(receiver, text)));
+    }
+
+    /// Sends `CHAT.TXT`'s line `number` (1 to 12) of `lines` `after` the
+    /// bot's first update, to the line's receiver or All. A number past
+    /// the file's lines is dropped, noted in [`Bot::chat_refused`].
+    pub fn quick_at(&mut self, after: Duration, number: u8, lines: &[QuickMessage]) {
+        match lines.get(usize::from(number).wrapping_sub(1)) {
+            Some(line) => self
+                .chat
+                .push((after, ChatSend::quick(number, line, Receiver::All))),
+            None => self
+                .chat_refused
+                .push((format!("quick message {number}"), Refusal::BadQuick)),
+        }
+    }
+
+    /// Sends the lines that are due and can go.
+    fn send_chat(&mut self, now: Duration) {
+        let started = *self.started.get_or_insert(now);
+        let mut i = 0;
+        while i < self.chat.len() {
+            if now.saturating_sub(started) < self.chat[i].0 {
+                i += 1;
+                continue;
+            }
+            match self.client.chat_send(self.chat[i].1.clone()) {
+                Ok(()) => {
+                    self.chat_sent += 1;
+                    self.chat.remove(i);
+                }
+                // Not yet: connecting, or waiting for a plane for a line
+                // to anyone but All.
+                Err(Refusal::NotConnected | Refusal::OnlyAll) => i += 1,
+                Err(refusal) => {
+                    let (_, send) = self.chat.remove(i);
+                    self.chat_refused.push((send.text, refusal));
+                }
+            }
         }
     }
 
@@ -254,6 +317,7 @@ impl Bot {
         };
         self.client.update(now, &controls);
         self.start_if_ready();
+        self.send_chat(now);
         drawn
     }
 }

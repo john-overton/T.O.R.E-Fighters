@@ -524,6 +524,16 @@ pub fn log_line(entry: &HostLog) -> String {
         HostLog::Lobby {
             callsign, event, ..
         } => format!("lobby: {callsign} {event}"),
+        HostLog::Chat {
+            callsign,
+            receiver,
+            text,
+            heard,
+            ..
+        } => format!(
+            "chat: {callsign} to {} ({heard} heard): {text}",
+            tore_session::wire::chat::receiver_label(*receiver).to_ascii_lowercase()
+        ),
     };
     format!("tick {}: {text}", entry.tick())
 }

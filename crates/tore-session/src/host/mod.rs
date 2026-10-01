@@ -24,6 +24,7 @@
 //! dedicated server starts as its `start` setting says. Every player is sent
 //! the lobby's state whenever it changes.
 
+mod chat;
 pub mod config;
 mod discover;
 pub mod inputs;
@@ -36,6 +37,7 @@ pub use config::{AfterEnd, BuildId, HostConfig, HostError, OpenPlanes, StartMode
 pub use lobby::LobbyEvent;
 pub use sorting::{BURST_SLACK_TICKS, round_interval};
 
+use crate::wire::chat::{RateLimit, Receiver};
 use crate::wire::connection::HostConnection;
 use crate::wire::entity::{Entity, EntityKind};
 use crate::wire::events::WireEvent;
@@ -212,6 +214,15 @@ pub enum HostLog {
         callsign: String,
         event: LobbyEvent,
     },
+    /// A chat line the host routed (protocol 4): who sent it, to whom, and
+    /// how many other players heard it.
+    Chat {
+        tick: u64,
+        callsign: String,
+        receiver: Receiver,
+        text: String,
+        heard: usize,
+    },
 }
 
 impl HostLog {
@@ -230,7 +241,8 @@ impl HostLog {
             | Self::Overloaded { tick, .. }
             | Self::Fault { tick, .. }
             | Self::Stopped { tick }
-            | Self::Lobby { tick, .. } => *tick,
+            | Self::Lobby { tick, .. }
+            | Self::Chat { tick, .. } => *tick,
         }
     }
 }
@@ -374,6 +386,8 @@ struct Peer {
     requests: (Duration, u32),
     /// The last refusal written to the log, and when.
     refusal_logged: Option<(Duration, String)>,
+    /// The lines this player has chatted lately (protocol 4).
+    chat_rate: RateLimit,
 }
 
 /// The lifecycle's own state.
@@ -445,6 +459,10 @@ pub struct Host {
     /// What each seat's game could not foresee, by tick (tests only).
     #[cfg(test)]
     unforeseen_log: Vec<(u64, SeatId, Unforeseen)>,
+    /// Targets tests give planes, for chat's Target receiver
+    /// (`chat::designated_aircraft`).
+    #[cfg(test)]
+    pub(crate) test_designations: BTreeMap<PlaneId, u32>,
 }
 
 /// Why a seat's game could not foresee its plane's state at a tick, for the
@@ -652,6 +670,8 @@ impl Host {
             overloads: 0,
             #[cfg(test)]
             unforeseen_log: Vec::new(),
+            #[cfg(test)]
+            test_designations: BTreeMap::new(),
             out: TickOutput::default(),
             config,
         };
@@ -1136,6 +1156,7 @@ impl Host {
                 lobby_sent: None,
                 requests: (Duration::ZERO, 0),
                 refusal_logged: None,
+                chat_rate: RateLimit::default(),
             },
         );
         let tick = self.world.tick();
@@ -1317,6 +1338,7 @@ impl Host {
                 };
                 self.answer(connection, kind::KICK, "a kick", result);
             }
+            Message::ChatSend(send) => self.chat(connection, send),
             Message::EndMission => {
                 let result = if matches!(self.life, Life::Flying) {
                     let next = self.after_end();
@@ -1349,7 +1371,22 @@ impl Host {
                 reason: reason.clone(),
             },
         );
-        // The same refusal again within a second is not logged again.
+        let what = match request {
+            kind::SLOT => "a slot",
+            kind::LOADOUT => "a loadout",
+            kind::SET_READY => "ready",
+            kind::CHANGE_MISSION => "a new mission",
+            kind::START => "the start",
+            kind::KICK => "a kick",
+            kind::END_MISSION => "the end",
+            _ => "a request",
+        };
+        self.log_refusal(connection, what, reason);
+    }
+
+    /// Writes a refusal to the log, unless the same one was written to the
+    /// same player within a second.
+    fn log_refusal(&mut self, connection: ConnectionId, what: &'static str, reason: String) {
         let now = self.now;
         let Some(peer) = self.peers.get_mut(&connection) else {
             return;
@@ -1361,16 +1398,6 @@ impl Host {
         }
         peer.refusal_logged = Some((now, reason.clone()));
         let callsign = peer.callsign.clone();
-        let what = match request {
-            kind::SLOT => "a slot",
-            kind::LOADOUT => "a loadout",
-            kind::SET_READY => "ready",
-            kind::CHANGE_MISSION => "a new mission",
-            kind::START => "the start",
-            kind::KICK => "a kick",
-            kind::END_MISSION => "the end",
-            _ => "a request",
-        };
         self.lobby_log(
             callsign,
             LobbyEvent::Refused {

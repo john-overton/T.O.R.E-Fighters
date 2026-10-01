@@ -10,7 +10,16 @@
 //! ```text
 //! tore-bot --connect HOST[:PORT] [--data-dir DIR] [--count N] [--callsign NAME]
 //!          [--slot PLANE] [--seconds S] [--password TEXT]
+//!          [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...
 //! ```
+//!
+//! `--say` makes every bot send the text to the receiver (`all`,
+//! `friendlies`, `enemies`, `wing` or `target`) that many seconds after it
+//! starts, once it may (a line to anyone but all waits until it flies);
+//! `--quick` sends `CHAT.TXT`'s line NUMBER (1 to 12) to the receiver the
+//! line names, or all. Both may be given more than once. Every chat line a
+//! bot receives is printed with its sender and receiver, the host's words
+//! (no one hears you, a refusal) too.
 //!
 //! It prints one line per join, seating, debrief, lobby change and
 //! departure, and each bot's figures every five seconds. It exits 0 when
@@ -25,11 +34,13 @@ use std::time::Duration;
 use tore_net::{CloseReason, DisconnectReason, Entropy, RealClock, bind_udp};
 use tore_session::bot::Bot;
 use tore_session::client::ended_text;
+use tore_session::wire::chat::Receiver;
 use tore_session::wire::messages::{Goodbye, LobbyState};
 use tore_session::{BuildId, Client, ClientConfig, ClientEvent, ClientPhase};
 
 const USAGE: &str = "usage: tore-bot --connect HOST[:PORT] [--data-dir DIR] [--count N] \
-[--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT]";
+[--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] \
+[--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...";
 
 /// How long a bot waits for its debrief and the disconnect after leaving.
 const LEAVE_GRACE: Duration = Duration::from_secs(8);
@@ -42,6 +53,55 @@ struct Options {
     slot: Option<u32>,
     seconds: u64,
     password: String,
+    /// `--say`: when, to whom, what.
+    say: Vec<(Duration, Receiver, String)>,
+    /// `--quick`: when, which line.
+    quick: Vec<(Duration, u8)>,
+}
+
+fn receiver(word: &str) -> Result<Receiver, String> {
+    Ok(match word.to_ascii_lowercase().as_str() {
+        "all" => Receiver::All,
+        "friendlies" => Receiver::Friendlies,
+        "enemies" => Receiver::Enemies,
+        "wing" => Receiver::Wing,
+        "target" => Receiver::Target,
+        _ => {
+            return Err(format!(
+                "{word:?} is not a receiver: all, friendlies, enemies, wing or target"
+            ));
+        }
+    })
+}
+
+fn seconds(word: &str) -> Result<Duration, String> {
+    word.parse::<f64>()
+        .ok()
+        .filter(|s| s.is_finite() && *s >= 0.)
+        .map(Duration::from_secs_f64)
+        .ok_or_else(|| format!("{word:?} is not a number of seconds"))
+}
+
+/// `--say SECONDS,RECEIVER,TEXT`.
+fn say(value: &str) -> Result<(Duration, Receiver, String), String> {
+    let mut parts = value.splitn(3, ',');
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(at), Some(to), Some(text)) => Ok((seconds(at)?, receiver(to)?, text.to_owned())),
+        _ => Err(format!("--say takes SECONDS,RECEIVER,TEXT\n{USAGE}")),
+    }
+}
+
+/// `--quick SECONDS,NUMBER`.
+fn quick(value: &str) -> Result<(Duration, u8), String> {
+    let (at, number) = value
+        .split_once(',')
+        .ok_or_else(|| format!("--quick takes SECONDS,NUMBER\n{USAGE}"))?;
+    let number = number
+        .parse()
+        .ok()
+        .filter(|n| (1..=12).contains(n))
+        .ok_or("--quick's number is 1 to 12")?;
+    Ok((seconds(at)?, number))
 }
 
 fn parse(args: &[String]) -> Result<Options, String> {
@@ -54,6 +114,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
         slot: None,
         seconds: 60,
         password: String::new(),
+        say: Vec::new(),
+        quick: Vec::new(),
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -82,6 +144,8 @@ fn parse(args: &[String]) -> Result<Options, String> {
                     .map_err(|_| "--seconds is a whole number")?;
             }
             "--password" => options.password = value()?,
+            "--say" => options.say.push(say(&value()?)?),
+            "--quick" => options.quick.push(quick(&value()?)?),
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unknown option {other}\n{USAGE}")),
         }
@@ -221,6 +285,10 @@ fn main() -> ExitCode {
     } else {
         "[::]:0".parse().expect("an address")
     };
+    let lines = resources
+        .get(tore_import::selection::CHAT_RESOURCE)
+        .map(|bytes| tore_formats::chat::parse(bytes))
+        .unwrap_or_default();
     let mut bots = Vec::new();
     for i in 0..options.count {
         let name = if options.count == 1 {
@@ -253,10 +321,17 @@ fn main() -> ExitCode {
                 return ExitCode::from(2);
             }
         };
+        let mut bot = Bot::new(client);
+        for (at, to, text) in &options.say {
+            bot.say_at(*at, *to, text);
+        }
+        for (at, number) in &options.quick {
+            bot.quick_at(*at, *number, &lines);
+        }
         bots.push(Running {
             name,
             socket,
-            bot: Bot::new(client),
+            bot,
             seated: false,
             debrief: false,
             left_at: None,
@@ -318,6 +393,13 @@ fn main() -> ExitCode {
                         println!("{}: seat {seat}, plane {plane}, at tick {tick}", r.name);
                     }
                     ClientEvent::Notice(text) => println!("{}: {text}", r.name),
+                    ClientEvent::Chat(line) => {
+                        let heard = line
+                            .sound
+                            .as_deref()
+                            .map_or(String::new(), |s| format!(" [{s}]"));
+                        println!("{}: chat: {}{heard}", r.name, line.log_text());
+                    }
                     ClientEvent::Debrief(debrief) => {
                         r.debrief = true;
                         println!(
@@ -424,5 +506,35 @@ mod tests {
         assert!(parse(&args("--count 2")).is_err());
         assert!(parse(&args("--connect 127.0.0.1 --count 0")).is_err());
         assert!(parse(&args("--connect 127.0.0.1 --bogus")).is_err());
+    }
+
+    #[test]
+    fn chat_options_parse_and_refuse_what_they_cannot_send() {
+        let o = parse(&args(
+            "--connect 127.0.0.1 --say 5,friendlies,Hello,_there --quick 7.5,12 --say 1,ALL,x",
+        ))
+        .unwrap();
+        assert_eq!(
+            o.say[0],
+            (
+                Duration::from_secs(5),
+                Receiver::Friendlies,
+                "Hello,_there".to_owned()
+            )
+        );
+        assert_eq!(o.say[1].1, Receiver::All);
+        assert_eq!(o.quick, [(Duration::from_millis(7500), 12)]);
+        for bad in [
+            "--say 5,friends,Hi",
+            "--say Hi",
+            "--say x,all,Hi",
+            "--quick 5,13",
+            "--quick 5",
+        ] {
+            assert!(
+                parse(&args(&format!("--connect 127.0.0.1 {bad}"))).is_err(),
+                "{bad}"
+            );
+        }
     }
 }

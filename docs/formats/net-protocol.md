@@ -296,7 +296,7 @@ Join by address always works without it.
 ## Reliable messages
 
 For what must arrive once and in order: the mission, seating, the roster, the
-debrief, leaving, and (protocol 3) the lobby.
+debrief, leaving, (protocol 3) the lobby and (protocol 4) chat.
 
 - Each message has a 16-bit id, counting up from 0 in each direction, a kind
   (8 bits) and a body of at most 256 bytes.
@@ -351,6 +351,13 @@ The lobby's messages, protocol 3 ([the lobby](../ARCHITECTURE.md#the-lobby)):
 | Refused | host to client | The refused request's message kind and the plain reason |
 | Goodbye | host to client | Why the host is about to disconnect the player: kicked (with the King's words) or the host left the game |
 | Flight loadouts | host to client | The mission starts flying: each loaded plane and its loadout, which every player builds the lobby's mission again with, and the content manifest entries they add, which the player checks |
+
+Chat's messages, protocol 4 ([chat](../ARCHITECTURE.md#chat)):
+
+| Kind | Direction | Body |
+| --- | --- | --- |
+| Chat send (25) | client to host | The receiver (All, Friendlies, Enemies, Wing or Target), the line's text and, for one of `CHAT.TXT`'s quick messages, its number (1 to 12) and sound |
+| Chat line (26) | host to client | A delivered line: the sender's callsign and where the sender stands to the reader (no side, the reader's side, the other side), whether it is the reader's own line sent back, the receiver, the text and a quick message's sound; or the host's words alone (a refusal, or that no one heard) |
 
 ## What the transport settled
 
@@ -921,6 +928,51 @@ host left the game (4); the King's End mission is reason 3.
   unanswered; it sends a player the lobby state only after a change, at most
   every 250 ms in the lobby and every second in flight.
 
+### Chat as built
+
+*Built (EF6), protocol 4, each an agent decision unless credited.* Kinds 25
+and 26 (23 and 24 stay free for the phase 2 lobby). Chat is reliable, rides
+the same messages as the lobby, and shares their pace: a connection's
+requests count against the 20 a second the host answers.
+
+- **Chat send** is the receiver in 3 bits (All 0, Friendlies 1, Enemies 2,
+  Wing 3, Target 4), the text (a string), and a presence bit; when set, the
+  quick message's number in 4 bits (1 to 12) and a presence bit and the
+  sound's name (a string). The text of a quick message is the line's, cut to
+  `CHAT.TXT`'s 50 characters and with any character outside printable ASCII
+  turned into `?` by the sender's game.
+- **Chat line** is a bit (0 the host's words: then the text and nothing
+  else; 1 a player's line) and, for a player's line: the sender's callsign
+  (a string), where the sender stands to the reader in 2 bits (0 neutral: the
+  sender or the reader has no plane, 1 the reader's own side, 2 the other
+  side), a bit for the reader's own line sent back, the receiver in 3 bits,
+  the text (a string), and a presence bit and the sound (a string).
+- **The host's rules.** The text is trimmed; empty is dropped without a
+  word; more than 80 characters, or any character outside printable ASCII
+  (space to `~`), is refused. A quick message's number must be 1 to 12 and
+  its sound at most 12 printable characters with no backslash, ending
+  `.5K` or `.11K` in any case. A player may send five lines in five seconds
+  (a sliding window, counted over the lines the host accepted); the sixth is
+  refused and does not count. Every refusal is a line from the host to the
+  sender alone, in words, and is noted in the log (once a second at most for
+  the same words). A player with no plane (in the lobby, whether or not the
+  mission flies) sends only to All.
+- **Routing.** The host never sends a line to a connection that is closing.
+  All goes to every other connection, in the lobby or flying, seated or not.
+  Friendlies goes to the players flying a plane on the sender's side,
+  Enemies to those on the other side, Wing to those in the sender's wing
+  (side and wing index), Target to the human flying the aircraft the sender
+  has designated (an AI-flown or non-aircraft target, or none, reaches no
+  one). A player flying hears Friendlies, Enemies, Wing and Target lines;
+  one with no plane hears All only. A player who left, or whose plane the
+  AI flies again, hears nothing more. The sender is sent its own line back
+  (no sound), so it sees what went out; when no one else heard it, the host
+  follows with "No one hears you."; Target with nothing designated is
+  refused ("You have no target designated."). Observers (phase 2) never
+  chat.
+- **Sounds.** The receivers play a quick message's sound; the sender does
+  not hear its own.
+
 ### Flights
 
 *Built (EF4), protocol 3, agent decision.* A connection now outlives a
@@ -964,6 +1016,7 @@ Decoders check every count and length against these before reading on.
 | Destroyed ground objects at seating | 8,192 |
 | Seats per host | 30 |
 | Players and slots in a lobby state, settings, loadouts at a flight's start | 64 each |
+| Chat line (protocol 4) | 80 characters of printable ASCII, 5 lines in 5 seconds a player, a quick message's sound 12 characters |
 
 ## Captures
 
@@ -1006,7 +1059,7 @@ to a replay is stage E.
 
 - The **protocol version** is one number in `tore-session`
   (`wire::PROTOCOL_VERSION`, 2 since the readout's coding, 3 since the lobby,
-  EF4). Any change to the bytes raises it. A test
+  EF4, 4 since chat, EF6). Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt`; when
   they differ it fails and says to raise the version and refresh the copy

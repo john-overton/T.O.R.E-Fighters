@@ -36,6 +36,8 @@
 //! - **Diagnostics and capture** ([`diagnostics`], [`capture`]).
 
 pub mod capture;
+#[cfg(test)]
+mod chat_tests;
 pub mod clock;
 pub mod diagnostics;
 pub mod interpolation;
@@ -48,6 +50,7 @@ pub mod prediction;
 mod tests;
 
 use crate::host::BuildId;
+use crate::wire::chat::{ChatLine, ChatSend, Receiver, Refusal};
 use crate::wire::connection::ClientConnection;
 use crate::wire::connection::FlightOrder;
 use crate::wire::entity::EntityKey;
@@ -295,6 +298,9 @@ pub enum ClientEvent {
     Roster,
     /// A line from the server for the HUD.
     Notice(String),
+    /// A chat line (protocol 4): another player's, the player's own sent
+    /// back, or the host's words (a refusal, or that no one heard).
+    Chat(ChatLine),
     /// The player's debrief.
     Debrief(Box<Debrief>),
     /// The host ended the mission.
@@ -1074,6 +1080,45 @@ impl Client {
         self.send(&message);
     }
 
+    // ----- Chat ----------------------------------------------------------
+
+    /// Sends a typed line to `receiver`. The host routes it ([`crate::wire::chat`]);
+    /// the answers are [`ClientEvent::Chat`]s: the line back as sent, and
+    /// the host's words if it is refused or no one hears it. A line the
+    /// rules refuse before it is sent (nothing but spaces, too long, not
+    /// printable ASCII, anyone but All before flight) comes back as the
+    /// refusal, for the caller to show.
+    pub fn chat(&mut self, receiver: Receiver, text: &str) -> Result<(), Refusal> {
+        self.chat_send(ChatSend::typed(receiver, text))
+    }
+
+    /// Sends one of `CHAT.TXT`'s lines (`number` 1 to 12, the F key) with
+    /// its sound, to the line's own receiver or `picked`, the receiver the
+    /// player has chosen.
+    pub fn chat_quick(
+        &mut self,
+        number: u8,
+        line: &tore_formats::chat::QuickMessage,
+        picked: Receiver,
+    ) -> Result<(), Refusal> {
+        self.chat_send(ChatSend::quick(number, line, picked))
+    }
+
+    /// Sends a chat line, checked first by the rules the host holds the
+    /// player to (apart from the rate, which only the host counts).
+    pub fn chat_send(&mut self, send: ChatSend) -> Result<(), Refusal> {
+        if matches!(self.phase, ClientPhase::Connecting | ClientPhase::Closed) {
+            return Err(Refusal::NotConnected);
+        }
+        let send = send.checked()?;
+        if send.receiver != Receiver::All && self.phase != ClientPhase::Flying {
+            return Err(Refusal::OnlyAll);
+        }
+        let now = self.now;
+        self.request(now, Message::ChatSend(send));
+        Ok(())
+    }
+
     /// Why the host said goodbye, when it did.
     pub fn goodbye(&self) -> Option<&Goodbye> {
         self.goodbye.as_ref()
@@ -1441,6 +1486,10 @@ impl Client {
                 }
             }
             Message::Notice(text) => self.event(ClientEvent::Notice(text)),
+            Message::ChatLine(line) => {
+                self.log("chat", &[&line.log_text()]);
+                self.event(ClientEvent::Chat(line));
+            }
             Message::Debrief(debrief) => {
                 self.log("debrief", &[]);
                 self.event(ClientEvent::Debrief(debrief));

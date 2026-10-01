@@ -10,6 +10,7 @@ use crate::{
 };
 use std::{collections::VecDeque, time::Duration};
 use tore_net::{Entropy, ServerSocket};
+use tore_session::wire::chat::receiver_label;
 use tore_session::{BuildId, HostConfig, HostLog, LeaveReason, Phase};
 
 /// Builds the host session for a prepared mission.
@@ -155,6 +156,18 @@ impl SessionHost {
                 HostLog::Lobby {
                     callsign, event, ..
                 } => Event::Note(format!("{callsign} {event}")),
+                HostLog::Chat {
+                    callsign,
+                    receiver,
+                    text,
+                    heard,
+                    ..
+                } => Event::Chat {
+                    callsign,
+                    receiver: receiver_label(receiver).to_ascii_lowercase(),
+                    text,
+                    heard,
+                },
             });
         }
     }

@@ -68,6 +68,14 @@ pub enum Event {
     MissionRestarted,
     /// The mission ended, with why (time limit, empty, console, ...).
     MissionEnded { reason: String },
+    /// A chat line the host routed: who sent it, to which receiver, what it
+    /// said, and how many other players heard it.
+    Chat {
+        callsign: String,
+        receiver: String,
+        text: String,
+        heard: usize,
+    },
     /// Anything else worth a line, such as an overload note.
     Note(String),
 }
@@ -105,6 +113,19 @@ impl Event {
             Self::MissionStarted => "mission started".into(),
             Self::MissionRestarted => "mission restarted".into(),
             Self::MissionEnded { reason } => format!("mission ended: {reason}"),
+            Self::Chat {
+                callsign,
+                receiver,
+                text,
+                heard,
+            } => {
+                let heard = match heard {
+                    0 => "no one heard".to_owned(),
+                    1 => "1 heard".to_owned(),
+                    n => format!("{n} heard"),
+                };
+                format!("chat: {callsign} to {receiver} ({heard}): {text}")
+            }
             Self::Note(text) => text.clone(),
         }
     }
