@@ -415,6 +415,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/performance.rs", ("flight-maneuvers",), "performance counters"),
     _r("crates/tore-app/src/replay/*", ("replay-recording", "ai-regression", "replay-live"), "recording and replay screens"),
     _r("crates/tore-app/src/net/hosting*", (), "the game's host thread; only --host reaches it; no scenario yet"),
+    _r("crates/tore-app/src/widgets/*", (), "the multiplayer widget kit; no screen draws it yet (EF7 and EF8 will), so no scenario reaches it"),
     # main.rs holds the command line and the probes, including the AI probe's scripted pilot, so it reaches
     # every kind of headless run.
     _r("crates/tore-app/src/main.rs", MAIN_FAMILIES, "command line, probes and start-up wiring"),

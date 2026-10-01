@@ -81,6 +81,7 @@ mod version;
 mod view_compass;
 mod weapon_hud;
 mod weather;
+mod widgets;
 
 // The mission core lives in tore-world; these keep the app's module paths.
 pub(crate) use tore_world::{
