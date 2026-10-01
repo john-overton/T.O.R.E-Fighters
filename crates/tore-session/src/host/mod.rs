@@ -1754,8 +1754,13 @@ impl Host {
         if let Some(peer) = self.peers.get_mut(&connection) {
             peer.lobby.release();
             peer.lobby.unable = Some(reason.clone());
-            if matches!(stage, Stage::Taking { .. } | Stage::Seated) {
-                peer.stage = Stage::Leaving;
+            // A take not yet made is cancelled; a plane already flown goes
+            // back to the AI at the next tick, and then the player is back
+            // in the lobby.
+            match stage {
+                Stage::Taking { .. } => peer.stage = Stage::Lobby,
+                Stage::Seated => peer.stage = Stage::Leaving,
+                _ => {}
             }
         }
         self.lobby_log(callsign, LobbyEvent::Unable(reason));
