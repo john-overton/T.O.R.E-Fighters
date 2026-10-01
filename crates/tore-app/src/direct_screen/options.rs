@@ -64,13 +64,13 @@ impl OptionsPanel {
         default_name: &str,
         quick: &[QuickMessage],
     ) -> Self {
-        let mut port_field = TextField::edit((FIELD_X, 136), 5, Filter::Port);
+        let mut port_field = TextField::line((FIELD_X, 139), 60, Filter::Port);
         port_field.set_text(&port.to_string());
-        let mut password_field = TextField::edit((FIELD_X, 166), 20, Filter::Text)
+        let mut password_field = TextField::line((FIELD_X, 169), 216, Filter::Text)
             .masked()
             .with_hint("none");
         password_field.set_text(password);
-        let mut name_field = TextField::edit((FIELD_X, 196), 20, Filter::Text)
+        let mut name_field = TextField::line((FIELD_X, 199), 216, Filter::Text)
             .with_max(MAX_NAME)
             .with_hint(default_name.to_owned());
         name_field.set_text(name.unwrap_or(""));

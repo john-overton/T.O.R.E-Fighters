@@ -110,7 +110,7 @@ impl Mock {
             } else {
                 "your callsign"
             }),
-            address: TextField::edit((110, 132), 20, Filter::Address).with_hint("host or address"),
+            address: TextField::line((110, 136), 216, Filter::Address).with_hint("host or address"),
             full: CheckBox::new((330, 130), "Show full games", false),
             games: List::new((48, 185), 200, 4)
                 .with_pager(Pager::NEWNET)
@@ -444,18 +444,18 @@ fn render_state_sheets() {
         30,
         224,
     );
-    let empty = TextField::edit((40, 242), 12, Filter::Address).with_hint("host or address");
-    let mut typed = TextField::edit((190, 242), 12, Filter::Address);
+    let empty = TextField::line((40, 242), 126, Filter::Address).with_hint("host or address");
+    let mut typed = TextField::line((190, 242), 126, Filter::Address);
     typed.set_text("192.168.1.20");
-    let mut focused = TextField::edit((340, 242), 12, Filter::Address);
+    let mut focused = TextField::line((340, 242), 126, Filter::Address);
     focused.set_text("games.local");
     focused.key("Home");
     for _ in 0..5 {
         focused.key("ArrowRight");
     }
-    let mut overflow = TextField::edit((490, 242), 12, Filter::Address);
+    let mut overflow = TextField::line((490, 242), 126, Filter::Address);
     overflow.set_text("games.example-server.org:26900");
-    let mut off = TextField::edit((40, 290), 12, Filter::Address);
+    let mut off = TextField::line((40, 290), 126, Filter::Address);
     off.set_text("disabled");
     off.set_enabled(false);
     empty.draw(&mut c, &kit, false);

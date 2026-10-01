@@ -18,11 +18,12 @@ pub const PIECES: &[&str] = &[
     // Buttons: green, grey, blue default, grey default, and the default caps.
     "ACTION0L", "ACTION0M", "ACTION0R", "ACTIOD0L", "ACTIOD0M", "ACTIOD0R", "ACTDFT0L", "ACTDFT0M",
     "ACTDFT0R", "ACTDFD0L", "ACTDFD0M", "ACTDFD0R", "ACTDFLT", "ACTDFLD",
-    // Fonts: panel text, its dim copy, list text, button labels, typed text.
-    "PANELFNT", "PANELFND", "SMLFONT", "FONTACT", "FONTACD", "FONTDFT", "FONTDFD", "WHEELFNT",
+    // Fonts: panel text (typed text too), its dim copy, list text, button
+    // labels. Text fields are plain grey boxes (John, 2026-10-01), so the
+    // retail edit control's `EDITL/M/R` and `WHEELFNT` are not in the kit.
+    "PANELFNT", "PANELFND", "SMLFONT", "FONTACT", "FONTACD", "FONTDFT", "FONTDFD",
     // Lists and the page box.
-    "LISTLFT", "LISTMID", "LISTRT", "LISTHI", "PAGEBOX", // Text fields.
-    "EDITL", "EDITM", "EDITR", // Check boxes.
+    "LISTLFT", "LISTMID", "LISTRT", "LISTHI", "PAGEBOX", // Check boxes.
     "CHECK00", "CHECK01", "CHECK02", "CHECK03", "CHECK04", "CHECK05", "CHECK06",
     // The PREV/NEXT rocker.
     "ROCKER00", "ROCKER01", "ROCKER02", "ROCKER03", "ROCKER04",
@@ -171,7 +172,7 @@ impl Kit {
     }
 
     /// A kit from sprites already made, for tests and previews.
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn from_sprites(sprites: BTreeMap<String, Sprite>) -> Self {
         Self { sprites }
     }

@@ -2,13 +2,17 @@
 //! maximum length, a hint when empty and sideways scrolling.
 use super::{
     Kit, Outcome, Point, Rect, Widget,
-    draw::{bar, focus_mark, text_clipped},
+    draw::{focus_mark, text_clipped},
     inside,
 };
 use crate::menu::Canvas;
 use std::cell::Cell;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use tore_formats::text::GlyphCodes;
+
+/// A taller box's height, and the text's inset from the box's sides.
+pub const LINE_HEIGHT: i32 = 18;
+const PAD: i32 = 3;
 
 /// Which characters a field takes, and how many.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,20 +49,12 @@ impl Filter {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Look {
-    /// `EDITL/M/R`: the recessed red and black bar, 24 high, typed in
-    /// `WHEELFNT` at ten pixels a character.
-    Edit,
-    /// NEWNET's callsign field: a flat bar 13 high, typed in `PANELFNT`.
-    Bar,
-}
-
-/// One editable line. Two looks (*agent decision*): [`TextField::edit`] is
-/// retail's edit control (`EDITL/M/R`, `WHEELFNT`, 24 high, ten pixels a
-/// character plus 16 across, EF0), for the address, the password and the chat
-/// line; [`TextField::bar`] is the flat 139 by 13 bar NEWNET shows for the
-/// callsign, typed in `PANELFNT` since a 14 pixel font does not fit 13 rows.
+/// One editable line: NEWNET's flat grey recessed box, typed in `PANELFNT`
+/// (John, 2026-10-01: every field a player types in is this plain box; the
+/// retail edit control's red gradient and wide-spaced `WHEELFNT` are not
+/// used). [`TextField::bar`] is the 13 pixel high bar NEWNET shows for the
+/// callsign; [`TextField::line`] is the same box taller, for the fields that
+/// are the point of their screen (Connect to, the chat line, Options).
 ///
 /// Keys it takes: Left, Right, Home, End, Backspace, Delete; Enter answers
 /// `Activated`. Typed text comes from the window's text events
@@ -68,7 +64,6 @@ enum Look {
 #[derive(Clone, Debug)]
 pub struct TextField {
     rect: Rect,
-    look: Look,
     filter: Filter,
     max: usize,
     hint: String,
@@ -82,20 +77,17 @@ pub struct TextField {
 }
 
 impl TextField {
-    /// Retail's edit control at `at`, showing `chars` characters at once
-    /// (10 pixels each plus 16, 24 high). A field whose filter allows more
-    /// scrolls.
-    pub fn edit(at: Point, chars: i32, filter: Filter) -> Self {
-        Self::new((at.0, at.1, chars * 10 + 16, 24), Look::Edit, filter)
-    }
     /// NEWNET's flat bar of `width` by 13 at `at` (the callsign is 139 wide).
     pub fn bar(at: Point, width: i32, filter: Filter) -> Self {
-        Self::new((at.0, at.1, width, 13), Look::Bar, filter)
+        Self::new((at.0, at.1, width, 13), filter)
     }
-    fn new(rect: Rect, look: Look, filter: Filter) -> Self {
+    /// The same box `width` by `LINE_HEIGHT` (18) at `at`.
+    pub fn line(at: Point, width: i32, filter: Filter) -> Self {
+        Self::new((at.0, at.1, width, LINE_HEIGHT), filter)
+    }
+    fn new(rect: Rect, filter: Filter) -> Self {
         Self {
             rect,
-            look,
             filter,
             max: filter.max_len(),
             hint: String::new(),
@@ -123,7 +115,7 @@ impl TextField {
         self.hint = hint.into();
         self
     }
-    #[allow(dead_code)] // Kit API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
     }
@@ -132,7 +124,7 @@ impl TextField {
         &self.text
     }
     /// The caret's place, in characters from the start.
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn caret(&self) -> usize {
         self.caret
     }
@@ -199,18 +191,11 @@ impl TextField {
     }
 
     fn font<'k>(&self, kit: &'k Kit) -> &'k crate::menu::Sprite {
-        kit.sprite(match self.look {
-            Look::Edit => "WHEELFNT",
-            Look::Bar => "PANELFNT",
-        })
+        kit.sprite("PANELFNT")
     }
     /// The text area: left, width.
     fn inner(&self) -> (i32, i32) {
-        let pad = match self.look {
-            Look::Edit => 8,
-            Look::Bar => 3,
-        };
-        (self.rect.0 + pad, self.rect.2 - 2 * pad)
+        (self.rect.0 + PAD, self.rect.2 - 2 * PAD)
     }
     fn widths(&self, kit: &Kit) -> Vec<i32> {
         let font = self.font(kit);
@@ -270,25 +255,11 @@ impl TextField {
         let (first, widths) = self.view(kit);
         let (left, room) = self.inner();
         let clip = (left, y, room, h);
-        let (top, caret_top, caret_height) = match self.look {
-            Look::Edit => {
-                bar(
-                    canvas,
-                    (
-                        kit.sprite("EDITL"),
-                        kit.sprite("EDITM"),
-                        kit.sprite("EDITR"),
-                    ),
-                    (x, y),
-                    w,
-                );
-                (y + 5, y + 5, 12)
-            }
-            Look::Bar => {
-                canvas.rect((x, y, w, h), [97, 97, 97, 255]);
-                (y + 2, y + 1, h - 2)
-            }
-        };
+        canvas.rect((x, y, w, h), [97, 97, 97, 255]);
+        // The text sits in the middle of the box (NEWNET's 13 pixel bar puts
+        // it 2 pixels down).
+        let top = y + 2 + (h - 13) / 2;
+        let (caret_top, caret_height) = (top - 1, 12);
         if self.text.is_empty() {
             if !self.hint.is_empty() {
                 text_clipped(canvas, font, &self.hint, (left, top), clip, Some([150; 3]));
@@ -324,7 +295,7 @@ impl Widget for TextField {
 
 /// Why `text` is not an address the Direct Connection screen can join, in
 /// plain words, or `None` when it is one. See [`parse_address`].
-#[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+#[cfg(test)]
 pub fn address_problem(text: &str) -> Option<&'static str> {
     parse_address(text).err()
 }
@@ -401,7 +372,7 @@ mod tests {
     use super::*;
 
     fn edit(filter: Filter) -> TextField {
-        TextField::edit((100, 100), 5, filter)
+        TextField::line((100, 100), 31, filter)
     }
     fn type_in(field: &mut TextField, text: &str) {
         field.text_input(text);
@@ -573,14 +544,14 @@ mod tests {
         let kit = kit();
         let mut f = edit(Filter::Text);
         type_in(&mut f, "abcde");
-        // The text starts at x 108 and each character is 10 wide.
-        f.press((108 + 24, 105), &kit);
+        // The text starts at x 103 and each character is 5 wide.
+        f.press((103 + 11, 105), &kit);
         assert_eq!(f.caret(), 2);
-        f.press((108 + 26, 105), &kit);
+        f.press((103 + 13, 105), &kit);
         assert_eq!(f.caret(), 3);
-        f.press((164, 105), &kit);
+        f.press((130, 105), &kit);
         assert_eq!(f.caret(), 5, "past the text is the end");
-        f.press((108 - 6, 105), &kit);
+        f.press((100, 105), &kit);
         assert_eq!(f.caret(), 0);
         f.press((300, 300), &kit);
         assert_eq!(f.caret(), 0, "a click elsewhere changes nothing");
@@ -593,16 +564,17 @@ mod tests {
         let mut pixels = blank();
         f.draw(&mut Canvas(&mut pixels), &kit, false);
         // The hint is the font's white in the hint grey, on the field.
-        assert_eq!(at(&pixels, 110, 108), [150; 3]);
+        assert_eq!(at(&pixels, 105, 106), [150; 3]);
         let mut pixels = blank();
         type_in(&mut f, "ab");
         f.draw(&mut Canvas(&mut pixels), &kit, true);
-        assert_eq!(at(&pixels, 110, 108), [255; 3], "typed text is not dimmed");
-        // The caret is a white line at x + 8 + 10 * 2, 5 below the top.
-        assert_eq!(at(&pixels, 128, 105), [255; 3]);
-        assert_eq!(at(&pixels, 128, 116), [255; 3]);
-        // The bar's pieces frame it.
-        assert_ne!(at(&pixels, 101, 112), [0; 3]);
+        assert_eq!(at(&pixels, 105, 106), [255; 3], "typed text is not dimmed");
+        // The caret is a white line at x + 3 + 5 * 2, from 3 below the top.
+        assert_eq!(at(&pixels, 113, 103), [255; 3]);
+        assert_eq!(at(&pixels, 113, 114), [255; 3]);
+        // A plain grey box, not the retail edit control (the box is 18 high).
+        assert_eq!(at(&pixels, 101, 112), [97; 3]);
+        assert_eq!(at(&pixels, 101, 117), [97; 3]);
     }
 
     #[test]

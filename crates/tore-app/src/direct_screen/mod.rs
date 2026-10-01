@@ -231,7 +231,7 @@ impl DirectScreen {
             kit,
             background: Background::direct_connection(),
             callsign,
-            address: TextField::edit((110, 132), 20, Filter::Address).with_hint("host or address"),
+            address: TextField::line((110, 136), 216, Filter::Address).with_hint("host or address"),
             full,
             games: List::new((48, 185), 200, 4)
                 .with_pager(Pager::NEWNET)
@@ -261,7 +261,8 @@ impl DirectScreen {
             searched_port: 0,
             search_said: None,
             backdrop: std::cell::OnceCell::new(),
-            timing: std::env::var_os("TORE_DIRECT_TIMING").map(|_| Timing::new()),
+            timing: std::env::var_os("TORE_DIRECT_TIMING")
+                .map(|_| Timing::new("Direct Connection")),
         };
         if !screen.settings.addresses.is_empty() {
             screen.say("Up and Down in Connect to pick an address you joined before.");
@@ -1214,9 +1215,10 @@ impl DirectScreen {
 /// game's log gets the mean and worst time of the screen's update and draw
 /// (the window's present and the rest of the frame are not in it) and the
 /// frame rate over those frames.
-struct Timing {
+pub(crate) struct Timing {
+    name: &'static str,
     frames: std::cell::Cell<u32>,
-    update: std::cell::Cell<Duration>,
+    pub(crate) update: std::cell::Cell<Duration>,
     draw: std::cell::Cell<Duration>,
     worst: std::cell::Cell<Duration>,
     since: std::cell::Cell<Instant>,
@@ -1225,8 +1227,9 @@ struct Timing {
 impl Timing {
     const WINDOW: u32 = 300;
 
-    fn new() -> Self {
+    pub(crate) fn new(name: &'static str) -> Self {
         Self {
+            name,
             frames: Default::default(),
             update: Default::default(),
             draw: Default::default(),
@@ -1235,7 +1238,7 @@ impl Timing {
         }
     }
 
-    fn drew(&self, took: Duration) {
+    pub(crate) fn drew(&self, took: Duration) {
         self.draw.set(self.draw.get() + took);
         self.worst.set(self.worst.get().max(took));
         let frames = self.frames.get() + 1;
@@ -1245,7 +1248,8 @@ impl Timing {
         }
         let ms = |d: Duration| d.as_secs_f64() * 1000.;
         log::info!(
-            "Direct Connection timing: {frames} frames, update {:.3} ms and draw {:.3} ms mean (draw worst {:.3} ms), {:.1} frames a second",
+            "{} timing: {frames} frames, update {:.3} ms and draw {:.3} ms mean (draw worst {:.3} ms), {:.1} frames a second",
+            self.name,
             ms(self.update.get()) / f64::from(frames),
             ms(self.draw.get()) / f64::from(frames),
             ms(self.worst.get()),

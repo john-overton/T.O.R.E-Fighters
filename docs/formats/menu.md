@@ -355,6 +355,11 @@ screenshot, is kept with the lead's notes (`.local/mp-notes/stage-ef/ef0/`).
   entry count times 10 plus 16 wide (S). The caret is a white (palette 10)
   vertical line 12 high at the field's x + 8 + 10 times the cursor index, 5
   below its top; it is erased by blitting a one pixel slice of `EDITM`.
+  *The game's screens do not draw it* (John, 2026-10-01: no red and grey text
+  areas): every field the player types in on a multiplayer screen is the
+  flat grey box NEWNET's Callsign field is (grey 97, `PANELFNT` text, a one
+  pixel white caret 12 high, 13 pixels high for the callsign and 18 for the
+  other fields), and the kit does not carry `EDITL/M/R` or `WHEELFNT`.
 - **List** `LISTLFT` (30 by 17), `LISTMID` (20 by 17), `LISTRT` (30 by 17),
   `LISTHI` (24 by 12): see the table above. The `LISTMID` rows are: row 0 a
   light edge (73), rows 1 and 2 dark, rows 3 to 13 near black (12), rows 14 to 16
@@ -486,21 +491,21 @@ Implementation mode, from the rectangles above. The screen is
 `crates/tore-app/src/direct_screen/`; its behaviour is in
 [the architecture notes](../ARCHITECTURE.md#the-direct-connection-screen-as-built-ef7).
 Everything on it is made of the widget kit at NEWNET's rectangles on `MODEM3`
-under `NETIPX3`'s top 80 rows (John's approved look), with these placements
+under `NETIPX3`'s title bar, its top 77 rows (John's approved look, corrected the same day: the pictures are identical through row 76 apart from the title text and palettes, and `NETIPX3`'s photograph starts at row 77, so `MODEM3`'s red shows everywhere below the bar, up to the panel at y 80), with these placements
 (agent decisions where the table above has no retail counterpart):
 
 | Item | Rectangle or position | Notes |
 | --- | --- | --- |
 | Background, panel, title, frame, headings | as the NEWNET table | The panel title still reads "TCP/IP Network connection" |
 | Callsign | field (88, 108), 139 by 13 | Flat `PANELFNT` bar; hint "your callsign" when empty |
-| Connect to | label (45, 139); `EDITL/M/R` field at (110, 132), 20 characters | An address or a name with an optional port; hint "host or address" |
+| Connect to | label (45, 139); grey field at (110, 136), 216 by 18 | An address or a name with an optional port; hint "host or address" |
 | Show full games | `CHECK0n` lamp at (330, 130) with its label | Kept in the settings; off hides full games |
 | Games | list at (48, 185), 200 wide, four rows; rocker, PREV/NEXT, PAGE and the page box as NEWNET | Columns from the row's text origin: lock (centred, 11 wide), name (x 14, 84 wide), players over capacity (x 100, 22 wide, right aligned), state (x 126, 46 wide: Lobby, Flying, Closed, or `vVERSION` for another build) |
 | Mission line | `PANELFNT` at (45, 290), up to 549 wide | The selected game's mission summary, or why the game cannot be joined; between the Games box (ends y 285) and the Messages heading (y 304) |
 | Players | list at (346, 185), 242 wide, five rows, no pager | Crown, then the callsign |
 | Messages | NEWNET's box, (45, 319), 549 by 88 | Grey system lines in the kit's colours |
 | Buttons | New, Join, Options, Cancel at NEWNET's positions | The blue default face with the striped cap is on Join once a game is selected or an address typed, on New otherwise; Cancel reads *Leave* while a session runs |
-| Options panel | panel (80, 100), 480 by 360; fields at (240, 136), (240, 166), (240, 196); quick messages box (115, 262), 410 by 128; OK (190, 408) and Cancel (330, 408) | Port (five digits), password (asterisks), game name; the box shows `F1  text  (to all)` lines |
+| Options panel | panel (80, 100), 480 by 360; grey fields at (240, 139) 60 wide (port), (240, 169) and (240, 199) 216 wide, all 18 high; quick messages box (115, 262), 410 by 128; OK (190, 408) and Cancel (330, 408) | Port (five digits), password (asterisks), game name; the box shows `F1  text  (to all)` lines |
 
 Headless renders, `--snapshot-state` `direct` (empty, searching), `direct-games`
 (six games on two pages, the last selected, with its players), `direct-trying`

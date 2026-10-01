@@ -41,8 +41,6 @@ fn size(name: &str) -> (usize, usize) {
         "LISTLFT" | "LISTRT" => (30, 17),
         "LISTMID" => (20, 17),
         "LISTHI" => (24, 12),
-        "EDITL" | "EDITR" => (8, 24),
-        "EDITM" => (20, 24),
         "PAGEBOX" => (50, 17),
         n if n.starts_with("CHECK") => (28, 28),
         n if n.starts_with("ROCKER") => (27, 40),
@@ -59,7 +57,6 @@ pub fn kit() -> Kit {
             "PANELFND" => font_in(5, 10, 150),
             "SMLFONT" => font(6, 12),
             "FONTACT" | "FONTACD" | "FONTDFT" | "FONTDFD" => font(7, 12),
-            "WHEELFNT" => font(10, 14),
             other => {
                 let (w, h) = size(other);
                 // Distinct colours so a drawn piece can be told from the

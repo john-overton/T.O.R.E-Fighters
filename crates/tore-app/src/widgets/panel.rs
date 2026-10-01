@@ -68,10 +68,17 @@ pub fn draw_panel(canvas: &mut Canvas, kit: &Kit, (x, y, w, h): Rect) {
     }
 }
 
+/// The rows of `NETIPX3` that are its title bar: the two "3" backgrounds are
+/// the same through row 76 apart from the title's text and the palettes; the
+/// photograph under the bar starts at row 77 (measured on the imported
+/// pictures, EF8).
+pub const TITLE_BAR_ROWS: i32 = 77;
+
 /// A background of one retail picture with a rectangle of another laid over
 /// it, each in its own palette: John's approved look for Direct Connection is
-/// `MODEM3`'s red photograph with `NETIPX3`'s title bar over its top 80 rows,
-/// so the screen reads NETWORK CONNECTION (2026-10-01).
+/// `MODEM3`'s red photograph with `NETIPX3`'s title bar over its top
+/// [`TITLE_BAR_ROWS`] rows, so the screen reads NETWORK CONNECTION
+/// (2026-10-01).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Background {
     base: &'static str,
@@ -80,7 +87,7 @@ pub struct Background {
 
 impl Background {
     /// One whole picture, as NETWORK CONNECTION is retail's `NETIPX3`.
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn single(base: &'static str) -> Self {
         Self { base, over: None }
     }
@@ -91,10 +98,13 @@ impl Background {
             over: Some((over, rect)),
         }
     }
-    /// `MODEM3` under `NETIPX3`'s title bar (the top 80 rows, above the
-    /// panel at y 80).
+    /// `MODEM3` under `NETIPX3`'s title bar: its top 77 rows, the chrome with
+    /// the badge and the help bar. Below them `MODEM3`'s red photograph
+    /// shows everywhere, up to the panel at y 80 (John, 2026-10-01: the three
+    /// rows `NETIPX3`'s own photograph took, and the blue they showed, are
+    /// gone).
     pub fn direct_connection() -> Self {
-        Self::composed("MODEM3", "NETIPX3", (0, 0, 640, 80))
+        Self::composed("MODEM3", "NETIPX3", (0, 0, 640, TITLE_BAR_ROWS))
     }
     pub fn draw(&self, canvas: &mut Canvas, kit: &Kit) {
         let base = kit.sprite(self.base);
@@ -215,7 +225,10 @@ mod tests {
         background.draw(&mut Canvas(&mut pixels), &kit);
         // The title bar is NETIPX3's, the rest MODEM3's.
         assert_eq!(at(&pixels, 320, 40), tone_of(&kit, "NETIPX3"));
-        assert_eq!(at(&pixels, 639, 79), tone_of(&kit, "NETIPX3"));
+        assert_eq!(at(&pixels, 639, 76), tone_of(&kit, "NETIPX3"));
+        // MODEM3's red shows everywhere under the bar, up to the panel.
+        assert_eq!(at(&pixels, 320, 77), tone_of(&kit, "MODEM3"));
+        assert_eq!(at(&pixels, 639, 79), tone_of(&kit, "MODEM3"));
         assert_eq!(at(&pixels, 320, 80), tone_of(&kit, "MODEM3"));
         assert_eq!(at(&pixels, 0, 479), tone_of(&kit, "MODEM3"));
         // One whole picture.

@@ -3237,7 +3237,8 @@ is now the spec:
   `NETTCP.DLG` and `NETIPX2.DLG`, the message prompt `NETCEDT.DLG`; `MPSTATUS.PIC`
   and `MPFONT.PIC` are the connected-state status window of the menus (upper
   right), not the in-flight pane. The widget pieces are `EDITL/M/R` (typed in
-  `WHEELFNT`, which the import also needs), `LISTLFT/MID/RT/HI`, `PAGEBOX` and
+  `WHEELFNT`, which the import also needs; the screens do not use them, see
+  [the look](#finding-a-game-and-joining)), `LISTLFT/MID/RT/HI`, `PAGEBOX` and
   `CHECK00-06`; panel text is `PANELFNT`, list rows and the page counter
   `SMLFONT`, buttons `FONTACT` and `FONTDFT`. `CHAT.TXT` lies loose in the
   install. The import kept almost none of this before EF1 (about 40 names, with
@@ -3372,11 +3373,15 @@ The **Direct Connection** screen replaces the MULTI menu's stubs:
 | Cancel | Back to Choose Activity |
 
 The look (approved by John, 2026-10-01): `MODEM3`'s red background with the
-title bar of `NETIPX3` laid over it, so it reads NETWORK CONNECTION, and the
-TCP/IP Network connection panel at retail's size and place, drawn from the
-panel pieces, with retail's buttons, edit fields, list wells, rocker and page
-box. The full-size panel covers most of the red photo, which shows at its
-edges.
+title bar of `NETIPX3` (its top 77 rows) laid over it, so it reads NETWORK
+CONNECTION, and the TCP/IP Network connection panel at retail's size and
+place, drawn from the panel pieces, with retail's buttons, list wells, rocker
+and page box. The full-size panel covers most of the red photo, which shows at
+its edges and between the bar and the panel. *John, 2026-10-01, after seeing
+the first renders:* every text field is a plain grey recessed box (NEWNET's
+Callsign look) and not retail's red edit control, and the red fills the whole
+area behind the panel, with no band of `NETIPX3`'s blue photograph under the
+bar.
 
 **Local discovery.** While the screen is open the game sends a small query to
 the local network's broadcast address on the game port every two seconds. Any
@@ -3912,10 +3917,11 @@ choice below an agent decision unless credited.
   how it was meant); a line to the player's own plane as Target reads
   `VIPER TO YOU`.
 - **The lobby's component** (`net/lobby_chat.rs`, for EF8 to place): a
-  `LobbyChat::new(messages_rect, field_at, chars)` holding the kit's
-  `MessageBox` and a retail edit control `TextField` (80 characters). `push`
-  takes a `ChatLine` in its colour, `system` the screen's own words, `key` and
-  `text_input` go to the line, `send(&kit, &mut client)` sends it to All, and
+  `LobbyChat::new(messages_rect, field_at, width)` holding the kit's
+  `MessageBox` and a plain grey `TextField` (80 characters, 18 high; John's
+  2026-10-01 look for every field). `push` takes a `ChatLine` in its colour,
+  `system` the screen's own words, `key` and `text_input` go to the line,
+  `take_text` hands over the trimmed line for the screen to send to All, and
   `draw` draws both with the focus. A headless render in a mock panel is the
   ignored test `render_the_lobby_chat_in_a_mock_panel`.
 - **The bot** (`Bot::say_at`, `quick_at`; `tore-bot --say SECONDS,RECEIVER,TEXT`
@@ -3957,7 +3963,7 @@ second completes the plan's stage F and stage E's replays.
 | --- | --- | --- | --- | --- |
 | EF0 Connection screens research | Sonnet | | Fold the retail survey into `docs/spec/multiplayer.md` and `docs/formats/menu.md`; settle the unknowns (NEWNET's field rectangles, the panel fonts, the list row count); the dialog reader learns `_DrawText`, a dialog's PIC name and a list's row count | Spec written with evidence; reader tests decode every network dialog. **Built (EF0, 2026-10-01):** the spec and format notes above, a headless render of NETWORK CONNECTION from the spec's numbers beside John's screenshot, and `ui::dialog` now reads text records (position, label, tail), a size-zero dialog's picture name, a list's row count, edit boxes and check boxes |
 | EF1 Import the art | Sonnet | EF0 | The import keeps the multiplayer screens' pictures, pieces, fonts, dialogs and menus and the retail `CHAT.TXT`; a marker makes an older import ask to re-import | Single-player baseline SAME; an import holds every new name; an older pack asks for a re-import | **Built (EF1, 2026-10-01):** `selection.rs` lists `MULTIPLAYER_ART` (35 pictures) and `MULTIPLAYER_DATA` (26 dialogs and menus), about 1.4 MB; `CHAT.TXT` is read loose from an installed folder and from the disc container's DCL entry and kept as `TORE_CHAT_V1`, parsed by `tore_formats::chat`; the marker `TORE_MULTIPLAYER_V1` is written by every import and asked for by the game's pack check only (`check_multiplayer_marker`), not by the dedicated server's; the game's check reads every new picture, dialog and menu, and the game holds them in `Assets::multiplayer_resources`, not in `theater_resources`, whose contents the combat tapes fingerprint. What was left out and why: [menu format notes](formats/menu.md#what-the-import-keeps-for-these-screens-ef1-2026-10-01) |
-| EF2 Widget kit | Sonnet | EF1 | Reusable retail-style widgets: text field, list with paging, scrolling message box, check box, the panel recipe, a background composed of two retail pictures, keyboard focus | Unit tests; headless renders compared with retail screenshots; single-player captures identical | **Built (EF2, 2026-10-01):** the kit is `crates/tore-app/src/widgets/` (how a screen uses it is the module's documentation): `Kit` (the pieces decoded in the screen's palette, the two backgrounds in their own), `draw_panel`, `Background` (`MODEM3` under `NETIPX3`'s top 80 rows), `Button` (with the disabled default from `ACTDFD0*` and `ACTDFLD`), `TextField` (retail edit control or NEWNET's flat bar; filters for callsign, address and port; `parse_address`), `List` (rows, columns, icons, rocker, "PAGE n of m"), `MessageBox`, `CheckBox`, `Focus`. No screen uses it yet and `main.rs` routing is unchanged: widgets take the key names and text the screens already receive. Agent decisions: the focus mark is a dotted pale rectangle that shows once the keyboard has been used; an empty list's page box reads `1  of  0` and its PREV and NEXT stay bright as on John's screenshot (they dim only at the ends of a list with rows); the selected row carries `LISTHI`'s gold stripe as a marker and the selection always stays on the shown page; the lock, crown and ready tick are authored pixel pictures (retail has none); the message box wraps with a two space hanging indent, keeps 200 lines, scrolls by wheel and keys and shows a thin bar when lines are hidden; buttons keep the existing pieces but label in `FONTACT`/`FONTDFT` as NEWNET does. A mock NETWORK CONNECTION built only of kit widgets is the same picture as EF0's render of the spec's numbers (0 of 307,200 pixels differ); drawing it whole (background, panel, three lists, a message box, two fields, a check box and four buttons) costs about 0.54 ms a frame in a release build and 1.1 ms in the dev build on this machine, of which the widgets are 0.31 ms and the rest the 640 by 480 background and panel; building the kit takes about 150 ms once, when a screen opens (the ignored tests in `widgets/mock_screen.rs`, 500 runs each) 
+| EF2 Widget kit | Sonnet | EF1 | Reusable retail-style widgets: text field, list with paging, scrolling message box, check box, the panel recipe, a background composed of two retail pictures, keyboard focus | Unit tests; headless renders compared with retail screenshots; single-player captures identical | **Built (EF2, 2026-10-01):** the kit is `crates/tore-app/src/widgets/` (how a screen uses it is the module's documentation): `Kit` (the pieces decoded in the screen's palette, the two backgrounds in their own), `draw_panel`, `Background` (`MODEM3` under `NETIPX3`'s top 77 rows), `Button` (with the disabled default from `ACTDFD0*` and `ACTDFLD`), `TextField` (filters for callsign, address and port; `parse_address`; EF8: the plain grey box only, 13 high as a `bar` or 18 as a `line`, John 2026-10-01; EF2 had retail's red edit control as well, now removed), `List` (rows, columns, icons, rocker, "PAGE n of m"), `MessageBox`, `CheckBox`, `Focus`. No screen uses it yet and `main.rs` routing is unchanged: widgets take the key names and text the screens already receive. Agent decisions: the focus mark is a dotted pale rectangle that shows once the keyboard has been used; an empty list's page box reads `1  of  0` and its PREV and NEXT stay bright as on John's screenshot (they dim only at the ends of a list with rows); the selected row carries `LISTHI`'s gold stripe as a marker and the selection always stays on the shown page; the lock, crown and ready tick are authored pixel pictures (retail has none); the message box wraps with a two space hanging indent, keeps 200 lines, scrolls by wheel and keys and shows a thin bar when lines are hidden; buttons keep the existing pieces but label in `FONTACT`/`FONTDFT` as NEWNET does. A mock NETWORK CONNECTION built only of kit widgets is the same picture as EF0's render of the spec's numbers (0 of 307,200 pixels differ); drawing it whole (background, panel, three lists, a message box, two fields, a check box and four buttons) costs about 0.54 ms a frame in a release build and 1.1 ms in the dev build on this machine, of which the widgets are 0.31 ms and the rest the 640 by 480 background and panel; building the kit takes about 150 ms once, when a screen opens (the ignored tests in `widgets/mock_screen.rs`, 500 runs each) 
 | EF3 Host in the game | Opus | | **Built.** The host on a thread inside the game, the in-process link, the local client, lifecycle and the game's 120 Hz clock | A hosted mission with a bot flies with no correction on the host's own plane; a two-second window stall stalls nobody; the session ends cleanly on leave, quit and a host panic |
 | EF4 The lobby on the wire | Opus | EF3 | The host's lobby phase, slots, loadouts, ready and start, the King's mission, return to the lobby after a mission, the crown, kick; the dedicated server's lobby without a King; protocol version 3 | Simulator tests: players join a lobby, take slots, arm, ready, start, fly, return and fly again; the King's mission change reaches everyone; the wire golden test. **Built (EF4):** see [the lobby](#the-lobby); the crown stays the hosting player's (passing it is phase 2) |
 | EF5 Discovery and addresses | Sonnet | EF4 | The discovery query and answer, the search loop, names resolved off the screen's thread with every address tried, remembered addresses | A host is found on 127.0.0.1 and on this machine's network address; a different build is shown as such; no answer is larger than its query. **Built (EF5):** see [finding a game and joining](#finding-a-game-and-joining) |

@@ -8,7 +8,7 @@
 //!
 //! ```ignore
 //! // Once, with the screen's rectangles: NEWNET's Messages box and a chat line.
-//! let mut chat = LobbyChat::new((45, 300, 549, 78), (45, 380), 54);
+//! let mut chat = LobbyChat::new((45, 300, 549, 78), (45, 380), 549);
 //! // Each session event:
 //! ClientEvent::Chat(line) => chat.push(&kit, &line),
 //! // The screen's own words (a player joined, a request was refused):
@@ -17,7 +17,7 @@
 //! Id::Line => { chat.field.key(name); chat.field.text_input(text); }
 //! Id::Messages => { chat.messages.key(name); }
 //! // Enter in the line (the field answers Outcome::Activated):
-//! chat.send(&kit, &mut session.client);
+//! if let Some(text) = chat.take_text() { session.client.chat(Receiver::All, &text) }
 //! // Draw it back to front with the rest, passing the focus:
 //! chat.draw(canvas, &kit, focus.marked(Id::Messages), focus.marked(Id::Line));
 //! ```
@@ -27,26 +27,24 @@
 use crate::menu::Canvas;
 use crate::net::chat::colour;
 use crate::widgets::{Filter, Kit, MessageBox, Outcome, Point, Rect, TextField, tone};
-use tore_session::Client;
-use tore_session::wire::chat::{ChatLine, MAX_TEXT, Receiver};
+use tore_session::wire::chat::{ChatLine, MAX_TEXT};
 
 /// The Messages box and the chat line under it.
 #[derive(Clone, Debug)]
 pub struct LobbyChat {
     /// The scrolling box; a screen gives it the focus and its keys.
     pub messages: MessageBox,
-    /// The chat line: retail's edit control, up to 80 characters.
+    /// The chat line: a plain grey box, up to 80 characters.
     pub field: TextField,
 }
 
 impl LobbyChat {
-    /// A Messages box at `messages` and a chat line whose edit control is at
-    /// `field`, showing `chars` characters at once (ten pixels each plus 16,
-    /// 24 high; the text scrolls sideways past that).
-    pub fn new(messages: Rect, field: Point, chars: i32) -> Self {
+    /// A Messages box at `messages` and a chat line at `field` (`width` wide, 18 high,
+    /// John's plain grey box; the text scrolls sideways past the width).
+    pub fn new(messages: Rect, field: Point, width: i32) -> Self {
         Self {
             messages: MessageBox::new(messages),
-            field: TextField::edit(field, chars, Filter::Text)
+            field: TextField::line(field, width, Filter::Text)
                 .with_max(MAX_TEXT)
                 .with_hint("type a message, Enter sends to all"),
         }
@@ -72,18 +70,6 @@ impl LobbyChat {
         (!text.is_empty()).then_some(text)
     }
 
-    /// Enter in the line: sends it to All through `client`. The host sends
-    /// the line back (`YOU TO ALL: ...`) and the box shows it when the
-    /// session event arrives; a line the game refuses (not connected) is
-    /// said in the box at once.
-    pub fn send(&mut self, kit: &Kit, client: &mut Client) {
-        if let Some(text) = self.take_text()
-            && let Err(refusal) = client.chat(Receiver::All, &text)
-        {
-            self.system(kit, refusal.text());
-        }
-    }
-
     /// Key `name` for the line, which answers `Activated` on Enter.
     pub fn key(&mut self, name: &str) -> Outcome {
         self.field.key(name)
@@ -103,6 +89,7 @@ impl LobbyChat {
 }
 
 /// The colour a line shows in the box, for a screen that draws its own.
+#[cfg(test)]
 pub fn line_colour(line: &ChatLine) -> [u8; 3] {
     colour(line.tone())
 }
@@ -111,7 +98,7 @@ pub fn line_colour(line: &ChatLine) -> [u8; 3] {
 mod tests {
     use super::*;
     use crate::widgets::test_kit;
-    use tore_session::wire::chat::{ChatFrom, Standing, Tone};
+    use tore_session::wire::chat::{ChatFrom, Receiver, Standing, Tone};
 
     fn line(standing: Standing, receiver: Receiver, you: bool, text: &str) -> ChatLine {
         ChatLine {
@@ -129,7 +116,7 @@ mod tests {
     #[test]
     fn lines_go_in_the_box_in_their_colours() {
         let kit = test_kit::kit();
-        let mut chat = LobbyChat::new((45, 300, 549, 78), (45, 380), 54);
+        let mut chat = LobbyChat::new((45, 300, 549, 78), (45, 380), 549);
         chat.push(
             &kit,
             &line(Standing::Neutral, Receiver::All, false, "Hello all"),
@@ -161,7 +148,7 @@ mod tests {
 
     #[test]
     fn the_line_takes_80_characters_and_enter_hands_them_over_trimmed() {
-        let mut chat = LobbyChat::new((45, 300, 549, 78), (45, 380), 54);
+        let mut chat = LobbyChat::new((45, 300, 549, 78), (45, 380), 549);
         assert_eq!(chat.take_text(), None);
         chat.text_input("  Ready when you are ");
         chat.text_input(&"x".repeat(100));
@@ -182,7 +169,7 @@ mod tests {
     #[test]
     fn drawing_puts_the_text_in_its_colour_in_the_box_and_the_line_under_it() {
         let kit = test_kit::kit();
-        let mut chat = LobbyChat::new((45, 300, 549, 78), (45, 380), 54);
+        let mut chat = LobbyChat::new((45, 300, 549, 78), (45, 380), 549);
         chat.push(&kit, &line(Standing::Enemy, Receiver::All, false, "Boo"));
         chat.text_input("typed");
         let mut pixels = test_kit::blank();
@@ -195,7 +182,7 @@ mod tests {
         };
         assert!(lit((45, 300, 549, 78), tone::ENEMY));
         assert!(
-            lit((45, 380, 556, 24), [255, 255, 255]),
+            lit((45, 380, 549, 18), [255, 255, 255]),
             "the typed text and caret"
         );
     }
@@ -219,7 +206,7 @@ mod tests {
         let kit = Kit::new(&assets.pics, &assets.multiplayer_resources, "MODEM3").expect("kit");
         let out =
             std::path::PathBuf::from(std::env::var_os("TORE_MOCK_OUT").expect("TORE_MOCK_OUT"));
-        let mut chat = LobbyChat::new((45, 300, 549, 78), (45, 380), 54);
+        let mut chat = LobbyChat::new((45, 300, 549, 78), (45, 380), 549);
         let said = |callsign: &str, standing, receiver, you, text: &str| ChatLine {
             from: ChatFrom::Player {
                 callsign: callsign.into(),
