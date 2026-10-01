@@ -109,6 +109,10 @@ pub const SEATING_SNAP: Duration = Duration::from_secs(1);
 /// after a stall) takes the host's newest exact state ahead of it instead of
 /// stepping the backlog.
 pub const CATCH_UP_TICKS: u64 = 30;
+/// A predicted clock less than this many ticks ahead of the host's newest
+/// snapshot is behind the host (that snapshot is already in the past) and
+/// jumps ahead.
+pub const BEHIND_TICKS: f64 = 1.;
 /// The longest an exact state waits while the host still repeats late
 /// inputs, ticks (125 ms); see `Client::apply_own_states`.
 pub const CORRECTION_HOLD_TICKS: u64 = 15;
@@ -386,6 +390,9 @@ pub struct ClientStats {
     /// Exact states taken to catch up a prediction far behind its clock
     /// (after a long stall), not counted as corrections.
     pub catch_ups: u64,
+    /// Times the predicted clock was found behind the host's newest
+    /// snapshot and jumped ahead.
+    pub behind: u64,
     pub frames: u64,
     /// Entities drawn over all frames, and of them past their newest state.
     pub entity_frames: u64,
@@ -591,6 +598,8 @@ pub struct Client {
     repeats_reported: u8,
     /// The snapshot tick a held exact state began waiting at.
     holding_since: Option<u64>,
+    /// The newest input tick whose margin the clock has been given.
+    margin_input: u32,
     /// The lobby as the host last sent it.
     lobby: Option<LobbyState>,
     /// The newest Mission message's number, and the number of the newest
@@ -706,6 +715,7 @@ impl Client {
             pending_own: Vec::new(),
             repeats_reported: 0,
             holding_since: None,
+            margin_input: 0,
             lobby: None,
             number: None,
             loaded: None,
@@ -1772,6 +1782,7 @@ impl Client {
         self.sent_tick = u64::from(seated.tick);
         self.mismatch = 0;
         self.settled = false;
+        self.margin_input = 0;
         self.phase = ClientPhase::Flying;
         self.log(
             "seated",
@@ -1897,8 +1908,14 @@ impl Client {
         if let Some(seat) = &mut self.seat {
             let round_trip = self.net.stats().map_or(Duration::ZERO, |s| s.round_trip);
             // Before the host has had an input from this seat its margin
-            // means nothing.
-            if u64::from(header.input_received) > seat.seated_tick {
+            // means nothing; and a snapshot that has had no new input since
+            // the last only repeats the last figure, which says nothing of
+            // inputs that are not arriving (EF4 follow-up: a client behind
+            // the host sends none, and a stale margin kept it there).
+            if u64::from(header.input_received) > seat.seated_tick
+                && header.input_received > self.margin_input
+            {
+                self.margin_input = header.input_received;
                 self.input_clock
                     .margin(now, f64::from(header.input_margin), round_trip);
             }
@@ -2108,6 +2125,21 @@ impl Client {
             || self.input_clock.smallest_margin(now).is_some()
         {
             self.settled = true;
+        }
+        // Behind the host's own newest snapshot (a starved or stalled game):
+        // every input would come late and none would be sent, so no margin
+        // would ever say so. The clock jumps ahead of the host as seating
+        // sets it, by a round trip and the margin (EF4 follow-up, agent
+        // decision).
+        if let Some(newest) = self.snapshot_tick
+            && self.seat.is_some()
+            && self.input_clock.position() < f64::from(newest) + BEHIND_TICKS
+        {
+            let round_trip = self.net.stats().map_or(Duration::ZERO, |s| s.round_trip);
+            let lead = clock::ticks_of(round_trip) + target + 1.;
+            self.input_clock.jump_to((f64::from(newest) + lead).ceil());
+            self.settled = true;
+            self.stats.behind += 1;
         }
         let due = self.input_clock.position().floor().max(0.) as u64;
         // Far behind (a long stall): rather than step the whole backlog, take

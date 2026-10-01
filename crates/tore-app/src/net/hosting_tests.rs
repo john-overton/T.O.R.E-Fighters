@@ -477,8 +477,9 @@ fn an_eight_second_window_stall_drops_nobody_and_the_king_still_reigns() {
     // they are printed rather than judged.
     assert!(stats.catch_ups >= 1, "{stats:#?}");
     // And then it settles: two seconds with the prediction the host's at
-    // every snapshot (on an idle machine at once; a starved one takes a few
-    // seconds of clock steering).
+    // every snapshot (on an idle machine at once; a starved one may jump its
+    // clock ahead of the host a few times first). A client stuck behind the
+    // host, corrected at every own state, never settles and fails here.
     let mut quiet_since = (Instant::now(), game.bot.client.corrections().len());
     let settled = game.fly_until(Duration::from_secs(12), |g| {
         let count = g.bot.client.corrections().len();

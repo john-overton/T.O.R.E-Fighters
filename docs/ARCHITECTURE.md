@@ -2693,7 +2693,16 @@ hooks. The lobby's calls are [the lobby's](#the-lobby).
   against the clock that sent the inputs it measured, a round trip earlier, so
   the two-second minimum does not make the steering overshoot. The target is 3
   ticks, 5 while the client's own packets lost more than 1 percent over 10
-  seconds.
+  seconds. *EF4 follow-up (agent decisions):* only a snapshot whose
+  newest input tick is newer than the last one measured gives the clock a
+  margin, since one that has had no new input repeats the last figure; and a
+  clock that is not ahead of the host's newest snapshot tick (a starved or
+  stalled game, whose inputs would all come late and none be sent) jumps
+  ahead of it as seating sets it, by a round trip and the margin, and counts
+  in `ClientStats::behind`. Before, such a client sent no inputs, so its
+  stale margin held the clock behind and the host's state of its plane was
+  taken at every own state, some 30 to 130 ft a time, for as long as it
+  lasted.
 - **The drawn time.** The newest snapshot tick is estimated as a line through
   their arrivals (each moves it a twentieth of the way). The interpolation
   delay is raised at once to keep the drawn time 2 ticks (6 while snapshots

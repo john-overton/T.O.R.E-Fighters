@@ -947,3 +947,41 @@ fn sustained_late_inputs_are_corrected_within_the_hold() {
     assert!(corrections.len() >= 10, "{applied:?}");
     assert!(longest <= CORRECTION_HOLD_TICKS + 4 * 4, "{applied:?}");
 }
+
+/// A client whose clock falls behind the host's newest snapshot (a starved
+/// game: the host's own state is already past it) sends no inputs that
+/// could arrive in time, so no margin would ever say it is late. It jumps
+/// ahead of the host, and is the host's again at every snapshot; before the
+/// fix it stayed behind, its plane taken back at every own state.
+#[test]
+fn a_client_behind_the_host_jumps_ahead_and_recovers() {
+    let mut rig = Rig::new(
+        spec(2, 2, 20),
+        LinkConfig::for_round_trip(20 * MS, 0., 0., 0.),
+        5,
+    );
+    let player = rig.join(|_| {}, Box::new(|now, _, _| weave(now.as_secs_f64())));
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(player)));
+    rig.run(Duration::from_secs(3));
+    let before = rig.players[player].client.clone_stats();
+    // Set the clock 10 ticks behind the host's newest snapshot.
+    let client = &mut rig.players[player].client;
+    let newest = f64::from(client.snapshot_tick.unwrap());
+    client.input_clock.jump_to(newest - 10.);
+    rig.run(Duration::from_secs(1));
+    let after = rig.players[player].client.clone_stats();
+    assert!(after.behind > before.behind, "it noticed: {after:?}");
+    let settled = rig.players[player].client.corrections().len();
+    let compared = after.hashes_compared;
+    rig.run(Duration::from_secs(5));
+    let end = rig.players[player].client.clone_stats();
+    let corrections = &rig.players[player].client.corrections()[settled..];
+    assert!(corrections.is_empty(), "{corrections:?}");
+    assert!(
+        end.hashes_compared >= compared + 140,
+        "the prediction is compared with the host's at every snapshot again: {end:?}"
+    );
+    assert_eq!(end.mismatches, after.mismatches, "{end:?}");
+    let margin = end.input_margin.unwrap();
+    assert!((2..=8).contains(&margin), "input margin {margin}");
+}

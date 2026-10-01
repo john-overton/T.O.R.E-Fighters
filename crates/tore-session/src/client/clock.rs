@@ -238,6 +238,18 @@ impl InputClock {
         Some(error)
     }
 
+    /// Jumps the clock forward to `position` and forgets the margins, which
+    /// were measured against the clock that fell behind. Returns the jump.
+    pub fn jump_to(&mut self, position: f64) -> f64 {
+        let jump = position - self.position;
+        self.position = position;
+        self.steering += jump;
+        self.rate = 1.;
+        self.jumps += 1;
+        self.margins.clear();
+        jump
+    }
+
     /// Steers towards a margin of `target` ticks: the rate within 2 percent
     /// of real time, or a jump when more than 250 ms off. Returns the jump.
     pub fn steer(&mut self, now: Duration, target: f64) -> Option<f64> {
