@@ -605,8 +605,11 @@ fn two_bots_fight_for_five_minutes() {
 }
 
 /// A bot joins a host over real UDP sockets on 127.0.0.1, with the real
-/// clock and system entropy, flies for `seconds` and leaves with its
-/// debrief.
+/// clock and system entropy, flies for `seconds` after it is seated and
+/// leaves with its debrief. The snapshot rate is judged over the seated
+/// time only: joining and building the mission take longer on a slow
+/// machine (macOS CI runners took more than half a second), and that time is
+/// not the flight's (slice EF-X).
 fn real_udp(seconds: u64) {
     let resources = Arc::new(resources());
     let mut host = Host::new(
@@ -628,6 +631,9 @@ fn real_udp(seconds: u64) {
     let mut bot = crate::bot::Bot::new(client);
     let mut events = Vec::new();
     let mut left = false;
+    // When the bot was seated and when it left, with the snapshot counts then.
+    let mut seated_at: Option<(Duration, u64)> = None;
+    let mut left_at: Option<(Duration, u64)> = None;
     let deadline = Duration::from_secs(seconds + 10);
     while clock.now() < deadline {
         let now = clock.now();
@@ -636,17 +642,23 @@ fn real_udp(seconds: u64) {
         host.transmit(&mut host_socket).unwrap();
         bot.client.receive_from(now, &mut socket).unwrap();
         if !left && bot.client.phase() == ClientPhase::Flying {
-            let seated = events
-                .iter()
-                .any(|e| matches!(e, ClientEvent::Seated { .. }));
-            if seated && now >= Duration::from_secs(seconds) {
+            let flown = seated_at.is_some_and(|(at, _)| now >= at + Duration::from_secs(seconds));
+            if flown {
                 bot.client.leave_game(now);
                 left = true;
+                left_at = Some((now, bot.client.clone_stats().snapshots));
             }
         }
         bot.update(now);
         bot.client.transmit(&mut socket).unwrap();
         events.extend(std::iter::from_fn(|| bot.client.poll_event()));
+        if seated_at.is_none()
+            && events
+                .iter()
+                .any(|e| matches!(e, ClientEvent::Seated { .. }))
+        {
+            seated_at = Some((now, bot.client.clone_stats().snapshots));
+        }
         if bot.client.phase() == ClientPhase::Closed {
             break;
         }
@@ -668,7 +680,19 @@ fn real_udp(seconds: u64) {
         "{events:?}"
     );
     assert_eq!(bot.client.phase(), ClientPhase::Closed);
-    assert!(stats.snapshots as f64 > seconds as f64 * 30. * 0.8);
+    // Thirty snapshots a second while seated, give or take a slow machine.
+    let ((from, first), (to, last)) = (seated_at.unwrap(), left_at.expect("the bot left"));
+    let flown = (to - from).as_secs_f64();
+    eprintln!(
+        "seated at {from:?}, {} snapshots in {flown:.2} s seated",
+        last - first
+    );
+    assert!(flown >= seconds as f64);
+    assert!(
+        (last - first) as f64 > flown * 30. * 0.8,
+        "{} snapshots in {flown:.2} s",
+        last - first
+    );
     assert!(bot.frames > 0);
 }
 
