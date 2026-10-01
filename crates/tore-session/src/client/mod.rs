@@ -31,6 +31,8 @@ pub mod capture;
 pub mod clock;
 pub mod diagnostics;
 pub mod interpolation;
+#[cfg(test)]
+mod matrix_tests;
 pub mod prediction;
 #[cfg(test)]
 mod tests;

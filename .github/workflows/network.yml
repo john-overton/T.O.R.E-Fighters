@@ -1,0 +1,34 @@
+name: Network loopback
+
+# A host and two bots over real UDP on the loopback interface (stage D, slice
+# D10), on every platform the game runs on. The host runs in the test process;
+# the bots are the real tore-bot program, each loading a synthetic import the
+# test writes (tore-world's test fixtures), so no retail data is needed. The
+# job fails on any refusal, fault, drop or bot that does not exit cleanly. The
+# network simulator matrix is part of the normal test suite (ci.yml); its full
+# five-minute form is an ignored test run by hand before a release.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  loopback:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: rustup show
+      - name: A host and two bots over loopback UDP
+        shell: bash
+        env:
+          TORE_LOOPBACK_SECONDS: '20'
+        run: cargo test --locked -p tore-session --test loopback -- --nocapture
