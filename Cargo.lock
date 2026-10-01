@@ -2014,6 +2014,8 @@ version = "0.1.3"
 dependencies = [
  "tore-import",
  "tore-net",
+ "tore-session",
+ "tore-sim",
  "tore-world",
 ]
 

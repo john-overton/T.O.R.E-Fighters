@@ -13,6 +13,8 @@ mod options;
 mod prepare;
 mod report;
 mod run;
+#[cfg(test)]
+mod session_test;
 mod socket;
 mod wiring;
 

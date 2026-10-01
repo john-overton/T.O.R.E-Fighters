@@ -216,7 +216,7 @@ mod tests {
             (
                 Duration::from_millis(900),
                 Event::Left {
-                    seat: 1,
+                    seat: Some(1),
                     callsign: "Viper".into(),
                     plane: Some(0),
                     reason: "left".into(),

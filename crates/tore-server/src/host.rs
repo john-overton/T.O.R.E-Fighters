@@ -21,7 +21,6 @@ use tore_world::mission::MissionSpec;
 pub type Time = Duration;
 
 /// What a host is built from.
-#[allow(dead_code)] // read by the real host, which slice D7a provides
 pub struct HostSetup {
     /// The settings, with `--port` and `--mission` applied.
     pub config: Config,
@@ -38,7 +37,6 @@ pub struct HostSetup {
 }
 
 /// Something that happened that the log records.
-#[allow(dead_code)] // built by the real host, which slice D7a provides
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     /// A connection was accepted.
@@ -58,7 +56,7 @@ pub enum Event {
     },
     /// A player left, or was removed, with the reason.
     Left {
-        seat: u8,
+        seat: Option<u8>,
         callsign: String,
         plane: Option<u32>,
         reason: String,
@@ -96,15 +94,13 @@ impl Event {
             Self::Left {
                 seat,
                 callsign,
-                plane: Some(plane),
+                plane,
                 reason,
-            } => format!("seat {seat} {callsign} (plane {plane}) left: {reason}"),
-            Self::Left {
-                seat,
-                callsign,
-                plane: None,
-                reason,
-            } => format!("seat {seat} {callsign} left: {reason}"),
+            } => {
+                let seat = seat.map_or_else(String::new, |seat| format!("seat {seat} "));
+                let plane = plane.map_or_else(String::new, |plane| format!(" (plane {plane})"));
+                format!("{seat}{callsign}{plane} left: {reason}")
+            }
             Self::MissionStarted => "mission started".into(),
             Self::MissionRestarted => "mission restarted".into(),
             Self::MissionEnded { reason } => format!("mission ended: {reason}"),

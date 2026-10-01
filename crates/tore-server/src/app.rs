@@ -25,8 +25,9 @@ pub fn version() -> &'static str {
 /// version instead of by commit. The rule is that the build script's stamped
 /// tag, `TORE_BUILD_VERSION`, was set at compile time: the same test as the
 /// game's `version::version()` uses to choose the tag over the crate version.
-/// The game's client (slice D8) must use the same rule.
-#[allow(dead_code)] // read by the real host's adapter in wiring.rs
+/// The game's client (slice D8) must use the same rule. `tore_session::BuildId::matches`
+/// decides what a release flag means: a release host also takes a game of the
+/// same plain version, and any host takes the same commit.
 pub fn is_release() -> bool {
     option_env!("TORE_BUILD_VERSION").is_some()
 }

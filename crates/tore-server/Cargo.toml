@@ -10,9 +10,11 @@ build = "build.rs"
 [dependencies]
 tore-import = { path = "../tore-import" }
 tore-net = { path = "../tore-net" }
+tore-session = { path = "../tore-session" }
 tore-world = { path = "../tore-world" }
 
 [dev-dependencies]
+tore-sim = { path = "../tore-sim" }
 tore-world = { path = "../tore-world", features = ["test-support"] }
 
 [lints]

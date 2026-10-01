@@ -156,7 +156,7 @@ pub fn build(
 ) -> Result<Prepared, String> {
     let (world, manifest) = {
         let reads = ResourceReads::new(&resources);
-        let world = World::new(&spec, &reads, Seating::SinglePlayer).map_err(|error| {
+        let world = World::new(&spec, &reads, Seating::Open).map_err(|error| {
             let hint = if spec.ground_runway().is_some() {
                 " (`start ground` takes a runway number from --check)"
             } else {

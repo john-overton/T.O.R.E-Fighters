@@ -8,12 +8,12 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Stage D design of 2026-09-30, reviewed by John the same day. **Built (D7b):**
-the program around the host session: the options, the configuration file, the
-import, `--check`, the start-up refusals, the real-time run loop, the console,
-the status line and the log. **Not yet built:** the host session itself (slice
-D7a), so `tore-server` cannot yet accept a player, and the joining game
-(stage D8). The dedicated server is part of the [multiplayer plan](multiplayer-plan.md#stages)
+Stage D design of 2026-09-30, reviewed by John the same day. **Built (D7b, on
+the host session of D7a):** the program: the options, the configuration file,
+the import, `--check`, the start-up refusals, the real-time run loop, the
+console, the status line and the log; on 127.0.0.1 a scripted client joins over
+a real UDP socket, flies and leaves, and `quit` stops the server. **Not yet
+built:** the joining game (stage D8), so no real game has joined one. The dedicated server is part of the [multiplayer plan](multiplayer-plan.md#stages)
 and the [multiplayer guide](MULTIPLAYER.md#dedicated-servers). Fighters
 Anthology had no dedicated server; everything on this page is an agent
 proposal unless it is credited to John.
@@ -222,18 +222,31 @@ flowchart TD
 
 - **Waiting.** With `start first-player` the mission is built but does not
   fly until someone is seated, so the first player starts it the way a single
-  player starts a Quick Mission.
+  player starts a Quick Mission. No snapshots are sent while it waits.
 - **Flying.** Players join and take free planes in flight and leave at any
   time. A player who leaves, or whose game goes silent for 5 seconds, gives
   the plane back to the AI at once; it is not held for a rejoin until stage K.
   A destroyed plane stays destroyed; respawns are stage F.
 - **Ending.** The mission ends at the time limit, once the last player has been
   gone for the empty timeout, or on the console's `end`. Every seated player
-  gets "Mission ended" and their own debrief, and is then disconnected; players
-  join again for the next mission. A player who ends the mission on
-  their side gets their debrief at once and the mission flies on for the others.
+  gets "Mission ended" first and then their own debrief, and is then
+  disconnected with the text "server stopping" (every connection is, seated or
+  not, once acknowledged or after 5 seconds); players join again for the next
+  mission, and a join while the mission is ended is refused as shutting down,
+  with the seconds to the next one. A player who ends the mission on their side
+  gets their debrief at once and the mission flies on for the others.
 - **Next.** After the restart delay the same mission starts again from its
-  file, fresh, or the server exits.
+  file, fresh, or the server exits. With `after-end quit` the host stops once
+  the ended players are gone, or 5 seconds after the end.
+
+*Built (D7a, D7b), the host's settled rules:* the number of players a mission
+seats is the lesser of `max-players` and the planes open to humans (the status
+line's `players 2/15`); the empty timeout counts from the moment the last
+seated player leaves (sends Leave or is dropped), not from the mission's start;
+`end` and `restart` tell the players "ended by the server"; `quit` disconnects
+everyone at once with "server stopping" and sends no debriefs. If a tick or the
+rebuild for the next mission fails, the host logs the fault, and ends the
+mission (or stops, when the rebuild itself failed).
 
 ## Joining from the game
 
