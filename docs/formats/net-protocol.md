@@ -273,7 +273,7 @@ The lobby's messages, protocol 3 ([the lobby](../ARCHITECTURE.md#the-lobby)):
 | Lobby | host to client | The lobby's state, sent to every player whenever it changes |
 | Refused | host to client | The refused request's message kind and the plain reason |
 | Goodbye | host to client | Why the host is about to disconnect the player: kicked (with the King's words) or the host left the game |
-| Flight loadouts | host to client | The mission starts flying: each loaded plane and its loadout, which every player builds the lobby's mission again with |
+| Flight loadouts | host to client | The mission starts flying: each loaded plane and its loadout, which every player builds the lobby's mission again with, and the content manifest entries they add, which the player checks |
 
 ## What the transport settled
 
@@ -809,8 +809,10 @@ host left the game (4); the King's End mission is reason 3.
   changed; choose again." (Take plane as a Seat refused, the others as a
   Refused).
 - **Content refused** is the mission's number (varint), the names (a count
-  and strings) and the reason (a string). A refusal for an earlier number
-  is logged and otherwise ignored.
+  and strings), the reason (a string) and a bit: the flight's loadouts
+  failed, not the lobby's mission (the host clears that mark when the lobby
+  returns). A refusal for an earlier number is logged and otherwise
+  ignored.
 - **Take plane** is the number (varint), then a presence bit and the plane
   (varint).
 - **Slot** is the number, then 2 bits (0 take, then the plane as a varint;
@@ -834,7 +836,13 @@ host left the game (4); the King's End mission is reason 3.
 - **Refused** is the request's kind (8 bits) and the reason (a string).
   **Goodbye** is 2 bits (kicked 0, then the reason as a string; the host
   left 1). **Flight loadouts** is a count, then each plane (varint) and its
-  loadout as Seated codes one.
+  loadout as Seated codes one, then the manifest entries the flight's build
+  read that the lobby's did not, coded as the Mission message's manifest; a
+  player compares its own hashes of those names.
+- **Pace.** The host answers at most 20 lobby requests a second from one
+  connection (Leave and Content refused aside) and drops the rest
+  unanswered; it sends a player the lobby state only after a change, at most
+  every 250 ms in the lobby and every second in flight.
 
 ### Flights
 

@@ -10,7 +10,7 @@ use tore_world::test_support::resources::{THEATER, resources};
 
 const MS: Duration = Duration::from_millis(1);
 
-fn host_address() -> SocketAddr {
+pub(super) fn host_address() -> SocketAddr {
     "10.0.0.1:26900".parse().unwrap()
 }
 
@@ -92,10 +92,21 @@ impl Rig {
         seed: u64,
         configure: impl FnOnce(&mut HostConfig),
     ) -> Self {
+        Self::with_import(spec, link, seed, resources(), configure)
+    }
+
+    /// [`Rig::with_config`] with the host's and the players' import.
+    pub fn with_import(
+        spec: MissionSpec,
+        link: LinkConfig,
+        seed: u64,
+        import: BTreeMap<String, Vec<u8>>,
+        configure: impl FnOnce(&mut HostConfig),
+    ) -> Self {
         let net = SimNetwork::new(seed);
         net.set_default_link(link);
         let socket = net.bind(host_address()).unwrap();
-        let resources = Arc::new(resources());
+        let resources = Arc::new(import);
         let mut config = HostConfig {
             entropy: Entropy::Seeded(11),
             ..HostConfig::new(build())

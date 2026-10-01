@@ -202,6 +202,7 @@ impl Host for SessionHost {
             .players()
             .into_iter()
             .map(|p| PlayerFigures {
+                id: p.id,
                 seat: p.seat,
                 callsign: p.callsign,
                 address: p.address.to_string(),
@@ -226,6 +227,19 @@ impl Host for SessionHost {
             .unwrap_or_default();
         self.host
             .kick(seat)
+            .map(|()| callsign)
+            .map_err(|error| error.to_string())
+    }
+
+    fn kick_player(&mut self, id: u8, reason: &str) -> Result<String, String> {
+        let callsign = self
+            .players()
+            .into_iter()
+            .find(|p| p.id == id)
+            .map(|p| p.callsign)
+            .unwrap_or_default();
+        self.host
+            .kick_player(id, reason)
             .map(|()| callsign)
             .map_err(|error| error.to_string())
     }

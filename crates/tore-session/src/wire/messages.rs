@@ -108,6 +108,9 @@ pub struct ContentRefused {
     /// Why, in words, for the lobby to show ("Your game data differs ...",
     /// or the build's own error).
     pub reason: String,
+    /// It was the flight's build with the players' loadouts that failed,
+    /// not the lobby's mission: the player may try again after it.
+    pub flight: bool,
 }
 
 /// Take a plane (client to host): in the lobby, hold that plane's slot (or
@@ -472,7 +475,18 @@ pub enum Message {
     /// The mission starts flying with these planes' loadouts (host to
     /// client): every player builds the lobby's mission again with them, so
     /// its copy holds the aircraft as the host flies them.
-    FlightLoadouts(Vec<(u32, LoadoutSpec)>),
+    FlightLoadouts(FlightLoadouts),
+}
+
+/// A flight's loadouts and what they add to the content check.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FlightLoadouts {
+    /// Each loaded plane and its loadout.
+    pub loadouts: Vec<(u32, LoadoutSpec)>,
+    /// The resources the flight's build read that the lobby's mission did
+    /// not (a loadout's other weapons), with their hashes: a player
+    /// compares its own as at the mission's content check.
+    pub manifest: Manifest,
 }
 
 fn write_tally(w: &mut BitWriter, t: &Tally) {
@@ -588,6 +602,38 @@ fn read_aircraft(r: &mut BitReader<'_>) -> WireResult<AircraftId> {
         .get(r.read_bits(4)? as usize)
         .copied()
         .ok_or(WireError::Invalid("aircraft"))
+}
+
+fn write_manifest(w: &mut BitWriter, manifest: &Manifest) -> WireResult<()> {
+    if manifest.entries.len() > MANIFEST_LIMIT {
+        return Err(WireError::TooMany {
+            what: "manifest entries",
+            limit: MANIFEST_LIMIT,
+        });
+    }
+    write_count(w, manifest.entries.len());
+    for entry in &manifest.entries {
+        write_str(w, &entry.name);
+        bits::write_option(w, entry.hash, |w, hash| {
+            let _ = w.write_bits(hash, 64);
+        });
+    }
+    Ok(())
+}
+
+fn read_manifest(r: &mut BitReader<'_>) -> WireResult<Manifest> {
+    let count = read_count(r, MANIFEST_LIMIT, "manifest entries")?;
+    if count > r.bits_remaining() / 9 {
+        return Err(tore_codec::CodecError::UnexpectedEnd.into());
+    }
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        entries.push(ManifestEntry {
+            name: read_str(r)?,
+            hash: bits::read_option(r, |r| Ok(r.read_bits(64)?))?,
+        });
+    }
+    Ok(Manifest { entries })
 }
 
 fn write_wing(w: &mut BitWriter, wing: WingId) {
@@ -931,19 +977,7 @@ impl Message {
         match self {
             Self::Mission(m) => {
                 write_long_str(&mut w, &m.spec);
-                if m.manifest.entries.len() > MANIFEST_LIMIT {
-                    return Err(WireError::TooMany {
-                        what: "manifest entries",
-                        limit: MANIFEST_LIMIT,
-                    });
-                }
-                write_count(&mut w, m.manifest.entries.len());
-                for entry in &m.manifest.entries {
-                    write_str(&mut w, &entry.name);
-                    bits::write_option(&mut w, entry.hash, |w, hash| {
-                        let _ = w.write_bits(hash, 64);
-                    });
-                }
+                write_manifest(&mut w, &m.manifest)?;
                 let _ = w.write_bits(u64::from(m.host_tick), 32);
                 w.write_varint(m.contrail_sortie);
                 w.write_varint(u64::from(m.number));
@@ -952,6 +986,7 @@ impl Message {
                 w.write_varint(u64::from(c.mission));
                 write_strings(&mut w, &c.names, MANIFEST_LIMIT, "names")?;
                 write_str(&mut w, &c.reason);
+                w.write_bool(c.flight);
             }
             Self::TakePlane(take) => {
                 w.write_varint(u64::from(take.mission));
@@ -1068,18 +1103,19 @@ impl Message {
                     let _ = w.write_bits(1, 2);
                 }
             },
-            Self::FlightLoadouts(loadouts) => {
-                if loadouts.len() > LOADOUTS_LIMIT {
+            Self::FlightLoadouts(flight) => {
+                if flight.loadouts.len() > LOADOUTS_LIMIT {
                     return Err(WireError::TooMany {
                         what: "loadouts",
                         limit: LOADOUTS_LIMIT,
                     });
                 }
-                write_count(&mut w, loadouts.len());
-                for (plane, loadout) in loadouts {
+                write_count(&mut w, flight.loadouts.len());
+                for (plane, loadout) in &flight.loadouts {
                     w.write_varint(u64::from(*plane));
                     write_loadout(&mut w, loadout)?;
                 }
+                write_manifest(&mut w, &flight.manifest)?;
             }
         }
         let bytes = bits::finish(w);
@@ -1105,20 +1141,10 @@ impl Message {
         let message = match kind {
             kind::MISSION => {
                 let spec = read_long_str(r, limits::MESSAGE, "mission text")?;
-                let count = read_count(r, MANIFEST_LIMIT, "manifest entries")?;
-                if count > r.bits_remaining() / 9 {
-                    return Err(tore_codec::CodecError::UnexpectedEnd.into());
-                }
-                let mut entries = Vec::with_capacity(count);
-                for _ in 0..count {
-                    entries.push(ManifestEntry {
-                        name: read_str(r)?,
-                        hash: bits::read_option(r, |r| Ok(r.read_bits(64)?))?,
-                    });
-                }
+                let manifest = read_manifest(r)?;
                 Self::Mission(Mission {
                     spec,
-                    manifest: Manifest { entries },
+                    manifest,
                     host_tick: r.read_bits(32)? as u32,
                     contrail_sortie: r.read_varint()?,
                     number: read_u32(r)?,
@@ -1128,6 +1154,7 @@ impl Message {
                 mission: read_u32(r)?,
                 names: read_strings(r, MANIFEST_LIMIT, "names")?,
                 reason: read_str(r)?,
+                flight: r.read_bool()?,
             }),
             kind::READY => Self::TakePlane(TakePlane {
                 mission: read_u32(r)?,
@@ -1258,7 +1285,10 @@ impl Message {
                 for _ in 0..count {
                     loadouts.push((read_u32(r)?, read_loadout(r)?));
                 }
-                Self::FlightLoadouts(loadouts)
+                Self::FlightLoadouts(FlightLoadouts {
+                    loadouts,
+                    manifest: read_manifest(r)?,
+                })
             }
             kind::GOODBYE => Self::Goodbye(match r.read_bits(2)? {
                 0 => Goodbye::Kicked(read_str(r)?),

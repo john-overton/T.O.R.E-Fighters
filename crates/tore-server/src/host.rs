@@ -132,6 +132,8 @@ pub struct Status {
 /// diagnostics log.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlayerFigures {
+    /// The player's lobby id, which `kick-player` takes.
+    pub id: u8,
     /// `None` while the connection has no seat yet.
     pub seat: Option<u8>,
     pub callsign: String,
@@ -179,6 +181,10 @@ pub trait Host {
     /// returns the callsign, or why there is no such seat.
     fn kick(&mut self, seat: u8) -> Result<String, String>;
 
+    /// Removes the player with lobby id `id`, in the lobby or flying, telling
+    /// it `reason`; returns the callsign, or why there is no such player.
+    fn kick_player(&mut self, id: u8, reason: &str) -> Result<String, String>;
+
     /// Ends the mission now, with debriefs.
     fn end_mission(&mut self);
 
@@ -212,6 +218,7 @@ pub mod scripted {
         pub restarted: u32,
         pub stopped: Option<Time>,
         pub kicked: Vec<u8>,
+        pub kicked_players: Vec<u8>,
         pub finish_at: Option<Time>,
         pub done: bool,
         pub polls: u32,
@@ -264,6 +271,15 @@ pub mod scripted {
                     Ok(self.players.remove(index).callsign)
                 }
                 None => Err(format!("no player in seat {seat}")),
+            }
+        }
+        fn kick_player(&mut self, id: u8, _reason: &str) -> Result<String, String> {
+            match self.players.iter().position(|p| p.id == id) {
+                Some(index) => {
+                    self.kicked_players.push(id);
+                    Ok(self.players.remove(index).callsign)
+                }
+                None => Err(format!("no player has the lobby id {id}")),
             }
         }
         fn end_mission(&mut self) {

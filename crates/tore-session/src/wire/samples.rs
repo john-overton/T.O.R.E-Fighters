@@ -489,6 +489,7 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
             mission: 7,
             names: vec!["UKR.T2".into(), "F18.PT".into()],
             reason: "Your game data differs".into(),
+            flight: false,
         }),
         Message::TakePlane(TakePlane {
             mission: 7,
@@ -600,18 +601,26 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
         },
         Message::Goodbye(Goodbye::Kicked("AFK".into())),
         Message::Goodbye(Goodbye::HostLeft),
-        Message::FlightLoadouts(vec![(
-            2,
-            LoadoutSpec {
-                fuel_lbs: 6_000.,
-                cheat: false,
-                stations: vec![StationLoad {
-                    weapon: "M61.JT".into(),
-                    count: 578,
-                    quantity: 300,
+        Message::FlightLoadouts(super::messages::FlightLoadouts {
+            loadouts: vec![(
+                2,
+                LoadoutSpec {
+                    fuel_lbs: 6_000.,
+                    cheat: false,
+                    stations: vec![StationLoad {
+                        weapon: "AIM9X.JT".into(),
+                        count: 2,
+                        quantity: 2,
+                    }],
+                },
+            )],
+            manifest: Manifest {
+                entries: vec![ManifestEntry {
+                    name: "AIM9X.JT".into(),
+                    hash: Some(0x1234_5678_9ABC_DEF0),
                 }],
             },
-        )]),
+        }),
     ]
 }
 

@@ -308,7 +308,7 @@ impl TestClient {
             Message::Lobby(lobby) => self.lobby = Some(*lobby),
             Message::Refused { request, reason } => self.refused.push((request, reason)),
             Message::Goodbye(goodbye) => self.goodbye = Some(goodbye),
-            Message::FlightLoadouts(loadouts) => self.loadouts.push(loadouts),
+            Message::FlightLoadouts(flight) => self.loadouts.push(flight.loadouts),
             Message::SeatRefused(reason) => self.seat_refused.push(reason),
             Message::Names(names) => {
                 let wire = self.wire.as_mut().unwrap();
@@ -1008,6 +1008,7 @@ fn refusals_reach_the_client_with_their_reason() {
             mission,
             names: vec!["F18.PT".into()],
             reason: "Your game data differs from the host's in 1 file(s), such as F18.PT.".into(),
+            flight: false,
         },
     ));
     assert!(rig.run_until(Duration::from_secs(2), |r| {

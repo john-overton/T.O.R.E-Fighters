@@ -452,7 +452,10 @@ fn the_king_kicks_a_player_with_a_reason() {
         tore_world::seats::Pilot::Ai,
         "the plane went back to the AI"
     );
-    assert_eq!(lobby(&rig, king).unwrap().players.len(), 1);
+    // A flying player hears of the lobby at most once a second.
+    assert!(rig.run_until(Duration::from_millis(1500), |r| {
+        lobby(r, king).is_some_and(|l| l.players.len() == 1)
+    }));
 }
 
 #[test]
@@ -500,7 +503,7 @@ fn a_player_joining_in_flight_takes_an_ai_aircraft() {
         moved > 100.,
         "it took the aircraft where it flew ({moved} ft)"
     );
-    assert!(rig.run_until(Duration::from_millis(500), |r| {
+    assert!(rig.run_until(Duration::from_millis(1500), |r| {
         lobby(r, king).is_some_and(|l| l.players.len() == 2 && l.players.iter().all(|p| p.flying))
     }));
 }
@@ -663,4 +666,284 @@ fn a_king_at_a_network_address_is_still_dropped_for_silence() {
         rig.players[cobra].client.goodbye(),
         Some(&crate::wire::messages::Goodbye::HostLeft)
     );
+}
+
+/// The King, seated and flying, and a second player in the lobby; returns
+/// (king, cobra).
+fn king_flying_and_one_in_the_lobby(rig: &mut Rig) -> (usize, usize) {
+    let king = manual(rig, "Viper");
+    let cobra = manual(rig, "Cobra");
+    gathered(rig, &[king, cobra]);
+    rig.players[king].client.take_slot(0);
+    rig.run(Duration::from_millis(300));
+    rig.players[king].client.set_ready(true);
+    rig.run(Duration::from_millis(300));
+    rig.players[king].client.start_mission();
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(king)));
+    rig.run(Duration::from_secs(1));
+    (king, cobra)
+}
+
+/// Review item 1: a player flooding the host with lobby requests is held to
+/// 20 a second, nothing that changes nothing is broadcast, and the flying
+/// player's lobby states come at most once a second; nobody is dropped.
+#[test]
+fn a_flood_of_lobby_requests_is_held_and_never_crowds_the_flying() {
+    let mut rig = kings_rig(3);
+    let (king, cobra) = king_flying_and_one_in_the_lobby(&mut rig);
+    let lobby_states = |rig: &Rig| count(rig, king, |e| matches!(e, ClientEvent::Lobby));
+    let before = lobby_states(&rig);
+    let logs_before = rig.logs.len();
+    // Two seconds of a request every millisecond: take, leave, and stale.
+    for i in 0..2000u32 {
+        let client = &mut rig.players[cobra].client;
+        match i % 3 {
+            0 => client.take_slot(1),
+            1 => client.leave_slot(),
+            _ => client.set_ready(true),
+        }
+        rig.step();
+    }
+    rig.run(Duration::from_millis(500));
+    let states = lobby_states(&rig) - before;
+    assert!(
+        states <= 3,
+        "{states} lobby states to the flying King in 2.5 s"
+    );
+    let cobra_answers = count(&rig, cobra, |e| {
+        matches!(e, ClientEvent::Refused { .. } | ClientEvent::Lobby)
+    });
+    assert!(cobra_answers <= 120, "{cobra_answers} answers in 2.5 s");
+    let floods = rig.logs[logs_before..]
+        .iter()
+        .filter(|l| {
+            matches!(
+                l,
+                HostLog::Lobby {
+                    event: crate::host::LobbyEvent::TooManyRequests,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert!((2..=3).contains(&floods), "{floods} flood notes");
+    assert!(
+        rig.logs.len() - logs_before <= 140,
+        "{} log lines",
+        rig.logs.len() - logs_before
+    );
+    assert!(!rig.closed(king) && !rig.closed(cobra));
+    assert!(rig.seated(king));
+}
+
+/// Review item 7: a loadout sent while the mission flies is refused, not
+/// silently kept for a plane that flies what it was built with.
+#[test]
+fn a_loadout_sent_in_flight_is_refused() {
+    let mut rig = kings_rig(3);
+    let (king, cobra) = king_flying_and_one_in_the_lobby(&mut rig);
+    rig.players[cobra].client.take_slot(1);
+    assert!(rig.run_until(Duration::from_secs(1), |r| {
+        me(r, cobra).is_some_and(|m| m.slot == Some(1))
+    }));
+    rig.players[cobra].client.send_loadout(Some(standard()));
+    rig.run(Duration::from_millis(300));
+    assert!(
+        refusals(&rig, cobra)
+            .iter()
+            .any(|(k, r)| *k == kind::LOADOUT
+                && r == "Loadouts are chosen in the lobby, before the mission flies."),
+        "{:?}",
+        refusals(&rig, cobra)
+    );
+    assert!(rig.seated(king));
+}
+
+/// Review item 8: a lobby id is not given to the next player at once.
+#[test]
+fn lobby_ids_do_not_repeat_at_once() {
+    let mut rig = kings_rig(3);
+    let king = manual(&mut rig, "Viper");
+    let cobra = manual(&mut rig, "Cobra");
+    gathered(&mut rig, &[king, cobra]);
+    let gone = me(&rig, cobra).unwrap().id;
+    let now = rig.net.now();
+    rig.players[cobra].client.disconnect(now);
+    assert!(rig.run_until(Duration::from_secs(1), |r| {
+        lobby(r, king).is_some_and(|l| l.players.len() == 1)
+    }));
+    let hawk = manual(&mut rig, "Hawk");
+    assert!(rig.run_until(Duration::from_secs(2), |r| me(r, hawk).is_some()));
+    assert_ne!(me(&rig, hawk).unwrap().id, gone);
+}
+
+/// Review item 5: the King's change to a mission a kept loadout does not
+/// fit drops that loadout, and its player is told.
+#[test]
+fn a_mission_change_drops_a_loadout_the_new_mission_refuses() {
+    let mut rig = kings_rig(3);
+    let king = manual(&mut rig, "Viper");
+    let cobra = manual(&mut rig, "Cobra");
+    gathered(&mut rig, &[king, cobra]);
+    rig.players[cobra].client.take_slot(1);
+    assert!(rig.run_until(Duration::from_secs(1), |r| {
+        me(r, cobra).is_some_and(|m| m.slot == Some(1))
+    }));
+    rig.players[cobra].client.send_loadout(Some(standard()));
+    assert!(rig.run_until(Duration::from_secs(1), |r| {
+        me(r, cobra).is_some_and(|m| m.loadout)
+    }));
+    // Guns only now: the standard missiles do not fit.
+    let mut guns = spec(3, 2, 20);
+    guns.guns_only = true;
+    rig.players[king].client.change_mission(&guns);
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        lobby(r, cobra).is_some_and(|l| l.mission == 2) && me(r, cobra).is_some_and(|m| !m.loadout)
+    }));
+    assert_eq!(me(&rig, cobra).unwrap().slot, Some(1), "the slot stays");
+    assert!(
+        rig.players[cobra].events.iter().any(|e| matches!(
+            e,
+            ClientEvent::Notice(text) if text.contains("does not fit the new mission")
+                && text.contains("Guns only")
+        )),
+        "{:?}",
+        rig.players[cobra].events
+    );
+}
+
+/// Review items 4 and 6: a loadout's other weapon is content-checked at the
+/// flight's start; a player whose own copy differs is told and stays in the
+/// lobby, and when the lobby returns it may fly the next mission.
+#[test]
+fn a_loadouts_other_weapon_is_checked_at_the_start_and_the_player_may_try_again() {
+    let mut import = resources();
+    import.insert(
+        "AIM9X.JT".into(),
+        tore_world::test_support::resources::loadable_missile("AIM9X.JT"),
+    );
+    let mut rig = Rig::with_import(
+        spec(3, 2, 20),
+        LinkConfig::for_round_trip(40 * MS, 0., 0., 0.),
+        7,
+        import.clone(),
+        |config| {
+            config.king = Some(Rig::player_address(0));
+            config.start = StartMode::King;
+            config.after_end = AfterEnd::Restart;
+            config.restart_delay = Duration::ZERO;
+            config.empty_timeout = Duration::ZERO;
+        },
+    );
+    let king = manual(&mut rig, "Viper");
+    // Cobra's copy of the other missile differs; the lobby's mission does
+    // not read it.
+    let mut other = import.clone();
+    other.get_mut("AIM9X.JT").unwrap().push(0);
+    rig.resources = Arc::new(other);
+    let cobra = manual(&mut rig, "Cobra");
+    rig.resources = Arc::new(import.clone());
+    gathered(&mut rig, &[king, cobra]);
+    assert!(me(&rig, cobra).unwrap().unable.is_none());
+    let mut load = standard();
+    let kind = tore_world::aircraft_type::AircraftType::load(&import, AircraftId::F18).unwrap();
+    let base = tore_sim::combat::loadout::Loadout::new(&kind.profile, |name| {
+        import
+            .get(name)
+            .cloned()
+            .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+    })
+    .unwrap();
+    let missile = tore_formats::weapons::Weapon::parse("AIM9X.JT", &import["AIM9X.JT"]).unwrap();
+    let capacity = base.capacity(1, &missile) as u16;
+    load.stations[1].weapon = "AIM9X.JT".into();
+    load.stations[1].count = capacity;
+    load.stations[1].quantity = capacity;
+    rig.players[king].client.take_slot(0);
+    rig.players[cobra].client.take_slot(1);
+    assert!(rig.run_until(Duration::from_secs(1), |r| {
+        me(r, king).is_some_and(|m| m.slot.is_some())
+    }));
+    rig.players[king].client.send_loadout(Some(load));
+    rig.players[king].client.set_ready(true);
+    rig.players[cobra].client.set_ready(true);
+    assert!(rig.run_until(Duration::from_secs(1), |r| {
+        lobby(r, king).is_some_and(|l| l.all_ready())
+    }));
+    rig.players[king].client.start_mission();
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.seated(king) && me(r, cobra).is_some_and(|m| m.unable.is_some())
+    }));
+    let p = &rig.players[cobra];
+    assert!(
+        p.events.iter().any(|e| matches!(
+            e,
+            ClientEvent::ContentRefused { names, .. } if names == &["AIM9X.JT".to_string()]
+        )),
+        "{:?}",
+        p.events
+    );
+    assert!(!rig.seated(cobra) && !rig.closed(cobra));
+    rig.run(Duration::from_secs(1));
+    // The lobby returns: Cobra may take its slot and fly the next mission.
+    rig.players[king].client.end_mission();
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        lobby(r, cobra).is_some_and(|l| l.phase == LobbyPhase::Lobby)
+            && me(r, cobra).is_some_and(|m| m.unable.is_none())
+    }));
+    assert!(rig.players[cobra].client.unable().is_none());
+    rig.players[cobra].client.take_slot(1);
+    rig.players[king].client.send_loadout(None);
+    assert!(rig.run_until(Duration::from_secs(1), |r| {
+        me(r, cobra).is_some_and(|m| m.slot == Some(1))
+    }));
+    rig.players[king].client.set_ready(true);
+    rig.players[cobra].client.set_ready(true);
+    assert!(rig.run_until(Duration::from_secs(1), |r| {
+        lobby(r, king).is_some_and(|l| l.all_ready())
+    }));
+    rig.players[king].client.start_mission();
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(king)
+        && r.seated(cobra)));
+}
+
+/// Review item 3: inputs that stay late for seconds (the path to the host
+/// slows by 100 ms while the input clock steers) still cost a correction
+/// at least every [`CORRECTION_HOLD_TICKS`] and a snapshot, never one held
+/// to the end.
+#[test]
+fn sustained_late_inputs_are_corrected_within_the_hold() {
+    let mut rig = Rig::new(
+        spec(2, 2, 20),
+        LinkConfig::for_round_trip(20 * MS, 0., 0., 0.),
+        5,
+    );
+    let player = rig.join(|_| {}, Box::new(|now, _, _| weave(now.as_secs_f64())));
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(player)));
+    rig.run(Duration::from_secs(3));
+    let before = rig.players[player].client.corrections().len();
+    rig.net.set_link(
+        Rig::player_address(0),
+        super::tests::host_address(),
+        LinkConfig::one_way(110 * MS),
+    );
+    let repeated = rig.players[player].client.clone_stats().inputs_repeated;
+    rig.run(Duration::from_secs(4));
+    let stats = rig.players[player].client.clone_stats();
+    let late = stats.inputs_repeated - repeated;
+    let corrections = &rig.players[player].client.corrections()[before..];
+    let applied: Vec<u64> = corrections.iter().map(|c| c.now).collect();
+    let longest = applied.windows(2).map(|w| w[1] - w[0]).max().unwrap_or(0);
+    eprintln!(
+        "{late} ticks repeated; {} corrections, applied at {applied:?}, the longest gap {longest} ticks, the largest {:.3} ft",
+        corrections.len(),
+        corrections.iter().map(|c| c.feet).fold(0., f64::max)
+    );
+    assert!(late > 60, "the inputs were late for a while: {late}");
+    assert!(!corrections.is_empty());
+    // While the host repeated them, each correction came within the hold
+    // and a few snapshots of the last (before the review, every one waited
+    // until the inputs were on time again).
+    assert!(corrections.len() >= 10, "{applied:?}");
+    assert!(longest <= CORRECTION_HOLD_TICKS + 4 * 4, "{applied:?}");
 }

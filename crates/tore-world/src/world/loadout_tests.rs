@@ -199,3 +199,43 @@ fn plane_loadouts_are_refused_where_they_do_not_belong() {
         "Plane 0's loadout: Station quantity exceeds capacity."
     );
 }
+
+#[test]
+fn another_missile_the_station_takes_is_a_loadout_the_standard_load_never_reads() {
+    let mut map = resources();
+    map.insert(
+        "AIM9X.JT".into(),
+        crate::test_support::resources::loadable_missile("AIM9X.JT"),
+    );
+    let player = aircraft_type::AircraftType::load(&map, AircraftId::F18).unwrap();
+    let mut load = standard();
+    let standard_load = tore_sim::combat::loadout::Loadout::new(&player.profile, |name| {
+        map.get(name)
+            .cloned()
+            .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+    })
+    .unwrap();
+    let missile = tore_formats::weapons::Weapon::parse("AIM9X.JT", &map["AIM9X.JT"]).unwrap();
+    let capacity = standard_load.capacity(1, &missile);
+    assert!(capacity > 0, "the station takes it");
+    load.stations[1].weapon = "AIM9X.JT".into();
+    load.stations[1].count = capacity as u16;
+    load.stations[1].quantity = capacity as u16;
+    load.check_for_plane(&player.profile, &map, false).unwrap();
+    let mut spec = spec();
+    spec.plane_loadouts.insert(1, load);
+    let reads = crate::resources::ResourceReads::new(&map);
+    let world = World::new(&spec, &reads, Seating::Open).unwrap();
+    assert!(
+        reads
+            .manifest()
+            .entries
+            .iter()
+            .any(|e| e.name == "AIM9X.JT")
+    );
+    let wings = world.ai_wings.as_ref().unwrap();
+    assert_eq!(
+        wings.configuration(1).unwrap().stations[1].weapon.source,
+        "AIM9X.JT"
+    );
+}

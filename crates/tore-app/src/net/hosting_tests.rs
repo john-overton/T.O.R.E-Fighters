@@ -540,13 +540,14 @@ fn the_king_ends_the_mission_and_everyone_flies_again() {
         "{:?}",
         game.bot.client.lobby()
     );
+    // Lobby states reach a flying player at most once a second.
+    game.fly(Duration::from_millis(1500));
     let lobby = game.bot.client.lobby().expect("the lobby").clone();
     assert_eq!(
         lobby.phase,
         tore_session::wire::messages::LobbyPhase::Flying
     );
     assert_eq!(lobby.players.len(), 2, "{lobby:?}");
-    game.fly(Duration::from_secs(1));
     assert!(
         game.bot
             .client

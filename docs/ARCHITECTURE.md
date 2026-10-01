@@ -2678,7 +2678,8 @@ hooks. The lobby's calls are [the lobby's](#the-lobby).
   second of seating, or under 0.01 ft and 0.01 degrees it does not slide. One
   for a tick the client has not reached is taken as it is. *EF4:* exact
   states are read on arrival and applied after the update's steps, only the
-  newest, and held (at most 125 ms) while the host still reports repeating
+  newest, and held (at most 125 ms from when the hold began) while the host
+  still reports repeating
   the seat's late inputs; ticks the host has stepped without the seat's input
   are predicted with the controls the host repeated
   ([the stall](#the-lobby)).
@@ -3449,7 +3450,15 @@ it on this). Each an agent decision unless credited.
   cannot play the mission, if it cannot), and the slots: the planes open to
   players (every friendly plane by default; a server's `open-planes`), each
   with its wing, member, aircraft and holder. A slot is held without seating
-  anyone; one holder a slot.
+  anyone; one holder a slot. The state goes out only when something changed,
+  and changes in quick succession go together: a player in the lobby gets at
+  most one state every 250 ms, a flying one at most one a second, since its
+  messages share 256 bytes of each snapshot packet. A connection's lobby
+  requests are held to 20 a second (the rest of that second's are dropped
+  unanswered and noted once in the log), and the same refusal is logged at
+  most once a second. Lobby ids go round rather than being given again at
+  once, so a King's kick meant for a player who just left never lands on the
+  next.
 - **Messages** (protocol 3, [layouts](formats/net-protocol.md#messages-as-built)).
   Player to host: Slot (take a plane's slot, the first free one, or leave),
   Loadout (for the player's own slot, or the standard load), Set ready, and
@@ -3471,11 +3480,17 @@ it on this). Each an agent decision unless credited.
   aircraft's standard load and adds what the page's controls guarantee: one
   station for each, each station's capacity the page's, and nothing but the
   gun with the creator's Guns only. Cheat loading is refused until the phase
-  2 King's setting for loadouts. At the start the mission is built again
-  with the held slots' loadouts (`MissionSpec::plane_loadouts`), each player
-  is sent them (Flight loadouts) and builds its copy again with them, and a
-  joiner in flight gets the whole text with them, so its build and content
-  manifest match the host's.
+  2 King's setting for loadouts. Loadouts are chosen in the lobby only; one
+  sent while the mission flies is refused. At the start the mission is built
+  again with the held slots' loadouts (`MissionSpec::plane_loadouts`), each
+  player is sent them (Flight loadouts) with the manifest entries they add
+  (a loadout's other weapons), builds its copy again with them and compares
+  those entries as at the mission's content check, and a joiner in flight
+  gets the whole text with them, so its build and content manifest match the
+  host's. A player whose copy differs is told and stays in the lobby, marked
+  unable for that flight only: the mark goes when the lobby returns, and the
+  client builds the lobby's mission again. A start whose build fails is
+  refused to the King with the build's words.
 - **Ready and start.** A player holding a slot marks ready. The King's Start
   is accepted in the lobby when every player holding a slot is ready and at
   least one holds one ("Not ready: Hawk." otherwise). The host then builds
@@ -3486,7 +3501,9 @@ it on this). Each an agent decision unless credited.
 - **The King's mission.** The host parses and builds the new mission to
   check it (refused with the build's own words), keeps it, frees the slots
   whose plane no longer exists (and the loadout of a plane whose aircraft
-  changed), clears every ready and unable mark, raises the mission's number
+  changed, or that the new mission refuses, such as missiles under a new
+  Guns only, whose player is told by a Notice), clears every ready and unable
+  mark, raises the mission's number
   and sends it to every player, who builds it and runs the content check. A
   player whose import cannot play it sends Content refused with the reason,
   stays in the lobby marked unable (its slot freed; it cannot take one), and
@@ -3548,7 +3565,8 @@ that queued during the stall were applied on arrival, before the prediction
 had stepped to the update's time, so each was a tick the client had not
 reached. The client now applies only the newest exact state, after the
 update's steps, and holds it while the host still reports repeating its late
-inputs (at most 125 ms); it steps the ticks the host has already stepped
+inputs (at most 125 ms from when the hold began, however long the inputs
+stay late); it steps the ticks the host has already stepped
 without its input with the controls the host repeated; and its inputs start
 after the newest snapshot's tick. A 2-second stall now costs one correction
 (0.01 ft on the simulator) in the tests, and at most one in the hosted test.

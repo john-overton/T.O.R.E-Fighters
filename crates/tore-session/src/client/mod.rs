@@ -494,6 +494,17 @@ impl ClientFrame {
     }
 }
 
+/// What a mission's build is compared with.
+#[derive(Clone, Copy)]
+enum Check<'a> {
+    /// The host's whole manifest: the Mission message's.
+    Whole(&'a Manifest),
+    /// Only these entries: what a flight's loadouts add.
+    Added(&'a Manifest),
+    /// Nothing: the lobby's mission again, checked before.
+    None,
+}
+
 /// Builds the static mission; the default is `World::new` with open seating.
 pub type MissionBuilder = Box<dyn FnMut(&MissionSpec, &dyn ResourceSource) -> WorldResult<World>>;
 
@@ -571,14 +582,18 @@ pub struct Client {
     pending_own: Vec<(OwnStateHeader, ExactState)>,
     /// The inputs the newest snapshot said the host repeated.
     repeats_reported: u8,
+    /// The snapshot tick a held exact state began waiting at.
+    holding_since: Option<u64>,
     /// The lobby as the host last sent it.
     lobby: Option<LobbyState>,
     /// The newest Mission message's number, and the number of the newest
     /// mission built and matched.
     number: Option<u32>,
     loaded: Option<u32>,
-    /// Why this import cannot play the mission, when it cannot.
+    /// Why this import cannot play the mission, when it cannot, and
+    /// whether only a flight's build (its loadouts) failed.
     unable: Option<String>,
+    unable_flight: bool,
     /// Why the host said it disconnects the player.
     goodbye: Option<Goodbye>,
     /// The automatic ready ([`ClientConfig::auto_ready`]): a Take plane is
@@ -683,10 +698,12 @@ impl Client {
             early: Vec::new(),
             pending_own: Vec::new(),
             repeats_reported: 0,
+            holding_since: None,
             lobby: None,
             number: None,
             loaded: None,
             unable: None,
+            unable_flight: false,
             goodbye: None,
             auto_pending: false,
             auto_plane: None,
@@ -1422,6 +1439,16 @@ impl Client {
                 self.log("mission-ended", &[&format!("{:?}", ended.reason)]);
                 self.end_flight();
                 self.event(ClientEvent::MissionEnded(ended));
+                // Only the flight's build failed here: back in the lobby the
+                // lobby's mission, which this import plays, is built again.
+                if ended.next_in_seconds.is_some()
+                    && std::mem::take(&mut self.unable_flight)
+                    && let (Some(mut spec), Some(number)) = (self.spec.clone(), self.number)
+                {
+                    self.unable = None;
+                    spec.plane_loadouts.clear();
+                    self.build_mission(spec, number, Check::None);
+                }
             }
             Message::Lobby(lobby) => {
                 if lobby.me().is_some_and(|me| me.ready || me.flying) {
@@ -1456,6 +1483,7 @@ impl Client {
         }
         self.seat = None;
         self.pending_own.clear();
+        self.holding_since = None;
         self.early.clear();
         self.auto_pending = false;
         if self.phase != ClientPhase::Loading {
@@ -1521,34 +1549,50 @@ impl Client {
         self.auto_pending = false;
         self.auto_wait = false;
         self.log("mission", &[&mission.host_tick.to_string()]);
-        self.build_mission(spec, mission.number, Some(&mission.manifest));
+        self.unable_flight = false;
+        self.build_mission(spec, mission.number, Check::Whole(&mission.manifest));
     }
 
     /// The flight starts with these planes' loadouts: the lobby's mission
-    /// is built again with them. The lobby's content check stands; only
-    /// the build can fail now.
-    fn flight_loadouts(&mut self, loadouts: Vec<(u32, LoadoutSpec)>) {
+    /// is built again with them, and the resources they add (a loadout's
+    /// other weapons) are compared with the host's; the rest was checked
+    /// in the lobby.
+    fn flight_loadouts(&mut self, flight: crate::wire::messages::FlightLoadouts) {
         let (Some(mut spec), Some(number)) = (self.spec.clone(), self.number) else {
             return;
         };
         if self.unable.is_some() {
             return;
         }
-        spec.plane_loadouts = loadouts.into_iter().collect();
-        self.build_mission(spec, number, None);
+        spec.plane_loadouts = flight.loadouts.into_iter().collect();
+        self.build_mission(spec, number, Check::Added(&flight.manifest));
     }
 
     /// Builds `spec` from the import, comparing the manifest with the
-    /// host's when there is one.
-    fn build_mission(&mut self, spec: MissionSpec, number: u32, manifest: Option<&Manifest>) {
+    /// host's as `check` says.
+    fn build_mission(&mut self, spec: MissionSpec, number: u32, check: Check<'_>) {
         let reads = ResourceReads::new(&self.resources);
         let built = match &mut self.builder {
             Some(builder) => builder(&spec, &reads),
             None => World::new(&spec, &reads, Seating::Open),
         };
-        let differences = manifest
-            .map(|manifest| reads.manifest().differences(manifest))
-            .unwrap_or_default();
+        let ours = reads.manifest();
+        let differences = match check {
+            Check::Whole(manifest) => ours.differences(manifest),
+            Check::Added(manifest) => manifest
+                .entries
+                .iter()
+                .filter(|entry| {
+                    ours.entries
+                        .iter()
+                        .find(|e| e.name == entry.name)
+                        .is_none_or(|e| e.hash != entry.hash)
+                })
+                .map(|entry| entry.name.clone())
+                .collect(),
+            Check::None => Vec::new(),
+        };
+        let flight = matches!(check, Check::Added(_));
         let refusal = if !differences.is_empty() {
             Some(format!(
                 "Your game data differs from the host's in {} file(s), such as {}. Import the \
@@ -1568,8 +1612,10 @@ impl Client {
                 mission: number,
                 names: differences.clone(),
                 reason: reason.clone(),
+                flight,
             }));
             self.unable = Some(reason.clone());
+            self.unable_flight = flight;
             self.mission = None;
             self.loaded = None;
             self.spec = Some(spec);
@@ -1756,6 +1802,7 @@ impl Client {
         self.destroyed.clear();
         self.snapshot_tick = None;
         self.pending_own.clear();
+        self.holding_since = None;
         self.early.retain(|body| {
             crate::wire::connection::own_state_header(body).is_ok_and(|h| h.flight == flight)
         });
@@ -1905,12 +1952,18 @@ impl Client {
         else {
             return;
         };
+        // The hold is counted from when it began, whatever arrives meanwhile
+        // (EF4 review): late inputs that last for seconds still cost a
+        // correction every 125 ms, never one large one at the end.
         let snapshot = self.snapshot_tick.map_or(0, u64::from);
-        if self.repeats_reported > 0 && u64::from(newest.0.tick) + CORRECTION_HOLD_TICKS > snapshot
-        {
-            self.pending_own.push(newest);
-            return;
+        if self.repeats_reported > 0 {
+            let since = *self.holding_since.get_or_insert(snapshot);
+            if snapshot < since + CORRECTION_HOLD_TICKS {
+                self.pending_own.push(newest);
+                return;
+            }
         }
+        self.holding_since = None;
         self.apply_own_state(newest.0, newest.1);
     }
 

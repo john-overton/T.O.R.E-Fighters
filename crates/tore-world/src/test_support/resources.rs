@@ -77,6 +77,17 @@ fn countermeasures(resource: &str) -> Vec<u8> {
 
 /// A weapon record: a gun or a short-range missile.
 fn weapon(resource: &str, gun: bool) -> Vec<u8> {
+    weapon_with(resource, gun, 0)
+}
+
+/// A missile other than the aircraft's own that its missile station takes
+/// (its flags say it may be loaded where it is not the default), for
+/// loadout tests: a resource the standard load never reads.
+pub fn loadable_missile(resource: &str) -> Vec<u8> {
+    weapon_with(resource, false, 2)
+}
+
+fn weapon_with(resource: &str, gun: bool, extra_flags: i64) -> Vec<u8> {
     let value = |name: &str| match name {
         "structType" => {
             // The object block's and the projectile block's first fields are
@@ -84,13 +95,7 @@ fn weapon(resource: &str, gun: bool) -> Vec<u8> {
             0
         }
         "weight" => 20,
-        "flags" => {
-            if gun {
-                0x844
-            } else {
-                0x240
-            }
-        }
+        "flags" => (if gun { 0x844 } else { 0x240 }) | extra_flags,
         "sig" => {
             if gun {
                 0

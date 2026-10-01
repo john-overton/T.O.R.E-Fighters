@@ -59,12 +59,13 @@ pub fn players_table(players: &[PlayerFigures]) -> Vec<String> {
         return vec!["No players connected".into()];
     }
     let mut lines = vec![format!(
-        "{:<4} {:<15} {:<5} {:>8} {:>7} {:>9} {:>9}  {}",
-        "seat", "callsign", "plane", "rtt", "loss", "margin", "repeated", "address"
+        "{:<4} {:<4} {:<15} {:<5} {:>8} {:>7} {:>9} {:>9}  {}",
+        "id", "seat", "callsign", "plane", "rtt", "loss", "margin", "repeated", "address"
     )];
     for p in players {
         lines.push(format!(
-            "{:<4} {:<15} {:<5} {:>5.0} ms {:>7} {:>9} {:>9}  {}",
+            "{:<4} {:<4} {:<15} {:<5} {:>5.0} ms {:>7} {:>9} {:>9}  {}",
+            p.id,
             seat(p),
             p.callsign,
             plane(p),
@@ -129,6 +130,7 @@ mod tests {
     #[test]
     fn the_players_table_and_figures_name_every_figure() {
         let player = PlayerFigures {
+            id: 2,
             seat: Some(1),
             callsign: "Viper".into(),
             address: "127.0.0.1:5000".into(),
@@ -172,6 +174,6 @@ mod tests {
         assert!(line.contains("seat - Newcomer plane none"), "{line}");
         assert!(line.contains("loss -, "), "{line}");
         assert!(line.contains("input margin -,"), "{line}");
-        assert!(players_table(&[player])[1].starts_with("-    Newcomer"));
+        assert!(players_table(&[player])[1].starts_with("0    -    Newcomer"));
     }
 }

@@ -13,6 +13,9 @@ pub enum Command {
     Status,
     Players,
     Kick(u8),
+    /// Removes a player by its lobby id (as `players` shows it), with the
+    /// reason it is told, which may be empty.
+    KickPlayer(u8, String),
     End,
     Restart,
     Quit,
@@ -22,7 +25,8 @@ pub enum Command {
 }
 
 /// The help text for `help`.
-pub const HELP: &str = "Commands: status, players, kick SEAT, end, restart, quit";
+pub const HELP: &str =
+    "Commands: status, players, kick SEAT, kick-player ID [REASON], end, restart, quit";
 
 /// Reads one line. Blank lines are nothing.
 pub fn parse(line: &str) -> Option<Command> {
@@ -49,6 +53,13 @@ pub fn parse(line: &str) -> Option<Command> {
                 Err(_) => Command::Invalid(format!("`{seat}` is not a seat number")),
             },
             _ => Command::Invalid("usage: kick SEAT".into()),
+        },
+        "kick-player" => match rest.split_first() {
+            Some((id, reason)) => match id.parse::<u8>() {
+                Ok(id) => Command::KickPlayer(id, reason.join(" ")),
+                Err(_) => Command::Invalid(format!("`{id}` is not a player id")),
+            },
+            None => Command::Invalid("usage: kick-player ID [REASON]".into()),
         },
         other => Command::Invalid(format!("unknown command `{other}`. {HELP}")),
     })
@@ -89,6 +100,18 @@ mod tests {
         assert_eq!(parse("status"), Some(Command::Status));
         assert_eq!(parse("  players  "), Some(Command::Players));
         assert_eq!(parse("kick 3"), Some(Command::Kick(3)));
+        assert_eq!(
+            parse("kick-player 4"),
+            Some(Command::KickPlayer(4, String::new()))
+        );
+        assert_eq!(
+            parse("kick-player 4 no  callsigns like that"),
+            Some(Command::KickPlayer(4, "no callsigns like that".into()))
+        );
+        assert!(matches!(parse("kick-player"), Some(Command::Invalid(m)) if m.contains("usage")));
+        assert!(
+            matches!(parse("kick-player x"), Some(Command::Invalid(m)) if m.contains("player id"))
+        );
         assert_eq!(parse("end"), Some(Command::End));
         assert_eq!(parse("restart"), Some(Command::Restart));
         assert_eq!(parse("quit"), Some(Command::Quit));

@@ -112,6 +112,10 @@ impl<'a> Loop<'a> {
                         self.log.print(&line);
                     }
                 }
+                Command::KickPlayer(id, reason) => match host.kick_player(id, &reason) {
+                    Ok(callsign) => self.log_line(&format!("kicked player {id} {callsign}")),
+                    Err(reason) => self.log.print(&reason),
+                },
                 Command::Kick(seat) => match host.kick(seat) {
                     Ok(callsign) => self.log_line(&format!("kicked seat {seat} {callsign}")),
                     Err(reason) => self.log.print(&reason),
@@ -182,6 +186,7 @@ mod tests {
 
     fn player(seat: u8, callsign: &str) -> PlayerFigures {
         PlayerFigures {
+            id: seat,
             seat: Some(seat),
             callsign: callsign.into(),
             plane: Some(u32::from(seat)),
@@ -315,12 +320,30 @@ mod tests {
         let mut rig = Rig::new("run-console");
         let mut host = ScriptedHost {
             flying: true,
-            players: vec![player(1, "Viper"), player(2, "Cobra")],
+            players: vec![
+                player(1, "Viper"),
+                player(2, "Cobra"),
+                PlayerFigures {
+                    id: 7,
+                    callsign: "Hawk".into(),
+                    ..Default::default()
+                },
+            ],
             ..Default::default()
         };
         let (sender, console) = channel();
         for line in [
-            "status", "players", "kick 2", "kick 9", "end", "restart", "bogus", "help", "quit",
+            "status",
+            "players",
+            "kick 2",
+            "kick 9",
+            "kick-player 7 Wrong slot",
+            "kick-player 8",
+            "end",
+            "restart",
+            "bogus",
+            "help",
+            "quit",
         ] {
             sender.send(crate::console::parse(line).unwrap()).unwrap();
         }
@@ -328,14 +351,17 @@ mod tests {
         let ended = Loop::new(&mut rig.timer, &mut log, &console, 0).run(&mut host);
         assert_eq!(ended, Ended::Quit);
         assert_eq!(host.kicked, vec![2]);
+        assert_eq!(host.kicked_players, vec![7], "a lobby player, by its id");
         assert_eq!((host.ended, host.restarted), (1, 1));
         assert_eq!(host.stopped, Some(Duration::ZERO));
         let text = rig.console.text();
         for needle in [
-            "tick 0 players 2/15",
+            "tick 0 players 3/15",
             "Viper",
             "kicked seat 2 Cobra",
             "no player in seat 9",
+            "kicked player 7 Hawk",
+            "no player has the lobby id 8",
             "ending the mission",
             "restarting the mission",
             "unknown command `bogus`",

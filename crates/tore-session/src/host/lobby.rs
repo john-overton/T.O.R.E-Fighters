@@ -22,6 +22,9 @@ pub(super) struct Entry {
     pub ready: bool,
     /// Why the player's import cannot play the mission, when it cannot.
     pub unable: Option<String>,
+    /// Only the flight's build failed (the loadouts' weapons): cleared when
+    /// the lobby returns.
+    pub unable_flight: bool,
 }
 
 impl Entry {
@@ -33,6 +36,7 @@ impl Entry {
             loadout: None,
             ready: false,
             unable: None,
+            unable_flight: false,
         }
     }
 
@@ -67,6 +71,9 @@ pub enum LobbyEvent {
     Kicked(String),
     /// The player left the flight and is back in the lobby.
     BackInLobby,
+    /// The player sent more lobby requests in a second than the host
+    /// answers; the rest of that second's are dropped.
+    TooManyRequests,
 }
 
 impl fmt::Display for LobbyEvent {
@@ -88,6 +95,9 @@ impl fmt::Display for LobbyEvent {
             Self::Kicked(reason) if reason.is_empty() => f.write_str("was kicked"),
             Self::Kicked(reason) => write!(f, "was kicked: {reason}"),
             Self::BackInLobby => f.write_str("is back in the lobby"),
+            Self::TooManyRequests => {
+                f.write_str("sent too many lobby requests; the rest of this second's are dropped")
+            }
         }
     }
 }

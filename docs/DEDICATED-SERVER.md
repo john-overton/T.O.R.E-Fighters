@@ -292,7 +292,12 @@ dedicated server has none. *The dedicated server's rules, agent decisions:*
   with `start now`); `after-end quit` disconnects everyone and exits.
 - **Nobody is King**: the King's requests (change the mission, start, end the
   mission, kick) are refused with "Only the King may do that."; the console
-  still ends, restarts and kicks by seat. A game with no lobby screen
+  still ends and restarts, kicks a seated player by seat, and kicks any
+  player by lobby id (`kick-player`).
+- **Loadouts** are chosen in the lobby; one sent while the mission flies is
+  refused. A player whose own copy of a loadout's other weapon differs from
+  the server's is told at the flight's start and kept in the lobby for that
+  flight, and may fly the next. A game with no lobby screen
   (`tore-app --connect`, `tore-bot`) takes its slot and marks ready by
   itself, so a server with `start first-player` starts as soon as the first
   such player joins, as before.
@@ -406,8 +411,9 @@ The server reads commands from its standard input:
 | Command | Does |
 | --- | --- |
 | `status` | One status line now |
-| `players` | Every connected player: seat, callsign, plane, round trip, loss, input margin, inputs repeated |
+| `players` | Every connected player: lobby id, seat, callsign, plane, round trip, loss, input margin, inputs repeated |
 | `kick SEAT` | Gives the plane back to the AI and disconnects the player (a seated player; one in the lobby has no seat) |
+| `kick-player ID [REASON]` | Removes the player with that lobby id (the `players` table's first column), in the lobby or flying, telling it the reason; its plane, if it flies one, goes back to the AI with no debrief (EF4) |
 | `end` | Ends the mission now, with debriefs |
 | `restart` | Ends the mission and starts it again at once |
 | `quit` | Tells every player the server is stopping, then exits |
