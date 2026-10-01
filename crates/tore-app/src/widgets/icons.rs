@@ -11,6 +11,7 @@ pub enum Icon {
     /// The King, the player who built the mission.
     Crown,
     /// A player who is ready to fly.
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     Ready,
 }
 

@@ -138,6 +138,20 @@ impl Join {
     /// opened.
     pub fn connect(options: &ConnectOptions) -> Result<Self, String> {
         let server = options.resolve()?;
+        let mut join = Self::to(server, &options.callsign, &options.password, &options.host)?;
+        join.slot = options.slot;
+        Ok(join)
+    }
+
+    /// A join to an address already known (a game the Direct Connection
+    /// screen found, or an address its lookup reached): a socket opened,
+    /// nothing looked up.
+    pub fn to(
+        server: SocketAddr,
+        callsign: &str,
+        password: &str,
+        label: &str,
+    ) -> Result<Self, String> {
         let local: SocketAddr = if server.is_ipv4() {
             ([0, 0, 0, 0], 0).into()
         } else {
@@ -148,10 +162,10 @@ impl Join {
         Ok(Self {
             server,
             transport: Transport::Udp(socket),
-            callsign: options.callsign.clone(),
-            slot: options.slot,
-            password: options.password.clone(),
-            label: options.host.clone(),
+            callsign: callsign.to_owned(),
+            slot: None,
+            password: password.to_owned(),
+            label: label.to_owned(),
         })
     }
 }
@@ -192,8 +206,20 @@ pub struct NetSession {
     host_failure: Option<String>,
     /// The lobby state the King's automatic start was last asked for.
     started_for: Option<tore_session::wire::messages::LobbyState>,
+    /// The King starts every mission by itself (a game hosted from the
+    /// command line). A game hosted from the Direct Connection screen starts
+    /// the first one and then waits in the lobby, so its player can come back
+    /// to the screen and leave (EF7, agent decision; EF8's Fly button
+    /// replaces both).
+    pub auto_restart: bool,
     /// The lobby's last line in the log.
     lobby_line: Option<String>,
+}
+
+/// Whether the King may start a mission by itself now: always when it
+/// restarts missions, and otherwise only before the first.
+fn restart_due<T>(auto_restart: bool, started_for: &Option<T>) -> bool {
+    auto_restart || started_for.is_none()
 }
 
 /// How long after Leave the game waits for the debrief and the disconnect
@@ -280,6 +306,7 @@ impl NetSession {
             hosting: None,
             host_failure: None,
             started_for: None,
+            auto_restart: true,
             lobby_line: None,
         })
     }
@@ -292,9 +319,11 @@ impl NetSession {
     /// The King's start for a game hosted from the command line (agent
     /// decision, until the lobby screen's Fly button, EF8): as soon as
     /// every player holding a slot is ready, when `allowed` (the hosting
-    /// player is not reading a debrief), once for each lobby state.
+    /// player is not reading a debrief), once for each lobby state, and, when
+    /// [`NetSession::auto_restart`] is off, only the first mission.
     pub fn auto_start(&mut self, allowed: bool) {
-        if !allowed || self.hosting.is_none() {
+        if !allowed || self.hosting.is_none() || !restart_due(self.auto_restart, &self.started_for)
+        {
             return;
         }
         let Some(lobby) = self.client.lobby() else {
@@ -597,6 +626,16 @@ fn release_of(
 mod tests {
     use super::*;
     use tore_sim::combat::live::DeviceRelease as Combat;
+
+    /// A game hosted from the Direct Connection screen starts its first
+    /// mission by itself and then leaves the next to the lobby screen.
+    #[test]
+    fn a_game_that_does_not_restart_starts_only_its_first_mission() {
+        assert!(restart_due(true, &None::<u8>));
+        assert!(restart_due(true, &Some(1u8)));
+        assert!(restart_due(false, &None::<u8>));
+        assert!(!restart_due(false, &Some(1u8)));
+    }
 
     /// What combat released, sent by the host and read back here, is the
     /// release combat made to within the wire's steps.

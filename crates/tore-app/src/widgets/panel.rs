@@ -80,6 +80,7 @@ pub struct Background {
 
 impl Background {
     /// One whole picture, as NETWORK CONNECTION is retail's `NETIPX3`.
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn single(base: &'static str) -> Self {
         Self { base, over: None }
     }

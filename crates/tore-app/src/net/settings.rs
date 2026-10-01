@@ -1,6 +1,7 @@
 //! What the multiplayer screens remember between sessions (slice EF5): the
 //! player's callsign, the last few addresses joined (most recent first), the
-//! port and the last game name hosted. One small text file in the data folder
+//! port, the last game name hosted and whether the Direct Connection screen
+//! lists full games. One small text file in the data folder
 //! beside the other preference files (`network-v1.conf`), read and written as
 //! they are. `--connect` and `--host` remember too.
 //!
@@ -12,6 +13,7 @@
 //! callsign Viper
 //! port 26900
 //! game-name Friday night
+//! show-full yes
 //! address 192.168.1.20:26900
 //! address game.example.org:26900
 //! ```
@@ -43,6 +45,8 @@ pub struct Remembered {
     pub game_name: Option<String>,
     /// The addresses last joined, most recent first.
     pub addresses: Vec<String>,
+    /// The Direct Connection screen lists games that are full (EF7).
+    pub show_full: bool,
 }
 
 impl Default for Remembered {
@@ -52,6 +56,7 @@ impl Default for Remembered {
             port: DEFAULT_PORT,
             game_name: None,
             addresses: Vec::new(),
+            show_full: false,
         }
     }
 }
@@ -126,6 +131,9 @@ impl Remembered {
         if let Some(name) = &self.game_name {
             text += &format!("game-name {name}\n");
         }
+        if self.show_full {
+            text += "show-full yes\n";
+        }
         for address in &self.addresses {
             text += &format!("address {address}\n");
         }
@@ -174,6 +182,13 @@ impl Remembered {
                         ));
                     }
                     found.game_name = Some(value.to_owned());
+                }
+                "show-full" => {
+                    found.show_full = match value {
+                        "yes" => true,
+                        "no" => false,
+                        _ => return Err(format!("show-full `{value}` is not yes or no")),
+                    };
                 }
                 "address" => {
                     let before = found.addresses.len();

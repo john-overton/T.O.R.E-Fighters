@@ -49,9 +49,17 @@ impl Button {
         self.default = true;
         self
     }
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn is_default(&self) -> bool {
         self.default
     }
+    /// Makes the button the screen's default one, or takes that away: a
+    /// screen whose Enter goes to a different button as the player works
+    /// (Direct Connection's New or Join) moves the blue face between them.
+    pub fn set_default(&mut self, default: bool) {
+        self.default = default;
+    }
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn label(&self) -> &str {
         &self.label
     }
@@ -65,6 +73,7 @@ impl Button {
             self.pressed = false;
         }
     }
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn is_pressed(&self) -> bool {
         self.pressed
     }

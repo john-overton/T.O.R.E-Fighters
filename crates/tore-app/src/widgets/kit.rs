@@ -28,6 +28,69 @@ pub const PIECES: &[&str] = &[
     "ROCKER00", "ROCKER01", "ROCKER02", "ROCKER03", "ROCKER04",
 ];
 
+/// What a screen needs to build a [`Kit`] when it opens, kept for the life of
+/// the game (*agent decision*, EF7). `Menu::new` consumes the imported
+/// `Assets`, and building the kit takes about 150 ms, so the game keeps the
+/// raw pictures the kit is made of (about 3 MB: the menu pieces it shares with
+/// Choose Activity, copied, and the multiplayer pieces, moved as bytes) and
+/// builds the kit the first time a screen opens, on a thread, then keeps the
+/// kit too.
+pub struct KitSource {
+    pics: BTreeMap<String, Pic>,
+    multiplayer: BTreeMap<String, Vec<u8>>,
+}
+
+/// A copy of a picture (`Pic` has no `Clone`; every field is public).
+fn copy_pic(pic: &Pic) -> Pic {
+    Pic {
+        width: pic.width,
+        height: pic.height,
+        pixels: pic.pixels.clone(),
+        mask: pic.mask.clone(),
+        palette: pic.palette.clone(),
+        glyphs: pic.glyphs.clone(),
+    }
+}
+
+impl KitSource {
+    /// Keeps what the kit is made of from the game's menu art and its
+    /// multiplayer resources, and the retail quick messages.
+    pub fn of(pics: &BTreeMap<String, Pic>, multiplayer: &BTreeMap<String, Vec<u8>>) -> Self {
+        let wanted = |file: &str| {
+            PIECES
+                .iter()
+                .chain(BACKGROUNDS.iter())
+                .any(|name| format!("{name}.PIC") == file)
+        };
+        Self {
+            pics: pics
+                .iter()
+                .filter(|(file, _)| wanted(file))
+                .map(|(file, pic)| (file.clone(), copy_pic(pic)))
+                .collect(),
+            multiplayer: multiplayer
+                .iter()
+                .filter(|(file, _)| wanted(file) || *file == tore_import::selection::CHAT_RESOURCE)
+                .map(|(file, bytes)| (file.clone(), bytes.clone()))
+                .collect(),
+        }
+    }
+
+    /// The kit in the palette of `primary` (see [`Kit::new`]).
+    pub fn build(&self, primary: &str) -> AppResult<Kit> {
+        Kit::new(&self.pics, &self.multiplayer, primary)
+    }
+
+    /// The retail quick messages (`CHAT.TXT`, F1 to F12 while typing a
+    /// message); none when the import has no file.
+    pub fn quick_messages(&self) -> Vec<tore_formats::chat::QuickMessage> {
+        self.multiplayer
+            .get(tore_import::selection::CHAT_RESOURCE)
+            .map(|bytes| tore_formats::chat::parse(bytes))
+            .unwrap_or_default()
+    }
+}
+
 /// The decoded pieces. Sprites are keyed `NAME.PIC`, as the menu's own sprite
 /// maps are, so `Canvas::button_style` can draw from [`Kit::sprites`] as it is.
 pub struct Kit {
@@ -108,6 +171,7 @@ impl Kit {
     }
 
     /// A kit from sprites already made, for tests and previews.
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn from_sprites(sprites: BTreeMap<String, Sprite>) -> Self {
         Self { sprites }
     }

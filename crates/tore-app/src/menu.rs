@@ -42,6 +42,12 @@ pub enum Action {
     Controls,
     Graphics,
     Sound,
+    /// The Multi menu's Direct Connection row: opens that screen (EF7).
+    Direct,
+    /// Leaves the Direct Connection screen.
+    DirectClose,
+    /// Leaves the game session the Direct Connection screen started.
+    DirectLeave,
     /// Opens the mission replay viewer on a recording.
     #[allow(dead_code)] // Sent by the Replays screen's Watch button.
     WatchReplay(std::path::PathBuf),
@@ -112,11 +118,10 @@ impl State {
                 "Controls...".into(),
                 "Re-import media...".into(),
             ],
-            2 => vec![
-                "Host Game...".into(),
-                "Join Game...".into(),
-                "Player Setup...".into(),
-            ],
+            // Authored rows (EF7, agent decision): the direct lobby for friends
+            // and the public lobby stage I will add. Retail's six rows (Serial,
+            // Modem, IPX/SPX, TCP/IP, Disconnect, Airbase Assault) are not built.
+            2 => vec!["Direct Connection...".into(), "Internet Lobby...".into()],
             // Replays opens its screen directly.
             _ => vec![],
         }
@@ -230,6 +235,10 @@ impl State {
                     if bar == 1 && row == 3 {
                         self.cancel();
                         return Action::ReimportMedia;
+                    }
+                    if bar == 2 && row == 0 {
+                        self.cancel();
+                        return Action::Direct;
                     }
                     if let Some(item) = self.items(bar).get(row) {
                         self.toast = Some((
@@ -347,6 +356,9 @@ pub(crate) struct Sprite {
 }
 pub struct Menu {
     pub state: State,
+    /// What the multiplayer screens' kit is built from when one opens (the
+    /// assets are consumed by `Menu::new`).
+    pub kit_source: std::sync::Arc<crate::widgets::KitSource>,
     pub(crate) sprites: BTreeMap<String, Sprite>,
     pub quick_sprites: BTreeMap<String, Sprite>,
     pub pixels: Vec<u8>,
@@ -410,6 +422,10 @@ impl Menu {
             let seed = std::collections::hash_map::RandomState::new().hash_one(());
             choices[seed as usize % choices.len()].to_string()
         };
+        let kit_source = std::sync::Arc::new(crate::widgets::KitSource::of(
+            &assets.pics,
+            &assets.multiplayer_resources,
+        ));
         assets.palette = assets.pics[&background]
             .palette
             .clone()
@@ -506,6 +522,7 @@ impl Menu {
         );
         Ok(Self {
             state,
+            kit_source,
             sprites,
             quick_sprites,
             pixels: vec![0; WIDTH * HEIGHT * 4],

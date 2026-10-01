@@ -54,8 +54,6 @@
 //! mock NETWORK CONNECTION screen made only of kit widgets, and the sheets
 //! of every widget in each state, are ignored tests in `mock_screen.rs` that
 //! render from the imported pieces.
-#![allow(dead_code, unused_imports)] // The screens that use the kit arrive with EF7 and EF8.
-
 mod button;
 mod check_box;
 mod draw;
@@ -70,18 +68,18 @@ mod text_field;
 #[cfg(test)]
 mod mock_screen;
 #[cfg(test)]
-mod test_kit;
+pub(crate) mod test_kit;
 
 pub use button::Button;
 pub use check_box::CheckBox;
-pub use draw::{FOCUS_COLOUR, focus_mark};
+pub use draw::fit;
 pub use focus::{Focus, Route};
 pub use icons::Icon;
-pub use kit::{Kit, PIECES};
+pub use kit::{Kit, KitSource};
 pub use list::{Align, Cell, Column, List, Pager, Row};
 pub use message_box::{MessageBox, tone};
 pub use panel::{Background, draw_panel};
-pub use text_field::{Filter, TextField, address_problem, parse_address};
+pub use text_field::{Filter, TextField, parse_address};
 
 /// A rectangle on the 640 by 480 canvas: x, y, width, height.
 pub type Rect = (i32, i32, i32, i32);

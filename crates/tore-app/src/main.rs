@@ -21,6 +21,7 @@ mod countermeasure_renderer;
 mod damage_art;
 mod debrief;
 mod diagnostics;
+mod direct_screen;
 mod effect_renderer;
 mod ejection_art;
 mod engine_material;
@@ -324,6 +325,8 @@ struct App {
     net_flight: Option<net::play::NetFlight>,
     /// Why the session ended, in plain words, for the player.
     net_ending: Option<String>,
+    /// The Direct Connection screen, open over the main menu (EF7).
+    direct: direct_screen::app::Direct,
 }
 /// Wing vapor line segments: position then RGBA, two vertices per segment.
 /// The five native colors are patterned fill types resolved through LAY
@@ -1117,6 +1120,13 @@ impl App {
             };
             let outcome = screen.key(key, false);
             return self.sound_result(outcome);
+        }
+        // And the Direct Connection screen.
+        if self.direct_open() {
+            let Some(key) = key else {
+                return Action::None;
+            };
+            return self.direct_key(key, None);
         }
         // Controller menu buttons navigate the Graphics screen while it is open.
         if let Some(editor) = &mut self.graphics_screen {
@@ -2044,6 +2054,9 @@ impl App {
             Action::Controls => self.open_controls("Main menu"),
             Action::Graphics => self.open_graphics("Main menu"),
             Action::Sound => self.open_sound(false),
+            Action::Direct => self.open_direct(),
+            Action::DirectClose => self.close_direct(),
+            Action::DirectLeave => self.leave_direct_session(event_loop),
             Action::WatchReplay(ref path) => self.watch_replay(path),
             Action::ReimportMedia => {
                 // The pack on disk is still valid here, so the menu the player
@@ -2297,6 +2310,9 @@ impl App {
                     "T.O.R.E-Fighters - {} Free Flight",
                     self.hornet.profile.id.label()
                 ),
+                Screen::Main if self.direct.screen.is_some() => {
+                    "T.O.R.E-Fighters - Direct Connection".to_string()
+                }
                 Screen::Main => "T.O.R.E-Fighters - Choose Activity".to_string(),
                 Screen::Quick => "T.O.R.E-Fighters - Quick Mission Creator".to_string(),
                 Screen::Viewer => format!(
@@ -2597,6 +2613,17 @@ impl App {
         {
             let result = editor.key(&name, self.modifiers.shift_key());
             let action = self.graphics_result(result);
+            self.action(event_loop, action);
+            return Action::None;
+        }
+        // The Direct Connection screen takes key presses and typed text,
+        // except the shortcuts that quit the game.
+        if event.pressed
+            && self.direct_open()
+            && !((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
+                || (self.modifiers.alt_key() && name == "F4"))
+        {
+            let action = self.direct_key(&name, event.text.as_deref());
             self.action(event_loop, action);
             return Action::None;
         }
@@ -2937,6 +2964,7 @@ impl ApplicationHandler for App {
             && self.renderer.as_ref().is_some_and(|r| r.window.id() == id)
         {
             self.net_tick(event_loop);
+            self.direct_tick(event_loop);
         }
         let Some(renderer) = self.renderer.as_mut() else {
             return;
@@ -2964,6 +2992,9 @@ impl ApplicationHandler for App {
                 if let Some(screen) = &mut self.replays_screen {
                     screen.cancel_press();
                 }
+                if let Some(screen) = &mut self.direct.screen {
+                    screen.cancel_press();
+                }
                 self.mouse_look = None;
                 self.pointer = None;
                 self.live_debug.release();
@@ -2981,6 +3012,12 @@ impl ApplicationHandler for App {
                     if outcome != sound_screen::Outcome::None {
                         self.action(event_loop, action);
                     }
+                    return;
+                }
+                if self.screen == Screen::Main
+                    && let Some(screen) = &mut self.direct.screen
+                {
+                    screen.moved(point);
                     return;
                 }
                 if self.controls.is_some()
@@ -3057,6 +3094,11 @@ impl ApplicationHandler for App {
                 {
                     let result = screen.wheel(notches);
                     self.replays_result(result)
+                } else if self.direct_open()
+                    && let Some(screen) = &mut self.direct.screen
+                {
+                    screen.wheel(notches);
+                    Action::None
                 } else if self.screen == Screen::Flight && !self.flight_ui.frozen() {
                     self.input.mouse_wheel(notches);
                     Action::None
@@ -3068,6 +3110,9 @@ impl ApplicationHandler for App {
                 self.pointer = None;
                 self.live_debug.release();
                 self.quick.pointer(None);
+                if let Some(screen) = &mut self.direct.screen {
+                    screen.moved(None);
+                }
                 self.menu.state.pointer(None)
             }
             WindowEvent::Focused(true) => {
@@ -3094,6 +3139,9 @@ impl ApplicationHandler for App {
                     screen.cancel_press();
                 }
                 if let Some(screen) = &mut self.replays_screen {
+                    screen.cancel_press();
+                }
+                if let Some(screen) = &mut self.direct.screen {
                     screen.cancel_press();
                 }
                 self.mouse_look = None;
@@ -3154,6 +3202,15 @@ impl ApplicationHandler for App {
                     replay::screen::Outcome::None
                 };
                 self.replays_result(result)
+            }
+            WindowEvent::MouseInput { state, button, .. }
+                if self.screen == Screen::Main && self.direct.screen.is_some() =>
+            {
+                if button == MouseButton::Left {
+                    self.direct_button(state == ElementState::Pressed)
+                } else {
+                    Action::None
+                }
             }
             WindowEvent::MouseInput {
                 state,
@@ -3345,7 +3402,14 @@ impl ApplicationHandler for App {
                                 screen.refresh();
                             }
                         }
-                        let mut animating = self.menu.render();
+                        // Direct Connection covers the whole menu; it draws its
+                        // own background, so the menu is not drawn under it.
+                        let mut animating = if let Some(screen) = &self.direct.screen {
+                            screen.draw(&mut menu::Canvas(&mut self.menu.pixels));
+                            true
+                        } else {
+                            self.menu.render() || self.direct.is_building()
+                        };
                         if let Some(editor) = &self.controls {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
                         }
@@ -10012,6 +10076,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             for p in menu.pixels.chunks_exact(4) {
                 f.write_all(&p[..3])?;
             }
+        } else if snapshot_state.starts_with("direct") {
+            // The Direct Connection screen with synthetic games and lines.
+            direct_screen::preview::render(&menu.kit_source, &snapshot_state, &mut menu.pixels)?;
+            use std::io::Write;
+            let mut f = std::fs::File::create(&path)?;
+            write!(f, "P6\n640 480\n255\n")?;
+            for p in menu.pixels.chunks_exact(4) {
+                f.write_all(&p[..3])?;
+            }
         } else if let Some(state) = snapshot_state.strip_prefix("replays") {
             // A synthetic list: no recordings are read or needed.
             let mut screen = replay::screen::Replays::preview("Main menu");
@@ -10888,6 +10961,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         net_built: None,
         net_flight: None,
         net_ending: None,
+        direct: Default::default(),
         connect,
         launch_creator,
         quick_loadout: stripped_loadout.clone(),

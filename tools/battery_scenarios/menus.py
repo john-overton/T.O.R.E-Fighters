@@ -16,6 +16,7 @@ NORMAL_STATES = [
     "normal", "hover", "pressed", "help", "pref", "multi", "notice", "controls", "controls-keyboard",
     "controls-mouse", "controls-head", "controls-search", "controls-search-keys", "graphics", "sound",
     "replays", "replays-settings", "replays-delete", "locate", "locate-importing", "locate-done",
+    "direct", "direct-games", "direct-trying", "direct-refused", "direct-options",
 ]
 # Quick Mission mode states, the loadout page states and the debrief pages.
 QUICK_STATES = [

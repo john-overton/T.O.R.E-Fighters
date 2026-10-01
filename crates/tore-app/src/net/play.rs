@@ -106,11 +106,22 @@ impl App {
         };
         let server = options.server();
         crate::net::settings::remember_join(&data, &options);
-        let join = match crate::net::session::Join::connect(&options) {
-            Ok(join) => join,
+        match crate::net::session::Join::connect(&options) {
+            Ok(join) => {
+                self.start_join(join, &server);
+            }
+            Err(error) => self.message(error),
+        }
+    }
+
+    /// Starts the session over `join`, naming `server` to the player. False
+    /// (with the reason shown) when it could not start.
+    pub(crate) fn start_join(&mut self, join: crate::net::session::Join, server: &str) -> bool {
+        let data = match crate::assets::data_directory() {
+            Ok(data) => data,
             Err(error) => {
-                self.message(error);
-                return;
+                self.error = Some(error);
+                return false;
             }
         };
         match NetSession::start(
@@ -122,9 +133,11 @@ impl App {
             Ok(session) => {
                 self.net = Some(session);
                 self.message(format!("Joining {server}..."));
+                true
             }
             Err(error) => {
                 self.message(error);
+                false
             }
         }
     }
@@ -136,6 +149,9 @@ impl App {
         log::info!("Network: {text}");
         if self.screen == Screen::Flight {
             self.flight_ui.message(text);
+        } else if let Some(screen) = &mut self.direct.screen {
+            // The Direct Connection screen is where the player is looking.
+            screen.say(&text);
         } else {
             self.menu.state.toast = Some((
                 text,
@@ -224,7 +240,11 @@ impl App {
     /// One session event. `false` ends the session.
     fn net_event(&mut self, event: ClientEvent) -> bool {
         match event {
-            ClientEvent::Connected { .. } => {}
+            ClientEvent::Connected { .. } => {
+                if let Some(screen) = &mut self.direct.screen {
+                    screen.say("Connected. Loading the game's mission...");
+                }
+            }
             ClientEvent::MissionLoaded => {
                 let session = self.net.as_mut().expect("a session");
                 match session.take_built() {

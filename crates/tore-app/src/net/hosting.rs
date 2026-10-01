@@ -532,29 +532,31 @@ impl crate::App {
     /// Starts hosting the game the command line described: the host thread,
     /// then this game's own join over the in-process link.
     pub(crate) fn start_hosting(&mut self, options: HostOptions) {
+        if let Err(error) = self.begin_hosting(options) {
+            self.message(error);
+        }
+    }
+
+    /// Starts hosting `options`, naming why it could not (a port in use, a
+    /// mission that does not build) in plain words. The Direct Connection
+    /// screen's New calls this and shows the reason in its Messages.
+    pub(crate) fn begin_hosting(&mut self, options: HostOptions) -> Result<(), String> {
         let data = match crate::assets::data_directory() {
             Ok(data) => data,
             Err(error) => {
                 self.error = Some(error);
-                return;
+                return Ok(());
             }
         };
         crate::net::settings::remember_host(&data, &options);
         let resources = Arc::clone(&self.theater_resources);
-        let started = HostThread::start(HostSetup {
+        let (thread, link) = HostThread::start(HostSetup {
             spec: options.spec.clone(),
             resources: Arc::clone(&resources),
             config: config(&options),
             listen: Listen::Any,
             port: options.port,
-        });
-        let (thread, link) = match started {
-            Ok(started) => started,
-            Err(error) => {
-                self.message(error);
-                return;
-            }
-        };
+        })?;
         let listening: Vec<String> = thread.addresses().iter().map(ToString::to_string).collect();
         log::info!(
             "Host: hosting {} from {} on UDP {}",
@@ -570,18 +572,15 @@ impl crate::App {
             password: options.password.clone().unwrap_or_default(),
             label: "hosted".into(),
         };
-        match NetSession::start(join, resources, &data, self.replay_library.as_ref()) {
-            Ok(mut session) => {
-                session.hosting = Some(thread);
-                self.net = Some(session);
-                self.message(format!(
-                    "Hosting {} on UDP port {}...",
-                    options.name, options.port
-                ));
-            }
-            // Dropping the thread stops it.
-            Err(error) => self.message(error),
-        }
+        // Dropping the thread, on an error, stops it.
+        let mut session = NetSession::start(join, resources, &data, self.replay_library.as_ref())?;
+        session.hosting = Some(thread);
+        self.net = Some(session);
+        self.message(format!(
+            "Hosting {} on UDP port {}...",
+            options.name, options.port
+        ));
+        Ok(())
     }
 }
 

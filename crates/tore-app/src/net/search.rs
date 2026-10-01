@@ -365,6 +365,7 @@ impl<D: Datagrams> Search<D> {
     }
 
     /// When the next round of queries goes out.
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn next_round(&self) -> Duration {
         self.next_round
     }

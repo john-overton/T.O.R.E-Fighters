@@ -11,12 +11,9 @@ pub mod debrief;
 pub mod files;
 pub mod guns;
 pub mod hosting;
-#[allow(dead_code)] // Taken by the Direct Connection screen (EF7).
 pub mod lookup;
 pub mod options;
 pub mod play;
-#[allow(dead_code)] // Taken by the Direct Connection screen (EF7).
 pub mod search;
 pub mod session;
-#[allow(dead_code)] // The screens read the callsign and addresses (EF7).
 pub mod settings;

@@ -167,18 +167,23 @@ impl List {
         self.enabled = enabled;
     }
 
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn len(&self) -> usize {
         self.rows.len()
     }
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn is_empty(&self) -> bool {
         self.rows.is_empty()
     }
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn rows(&self) -> &[Row] {
         &self.rows
     }
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn visible(&self) -> usize {
         self.visible
     }
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn selected(&self) -> Option<usize> {
         self.selected
     }
@@ -186,6 +191,7 @@ impl List {
         self.selected.and_then(|i| self.rows.get(i))
     }
     /// The page shown, from 0.
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn page(&self) -> usize {
         self.page
     }
@@ -230,6 +236,7 @@ impl List {
     }
 
     /// The text of the page box, as retail formats it, for example `1  of  3`.
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn page_counter(&self) -> String {
         let (left, right) = self.counter_parts();
         format!("{left}{right}")

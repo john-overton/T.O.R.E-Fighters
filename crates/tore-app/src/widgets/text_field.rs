@@ -77,6 +77,8 @@ pub struct TextField {
     /// The first character shown; settled by the next draw or click.
     first: Cell<usize>,
     enabled: bool,
+    /// Draws a `*` for every character (a password).
+    masked: bool,
 }
 
 impl TextField {
@@ -101,7 +103,14 @@ impl TextField {
             caret: 0,
             first: Cell::new(0),
             enabled: true,
+            masked: false,
         }
+    }
+    /// Shows a `*` for every character typed, as a password field does. The
+    /// text is still what [`TextField::text`] returns.
+    pub fn masked(mut self) -> Self {
+        self.masked = true;
+        self
     }
     /// A tighter limit than the filter's.
     pub fn with_max(mut self, max: usize) -> Self {
@@ -122,6 +131,7 @@ impl TextField {
         &self.text
     }
     /// The caret's place, in characters from the start.
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn caret(&self) -> usize {
         self.caret
     }
@@ -283,7 +293,11 @@ impl TextField {
                 text_clipped(canvas, font, &self.hint, (left, top), clip, Some([150; 3]));
             }
         } else {
-            let shown: String = self.text.chars().skip(first).collect();
+            let shown: String = if self.masked {
+                "*".repeat(self.text.chars().count().saturating_sub(first))
+            } else {
+                self.text.chars().skip(first).collect()
+            };
             let tint = (!self.enabled).then_some([120; 3]);
             text_clipped(canvas, font, &shown, (left, top), clip, tint);
         }
@@ -309,6 +323,7 @@ impl Widget for TextField {
 
 /// Why `text` is not an address the Direct Connection screen can join, in
 /// plain words, or `None` when it is one. See [`parse_address`].
+#[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
 pub fn address_problem(text: &str) -> Option<&'static str> {
     parse_address(text).err()
 }

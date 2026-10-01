@@ -87,6 +87,7 @@ pub fn blit_part(
 }
 
 /// The whole of `sprite` at `(x, y)`.
+#[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
 pub fn blit_all(canvas: &mut Canvas, sprite: &Sprite, at: (i32, i32)) {
     canvas.blit(sprite, at, 0, sprite.width, 1.0);
 }
@@ -129,6 +130,7 @@ pub fn text_clipped(
 }
 
 /// Text with no clip beyond the canvas, optionally tinted.
+#[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
 pub fn text_at(
     canvas: &mut Canvas,
     font: &Sprite,
@@ -185,6 +187,7 @@ pub fn fit(font: &Sprite, text: &str, width: i32) -> String {
 }
 
 /// The height of the lit rows of a font, for centring a line of text.
+#[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
 pub fn glyph_height(font: &Sprite) -> i32 {
     font.height as i32
 }

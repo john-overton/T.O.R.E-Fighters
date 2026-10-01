@@ -50,6 +50,7 @@ impl<Id: Copy + PartialEq> Focus<Id> {
     pub fn current(&self) -> Option<Id> {
         self.current
     }
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn default_button(&self) -> Option<Id> {
         self.default
     }
@@ -68,6 +69,7 @@ impl<Id: Copy + PartialEq> Focus<Id> {
             self.current = Some(id);
         }
     }
+    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn clear(&mut self) {
         self.current = None;
         self.keyboard = false;
