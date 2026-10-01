@@ -506,9 +506,6 @@ impl DirectScreen {
         }
         self.cancel
             .set_label(if self.session { "Leave" } else { "Cancel" });
-        for field in [&mut self.callsign, &mut self.address] {
-            field.set_enabled(!busy);
-        }
         self.full.set_enabled(!busy);
         self.games.set_enabled(!busy);
     }
@@ -845,6 +842,10 @@ impl DirectScreen {
                 } else {
                     Outcome::None
                 }
+            }
+            // The fields do not take keys while something is going on.
+            Route::Widget(Id::Callsign | Id::Address | Id::Full | Id::Games) if busy => {
+                Outcome::None
             }
             Route::Widget(id) => match id {
                 Id::Callsign => match self.callsign.key(name) {

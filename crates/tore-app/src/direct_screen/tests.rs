@@ -192,6 +192,10 @@ fn the_buttons_are_disabled_while_something_is_going_on() {
     s.update_at(Duration::ZERO, false);
     assert!(!s.join.hit((240, 425)) && !s.new.hit((120, 425)) && !s.options_button.hit((360, 425)));
     assert!(s.cancel.hit((480, 425)));
+    // Typing and keys in the fields do nothing while it goes on.
+    s.focus.set(Id::Callsign);
+    s.key("Backspace", false);
+    assert_eq!(s.callsign_text(), "Maverick");
     // Enter does nothing but Esc cancels the lookup, and the screen stays.
     assert_eq!(s.key("Enter", false), Outcome::None);
     assert_eq!(s.key("Escape", false), Outcome::None);

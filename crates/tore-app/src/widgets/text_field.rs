@@ -123,6 +123,7 @@ impl TextField {
         self.hint = hint.into();
         self
     }
+    #[allow(dead_code)] // Kit API for the tests and the lobby screen (EF8).
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
     }
