@@ -502,14 +502,26 @@ pub(crate) fn station_specs(
     config: &live::Configuration,
     guns_only: bool,
 ) -> Vec<tore_sim::ai::mission::StationSpec> {
+    let counts: Vec<u16> = config.stations.iter().map(|s| s.count).collect();
+    station_specs_loaded(config, &counts, guns_only)
+}
+
+/// [`station_specs`] with each station carrying `quantities` (a player's
+/// loadout) instead of its full count.
+pub(crate) fn station_specs_loaded(
+    config: &live::Configuration,
+    quantities: &[u16],
+    guns_only: bool,
+) -> Vec<tore_sim::ai::mission::StationSpec> {
     let mut stores = Vec::new();
     for (index, station) in config.stations.iter().enumerate() {
         let w = &station.weapon;
         let gun = w.source == config.aircraft.gun();
+        let carried = u32::from(quantities.get(index).copied().unwrap_or(station.count));
         let mut spec = if gun {
-            simple_stations(0, u32::from(station.count), AI_STORE_SPEED).remove(0)
+            simple_stations(0, carried, AI_STORE_SPEED).remove(0)
         } else {
-            simple_stations(u32::from(station.count), 0, AI_STORE_SPEED).remove(0)
+            simple_stations(carried, 0, AI_STORE_SPEED).remove(0)
         };
         if guns_only && !gun {
             spec.store.rounds = tore_sim::ai::weapon_service::Rounds::Finite(0);
@@ -828,6 +840,30 @@ impl AiWings {
         airfields: &Airfields,
         humans: &[HumanSlot],
     ) -> WorldResult<Self> {
+        Self::build_mission_loaded(
+            wings,
+            targets,
+            guns_only,
+            resources,
+            airfields,
+            humans,
+            &BTreeMap::new(),
+        )
+    }
+
+    /// [`build_mission_for`](Self::build_mission_for) with the loadouts the
+    /// players chose for some planes of an open mission (EF4): each such
+    /// aircraft carries its loadout's stores, quantities and fuel, which a
+    /// human taking it over keeps.
+    pub fn build_mission_loaded(
+        wings: &[WingLaunch],
+        targets: &[live::Target],
+        guns_only: bool,
+        resources: &dyn ResourceSource,
+        airfields: &Airfields,
+        humans: &[HumanSlot],
+        loadouts: &BTreeMap<u32, tore_sim::combat::loadout::Loadout>,
+    ) -> WorldResult<Self> {
         let mut bridge = Self::build_for(wings, targets, airfields, humans, |id| {
             let bytes = resources
                 .get(id.pt())
@@ -849,13 +885,23 @@ impl AiWings {
                     .get(pt)
                     .ok_or_else(|| format!("aircraft cache missing {pt}"))?,
             )?;
-            let config = live::Configuration::from_source(&aircraft, |name| {
-                resources
-                    .get(name)
-                    .cloned()
-                    .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
-            })?;
-            let stores = station_specs(&config, guns_only);
+            let loaded = loadouts.get(&actor.id());
+            let config = match loaded {
+                Some(load) => load.configuration.clone(),
+                None => live::Configuration::from_source(&aircraft, |name| {
+                    resources
+                        .get(name)
+                        .cloned()
+                        .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+                })?,
+            };
+            let stores = match loaded {
+                Some(load) => station_specs_loaded(&config, &load.quantities, guns_only),
+                None => station_specs(&config, guns_only),
+            };
+            if let Some(load) = loaded {
+                actor.flight_mut().fuel = load.fuel_lbs;
+            }
             for (index, station) in config.stations.iter().enumerate() {
                 bridge
                     .weapons

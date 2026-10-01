@@ -37,6 +37,8 @@ mod handoff_tests;
 #[cfg(test)]
 mod lagcomp_tests;
 #[cfg(test)]
+mod loadout_tests;
+#[cfg(test)]
 mod open_tests;
 pub mod plane;
 #[cfg(test)]
@@ -129,6 +131,10 @@ pub struct AiSetup {
     pub flight_model: ai_wings::AiFlightModel,
     pub group_objectives: [tore_sim::ai::engagement::GroupObjective; 6],
     pub group_must_survive: [bool; 6],
+    /// The loadouts the players chose for planes of an open mission, by
+    /// plane, checked ([`crate::mission::LoadoutSpec::check_for_plane`]);
+    /// every other AI aircraft carries its standard load.
+    pub loadouts: std::collections::BTreeMap<u32, tore_sim::combat::loadout::Loadout>,
 }
 
 /// What a restart tells the app about the new flight.
@@ -389,13 +395,14 @@ impl World {
             } else {
                 &[ai_wings::HumanSlot::SINGLE_PLAYER]
             };
-            let mut bridge = ai_wings::AiWings::build_mission_for(
+            let mut bridge = ai_wings::AiWings::build_mission_loaded(
                 &ai.wings,
                 &self.combat.state.targets,
                 ai.guns_only,
                 resources,
                 &airfields,
                 humans,
+                &ai.loadouts,
             )?;
             bridge.set_flight_model(ai.flight_model)?;
             bridge.apply_mission_preset(ai.preset, lead.position);

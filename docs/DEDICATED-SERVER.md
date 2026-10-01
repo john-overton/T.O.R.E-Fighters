@@ -196,12 +196,14 @@ twice.
 | `flight-model human hybrid/legacy`, `flight-model ai standard/hybrid` | The flight models: the hybrid model for humans (the default, and the only one a networked mission uses) and `hybrid` for every AI aircraft (the default here). `legacy` and `standard` are the single-player game's own settings |
 | `enemy-skill novice/average/none` | The game's `--enemy-skill`: every enemy wing at one level. `none` by default |
 | `fixture-wings yes/no` | The game's `--fixture-wings` development setting: straight-flight fixtures instead of AI wings. A server does not use it |
-| `loadout fuel POUNDS`, `loadout cheat yes/no`, `loadout station N WEAPON COUNT QUANTITY` | The loadout of plane 0 for a single-player start, as the creator's Load Ordnance page leaves it: the fuel, the loadout screen's Cheat, and one line for every station, in the aircraft's station order, naming its weapon's resource, its capacity and what it carries. **Used only by the game, not by a server**: a networked plane carries its aircraft's standard load, so a server's file leaves them out (stage F lets a player choose) |
+| `loadout fuel POUNDS`, `loadout cheat yes/no`, `loadout station N WEAPON COUNT QUANTITY` | The loadout of plane 0 for a single-player start, as the creator's Load Ordnance page leaves it: the fuel, the loadout screen's Cheat, and one line for every station, in the aircraft's station order, naming its weapon's resource, its capacity and what it carries. **Used only by single player**: an open (networked) mission refuses it, since nobody flies from the start |
+| `plane-loadout PLANE fuel POUNDS`, `plane-loadout PLANE cheat no`, `plane-loadout PLANE station N WEAPON COUNT QUANTITY` | The loadout a player chose in the lobby for one plane of a networked mission, the same lines as `loadout` with the plane number first. *Built (EF4).* The host writes them into the mission it sends when a flight starts, so every player builds the same aircraft; a server's own file normally leaves them out, and a plane with none carries its aircraft's standard load. Each is checked as the [lobby's loadout rule](ARCHITECTURE.md#the-lobby) says, and single player refuses them |
 
 Planes are numbered as in the game: plane 0 is the lead of friendly wing 1,
 then every other aircraft in wing order. `--check` prints the list. Every
-plane carries its aircraft's standard load, and a player keeps the load of
-the plane they take; choosing a loadout before flight is stage F. Every AI
+plane carries its aircraft's standard load unless a player chose another for
+it in the lobby, and a player who takes a plane in flight keeps the load of
+the plane they take. Every AI
 aircraft flies the hybrid flight model in a networked mission (John,
 2026-09-28). Until the stage F lobby lets the creator save one, mission files
 are written by hand.

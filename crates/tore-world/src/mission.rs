@@ -19,6 +19,7 @@ use crate::{
     resources::ResourceSource,
     terrain::{CONDITION_NAMES, Overrides},
 };
+use std::collections::BTreeMap;
 use std::fmt;
 use tore_formats::{aircraft::AircraftId, weapons::Weapon};
 use tore_sim::{
@@ -58,6 +59,13 @@ pub const WINGS: usize = 6;
 
 /// The largest wing the creator offers (friendly wing 1 counts the player).
 pub const MAX_WING: usize = MAX_WING_MEMBERS;
+
+/// The most planes a mission has: six wings of five. Planes are numbered
+/// from 0.
+pub const MAX_PLANES: u32 = (WINGS * MAX_WING) as u32;
+
+/// The most stations a loadout lists.
+pub const MAX_STATIONS: usize = 64;
 
 /// One of the six weather and time of day choices the creator offers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -263,6 +271,87 @@ impl LoadoutSpec {
     }
 }
 
+impl LoadoutSpec {
+    /// The loadout a player chose for one plane of an open mission, put onto
+    /// the aircraft's standard load and checked. This is the multiplayer
+    /// lobby's rule (EF4, agent decision): the checks are the ones the
+    /// single-player Load Ordnance page makes before Fly, which live in
+    /// `tore_sim::combat::loadout` and are shared, not copied
+    /// ([`Loadout::validate`]: every quantity within its station's capacity
+    /// for that weapon, only weapons connected to flight, the fuel within the
+    /// tanks, the weight within the maximum take-off weight), plus three the
+    /// page makes by its controls, which a message must be checked for:
+    ///
+    /// - one station for each of the aircraft's, in its order;
+    /// - each station's capacity the one the page gives it: the standard
+    ///   count for the standard weapon, else the station's capacity for the
+    ///   weapon (what selecting it on the page sets);
+    /// - with the creator's Guns only, nothing loaded but the gun (the
+    ///   single-player build's own refusal, in its words).
+    ///
+    /// Cheat loading (any store on any station) is refused: the phase 2
+    /// lobby gives the King a setting for it (John, 2026-10-01), and until
+    /// then a multiplayer aircraft carries what it really carries.
+    pub fn check_for_plane(
+        &self,
+        aircraft: &tore_formats::aircraft::Aircraft,
+        resources: &dyn ResourceSource,
+        guns_only: bool,
+    ) -> crate::WorldResult<Loadout> {
+        if self.cheat {
+            return Err("Cheat loading is not allowed in a multiplayer game.".into());
+        }
+        let standard = Loadout::new(aircraft, |name| {
+            resources
+                .get(name)
+                .cloned()
+                .ok_or_else(|| std::io::Error::other(format!("missing loadout resource {name}")))
+        })?;
+        let load = self.apply(standard.clone(), resources, None)?;
+        for (index, station) in load.configuration.stations.iter().enumerate() {
+            let default = &standard.configuration.stations[index];
+            let expected = if station.weapon.source == default.weapon.source {
+                i32::from(default.count)
+            } else {
+                load.capacity(index, &station.weapon)
+            };
+            if i32::from(station.count) != expected {
+                return Err(format!(
+                    "Station {} cannot hold {} {}.",
+                    index + 1,
+                    station.count,
+                    station.weapon.source
+                )
+                .into());
+            }
+        }
+        if guns_only
+            && load
+                .configuration
+                .stations
+                .iter()
+                .zip(&load.quantities)
+                .any(|(s, n)| s.weapon.source != load.aircraft.gun() && *n > 0)
+        {
+            return Err("Guns only is selected. Unload other weapons or return to setup and change the restriction.".into());
+        }
+        load.validate()?;
+        Ok(load)
+    }
+}
+
+/// One plane of an open mission, numbered as the game numbers them: plane 0
+/// is the lead of friendly wing 1, then every other aircraft in wing order
+/// (friendly wings 1 to 3, then enemy wings 1 to 3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpenPlane {
+    pub id: u32,
+    pub wing: WingId,
+    /// Its place in the wing, from 0 (the lead).
+    pub member: u8,
+    pub aircraft: AircraftId,
+}
+
 /// A Quick Mission with stable names. See the module comment.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MissionSpec {
@@ -303,6 +392,11 @@ pub struct MissionSpec {
     pub fixture_wings: bool,
     /// The loadout of plane 0; see [`LoadoutSpec`].
     pub loadout: Option<LoadoutSpec>,
+    /// The loadouts of an open mission's planes, by plane number, as the
+    /// players who hold them chose them in the lobby (stage F, EF4). A plane
+    /// with none carries its aircraft's standard load. Single player has
+    /// none: it keeps [`Self::loadout`] for plane 0.
+    pub plane_loadouts: BTreeMap<u32, LoadoutSpec>,
 }
 
 impl MissionSpec {
@@ -341,6 +435,7 @@ impl MissionSpec {
             enemy_skill: None,
             fixture_wings: false,
             loadout: None,
+            plane_loadouts: BTreeMap::new(),
         }
     }
 
@@ -430,6 +525,53 @@ impl MissionSpec {
         self.wings[0].count.clamp(1, MAX_WING)
     }
 
+    /// Every plane of the mission when it is open (every plane on the AI,
+    /// plane 0 included), in plane order.
+    pub fn open_planes(&self) -> Vec<OpenPlane> {
+        let mut planes = Vec::new();
+        for (index, wing) in self.wings.iter().enumerate() {
+            for member in 0..wing.count.min(MAX_WING) {
+                planes.push(OpenPlane {
+                    id: planes.len() as u32,
+                    wing: Self::wing_id(index),
+                    member: member as u8,
+                    aircraft: wing.aircraft,
+                });
+            }
+        }
+        planes
+    }
+
+    /// A one-line summary for a lobby or a game list, for example `UKR,
+    /// clear, airborne at 20000 ft: F/A-18D Hornet x4 against MiG-29 Fulcrum-C x4`.
+    pub fn summary(&self) -> String {
+        let side = |enemy: bool| {
+            let wings: Vec<String> = self
+                .wings
+                .iter()
+                .enumerate()
+                .filter(|(index, wing)| (*index >= 3) == enemy && wing.count > 0)
+                .map(|(_, wing)| format!("{} x{}", wing.aircraft.label(), wing.count))
+                .collect();
+            if wings.is_empty() {
+                "nobody".to_owned()
+            } else {
+                wings.join(", ")
+            }
+        };
+        let start = match self.start {
+            Start::Airborne { altitude_ft } => format!("airborne at {altitude_ft} ft"),
+            Start::Ground { .. } => "ground start".to_owned(),
+        };
+        format!(
+            "{}, {}, {start}: {} against {}",
+            self.theater,
+            self.condition.name(),
+            side(false),
+            side(true)
+        )
+    }
+
     /// Refuses a spec no mission can be built from. A spec that parses from
     /// text is valid.
     pub fn validate(&self) -> Result<(), MissionError> {
@@ -511,13 +653,25 @@ impl MissionSpec {
                 _ => {}
             }
         }
-        if let Some(load) = &self.loadout {
+        for load in self.loadout.iter().chain(self.plane_loadouts.values()) {
             if !load.fuel_lbs.is_finite() || load.fuel_lbs < 0. {
                 return refuse(format!("{} is not a fuel load", load.fuel_lbs));
+            }
+            if load.stations.len() > MAX_STATIONS {
+                return refuse(format!(
+                    "a loadout has at most {MAX_STATIONS} stations, not {}",
+                    load.stations.len()
+                ));
             }
             if let Some(bad) = load.stations.iter().find(|s| !resource_name(&s.weapon)) {
                 return refuse(format!("`{}` is not a weapon resource name", bad.weapon));
             }
+        }
+        if let Some(plane) = self.plane_loadouts.keys().find(|p| **p >= MAX_PLANES) {
+            return refuse(format!(
+                "plane {plane} is beyond the mission's planes 0 to {}",
+                MAX_PLANES - 1
+            ));
         }
         Ok(())
     }
@@ -616,13 +770,13 @@ impl MissionSpec {
             line("fixture-wings yes".to_owned());
         }
         if let Some(load) = &self.loadout {
-            line(format!("loadout fuel {}", load.fuel_lbs));
-            line(format!("loadout cheat {}", yes_no(load.cheat)));
-            for (index, station) in load.stations.iter().enumerate() {
-                line(format!(
-                    "loadout station {index} {} {} {}",
-                    station.weapon, station.count, station.quantity
-                ));
+            for text in load_lines(load) {
+                line(format!("loadout {text}"));
+            }
+        }
+        for (plane, load) in &self.plane_loadouts {
+            for text in load_lines(load) {
+                line(format!("plane-loadout {plane} {text}"));
             }
         }
         out
@@ -908,9 +1062,120 @@ struct Parser {
     ai_model: Option<AiFlightModel>,
     enemy_skill: Option<Option<EnemySkillOverride>>,
     fixture_wings: Option<bool>,
-    load_fuel: Option<f64>,
-    load_cheat: Option<bool>,
-    load_stations: Vec<Option<StationLoad>>,
+    load: LoadParts,
+    plane_loads: BTreeMap<u32, LoadParts>,
+}
+
+/// One loadout's lines as the parser has read them.
+#[derive(Default)]
+struct LoadParts {
+    fuel: Option<f64>,
+    cheat: Option<bool>,
+    stations: Vec<Option<StationLoad>>,
+}
+
+impl LoadParts {
+    fn is_empty(&self) -> bool {
+        self.fuel.is_none() && self.cheat.is_none() && self.stations.is_empty()
+    }
+
+    /// Reads `fuel POUNDS`, `cheat yes/no` or `station N WEAPON COUNT
+    /// QUANTITY`; `key` is the line's key, for the messages.
+    fn line(&mut self, key: &str, words: &[&str]) -> Parsed<()> {
+        match words.first().copied() {
+            Some("fuel") => {
+                let [pounds] = arguments(words, 1, &format!("{key} fuel POUNDS"))? else {
+                    unreachable!("one argument")
+                };
+                let Some(pounds) = pounds
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite() && *v >= 0.)
+                else {
+                    return refuse(format!("`{pounds}` is not a fuel load"));
+                };
+                once(&mut self.fuel, &format!("`{key} fuel`"), pounds)
+            }
+            Some("cheat") => {
+                let [value] = arguments(words, 1, &format!("{key} cheat yes/no"))? else {
+                    unreachable!("one argument")
+                };
+                once(
+                    &mut self.cheat,
+                    &format!("`{key} cheat`"),
+                    yes_no_word(value, &format!("{key} cheat"))?,
+                )
+            }
+            Some("station") => {
+                let [index, weapon, count, quantity] =
+                    arguments(words, 4, &format!("{key} station N WEAPON COUNT QUANTITY"))?
+                else {
+                    unreachable!("four arguments")
+                };
+                let index = whole(index, "the station number")? as usize;
+                if index >= MAX_STATIONS {
+                    return refuse(format!("station {index} is beyond the aircraft's stations"));
+                }
+                if !resource_name(weapon) {
+                    return refuse(format!("`{weapon}` is not a weapon resource name"));
+                }
+                let count = u16::try_from(whole(count, "the station's capacity")?)
+                    .or_else(|_| refuse("the station's capacity is 0 to 65535".into()))?;
+                let quantity = u16::try_from(whole(quantity, "the quantity")?)
+                    .or_else(|_| refuse("the quantity is 0 to 65535".into()))?;
+                if self.stations.len() <= index {
+                    self.stations.resize(index + 1, None);
+                }
+                once(
+                    &mut self.stations[index],
+                    &format!("`{key} station {index}`"),
+                    StationLoad {
+                        weapon: (*weapon).to_owned(),
+                        count,
+                        quantity,
+                    },
+                )
+            }
+            _ => refuse(format!(
+                "expected `{key} fuel`, `{key} cheat` or `{key} station`, each with its values"
+            )),
+        }
+    }
+
+    /// The loadout, once every line is read: the fuel and every station from
+    /// 0 up must be there.
+    fn finish(self, key: &str) -> Parsed<LoadoutSpec> {
+        let Some(fuel_lbs) = self.fuel else {
+            return refuse(format!("the loadout has no `{key} fuel` line"));
+        };
+        let mut stations = Vec::new();
+        for (index, station) in self.stations.into_iter().enumerate() {
+            let Some(station) = station else {
+                return refuse(format!("the loadout has no `{key} station {index}` line"));
+            };
+            stations.push(station);
+        }
+        Ok(LoadoutSpec {
+            fuel_lbs,
+            cheat: self.cheat.unwrap_or(false),
+            stations,
+        })
+    }
+}
+
+/// A loadout's lines after their key: the fuel, the cheat and each station.
+fn load_lines(load: &LoadoutSpec) -> Vec<String> {
+    let mut lines = vec![
+        format!("fuel {}", load.fuel_lbs),
+        format!("cheat {}", yes_no(load.cheat)),
+    ];
+    for (index, station) in load.stations.iter().enumerate() {
+        lines.push(format!(
+            "station {index} {} {} {}",
+            station.weapon, station.count, station.quantity
+        ));
+    }
+    lines
 }
 
 impl Parser {
@@ -1056,6 +1321,7 @@ impl Parser {
                 )
             }
             "loadout" => self.loadout(words),
+            "plane-loadout" => self.plane_loadout(words),
             _ => refuse(format!("unknown setting `{key}`")),
         }
     }
@@ -1273,65 +1539,24 @@ impl Parser {
     }
 
     fn loadout(&mut self, words: &[&str]) -> Parsed<()> {
-        match words.get(1).copied() {
-            Some("fuel") => {
-                let [_, pounds] = arguments(words, 2, "loadout fuel POUNDS")? else {
-                    unreachable!("two arguments")
-                };
-                let Some(pounds) = pounds
-                    .parse::<f64>()
-                    .ok()
-                    .filter(|v| v.is_finite() && *v >= 0.)
-                else {
-                    return refuse(format!("`{pounds}` is not a fuel load"));
-                };
-                once(&mut self.load_fuel, "`loadout fuel`", pounds)
-            }
-            Some("cheat") => {
-                let [_, value] = arguments(words, 2, "loadout cheat yes/no")? else {
-                    unreachable!("two arguments")
-                };
-                once(
-                    &mut self.load_cheat,
-                    "`loadout cheat`",
-                    yes_no_word(value, "loadout cheat")?,
-                )
-            }
-            Some("station") => {
-                let [_, index, weapon, count, quantity] =
-                    arguments(words, 5, "loadout station N WEAPON COUNT QUANTITY")?
-                else {
-                    unreachable!("five arguments")
-                };
-                let index = whole(index, "the station number")? as usize;
-                if index >= 64 {
-                    return refuse(format!("station {index} is beyond the aircraft's stations"));
-                }
-                if !resource_name(weapon) {
-                    return refuse(format!("`{weapon}` is not a weapon resource name"));
-                }
-                let count = u16::try_from(whole(count, "the station's capacity")?)
-                    .or_else(|_| refuse("the station's capacity is 0 to 65535".into()))?;
-                let quantity = u16::try_from(whole(quantity, "the quantity")?)
-                    .or_else(|_| refuse("the quantity is 0 to 65535".into()))?;
-                if self.load_stations.len() <= index {
-                    self.load_stations.resize(index + 1, None);
-                }
-                once(
-                    &mut self.load_stations[index],
-                    &format!("`loadout station {index}`"),
-                    StationLoad {
-                        weapon: (*weapon).to_owned(),
-                        count,
-                        quantity,
-                    },
-                )
-            }
-            _ => refuse(
-                "expected `loadout fuel`, `loadout cheat` or `loadout station`, each with its values"
-                    .into(),
-            ),
+        self.load.line("loadout", &words[1..])
+    }
+
+    fn plane_loadout(&mut self, words: &[&str]) -> Parsed<()> {
+        let Some(plane) = words.get(1) else {
+            return refuse("expected `plane-loadout PLANE fuel`, `cheat` or `station`".into());
+        };
+        let plane = whole(plane, "the plane number")?;
+        if plane >= MAX_PLANES {
+            return refuse(format!(
+                "plane {plane} is beyond the mission's planes 0 to {}",
+                MAX_PLANES - 1
+            ));
         }
+        self.plane_loads
+            .entry(plane)
+            .or_default()
+            .line(&format!("plane-loadout {plane}"), &words[2..])
     }
 
     fn finish(self) -> Parsed<MissionSpec> {
@@ -1373,22 +1598,12 @@ impl Parser {
         spec.ai_flight_model = self.ai_model.unwrap_or(AiFlightModel::AllHybrid);
         spec.enemy_skill = self.enemy_skill.unwrap_or(None);
         spec.fixture_wings = self.fixture_wings.unwrap_or(false);
-        if self.load_fuel.is_some() || self.load_cheat.is_some() || !self.load_stations.is_empty() {
-            let Some(fuel_lbs) = self.load_fuel else {
-                return refuse("the loadout has no `loadout fuel` line".into());
-            };
-            let mut stations = Vec::new();
-            for (index, station) in self.load_stations.into_iter().enumerate() {
-                let Some(station) = station else {
-                    return refuse(format!("the loadout has no `loadout station {index}` line"));
-                };
-                stations.push(station);
-            }
-            spec.loadout = Some(LoadoutSpec {
-                fuel_lbs,
-                cheat: self.load_cheat.unwrap_or(false),
-                stations,
-            });
+        if !self.load.is_empty() {
+            spec.loadout = Some(self.load.finish("loadout")?);
+        }
+        for (plane, load) in self.plane_loads {
+            let key = format!("plane-loadout {plane}");
+            spec.plane_loadouts.insert(plane, load.finish(&key)?);
         }
         spec.validate()?;
         Ok(spec)

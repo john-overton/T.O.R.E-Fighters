@@ -80,6 +80,8 @@ impl World {
         spec.validate()?;
         if open {
             check_open(spec)?;
+        } else if !spec.plane_loadouts.is_empty() {
+            return Err("Plane loadouts are a multiplayer mission's: single player loads plane 0 with `loadout`.".into());
         }
         let terrain = crate::terrain::Terrain::for_mission(
             resources,
@@ -207,6 +209,26 @@ impl World {
         } else {
             combat.mission_aircraft(&wings, &layout, resources, loader)?;
         }
+        // The players' loadouts of an open mission, checked against the
+        // aircraft each plane flies (the types are loaded by now).
+        let mut loadouts = std::collections::BTreeMap::new();
+        for (plane, load) in &spec.plane_loadouts {
+            let aircraft = spec
+                .open_planes()
+                .into_iter()
+                .find(|p| p.id == *plane)
+                .ok_or_else(|| format!("The mission has no plane {plane} to load."))?
+                .aircraft;
+            let kind = combat
+                .dummy_types()
+                .iter()
+                .find(|kind| kind.profile.id == aircraft)
+                .ok_or_else(|| format!("The mission holds no aircraft type for plane {plane}."))?;
+            let checked = load
+                .check_for_plane(&kind.profile, resources, spec.guns_only)
+                .map_err(|error| format!("Plane {plane}'s loadout: {error}"))?;
+            loadouts.insert(*plane, checked);
+        }
 
         let setup = Setup {
             mission: Some((altitude, fuel)),
@@ -220,6 +242,7 @@ impl World {
                 flight_model: spec.ai_flight_model,
                 group_objectives: spec.objectives,
                 group_must_survive: spec.must_survive,
+                loadouts,
             }),
         };
 
@@ -279,7 +302,8 @@ impl World {
 }
 
 /// What an open mission refuses: it needs the AI (no straight-flight
-/// fixtures), nobody flies from the start (no player loadout), and a networked
+/// fixtures), nobody flies from the start (no player loadout: the players'
+/// loadouts are by plane, `plane-loadout`), and a networked
 /// mission flies the hybrid model for humans and for every AI aircraft
 /// (John, 2026-09-28). Agent decision (D3c): refused rather than overridden,
 /// so a mission file says what it flies.
