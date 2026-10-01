@@ -193,6 +193,11 @@ pub struct FlightUi {
     pub pause: PauseMenu,
     /// The HUD bank scale's gyro; a new flight starts it at the aircraft's bank.
     pub bank_gyro: crate::hud::BankGyro,
+    /// Whether this flight is a session on a server. The host's clock never
+    /// stops, so there is no pause or time compression, the Restart key is
+    /// refused, and the Cheat menu keeps only what changes the screen alone
+    /// (John, 2026-09-30). See [`session_menu`].
+    pub session: bool,
 }
 impl Default for FlightUi {
     fn default() -> Self {
@@ -214,9 +219,76 @@ impl Default for FlightUi {
             notes: Default::default(),
             pause: PauseMenu::default(),
             bank_gyro: Default::default(),
+            session: false,
         }
     }
 }
+/// The Cheat rows a session keeps: the three that change nothing but the
+/// player's own screen. Every other cheat changes the mission, which the
+/// server alone decides (John, 2026-09-30).
+pub const SESSION_CHEATS: [&str; 3] = [
+    "No sun whiteout?",
+    "No redout or blackout?",
+    "No screen-shaking?",
+];
+/// What the Restart key says in a session: the mission is the server's.
+pub const RESTART_REFUSED: &str = "Restart is not available in a multiplayer flight";
+/// The rows that stop or change time, which a session has no use for.
+const TIME_ROWS: [&str; 6] = ["Paused", "Slow-motion", "1x", "2x", "4x", "8x"];
+
+/// Why a menu row does nothing in a session, or `None` when it works. The
+/// rows are named by their imported labels.
+pub fn session_refusal(label: &str) -> Option<&'static str> {
+    let label = label.trim();
+    if TIME_ROWS.contains(&label) {
+        return Some("Time cannot be paused or sped up in a multiplayer flight");
+    }
+    let mission_cheat = matches!(
+        label,
+        "Invulnerable" | "Normal" | "Realistic" | "Novice" | "Average" | "Unchanged"
+    ) || cheat_switch(&mut Default::default(), label).is_some();
+    (mission_cheat && !SESSION_CHEATS.contains(&label))
+        .then_some("The server sets the cheats in a multiplayer flight")
+}
+
+/// The flight menu a session shows: `tree` without the time rows, without
+/// the Cheat rows that change the mission (and the submenus they leave
+/// empty), and without the Pos menu that moves the aircraft.
+#[allow(dead_code)] // Wired with the client session (D8b).
+pub fn session_menu(tree: &[MenuNode]) -> Vec<MenuNode> {
+    fn without_time(node: &MenuNode) -> Option<MenuNode> {
+        if TIME_ROWS.contains(&node.label.trim()) {
+            return None;
+        }
+        if node.children.is_empty() {
+            return Some(node.clone());
+        }
+        let children: Vec<_> = node.children.iter().filter_map(without_time).collect();
+        (!children.is_empty()).then(|| MenuNode {
+            children,
+            ..node.clone()
+        })
+    }
+    tree.iter()
+        .filter(|node| node.label != "Pos")
+        .filter_map(|node| {
+            if node.label == "Cheat" {
+                let children: Vec<_> = node
+                    .children
+                    .iter()
+                    .filter(|row| SESSION_CHEATS.contains(&row.label.as_str()))
+                    .cloned()
+                    .collect();
+                return Some(MenuNode {
+                    children,
+                    ..node.clone()
+                });
+            }
+            without_time(node)
+        })
+        .collect()
+}
+
 /// The on/off Cheat menu rows that work, by their imported label.
 fn cheat_switch<'a>(cheats: &'a mut tore_sim::cheats::Cheats, label: &str) -> Option<&'a mut bool> {
     Some(match label {
@@ -271,11 +343,41 @@ impl FlightUi {
         };
         Some(if on { "On" } else { "Off" })
     }
+    /// Whether a menu or the pause is up, so the flight takes no input. In a
+    /// session the flight runs on behind it: see [`FlightUi::stopped`].
     pub fn frozen(&self) -> bool {
         self.menu || self.paused
     }
+    /// Whether the flight's time is stopped. A pause or a menu stops it in
+    /// single player; a session's never stops, whatever is open over it.
+    pub fn stopped(&self) -> bool {
+        self.frozen() && !self.session
+    }
+    /// Starts a session's flight: no pause or time compression, and only the
+    /// cheats that change the screen alone survive from earlier flights.
+    #[allow(dead_code)] // Wired with the client session (D8b).
+    pub fn enter_session(&mut self) {
+        self.session = true;
+        self.paused = false;
+        self.time_scale = 1.;
+        let kept = self.cheats;
+        self.cheats = tore_sim::cheats::Cheats {
+            no_sun_whiteout: kept.no_sun_whiteout,
+            no_g_effects: kept.no_g_effects,
+            no_screen_shake: kept.no_screen_shake,
+            ..Default::default()
+        };
+    }
+    /// Pauses the flight because the window lost the player's attention. A
+    /// session cannot pause; its controls go neutral instead (the input
+    /// context does that).
+    pub fn pause_for_focus(&mut self) {
+        if !self.session {
+            self.paused = true;
+        }
+    }
     pub fn steps(&self, clock: &mut crate::flight::Clock, elapsed: f64) -> usize {
-        if self.frozen() {
+        if self.stopped() {
             0
         } else if self.time_scale == 1. {
             clock.steps(elapsed)
@@ -340,7 +442,17 @@ impl FlightUi {
         if let Some(view) = crate::flight_views::key(shortcut) {
             return Command::View(view);
         }
+        if self.session
+            && let Some(refusal) = session_refusal(label)
+        {
+            self.message(refusal);
+            return Command::Click;
+        }
         match label {
+            "Restart free flight" if self.session => {
+                self.message(RESTART_REFUSED);
+                Command::Click
+            }
             "Resume flight" => {
                 self.menu = false;
                 self.paused = false;
@@ -645,6 +757,10 @@ impl FlightUi {
         }
         // Time cycle has four menu rows with the same accelerator.
         if !ctrl && !alt && !shift && key == "c" {
+            if self.session {
+                self.message("Time cannot be paused or sped up in a multiplayer flight");
+                return Command::Click;
+            }
             self.time_scale = match self.time_scale {
                 x if x < 1. => 1.,
                 1. => 2.,
@@ -1409,6 +1525,117 @@ mod tests {
             Command::Toggle(Switch::Gear)
         );
         assert_eq!(u.key("q", false, true, false, &t), Command::End);
+    }
+    fn node(label: &str, shortcut: &str, children: Vec<MenuNode>) -> MenuNode {
+        MenuNode {
+            label: label.into(),
+            shortcut: shortcut.into(),
+            children,
+        }
+    }
+    /// The parts of the retail menu a session changes.
+    fn retail_tree() -> Vec<MenuNode> {
+        vec![
+            node("?", "", vec![node("End mission", "Ctrl-Q", vec![])]),
+            node(
+                "Pref",
+                "",
+                vec![
+                    node(
+                        "Time ",
+                        "",
+                        ["Paused", "Slow-motion", "1x", "2x", "4x", "8x"]
+                            .map(|label| node(label, "", vec![]))
+                            .into(),
+                    ),
+                    node("Large windows?", "", vec![]),
+                ],
+            ),
+            node(
+                "Cheat",
+                "",
+                vec![
+                    node("Damage", "", vec![node("Invulnerable", "", vec![])]),
+                    node("Unlimited ammo?", "", vec![]),
+                    node("No sun whiteout?", "", vec![]),
+                    node("No redout or blackout?", "", vec![]),
+                    node("No screen-shaking?", "", vec![]),
+                    node("Enemy AI?", "", vec![node("Novice", "", vec![])]),
+                ],
+            ),
+            node("Pos", "", vec![node("40,000 feet", "", vec![])]),
+        ]
+    }
+    fn labels(tree: &[MenuNode]) -> Vec<String> {
+        tree.iter()
+            .flat_map(|n| std::iter::once(n.label.clone()).chain(labels(&n.children)))
+            .collect()
+    }
+    #[test]
+    fn a_session_menu_drops_time_rows_mission_cheats_and_the_pos_menu() {
+        let shown = labels(&session_menu(&retail_tree()));
+        assert_eq!(
+            shown,
+            [
+                "?",
+                "End mission",
+                "Pref",
+                "Large windows?",
+                "Cheat",
+                "No sun whiteout?",
+                "No redout or blackout?",
+                "No screen-shaking?",
+            ]
+        );
+        // Single player's menu is the retail one.
+        assert_eq!(labels(&retail_tree()).len(), 22);
+    }
+    #[test]
+    fn a_session_cannot_pause_or_compress_time_and_refuses_with_a_line() {
+        let mut ui = FlightUi::default();
+        ui.cheats.unlimited_ammo = true;
+        ui.cheats.no_screen_shake = true;
+        ui.time_scale = 4.;
+        ui.enter_session();
+        assert!(ui.session);
+        // Carried over: the screen-only cheat. Gone: the mission cheat.
+        assert!(ui.cheats.no_screen_shake && !ui.cheats.unlimited_ammo);
+        assert_eq!(ui.time_scale, 1.);
+        let tree = retail_tree();
+        for label in ["Paused", "2x", "Slow-motion", "Unlimited ammo?", "Novice"] {
+            let before = ui.cheats;
+            assert_eq!(ui.activate(label, ""), Command::Click, "{label}");
+            assert!(!ui.paused && ui.time_scale == 1. && ui.cheats == before);
+        }
+        assert_eq!(ui.activate("Restart free flight", ""), Command::Click);
+        assert!(ui.notices.iter().any(|(line, _)| line == RESTART_REFUSED));
+        // The screen-only cheats still toggle.
+        assert_eq!(ui.activate("No sun whiteout?", ""), Command::Click);
+        assert!(ui.cheats.no_sun_whiteout);
+        // Control-P and C do nothing but say so.
+        ui.key("p", false, true, false, &tree);
+        ui.key("c", false, false, false, &tree);
+        assert!(!ui.paused && ui.time_scale == 1.);
+        // Losing the window's attention does not pause either.
+        ui.pause_for_focus();
+        assert!(!ui.paused);
+    }
+    #[test]
+    fn the_flight_runs_on_behind_a_menu_in_a_session_and_stops_in_single_player() {
+        let tree = tree();
+        let mut clock = crate::flight::Clock { remainder: 0. };
+        let mut single = FlightUi::default();
+        single.key("Escape", false, false, false, &tree);
+        assert!(single.frozen() && single.stopped());
+        assert_eq!(single.steps(&mut clock, 0.1), 0);
+        let mut session = FlightUi::default();
+        session.enter_session();
+        session.key("Escape", false, false, false, &tree);
+        // A menu is up, so the player takes no flight input, but time moves.
+        assert!(session.frozen() && !session.stopped());
+        assert_eq!(session.steps(&mut clock, 0.1), 12);
+        single.pause_for_focus();
+        assert!(single.paused);
     }
     #[test]
     fn pause_discards_wall_time_and_time_scaling_keeps_fixed_ticks() {

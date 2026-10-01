@@ -1385,6 +1385,10 @@ impl App {
             Command::Click => Action::Click,
             Command::End => Action::Back,
             Command::Exit => Action::Exit,
+            Command::Restart if self.flight_ui.session => {
+                self.flight_ui.message(flight_ui::RESTART_REFUSED);
+                Action::Click
+            }
             Command::Restart => Action::FreeFlight,
             // Retail Ctrl+V works only while flying an aircraft. The message is
             // an opinionated agent addition (2026-09-23).
@@ -2984,7 +2988,7 @@ impl ApplicationHandler for App {
                 self.focused = false;
                 self.input.context(true, false);
                 if self.screen == Screen::Flight {
-                    self.flight_ui.paused = true;
+                    self.flight_ui.pause_for_focus();
                 }
                 self.menu.state.cancel();
                 self.quick.cancel();
@@ -4213,9 +4217,12 @@ impl ApplicationHandler for App {
                 log::warn!("Input: {warning}");
             }
             if lost && self.screen == Screen::Flight {
-                self.flight_ui.paused = true;
-                self.flight_ui
-                    .message("Active controller disconnected; resume explicitly");
+                self.flight_ui.pause_for_focus();
+                self.flight_ui.message(if self.flight_ui.session {
+                    "Active controller disconnected; controls are neutral"
+                } else {
+                    "Active controller disconnected; resume explicitly"
+                });
                 self.camera.keys.clear();
                 self.release_trigger();
                 self.input.context(true, self.focused);
