@@ -241,9 +241,20 @@ flowchart TD
   small thread of the game sends a
   [keepalive](formats/net-protocol.md#keepalive) once a second for up to a
   minute, and the player keeps the plane, which flies on with its last
-  controls. The log shows nothing for such a stall (the player's
-  once-a-minute figures show the inputs repeated, 120 for each second of it);
-  a game stalled for longer than a minute leaves with the usual "silent" line
+  controls for half a second and then with a paused game's neutral controls
+  (stick centred, throttle where it was, trigger released) until the game is
+  back. The log shows the stall when the first keepalive arrives and its end
+  when the game is back:
+
+  ```text
+  seat 2 Viper: game stalled, flying neutral
+  seat 2 Viper: game back after 7.4 s
+  ```
+
+  (a player in the lobby shows as `Viper: game stalled`), and the player's
+  once-a-minute figures count the ticks repeated, 120 for each second of it;
+  a stall shorter than about a second sends no keepalive and logs nothing.
+  A game stalled for longer than a minute leaves with the usual "silent" line
   about 65 seconds after it stopped
   ([details](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k)).
   A destroyed plane stays destroyed; respawns are stage F.

@@ -521,7 +521,7 @@ estimates. How they are used is in the
 | --- | --- |
 | Input margin | The client keeps its clock ahead of the host so that the smallest margin by which its inputs arrived over the last 2 seconds is 1 tick plus one input packet's interval (3 ticks, 25 ms, at 60 packets a second), and one interval more while loss over the last 10 seconds is above 1 percent; a single lost packet then costs nothing |
 | Clock steering | The client's clock runs between 0.98 and 1.02 times real time; it jumps only when more than 250 ms off. *Correction (D8a):* the first margin the host reports after seating also sets the clock outright, since the Seated message can arrive late and seating snaps anyway |
-| Missing input | The host repeats the player's last stick, throttle, trigger and scope controls with no commands; a command that arrives late is applied on the next tick |
+| Missing input | The host repeats the player's last stick, throttle, trigger and scope controls with no commands; a command that arrives late is applied on the next tick. After 60 ticks (half a second) in a row with no input, or once the player's keepalives arrive, the game counts as stalled and the seat flies a paused game's neutral controls until its next input (EF-K follow-up; the threshold is an agent decision) |
 | Interpolation delay | Starts at 100 ms and adapts between 50 and 250 ms, keeping the drawn time at least 2 ticks behind the newest snapshot over the last 2 seconds, or 6 ticks while loss over the last 10 seconds is above 1 percent |
 | Interpolation | A cubic curve through two snapshots' positions and velocities; attitude turns the short way between them |
 | Extrapolation | Up to 250 ms along the last motion when a snapshot is late, then the aircraft holds |
@@ -573,7 +573,7 @@ target window come from the host's own readout, not from the drawn aircraft.
 | Item | Value |
 | --- | --- |
 | Connecting | The client repeats each handshake step every 250 ms and gives up after 10 seconds |
-| Dropped player | 5 seconds without a valid packet; the AI takes the plane at once. A game whose loop is stalled (a window dragged, a long frame) keeps its plane for up to 60 seconds through its [keepalive](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k) (EF-K, agent decision) |
+| Dropped player | 5 seconds without a valid packet; the AI takes the plane at once. A game whose loop is stalled (a window dragged, a long frame) keeps its plane for up to 60 seconds through its [keepalive](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k) (EF-K, agent decision), flown neutral meanwhile |
 | Players per server | A setting, default 30 (John, 2026-09-28); a co-op mission seats at most its 15 friendly planes |
 | Default port | UDP 26900, a setting |
 
@@ -726,7 +726,7 @@ Made by John on 2026-09-30 at the stage D design review
 
 | Question | Decision |
 | --- | --- |
-| Menus in a networked flight | Nothing pauses. While the pause or Esc menu is up the controls go neutral (stick centred, throttle held, trigger released); a window that loses focus counts as paused (agent reading). Whether the AI takes over after a while stays open for stage F |
+| Menus in a networked flight | Nothing pauses. While the pause or Esc menu is up the controls go neutral (stick centred, throttle held, trigger released); a window that loses focus counts as paused (agent reading). Whether the AI takes over after a while stays open for stage F. *The lead's application, 2026-10-01:* a joined game whose loop is stalled (a window held, a long frame) counts as paused too: once the host has had no input from it for half a second, or hears its keepalives, it flies the seat with the same neutral controls until the next input ([the stall rule](ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k)) |
 | Relevance | 30 updates a second for what is near or tracked, twice a second for everything else, smoothed so those never jitter ([netcode numbers](#netcode-numbers)) |
 | Recordings of networked flights | In stage D each client keeps a capture of what the network brought, with a diagnostics log, instead of recording a replay live. A capture converts into a replay whose aircraft follow a smooth curve through every update received, using hindsight, rather than what the player saw live; the conversion comes in stage E. Until then this replaces the 2026-09-28 rule that each machine records its own replay |
 | Stage D acceptance | Agents smoke-test a dedicated server with clients on the development machine; John then tests on three machines on his LAN, macOS, Linux and Windows |

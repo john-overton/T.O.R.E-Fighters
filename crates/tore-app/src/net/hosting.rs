@@ -534,6 +534,7 @@ pub fn log_line(entry: &HostLog) -> String {
             "chat: {callsign} to {} ({heard} heard): {text}",
             tore_session::wire::chat::receiver_label(*receiver).to_ascii_lowercase()
         ),
+        HostLog::Stalled { .. } | HostLog::Resumed { .. } => entry.stall_text().unwrap_or_default(),
     };
     format!("tick {}: {text}", entry.tick())
 }

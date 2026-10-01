@@ -2343,7 +2343,9 @@ Each tick the host:
    player's screen showed (for [lag compensation](#hits-and-lag-compensation)).
    A late or missing input repeats the player's last stick, throttle, trigger
    and scope controls with no commands; commands that arrive late are applied
-   on the next tick, in order, never dropped.
+   on the next tick, in order, never dropped. *Since the EF-K follow-up* a
+   seat whose game is stalled flies neutral instead
+   ([the stall rule](#a-stalled-game-stays-connected-ef-k)).
 3. Steps the `World` with every seat's input.
 4. Sorts the tick's output: each seat's cues, releases and order replies go to
    that seat's event queue, mission-wide events (effects, marks, destroyed
@@ -3149,8 +3151,11 @@ game's session tells it the loop has run.
 - **Identity.** The packet carries the connection's id and is accepted only
   from the connection's address, exactly what a Payload needs, so nobody else
   can keep a connection alive and nothing new is open to a stranger. The host
-  counts it as hearing from the connection and nothing else (no
-  acknowledgement, round trip or rate statistic) and never answers it.
+  counts it as hearing from the connection (no acknowledgement, round trip
+  or rate statistic) and never answers it; the first since the game's last
+  Payload tells the session the game has stalled (`tore_net::Event::Stalled`),
+  and the next Payload that it is back (`Event::Resumed`, with how long it
+  was gone).
 - **Lifetime.** The thread starts once the session is past joining, stops
   (and is joined) when the connection closes, a new one is started for a new
   connection, and dropping the session stops it. It only sends: it never
@@ -3160,27 +3165,54 @@ game's session tells it the loop has run.
 - **The log.** When the loop comes back the game's log says how many
   keepalives covered the stall ("Network: the game was held up; its
   keepalive kept the connection (14 keepalives, 14 in all)"). The host logs
-  nothing for a stall; a game stalled past the bound leaves with the usual
-  "silent" line ([server guide](DEDICATED-SERVER.md#the-mission-lifecycle)).
+  the stall at its first keepalive and its end at the first Payload after it
+  (`HostLog::Stalled` and `Resumed`: "seat 2 Viper: game stalled, flying
+  neutral", "seat 2 Viper: game back after 7.4 s"; a player in the lobby has
+  no seat and flies nothing), in the dedicated server's log and in a hosting
+  game's; a game stalled past the bound leaves with the usual "silent" line
+  ([server guide](DEDICATED-SERVER.md#the-mission-lifecycle)).
+
+**The stall rule: a stalled game counts as paused.** *The lead's application
+(2026-10-01) of John's rule of 2026-09-30* that the controls go neutral while
+a game is paused or in its Esc menu ([decisions](MULTIPLAYER.md#decisions)).
+The host knows a seat's game is stalled once more than 60 ticks (half a
+second) in a row have had no input from it (`host::inputs::STALL_TICKS`,
+agent decision), or once it hears the connection's keepalives, whichever
+comes first. From then on every tick with no input takes exactly the
+controls a paused game sends (`Controls::neutral`): stick, rudder and
+throttle rate centred, no throttle position so the throttle stays where it
+was, the trigger released, no commands (the momentary ones are commands, and
+a missing tick never repeats them), and the scope controls as they were. The
+neutral controls fly that seat's plane only, and end at the first fresh
+input. A late or lost input packet costs a few ticks and every packet
+repeats the last 24, so below the threshold nothing changes: a late player's
+last controls repeat as before. The network matrix, short and full, checks
+that no seat is ever flown neutral on any of its paths
+(`PlayerStatus::inputs_neutral` stays 0); in the simulator a seat that
+stalls while pulling and firing fires on and pulls on for half a second and
+then stops firing, its elevator back to 0 with the throttle unchanged
+(`client/stall_tests.rs`). The King's own plane follows the same rule when
+its window is held, though its connection never times out.
 
 **What a 15-second stall looks like.**
 
 - *For the stalled player:* the picture freezes. When it comes back, their
-  plane is where the host flew it meanwhile, on the last stick, throttle,
-  trigger and scope controls the host had (stage D's rule for a late player:
-  a held trigger keeps firing, a held pull keeps pulling); the client takes
+  plane is where the host flew it meanwhile: half a second on the last
+  controls the host had, then neutral ([the stall rule](#a-stalled-game-stays-connected-ef-k):
+  a held trigger stops firing, a held pull stops pulling); the client takes
   the host's newest state instead of stepping the backlog (a catch-up), and
   everything else jumps to where it is now. Then, as the snapshots that waited
   in the socket and the first fresh ones are read, the own plane may be
-  corrected a few times within about a fifth of a second (none to twelve
-  corrections in four runs of the test, the largest about 22 ft and 20
-  degrees, most of them blended, the last under a tenth of a foot), and none
-  after. Those come from the ticks between the state the client caught up to
+  corrected a few times within about a fifth of a second (about eleven in each of
+  three runs of the test since the stall rule, the largest seen about 7 ft
+  and 6 degrees, most of them blended; up to 22 ft and 20 degrees before it,
+  when the host still flew the held pull), and none after. Those come from the ticks between the state the client caught up to
   and the present, which it predicted with controls the host had already
-  replaced with the held ones.
-- *For the others:* the player's plane flies on smoothly on those held
-  controls, the player stays in the roster and the lobby, and nobody is told
-  anything. Before EF-K the plane went back to the AI after 5 seconds and the
+  replaced with neutral ones.
+- *For the others:* the player's plane flies on smoothly, half a second on
+  its last controls and then hands off the stick with its throttle where it
+  was; the player stays in the roster and the lobby, and nobody is told
+  anything (the host's log is). Before EF-K the plane went back to the AI after 5 seconds and the
   player was gone.
 
 **Measured** (`net/keepalive_tests.rs`, real time, a hosted game with its King
@@ -3758,7 +3790,8 @@ it starts as its `start` setting says. *Agent decisions.*
   transport refuses to any socket datagram, so no remote player can claim it.
   A hosting window held still (dragged or resized on Windows, a long load, a
   modal; [what stalls the loop](#a-stalled-game-stays-connected-ef-k)) stalls only that game: the mission flies on for everyone, the King's
-  plane with its last controls as any late player's, and when the window
+  plane on its last controls for half a second and then neutral, as any
+  stalled game's ([the stall rule](#a-stalled-game-stays-connected-ef-k)), and when the window
   comes back the client catches up as after any stall. The connection cannot
   really go silent for good: if the game goes away, its host thread goes with
   it, and a game that drops its host stops it politely. A King at a network

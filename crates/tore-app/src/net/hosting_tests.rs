@@ -765,6 +765,26 @@ fn the_log_names_the_hosting_players_own_connection() {
         line,
         "tick 240: seat 1 Cobra (plane 1) left: no packet for 5 seconds"
     );
+    // A stalled game, and its return (EF-K follow-up).
+    let line = log_line(&HostLog::Stalled {
+        tick: 300,
+        seat: Some(2),
+        callsign: "Viper".into(),
+    });
+    assert_eq!(line, "tick 300: seat 2 Viper: game stalled, flying neutral");
+    let line = log_line(&HostLog::Resumed {
+        tick: 1188,
+        seat: Some(2),
+        callsign: "Viper".into(),
+        stalled_for: Duration::from_millis(7_420),
+    });
+    assert_eq!(line, "tick 1188: seat 2 Viper: game back after 7.4 s");
+    let line = log_line(&HostLog::Stalled {
+        tick: 300,
+        seat: None,
+        callsign: "Cobra".into(),
+    });
+    assert_eq!(line, "tick 300: Cobra: game stalled");
 }
 
 /// A game this one hosts is found by the search loop (slice EF5) at its

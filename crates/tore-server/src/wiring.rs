@@ -156,6 +156,9 @@ impl SessionHost {
                 HostLog::Lobby {
                     callsign, event, ..
                 } => Event::Note(format!("{callsign} {event}")),
+                entry @ (HostLog::Stalled { .. } | HostLog::Resumed { .. }) => {
+                    Event::Note(entry.stall_text().unwrap_or_default())
+                }
                 HostLog::Chat {
                     callsign,
                     receiver,

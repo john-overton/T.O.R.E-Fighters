@@ -5,6 +5,14 @@
 //! - The controls for tick T are used at T. A tick with none, because its
 //!   input is late or lost, repeats the last stick, throttle, trigger and
 //!   scope controls with no commands, and counts as repeated.
+//! - A seat whose game is stalled flies neutral (slice EF-K follow-up; the
+//!   lead's application of John's 2026-09-30 rule that controls go neutral
+//!   while a game is paused): once more than [`STALL_TICKS`] ticks in a row
+//!   had no input, or once the host hears the connection's keepalives, the
+//!   repeated tick takes the controls a paused game sends (stick, rudder and
+//!   throttle rate centred, no throttle position so the throttle stays where
+//!   it is, trigger released, the scope as it was) until the first fresh
+//!   input.
 //! - A command is applied exactly once, in number order, at the tick the
 //!   player's game applied it, or at the next tick run when that one has
 //!   already been stepped. Commands repeat in every input packet until a
@@ -21,6 +29,12 @@ use tore_world::seats::{SeatId, SeatInput, SeatView};
 pub const MAX_AHEAD_TICKS: u64 = 120;
 /// Commands a seat may have waiting at most; more are a protocol error.
 pub const MAX_PENDING_COMMANDS: usize = 256;
+/// Ticks in a row with no input after which the seat's game counts as
+/// stalled and its plane flies neutral: 60 ticks, half a second (agent
+/// decision). A late or lost packet costs a few ticks, and every input
+/// packet repeats 24 ticks, so only a game that has stopped, or a network
+/// that has, gets this far.
+pub const STALL_TICKS: u64 = 60;
 
 /// What taking one tick's input found, for the host's notes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -32,6 +46,9 @@ pub struct Taken {
     pub command_moved: bool,
     /// Commands applied this tick.
     pub commands: usize,
+    /// The repeated controls were the neutral ones: the seat's game is
+    /// stalled.
+    pub neutral: bool,
 }
 
 /// Why an Inputs section was refused.
@@ -63,6 +80,12 @@ pub struct InputBuffer {
     /// Ticks repeated since the last report, and in all.
     repeats: u32,
     repeats_total: u64,
+    /// Ticks in a row taken with no input.
+    run: u64,
+    /// Ticks flown neutral because the game was stalled, in all.
+    neutral_total: u64,
+    /// The host heard the connection's keepalives: its game is stalled.
+    stalled: bool,
     /// What the player's view follows.
     pub view_subject: Option<ViewSubject>,
     /// The newest tick the client reported an own-state mismatch for.
@@ -89,6 +112,9 @@ impl InputBuffer {
             reported_margin: 0,
             repeats: 0,
             repeats_total: 0,
+            run: 0,
+            neutral_total: 0,
+            stalled: false,
             view_subject: None,
             mismatch: 0,
         }
@@ -147,15 +173,28 @@ impl InputBuffer {
             self.frames.pop_first();
         }
         let (frame, view) = match self.frames.remove(&tick) {
-            Some((frame, view)) => (frame, Some(view)),
+            Some((frame, view)) => {
+                self.run = 0;
+                self.stalled = false;
+                (frame, Some(view))
+            }
             None => {
                 taken.repeated = true;
                 self.repeats = self.repeats.saturating_add(1);
                 self.repeats_total += 1;
+                self.run += 1;
+                // A seat with no input yet flies neutral anyway.
+                let neutral = self.last.is_some() && (self.stalled || self.run > STALL_TICKS);
+                taken.neutral = neutral;
+                self.neutral_total += u64::from(neutral);
                 match self.last {
                     // The view moves on with the repeated ticks.
                     Some((last_tick, frame, view)) => (
-                        frame,
+                        if neutral {
+                            neutral_frame(&frame)
+                        } else {
+                            frame
+                        },
                         Some(SeatView {
                             tick: view.tick + tick.saturating_sub(last_tick),
                             ..view
@@ -182,6 +221,13 @@ impl InputBuffer {
         }
         taken.commands = commands.len();
         (frame.seat_input(seat, tick, &commands, view), taken)
+    }
+
+    /// The host hears the connection's keepalives: its game is stalled, and
+    /// the seat flies neutral from the next repeated tick until the first
+    /// fresh input.
+    pub fn set_stalled(&mut self) {
+        self.stalled = true;
     }
 
     /// The newest input tick received, or 0.
@@ -217,9 +263,25 @@ impl InputBuffer {
         self.repeats_total
     }
 
+    /// Ticks flown neutral since the seat joined, its game stalled.
+    pub fn neutral_total(&self) -> u64 {
+        self.neutral_total
+    }
+
     /// Commands taken and not yet applied.
     pub fn pending_commands(&self) -> usize {
         self.pending.len()
+    }
+}
+
+/// The controls a paused game sends (`Controls::neutral`, John's rule of
+/// 2026-09-30): stick, rudder and throttle rate centred, no throttle
+/// position (the throttle stays where it is), trigger released, the scope
+/// controls as they were.
+fn neutral_frame(last: &InputFrame) -> InputFrame {
+    InputFrame {
+        sensors: last.sensors,
+        ..InputFrame::default()
     }
 }
 
@@ -448,5 +510,73 @@ mod tests {
             }
         }
         assert!(refused);
+    }
+
+    /// A held pull and trigger repeat for half a second of missing input, as
+    /// for any late player, then the seat flies neutral (the scope kept,
+    /// the throttle left where it is) until the first fresh input.
+    #[test]
+    fn a_stalled_seat_flies_neutral_after_half_a_second_until_fresh_input() {
+        let mut buffer = InputBuffer::new();
+        let held = InputFrame {
+            pitch: 20_000,
+            roll: -3_000,
+            throttle_rate: 40,
+            throttle: Some(50_000),
+            trigger: true,
+            sensors: tore_sim::sensors::Controls {
+                range_index: 2,
+                history: true,
+                ..Default::default()
+            },
+            ..InputFrame::default()
+        };
+        let mut packet = section(100, &[0], 1, &[]);
+        packet.frames = vec![held];
+        buffer.receive(&packet, 100).unwrap();
+        assert!(!buffer.take(SEAT, 100).1.repeated);
+        for tick in 101..=100 + STALL_TICKS {
+            let (input, taken) = buffer.take(SEAT, tick);
+            assert!(taken.repeated && !taken.neutral, "tick {tick}");
+            assert!(input.trigger && input.pilot.pitch > 0.5);
+        }
+        let (input, taken) = buffer.take(SEAT, 101 + STALL_TICKS);
+        assert!(taken.repeated && taken.neutral);
+        let neutral = neutral_frame(&held);
+        assert_eq!(neutral.sensors, held.sensors);
+        assert_eq!(
+            (
+                input.pilot.pitch,
+                input.pilot.roll,
+                input.pilot.throttle_rate,
+                input.pilot.throttle,
+                input.trigger
+            ),
+            (0., 0., 0., None, false)
+        );
+        // The first fresh input ends it, and a short gap after it repeats
+        // that input again.
+        let tick = 102 + STALL_TICKS;
+        let mut packet = section(tick as u32, &[0], 1, &[]);
+        packet.frames = vec![held];
+        buffer.receive(&packet, tick).unwrap();
+        let (input, taken) = buffer.take(SEAT, tick);
+        assert!(!taken.repeated && input.trigger);
+        let (input, taken) = buffer.take(SEAT, tick + 1);
+        assert!(taken.repeated && !taken.neutral && input.trigger);
+    }
+
+    /// Keepalives from the seat's connection make it neutral at once.
+    #[test]
+    fn a_seat_whose_keepalives_are_heard_flies_neutral_at_once() {
+        let mut buffer = InputBuffer::new();
+        let mut packet = section(100, &[0], 1, &[]);
+        packet.frames[0].trigger = true;
+        buffer.receive(&packet, 100).unwrap();
+        buffer.take(SEAT, 100);
+        assert!(buffer.take(SEAT, 101).0.trigger);
+        buffer.set_stalled();
+        let (input, taken) = buffer.take(SEAT, 102);
+        assert!(taken.neutral && !input.trigger);
     }
 }

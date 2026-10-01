@@ -666,6 +666,7 @@ impl Server {
             return;
         }
         entry.connection.kept_alive(now);
+        self.collect(from);
     }
 
     /// Moves a connection's events out and removes it once closed.

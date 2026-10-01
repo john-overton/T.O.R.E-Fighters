@@ -269,6 +269,10 @@ fn run(cell: Cell, seconds: u64) -> Vec<Figures> {
         .iter()
         .map(|&i| rig.players[i].client.seat().expect("seated").0)
         .collect();
+    // The network's delay, spread and loss never pass for a stalled game:
+    // no seat was flown neutral (EF-K follow-up).
+    let neutral: u64 = rig.host.players().iter().map(|p| p.inputs_neutral).sum();
+    assert_eq!(neutral, 0, "{cell:?}: ticks flown neutral as stalled");
     // Leave cleanly: a refusal or a drop would show here.
     for &i in &bots {
         let now = rig.net.now();

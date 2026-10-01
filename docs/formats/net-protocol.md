@@ -224,8 +224,11 @@ Nine bytes, smaller than the empty Payload (19 bytes) it stands in for.
   connection closes or the session ends. The hosting game's own connection
   has none: it is exempt from the timeout (EF4).
 - **What the host does.** A Keepalive from the connection's own address with
-  its own id counts as hearing from the connection, and as nothing else: no
-  acknowledgement, no round trip, no rate statistic, no answer. One from any
+  its own id counts as hearing from the connection: no acknowledgement, no
+  round trip, no rate statistic, no answer. The first since the game's last
+  Payload tells the host's session the game has stalled, which flies the
+  seat neutral and logs it (the
+  [stall rule](../ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k)). One from any
   other address is counted as from an unknown address, one with another id as
   stale, one of another version fails its checksum, and none of them keeps
   anything alive. A host before protocol 5 drops the kind as invalid, but

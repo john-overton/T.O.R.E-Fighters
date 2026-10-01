@@ -223,6 +223,20 @@ pub enum HostLog {
         text: String,
         heard: usize,
     },
+    /// A player's game stalled: its keepalives stand in for it, and a
+    /// seated player's plane flies neutral until it is back (EF-K follow-up).
+    Stalled {
+        tick: u64,
+        seat: Option<u8>,
+        callsign: String,
+    },
+    /// A stalled player's game is back, after this long without input.
+    Resumed {
+        tick: u64,
+        seat: Option<u8>,
+        callsign: String,
+        stalled_for: Duration,
+    },
 }
 
 impl HostLog {
@@ -242,7 +256,42 @@ impl HostLog {
             | Self::Fault { tick, .. }
             | Self::Stopped { tick }
             | Self::Lobby { tick, .. }
-            | Self::Chat { tick, .. } => *tick,
+            | Self::Chat { tick, .. }
+            | Self::Stalled { tick, .. }
+            | Self::Resumed { tick, .. } => *tick,
+        }
+    }
+
+    /// The line a stall or its end prints in a log, the same in the
+    /// dedicated server's and in a hosting game's: "seat 2 Viper: game
+    /// stalled, flying neutral", "seat 2 Viper: game back after 7.4 s". `None`
+    /// for any other entry.
+    pub fn stall_text(&self) -> Option<String> {
+        let who = |seat: &Option<u8>, callsign: &str| match seat {
+            Some(seat) => format!("seat {seat} {callsign}"),
+            None => callsign.to_owned(),
+        };
+        match self {
+            Self::Stalled { seat, callsign, .. } => Some(format!(
+                "{}: game stalled{}",
+                who(seat, callsign),
+                if seat.is_some() {
+                    ", flying neutral"
+                } else {
+                    ""
+                }
+            )),
+            Self::Resumed {
+                seat,
+                callsign,
+                stalled_for,
+                ..
+            } => Some(format!(
+                "{}: game back after {:.1} s",
+                who(seat, callsign),
+                stalled_for.as_secs_f64()
+            )),
+            _ => None,
         }
     }
 }
@@ -315,6 +364,8 @@ pub struct PlayerStatus {
     pub input_margin_ticks: Option<i32>,
     /// Ticks the host repeated the player's last input for.
     pub inputs_repeated: u64,
+    /// Of those, the ticks flown neutral because its game was stalled.
+    pub inputs_neutral: u64,
     /// Bytes a second the host sends the player, and receives from it.
     pub bytes_up_per_second: u64,
     pub bytes_down_per_second: u64,
@@ -953,6 +1004,7 @@ impl Host {
                     spread: stats.as_ref().map_or(Duration::ZERO, |s| s.spread),
                     input_margin_ticks: seated.then(|| i32::from(peer.inputs.margin())),
                     inputs_repeated: peer.inputs.repeats_total(),
+                    inputs_neutral: peer.inputs.neutral_total(),
                     bytes_up_per_second: stats.as_ref().map_or(0, |s| s.bytes_sent_per_second),
                     bytes_down_per_second: stats
                         .as_ref()
@@ -1110,8 +1162,44 @@ impl Host {
                             peer.wire.lost(sequence);
                         }
                     }
+                    Event::Stalled => self.stalled(connection, None),
+                    Event::Resumed { stalled_for } => self.stalled(connection, Some(stalled_for)),
                 },
             }
+        }
+    }
+
+    /// A connection's game stalled (its first keepalive; `None`) or came
+    /// back after `Some` time: a seated player's plane flies neutral
+    /// meanwhile (the lead's reading of John's pause rule, EF-K follow-up),
+    /// and the log says so.
+    fn stalled(&mut self, connection: ConnectionId, back_after: Option<Duration>) {
+        let tick = self.world.tick();
+        let Some(peer) = self.peers.get_mut(&connection) else {
+            return;
+        };
+        let seat = match peer.stage {
+            Stage::Seated => peer.seat.map(|s| s.0),
+            _ => None,
+        };
+        let callsign = peer.callsign.clone();
+        match back_after {
+            None => {
+                if seat.is_some() {
+                    peer.inputs.set_stalled();
+                }
+                self.log(HostLog::Stalled {
+                    tick,
+                    seat,
+                    callsign,
+                });
+            }
+            Some(stalled_for) => self.log(HostLog::Resumed {
+                tick,
+                seat,
+                callsign,
+                stalled_for,
+            }),
         }
     }
 

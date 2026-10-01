@@ -47,6 +47,8 @@ mod lobby_tests;
 mod matrix_tests;
 pub mod prediction;
 #[cfg(test)]
+mod stall_tests;
+#[cfg(test)]
 mod tests;
 
 use crate::host::BuildId;
@@ -1462,6 +1464,8 @@ impl Client {
                     Event::Payload { sections, .. } => self.payload(sections),
                     Event::Delivered { .. } => self.upstream.note(self.now, 0, 1),
                     Event::Lost { .. } => self.upstream.note(self.now, 1, 0),
+                    // Only a host hears keepalives.
+                    Event::Stalled | Event::Resumed { .. } => {}
                 },
             }
         }

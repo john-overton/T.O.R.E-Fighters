@@ -182,6 +182,15 @@ pub enum Event {
         /// Its sequence.
         sequence: u16,
     },
+    /// The first Keepalive since the other side's last Payload: its game's
+    /// loop is stalled (host only; slice EF-K).
+    Stalled,
+    /// The first Payload after a stall the keepalives covered: the game is
+    /// back, after this long without a Payload.
+    Resumed {
+        /// From the last Payload before the stall to this one.
+        stalled_for: Duration,
+    },
 }
 
 /// Why a send failed.
@@ -281,6 +290,11 @@ pub(crate) struct Connection {
     silence_exempt: bool,
     /// Keepalives received.
     keepalives: u64,
+    /// When the last Payload was applied.
+    last_payload: Duration,
+    /// Keepalives are standing in for the other side's game, which last
+    /// sent a Payload at this time.
+    stalled_since: Option<Duration>,
     pub events: VecDeque<Event>,
     pub closed: Option<CloseReason>,
 }
@@ -324,6 +338,8 @@ impl Connection {
             message_budget: MAX_DATAGRAM,
             silence_exempt: false,
             keepalives: 0,
+            last_payload: now,
+            stalled_since: None,
             events: VecDeque::new(),
             closed: None,
         }
@@ -474,6 +490,12 @@ impl Connection {
         }
         self.recv.record(header.sequence, now);
         self.last_received = now;
+        self.last_payload = now;
+        if let Some(since) = self.stalled_since.take() {
+            self.events.push_back(Event::Resumed {
+                stalled_for: now.saturating_sub(since),
+            });
+        }
         self.recv_rate.push(now, datagram_len);
         if header.ack_delay != ACK_DELAY_NONE {
             let delay = Duration::from_micros(u64::from(header.ack_delay) * ACK_DELAY_UNIT_MICROS);
@@ -560,8 +582,9 @@ impl Connection {
     }
 
     /// Takes a Keepalive whose connection id and address are good: the
-    /// connection has heard from its peer, and nothing else changes. No
-    /// acknowledgement, statistic or answer comes of it.
+    /// connection has heard from its peer. No acknowledgement, statistic or
+    /// answer comes of it; the first since a Payload raises
+    /// [`Event::Stalled`], and the next Payload [`Event::Resumed`].
     pub(crate) fn kept_alive(&mut self, now: Duration) {
         if self.closed.is_some() {
             return;
@@ -569,6 +592,10 @@ impl Connection {
         self.now = now;
         self.last_received = self.last_received.max(now);
         self.keepalives += 1;
+        if self.stalled_since.is_none() {
+            self.stalled_since = Some(self.last_payload);
+            self.events.push_back(Event::Stalled);
+        }
     }
 
     /// Counts a bad packet; 50 within 5 seconds end the connection.

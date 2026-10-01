@@ -10,7 +10,7 @@ use std::time::Duration;
 use common::{MS, VERSION, World, host_addr, player_addr};
 use tore_net::packet::{Keepalive, Packet};
 use tore_net::sim::{LinkConfig, SimSocket};
-use tore_net::{CloseReason, Datagrams, DisconnectReason, ServerEvent};
+use tore_net::{CloseReason, Datagrams, DisconnectReason, Event, ServerEvent};
 
 /// The host alone steps for `time`, 1 ms at a time; the players' games are
 /// stalled. `speak` is called each step with the time since the stall began
@@ -102,9 +102,33 @@ fn a_fifteen_second_stall_with_keepalives_is_not_dropped() {
     );
     let stats = w.server.stats(connection).unwrap();
     assert!(stats.packets_received_per_second >= 9, "{stats:?}");
+    // The caller heard the stall once, and its end with its length: from
+    // the last Payload before it to the first after.
+    let stalls: Vec<&Event> = w
+        .host_events
+        .iter()
+        .filter_map(|(_, e)| match e {
+            ServerEvent::Connection { event, .. }
+                if matches!(event, Event::Stalled | Event::Resumed { .. }) =>
+            {
+                Some(event)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stalls.len(), 2, "{stalls:?}");
+    assert_eq!(stalls[0], &Event::Stalled);
+    let Event::Resumed { stalled_for } = stalls[1] else {
+        panic!("{stalls:?}")
+    };
+    assert!(
+        (Duration::from_millis(14_900)..=Duration::from_millis(15_200)).contains(stalled_for),
+        "{stalled_for:?}"
+    );
 }
 
-/// The host answers a keepalive with nothing at all.
+/// The host answers a keepalive with nothing at all; its first tells the
+/// caller the game has stalled.
 #[test]
 fn a_keepalive_is_never_answered() {
     let (mut w, datagram) = joined();
@@ -115,7 +139,18 @@ fn a_keepalive_is_never_answered() {
     w.server
         .receive(now, player_addr(0), &datagram, &mut w.gate);
     assert!(w.server.poll_transmit().is_none());
+    assert!(matches!(
+        w.server.poll_event(),
+        Some(ServerEvent::Connection {
+            event: Event::Stalled,
+            ..
+        })
+    ));
     assert!(w.server.poll_event().is_none());
+    // A second keepalive in the same stall says nothing more.
+    w.server
+        .receive(now, player_addr(0), &datagram, &mut w.gate);
+    assert!(w.server.poll_event().is_none() && w.server.poll_transmit().is_none());
 }
 
 /// Without keepalives a stalled game is dropped after 5 seconds, as before.
