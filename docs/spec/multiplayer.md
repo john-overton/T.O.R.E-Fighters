@@ -295,6 +295,12 @@ line as the message and its sound as the message's sound, sets the receiver if
 the line has one, and sends it. The default sound for a typed message is
 `^BEEP2.5K`.
 
+**In T.O.R.E** (EF1): the import keeps the file as `TORE_CHAT_V1` and
+`tore_formats::chat::parse` returns its lines with the receiver, text and
+sound under the limits above (sound accepted at 12 characters or fewer; the
+40 is the retail buffer). Details and agent decisions: the [menu
+format notes](../formats/menu.md#what-the-import-keeps-for-these-screens-ef1-2026-10-01).
+
 **Who hears the sound.** The sound's name travels in the message itself (the
 packet holds the text, a zero byte and the sound name, S, `0x413640`), and the
 receive path reads it as a second string (S, `0x48d3c0`), so **receivers hear

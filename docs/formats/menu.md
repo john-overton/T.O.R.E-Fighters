@@ -344,7 +344,7 @@ screenshot, is kept with the lead's notes (`.local/mp-notes/stage-ef/ef0/`).
 | `PANELFNT` (`PANELFND` the dim copy) | 10, line height 10 | Panel title, labels, headings, "PAGE", "PREV", "NEXT", the Messages area; each connection function loads `PANELFNT.PIC` (S: `0x49284e`, `0x4931a3`, `0x4937ec` and others). Widths: "TCP/IP Network connection" 128, "Callsign:" 40, "Games" 28, "Players" 34, "Messages" 43, all matching the screenshot to a pixel |
 | `SMLFONT` | 12 | List row text and the page counter |
 | `FONTACT` (`FONTACD` dim), `FONTDFT` (`FONTDFD` dim) | 12 | Button labels, normal and default |
-| `WHEELFNT` | 14, ten pixels a glyph (monospaced) | Text in the `EDIT*` fields (S: `0x48c78a` loads it in the edit routine; the caret moves 10 pixels a character, `0x48bec0`). Not in the current import and not in the survey's list |
+| `WHEELFNT` | 14, ten pixels a glyph (monospaced) | Text in the `EDIT*` fields (S: `0x48c78a` loads it in the edit routine; the caret moves 10 pixels a character, `0x48bec0`). Kept by the import since EF1 (it was not in the survey's list) |
 | `MPFONT` | 9 | The connected-state status window (below) |
 | `PANLFNT2`, `FONT4X6`, `MFONT320` | | Present in `FA_1.LIB`, not used by these screens (U) |
 
@@ -373,6 +373,77 @@ screenshot, is kept with the lead's notes (`.local/mp-notes/stage-ef/ef0/`).
   `ACTIOD0L/M/R` and `ACTDFD0L/M/R` the disabled copies, `ACTDFLT`/`ACTDFLD` the
   20 by 27 cap. The disabled default pieces are needed wherever Start or Call
   can be unavailable.
+
+### What the import keeps for these screens (EF1, 2026-10-01)
+
+Implementation mode. The lists are `MULTIPLAYER_ART` (`FA_1.LIB`, 35 pictures)
+and `MULTIPLAYER_DATA` (`FA_2.LIB`, 26 dialogs and menus) in
+`crates/tore-import/src/selection.rs`, and the game's pack check
+(`crates/tore-app/src/assets.rs`) requires every name and reads each picture,
+dialog and menu with the existing readers. The checked sizes below are the
+installed game's; the 1.0 disc gives the same sizes, and its dialogs and menus
+differ by the four timestamp bytes described above. The whole addition is
+about 1.44 MB (1,438,167 bytes of resources) on a 178 MB pack, 63 resources including the two below.
+
+| Group | Names and sizes in bytes |
+| --- | --- |
+| Backgrounds | `MODEM3`, `NETIPX3` (each 309,952) |
+| Panel kit | `PANEL` 309,184; `EDGETL` 810; `EDGETR` 562; `EDGEBL` 552; `EDGEBR` 810; `EDGELR` 280; `EDGETB` 272 |
+| Lists, fields | `LISTLFT` 740; `LISTMID` 484; `LISTRT` 756; `LISTHI` 400; `EDITL` 506; `EDITM` 640; `EDITR` 506; `PAGEBOX` 1,092 |
+| Check boxes | `CHECK00` 1,234; `CHECK01` 1,138; `CHECK02` 1,022; `CHECK03` 944; `CHECK04` 1,022; `CHECK05` 1,138; `CHECK06` 1,234 |
+| Fonts | `PANELFND` 10,944; `FONTDFT` 14,432; `FONTDFD` 14,432; `MPFONT` 9,360; `WHEELFNT` 23,536 |
+| Disabled default button | `ACTDFD0L` 1,146; `ACTDFD0M` 650; `ACTDFD0R` 1,300; `ACTDFLD` 1,154 |
+| Status window | `MPSTATUS` 27,024 (333 by 80) |
+| `MC_DLG`'s picture | `MC` 260,364 (640 by 403) |
+| Network dialogs | `NEWNET`, `NETNEW`, `NETJOIN`, `NETTCP`, `NETCEDT`, `NETEDT`, `NETBEDT`, `CALLSIGN`, `EDITSIGN`, `MODEM` (`.DLG`) (each 4,608) |
+| Mission-setting dialogs | `MC_DELAY`, `MC_DIST`, `MC_DLG`, `MC_KILLS`, `MC_KILLT`, `MC_LIVES`, `MC_NAME`, `MC_NAT2`, `MC_NAT`, `MC_SCR`, `MC_TIME`, `MC_WETH` (`.DLG`, each 4,608); `MC_NATF.DLG` 8,704 |
+| Menus | `CHOOSEM.MNU` and `MULTI.MNU` (each 4,608); `MC_MENU.MNU` 8,704 |
+| Quick messages | `TORE_CHAT_V1` (the retail `CHAT.TXT`, see below) |
+| Marker | `TORE_MULTIPLAYER_V1` (see [the pack contract](../spec/import-cache.md#markers)) |
+
+Agent decisions, 2026-10-01:
+
+- `MC.PIC` is kept because `MC_DLG` is a size-zero dialog that draws it.
+- `MC_MENU.MNU` is kept: it is the mission creator's menu bar, and its
+  Multiplayer menu (Time limit, Number of kills, End scenario conditions,
+  Number of revives, Revive time delay, Revive distance) is what opens the
+  `MC_*` dialogs. The brief named `MC_*` without saying whether the menu counts;
+  it costs 8,704 bytes.
+- Left out because no screen in the design shows them: `SERIAL3` and the modem
+  and serial dialog panels (`MODEM`, `MODEMCOM`, `MODEMSTS`, `SERIAL`, `COM`,
+  `MODEM2`, `SERIAL2` pictures), the dialogs `SERIAL`, `MODEMCOM`, `MODEMSTS`,
+  `MODLIST` and `COMLIST`, the IPX dialogs and pictures (`NETIPX2` and
+  `NETIPX`, the latter left over from the earlier game), `NETDIR`, `FORTAIRB`
+  (Airbase Assault, phase 2 at the earliest), the horizontal rocker `ROCKERH0`
+  to `4` (no screen of ours uses it, EF0) and `CHECK320` (the 320 by 200
+  mode's check box). `MODEM3` is kept for the modem background even though the
+  modem itself is not built, because it is the second background the lobby may
+  use.
+
+The game keeps these resources in `Assets::multiplayer_resources`, apart from
+`theater_resources` (*agent decision*). The combat tapes fingerprint every
+resource in `theater_resources`, so folding the new art into it would have made
+every recorded tape of the single-player baseline refuse to replay (a changed
+fingerprint, not a changed flight); kept apart, the tapes and the baseline are
+unchanged and the screens read the pieces from their own map.
+
+**`CHAT.TXT`** is a loose file in no archive. The importer reads it from the
+installed folder's root (any letter case), and from the disc's installer
+container (`SETUP.ESA`, the `FA_MISC` entry, 336 stored and 591 decoded bytes)
+by the container reader's DCL decoder, which is cheap: it decodes that one
+entry in memory (`MediaSource::loose_file`). On the retail media both give the
+same 591 bytes. The pack holds the bytes as read under `TORE_CHAT_V1`
+(*agent decision*: a name of its own in the `TORE_*` family, so it can never
+collide with an archive resource), and `tore_formats::chat::parse` reads them.
+Absent or unreadable media files are not an import failure: the import report
+and the summary say "quick chat messages unavailable" and chat has no quick
+messages. The reader's rules (spec: [CHAT.TXT](../spec/multiplayer.md#chattxt)):
+the first twelve lines before the Ctrl-Z byte, CRLF or LF, a line cut at 159
+characters, the five receiver keywords matched without regard to case (and
+trimmed, *agent decision*), a last field taken as the sound when it is at most
+12 characters and ends in `.5K` or `.11K` and upper-cased, text cut at 50
+characters. A blank line in the middle keeps its slot so F keys stay aligned
+with lines (*agent decision*; retail's handling is unknown).
 
 ### Corrections to the notes above (EF0)
 

@@ -3204,8 +3204,9 @@ is now the spec:
   `WHEELFNT`, which the import also needs), `LISTLFT/MID/RT/HI`, `PAGEBOX` and
   `CHECK00-06`; panel text is `PANELFNT`, list rows and the page counter
   `SMLFONT`, buttons `FONTACT` and `FONTDFT`. `CHAT.TXT` lies loose in the
-  install. The import keeps almost none of this today (about 40 names to add,
-  with `WHEELFNT`), and the 1.0 and 1.02F copies are byte-identical.
+  install. The import kept almost none of this before EF1 (about 40 names, with
+  `WHEELFNT`; it keeps them now, see the EF1 row), and the 1.0 and 1.02F copies are
+  byte-identical.
 - **Menus.** There is no widget toolkit: each screen draws into the 640 by 480
   canvas with its own hit areas. Reusable today: the retail action buttons with
   the striped default cap, the PREV/NEXT rocker, the creator's paged list and
@@ -3423,7 +3424,7 @@ second completes the plan's stage F and stage E's replays.
 | Slice | Model | After | Work | Acceptance |
 | --- | --- | --- | --- | --- |
 | EF0 Connection screens research | Sonnet | | Fold the retail survey into `docs/spec/multiplayer.md` and `docs/formats/menu.md`; settle the unknowns (NEWNET's field rectangles, the panel fonts, the list row count); the dialog reader learns `_DrawText`, a dialog's PIC name and a list's row count | Spec written with evidence; reader tests decode every network dialog. **Built (EF0, 2026-10-01):** the spec and format notes above, a headless render of NETWORK CONNECTION from the spec's numbers beside John's screenshot, and `ui::dialog` now reads text records (position, label, tail), a size-zero dialog's picture name, a list's row count, edit boxes and check boxes |
-| EF1 Import the art | Sonnet | EF0 | The import keeps the multiplayer screens' pictures, pieces, fonts, dialogs and menus and the retail `CHAT.TXT`; a marker makes an older import ask to re-import | Single-player baseline SAME; an import holds every new name; an older pack asks for a re-import |
+| EF1 Import the art | Sonnet | EF0 | The import keeps the multiplayer screens' pictures, pieces, fonts, dialogs and menus and the retail `CHAT.TXT`; a marker makes an older import ask to re-import | Single-player baseline SAME; an import holds every new name; an older pack asks for a re-import | **Built (EF1, 2026-10-01):** `selection.rs` lists `MULTIPLAYER_ART` (35 pictures) and `MULTIPLAYER_DATA` (26 dialogs and menus), about 1.4 MB; `CHAT.TXT` is read loose from an installed folder and from the disc container's DCL entry and kept as `TORE_CHAT_V1`, parsed by `tore_formats::chat`; the marker `TORE_MULTIPLAYER_V1` is written by every import and asked for by the game's pack check only (`check_multiplayer_marker`), not by the dedicated server's; the game's check reads every new picture, dialog and menu, and the game holds them in `Assets::multiplayer_resources`, not in `theater_resources`, whose contents the combat tapes fingerprint. What was left out and why: [menu format notes](formats/menu.md#what-the-import-keeps-for-these-screens-ef1-2026-10-01) |
 | EF2 Widget kit | Sonnet | EF1 | Reusable retail-style widgets: text field, list with paging, scrolling message box, check box, the panel recipe, a background composed of two retail pictures, keyboard focus | Unit tests; headless renders compared with retail screenshots; single-player captures identical |
 | EF3 Host in the game | Opus | | **Built.** The host on a thread inside the game, the in-process link, the local client, lifecycle and the game's 120 Hz clock | A hosted mission with a bot flies with no correction on the host's own plane; a two-second window stall stalls nobody; the session ends cleanly on leave, quit and a host panic |
 | EF4 The lobby on the wire | Opus | EF3 | The host's lobby phase, slots, loadouts, ready and start, the King's mission, return to the lobby after a mission, the crown, kick; the dedicated server's lobby without a King; protocol version 3 | Simulator tests: players join a lobby, take slots, arm, ready, start, fly, return and fly again; the King's mission change reaches everyone; the wire golden test |
