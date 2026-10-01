@@ -259,9 +259,17 @@ tore-app --connect 192.168.1.20 --callsign Viper
 | Option | Meaning |
 | --- | --- |
 | `--connect HOST[:PORT]` | The server's address or name; the port defaults to 26900 |
-| `--callsign NAME` | 1 to 15 printable characters; a callsign already in use gets a suffix (`Viper_2`), shortened first to stay within 15 |
+| `--callsign NAME` | 1 to 15 printable ASCII characters, none given means `Pilot`; a callsign already in use gets a suffix (`Viper_2`), shortened first to stay within 15 |
 | `--slot N` | The plane to take; without it, the first free friendly plane, friendly wing 1's lead first |
 | `--password TEXT` | The server's password, if it has one |
+
+`HOST` is a name or an address; an IPv6 address needs brackets to carry a
+port (`[fe80::1]:26900`). The options are checked at start, before anything is
+sent, and a game started with `--retail-stall-speeds` refuses to join (every
+machine in a session flies the same aircraft model). `--callsign`, `--slot`
+and `--password` go with `--connect` and nothing else. While it flies, the game
+keeps a [diagnostics log and a capture](ARCHITECTURE.md#recordings-and-diagnostics)
+and records no replay.
 
 The game loads the mission from its own import and compares its content
 manifest with the server's: the names and hashes of every resource the
