@@ -6,7 +6,7 @@
 //! Parsing and checking are here and need no network: the host name is looked
 //! up only when the game starts the session ([`ConnectOptions::resolve`]).
 //! Every default is an agent decision.
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use tore_session::OpenPlanes;
 use tore_world::mission::MissionSpec;
@@ -69,18 +69,43 @@ impl ConnectOptions {
         })
     }
 
-    /// The server's address. A name is looked up now and the first address
-    /// found is used (IPv4 before IPv6 when both exist).
+    /// Every address the server's name gives, IPv4 first, looked up now.
+    pub fn addresses(&self) -> Result<Vec<SocketAddr>, String> {
+        let found = tore_net::reach::resolve(&self.host, self.port)
+            .map_err(|error| format!("Cannot find the server {}: {error}", self.host))?;
+        if found.is_empty() {
+            return Err(format!("Cannot find the server {}", self.host));
+        }
+        Ok(found)
+    }
+
+    /// The server's address. A name is looked up now; when it gives several
+    /// addresses each is tried in turn (IPv4 first, three seconds each) and
+    /// the first that answers the handshake is used, else the first one, so
+    /// the join reports the silence itself. One address is used without a
+    /// test. This waits, so the game's screens use `lookup::Lookup` on a
+    /// thread instead; the command line is the caller that may wait.
     pub fn resolve(&self) -> Result<SocketAddr, String> {
-        let mut found: Vec<SocketAddr> = (self.host.as_str(), self.port)
-            .to_socket_addrs()
-            .map_err(|error| format!("Cannot find the server {}: {error}", self.host))?
-            .collect();
-        found.sort_by_key(|address| address.is_ipv6());
-        found
-            .into_iter()
-            .next()
-            .ok_or_else(|| format!("Cannot find the server {}", self.host))
+        let found = self.addresses()?;
+        if found.len() == 1 {
+            return Ok(found[0]);
+        }
+        for address in &found {
+            let reach = tore_net::reach::probe(
+                *address,
+                tore_session::wire::PROTOCOL_VERSION,
+                tore_net::reach::PROBE_TIMEOUT,
+                &|| false,
+            );
+            if matches!(
+                reach,
+                Ok(tore_net::reach::Reach::Answered | tore_net::reach::Reach::Refused(_))
+            ) {
+                return Ok(*address);
+            }
+            log::info!("Network: no answer from {address}, trying the next address");
+        }
+        Ok(found[0])
     }
 
     /// The server as the player typed it, for messages and logs.
@@ -317,40 +342,12 @@ pub fn callsign_problem(callsign: &str) -> Option<&'static str> {
     }
 }
 
-/// `HOST`, `HOST:PORT`, `[V6]` or `[V6]:PORT` into a host and a port. A bare
-/// IPv6 address (more than one colon, no brackets) has no port.
-fn split_server(server: &str) -> Result<(String, u16), String> {
-    let usage = "--connect needs HOST or HOST:PORT";
-    let server = server.trim();
-    if server.is_empty() {
-        return Err(usage.into());
-    }
-    let port = |text: &str| -> Result<u16, String> {
-        text.parse::<u16>()
-            .ok()
-            .filter(|port| *port != 0)
-            .ok_or_else(|| format!("--connect port {text:?} is not 1 to 65535"))
-    };
-    if let Some(rest) = server.strip_prefix('[') {
-        let (host, tail) = rest.split_once(']').ok_or(usage)?;
-        let port = match tail.strip_prefix(':') {
-            Some(text) => port(text)?,
-            None if tail.is_empty() => DEFAULT_PORT,
-            None => return Err(usage.into()),
-        };
-        return Ok((host.to_owned(), port));
-    }
-    match server.matches(':').count() {
-        0 => Ok((server.to_owned(), DEFAULT_PORT)),
-        1 => {
-            let (host, text) = server.split_once(':').expect("one colon");
-            if host.is_empty() {
-                return Err(usage.into());
-            }
-            Ok((host.to_owned(), port(text)?))
-        }
-        _ => Ok((server.to_owned(), DEFAULT_PORT)),
-    }
+/// `HOST`, `HOST:PORT`, `[V6]` or `[V6]:PORT` into a host and a port (the
+/// reading is `tore_net::reach::split_address`, shared with the bot and the
+/// screen). A bare IPv6 address has no port.
+pub fn split_server(server: &str) -> Result<(String, u16), String> {
+    tore_net::reach::split_address(server, DEFAULT_PORT)
+        .map_err(|error| format!("--connect {error}"))
 }
 
 /// Why this process may not join a server, or `None`. The retail stall-speed

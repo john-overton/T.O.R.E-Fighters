@@ -105,6 +105,7 @@ impl App {
             }
         };
         let server = options.server();
+        crate::net::settings::remember_join(&data, &options);
         let join = match crate::net::session::Join::connect(&options) {
             Ok(join) => join,
             Err(error) => {

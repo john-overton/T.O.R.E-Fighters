@@ -3176,8 +3176,8 @@ taken together at John's request of 2026-10-01, written by the lead and
 reviewed by John the same day; his answers are in the guide's
 [decisions](MULTIPLAYER.md#decisions). Built so far: slice EF0, the research
 and the dialog reader, slice EF1, the import of the art, slice EF2, the widget
-kit, slice EF3, the host inside the game, and slice EF4, the lobby on the wire
-(below); the rest is design.
+kit, slice EF3, the host inside the game, slice EF4, the lobby on the wire, and
+slice EF5, discovery and addresses (below); the rest is design.
 Every choice is an agent decision unless it is credited to John.
 
 John's direction (2026-10-01):
@@ -3376,8 +3376,68 @@ different version; the answer is never longer than the query, as the
 handshake already requires. IPv4 broadcast only: IPv6 discovery, port mapping
 and the internet are stage J. *Agent decision.*
 
-**Addresses.** A typed name is resolved on a background thread, every address
-it returns is tried in turn, and an IPv6 address may carry a port in brackets.
+*Built (EF5), with no screen (EF7 draws it).* What the screen takes:
+
+- **The packets** are `tore_net::packet` kinds 8 (Discover query, exactly 1,000
+  bytes: the asker's protocol version, a nonce, zero padding) and 9 (Discover
+  answer: the nonce, the host's protocol version, flags, players, capacity, the
+  session id, the game's version and commit, the name, the mission summary, the
+  King and the callsigns as far as they fit), layouts in the
+  [wire protocol](formats/net-protocol.md#discovery). They use the `TORE-HELLO`
+  id and so sit outside the protocol version: `PROTOCOL_VERSION` is unchanged
+  and the encodings have a golden file of their own, `crates/tore-net/
+  discover-golden.txt`, so this slice does not touch `wire-golden.txt` and
+  does not collide with slices that raise the version. *Agent decisions:* the
+  hello id rather than a `TORE-FIND` id (one fixed id, and an old host drops
+  the kind as an unknown one either way); a separate rate limiter with the
+  joins' limits, so queries cannot use up the joins' allowance; the answer
+  carries the commit and the session id beside what the brief listed, the
+  commit so the screen can tell the same build from another and the session id
+  so one game answering from two addresses is listed once.
+- **The host's answer.** `Server::receive` rate-limits a query and hands it up
+  as `ServerEvent::Discover`; `Host::pump` calls `answer_discover`
+  (`tore-session`'s `host/discover.rs`), which builds the answer from the
+  lobby's state (`Host::discover_answer(nonce)`: name, `MissionSpec::summary()`,
+  the connected players in joining order, the King's callsign, capacity, the
+  password flag, full, the phase) in every phase, and `Server::answer_discover`
+  fits it to the query's length before queuing it. The dedicated server and a
+  hosting game answer alike, because both are a `Host`.
+- **The search loop** is `net::search::Search`: `Search::start(port, own,
+  now)` binds an IPv4 socket with broadcast on; `update(now)` (called every
+  frame with a clock's time, never blocks) sends the round's queries every two
+  seconds (to 255.255.255.255, to this machine's own network address and to
+  loopback, all on the game port), reads the answers whose nonce is its own,
+  forgets a game not heard for three rounds and a half, and queues
+  `SearchEvent::Added`, `Changed` or `Dropped` for each change (a repeated
+  identical answer is no event); `games()` is the list, by name, each game once
+  at its best address (a network address before a loopback one) with a
+  `Compat` that says the same build, another build or another protocol
+  version; `poll_event()` takes the events. Dropping the `Search` stops it.
+  *Agent decision:* the machine's own network address is a target beside
+  loopback, found by pointing an unconnected UDP socket at a far address (no
+  packet is sent), so a game hosted here is also found at the address other
+  machines use, and where a firewall drops the broadcast of one's own machine
+  the list still shows the local game.
+- **Addresses.** `tore_net::reach` holds `split_address` (every form: `host`,
+  `host:port`, `[v6]`, `[v6]:port`, an IPv4 or IPv6 literal), `resolve` (every
+  address, IPv4 first, each once) and `probe` (the handshake's first packet to
+  one address, which a host answers with a stateless Challenge or a Refuse:
+  `Reach::Answered`, `Refused`, `Silent` or `Cancelled`). `net::lookup::Lookup`
+  runs both on a thread of its own: `Lookup::start(text, protocol_version)`
+  parses at once and returns an error for text that is no address, `poll()`
+  gives `Progress` events (`LookingUp`, `Found`, `Trying`, `NoAnswer`, and the
+  last one: `Reached(address)`, `Refused(address, text)` or `Failed(text)`),
+  `cancel()` or dropping it stops it, and the screen then joins the address in
+  `Reached` with `NetSession::start` as `--connect` does. Each address gets
+  three seconds. `--connect` and `tore-bot --connect` now try every address of
+  a name the same way (a single address is not tested), blocking at start-up as
+  they always did. A zone id (`[fe80::1%eth0]`) is passed to the system's
+  lookup unparsed; not tested on a real link-local address.
+- **Remembered settings.** `net::settings::Remembered`, one text file
+  `network-v1.conf` in the data folder (`tore-network 1`, then `callsign`,
+  `port`, `game-name` and up to eight `address` lines, most recent first);
+  `--connect` and `--host` remember their address, port, game name and an
+  explicit callsign. *Agent decision:* the password is not kept.
 
 ### The lobby
 
@@ -3626,7 +3686,7 @@ second completes the plan's stage F and stage E's replays.
 | EF2 Widget kit | Sonnet | EF1 | Reusable retail-style widgets: text field, list with paging, scrolling message box, check box, the panel recipe, a background composed of two retail pictures, keyboard focus | Unit tests; headless renders compared with retail screenshots; single-player captures identical | **Built (EF2, 2026-10-01):** the kit is `crates/tore-app/src/widgets/` (how a screen uses it is the module's documentation): `Kit` (the pieces decoded in the screen's palette, the two backgrounds in their own), `draw_panel`, `Background` (`MODEM3` under `NETIPX3`'s top 80 rows), `Button` (with the disabled default from `ACTDFD0*` and `ACTDFLD`), `TextField` (retail edit control or NEWNET's flat bar; filters for callsign, address and port; `parse_address`), `List` (rows, columns, icons, rocker, "PAGE n of m"), `MessageBox`, `CheckBox`, `Focus`. No screen uses it yet and `main.rs` routing is unchanged: widgets take the key names and text the screens already receive. Agent decisions: the focus mark is a dotted pale rectangle that shows once the keyboard has been used; an empty list's page box reads `1  of  0` and its PREV and NEXT stay bright as on John's screenshot (they dim only at the ends of a list with rows); the selected row carries `LISTHI`'s gold stripe as a marker and the selection always stays on the shown page; the lock, crown and ready tick are authored pixel pictures (retail has none); the message box wraps with a two space hanging indent, keeps 200 lines, scrolls by wheel and keys and shows a thin bar when lines are hidden; buttons keep the existing pieces but label in `FONTACT`/`FONTDFT` as NEWNET does. A mock NETWORK CONNECTION built only of kit widgets is the same picture as EF0's render of the spec's numbers (0 of 307,200 pixels differ); drawing it whole (background, panel, three lists, a message box, two fields, a check box and four buttons) costs about 0.54 ms a frame in a release build and 1.1 ms in the dev build on this machine, of which the widgets are 0.31 ms and the rest the 640 by 480 background and panel; building the kit takes about 150 ms once, when a screen opens (the ignored tests in `widgets/mock_screen.rs`, 500 runs each) 
 | EF3 Host in the game | Opus | | **Built.** The host on a thread inside the game, the in-process link, the local client, lifecycle and the game's 120 Hz clock | A hosted mission with a bot flies with no correction on the host's own plane; a two-second window stall stalls nobody; the session ends cleanly on leave, quit and a host panic |
 | EF4 The lobby on the wire | Opus | EF3 | The host's lobby phase, slots, loadouts, ready and start, the King's mission, return to the lobby after a mission, the crown, kick; the dedicated server's lobby without a King; protocol version 3 | Simulator tests: players join a lobby, take slots, arm, ready, start, fly, return and fly again; the King's mission change reaches everyone; the wire golden test. **Built (EF4):** see [the lobby](#the-lobby); the crown stays the hosting player's (passing it is phase 2) |
-| EF5 Discovery and addresses | Sonnet | EF4 | The discovery query and answer, the search loop, names resolved off the screen's thread with every address tried, remembered addresses | A host is found on 127.0.0.1 and on this machine's network address; a different build is shown as such; no answer is larger than its query |
+| EF5 Discovery and addresses | Sonnet | EF4 | The discovery query and answer, the search loop, names resolved off the screen's thread with every address tried, remembered addresses | A host is found on 127.0.0.1 and on this machine's network address; a different build is shown as such; no answer is larger than its query. **Built (EF5):** see [finding a game and joining](#finding-a-game-and-joining) |
 | EF6 Chat | Sonnet | EF4 | Chat on the wire with the host's routing, the lobby's box and line, the flight line and keys, the top-left chat window with its colours, `CHAT.TXT` quick messages, limits; `docs/CONTROLS.md` | Routing tests for every receiver; a windowed run types and receives chat in flight with a bot; the controls list test |
 | EF7 Direct Connection screen | Sonnet | EF2, EF5 | The MULTI menu's rows and the screen of "Finding a game and joining" | Headless renders; a windowed run finds a host on this machine and joins it |
 | EF8 Lobby screen | Sonnet | EF2, EF4, EF6 | The lobby screen, the creator with Accept, Load Ordnance for one's own slot, the debrief and the return | A windowed run hosts, builds a mission, takes a slot, chats with a bot, starts, flies, ends and returns to the lobby |

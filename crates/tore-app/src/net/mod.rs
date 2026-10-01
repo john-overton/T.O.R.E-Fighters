@@ -4,11 +4,19 @@
 //! prediction included, is `tore_session::Client`; see docs/ARCHITECTURE.md,
 //! "Network sessions" and docs/DEDICATED-SERVER.md, "Joining from the game".
 //! The game also hosts a session itself, on a thread, and joins it as a
-//! client (slice EF3, `hosting`).
+//! client (slice EF3, `hosting`). Slice EF5 adds finding games and servers
+//! without a screen: `search` (the local network), `lookup` (a typed address,
+//! off the screen's thread) and `settings` (what is remembered).
 pub mod debrief;
 pub mod files;
 pub mod guns;
 pub mod hosting;
+#[allow(dead_code)] // Taken by the Direct Connection screen (EF7).
+pub mod lookup;
 pub mod options;
 pub mod play;
+#[allow(dead_code)] // Taken by the Direct Connection screen (EF7).
+pub mod search;
 pub mod session;
+#[allow(dead_code)] // The screens read the callsign and addresses (EF7).
+pub mod settings;

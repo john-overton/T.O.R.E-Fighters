@@ -539,6 +539,7 @@ impl crate::App {
                 return;
             }
         };
+        crate::net::settings::remember_host(&data, &options);
         let resources = Arc::clone(&self.theater_resources);
         let started = HostThread::start(HostSetup {
             spec: options.spec.clone(),

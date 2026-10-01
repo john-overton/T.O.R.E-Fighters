@@ -765,3 +765,58 @@ fn the_log_names_the_hosting_players_own_connection() {
         "tick 240: seat 1 Cobra (plane 1) left: no packet for 5 seconds"
     );
 }
+
+/// A game this one hosts is found by the search loop (slice EF5) at its
+/// game port, with the hosting player listed as the King: the answer comes
+/// from the host thread's own socket while the game's session is joined over
+/// the link.
+#[test]
+fn a_hosted_game_is_found_by_the_search_loop() {
+    use crate::net::search::{Compat, Own, Search, SearchEvent};
+    use tore_net::packet::DiscoverPhase;
+    let (_thread, link, address) = start_host(0);
+    let mut game = Game::join(link);
+    let socket = bind_udp("0.0.0.0:0".parse().unwrap()).expect("a socket");
+    let mut search = Search::with(
+        socket,
+        vec![address],
+        Own::this_game(),
+        tore_net::reach::random_nonce(),
+        Duration::ZERO,
+    )
+    .expect("a search");
+    let clock = RealClock::new();
+    let started = Instant::now();
+    let mut added = None;
+    let mut last = None;
+    while started.elapsed() < Duration::from_secs(8) {
+        game.pump();
+        search.update(clock.now());
+        while let Some(event) = search.poll_event() {
+            if let SearchEvent::Added(found) | SearchEvent::Changed(found) = event {
+                added.get_or_insert(started.elapsed());
+                last = Some(found);
+            }
+        }
+        // Done once the hosting player is listed.
+        if last.as_ref().is_some_and(|g| g.answer.players == 1) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let found = last.expect("the hosted game is found");
+    eprintln!("found after {:?}: {:?}", added.unwrap(), found.answer);
+    assert_eq!(found.address, address);
+    assert_eq!(found.compat, Compat::Same);
+    assert_eq!(found.answer.name, "Host's game");
+    // The King starts the mission as soon as the hosting player is ready.
+    assert_ne!(found.answer.phase, DiscoverPhase::Closed);
+    assert_eq!(found.answer.callsigns, ["Host"]);
+    assert_eq!(found.answer.king, "Host");
+    assert_eq!((found.answer.players, found.answer.capacity), (1, 4));
+    assert!(
+        found.answer.summary.starts_with("UKR"),
+        "{}",
+        found.answer.summary
+    );
+}
