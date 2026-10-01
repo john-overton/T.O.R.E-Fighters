@@ -596,4 +596,66 @@ mod tests {
         assert_eq!(search.games()[0].address, address);
         assert_eq!(search.games()[0].answer.name, "Loopback game");
     }
+
+    /// Looks for games on this machine's network for a while and prints what
+    /// it hears and when: the on-machine check of slice EF5. Run with a host
+    /// or a server up:
+    ///
+    /// ```sh
+    /// TORE_FIND_PORT=26900 TORE_FIND_SECONDS=8 cargo test --locked -p tore-app \
+    ///   find_games_on_this_machine -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "looks at the real network; run by hand"]
+    fn find_games_on_this_machine() {
+        let port = std::env::var("TORE_FIND_PORT")
+            .ok()
+            .and_then(|text| text.parse().ok())
+            .unwrap_or(tore_net::DEFAULT_PORT);
+        let seconds: f64 = std::env::var("TORE_FIND_SECONDS")
+            .ok()
+            .and_then(|text| text.parse().ok())
+            .unwrap_or(6.0);
+        // TORE_FIND_TARGET=ADDRESS asks that one address alone.
+        let mut search = match std::env::var("TORE_FIND_TARGET") {
+            Ok(address) => {
+                let socket = tore_net::bind_udp((Ipv4Addr::UNSPECIFIED, 0).into()).unwrap();
+                socket.set_broadcast(true).unwrap();
+                let target: SocketAddr = format!("{address}:{port}").parse().unwrap();
+                eprintln!("asking [{target}]");
+                Search::with(
+                    socket,
+                    vec![target],
+                    Own::this_game(),
+                    reach::random_nonce(),
+                    Duration::ZERO,
+                )
+                .unwrap()
+            }
+            Err(_) => {
+                eprintln!("asking {:?}", targets(port));
+                Search::start(port, Own::this_game(), Duration::ZERO).unwrap()
+            }
+        };
+        let clock = tore_net::RealClock::new();
+        while clock.now().as_secs_f64() < seconds {
+            search.update(clock.now());
+            while let Some(event) = search.poll_event() {
+                eprintln!("{:>7.1} ms  {event:?}", clock.now().as_secs_f64() * 1000.0);
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        for game in search.games() {
+            eprintln!(
+                "listed: {} at {} ({:?}, {}/{} players, {:?}, king {:?})",
+                game.answer.name,
+                game.address,
+                game.compat,
+                game.answer.players,
+                game.answer.capacity,
+                game.answer.phase,
+                game.answer.king
+            );
+        }
+    }
 }
