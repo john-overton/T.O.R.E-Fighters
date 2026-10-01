@@ -399,8 +399,20 @@ impl App {
         let Some((_, plane)) = session.client.seat() else {
             return true;
         };
-        let Some(built) = self.net_built.take() else {
-            return true;
+        // The build of the mission the host sent serves the first seating; a
+        // player who left its flight and takes a plane in the same running
+        // mission again (the others fly on) has the game build it again.
+        let built = match self.net_built.take() {
+            Some(built) => built,
+            None => match self.net.as_mut().and_then(NetSession::rebuild) {
+                Some(Ok(built)) => built,
+                Some(Err(error)) => {
+                    self.net_ending = Some(format!("The mission could not be built: {error}"));
+                    self.end_session(event_loop);
+                    return false;
+                }
+                None => return true,
+            },
         };
         let plane = plane.0;
         // A page of the lobby still open gives way to the flight.

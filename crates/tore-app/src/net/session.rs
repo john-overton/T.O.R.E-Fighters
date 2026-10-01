@@ -272,6 +272,10 @@ pub struct NetSession {
     kept: KeptAlive,
     clock: RealClock,
     sink: Sink,
+    /// The mission the host last sent, to build the game's copy of it again
+    /// for a plane taken a second time in the same running mission.
+    spec: Rc<RefCell<Option<MissionSpec>>>,
+    resources: Arc<BTreeMap<String, Vec<u8>>>,
     /// Chaff, flares, smoke and contrails, stepped once per client tick.
     pub effects: Effects,
     /// The client tick the effects have been stepped to.
@@ -368,8 +372,14 @@ impl NetSession {
         client.set_diagnostics(Box::new(DatedLog::new(data.join(files::LOG_FOLDER))));
 
         let sink: Sink = Rc::new(RefCell::new(None));
-        let (map, kept) = (Arc::clone(&resources), Rc::clone(&sink));
+        let spec_kept: Rc<RefCell<Option<MissionSpec>>> = Rc::new(RefCell::new(None));
+        let (map, kept, spec_for_rebuild) = (
+            Arc::clone(&resources),
+            Rc::clone(&sink),
+            Rc::clone(&spec_kept),
+        );
         client.set_mission_builder(Box::new(move |spec, reads: &dyn ResourceSource| {
+            *spec_for_rebuild.borrow_mut() = Some(spec.clone());
             // The game's own build for the screens, then the session's: a
             // failure of either is the mission's.
             *kept.borrow_mut() = Some(build_mission(spec, &map));
@@ -383,6 +393,8 @@ impl NetSession {
             kept: KeptAlive::new(KeepaliveConfig::default()),
             clock,
             sink,
+            spec: spec_kept,
+            resources,
             effects: Effects::default(),
             effects_tick: 0,
             releases: Vec::new(),
@@ -538,6 +550,15 @@ impl NetSession {
     /// once; an `Err` is the build's failure.
     pub fn take_built(&mut self) -> Option<WorldResult<Built>> {
         self.sink.borrow_mut().take()
+    }
+
+    /// The game's build of the running mission again, for a player who left
+    /// its flight and takes a plane in the same mission once more (the
+    /// first seating took the build [`NetSession::take_built`] gave).
+    /// `None` until the host has sent a mission.
+    pub fn rebuild(&mut self) -> Option<WorldResult<Built>> {
+        let spec = self.spec.borrow().clone()?;
+        Some(build_mission(&spec, &self.resources))
     }
 
     /// End Mission in flight. The hosting player, the King, ends the
@@ -789,3 +810,7 @@ mod tests {
 #[cfg(test)]
 #[path = "keepalive_tests.rs"]
 mod keepalive_tests;
+
+#[cfg(test)]
+#[path = "rejoin_tests.rs"]
+mod rejoin_tests;
