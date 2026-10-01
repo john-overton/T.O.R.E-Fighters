@@ -136,7 +136,7 @@ pub fn serve_with(
 
     let socket = ServerSocket::bind(config.address, config.port).map_err(|error| {
         format!(
-            "Cannot listen on {}: {error}. Is another server using the port? Change it with the `port` setting or --port.",
+            "Cannot listen on {}: {error}. Is another server using the port, or is a game's Direct Connection screen open on this machine? Change it with the `port` setting or --port.",
             config.listen_description()
         )
     })?;
