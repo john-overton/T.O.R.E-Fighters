@@ -856,6 +856,19 @@ impl Client {
         self.net.transmit(socket)
     }
 
+    /// The transport's Keepalive packet for this connection, once joined
+    /// (slice EF-K): what the game's keepalive thread ([`tore_net::Keepalive`])
+    /// sends for it while the game's loop is stalled. `None` while joining and
+    /// once the connection has closed.
+    pub fn keepalive_datagram(&self) -> Option<Vec<u8>> {
+        self.net.keepalive_datagram()
+    }
+
+    /// The host's address.
+    pub fn server(&self) -> SocketAddr {
+        self.net.server()
+    }
+
     /// How long from `now` until the next predicted tick is due, at most
     /// 10 ms.
     pub fn next_wake(&self, now: Duration) -> Duration {

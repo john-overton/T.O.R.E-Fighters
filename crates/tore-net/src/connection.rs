@@ -246,8 +246,12 @@ pub struct Stats {
     pub bad_packets_recent: u32,
     /// Reliable messages queued and unacknowledged, fragments counted each.
     pub messages_queued: usize,
-    /// Time since the last valid packet.
+    /// Time since the last valid packet, a keepalive included.
     pub since_last_received: Duration,
+    /// Keepalives received since the connection started: the times the
+    /// other side's game was stalled and its keepalive thread spoke for it
+    /// (slice EF-K; only a host receives them).
+    pub keepalives: u64,
 }
 
 /// The state of an established connection.
@@ -275,6 +279,8 @@ pub(crate) struct Connection {
     /// Never closed for silence: the host's own player's connection over
     /// the in-process link, which cannot go silent while its game lives.
     silence_exempt: bool,
+    /// Keepalives received.
+    keepalives: u64,
     pub events: VecDeque<Event>,
     pub closed: Option<CloseReason>,
 }
@@ -317,6 +323,7 @@ impl Connection {
             now,
             message_budget: MAX_DATAGRAM,
             silence_exempt: false,
+            keepalives: 0,
             events: VecDeque::new(),
             closed: None,
         }
@@ -352,6 +359,7 @@ impl Connection {
             bad_packets_recent: self.bad.recent(now) as u32,
             messages_queued: self.sender.queued(),
             since_last_received: now.saturating_sub(self.last_received),
+            keepalives: self.keepalives,
         }
     }
 
@@ -549,6 +557,18 @@ impl Connection {
             self.loss.push(now, true);
             self.events.push_back(Event::Lost { sequence });
         }
+    }
+
+    /// Takes a Keepalive whose connection id and address are good: the
+    /// connection has heard from its peer, and nothing else changes. No
+    /// acknowledgement, statistic or answer comes of it.
+    pub(crate) fn kept_alive(&mut self, now: Duration) {
+        if self.closed.is_some() {
+            return;
+        }
+        self.now = now;
+        self.last_received = self.last_received.max(now);
+        self.keepalives += 1;
     }
 
     /// Counts a bad packet; 50 within 5 seconds end the connection.

@@ -7,7 +7,8 @@
 //! transport it holds what a host's real-time loop shares between the
 //! dedicated server and a game that hosts: the server's dual-stack sockets
 //! ([`ServerSocket`]), the in-process [`link`] a hosting game flies through,
-//! and the sleep-then-spin wait ([`wait_until`]). The wire
+//! and the sleep-then-spin wait ([`wait_until`]); and, for a joined game, the
+//! [`Keepalive`] thread that speaks for it while its loop is stalled. The wire
 //! format is [`docs/formats/net-protocol.md`](../../../docs/formats/net-protocol.md),
 //! from "Overview" to "Reliable messages", "Limits", "Versions" and
 //! "Security".
@@ -63,6 +64,7 @@
 
 use std::time::Duration;
 
+pub mod keepalive;
 pub mod link;
 pub mod packet;
 pub mod reach;
@@ -84,6 +86,7 @@ pub use connection::{
 };
 pub use datagram::{Datagrams, RealClock, Transmit, bind_udp};
 pub use entropy::{Entropy, SplitMix64};
+pub use keepalive::{Keepalive, KeepaliveConfig};
 pub use link::{LINK_ADDRESS, LinkEnd, Linked};
 pub use packet::{MAX_DATAGRAM, Section};
 pub use reliable::{MAX_MESSAGE_BODY, MAX_MESSAGE_LEN, MAX_QUEUED_MESSAGES, MESSAGE_WINDOW};
@@ -102,7 +105,9 @@ pub const HANDSHAKE_RETRY: Duration = Duration::from_millis(250);
 pub const HANDSHAKE_GIVE_UP: Duration = Duration::from_secs(10);
 /// A connection ends after this long without a valid packet.
 pub const TIMEOUT: Duration = Duration::from_secs(5);
-/// Each side sends a packet at least this often (10 a second).
+/// Each side's transport sends a packet at least this often (10 a second)
+/// while its caller drives it; a stalled game's [`Keepalive`] thread sends
+/// one a second instead.
 pub const KEEPALIVE_INTERVAL: Duration = Duration::from_millis(100);
 /// `update` sends a packet of due messages alone at most this often (120 a
 /// second), so a burst of messages does not flood the link and a packet is

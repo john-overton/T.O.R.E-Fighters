@@ -207,6 +207,20 @@ impl Client {
         }
     }
 
+    /// The Keepalive packet of this connection, once joined: what a
+    /// [`crate::Keepalive`] thread sends for the game while its loop is
+    /// stalled. `None` while joining and once closed.
+    pub fn keepalive_datagram(&self) -> Option<Vec<u8>> {
+        let State::Connected(connection) = &self.state else {
+            return None;
+        };
+        Packet::Keepalive(packet::Keepalive {
+            connection: connection.id,
+        })
+        .encode(self.config.protocol_version)
+        .ok()
+    }
+
     /// Datagrams dropped before reaching the connection, by cause.
     pub fn counters(&self) -> &Counters {
         &self.counters
@@ -357,7 +371,8 @@ impl Client {
             PacketKind::ConnectRequest
             | PacketKind::ChallengeAnswer
             | PacketKind::Discover
-            | PacketKind::DiscoverAnswer => {
+            | PacketKind::DiscoverAnswer
+            | PacketKind::Keepalive => {
                 self.counters.unexpected += 1;
             }
         }

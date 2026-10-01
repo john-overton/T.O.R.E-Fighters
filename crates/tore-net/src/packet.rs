@@ -1,4 +1,4 @@
-//! Packets: the header, the checksum and the nine kinds.
+//! Packets: the header, the checksum and the ten kinds.
 //!
 //! Every packet starts with a CRC-32 checksum (4 bytes, least significant
 //! byte first) and a kind byte. The checksum covers a 10-byte protocol id that
@@ -56,7 +56,7 @@ pub const MAX_DISCOVER_NAME: usize = 64;
 /// The longest mission summary a discover answer carries, in bytes.
 pub const MAX_DISCOVER_SUMMARY: usize = 200;
 
-/// The nine packet kinds.
+/// The ten packet kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum PacketKind {
@@ -80,6 +80,11 @@ pub enum PacketKind {
     /// Host to the asker, `TORE-HELLO` id, never longer than the query: the
     /// game's summary.
     DiscoverAnswer = 9,
+    /// Client to host once connected, 9 bytes: "my game is stalled, not
+    /// gone" (slice EF-K, protocol 5). Sent by the joined game's keepalive
+    /// thread while its own loop is held up; the host only notes that it
+    /// heard from the connection.
+    Keepalive = 10,
 }
 
 impl PacketKind {
@@ -95,6 +100,7 @@ impl PacketKind {
             7 => Self::Disconnect,
             8 => Self::Discover,
             9 => Self::DiscoverAnswer,
+            10 => Self::Keepalive,
             _ => return None,
         })
     }
@@ -126,7 +132,7 @@ pub enum PacketError {
     TooShort,
     /// Longer than 1,200 bytes.
     TooLong,
-    /// A kind byte that is not one of the nine.
+    /// A kind byte that is not one of the ten.
     UnknownKind(u8),
     /// The checksum does not match: another program, another version or
     /// damage. Dropped silently.
@@ -258,6 +264,16 @@ pub struct Disconnect {
     pub connection: u32,
     /// The reason code.
     pub reason: u8,
+}
+
+/// Keepalive: the connection is alive though its game's loop is stalled.
+/// 9 bytes, smaller than the empty Payload it stands in for, and never
+/// answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Keepalive {
+    /// The connection id from Accepted: the same identity every Payload
+    /// carries, accepted only from the connection's own address.
+    pub connection: u32,
 }
 
 /// Discover query: "who is hosting here?" The protocol version and the nonce
@@ -439,6 +455,8 @@ pub enum Packet {
     Discover(Discover),
     /// Kind 9.
     DiscoverAnswer(DiscoverAnswer),
+    /// Kind 10.
+    Keepalive(Keepalive),
 }
 
 impl Packet {
@@ -454,6 +472,7 @@ impl Packet {
             Self::Disconnect(_) => PacketKind::Disconnect,
             Self::Discover(_) => PacketKind::Discover,
             Self::DiscoverAnswer(_) => PacketKind::DiscoverAnswer,
+            Self::Keepalive(_) => PacketKind::Keepalive,
         }
     }
 
@@ -553,6 +572,9 @@ impl Packet {
                     put_str(&mut w, callsign)?;
                 }
             }
+            Self::Keepalive(p) => {
+                w.write_bits(u64::from(p.connection), 32).ok();
+            }
         }
         seal(w.finish(), version)
     }
@@ -577,6 +599,7 @@ impl Packet {
             PacketKind::Disconnect => Self::Disconnect(decode_disconnect(body)?),
             PacketKind::Discover => Self::Discover(decode_discover(datagram.len(), body, version)?),
             PacketKind::DiscoverAnswer => Self::DiscoverAnswer(decode_discover_answer(body)?),
+            PacketKind::Keepalive => Self::Keepalive(decode_keepalive(body)?),
         })
     }
 }
@@ -855,6 +878,14 @@ pub fn decode_disconnect(body: &[u8]) -> Result<Disconnect, PacketError> {
     Ok(Disconnect { connection, reason })
 }
 
+/// Decodes a Keepalive's body.
+pub fn decode_keepalive(body: &[u8]) -> Result<Keepalive, PacketError> {
+    let mut r = BitReader::new(body);
+    let connection = u32_of(&mut r)?;
+    end(&r)?;
+    Ok(Keepalive { connection })
+}
+
 /// Decodes a Payload's fixed header; returns it and the section bytes.
 pub fn decode_payload_header(body: &[u8]) -> Result<(PayloadHeader, &[u8]), PacketError> {
     let fixed = PAYLOAD_HEADER_LEN - HEADER_LEN;
@@ -994,6 +1025,9 @@ mod tests {
                 nonce: 0xFEDC_BA98_7654_3210,
             }),
             Packet::DiscoverAnswer(answer(&["Viper", "Maverick 1"])),
+            Packet::Keepalive(Keepalive {
+                connection: 0xDEAD_BEEF,
+            }),
         ]
     }
 
@@ -1045,6 +1079,9 @@ mod tests {
         // The query is padded to the longest answer it may be given.
         assert_eq!(sizes[7], DISCOVER_LEN);
         assert!(sizes[8] < DISCOVER_LEN);
+        // A keepalive is smaller than the empty Payload it stands in for.
+        assert_eq!(sizes[9], 9);
+        assert!(sizes[9] < PAYLOAD_HEADER_LEN);
     }
 
     #[test]
@@ -1271,5 +1308,18 @@ mod tests {
         assert_eq!(decode_sections(&[0, 0, 0]), Err(PacketError::Malformed));
         assert_eq!(decode_sections(&[2, 0]), Err(PacketError::Malformed));
         assert_eq!(decode_sections(&[]), Ok(vec![]));
+        // A keepalive is exactly its connection id: shorter or longer is
+        // malformed.
+        assert_eq!(decode_keepalive(&[1, 2, 3]), Err(PacketError::Malformed));
+        assert_eq!(
+            decode_keepalive(&[1, 2, 3, 4, 0]),
+            Err(PacketError::Malformed)
+        );
+        assert_eq!(
+            decode_keepalive(&[0xEF, 0xBE, 0xAD, 0xDE]),
+            Ok(Keepalive {
+                connection: 0xDEAD_BEEF
+            })
+        );
     }
 }

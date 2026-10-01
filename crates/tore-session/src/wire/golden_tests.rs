@@ -21,8 +21,10 @@ fn hex(bytes: &[u8]) -> String {
     })
 }
 
-/// Every sample, one line each: its name and its bytes in hex.
-fn lines() -> Vec<(String, String)> {
+/// Every sample, one line each: its name and its bytes in hex. The
+/// transport's Keepalive packet is whole, checksum included, so its line is
+/// the one that depends on `version`.
+fn lines(version: u16) -> Vec<(String, String)> {
     let mut out = Vec::new();
     out.push(("inputs".into(), hex(&samples::inputs().encode().unwrap())));
     let (full, delta) = samples::snapshots();
@@ -58,6 +60,15 @@ fn lines() -> Vec<(String, String)> {
         "message-11-ended-by-server".into(),
         hex(&ended.encode().unwrap()),
     ));
+    // The transport's own packet added under protocol 5 (EF-K), sealed for
+    // the version.
+    let keepalive = tore_net::packet::Packet::Keepalive(tore_net::packet::Keepalive {
+        connection: 0xDEAD_BEEF,
+    });
+    out.push((
+        "transport-keepalive".into(),
+        hex(&keepalive.encode(version).unwrap()),
+    ));
     out
 }
 
@@ -67,7 +78,7 @@ fn render(version: u16) -> String {
          # Raise PROTOCOL_VERSION, then refresh with TORE_UPDATE_WIRE_GOLDEN=1.\n\
          version {version}\n"
     );
-    for (name, bytes) in lines() {
+    for (name, bytes) in lines(version) {
         let _ = writeln!(text, "{name} {bytes}");
     }
     text

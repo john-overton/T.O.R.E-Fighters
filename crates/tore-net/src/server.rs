@@ -404,6 +404,7 @@ impl Server {
             PacketKind::Payload => self.on_payload(now, from, datagram.len(), body, gate),
             PacketKind::Disconnect => self.on_disconnect(from, body),
             PacketKind::Discover => self.on_discover(now, from, datagram.len(), body),
+            PacketKind::Keepalive => self.on_keepalive(now, from, body),
             PacketKind::Challenge
             | PacketKind::Accepted
             | PacketKind::Refuse
@@ -647,6 +648,26 @@ impl Server {
         self.collect(from);
     }
 
+    /// A joined game's keepalive thread speaking while the game is stalled
+    /// (slice EF-K). It counts only from the connection's own address with
+    /// its own id, exactly as a Payload must, and only as hearing from the
+    /// connection: nothing is acknowledged, applied or answered.
+    fn on_keepalive(&mut self, now: Duration, from: SocketAddr, body: &[u8]) {
+        let Ok(keepalive) = packet::decode_keepalive(body) else {
+            self.counters.malformed += 1;
+            return;
+        };
+        let Some(entry) = self.entries.get_mut(&from) else {
+            self.counters.unknown_address += 1;
+            return;
+        };
+        if entry.connection.id != keepalive.connection {
+            self.counters.stale += 1;
+            return;
+        }
+        entry.connection.kept_alive(now);
+    }
+
     /// Moves a connection's events out and removes it once closed.
     fn collect(&mut self, address: SocketAddr) {
         let Some(entry) = self.entries.get_mut(&address) else {
@@ -814,7 +835,7 @@ mod tests {
         let mut server = host();
         let asker: SocketAddr = "10.0.0.9:40000".parse().unwrap();
         let mut unknown = query(V, 1);
-        unknown[4] = 10;
+        unknown[4] = 11;
         let crc = packet::checksum(PacketKind::Discover, V, &unknown[4..]);
         unknown[..4].copy_from_slice(&crc.to_le_bytes());
         server.receive(Duration::ZERO, asker, &unknown, &mut accept_all);

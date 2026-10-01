@@ -27,6 +27,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Overview](#overview)
 - [Packets](#packets)
 - [Connecting](#connecting)
+- [Keepalive](#keepalive)
 - [Discovery](#discovery)
 - [Acknowledgements and round trip](#acknowledgements-and-round-trip)
 - [Reliable messages](#reliable-messages)
@@ -88,6 +89,7 @@ version.
 | 7 | Disconnect | both | versioned |
 | 8 | Discover query | anyone to a host | `TORE-HELLO` |
 | 9 | Discover answer | host to the asker | `TORE-HELLO` |
+| 10 | [Keepalive](#keepalive) (protocol 5) | client to host | versioned |
 
 A **Payload** packet, the only kind once connected, continues:
 
@@ -110,7 +112,8 @@ The payload header is 19 bytes with the checksum and kind. Section kinds:
 | [Events](#events) | 4 | host to client |
 | [Own state](#the-own-aircraft) | 5 | host to client |
 
-An empty Payload is a keepalive. A section of an unknown kind, a second
+An empty Payload is a keepalive while a side's loop runs; a joined game
+whose loop is stalled sends the [Keepalive](#keepalive) packet instead. A section of an unknown kind, a second
 Messages section, a length that runs past the packet, an acknowledgement of a
 sequence never sent, or a body that fails its own checks drops the whole
 packet, unacknowledged; such packets are counted, and 50 of them within 5 seconds from one
@@ -188,11 +191,46 @@ The content check happens after the mission loads, as a reliable message
 (below), because only then can the client compare.
 
 **Disconnect reasons** (the codes are an agent decision, D2): 1 the player
-left, 2 timeout (5 seconds without a valid packet; a host may exempt a
+left, 2 timeout (5 seconds without a valid packet, a
+[Keepalive](#keepalive) included; a host may exempt a
 connection, as a hosting game exempts its own player's over the in-process
 link, EF4), 3 too many bad packets,
 4 protocol error (a message ahead of its window, or fragments that do not fit
 together), 5 content mismatch, 6 server stopping, 7 kicked.
+
+## Keepalive
+
+*Built (EF-K), protocol 5; agent decisions unless credited.* A joined game's
+loop can stop for longer than the 5-second timeout without the game being
+gone: a window dragged on Windows, a long frame, a screenshot on a loaded
+machine ([what stalls it, by platform](../ARCHITECTURE.md#a-stalled-game-stays-connected-ef-k)).
+While it is stopped, a small thread of the game speaks for it.
+
+| Field | Size | Meaning |
+| --- | --- | --- |
+| Checksum | 32 bits | As every packet, under the versioned id |
+| Kind | 8 bits | 10 |
+| Connection id | 32 bits | The number the host gave in Accepted |
+
+Nine bytes, smaller than the empty Payload (19 bytes) it stands in for.
+
+- **Who sends it.** Only a game joined over UDP, from a thread that holds a
+  clone of the game's own socket, so it comes from the connection's address.
+  The thread sends it once the game's loop has not taken a turn for 1
+  second, then once a second, and never once the loop has not turned for 60
+  seconds (the bound): a game that is truly hung still times out, 5 seconds
+  after its last keepalive. The thread only sends this one packet; it never
+  reads the socket or touches the client's state, and it stops when the
+  connection closes or the session ends. The hosting game's own connection
+  has none: it is exempt from the timeout (EF4).
+- **What the host does.** A Keepalive from the connection's own address with
+  its own id counts as hearing from the connection, and as nothing else: no
+  acknowledgement, no round trip, no rate statistic, no answer. One from any
+  other address is counted as from an unknown address, one with another id as
+  stale, one of another version fails its checksum, and none of them keeps
+  anything alive. A host before protocol 5 drops the kind as invalid, but
+  versions must match to join anyway.
+- **A client** that receives one counts it as unexpected.
 
 ## Discovery
 
@@ -290,8 +328,9 @@ Join by address always works without it.
   input packets (client to host) from the tick each carries, in the manner of
   RFC 3550's interarrival jitter. The transport does not read ticks: the
   session gives it each packet's send time, from its tick, and arrival time.
-- Each side sends at least 10 packets a second; with nothing else to say it
-  sends an empty Payload.
+- Each side sends at least 10 packets a second while its loop runs; with
+  nothing else to say it sends an empty Payload. A joined game whose loop is
+  stalled sends a [Keepalive](#keepalive) once a second instead.
 
 ## Reliable messages
 
@@ -1019,6 +1058,7 @@ Decoders check every count and length against these before reading on.
 | Seats per host | 30 |
 | Players and slots in a lobby state, settings, loadouts at a flight's start | 64 each |
 | Chat line (protocol 4) | 80 characters of printable ASCII, 5 lines in 5 seconds a player, a quick message's sound 12 characters |
+| Keepalive (protocol 5) | 1 a second from a stalled game, for at most 60 seconds of stall |
 
 ## Captures
 
@@ -1061,9 +1101,12 @@ to a replay is stage E.
 
 - The **protocol version** is one number in `tore-session`
   (`wire::PROTOCOL_VERSION`, 2 since the readout's coding, 3 since the lobby,
-  EF4, 4 since chat, EF6). Any change to the bytes raises it. A test
+  EF4, 4 since chat, EF6, 5 since the transport's [Keepalive](#keepalive),
+  EF-K). Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
-  them with a committed copy, `crates/tore-session/wire-golden.txt`; when
+  them with a committed copy, `crates/tore-session/wire-golden.txt` (since
+  protocol 5 it holds one transport packet too, the Keepalive, sealed for the
+  version); when
   they differ it fails and says to raise the version and refresh the copy
   (`TORE_UPDATE_WIRE_GOLDEN=1 cargo test --locked -p tore-session
   wire_golden`), the way the controls list test works. The copy records the
@@ -1092,6 +1135,11 @@ watch the network can read it. What the protocol does guard against:
   someone who sees the traffic can refuse or misdirect a join.
 - **Blind injection.** Once connected, a packet must carry the connection's
   32-bit id and a valid checksum.
+- **Keepalives** (protocol 5) need the same identity as a Payload, the
+  connection's address and its id, so they add nothing a stranger could not
+  already do with an empty Payload: they only keep a connection from timing
+  out, are never answered, are smaller than an empty Payload, and a game sends
+  at most one a second, for at most a minute of stall.
 - **Malformed packets.** Every decoder is bounded and returns an error instead
   of panicking; a seeded fuzz test feeds each one random and mutated packets.
 - **Floods.** Connect requests are rate-limited per address and in total, and

@@ -68,8 +68,10 @@ use tore_codec::CodecError;
 /// The protocol version: one number for every byte of the protocol, the
 /// transport's included. Any change to the bytes raises it; the wire golden
 /// test fails until it is raised and the committed copy refreshed
-/// (`TORE_UPDATE_WIRE_GOLDEN=1`).
-pub const PROTOCOL_VERSION: u16 = 4;
+/// (`TORE_UPDATE_WIRE_GOLDEN=1`). 2 since the readout's coding, 3 since the
+/// lobby (EF4), 4 since chat (EF6), 5 since the transport's Keepalive packet
+/// (EF-K).
+pub const PROTOCOL_VERSION: u16 = 5;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks
