@@ -2419,7 +2419,13 @@ only the tick-cost figure reads the process's clock.
 - **Seating.** Seat ids are the lowest free from 0. The Seated message's
   loadout is the plane's stations as they are (weapon, capacity, rounds left)
   and its fuel. A newly seated player's first snapshot queues the mission as
-  it stands: every mark and every effect still showing.
+  it stands: every mark and every effect still showing. *Built (D10):* the
+  host holds the seat's exact states back until its Seated message is
+  acknowledged (the transport reports no more than the count of reliable
+  messages still unacknowledged, so every message must be, in practice a
+  round trip), at most 3 seconds (`SEATED_HOLD_TICKS`); the state due
+  meanwhile goes out at the next snapshot after. The first 3 seconds' hashes
+  still flow, so a mismatch is reported and answered as before.
 - **A plane that cannot go back.** When a player leaves a plane that is
   destroyed or whose pilot is dead or gone, the AI cannot take it; it stays
   with the departed player's seat, flown with neutral input, and the roster
@@ -2581,9 +2587,10 @@ mission, `roster()`, `name(index)` and `stats()` the rest.
   wings' record, else the mission's for the type), decodes the exact state with
   that type's flight model, and starts its prediction; the standing ground
   objects are the mission's less the Seated message's destroyed list. Own
-  states that arrive before the Seated message (they overtake its fragments)
-  are kept, by the baselines they name, and read once it has arrived: the
-  transport has acknowledged them, so the host codes the next against them.
+  states that arrive before the Seated message (they overtook its fragments
+  until D10, when the host began holding them back; a client still keeps
+  them) are kept, by the baselines they name, and read once it has arrived:
+  the transport has acknowledged them, so the host codes the next against them.
 - **Prediction.** Each predicted tick quantizes the controls as the wire does,
   numbers the commands given since the last tick from 1 (wrapping), and runs
   `OwnPlane::step` with the seat's sensors, the standing objects, the weather

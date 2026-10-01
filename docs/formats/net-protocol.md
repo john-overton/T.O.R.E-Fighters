@@ -739,7 +739,10 @@ client keeps its last 64.
 
 - An Own state section that arrives before the Seated message is accepted
   when it has no baseline or names one the client kept, and is read once the
-  seat arrives: the host may already have coded the next against it.
+  seat arrives: the host may already have coded the next against it. (The
+  host holds a seat's exact states until its Seated message is acknowledged,
+  from D10, so a client of this build never sees one early; a client still
+  tolerates it.)
 - The view offset is the newest tick less the drawn time's whole tick; the
   interpolation delay is the main delay rounded to whole ticks (a far
   entity's extra delay is not included).

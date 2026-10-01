@@ -66,6 +66,11 @@ pub const MAX_CATCH_UP_TICKS: u64 = 30;
 pub const FLIGHT_MESSAGE_BUDGET: usize = 256;
 /// A player's plane's exact state goes out at least this often (1 s).
 pub const OWN_STATE_INTERVAL_TICKS: u64 = 120;
+/// The longest the host holds a seat's exact states back for its Seated
+/// message to be acknowledged, ticks (3 seconds): a lost fragment is sent
+/// again after about a round trip, but a message queue that never empties
+/// must not hold them for good.
+pub const SEATED_HOLD_TICKS: u64 = 360;
 /// How long a departing connection has for its last messages (the debrief,
 /// Mission ended) to be acknowledged before the host disconnects it anyway.
 pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
@@ -300,6 +305,10 @@ struct Peer {
     unforeseen: bool,
     /// The tick of the last exact state sent.
     last_own_state: u64,
+    /// Seated was sent at this tick and its acknowledgement is awaited: no
+    /// exact state goes out until it is (or [`SEATED_HOLD_TICKS`] pass), so
+    /// none overtakes the Seated message.
+    holding_since: Option<u64>,
     /// The newest mismatch already answered with an exact state.
     mismatch_answered: u32,
     /// The ownship terms the plane took last tick.
@@ -363,6 +372,21 @@ pub struct Host {
     costs: Costs,
     overloads: u64,
     out: TickOutput,
+    /// What each seat's game could not foresee, by tick (tests only).
+    #[cfg(test)]
+    unforeseen_log: Vec<(u64, SeatId, Unforeseen)>,
+}
+
+/// Why a seat's game could not foresee its plane's state at a tick, for the
+/// network matrix's figures.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Unforeseen {
+    /// An input was late and repeated, or a command applied at another tick.
+    LateInput,
+    /// A change of the ownship terms (a release, fuel or stores) or an event
+    /// about the plane (a hit, a blast, damage).
+    Event,
 }
 
 fn build_world(
@@ -556,6 +580,8 @@ impl Host {
             logs: VecDeque::new(),
             costs: Costs::default(),
             overloads: 0,
+            #[cfg(test)]
+            unforeseen_log: Vec::new(),
             out: TickOutput::default(),
             config,
         };
@@ -782,6 +808,12 @@ impl Host {
             .collect()
     }
 
+    /// What each seat's game could not foresee, as (tick, seat, why).
+    #[cfg(test)]
+    pub(crate) fn unforeseen_log(&self) -> &[(u64, SeatId, Unforeseen)] {
+        &self.unforeseen_log
+    }
+
     /// The mission's world.
     pub fn world(&self) -> &World {
         &self.world
@@ -935,6 +967,7 @@ impl Host {
                 inputs: InputBuffer::new(),
                 unforeseen: false,
                 last_own_state: 0,
+                holding_since: None,
                 mismatch_answered: 0,
                 terms: None,
                 picture: None,
@@ -1355,6 +1388,11 @@ impl Host {
             let Some(seat) = peer.seat else { continue };
             let (input, taken) = peer.inputs.take(seat, tick);
             peer.unforeseen |= taken.repeated || taken.command_moved;
+            #[cfg(test)]
+            if taken.repeated || taken.command_moved {
+                self.unforeseen_log
+                    .push((tick, seat, Unforeseen::LateInput));
+            }
             inputs.push(input);
         }
         for &(_, seat, _) in &takes {
@@ -1464,6 +1502,7 @@ impl Host {
         peer.inputs = InputBuffer::new();
         peer.unforeseen = false;
         peer.last_own_state = tick;
+        peer.holding_since = Some(tick);
         peer.terms = terms;
         peer.picture = None;
         let callsign = peer.callsign.clone();
@@ -1540,9 +1579,14 @@ impl Host {
             }
             // What the player's game cannot foresee about its own plane.
             let terms = out.terms.iter().find(|(p, _)| *p == plane).map(|(_, t)| *t);
-            peer.unforeseen |= terms != peer.terms;
+            let changed =
+                terms != peer.terms || out.events.iter().any(|event| about(event, plane.0));
+            peer.unforeseen |= changed;
             peer.terms = terms;
-            peer.unforeseen |= out.events.iter().any(|event| about(event, plane.0));
+            #[cfg(test)]
+            if changed {
+                self.unforeseen_log.push((tick, seat, Unforeseen::Event));
+            }
         }
         for id in behind {
             self.server.disconnect(id, DisconnectReason::ProtocolError);
@@ -1675,10 +1719,24 @@ impl Host {
         }
         peer.picture = Some(picture);
 
+        // The Seated message comes first: an exact state is held until it
+        // is acknowledged (every reliable message acknowledged, since the
+        // transport reports no more than the count), and then goes out at
+        // once if one was due meanwhile.
+        if let Some(since) = peer.holding_since {
+            let acknowledged = self
+                .server
+                .stats(connection)
+                .is_some_and(|stats| stats.messages_queued == 0);
+            if acknowledged || tick.saturating_sub(since) >= SEATED_HOLD_TICKS {
+                peer.holding_since = None;
+            }
+        }
         let mismatch = peer.inputs.mismatch > peer.mismatch_answered;
-        let due = peer.unforeseen
-            || mismatch
-            || tick.saturating_sub(peer.last_own_state) >= OWN_STATE_INTERVAL_TICKS;
+        let due = peer.holding_since.is_none()
+            && (peer.unforeseen
+                || mismatch
+                || tick.saturating_sub(peer.last_own_state) >= OWN_STATE_INTERVAL_TICKS);
         if due {
             let bytes = peer.wire.own_state(tick as u32, &exact)?;
             match self

@@ -432,7 +432,10 @@ fn fight(seconds: u64, round_trip: Duration, loss: f64) {
             let Some(picture) = &player.picture else {
                 continue;
             };
-            let render = player.client.render_tick().unwrap();
+            // No picture of the others before the first snapshot arrives.
+            let Some(render) = player.client.render_tick() else {
+                continue;
+            };
             m.frames += 1;
             for pose in picture.targets.iter().filter(|p| p.aircraft.is_some()) {
                 // Each is drawn at the render time less its own extra delay:
@@ -644,4 +647,27 @@ fn a_bot_flies_over_real_udp_on_this_machine() {
 #[ignore = "a minute of real time"]
 fn a_bot_flies_a_minute_over_real_udp() {
     real_udp(60);
+}
+
+/// The host holds a seat's exact states until its Seated message is
+/// acknowledged, so none arrives before the Seated message does, even on a
+/// slow lossy link (the client keeps early ones, but need not).
+#[test]
+fn no_exact_state_arrives_before_the_seated_message() {
+    for (seed, round_trip, loss) in [(31, 300, 0.05), (32, 150, 0.05), (33, 300, 0.02)] {
+        let link = LinkConfig::for_round_trip(round_trip * MS, 0.1, loss, 0.01);
+        let mut rig = Rig::new(spec(2, 2, 2), link, seed);
+        let a = rig.join(|c| c.callsign = "Alpha".into(), bot_script());
+        let b = rig.join(|c| c.callsign = "Bravo".into(), bot_script());
+        let mut early = 0;
+        let end = rig.net.now() + Duration::from_secs(12);
+        while rig.net.now() < end {
+            rig.step();
+            for i in [a, b] {
+                early += rig.players[i].client.early.len();
+            }
+        }
+        assert!(rig.seated(a) && rig.seated(b), "seated (seed {seed})");
+        assert_eq!(early, 0, "seed {seed}: own states arrived before Seated");
+    }
 }
