@@ -2532,7 +2532,11 @@ tracer flag (every third round), so the existing drawing shows them. Single
 player never runs any of it.
 
 - **The seat's own rounds** are drawn at once from its trigger, held while its
-  gun is selected and the newest readout says the weapon is ready, with the
+  gun is selected and the newest readout says the weapon is ready (the trigger
+  is the host's own: the Space key arrives as `TriggerKey` seat commands and
+  the controller's button as the controls' trigger, each held by the world's
+  `FireInput` rule, and a press made with a menu up or the window unfocused
+  fires nothing), with the
   readout's rounds less those the client has let go since the readout's tick.
   `gun_round::Cadence` is combat's trigger and round schedule (the press, the
   rounds waiting, the scaled deadline of the next), so the same rounds leave on
