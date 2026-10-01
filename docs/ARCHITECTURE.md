@@ -2345,7 +2345,11 @@ Each tick the host:
    another tick, a hit, a blast, a release, a change of ownship terms.
 
 Every fourth tick (30 a second, John 2026-09-28) it builds one snapshot packet
-per connection: a hash of that player's own plane state; that player's
+per connection, each seat on its own tick of the four so that a full server
+never builds every snapshot at once (*agent decision, D10 follow-up:* the
+seat's phase is its seat number modulo the ticks per snapshot, kept for the
+connection, and the client keeps its own-state hashes at those ticks; with 30
+players the busiest tick builds 8 snapshots, not 30): a hash of that player's own plane state; that player's
 [cockpit readout](#the-flight-screen-draws-a-frame); the player's
 unacknowledged events; and every other aircraft, missile, debris piece and
 ejected pilot, coded against what the player has acknowledged, with room kept

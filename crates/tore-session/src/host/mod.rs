@@ -1437,10 +1437,7 @@ impl Host {
         if std::mem::take(&mut self.roster_dirty) {
             self.broadcast_roster();
         }
-        let tps = u64::from(self.config.ticks_per_snapshot());
-        if tick.is_multiple_of(tps) {
-            self.snapshots(tick, now, &out);
-        }
+        self.snapshots(tick, now, &out);
         self.out = out;
         let cost = started.elapsed();
         self.costs.ticks += 1;
@@ -1595,7 +1592,25 @@ impl Host {
 
     /// Each seated player's snapshot of `tick`, and its plane's exact state
     /// when due.
+    /// The snapshots due at `tick`: each seat's has its own phase within the
+    /// interval ([`wire::snapshot_phase`]), so the cost spreads over the
+    /// interval's ticks instead of landing on one.
     fn snapshots(&mut self, tick: u64, now: Duration, out: &TickOutput) {
+        let tps = self.config.ticks_per_snapshot();
+        let ids: Vec<ConnectionId> = self
+            .peers
+            .iter()
+            .filter(|(_, peer)| {
+                peer.stage == Stage::Seated
+                    && peer.seat.is_some_and(|seat| {
+                        tick % u64::from(tps) == crate::wire::snapshot_phase(seat.0, tps)
+                    })
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
         // Who each side's sensors track: every human-flown plane's contacts.
         let mut tracked: BTreeMap<bool, BTreeSet<u32>> = BTreeMap::new();
         for own in self.world.combat.state.ownships() {
@@ -1609,12 +1624,6 @@ impl Host {
             set.extend(own.sensors.visual().iter().map(|c| c.id));
         }
         let mut failed = Vec::new();
-        let ids: Vec<ConnectionId> = self
-            .peers
-            .iter()
-            .filter(|(_, peer)| peer.stage == Stage::Seated)
-            .map(|(id, _)| *id)
-            .collect();
         for id in ids {
             if self.snapshot(id, tick, now, out, &tracked).is_err() {
                 failed.push(id);

@@ -71,6 +71,15 @@ use tore_codec::CodecError;
 pub const PROTOCOL_VERSION: u16 = 2;
 
 /// Section kinds after the transport's own Messages (kind 1).
+/// The tick of each interval at which a seat's snapshots are built: ticks
+/// where the tick modulo `ticks_per_snapshot` is this phase. Seats are spread
+/// over the interval by their numbers, so a host with many players never
+/// builds every snapshot on one tick (D10 follow-up, agent decision). The
+/// client keeps the own-state hash at the same ticks.
+pub fn snapshot_phase(seat: u8, ticks_per_snapshot: u32) -> u64 {
+    u64::from(seat) % u64::from(ticks_per_snapshot.max(1))
+}
+
 pub const SECTION_INPUTS: u8 = 2;
 /// The Snapshot section.
 pub const SECTION_SNAPSHOT: u8 = 3;

@@ -377,15 +377,18 @@ data and the headless bot, on a 15 against 15 Quick Mission
 | 0 | 1.3 ms | 15% (21% over 5 minutes) | | |
 | 2 | 1.5 ms | 18% | 10.5 KB/s | 21 KB/s |
 | 8 | 2.3 ms | 27% | 12.3 KB/s | 98 KB/s (0.79 Mbit/s) |
-| 15 | 2.6 ms | 31% | 12.4 KB/s | 187 KB/s (1.49 Mbit/s) |
-| 30 | 6.5 ms | 77% | 13.8 KB/s | 415 KB/s (3.32 Mbit/s) |
+| 15 | 2.8 ms | 33% | 12.8 KB/s | 192 KB/s (1.54 Mbit/s) |
+| 30 | 6.8 ms | 81% | 14.0 KB/s | 419 KB/s (3.35 Mbit/s) |
 
 Each human adds about 0.1 to 0.2 ms a tick, and about 2.6 KB/s comes back from
 each player. A tick is 8.3 ms, so one core carries 15 humans comfortably and 30
-at about three quarters of it: with 30 players every fourth tick builds all 30
-snapshots at once and takes 14 ms at the 99th percentile (22 ms at the longest),
-so the host runs those late and catches up, never skipping time. A server on
-a machine that is also busy with other work reports "overloaded" while it
+at about four fifths of it. Each player's snapshots are built on their own
+tick of the four in each interval (seat number modulo 4), so with 30 players a
+tick builds at most 8 snapshots instead of 30: the 99th percentile of a tick
+fell from 13.9 to 10 ms and the longest from 21.8 to 18.5 ms. The few ticks
+over 8.3 ms are the AI's opening fight with a snapshot or two on top; the host
+runs them late and catches up, never skipping time. A server
+on a machine that is also busy with other work reports "overloaded" while it
 catches up; give a 30-player server a core of its own. The bytes are the
 transport's payload, without the 28 bytes of IP and UDP headers on each packet.
 The plan's [bandwidth budget](multiplayer-plan.md#bandwidth-budget) compares

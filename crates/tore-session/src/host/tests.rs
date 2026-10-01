@@ -388,15 +388,16 @@ impl Rig {
     /// The host's state at snapshot tick `tick` for every plane a human
     /// flies, built the way the host builds a snapshot.
     fn record(&mut self, tick: u64) {
-        if !tick.is_multiple_of(u64::from(self.host.config().ticks_per_snapshot())) {
-            return;
-        }
+        // Each seat's snapshots come at its own phase of the interval.
+        let tps = self.host.config().ticks_per_snapshot();
         let planes: Vec<u32> = self
             .host
-            .world()
-            .cockpits
-            .iter()
-            .map(|c| c.plane.0)
+            .peers
+            .values()
+            .filter(|p| p.stage == Stage::Seated)
+            .filter_map(|p| Some((p.seat?, p.plane?)))
+            .filter(|(seat, _)| tick % u64::from(tps) == crate::wire::snapshot_phase(seat.0, tps))
+            .map(|(_, plane)| plane.0)
             .collect();
         for plane in planes {
             let world = self.host.world();
@@ -611,7 +612,10 @@ fn a_seated_client_rebuilds_the_hosts_entities_and_own_state() {
         let host_name = |i: u16| rig.names.name(NameIndex(i)).unwrap().to_owned();
         let mut checked = 0;
         for (header, received) in &c.snapshots {
-            assert_eq!(header.tick % 4, 0);
+            assert_eq!(
+                u64::from(header.tick) % 4,
+                crate::wire::snapshot_phase(seated.seat, 4)
+            );
             assert!(received.unresolved.is_empty());
             let expected = &rig.expected[&(u64::from(header.tick), plane)];
             assert_eq!(header.own_hash, Some(expected.exact.hash().unwrap()));
@@ -1205,4 +1209,35 @@ fn every_player_hears_of_bursts_and_only_its_own_rumbles() {
         })
         .count();
     assert!(rumbles > 0, "the seat's own gun rumbles");
+}
+
+#[test]
+fn each_seats_snapshots_have_their_own_phase_of_the_interval() {
+    let mut rig = Rig::new(spec(5, 2, 20), config(), LinkConfig::one_way(5 * MS));
+    let clients: Vec<usize> = (0..5).map(|_| rig.join(|_| {})).collect();
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        clients.iter().all(|&c| r.seated(c))
+    }));
+    for &c in &clients {
+        rig.clients[c].snapshots.clear();
+    }
+    rig.run(Duration::from_secs(3));
+    let mut phases = Vec::new();
+    for &c in &clients {
+        let client = &rig.clients[c];
+        let seat = client.seated.as_ref().unwrap().seat;
+        let phase = crate::wire::snapshot_phase(seat, 4);
+        // 30 a second, every one at this seat's phase of the four ticks.
+        assert!(client.snapshots.len() >= 85, "{}", client.snapshots.len());
+        for (header, _) in &client.snapshots {
+            assert_eq!(u64::from(header.tick) % 4, phase, "seat {seat}");
+        }
+        phases.push(phase);
+    }
+    // Five seats over four phases: every phase is used, and none holds more
+    // than two seats.
+    for phase in 0..4 {
+        let n = phases.iter().filter(|&&p| p == phase).count();
+        assert!((1..=2).contains(&n), "phase {phase}: {n} seats");
+    }
 }

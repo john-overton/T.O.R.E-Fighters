@@ -82,6 +82,9 @@ pub struct Predictor {
     terms: Option<OwnshipTerms>,
     config: Arc<Configuration>,
     ticks_per_snapshot: u64,
+    /// The ticks of this seat's snapshots: the tick modulo
+    /// `ticks_per_snapshot` is this.
+    phase: u64,
     start_seconds: i32,
     /// The ground objects that can still be hit; the destroyed ones are
     /// taken out as the host says.
@@ -110,6 +113,7 @@ impl Predictor {
             terms,
             config,
             ticks_per_snapshot: ticks_per_snapshot.max(1),
+            phase: crate::wire::snapshot_phase(seat.0, ticks_per_snapshot.clamp(1, 120) as u32),
             start_seconds,
             standing,
             history: VecDeque::new(),
@@ -199,7 +203,7 @@ impl Predictor {
         // The host gives these to the seat as its HUD lines.
         self.plane.flight.systems.messages.clear();
         self.tick = tick;
-        Ok(if tick.is_multiple_of(self.ticks_per_snapshot) {
+        Ok(if tick % self.ticks_per_snapshot == self.phase {
             Some(self.exact().hash()?)
         } else {
             None
@@ -265,7 +269,7 @@ impl Predictor {
             }
         }
         // The host's state is the record's at its tick.
-        if tick.is_multiple_of(self.ticks_per_snapshot)
+        if tick % self.ticks_per_snapshot == self.phase
             && let Some(record) = first
                 .and_then(|f| tick.checked_sub(f))
                 .and_then(|i| self.history.get_mut(i as usize))

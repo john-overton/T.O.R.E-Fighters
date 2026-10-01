@@ -365,7 +365,11 @@ header of at most 21), the cockpit readout takes up to 200 bytes, the events
 up to 150 and the messages up to 256, and the entities get the rest, at least
 545 bytes; whatever one section leaves unused goes to the entities, and the
 events may use what the entities leave ([settled](#snapshots-as-built)). The
-exact own state, when due, travels in a second packet.
+exact own state, when due, travels in a second packet. *Agent decision (D10
+follow-up):* a connection's snapshot ticks are the ticks whose number modulo
+the ticks per snapshot equals its seat number modulo the same, so the seats
+share the interval's ticks; the Seated message's seat tells the client its
+phase, and baselines (counted in snapshots back) are unaffected.
 
 ### Header
 
