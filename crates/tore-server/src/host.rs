@@ -11,9 +11,10 @@
 //! commands and reports what it says. The host reads no clock and opens no
 //! socket: the program gives it the time and the sockets.
 
-use crate::{config::Config, socket::ServerSocket};
+use crate::config::Config;
 use std::{sync::Arc, time::Duration};
 use tore_import::Resources;
+use tore_net::ServerSocket;
 use tore_world::mission::MissionSpec;
 
 /// Time since the server's clock started. The same kind of value as

@@ -15,7 +15,6 @@ mod report;
 mod run;
 #[cfg(test)]
 mod session_test;
-mod socket;
 mod wiring;
 
 use std::process::ExitCode;

@@ -87,7 +87,8 @@ pub(crate) fn transmit_all<D: Datagrams + ?Sized>(
 }
 
 /// The time since this clock was made, for driving endpoints on a real
-/// network. Nothing else in the crate reads a clock.
+/// network, and to wait on ([`crate::wait_until`]). The transport's endpoints
+/// never read a clock.
 #[derive(Debug, Clone, Copy)]
 pub struct RealClock {
     origin: Instant,

@@ -3,7 +3,11 @@
 //! and an in-process network simulator.
 //!
 //! This crate uses only the standard library and `tore-codec`, and knows
-//! nothing of the game: the game's payloads are opaque sections. The wire
+//! nothing of the game: the game's payloads are opaque sections. Beside the
+//! transport it holds what a host's real-time loop shares between the
+//! dedicated server and a game that hosts: the server's dual-stack sockets
+//! ([`ServerSocket`]), the in-process [`link`] a hosting game flies through,
+//! and the sleep-then-spin wait ([`wait_until`]). The wire
 //! format is [`docs/formats/net-protocol.md`](../../../docs/formats/net-protocol.md),
 //! from "Overview" to "Reliable messages", "Limits", "Versions" and
 //! "Security".
@@ -59,6 +63,7 @@
 
 use std::time::Duration;
 
+pub mod link;
 pub mod packet;
 pub mod sim;
 
@@ -68,7 +73,9 @@ mod datagram;
 mod entropy;
 mod reliable;
 mod server;
+mod socket;
 mod track;
+mod wait;
 
 pub use client::{Client, ClientConfig, ClientEvent, ClientState, ConfigError, Welcome};
 pub use connection::{
@@ -76,9 +83,12 @@ pub use connection::{
 };
 pub use datagram::{Datagrams, RealClock, Transmit, bind_udp};
 pub use entropy::{Entropy, SplitMix64};
+pub use link::{LINK_ADDRESS, LinkEnd, Linked};
 pub use packet::{MAX_DATAGRAM, Section};
 pub use reliable::{MAX_MESSAGE_BODY, MAX_MESSAGE_LEN, MAX_QUEUED_MESSAGES, MESSAGE_WINDOW};
 pub use server::{AcceptInfo, ConnectDetails, Decision, Gate, Server, ServerConfig, ServerEvent};
+pub use socket::{Listen, ServerSocket};
+pub use wait::{MAX_NAP, SPIN_MARGIN, Sleep, wait_until};
 
 /// The default server port (a setting).
 pub const DEFAULT_PORT: u16 = 26900;

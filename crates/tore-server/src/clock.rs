@@ -1,79 +1,49 @@
 //! The real-time clock the run loop waits on. The host never reads a clock;
 //! the program reads this one and hands it the time.
 //!
-//! Sleeping is coarse: on Windows a sleep of a millisecond can last 15, so the
-//! wait sleeps until a little before the deadline and spins for the rest. The
-//! host catches up any tick a late wake-up missed (agent decision; the margins
-//! are fitted, not measured on Windows).
+//! The wait itself, sleeping until a little before the deadline and spinning
+//! for the rest, is `tore_net::wait_until`, shared with the game's host
+//! thread; this clock adds the wall clock for the log's dates.
 
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tore_net::{RealClock, Sleep};
 
-/// How long before a deadline the wait stops sleeping and spins. Windows'
-/// default timer resolution is about 15.6 ms and the standard library cannot
-/// raise it, so there the spin is long enough to ride out most of an
-/// overshoot; elsewhere a sleep overshoots by a fraction of a millisecond.
-#[cfg(windows)]
-pub const SPIN_MARGIN: Duration = Duration::from_millis(2);
-#[cfg(not(windows))]
-pub const SPIN_MARGIN: Duration = Duration::from_micros(400);
-
-/// The longest the loop goes without polling the host and the console.
-pub const MAX_NAP: Duration = Duration::from_millis(4);
+pub use tore_net::{MAX_NAP, SPIN_MARGIN, wait_until};
 
 /// Time, sleeping and the wall clock, so tests can fake all three.
-pub trait Timer {
-    /// Time since the timer was made.
-    fn now(&self) -> Duration;
-    /// Sleeps at least `duration`, and possibly longer.
-    fn sleep(&mut self, duration: Duration);
-    /// Gives the processor a hint while spinning.
-    fn spin(&mut self) {
-        std::hint::spin_loop();
-    }
+pub trait Timer: Sleep {
     /// Seconds since 1970-01-01 UTC, for the log's dates.
     fn unix_seconds(&self) -> u64;
 }
 
 /// The system's clock.
 pub struct RealTimer {
-    origin: Instant,
+    clock: RealClock,
 }
 
 impl RealTimer {
     pub fn new() -> Self {
         Self {
-            origin: Instant::now(),
+            clock: RealClock::new(),
         }
     }
 }
 
-impl Timer for RealTimer {
+impl Sleep for RealTimer {
     fn now(&self) -> Duration {
-        self.origin.elapsed()
+        self.clock.now()
     }
     fn sleep(&mut self, duration: Duration) {
         std::thread::sleep(duration);
     }
+}
+
+impl Timer for RealTimer {
     fn unix_seconds(&self) -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0)
-    }
-}
-
-/// Waits until `deadline`: sleeps until [`SPIN_MARGIN`] before it, then spins.
-pub fn wait_until(timer: &mut dyn Timer, deadline: Duration, spin_margin: Duration) {
-    loop {
-        let now = timer.now();
-        let Some(remaining) = deadline.checked_sub(now).filter(|d| !d.is_zero()) else {
-            return;
-        };
-        if remaining > spin_margin {
-            timer.sleep(remaining - spin_margin);
-        } else {
-            timer.spin();
-        }
     }
 }
 
@@ -129,7 +99,7 @@ pub mod fake {
         pub spins: Rc<Cell<u32>>,
     }
 
-    impl Timer for FakeTimer {
+    impl Sleep for FakeTimer {
         fn now(&self) -> Duration {
             self.now.get()
         }
@@ -142,6 +112,9 @@ pub mod fake {
             // Each spin takes a microsecond.
             self.now.set(self.now.get() + Duration::from_micros(1));
         }
+    }
+
+    impl Timer for FakeTimer {
         fn unix_seconds(&self) -> u64 {
             self.unix + self.now.get().as_secs()
         }

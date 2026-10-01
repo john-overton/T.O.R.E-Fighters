@@ -6,7 +6,6 @@
 use std::{
     collections::BTreeSet,
     fmt,
-    net::IpAddr,
     path::{Path, PathBuf},
 };
 
@@ -27,14 +26,8 @@ pub const EMPTY_TIMEOUT_MAX: u32 = 24 * 60 * 60;
 /// The longest restart delay and status interval, in seconds: an hour (agent decision).
 pub const DELAY_MAX: u32 = 60 * 60;
 
-/// Where the server listens.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Listen {
-    /// Every IPv4 and IPv6 address the machine has.
-    Any,
-    /// One local address.
-    Address(IpAddr),
-}
+/// Where the server listens (the transport's, shared with the game's host).
+pub use tore_net::Listen;
 
 /// Which planes humans may take.
 #[derive(Clone, Debug, PartialEq, Eq)]

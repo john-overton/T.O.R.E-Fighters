@@ -1,18 +1,30 @@
-//! The server's UDP sockets. `address any` listens on every IPv4 and IPv6
-//! address: one IPv6 socket that takes IPv4 as well where the system allows it
-//! (Linux and macOS), and an IPv4 socket beside it where it does not (Windows,
-//! and systems with no IPv6). The standard library cannot set the IPv6-only
-//! option, so the program tries the IPv6 socket first and treats "address in
-//! use" on the IPv4 one as the IPv6 socket already covering it.
+//! A server's UDP sockets, shared by the dedicated server and the game that
+//! hosts (moved here from `tore-server` in slice EF3, unchanged).
+//!
+//! `Listen::Any` listens on every IPv4 and IPv6 address: one IPv6 socket that
+//! takes IPv4 as well where the system allows it (Linux and macOS), and an
+//! IPv4 socket beside it where it does not (Windows, and systems with no
+//! IPv6). The standard library cannot set the IPv6-only option, so the
+//! program tries the IPv6 socket first and treats "address in use" on the
+//! IPv4 one as the IPv6 socket already covering it.
 
-use crate::config::Listen;
+use crate::datagram::{Datagrams, bind_udp};
 use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
 };
-use tore_net::{Datagrams, bind_udp};
+
+/// Where a server listens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Listen {
+    /// Every IPv4 and IPv6 address the machine has.
+    Any,
+    /// One local address.
+    Address(IpAddr),
+}
 
 /// One or two bound, non-blocking sockets behind the transport's datagram trait.
+#[derive(Debug)]
 pub struct ServerSocket {
     v6: Option<UdpSocket>,
     v4: Option<UdpSocket>,

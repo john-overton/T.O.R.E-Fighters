@@ -1,6 +1,7 @@
 //! The program: options, then import, check or run.
 
 use std::sync::mpsc::Receiver;
+use tore_net::ServerSocket;
 
 use crate::{
     check,
@@ -13,7 +14,6 @@ use crate::{
     options::{Options, USAGE},
     prepare::{self, Prepared},
     run::{Ended, Loop},
-    socket::ServerSocket,
     wiring,
 };
 /// The build's version string, as the game reports it.

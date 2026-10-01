@@ -7,10 +7,9 @@ use crate::{
     app::is_release,
     config::{AfterEnd, OpenPlanes, StartMode},
     host::{Event, Host, HostSetup, PlayerFigures, Status, Time},
-    socket::ServerSocket,
 };
 use std::{collections::VecDeque, time::Duration};
-use tore_net::Entropy;
+use tore_net::{Entropy, ServerSocket};
 use tore_session::{BuildId, HostConfig, HostLog, LeaveReason, Phase};
 
 /// Builds the host session for a prepared mission.
