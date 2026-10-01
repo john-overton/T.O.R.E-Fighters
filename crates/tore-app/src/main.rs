@@ -242,7 +242,8 @@ struct App {
     /// The cheats the mission has been told of; `None` until a flight's first
     /// tick, so every flight starts by hearing them.
     cheats_sent: Option<tore_sim::cheats::Cheats>,
-    theater_resources: std::collections::BTreeMap<String, Vec<u8>>,
+    /// Shared with a networked session, which builds its mission from it.
+    theater_resources: Arc<std::collections::BTreeMap<String, Vec<u8>>>,
     camera: camera::Camera,
     quick: quick_mission::QuickMission,
     launch_creator: bool,
@@ -313,6 +314,15 @@ struct App {
     script: Option<input_script::Runner>,
     /// `--connect`: the server to join once the window is up.
     connect: Option<net::options::ConnectOptions>,
+    /// The joined (or joining) server.
+    net: Option<net::session::NetSession>,
+    /// The mission the game built for the session, until the flight starts.
+    net_built: Option<net::session::Built>,
+    /// A networked flight on screen, with the single-player state it set
+    /// aside.
+    net_flight: Option<net::play::NetFlight>,
+    /// Why the session ended, in plain words, for the player.
+    net_ending: Option<String>,
 }
 /// Wing vapor line segments: position then RGBA, two vertices per segment.
 /// The five native colors are patterned fill types resolved through LAY
@@ -1135,17 +1145,25 @@ impl App {
         if let Some(key) = key {
             // Menu navigation buttons have no flight semantics while the menu is closed.
             if self.flight_ui.menu || name == "menu" {
-                let command =
-                    self.flight_ui
-                        .key(key, false, false, false, &self.hornet.flight_menu);
+                let command = self.flight_ui.key(
+                    key,
+                    false,
+                    false,
+                    false,
+                    net::play::menu(&self.hornet, &self.net_flight),
+                );
                 return self.flight_command(command);
             }
             return Action::None;
         }
         if name == "pause" {
-            let command = self
-                .flight_ui
-                .key("p", false, true, false, &self.hornet.flight_menu);
+            let command = self.flight_ui.key(
+                "p",
+                false,
+                true,
+                false,
+                net::play::menu(&self.hornet, &self.net_flight),
+            );
             return self.flight_command(command);
         }
         if self.flight_ui.frozen() {
@@ -1164,9 +1182,13 @@ impl App {
             if shift {
                 key = &key[6..];
             }
-            let command = self
-                .flight_ui
-                .key(key, shift, ctrl, alt, &self.hornet.flight_menu);
+            let command = self.flight_ui.key(
+                key,
+                shift,
+                ctrl,
+                alt,
+                net::play::menu(&self.hornet, &self.net_flight),
+            );
             return self.flight_command(command);
         }
         let command = match name.as_str() {
@@ -1378,7 +1400,7 @@ impl App {
                             .message(tore_sim::aircraft_systems::label(index));
                     }
                 }
-                let frame = tick_frame(&self.world, SEAT, &[]);
+                let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
                 for message in combat_view::equipment_damage_report(frame.config, &frame.readout) {
                     self.flight_ui.message(message);
                 }
@@ -1416,7 +1438,21 @@ impl App {
                 Action::None
             }
             Command::Combat(command) => {
-                self.queue(seats::SeatCommand::Manual(command));
+                use tore_sim::combat::live::Command as Live;
+                if self.flight_ui.session
+                    && matches!(
+                        command,
+                        Live::Incoming | Live::DamagePlayer | Live::ToggleTargetJammer
+                    )
+                {
+                    // Range fixtures: they change the mission, which the
+                    // server alone does.
+                    self.flight_ui.message(
+                        "That is a development command, not available in a multiplayer flight",
+                    );
+                } else {
+                    self.queue(seats::SeatCommand::Manual(command));
+                }
                 Action::None
             }
             Command::Chaff | Command::Flare => {
@@ -1541,7 +1577,7 @@ impl App {
                     Command::ViewRelative(view, reference) => (view, reference),
                     _ => unreachable!(),
                 };
-                let frame = tick_frame(&self.world, SEAT, &[]);
+                let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
                 let scene = flight_views::Scene::new(
                     &frame,
                     &self.world.cockpits[OWN].flight,
@@ -1645,7 +1681,7 @@ impl App {
                 // Cycles the available sensor channels. Radar search and track
                 // modes follow the selected display range automatically.
                 self.instruments.cycle_channel();
-                if !tick_frame(&self.world, SEAT, &[])
+                if !net::play::current_frame(&self.world, &self.net_flight, &self.net)
                     .readout
                     .sensors
                     .available(self.instruments.controls().channel)
@@ -1660,7 +1696,7 @@ impl App {
                 Action::Click
             }
             Command::SensorInfrared => {
-                if tick_frame(&self.world, SEAT, &[])
+                if net::play::current_frame(&self.world, &self.net_flight, &self.net)
                     .readout
                     .sensors
                     .available(tore_sim::sensors::Channel::Infrared)
@@ -1848,7 +1884,7 @@ impl App {
         spec.weather = scenery::launch_overrides().map_err(|error| error.to_string())?;
         // The drawn model of each other aircraft type, loaded as the build
         // asks for its simulation half.
-        let resources = &self.theater_resources;
+        let resources = &*self.theater_resources;
         let mut models = Vec::new();
         let mut load = |id| -> tore_world::WorldResult<Arc<aircraft_type::AircraftType>> {
             let model = aircraft::Airframe::load(resources, id)?;
@@ -1920,7 +1956,7 @@ impl App {
                 }
                 built.restarted
             }
-            None => match self.world.restart(&self.hornet, &self.theater_resources) {
+            None => match self.world.restart(&self.hornet, &*self.theater_resources) {
                 Ok(restarted) => restarted,
                 Err(error) => {
                     self.error = Some(error);
@@ -1994,6 +2030,12 @@ impl App {
         if action == Action::Exit {
             self.finished = true;
             event_loop.exit();
+            return;
+        }
+        // End Mission in a networked flight leaves the session: the host
+        // answers with the debrief and ends the connection.
+        if action == Action::Back && self.net_flight.is_some() && self.screen == Screen::Flight {
+            self.leave_session();
             return;
         }
         match action {
@@ -2072,7 +2114,7 @@ impl App {
                             self.reset_vapor();
                             match combat::Combat::new(
                                 &self.hornet,
-                                &self.theater_resources,
+                                &*self.theater_resources,
                                 self.world.combat.range,
                             )
                             .and_then(|mut c| {
@@ -2339,7 +2381,11 @@ impl App {
             self.script = Some(runner);
             return;
         }
-        let tick = self.world.combat.state.tick();
+        // A networked flight counts the client's ticks; the world's never move.
+        let tick = match self.net_flight.as_ref().and_then(|f| f.frame.as_ref()) {
+            Some(frame) => frame.tick,
+            None => self.world.combat.state.tick(),
+        };
         if let Some(step) = runner.due(tick, Instant::now()) {
             let mouse = |app: &mut App, event: WindowEvent| app.window_event(event_loop, id, event);
             match step {
@@ -2439,6 +2485,28 @@ impl App {
                         Ok(()) => println!("Script snapshot: {}", path.display()),
                         Err(error) => {
                             self.error = Some(format!("{}: {error}", path.display()).into())
+                        }
+                    }
+                }
+                Step::Shot(path) => {
+                    let path = match std::env::var_os("TORE_SCRIPT_OUT") {
+                        Some(dir) if path.is_relative() => PathBuf::from(dir).join(path),
+                        _ => path,
+                    };
+                    if let Some(renderer) = &mut self.renderer {
+                        if let Some(parent) = path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        // The 3D view with the cockpit, HUD and instruments as
+                        // the last frame drew them.
+                        if let Err(error) = renderer.capture_sim(
+                            &path,
+                            &self.camera,
+                            &self.world.terrain,
+                            &self.scenery,
+                            true,
+                        ) {
+                            self.error = Some(format!("{}: {error}", path.display()).into());
                         }
                     }
                 }
@@ -2627,7 +2695,7 @@ impl App {
                     self.modifiers.shift_key(),
                     self.modifiers.control_key(),
                     self.modifiers.alt_key(),
-                    &self.hornet.flight_menu,
+                    net::play::menu(&self.hornet, &self.net_flight),
                 )
             };
             if self.flight_ui.map.open != map_before {
@@ -2716,15 +2784,11 @@ impl ApplicationHandler for App {
                 renderer.window.request_redraw();
                 self.renderer = Some(renderer);
                 if let Some(options) = self.connect.take() {
-                    self.error = Some(
-                        format!(
-                            "Joining {} is not wired to the client session yet",
-                            options.server()
-                        )
-                        .into(),
-                    );
-                    event_loop.exit();
-                    return;
+                    self.start_session(options);
+                    if self.error.is_some() {
+                        event_loop.exit();
+                        return;
+                    }
                 }
                 if std::mem::take(&mut self.launch_creator) {
                     let view = self.flight_view;
@@ -2787,7 +2851,8 @@ impl ApplicationHandler for App {
                             Some("Quick Mission could not launch the selected setup".into());
                         event_loop.exit();
                     } else if self.error.is_none() {
-                        let frame = tick_frame(&self.world, SEAT, &[]);
+                        let frame =
+                            net::play::current_frame(&self.world, &self.net_flight, &self.net);
                         let listed = combat_view::readout(
                             &self.world.combat,
                             frame.config,
@@ -2862,6 +2927,13 @@ impl ApplicationHandler for App {
         } else {
             event
         };
+        // A joined server takes its turn before a frame is drawn: the controls
+        // go in, the frame to draw comes out.
+        if matches!(event, WindowEvent::RedrawRequested)
+            && self.renderer.as_ref().is_some_and(|r| r.window.id() == id)
+        {
+            self.net_tick(event_loop);
+        }
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -3156,7 +3228,7 @@ impl ApplicationHandler for App {
                     Action::None
                 } else if self.screen == Screen::Flight && self.flight_ui.menu {
                     let command = self.flight_ui.pointer(
-                        &self.hornet.flight_menu,
+                        net::play::menu(&self.hornet, &self.net_flight),
                         self.pointer
                             .and_then(|(x, y)| renderer.viewport().point(x, y)),
                         state == ElementState::Pressed,
@@ -3248,6 +3320,7 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 let frame_start = Instant::now();
                 let mut simulation_ms = 0.;
+
                 if self.screen == Screen::Flight
                     && let Some(view) = self.performance.view()
                 {
@@ -3301,12 +3374,20 @@ impl ApplicationHandler for App {
                         self.scenery.no_sun_whiteout = self.flight_ui.cheats.no_sun_whiteout;
                         let now = Instant::now();
                         let elapsed = (now - self.frame_time).as_secs_f64().min(0.25);
-                        let steps = self.flight_ui.steps(&mut self.flight_clock, elapsed);
+                        // A networked flight's ticks are the client session's.
+                        let session = self.net_flight.is_some();
+                        let steps = if session {
+                            0
+                        } else {
+                            self.flight_ui.steps(&mut self.flight_clock, elapsed)
+                        };
                         self.frame_time = now;
                         if let Some(audio) = &self.audio {
-                            let frame = tick_frame(&self.world, SEAT, &[]);
-                            audio.seeker(frame.readout.seeker.tone);
-                            audio.pause_flight(self.flight_ui.frozen());
+                            if !session {
+                                let frame = tick_frame(&self.world, SEAT, &[]);
+                                audio.seeker(frame.readout.seeker.tone);
+                            }
+                            audio.pause_flight(self.flight_ui.stopped());
                         }
                         // Pauses, time compression and cheats, noted as they happen.
                         if let Some(recording) = &mut self.replay_recorder {
@@ -3423,47 +3504,76 @@ impl ApplicationHandler for App {
                             );
                             self.head_look = self.input.head_look().unwrap_or([0.; 2]);
                         }
-                        self.combat_view.present(
-                            &self.world.combat,
-                            if self.flight_ui.frozen() {
-                                1.0
-                            } else {
-                                self.flight_clock.remainder / flight::DT
-                            },
-                        );
+                        if !session {
+                            self.combat_view.present(
+                                &self.world.combat,
+                                if self.flight_ui.frozen() {
+                                    1.0
+                                } else {
+                                    self.flight_clock.remainder / flight::DT
+                                },
+                            );
+                        }
                         // Everything combat draws this frame, shared by every camera.
                         let picture = self.combat_view.presented(&self.world.combat);
                         // The flight frame every screen below draws: the seat's
                         // plane at this frame's instant, the picture, the smoke
-                        // and the devices.
-                        let frame = self
-                            .world
-                            .flight_frame(
-                                SEAT,
-                                (!self.flight_ui.frozen())
-                                    .then(|| {
-                                        self.world.presented_flight(
-                                            SEAT,
-                                            self.flight_clock.remainder / flight::DT,
-                                        )
-                                    })
-                                    .flatten(),
-                                &picture,
-                                &[],
-                            )
-                            .expect("the presented seat flies a plane");
+                        // and the devices. A networked flight's comes from the
+                        // client session.
+                        let net_frame = self.net_flight.as_ref().and_then(|f| f.frame.as_ref());
+                        let frame = match (net_frame, self.net.as_ref()) {
+                            (Some(client), Some(net)) => {
+                                let world = &self.world;
+                                client.flight_frame(
+                                    [&net.effects.smoke, &net.effects.contrails],
+                                    &net.effects.devices,
+                                    || {
+                                        world
+                                            .cockpit_readout(
+                                                SEAT,
+                                                combat::launcher(&client.presented),
+                                            )
+                                            .expect("the seat flies a plane")
+                                    },
+                                )
+                            }
+                            _ => self
+                                .world
+                                .flight_frame(
+                                    SEAT,
+                                    (!self.flight_ui.frozen())
+                                        .then(|| {
+                                            self.world.presented_flight(
+                                                SEAT,
+                                                self.flight_clock.remainder / flight::DT,
+                                            )
+                                        })
+                                        .flatten(),
+                                    &picture,
+                                    &[],
+                                )
+                                .expect("the presented seat flies a plane"),
+                        };
                         let presented = frame.presented();
                         if presented.escape.is_some() {
                             self.flight_view = 1;
                             self.view_rig.select(flight_views::Reference::Player);
                         }
-                        let scene = flight_views::Scene::new(
-                            &frame,
-                            presented,
-                            &self.world.combat,
-                            self.world.ai_wings.as_ref(),
-                            Some(&self.combat_view),
-                        );
+                        let scene = if session {
+                            flight_views::Scene::from_frame(
+                                &frame,
+                                presented,
+                                self.world.ai_wings.as_ref(),
+                            )
+                        } else {
+                            flight_views::Scene::new(
+                                &frame,
+                                presented,
+                                &self.world.combat,
+                                self.world.ai_wings.as_ref(),
+                                Some(&self.combat_view),
+                            )
+                        };
                         let camera_keys = std::mem::take(&mut self.camera.keys);
                         let base =
                             self.hornet
@@ -4011,7 +4121,7 @@ impl ApplicationHandler for App {
                         self.flight_ui.draw(
                             &mut self.menu.pixels,
                             &self.hornet.font,
-                            &self.hornet.flight_menu,
+                            net::play::menu(&self.hornet, &self.net_flight),
                         );
                         if let Some(editor) = &self.controls {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
@@ -4032,8 +4142,11 @@ impl ApplicationHandler for App {
                         if let Some(audio) = &self.audio {
                             // The tone follows the flight as the last tick left
                             // it, not the blended one the screen draws.
-                            audio.seeker(tick_frame(&self.world, SEAT, &[]).readout.seeker.tone);
-                            audio.pause_flight(self.flight_ui.frozen());
+                            if !session {
+                                audio
+                                    .seeker(tick_frame(&self.world, SEAT, &[]).readout.seeker.tone);
+                            }
+                            audio.pause_flight(self.flight_ui.stopped());
                             audio.flight(Some((
                                 &self.hornet.profile,
                                 frame.flight,
@@ -4173,6 +4286,12 @@ impl ApplicationHandler for App {
         );
     }
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // A session ends politely when the game does.
+        if let Some(session) = &mut self.net {
+            let now = session.now();
+            session.client.disconnect(now);
+            session.flush();
+        }
         // Release GPU backends while the event loop's display connection is alive.
         self.input.stop();
         self.finish_replay_recording("exit");
@@ -4285,6 +4404,11 @@ impl ApplicationHandler for App {
                 renderer.window.request_redraw();
             }
         }
+        // A joined server needs a turn every few milliseconds, so while it is
+        // not the flight redrawing, the screen redraws about 60 times a second.
+        if self.net.is_some() && self.screen != Screen::Flight && self.next_frame.is_none() {
+            self.next_frame = Some(Instant::now() + Duration::from_millis(16));
+        }
         if self.next_frame.is_some_and(|next| Instant::now() >= next) {
             if let Some(renderer) = &self.renderer {
                 renderer.window.request_redraw();
@@ -4294,6 +4418,9 @@ impl ApplicationHandler for App {
         let mut next = self
             .next_frame
             .map_or(self.input.next_poll, |n| n.min(self.input.next_poll));
+        if let Some(session) = &self.net {
+            next = next.min(Instant::now() + session.next_wake());
+        }
         if self.script.is_some() {
             next = next.min(Instant::now() + Duration::from_millis(10));
         }
@@ -10730,6 +10857,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     };
     let presented_plane = world.picture_plane().0;
     let mut app = App {
+        net: None,
+        net_built: None,
+        net_flight: None,
+        net_ending: None,
         connect,
         launch_creator,
         quick_loadout: stripped_loadout.clone(),
@@ -10798,7 +10929,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             i
         },
         pointer: None,
-        theater_resources,
+        theater_resources: Arc::new(theater_resources),
         seat_commands: Vec::new(),
         cheats_sent: None,
         camera,

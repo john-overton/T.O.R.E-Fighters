@@ -79,6 +79,15 @@ const LOOK: Look = Look {
     buttons: &BUTTONS,
     help: flight_help,
 };
+/// A session's bottom buttons: nothing restarts, and the mission ends here.
+const SESSION_BUTTONS: [&str; 3] = ["Resume flight", "End mission", "Keyboard shortcuts"];
+/// A session's menu is not a pause: the flight goes on behind it, so it says
+/// so (agent decision).
+const SESSION_LOOK: Look = Look {
+    title: "FLIGHT MENU - THE MISSION GOES ON",
+    buttons: &SESSION_BUTTONS,
+    help: flight_help,
+};
 /// The flight keyboard help: the stock keys, then every shortcut in the
 /// imported menu.
 fn flight_help(tree: &[MenuNode]) -> Vec<String> {
@@ -254,7 +263,6 @@ pub fn session_refusal(label: &str) -> Option<&'static str> {
 /// The flight menu a session shows: `tree` without the time rows, without
 /// the Cheat rows that change the mission (and the submenus they leave
 /// empty), and without the Pos menu that moves the aircraft.
-#[allow(dead_code)] // Wired with the client session (D8b).
 pub fn session_menu(tree: &[MenuNode]) -> Vec<MenuNode> {
     fn without_time(node: &MenuNode) -> Option<MenuNode> {
         if TIME_ROWS.contains(&node.label.trim()) {
@@ -355,7 +363,6 @@ impl FlightUi {
     }
     /// Starts a session's flight: no pause or time compression, and only the
     /// cheats that change the screen alone survive from earlier flights.
-    #[allow(dead_code)] // Wired with the client session (D8b).
     pub fn enter_session(&mut self) {
         self.session = true;
         self.paused = false;
@@ -869,6 +876,14 @@ impl FlightUi {
             _ => Command::None,
         }
     }
+    /// How the menu looks and what its bottom buttons are, in a session or not.
+    fn look(&self) -> (&'static Look, &'static [&'static str; 3]) {
+        if self.session {
+            (&SESSION_LOOK, &SESSION_BUTTONS)
+        } else {
+            (&LOOK, &BUTTONS)
+        }
+    }
     /// The menu's controls as drawn, for tests.
     #[cfg(test)]
     fn controls(&self, tree: &[MenuNode]) -> Vec<pause_menu::Control> {
@@ -880,10 +895,11 @@ impl FlightUi {
         self.pause.show_tab(0);
     }
     pub fn pointer(&mut self, tree: &[MenuNode], point: Option<(f64, f64)>, down: bool) -> Command {
-        match self.pause.pointer(tree, &LOOK, point, down) {
+        let (look, buttons) = self.look();
+        match self.pause.pointer(tree, look, point, down) {
             Event::None | Event::Switched(_) => Command::None,
             Event::Click => Command::Click,
-            Event::Button(index) => self.activate(BUTTONS[index], ""),
+            Event::Button(index) => self.activate(buttons[index], ""),
             Event::Tab(index) => {
                 if tree[index].label == "Control" {
                     return Command::ControlsOpen;
@@ -897,7 +913,9 @@ impl FlightUi {
     pub fn draw(&mut self, pixels: &mut [u8], font: &Font, tree: &[MenuNode]) {
         if self.menu {
             self.pause
-                .draw(pixels, font, tree, &LOOK, &|label| self.cheat_state(label));
+                .draw(pixels, font, tree, self.look().0, &|label| {
+                    self.cheat_state(label)
+                });
         } else if self.paused {
             Canvas(pixels).rect((222, 35, 196, 22), [20, 30, 40, 230]);
             Paint {

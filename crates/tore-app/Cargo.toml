@@ -19,6 +19,7 @@ tore-sim = { path = "../tore-sim" }
 tore-world = { path = "../tore-world" }
 tore-replay = { path = "../tore-replay" }
 tore-session = { path = "../tore-session" }
+tore-net = { path = "../tore-net" }
 cpal = "0.16"
 tore-formats = { path = "../tore-formats" }
 tore-import = { path = "../tore-import" }

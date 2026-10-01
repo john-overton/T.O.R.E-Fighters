@@ -101,18 +101,6 @@ impl CombatView {
         Self::new(combat, plane, data)?.with_drawn(combat, data, models)
     }
 
-    /// [`CombatView::with_models`] for a presented plane whose loadout is
-    /// `configuration`.
-    #[allow(dead_code)] // The networked flight's view (D8b).
-    pub fn with_configuration(
-        combat: &Combat,
-        configuration: &live::Configuration,
-        data: &BTreeMap<String, Vec<u8>>,
-        models: Vec<Airframe>,
-    ) -> AppResult<Self> {
-        Self::for_configuration(combat, configuration, data)?.with_drawn(combat, data, models)
-    }
-
     fn with_drawn(
         mut self,
         combat: &Combat,
@@ -137,7 +125,6 @@ impl CombatView {
 
     /// Shows `picture`, a networked client's, instead of combat's render
     /// history from now on. A client calls this once a frame.
-    #[allow(dead_code)] // The networked flight's view (D8b).
     pub fn show_picture(&mut self, picture: RenderSnapshot) {
         self.picture = Some(picture);
     }

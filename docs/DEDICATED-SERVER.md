@@ -271,6 +271,19 @@ and `--password` go with `--connect` and nothing else. While it flies, the game
 keeps a [diagnostics log and a capture](ARCHITECTURE.md#recordings-and-diagnostics)
 and records no replay.
 
+Once the options pass, the game opens its window as usual and joins in the
+background: the main menu shows "Joining ..." while it connects, loads the
+mission and is seated, and then the flight screen takes over. In the flight
+there is no pause and no time compression, the Restart key and the Cheat
+rows that change the mission are refused or hidden (the server sets the
+cheats), and the Esc menu draws over the running flight: while it is up, or the
+window has lost focus, the aircraft flies on with the stick centred, the
+throttle held and the trigger released. A plane that is refused (taken,
+destroyed, not open) is asked for again as any free plane. End Mission leaves:
+the host sends the debrief, which the game shows before the main menu. A drop,
+a refusal, a data mismatch or a server stopping is a plain message on the
+main menu. A client draws no gun rounds yet, though its hits count.
+
 The game loads the mission from its own import and compares its content
 manifest with the server's: the names and hashes of every resource the
 simulation reads for that mission (aircraft, weapons, theater, radio phrases).

@@ -21,6 +21,8 @@
 //! wheel 3               wheel notches, negative for down
 //! snapshot out.ppm      the menu layer as it is drawn now (menu screens); a relative path
 //!                       goes in the folder named by TORE_SCRIPT_OUT when that is set
+//! shot out.ppm          the flight as it is drawn now, with the cockpit, HUD and
+//!                       instruments (the same path rule)
 //! exit                  quit
 //! ```
 use std::path::PathBuf;
@@ -59,6 +61,7 @@ pub enum Step {
     Click(MouseButton),
     Wheel(f32),
     Snapshot(PathBuf),
+    Shot(PathBuf),
     Exit,
 }
 
@@ -277,6 +280,9 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
                 words
                     .get(1)
                     .ok_or_else(|| at("snapshot needs a path".into()))?,
+            )),
+            "shot" => Step::Shot(PathBuf::from(
+                words.get(1).ok_or_else(|| at("shot needs a path".into()))?,
             )),
             "exit" => Step::Exit,
             other => return Err(at(format!("unknown step {other:?}"))),

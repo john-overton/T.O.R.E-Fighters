@@ -604,8 +604,17 @@ move 320 240       mouse to window pixels   movemenu 320 240   to the 640 by 480
 click [left|right] press and release   press / release   hold a button
 wheel 3            wheel notches, negative for down
 snapshot out.ppm   the menu layer as drawn now (menu screens); relative paths go in $TORE_SCRIPT_OUT
+shot out.ppm       the flight as drawn now, cockpit, HUD and instruments included (same path rule)
 exit               quit
 ```
+
+In a networked flight (`--connect`) `waittick` counts the client's ticks. To try the game
+against a server on this machine, import a profile for both, start `tore-server` on a spare
+port with its data folder (`tore-server --port 26911`; a `server.conf` with `empty-timeout
+3600` keeps the mission up between runs), start the game through `tools/agent-run.sh` with
+`--connect 127.0.0.1:26911 --slot 1 --windowed --no-audio --input-script FILE`, and a
+`tore-bot --connect 127.0.0.1:26911 --slot 0 --seconds 200` for company. Build the server,
+the bot and the game at one commit: a build must match to join.
 
 `Down` is nose up and `Up` nose down, as in the game. Set `TORE_RECORD_MISSIONS=1` to record the
 flight. The battery's hand-flown scenarios (`replay-script-*`, scripts in

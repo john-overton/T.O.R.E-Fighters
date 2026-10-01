@@ -8,10 +8,6 @@
 //! smoke steps with [`Smoke::step`], so a puff is born, rises, drifts and
 //! fades exactly as it does where combat runs. See docs/ARCHITECTURE.md,
 //! "The client session" and docs/REPLAYS.md.
-// The networked flight's effects below are wired to the game when the client
-// session lands (slice D8b); until then only the tests and the replay use them.
-#![allow(dead_code)]
-
 use crate::terrain::Terrain;
 use tore_sim::combat::{countermeasures::Devices, live::EffectKind};
 
@@ -131,11 +127,6 @@ pub struct Effects {
 }
 
 impl Effects {
-    /// Starts over, as a new mission does.
-    pub fn clear(&mut self) {
-        *self = Self::default();
-    }
-
     /// Advances one 120 Hz client tick over `picture`, then lets `releases`
     /// go (a device appears where it left, as in combat).
     pub fn step(

@@ -186,7 +186,6 @@ impl Scene {
     /// The scene of the flight screen `frame` is for when it has no combat
     /// to read, a networked client's: its plane is the scene's player, as in
     /// [`Scene::new`], and everything else comes from the frame's picture.
-    #[allow(dead_code)] // The networked flight's scene, wired with the client (D8b).
     pub fn from_frame(
         frame: &crate::frame::FlightFrame,
         player: &flight::State,

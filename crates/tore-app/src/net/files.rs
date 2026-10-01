@@ -26,9 +26,9 @@ const LOG_PREFIX: &str = "net-";
 const LOG_EXTENSION: &str = "tsv";
 /// A capture file's extension.
 pub const CAPTURE_EXTENSION: &str = "tore-capture";
-/// A capture file's first bytes. Agent decision until the capture format
-/// (docs/formats/net-protocol.md, "Captures") names its own.
-pub const CAPTURE_MAGIC: &[u8; 8] = b"TORECAPT";
+/// A capture file's first bytes, which the client session writes
+/// (docs/formats/net-protocol.md, "Captures").
+pub const CAPTURE_MAGIC: &[u8; 8] = tore_session::capture::MAGIC;
 /// The most a diagnostics line may be before the log drops the rest of it, so
 /// a writer that never ends a line cannot grow the buffer without end.
 const MAX_LINE: usize = 4096;

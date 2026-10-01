@@ -1940,6 +1940,7 @@ dependencies = [
  "tore-import",
  "tore-input",
  "tore-input-native",
+ "tore-net",
  "tore-replay",
  "tore-session",
  "tore-sim",
