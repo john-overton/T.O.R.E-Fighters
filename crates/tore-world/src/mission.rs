@@ -1620,7 +1620,8 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../docs/DEDICATED-SERVER.md"
         );
-        let guide = std::fs::read_to_string(path).unwrap();
+        // A Windows checkout may turn the guide's line ends into CR LF.
+        let guide = std::fs::read_to_string(path).unwrap().replace("\r\n", "\n");
         let section = guide.split("\n## The mission file").nth(1).unwrap();
         let block = section.split("```text\n").nth(1).unwrap();
         block.split("```").next().unwrap().to_owned()
