@@ -3435,9 +3435,13 @@ it on this). Each an agent decision unless credited.
   address (phase 2) is dropped for silence like any player. Measured
   (`net/hosting_tests.rs`): an 8-second stall of the game side, with a remote
   bot flying; the host stepped 959 to 961 ticks, the bot's longest gap between
-  snapshots was 36 to 39 ms, nobody was dropped, the hosting player recovered
-  with 0 to 3 corrections, all under 0.01 ft and 0.01 degrees, none adopted
-  or shown, and its End mission then returned both players to the lobby. A
+  snapshots was 34 to 39 ms, nobody was dropped, and the hosting player
+  caught up by taking the host's newest state (a catch-up, rather than
+  stepping the whole backlog), then had 0 to 8 corrections, the largest
+  0.005 ft and 1.2 degrees, one every 125 ms at most, and none after (with
+  the whole test suite running beside this real-time test the debug client is
+  starved and is corrected for a few seconds more before it settles), and
+  its End mission then returned both players to the lobby. A
   dedicated server has no King. The host's house is the King's player in a hosted game and nobody
   on a server. Passing the crown and the King's other settings are phase 2;
   the lobby state carries an empty settings list, and message kinds 23 and 24
@@ -3567,7 +3571,10 @@ reached. The client now applies only the newest exact state, after the
 update's steps, and holds it while the host still reports repeating its late
 inputs (at most 125 ms from when the hold began, however long the inputs
 stay late); it steps the ticks the host has already stepped
-without its input with the controls the host repeated; and its inputs start
+without its input with the controls the host repeated; a prediction more
+than 30 ticks behind its clock takes the host's newest exact state ahead of it
+rather than step the whole backlog (a catch-up, counted apart from
+corrections in `ClientStats::catch_ups`); and its inputs start
 after the newest snapshot's tick. A 2-second stall now costs one correction
 (0.01 ft on the simulator) in the tests, and at most one in the hosted test.
 

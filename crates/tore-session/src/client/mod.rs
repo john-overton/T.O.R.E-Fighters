@@ -105,6 +105,10 @@ pub const INPUT_REDUNDANCY: u64 = 24;
 pub const MAX_TICKS_PER_UPDATE: u64 = 240;
 /// A correction within this long of seating snaps.
 pub const SEATING_SNAP: Duration = Duration::from_secs(1);
+/// A prediction this many ticks behind its clock (a quarter of a second,
+/// after a stall) takes the host's newest exact state ahead of it instead of
+/// stepping the backlog.
+pub const CATCH_UP_TICKS: u64 = 30;
 /// The longest an exact state waits while the host still repeats late
 /// inputs, ticks (125 ms); see `Client::apply_own_states`.
 pub const CORRECTION_HOLD_TICKS: u64 = 15;
@@ -379,6 +383,9 @@ pub struct ClientStats {
     pub corrections: u64,
     pub corrections_shown: u64,
     pub adopted: u64,
+    /// Exact states taken to catch up a prediction far behind its clock
+    /// (after a long stall), not counted as corrections.
+    pub catch_ups: u64,
     pub frames: u64,
     /// Entities drawn over all frames, and of them past their newest state.
     pub entity_frames: u64,
@@ -1967,6 +1974,29 @@ impl Client {
         self.apply_own_state(newest.0, newest.1);
     }
 
+    /// Takes the host's exact state of a tick the prediction never reached
+    /// (it fell far behind): not a correction of anything predicted, so it
+    /// counts as a catch-up, and the drawn plane goes there with it.
+    fn catch_up(&mut self, header: OwnStateHeader, state: ExactState) {
+        let now = self.now;
+        let (Some(seat), Some(mission)) = (self.seat.as_mut(), self.mission.as_ref()) else {
+            return;
+        };
+        match seat
+            .predictor
+            .restore(u64::from(header.tick), state, &mission.world.terrain)
+        {
+            Ok(_) => {
+                seat.offset.clear(now.as_secs_f64());
+                self.stats.catch_ups += 1;
+            }
+            Err(error) => {
+                self.log("prediction-failed", &[&error.to_string()]);
+                self.net.disconnect(DisconnectReason::Other(0));
+            }
+        }
+    }
+
     fn apply_own_state(&mut self, header: OwnStateHeader, state: ExactState) {
         let now = self.now;
         let (Some(seat), Some(mission)) = (self.seat.as_mut(), self.mission.as_ref()) else {
@@ -2079,10 +2109,30 @@ impl Client {
         {
             self.settled = true;
         }
+        let due = self.input_clock.position().floor().max(0.) as u64;
+        // Far behind (a long stall): rather than step the whole backlog, take
+        // the host's newest exact state ahead of the prediction as it is,
+        // one correction, and step only what is left (agent decision, EF4
+        // review: a slow machine could otherwise take seconds to step it,
+        // and be corrected all the while).
+        if let Some(at) = self.seat.as_ref().map(|seat| seat.predictor.tick())
+            && due.saturating_sub(at) > CATCH_UP_TICKS
+            && let Some(index) = self
+                .pending_own
+                .iter()
+                .enumerate()
+                .filter(|(_, (header, _))| u64::from(header.tick) > at)
+                .max_by_key(|(_, (header, _))| header.tick)
+                .map(|(index, _)| index)
+        {
+            let (header, state) = self.pending_own.swap_remove(index);
+            self.pending_own.retain(|(h, _)| h.tick > header.tick);
+            self.holding_since = None;
+            self.catch_up(header, state);
+        }
         let (Some(seat), Some(mission)) = (self.seat.as_mut(), self.mission.as_ref()) else {
             return;
         };
-        let due = self.input_clock.position().floor().max(0.) as u64;
         // Ticks the host has stepped already without this player's input
         // (the game stalled): it repeated the last controls with no
         // commands, so the prediction does the same and stays the host's
