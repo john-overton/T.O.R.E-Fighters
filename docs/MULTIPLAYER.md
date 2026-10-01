@@ -465,7 +465,7 @@ estimates. How they are used is in the
 | Item | Value |
 | --- | --- |
 | Input margin | The client keeps its clock ahead of the host so that the smallest margin by which its inputs arrived over the last 2 seconds is 1 tick plus one input packet's interval (3 ticks, 25 ms, at 60 packets a second), and one interval more while loss over the last 10 seconds is above 1 percent; a single lost packet then costs nothing |
-| Clock steering | The client's clock runs between 0.98 and 1.02 times real time; it jumps only when more than 250 ms off |
+| Clock steering | The client's clock runs between 0.98 and 1.02 times real time; it jumps only when more than 250 ms off. *Correction (D8a):* the first margin the host reports after seating also sets the clock outright, since the Seated message can arrive late and seating snaps anyway |
 | Missing input | The host repeats the player's last stick, throttle, trigger and scope controls with no commands; a command that arrives late is applied on the next tick |
 | Interpolation delay | Starts at 100 ms and adapts between 50 and 250 ms, keeping the drawn time at least 2 ticks behind the newest snapshot over the last 2 seconds, or 6 ticks while loss over the last 10 seconds is above 1 percent |
 | Interpolation | A cubic curve through two snapshots' positions and velocities; attitude turns the short way between them |

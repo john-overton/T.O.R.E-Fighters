@@ -36,6 +36,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Quantization](#quantization)
 - [What the game's sections settled](#what-the-games-sections-settled)
 - [Limits](#limits)
+- [Captures](#captures)
 - [Versions](#versions)
 - [Security](#security)
 
@@ -732,6 +733,19 @@ none), then the exact state's own coding and zero padding. The host codes
 against the newest acknowledged own state no more than 31 numbers back; the
 client keeps its last 64.
 
+### The client as built
+
+*Settled by the client (D8a)*, each an agent decision:
+
+- An Own state section that arrives before the Seated message is accepted
+  when it has no baseline or names one the client kept, and is read once the
+  seat arrives: the host may already have coded the next against it.
+- The view offset is the newest tick less the drawn time's whole tick; the
+  interpolation delay is the main delay rounded to whole ticks (a far
+  entity's extra delay is not included).
+- Commands are numbered from 1 and wrap through 0 as the host's buffer
+  expects; a snapshot's "commands applied" acknowledges every number up to it.
+
 ### Messages as built
 
 Kind bytes 1 to 11 in the table's order (Mission to Mission ended). The
@@ -772,6 +786,41 @@ Decoders check every count and length against these before reading on.
 | Manifest entries, names in a refusal | 8,192 |
 | Destroyed ground objects at seating | 8,192 |
 | Seats per host | 30 |
+
+## Captures
+
+A client's **capture** is everything its session was given, so it can be run
+again offline into the same frames ([recordings and
+diagnostics](../ARCHITECTURE.md#recordings-and-diagnostics)). *Built (D8a)*,
+`tore_session::client::capture`; the format is an agent decision. It is not
+part of the protocol: it never crosses the network, and its own version
+number changes on its own.
+
+The file starts with 12 bytes: the 8-byte magic `TORE-CAP`
+(`tore_session::capture::MAGIC`, which a game's pruner checks so that it only
+ever deletes captures), the capture format's version (16 bits, 1) and the
+protocol version (16 bits); a reader refuses another of either. Records follow, each a kind (8 bits), a body length (32 bits) and the
+body; a capture cut short ends at its last whole record. Numbers are least
+significant byte first, times are nanoseconds of the client's clock (64 bits),
+and strings are a 16-bit length and UTF-8.
+
+| Kind | Record | Body |
+| --- | --- | --- |
+| 1 | Start | The time the join started, the seed of its randomness (64 bits: the nonce comes from it), the server's address, the callsign, the game version and commit, a release-build byte, and the plane asked for (a byte, then 32 bits when 1). Never the password |
+| 2 | Receive | The time, the sender's address, then the datagram as it arrived |
+| 3 | Update | The time, then the controls as the client rounded them, bit packed: pitch, roll and yaw (16 bits each), the throttle rate (8), the throttle position (1, then 16), the trigger (1), the scope's channel (2), range step (4) and history (1), the view subject (1, then its kind in 2 bits and its id as a varint), and the commands (a varint count, then each in its Inputs coding) |
+| 4 | Frame | The time a frame was drawn |
+| 5 | Leave | The time the player ended the mission |
+| 6 | Disconnect | The time the player quit |
+| 7 | Sent | The time, then an Inputs section the client sent |
+
+A replay (`capture::replay`) starts a client from the Start record, seeded
+the same, feeds it every Receive, Update, Frame, Leave and Disconnect at its
+time with no network, and hands back each frame. The replayed client writes a
+capture of its own, which equals the original byte for byte when it behaved
+the same: same inputs sent, same frames. A capture holds what the client knew
+and nothing of the host, so it needs the same import to replay; converting one
+to a replay is stage E.
 
 ## Versions
 

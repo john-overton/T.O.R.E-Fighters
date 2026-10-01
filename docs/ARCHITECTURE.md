@@ -2003,7 +2003,7 @@ dependency.
 | `tore-codec` | library | Bit writer and bounded bit reader, variable-length integers, quantizers, FNV-1a and CRC-32. Shared by the wire, the exact own-plane coder and, in stage H, the checkpoints | std only |
 | `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator. **Built (D2).** The host and client are state machines that never read a clock or touch a socket: the caller passes the time in, feeds them datagrams and sends what they give, over a UDP socket or the simulator (agent decision) | tore-codec |
 | `tore-import` | library | The data folder, the import pack's reader and writer, media detection and the import itself, moved out of `tore-app` so a server can import and load without the game. *Built (D3a).* | tore-formats |
-| `tore-session` | library | The game's side of networking: the wire messages, the host session (clock, inputs, snapshots, joins), the client session (prediction, interpolation, clock steering, readouts) and the headless bot client. *Wire built (D6)*: the module `wire` has every section and message, the cockpit readout's included, with each end's bookkeeping (acknowledged baselines, priorities, the event queue, the name table) and no clock or socket ([what it settled](formats/net-protocol.md#what-the-games-sections-settled)). *Host built (D7a)*: the module `host` ([the host session](#the-host-session)) | tore-world, tore-net, tore-codec |
+| `tore-session` | library | The game's side of networking: the wire messages, the host session (clock, inputs, snapshots, joins), the client session (prediction, interpolation, clock steering, readouts) and the headless bot client. *Wire built (D6)*: the module `wire` has every section and message, the cockpit readout's included, with each end's bookkeeping (acknowledged baselines, priorities, the event queue, the name table) and no clock or socket ([what it settled](formats/net-protocol.md#what-the-games-sections-settled)). *Host built (D7a)*: the module `host` ([the host session](#the-host-session)). *Client built (D8a)*: the modules `client` ([the client session](#the-client-session)) and `bot`, and the `tore-bot` program, which loads an import through `tore-import` | tore-world, tore-net, tore-codec, tore-import |
 | `tore-server` | binary | The dedicated server: configuration, import, logging and the console. **Built (D7b):** options, configuration file, `--import`, `--check`, start-up refusals, the real-time run loop, the console, status lines and the log, around `tore_session::Host`. The run loop drives the host through a small `Host` trait (`host.rs`) that `wiring.rs` implements with `tore_session::Host`, so the loop, console and log are tested against a scripted host on a fake clock (agent decision). Which build is a release is `app::is_release`, the stamped `TORE_BUILD_VERSION` tag, which the game's `--connect` (D8) must use too | tore-session, tore-import |
 
 `tore-sim` and `tore-world` gain `tore-codec` for the exact own-plane state and
@@ -2029,6 +2029,7 @@ flowchart TD
   server --> session
   server --> import
   session --> world
+  session --> import
   session --> net
   net --> codec
   world --> sim
@@ -2495,6 +2496,147 @@ flowchart TD
   frame --> screen["Draw, play sound, rumble"]
 ```
 
+*Built (D8a), headless:* `tore_session::Client` (`crates/tore-session/src/client`),
+with no window or audio; slice D8b wires it into the game. The game's
+regeneration of smoke, contrails, chaff, flares and tracers from the frame is
+D8b's.
+
+**The calls.** `Client::connect(ClientConfig, resources, now)` starts the
+join (server, callsign, password, build, the plane wanted or any, the entropy;
+it refuses the retail stall-speed switch). The caller drives it like the host:
+`receive` or `receive_from`, `update(now, &Controls)` with the pilot's held
+controls and the commands given since the last update (`Controls::neutral`
+while a menu is up), `poll_transmit` or `transmit`, and `next_wake(now)`.
+`frame(now)` gives a `ClientFrame` once seated: the predicted flight and the
+presented one, the picture at the render time, the newest cockpit readout, the
+plane's configuration and the events released since the last frame;
+`ClientFrame::flight_frame` makes the screens' `FlightFrame` from it with the
+game's smoke and devices. `poll_event` gives the session's events (connected,
+mission loaded, content refused, seat refused, seated, roster, notice,
+debrief, mission ended, closed with its reason). `leave(now)` sends Leave;
+`disconnect(now)` quits at once. `mission()` is the client's copy of the
+mission, `roster()`, `name(index)` and `stats()` the rest.
+`set_mission_builder` lets the game build the mission with its own hooks.
+
+**As built**, each an agent decision unless credited:
+
+- **Joining.** On the Mission message the client builds the mission from its
+  own import with `World::new(spec, resources, Seating::Open)`, never stepped,
+  and compares the manifest its build read with the host's: a difference sends
+  Content refused with the names and the host disconnects. Then Ready with the
+  plane wanted. On Seated it finds the plane's aircraft type and ownship
+  configuration in its copy of the mission as the host's handoff does (the AI
+  wings' record, else the mission's for the type), decodes the exact state with
+  that type's flight model, and starts its prediction; the standing ground
+  objects are the mission's less the Seated message's destroyed list. Own
+  states that arrive before the Seated message (they overtake its fragments)
+  are kept, by the baselines they name, and read once it has arrived: the
+  transport has acknowledged them, so the host codes the next against them.
+- **Prediction.** Each predicted tick quantizes the controls as the wire does,
+  numbers the commands given since the last tick from 1 (wrapping), and runs
+  `OwnPlane::step` with the seat's sensors, the standing objects, the weather
+  clock's reading at that tick, the ownship terms of the latest exact state and
+  no combat events. The reading is a function of the tick, the clock having
+  stepped once per tick from tick 0 (`prediction::weather_at`, checked against
+  the host's world each tick). The plane's queued systems messages are dropped
+  after each step: the host sends them as the seat's HUD lines. The predictor
+  keeps 240 ticks of controls and commands and the own state hash at each
+  snapshot tick.
+- **Inputs.** One Inputs packet when a tick was stepped since the last and at
+  least 1/60 s has passed, with every tick from the host's newest received one
+  (snapshot header) to now, at most 24; every command the host has not applied
+  whose tick the client has reached; the view offset to the drawn time and the
+  interpolation delay in whole ticks; and the newest snapshot tick whose own
+  state hash differed.
+- **Reconciliation.** An exact state equal to the prediction at its tick
+  changes nothing. One that differs restarts the plane at its tick and steps
+  the stored ticks again, and the drawn plane keeps where it was and slides to
+  the new path with a 50 ms time constant; over 100 ft or 20 degrees, within a
+  second of seating, or under 0.01 ft and 0.01 degrees it does not slide. One
+  for a tick the client has not reached is taken as it is.
+- **The clock.** Seating sets the predicted clock ahead of the Seated tick by
+  a round trip and the margin. The first margin the host reports after it has
+  had an input from the seat sets the clock outright, whatever the size: the
+  Seated message can be late by retransmitted fragments, and seating snaps
+  anyway (*correction to the design*, which jumped only past 250 ms). After
+  that the rate is 1 plus 1 percent for each tick of margin error, within 2
+  percent, and the clock jumps only past 30 ticks. Each margin is judged
+  against the clock that sent the inputs it measured, a round trip earlier, so
+  the two-second minimum does not make the steering overshoot. The target is 3
+  ticks, 5 while the client's own packets lost more than 1 percent over 10
+  seconds.
+- **The drawn time.** The newest snapshot tick is estimated as a line through
+  their arrivals (each moves it a twentieth of the way). The interpolation
+  delay is raised at once to keep the drawn time 2 ticks (6 while snapshots
+  lost more than 1 percent over 10 seconds) behind the newest snapshot over
+  the last 2 seconds, lowered only after 2 settled seconds, kept within 6 and
+  30 ticks, and slides at a tenth of real time; the drawn time never steps back
+  by less than 250 ms.
+- **Entities.** Each keeps its states by tick and is drawn at the drawn time
+  less its own extra delay: the gap between its last two states once that is 4
+  snapshots or more (at most a second), none once it is 2 or fewer, sliding
+  at a tenth of real time once drawn. An entity heard of once and not again
+  within 4 snapshots is a far one from the start, drawn its interval back.
+  Positions follow the cubic curve, attitudes `Basis::blended`, projectile
+  directions and pilot headings the short way, devices blend, the rest is the
+  earlier state's. Past its newest state an entity goes on for at most 30
+  ticks, then holds; from its removal's tick it is not drawn.
+- **The frame.** The presented flight is the prediction blended by the
+  clock's fraction of a tick, plus what is left of the correction's offset.
+  The picture is the render time's: the own plane as the player pose (as
+  combat draws it, with the latest terms' damage), every other aircraft, the
+  mission's ground objects (destroyed from their event's tick), projectiles,
+  debris (the own plane's drawn with its airframe), pilots (the own one from
+  the prediction's escape), effects aged from their events and marks from
+  theirs. A mark's fire is drawn at full strength: its remaining life is not on
+  the wire (a known difference until the host sends it). The readout is the
+  newest received, its contacts placed around the presented flight
+  (`ClientConnection::cockpit_readout`).
+- **Events.** The seat's cues are released on arrival, since they belong to
+  the player's own predicted plane: HUD lines, radio, tower, order voice and
+  replies, weapon cycled, release sounds, rumble and "your aircraft exploded".
+  The mission-wide ones are released when the picture reaches their tick, so
+  an explosion shows and sounds where the missile is drawn (lead decision,
+  2026-09-30): effects, marks, sounds, countermeasure releases, gun bursts,
+  launches, ground objects destroyed and wing ejections. A ground object's
+  destruction reaches the prediction's standing objects on arrival.
+- **Diagnostics and capture.** `set_diagnostics` and `set_capture` take
+  writers ([below](#recordings-and-diagnostics)). For a capture's replay the
+  client draws its join's random seed itself, from the system for
+  `Entropy::System`, and seeds the transport with it.
+- **The bot.** `tore_session::bot::Bot` flies a client with a scripted pilot:
+  straight and level and turns, a 40-second cycle holding its altitude, a
+  chase of the nearest aircraft of the other side within 3 nm, and 0.4-second
+  gun bursts at any aircraft within 4,000 ft and 2 degrees of its flight path.
+  `tore-bot` (`--connect`, `--data-dir`, `--count`, `--callsign`, `--slot`,
+  `--seconds`, `--password`) runs bots against a server over UDP and exits 0
+  when every bot was seated, got its debrief and left.
+
+**Measured** (`client/tests.rs`, synthetic resources on the network
+simulator unless said; debug build):
+
+- One client flying straight, level and turning for 5 minutes at a 60 ms
+  round trip with no loss: its own state hash was compared at 9,090
+  snapshots and never differed; no exact state changed the prediction, even
+  at seating; the input margin settled at 4 ticks.
+- Two bots fighting the enemy for 5 minutes at a 150 ms round trip, 2 percent
+  loss each way, 1 percent duplicated and arrivals spread by 10 percent of
+  the one-way delay: 18 and 6 exact states changed the prediction, all in the
+  first seconds after seating while the clock settled (a 20-second run counts
+  the same), none blended, so no snapshot needed a visible correction; the other aircraft were drawn within
+  1 ft of the host's position at the same moment in 99.8 percent of frames and
+  within 3 ft in 99.9 (the worst, 186 ft, a far aircraft held after a lost
+  update); 0.49 and 0.56 percent of entity frames were drawn past their
+  newest state; the host repeated 0.06 and 0.18 percent of the bots' input
+  ticks; both left with their debriefs. The first bot's capture, 9.4 MB,
+  replayed offline into the same 18,774 frames and the same inputs, byte for
+  byte.
+- Over real UDP on 127.0.0.1 a bot flew a minute against an in-process host,
+  and two `tore-bot` bots flew a minute against a release `tore-server`
+  with a real import (the guide's 12-aircraft example mission): both were
+  seated, got their debriefs and left cleanly, at a 4 ms round trip, a 57 ms
+  interpolation delay and an input margin of 4 ticks.
+
 ### The flight screen draws a frame
 
 Today the flight screen reads `World` directly. Stage D puts one plain-data
@@ -2804,6 +2946,15 @@ does not have). Instead each networked flight keeps:
   interpolation delay, corrections made and bytes each way, plus every join,
   drop and refusal.
 
+*Built (D8a)* in the client session: `Client::set_capture` writes the capture
+([format](formats/net-protocol.md#captures)) and `capture::replay` runs it
+again offline into the same frames; `Client::set_diagnostics` writes the log,
+a header line and then tab-separated lines that start with the seconds and
+the kind (`stats` once a second with the fields of
+`client::diagnostics::STATS_FIELDS`, and `connect`, `joined`, `mission`,
+`seated`, `seat-refused`, `content-refused`, `debrief`, `mission-ended`,
+`refused` and `closed`). The game names the files and keeps them (D8b).
+
 In stage E a capture **converts into a replay** (John, 2026-09-30): every
 aircraft follows a smooth curve through every update the client received,
 using hindsight, instead of what the player saw live with its guesses ahead;
@@ -2830,7 +2981,7 @@ risky refactors, as John asked; the rest are Sonnet.
 | D3c Open seating | `mp/d-open` | Opus | D5a | `Seating::Open`: plane 0 on the AI, a tick with no human, combat with no ownship | Single-player baseline SAME; a headless test builds an open mission with every plane on the AI, steps it 1,200 ticks, then a seat takes plane 0, flies, and gives it back. **Built (D3c):** see [open seating and no human](#a-mission-with-no-window); the run repeats to the bit, and two seats hand planes in both wings through a fight, the last leaving the mission with no human |
 | D6 Wire | `mp/d-wire` | Opus | D1, D3b, D4, D5b | `tore-session`'s messages: inputs, snapshots with acknowledged baselines, priorities and relevance, own-state hash and exact state, readouts, events (bursts and launches included), join messages, debrief | Every message round-trips; a snapshot decodes with any earlier packet lost; entities always get their share of the packet; a wire golden test fails when the bytes change without a protocol version bump; bytes per snapshot measured on the 15 against 15 mission against the [budget](multiplayer-plan.md#bandwidth-budget). **Built (D6):** seeded round trips of every section and message; a 3,000-snapshot run dropping, duplicating and reordering packets and acknowledgements rebuilds every entity exactly; 100,000 fuzzed bodies; the golden copy `crates/tore-session/wire-golden.txt`. On the 15 against 15 mission (29 other aircraft, up to 31 missiles in flight) the Snapshot section is 177 to 879 bytes, mean 350, before the readout; the readout's record is 4 to 506 bytes, mean 52, against a plain size of mean 1,895; the whole download is 13.2 KB/s before the messages ([details](formats/net-protocol.md#what-the-games-sections-settled)) |
 | D7 Host and server | `mp/d-host` | Opus | D2, D3c, D6 | The host session, its clock and input buffers; `tore-server` with its configuration, import and console | A server flies a 15 against 15 mission for 10 minutes with nobody connected under 20 percent of one core; scripted test clients join and leave 100 times without an error; late, early, missing and duplicated inputs are applied as specified. **Host built (D7a):** [the host session](#the-host-session); each seat's cockpit readout goes in its snapshots (D6), and a seated client holds the host's readout of each snapshot tick exactly once the first second has brought it across; on the simulator scripted clients join, fly and leave 100 times with no error, each plane going back to the AI; a seated client's entities, own-state hashes and exact states match the host's world at every snapshot tick, with and without 5 percent loss and duplication; the 15 against 15 UKR mission with nobody connected flies 10 minutes at 1.46 ms a tick, 17.5 percent of one core (release, Ryzen 9 7900X), the world's own step alone costing the same within 2 percent; its first minute, while all 30 aircraft fight, costs 3.4 ms a tick (41 percent) with or without the host, the remaining minutes 1.2 to 1.3 ms. **Server half built (D7b, `mp/d-server`):** `tore-server`'s options, configuration file (every setting, default and range tested), import, `--check` (run on a real 1.02F import for the guide's example mission: 12 planes, 14 runways, a content digest; built through `Seating::Open`), start-up refusals (missing or stale import, a mission the import cannot build, a bad setting or mission line with its number, the retail stall-speed switch, a taken port), the run loop on a fake clock against a scripted host, the console, the status line and the log; and on 127.0.0.1 a scripted client (the transport's client and the wire's messages) joins over a real UDP socket, takes plane 0, flies, leaves, and the console's `quit` ends the server, with the log recording each step. The server ran the guide's mission with real data at 6 to 7 ms a tick in a debug build (not measured in release) |
-| D8 Client, bot and `--connect` | `mp/d-client` | Opus | D5b, D6, D7 | The client session: join, prediction, reconciliation, smoothing, interpolation (the slow entities' longer delay included), clock steering, local effects, neutral controls in menus; the headless bot (the client session with a scripted pilot); the game's `--connect`; the capture and the diagnostics log | On the simulator with no loss, one platform and no hit, the prediction never differs from the host; two bots fly a 5-minute fight against a server; a windowed client flies against a server on this machine through `tools/agent-run.sh` |
+| D8 Client, bot and `--connect` | `mp/d-client` | Opus | D5b, D6, D7 | The client session: join, prediction, reconciliation, smoothing, interpolation (the slow entities' longer delay included), clock steering, local effects, neutral controls in menus; the headless bot (the client session with a scripted pilot); the game's `--connect`; the capture and the diagnostics log | On the simulator with no loss, one platform and no hit, the prediction never differs from the host; two bots fly a 5-minute fight against a server; a windowed client flies against a server on this machine through `tools/agent-run.sh`. **Client half built (D8a):** [the client session](#the-client-session) with the bot, the capture and the diagnostics log, headless; the game's `--connect` is D8b |
 | D9 Lag compensation | `mp/d-lagcomp` | Opus | D4 | The hit-volume history in combat, the view tick in `SeatInput`, rewound gun hit tests | Single-player baseline SAME; a burst aimed at the drawn position of a target crossing at 500 knots, with a 150 ms round trip and a 100 ms interpolation delay, hits with compensation and misses without; the cap holds. **Built (D9):** see [hits and lag compensation](#hits-and-lag-compensation); missiles fired by the same seat carry no rewind |
 | D10 Matrix and measurements | `mp/d-bots` | Sonnet | D8, D9 | The simulator matrix as a test, a CI job with a server and two bots, load and bandwidth at 2, 8, 15 and 30 humans | The [matrix limits](MULTIPLAYER.md#netcode-numbers) hold; CI passes on all three platforms; `docs/baselines/net-<date>.md` records the matrix, bandwidth against the budget and host CPU per human |
 | D11 LAN acceptance | lead, then John | Opus | all | Agents smoke-test a dedicated server with a windowed client and a bot on the development machine; then John flies it on three machines on his LAN, macOS, Linux and Windows (John, 2026-09-30); docs brought to built | The plan's stage D acceptance, with evidence from both |
