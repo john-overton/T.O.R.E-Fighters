@@ -15,9 +15,14 @@
 //! joins, each seat's input buffer, the tick's sorting into events, the
 //! snapshots and the mission's lifecycle ([`Host`]).
 
+pub mod bot;
+pub mod client;
 pub mod host;
 pub mod wire;
 
+pub use client::{
+    Client, ClientConfig, ClientError, ClientEvent, ClientFrame, ClientPhase, ClientStats, Controls,
+};
 pub use host::{
     AfterEnd, BuildId, CommandError, Host, HostConfig, HostError, HostLog, HostStatus, LeaveReason,
     OpenPlanes, Phase, PlayerStatus, StartMode,

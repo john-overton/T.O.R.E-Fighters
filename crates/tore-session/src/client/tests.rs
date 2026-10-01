@@ -1,0 +1,530 @@
+//! The client session against a `Host` on the network simulator, over a
+//! mission built from synthetic resources.
+
+use super::*;
+use crate::host::{Host, HostConfig, HostLog};
+use std::collections::HashMap;
+use tore_net::sim::{LinkConfig, SimNetwork, SimSocket};
+use tore_world::mission::{Skill, Start};
+use tore_world::test_support::resources::{THEATER, resources};
+
+const MS: Duration = Duration::from_millis(1);
+
+fn host_address() -> SocketAddr {
+    "10.0.0.1:26900".parse().unwrap()
+}
+
+pub(super) fn build() -> BuildId {
+    BuildId {
+        version: "0.1.3-1-gtest".into(),
+        commit: "test-commit".into(),
+        release: false,
+    }
+}
+
+/// Friendly Wing 1 of `friendly` and the enemy's Wing 1 of `enemy`, the
+/// enemy `separation_nm` ahead, airborne at 10,000 feet.
+pub(super) fn spec(friendly: usize, enemy: usize, separation_nm: u32) -> MissionSpec {
+    let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+    spec.wings[0].count = friendly;
+    spec.wings[3].count = enemy;
+    spec.wings[3].skill = Skill::Average;
+    spec.separation_nm = separation_nm;
+    spec.start = Start::Airborne {
+        altitude_ft: 10_000,
+    };
+    spec
+}
+
+/// A gentle weave with the throttle held: the plane stays airborne.
+pub(super) fn weave(t: f64) -> Controls {
+    Controls {
+        pilot: PilotInput {
+            pitch: (t * 0.7).sin() * 0.15,
+            roll: (t * 0.45).cos() * 0.2,
+            ..PilotInput::default()
+        },
+        ..Controls::default()
+    }
+}
+
+type Script = Box<dyn FnMut(Duration, &Client, Option<&RenderSnapshot>) -> Controls>;
+
+/// One player's game on the simulator.
+pub(super) struct Player {
+    pub socket: SimSocket,
+    pub client: Client,
+    pub script: Script,
+    pub events: Vec<ClientEvent>,
+    pub frames: Vec<ClientFrame>,
+    pub keep_frames: bool,
+    pub frame_every: Duration,
+    pub last_frame: Option<Duration>,
+    pub digests: Vec<u64>,
+    pub picture: Option<RenderSnapshot>,
+}
+
+/// A host and its players on one simulated network.
+pub(super) struct Rig {
+    pub net: SimNetwork,
+    pub host: Host,
+    pub socket: SimSocket,
+    pub players: Vec<Player>,
+    pub logs: Vec<HostLog>,
+    pub next_port: u16,
+    /// Each aircraft's position after each host tick, when watching.
+    pub watch: bool,
+    pub truth: HashMap<(u64, u32), [f64; 3]>,
+    pub resources: Arc<BTreeMap<String, Vec<u8>>>,
+}
+
+impl Rig {
+    pub fn new(spec: MissionSpec, link: LinkConfig, seed: u64) -> Self {
+        let net = SimNetwork::new(seed);
+        net.set_default_link(link);
+        let socket = net.bind(host_address()).unwrap();
+        let resources = Arc::new(resources());
+        let host = Host::new(
+            spec,
+            Arc::clone(&resources),
+            HostConfig {
+                entropy: Entropy::Seeded(11),
+                ..HostConfig::new(build())
+            },
+        )
+        .unwrap();
+        Self {
+            net,
+            host,
+            socket,
+            players: Vec::new(),
+            logs: Vec::new(),
+            next_port: 40_000,
+            watch: false,
+            truth: HashMap::new(),
+            resources,
+        }
+    }
+
+    pub fn join(&mut self, configure: impl FnOnce(&mut ClientConfig), script: Script) -> usize {
+        let address: SocketAddr = format!("10.0.0.2:{}", self.next_port).parse().unwrap();
+        let socket = self.net.bind(address).unwrap();
+        let mut config = ClientConfig {
+            entropy: Entropy::Seeded(u64::from(self.next_port)),
+            ..ClientConfig::new(host_address(), "Viper", build())
+        };
+        configure(&mut config);
+        self.next_port += 1;
+        let client = Client::connect(config, Arc::clone(&self.resources), self.net.now()).unwrap();
+        self.players.push(Player {
+            socket,
+            client,
+            script,
+            events: Vec::new(),
+            frames: Vec::new(),
+            keep_frames: false,
+            frame_every: Duration::from_millis(16),
+            last_frame: None,
+            digests: Vec::new(),
+            picture: None,
+        });
+        self.players.len() - 1
+    }
+
+    /// One millisecond for everyone.
+    pub fn step(&mut self) {
+        self.net.advance(MS);
+        let now = self.net.now();
+        let before = self.host.world().tick();
+        self.host.receive_from(now, &mut self.socket).unwrap();
+        self.host.update(now);
+        self.host.transmit(&mut self.socket).unwrap();
+        while let Some(log) = self.host.poll_log() {
+            self.logs.push(log);
+        }
+        if self.watch && self.host.world().tick() > before {
+            self.record();
+        }
+        for player in &mut self.players {
+            player.client.receive_from(now, &mut player.socket).unwrap();
+            let controls = (player.script)(now, &player.client, player.picture.as_ref());
+            player.client.update(now, &controls);
+            if player
+                .last_frame
+                .is_none_or(|last| now - last >= player.frame_every)
+            {
+                player.last_frame = Some(now);
+                if let Some(frame) = player.client.frame(now) {
+                    player.digests.push(frame.digest());
+                    player.picture = Some(frame.picture.clone());
+                    if player.keep_frames {
+                        player.frames.push(frame);
+                    }
+                }
+            }
+            player.client.transmit(&mut player.socket).unwrap();
+            while let Some(event) = player.client.poll_event() {
+                player.events.push(event);
+            }
+        }
+    }
+
+    /// Where every aircraft is after the host's last tick.
+    fn record(&mut self) {
+        let world = self.host.world();
+        let tick = world.tick() - 1;
+        for cockpit in &world.cockpits {
+            self.truth
+                .insert((tick, cockpit.plane.0), cockpit.flight.position);
+        }
+        if let Some(wings) = &world.ai_wings {
+            for actor in wings.mission().actors() {
+                self.truth
+                    .insert((tick, actor.id()), actor.flight().position);
+            }
+        }
+    }
+
+    pub fn run_until(&mut self, limit: Duration, mut done: impl FnMut(&Rig) -> bool) -> bool {
+        let end = self.net.now() + limit;
+        while self.net.now() < end {
+            self.step();
+            if done(self) {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn run(&mut self, time: Duration) {
+        let end = self.net.now() + time;
+        while self.net.now() < end {
+            self.step();
+        }
+    }
+
+    pub fn seated(&self, player: usize) -> bool {
+        self.players[player].client.phase() == ClientPhase::Flying
+    }
+
+    pub fn closed(&self, player: usize) -> bool {
+        self.players[player].client.phase() == ClientPhase::Closed
+    }
+
+    /// The host's position of `plane` at fractional tick `tick`.
+    pub fn truth_at(&self, plane: u32, tick: f64) -> Option<[f64; 3]> {
+        let t0 = tick.floor() as u64;
+        let a = self.truth.get(&(t0, plane))?;
+        let b = self.truth.get(&(t0 + 1, plane)).unwrap_or(a);
+        let s = tick - tick.floor();
+        Some(std::array::from_fn(|i| a[i] + (b[i] - a[i]) * s))
+    }
+}
+
+fn weave_script() -> Script {
+    Box::new(|now, _, _| weave(now.as_secs_f64()))
+}
+
+/// The bot's pilot with no picture: straight and level and turns, never
+/// firing.
+pub(super) fn level_script() -> Script {
+    let mut pilot = crate::bot::ScriptedPilot::new();
+    Box::new(move |now, client, _| match client.prediction() {
+        Some(prediction) => pilot.controls(now, &prediction.plane().flight, None, &|_| false),
+        None => Controls::default(),
+    })
+}
+
+/// The bot's pilot, chasing and firing at the other side.
+pub(super) fn bot_script() -> Script {
+    let mut pilot = crate::bot::ScriptedPilot::new();
+    Box::new(move |now, client, picture| match client.prediction() {
+        Some(prediction) => {
+            let enemies = crate::bot::enemies(client);
+            pilot.controls(now, &prediction.plane().flight, picture, &|id| {
+                enemies.contains(&id)
+            })
+        }
+        None => Controls::default(),
+    })
+}
+
+#[test]
+fn the_weather_reading_follows_the_host_tick() {
+    let mut rig = Rig::new(spec(1, 1, 20), LinkConfig::PERFECT, 1);
+    let start = rig
+        .host
+        .world()
+        .terrain
+        .weather
+        .configuration()
+        .start_seconds();
+    rig.host.start_now();
+    let mut checked = 0;
+    for _ in 0..3000 {
+        let before = rig.host.world().tick();
+        rig.step();
+        let world = rig.host.world();
+        if world.tick() > before {
+            let reading = tore_world::world::plane::WeatherReading::of(&world.terrain.weather);
+            assert_eq!(prediction::weather_at(start, world.tick() - 1), reading);
+            checked += 1;
+        }
+    }
+    assert!(checked > 300);
+}
+
+#[test]
+fn a_client_joins_flies_and_leaves_with_its_debrief() {
+    let mut rig = Rig::new(
+        spec(2, 2, 20),
+        LinkConfig::for_round_trip(40 * MS, 0.1, 0., 0.),
+        3,
+    );
+    let player = rig.join(|_| {}, weave_script());
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(player)));
+    rig.run(Duration::from_secs(3));
+    let now = rig.net.now();
+    rig.players[player].client.leave(now);
+    assert!(rig.run_until(Duration::from_secs(7), |r| r.closed(player)));
+    let p = &rig.players[player];
+    assert!(
+        p.events
+            .iter()
+            .any(|e| matches!(e, ClientEvent::Debrief(_))),
+        "{:?}",
+        p.events
+    );
+    assert!(p.events.iter().any(|e| matches!(
+        e,
+        ClientEvent::Closed(CloseReason::Disconnected {
+            reason: DisconnectReason::Left,
+            by_peer: true
+        })
+    )));
+    assert!(!p.digests.is_empty());
+}
+
+#[test]
+fn a_different_import_is_refused_with_the_names_that_differ() {
+    let mut rig = Rig::new(spec(1, 1, 20), LinkConfig::PERFECT, 4);
+    let mut other = resources();
+    let name = other.keys().find(|k| k.ends_with(".PT")).unwrap().clone();
+    other.get_mut(&name).unwrap().push(0);
+    rig.resources = Arc::new(other);
+    let player = rig.join(|_| {}, weave_script());
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.closed(player)));
+    let p = &rig.players[player];
+    assert!(
+        p.events
+            .iter()
+            .any(|e| matches!(e, ClientEvent::ContentRefused { names } if names.contains(&name))),
+        "{:?}",
+        p.events
+    );
+    assert!(p.events.iter().any(|e| matches!(
+        e,
+        ClientEvent::Closed(CloseReason::Disconnected {
+            reason: DisconnectReason::ContentMismatch,
+            ..
+        })
+    )));
+}
+
+/// Flies one client for `seconds` on a clean link and checks that, after
+/// seating settles, the prediction equals the host at every snapshot.
+fn prediction_matches_the_host(seconds: u64) {
+    let mut rig = Rig::new(
+        spec(2, 2, 20),
+        LinkConfig::for_round_trip(60 * MS, 0., 0., 0.),
+        5,
+    );
+    let player = rig.join(|_| {}, level_script());
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(player)));
+    rig.run(Duration::from_secs(3));
+    let settled = rig.players[player].client.stats();
+    rig.run(Duration::from_secs(seconds));
+    let stats = rig.players[player].client.stats();
+    eprintln!("settled after seating: {settled:#?}\nend: {stats:#?}");
+    eprintln!(
+        "corrections: {:?}",
+        rig.players[player].client.corrections()
+    );
+    let compared = stats.hashes_compared - settled.hashes_compared;
+    assert!(
+        compared as f64 >= seconds as f64 * 30. * 0.95,
+        "{compared} hashes compared in {seconds} s"
+    );
+    assert_eq!(stats.mismatches, settled.mismatches, "{stats:#?}");
+    assert_eq!(stats.corrections, settled.corrections, "{stats:#?}");
+    assert_eq!(stats.inputs_repeated, settled.inputs_repeated, "{stats:#?}");
+    assert_eq!(stats.clock_jumps, settled.clock_jumps, "{stats:#?}");
+    let margin = stats.input_margin.unwrap();
+    assert!((2..=6).contains(&margin), "input margin {margin}");
+}
+
+#[test]
+fn the_prediction_equals_the_host_at_every_snapshot() {
+    prediction_matches_the_host(20);
+}
+
+/// The acceptance's five minutes; run with `--ignored`.
+#[test]
+#[ignore = "five minutes of simulated flight"]
+fn the_prediction_equals_the_host_for_five_minutes() {
+    prediction_matches_the_host(300);
+}
+
+/// A writer the test keeps a handle on.
+#[derive(Clone, Default)]
+struct Shared(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl Write for Shared {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// What a fight measured for one bot.
+#[derive(Debug, Default)]
+struct Measured {
+    frames: u64,
+    /// Other aircraft drawn, and of them within 1, 3 and 10 ft of the host.
+    drawn: u64,
+    within: [u64; 3],
+    worst_ft: f64,
+}
+
+/// Two bots fight AI enemies for `seconds` against a host at `round_trip`
+/// with `loss` each way (1 percent duplicated, arrivals spread by 10 percent
+/// of the one-way delay), then leave; the first bot's capture replays
+/// offline into the same frames.
+fn fight(seconds: u64, round_trip: Duration, loss: f64) {
+    let link = LinkConfig::for_round_trip(round_trip, 0.1, loss, 0.01);
+    let mut rig = Rig::new(spec(2, 2, 2), link, 21);
+    rig.watch = true;
+    let capture = Shared::default();
+    let a = rig.join(|c| c.callsign = "Alpha".into(), bot_script());
+    rig.players[a].client.set_capture(Box::new(capture.clone()));
+    let diagnostics = Shared::default();
+    rig.players[a]
+        .client
+        .set_diagnostics(Box::new(diagnostics.clone()));
+    let b = rig.join(|c| c.callsign = "Bravo".into(), bot_script());
+    assert!(rig.run_until(Duration::from_secs(5), |r| r.seated(a) && r.seated(b)));
+    let mut measured = [Measured::default(), Measured::default()];
+    let end = rig.net.now() + Duration::from_secs(seconds);
+    let mut counted = [0usize; 2];
+    while rig.net.now() < end {
+        rig.step();
+        for (i, m) in measured.iter_mut().enumerate() {
+            let player = &rig.players[i];
+            if player.digests.len() == counted[i] {
+                continue;
+            }
+            counted[i] = player.digests.len();
+            let Some(picture) = &player.picture else {
+                continue;
+            };
+            let render = player.client.render_tick().unwrap();
+            m.frames += 1;
+            for pose in picture.targets.iter().filter(|p| p.aircraft.is_some()) {
+                let Some(truth) = rig.truth_at(pose.id, render) else {
+                    continue;
+                };
+                let error = (0..3)
+                    .map(|k| (pose.position[k] - truth[k]).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                m.drawn += 1;
+                for (n, limit) in [1., 3., 10.].iter().enumerate() {
+                    m.within[n] += u64::from(error <= *limit);
+                }
+                m.worst_ft = m.worst_ft.max(error);
+            }
+        }
+    }
+    let ticks = seconds * 120;
+    for i in [a, b] {
+        let now = rig.net.now();
+        rig.players[i].client.leave(now);
+    }
+    assert!(rig.run_until(Duration::from_secs(8), |r| r.closed(a) && r.closed(b)));
+    for (i, m) in measured.iter().enumerate() {
+        let p = &rig.players[i];
+        let stats = p.client.clone_stats();
+        let corrections = p.client.corrections();
+        let shown = corrections.iter().filter(|c| c.shown).count();
+        let under_foot = corrections.iter().filter(|c| c.feet < 1.).count();
+        eprintln!(
+            "bot {i}: {stats:#?}\n  corrections {} (shown {shown}, under 1 ft {under_foot}), \
+             {} snapshots: {:.2} percent needed a visible correction\n  \
+             other aircraft drawn {}: within 1 ft {:.2} percent, 3 ft {:.2}, 10 ft {:.2}, \
+             worst {:.2} ft\n  extrapolated {:.3} percent of entity frames\n  \
+             inputs repeated {:.3} percent of {ticks} ticks\n  gun bursts by the bots' pilots",
+            corrections.len(),
+            stats.snapshots,
+            100. * shown as f64 / stats.snapshots.max(1) as f64,
+            m.drawn,
+            100. * m.within[0] as f64 / m.drawn.max(1) as f64,
+            100. * m.within[1] as f64 / m.drawn.max(1) as f64,
+            100. * m.within[2] as f64 / m.drawn.max(1) as f64,
+            m.worst_ft,
+            100. * stats.extrapolated as f64 / stats.entity_frames.max(1) as f64,
+            100. * stats.inputs_repeated as f64 / ticks as f64,
+        );
+        assert!(
+            p.events
+                .iter()
+                .any(|e| matches!(e, ClientEvent::Debrief(_))),
+            "bot {i} got its debrief"
+        );
+        assert!(p.events.iter().any(|e| matches!(
+            e,
+            ClientEvent::Closed(CloseReason::Disconnected {
+                reason: DisconnectReason::Left,
+                by_peer: true
+            })
+        )));
+        assert!(m.drawn > 0);
+    }
+    let log = String::from_utf8(diagnostics.0.lock().unwrap().clone()).unwrap();
+    assert!(log.lines().filter(|l| l.contains("\tstats\t")).count() as u64 >= seconds);
+    assert!(log.contains("\tseated\t"));
+
+    // The capture replays offline into the same frames.
+    let bytes = capture.0.lock().unwrap().clone();
+    let mut digests = Vec::new();
+    let replayed = capture::replay(&bytes, Arc::clone(&rig.resources), &mut |frame| {
+        digests.push(frame.digest());
+    })
+    .unwrap();
+    assert!(
+        replayed.identical,
+        "the replayed client sent the same inputs"
+    );
+    assert_eq!(digests, rig.players[a].digests, "the same frames");
+    eprintln!(
+        "capture: {} bytes, {} records, {} frames",
+        bytes.len(),
+        replayed.records,
+        replayed.frames
+    );
+}
+
+#[test]
+fn two_bots_fight_and_a_capture_replays_into_the_same_frames() {
+    fight(20, Duration::from_millis(150), 0.02);
+}
+
+/// The acceptance's five minutes at 150 ms and 2 percent loss; run with
+/// `--ignored`.
+#[test]
+#[ignore = "five minutes of simulated flight"]
+fn two_bots_fight_for_five_minutes() {
+    fight(300, Duration::from_millis(150), 0.02);
+}
