@@ -457,3 +457,25 @@ with lines (*agent decision*; retail's handling is unknown).
   state bytes (U).
 - The "Multi contains stub Host Game/Join Game/Player Setup" line above describes
   the authored scaffolding; the retail tree is the one listed here.
+
+### Settled while building the widget kit (EF2, 2026-10-01)
+
+- **PREV and NEXT on an empty list are bright (M).** John's screenshot draws
+  both labels in `PANELFNT`, not the dim `PANELFND`, with "1 of 0" and no rows.
+  The note above that `PANELFND` is the disabled face stays (S), but "no page to
+  turn to" is not what disables it; when retail dims them is U (next step: the
+  enable calls around `0x48b02e`). The kit dims PREV on the first page and NEXT
+  on the last page of a list that has rows, and leaves both bright when it is
+  empty.
+- **`LISTHI` is two 12 by 12 stripes side by side (R):** blue and white on the
+  left half, gold and black on the right. Which one retail paints on the selected
+  row, and whether it is a marker or a bar, is U. The kit puts the gold half as a
+  marker 4 pixels in from the row's left edge, 1 below its top, with the row text
+  starting at 20 (agent decision; the creator's selector list marks its current
+  row gold too).
+- **The kit's render of NETWORK CONNECTION** (every widget placed at the
+  rectangles in the table above, nothing else) is the same picture as EF0's
+  render of those numbers: none of the 307,200 pixels differs. It therefore scores
+  as EF0's does against the screenshot: a mean grey difference of 2.9 over the
+  panel and 4.5 over the whole screen below the title bar, after a one pixel blur
+  of the render (the rest is the screenshot's resampling).
