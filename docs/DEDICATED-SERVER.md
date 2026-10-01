@@ -34,6 +34,7 @@ proposal unless it is credited to John.
 - [Hosting from the game](#hosting-from-the-game)
 - [Console, status and logs](#console-status-and-logs)
 - [Ports and firewalls](#ports-and-firewalls)
+- [Discovery and the firewall](#discovery-and-the-firewall)
 - [Running it as a service](#running-it-as-a-service)
 - [Performance](#performance)
 - [Security](#security)
@@ -318,7 +319,13 @@ tore-app --connect 192.168.1.20 --callsign Viper
 | `--password TEXT` | The server's password, if it has one |
 
 `HOST` is a name or an address; an IPv6 address needs brackets to carry a
-port (`[fe80::1]:26900`). The options are checked at start, before anything is
+port (`[fe80::1]:26900`). *Since EF5,* a name that gives several addresses
+(for example an IPv4 and an IPv6 one) is tried address by address, IPv4 first,
+three seconds each, and the first that answers the handshake is joined (one
+address is joined as it is); `tore-bot --connect` does the same. The game
+remembers the address, the callsign (when `--callsign` gave one), the port and
+the game name in `network-v1.conf` in its data folder, beside the other
+preference files; the password is never kept. The options are checked at start, before anything is
 sent, and a game started with `--retail-stall-speeds` refuses to join (every
 machine in a session flies the same aircraft model). `--callsign`, `--slot`
 and `--password` go with `--connect` and nothing else. While it flies, the game
@@ -457,6 +464,38 @@ The server uses one UDP port, 26900 unless set. On a LAN nothing else is
 needed. For players on the internet, forward that UDP port on the router to the
 server; automatic port mapping, NAT traversal and the relay are stage J.
 Windows and macOS ask once whether the unsigned program may accept connections.
+
+## Discovery and the firewall
+
+*Built (EF5).* The server, and a game that hosts, answer a discovery query on
+the game port ([wire protocol](formats/net-protocol.md#discovery)): a game on
+the local network lists them without being told an address. Nothing needs to
+be set up. The answer carries the game's name, mission, players, King, whether
+it has a password or is full, and whether it is in the lobby or flying, in a
+packet never longer than the question.
+
+The question is a broadcast to 255.255.255.255 on the game port, so it reaches
+a host only where the network passes broadcast and the host's firewall lets
+UDP on the game port in. On the host's machine:
+
+- **Linux.** A firewall that denies incoming traffic by default drops the
+  broadcast and the joins alike: allow the game port, for example `sudo ufw
+  allow 26900/udp`. On the development machine (ufw active)
+  a broadcast to its own network interface never reached its own sockets, while
+  one to the loopback network did; ufw's default deny is the likely cause (not
+  confirmed: checking needs root). The server's socket takes IPv4 broadcast
+  on its IPv6 socket (checked on Linux).
+- **Windows.** The first run asks whether the program may accept connections;
+  allow it on the private network. The public-network profile blocks incoming
+  broadcast. The server binds a separate IPv4 socket there, as it does for
+  joins, which is what receives the broadcast (not yet measured on Windows).
+- **macOS.** The same first-run question; allow incoming connections.
+
+A machine on several networks (a laptop with Wi-Fi and a VPN) sends its
+question out of the default interface only; a host on another network is
+joined by its address. Wi-Fi networks that isolate clients, and guest networks,
+pass neither broadcast nor joins. Discovery is best effort: joining by address
+always works.
 
 ## Running it as a service
 

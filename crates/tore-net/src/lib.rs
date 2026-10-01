@@ -65,6 +65,7 @@ use std::time::Duration;
 
 pub mod link;
 pub mod packet;
+pub mod reach;
 pub mod sim;
 
 mod client;

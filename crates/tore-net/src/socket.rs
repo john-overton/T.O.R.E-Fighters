@@ -159,4 +159,40 @@ mod tests {
         let (bytes, _) = receive(&mut server).expect("an IPv4 datagram reaches `any`");
         assert_eq!(bytes, b"x");
     }
+
+    /// Discovery's question to a host on the network is a datagram to the
+    /// limited broadcast address on the game port. A dual-stack IPv6 socket
+    /// takes IPv4 broadcast on Linux, so `Listen::Any` needs no IPv4 socket of
+    /// its own for discovery (agent finding, 2026-10-01). The loopback
+    /// network's broadcast address stands in here, since a machine's firewall
+    /// may drop broadcast on its real interfaces (ufw does until the port is
+    /// allowed); the test only asserts on Linux, where it was settled.
+    #[test]
+    fn any_receives_an_ipv4_broadcast() {
+        let port = {
+            let probe = UdpSocket::bind("0.0.0.0:0").unwrap();
+            probe.local_addr().unwrap().port()
+        };
+        let Ok(mut server) = ServerSocket::bind(Listen::Any, port) else {
+            return;
+        };
+        let sender = UdpSocket::bind("0.0.0.0:0").unwrap();
+        sender.set_broadcast(true).unwrap();
+        if sender.send_to(b"who", ("127.255.255.255", port)).is_err() {
+            return; // no broadcast route here
+        }
+        let got = receive(&mut server);
+        if cfg!(target_os = "linux") {
+            let (bytes, from) = got.expect("an IPv4 broadcast reaches `any`");
+            assert_eq!(bytes, b"who");
+            // The answer goes back to the asker.
+            server.send_datagram(from, b"here").unwrap();
+            let mut buf = [0u8; 16];
+            sender
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let length = sender.recv(&mut buf).unwrap();
+            assert_eq!(&buf[..length], b"here");
+        }
+    }
 }

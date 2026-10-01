@@ -17,7 +17,7 @@
 //! every bot was seated, got a debrief and then left cleanly, or was told the
 //! host left the game.
 
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -87,17 +87,41 @@ fn parse(args: &[String]) -> Result<Options, String> {
         }
     }
     let connect = connect.ok_or_else(|| format!("--connect is required\n{USAGE}"))?;
-    let with_port = if connect.contains(':') && !connect.ends_with(']') {
-        connect.clone()
-    } else {
-        format!("{connect}:{}", tore_net::DEFAULT_PORT)
-    };
-    options.connect = with_port
-        .to_socket_addrs()
-        .map_err(|error| format!("cannot resolve {connect}: {error}"))?
-        .next()
-        .ok_or_else(|| format!("cannot resolve {connect}"))?;
+    options.connect = reach(&connect)?;
     Ok(options)
+}
+
+/// The address to join for what `--connect` said: every address the name
+/// gives is tried in turn (IPv4 first, three seconds each) and the first that
+/// answers the handshake is used, else the first; one address is used as it
+/// is. `HOST`, `HOST:PORT`, `[V6]` and `[V6]:PORT` are read.
+fn reach(connect: &str) -> Result<SocketAddr, String> {
+    let (host, port) = tore_net::reach::split_address(connect, tore_net::DEFAULT_PORT)
+        .map_err(|error| format!("--connect {connect:?} {error}"))?;
+    let found = tore_net::reach::resolve(&host, port)
+        .map_err(|error| format!("cannot resolve {connect}: {error}"))?;
+    let first = *found
+        .first()
+        .ok_or_else(|| format!("cannot resolve {connect}"))?;
+    if found.len() == 1 {
+        return Ok(first);
+    }
+    for address in &found {
+        let reach = tore_net::reach::probe(
+            *address,
+            tore_session::wire::PROTOCOL_VERSION,
+            tore_net::reach::PROBE_TIMEOUT,
+            &|| false,
+        );
+        if matches!(
+            reach,
+            Ok(tore_net::reach::Reach::Answered | tore_net::reach::Reach::Refused(_))
+        ) {
+            return Ok(*address);
+        }
+        eprintln!("no answer from {address}, trying the next address");
+    }
+    Ok(first)
 }
 
 fn load(data_dir: Option<PathBuf>) -> Result<tore_import::Resources, String> {

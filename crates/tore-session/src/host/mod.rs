@@ -25,6 +25,7 @@
 //! the lobby's state whenever it changes.
 
 pub mod config;
+mod discover;
 pub mod inputs;
 mod lobby;
 mod sorting;
@@ -1069,6 +1070,7 @@ impl Host {
                 ServerEvent::Closed {
                     connection, reason, ..
                 } => self.closed(connection, reason),
+                ServerEvent::Discover { from, query } => self.answer_discover(from, &query),
                 ServerEvent::Connection { connection, event } => match event {
                     Event::Message { kind, body } => self.message(connection, kind, &body),
                     Event::Payload { sections, .. } => {

@@ -27,6 +27,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Overview](#overview)
 - [Packets](#packets)
 - [Connecting](#connecting)
+- [Discovery](#discovery)
 - [Acknowledgements and round trip](#acknowledgements-and-round-trip)
 - [Reliable messages](#reliable-messages)
 - [What the transport settled](#what-the-transport-settled)
@@ -71,9 +72,10 @@ Every packet starts with a byte-aligned header:
 
 The protocol id is not sent. It is the 8 bytes `TORE-NET` followed by the
 protocol version as 16 bits, so a packet from another program or another
-version fails its checksum and is dropped silently. The two kinds a
-different version must still read, Connect request and Refuse, use the
-fixed id `TORE-HELLO` instead, which carries no version.
+version fails its checksum and is dropped silently. The kinds a
+different version must still read, Connect request, Refuse and the two
+discovery kinds, use the fixed id `TORE-HELLO` instead, which carries no
+version.
 
 | Kind | Name | Direction | Checksum id |
 | --- | --- | --- | --- |
@@ -84,6 +86,8 @@ fixed id `TORE-HELLO` instead, which carries no version.
 | 5 | Refuse | host to client | `TORE-HELLO` |
 | 6 | Payload | both | versioned |
 | 7 | Disconnect | both | versioned |
+| 8 | Discover query | anyone to a host | `TORE-HELLO` |
+| 9 | Discover answer | host to the asker | `TORE-HELLO` |
 
 A **Payload** packet, the only kind once connected, continues:
 
@@ -189,6 +193,78 @@ connection, as a hosting game exempts its own player's over the in-process
 link, EF4), 3 too many bad packets,
 4 protocol error (a message ahead of its window, or fragments that do not fit
 together), 5 content mismatch, 6 server stopping, 7 kicked.
+
+## Discovery
+
+*Built (EF5).* Any host answers "who is hosting here?", whether or not the
+asker can join it: the game's Direct Connection screen asks the local network
+this way and lists what answers. The two packets are transport packets, not
+the session's reliable messages. They sit under the fixed `TORE-HELLO` id,
+so a host of any later build still reads the query and answers, and a game
+of another build still reads the answer and lists the host marked as another
+version. They never change under this protocol or any later one: a different
+layout is a different kind. They therefore have a golden file of their own,
+`crates/tore-net/discover-golden.txt`, outside the protocol version's
+(agent decision); the test `discover_golden` compares it. A host of a build
+from before slice EF5 drops a query silently, as it drops any kind it has no
+name for (an invalid packet, counted and never answered).
+
+```mermaid
+sequenceDiagram
+  participant A as Asker
+  participant H as Host
+  A->>H: Discover query, 1,000 bytes, to the host's game port
+  H->>A: Discover answer, never longer than the query
+```
+
+| Packet | Fields |
+| --- | --- |
+| Discover query | asker's protocol version (16), asker's nonce (64), zero padding to exactly 1,000 bytes. The padding must be zero when the asker's version is the host's; another version may put fields in it, which this build ignores |
+| Discover answer | nonce (64, the query's), protocol version (16, the host's), flags (8), players (8), capacity (8), session id (64), game version, game commit, game name, mission summary, King's callsign (each a string), count (8), then that many callsigns (strings) |
+
+The answer's flags, from the least significant bit: password needed, full (no
+place for another player), the callsign list is truncated, then two bits of
+phase (0 lobby, 1 flying, 2 closed: the mission has ended or the host is
+stopping, and joins are refused), then three zero bits. The summary is
+`MissionSpec::summary()`, one line (theater, weather, start, the two sides);
+the King is the callsign of the player who may change the mission, empty on a
+dedicated server; the callsigns are the connected players in the order they
+joined; the session id names one game across the addresses it answers from.
+Texts are cut to fit: build texts to 64 bytes, the name to 64, the summary to
+200, the King to 15 (the callsign limit).
+
+**The size rule.** No answer is ever longer than its query, whatever the
+lobby holds: a query is exactly 1,000 bytes and the host fits its answer to
+that. The fixed part of the answer is at most about 440 bytes with every text
+at its limit, and the callsigns follow while they fit (the largest lobby,
+30 callsigns of 15 characters, takes 480 bytes more, which fits); a list that
+would not fit is cut from the end and the answer says so in the truncated flag.
+An answer that still does not fit is not sent. A spoofed query therefore
+gains nothing by size, as with the handshake's Challenge.
+
+**Who answers.** The host's game port answers, in every phase, from the
+lobby's state: a player-hosted game and a dedicated server alike, in the lobby,
+flying and after the mission, until the host stops. The host's transport reads a
+query, rate-limits it by source address (20 a second per address and 200 in
+all, the connect limits but counted apart so a flood of queries cannot take the
+joins' allowance, an agent decision) and hands it to the session, which fills
+in the answer from its lobby state and queues it for the asker.
+
+**Where it is asked.** A game looks for others by sending a query every two
+seconds to the limited broadcast address (255.255.255.255) on the game port, to
+this machine's own network address and to its loopback address, and listens
+for answers on the same socket. Discovery is IPv4 only; IPv6 discovery, port
+mapping and the internet are stage J. A host on an IPv6 socket that also takes
+IPv4 receives IPv4 broadcast on Linux (checked on this machine with a query to
+the loopback network's broadcast address, which a firewall leaves alone); a
+platform that needs an IPv4 socket for it (Windows, per the standard library's
+note on dual-stack sockets) gets one from the server's socket code, which binds
+both. A machine's firewall may drop incoming broadcast on its real network
+interfaces: on the development machine (ufw active) a broadcast to its own
+interface never reached its own sockets, and a Windows firewall asks on first
+run
+([the dedicated server's note](../DEDICATED-SERVER.md#discovery-and-the-firewall)).
+Join by address always works without it.
 
 ## Acknowledgements and round trip
 
@@ -936,6 +1012,8 @@ to a replay is stage E.
   (`TORE_UPDATE_WIRE_GOLDEN=1 cargo test --locked -p tore-session
   wire_golden`), the way the controls list test works. The copy records the
   version, and refreshing changed bytes under the same version is refused.
+  The [discovery](#discovery) packets, which no version changes, have their own
+  golden file.
 - The **game build** is the version string and the commit the build stamps.
   John's rule is that the build must match ([guide](../MULTIPLAYER.md#compatibility-handshake)).
   *Agent decision:* two tagged release builds match when their versions are
@@ -962,3 +1040,6 @@ watch the network can read it. What the protocol does guard against:
   of panicking; a seeded fuzz test feeds each one random and mutated packets.
 - **Floods.** Connect requests are rate-limited per address and in total, and
   a connection that sends too many bad packets is closed.
+- **Reflection by discovery.** A discover answer is never longer than the query
+  it answers, queries are rate-limited per address and in total apart from
+  joins, and an old host drops the kind without a word.

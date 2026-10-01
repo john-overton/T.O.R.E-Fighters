@@ -354,7 +354,10 @@ impl Client {
             PacketKind::Refuse => self.on_refuse(body),
             PacketKind::Payload => self.on_payload(now, datagram.len(), body, check),
             PacketKind::Disconnect => self.on_disconnect(body),
-            PacketKind::ConnectRequest | PacketKind::ChallengeAnswer => {
+            PacketKind::ConnectRequest
+            | PacketKind::ChallengeAnswer
+            | PacketKind::Discover
+            | PacketKind::DiscoverAnswer => {
                 self.counters.unexpected += 1;
             }
         }

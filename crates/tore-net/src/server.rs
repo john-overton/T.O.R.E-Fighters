@@ -10,7 +10,8 @@ use crate::connection::{
 };
 use crate::entropy::{CookieKey, Entropy, Rng};
 use crate::packet::{
-    self, Accepted, Challenge, MAX_DATAGRAM, MAX_REFUSE_TEXT, Packet, PacketKind, Refuse,
+    self, Accepted, Challenge, Discover, DiscoverAnswer, MAX_DATAGRAM, MAX_REFUSE_TEXT, Packet,
+    PacketKind, Refuse,
 };
 use crate::{
     COOKIE_SLOT, Counters, Datagrams, MAX_SECTION_KIND, RATE_LIMIT_PER_ADDRESS, RATE_LIMIT_TOTAL,
@@ -143,6 +144,15 @@ pub enum ServerEvent {
         /// What.
         event: Event,
     },
+    /// Someone asked who is hosting here (slice EF5). The caller answers with
+    /// [`Server::answer_discover`], or ignores it. The query has passed the
+    /// rate limit.
+    Discover {
+        /// Who asked.
+        from: SocketAddr,
+        /// What it carries.
+        query: Discover,
+    },
 }
 
 struct Entry {
@@ -195,6 +205,9 @@ pub struct Server {
     entries: BTreeMap<SocketAddr, Entry>,
     ids: HashMap<u32, SocketAddr>,
     limiter: RateLimiter,
+    /// Discover queries have a limiter of their own, with the same limits, so
+    /// a flood of them cannot use up the joins' allowance (agent decision).
+    discover_limiter: RateLimiter,
     out: VecDeque<Transmit>,
     events: VecDeque<ServerEvent>,
     counters: Counters,
@@ -212,6 +225,7 @@ impl Server {
             entries: BTreeMap::new(),
             ids: HashMap::new(),
             limiter: RateLimiter::default(),
+            discover_limiter: RateLimiter::default(),
             out: VecDeque::new(),
             events: VecDeque::new(),
             counters: Counters::default(),
@@ -389,9 +403,38 @@ impl Server {
             PacketKind::ChallengeAnswer => self.on_answer(now, from, datagram.len(), body, gate),
             PacketKind::Payload => self.on_payload(now, from, datagram.len(), body, gate),
             PacketKind::Disconnect => self.on_disconnect(from, body),
-            PacketKind::Challenge | PacketKind::Accepted | PacketKind::Refuse => {
+            PacketKind::Discover => self.on_discover(now, from, datagram.len(), body),
+            PacketKind::Challenge
+            | PacketKind::Accepted
+            | PacketKind::Refuse
+            | PacketKind::DiscoverAnswer => {
                 self.counters.unexpected += 1;
             }
+        }
+    }
+
+    fn on_discover(&mut self, now: Duration, from: SocketAddr, len: usize, body: &[u8]) {
+        let Ok(query) = packet::decode_discover(len, body, self.config.protocol_version) else {
+            self.counters.malformed += 1;
+            return;
+        };
+        if !self.discover_limiter.allow(now, from.ip()) {
+            self.counters.rate_limited += 1;
+            return;
+        }
+        self.events.push_back(ServerEvent::Discover { from, query });
+    }
+
+    /// Queues the answer to a [`ServerEvent::Discover`] for `to`: the answer
+    /// is fitted to the query's length ([`packet::DISCOVER_LEN`]), so it is
+    /// never longer than the query, whatever the game holds.
+    pub fn answer_discover(&mut self, to: SocketAddr, answer: DiscoverAnswer) {
+        let answer = answer.fit(packet::DISCOVER_LEN);
+        match Packet::DiscoverAnswer(answer)
+            .encode_within(self.config.protocol_version, packet::DISCOVER_LEN)
+        {
+            Ok(datagram) => self.out.push_back(Transmit { to, datagram }),
+            Err(_) => self.counters.unexpected += 1,
         }
     }
 
@@ -667,6 +710,172 @@ fn truncate(text: &str, max: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::packet::{Discover, DiscoverPhase};
+
+    const V: u16 = 3;
+
+    fn host() -> Server {
+        Server::new(ServerConfig {
+            entropy: Entropy::Seeded(1),
+            ..ServerConfig::new(V)
+        })
+    }
+
+    fn accept_all(_: &ConnectDetails) -> Decision {
+        Decision::Refuse {
+            reason: RefuseReason::ShuttingDown,
+            text: String::new(),
+        }
+    }
+
+    fn query(version: u16, nonce: u64) -> Vec<u8> {
+        Packet::Discover(Discover {
+            protocol_version: version,
+            nonce,
+        })
+        .encode(version)
+        .unwrap()
+    }
+
+    fn answer(nonce: u64, callsigns: usize) -> DiscoverAnswer {
+        DiscoverAnswer {
+            nonce,
+            protocol_version: V,
+            game_version: "0.1.3".into(),
+            game_commit: "abc".into(),
+            session_id: 7,
+            name: "Game".into(),
+            summary: "UKR".into(),
+            players: callsigns as u8,
+            capacity: 30,
+            password: false,
+            full: false,
+            phase: DiscoverPhase::Lobby,
+            king: String::new(),
+            callsigns: (0..callsigns).map(|i| format!("Callsign_{i:06}")).collect(),
+            truncated: false,
+        }
+    }
+
+    #[test]
+    fn a_query_is_handed_up_and_its_answer_is_never_longer() {
+        let mut server = host();
+        let asker: SocketAddr = "10.0.0.9:40000".parse().unwrap();
+        let now = Duration::from_secs(5);
+        server.receive(now, asker, &query(V, 42), &mut accept_all);
+        let Some(ServerEvent::Discover { from, query }) = server.poll_event() else {
+            panic!("no query event")
+        };
+        assert_eq!((from, query.nonce, query.protocol_version), (asker, 42, V));
+        // The largest lobby: every callsign at its longest.
+        server.answer_discover(from, answer(42, 30));
+        let sent = server.poll_transmit().expect("an answer");
+        assert_eq!(sent.to, asker);
+        assert!(sent.datagram.len() <= packet::DISCOVER_LEN);
+        let Ok(Packet::DiscoverAnswer(back)) = Packet::decode(&sent.datagram, V) else {
+            panic!("not an answer")
+        };
+        assert_eq!((back.nonce, back.callsigns.len()), (42, 30));
+        // An answer from a game of any size is cut to fit rather than sent long.
+        let mut huge = answer(42, 0);
+        huge.name = "n".repeat(1000);
+        huge.callsigns = vec!["x".repeat(15); 255];
+        server.answer_discover(from, huge);
+        let sent = server.poll_transmit().expect("an answer");
+        assert!(sent.datagram.len() <= packet::DISCOVER_LEN);
+        let Ok(Packet::DiscoverAnswer(back)) = Packet::decode(&sent.datagram, V) else {
+            panic!("not an answer")
+        };
+        assert!(back.truncated && back.callsigns.len() < 255);
+    }
+
+    #[test]
+    fn a_query_of_another_version_is_still_handed_up() {
+        let mut server = host();
+        let asker: SocketAddr = "10.0.0.9:40000".parse().unwrap();
+        // A later build's query: its own checksum covers the hello id, so it
+        // passes, and its padding may carry fields this build does not know.
+        let mut later = query(V + 1, 9);
+        later[600] = 0x55;
+        let crc = packet::checksum(PacketKind::Discover, V, &later[4..]);
+        later[..4].copy_from_slice(&crc.to_le_bytes());
+        server.receive(Duration::ZERO, asker, &later, &mut accept_all);
+        assert!(matches!(
+            server.poll_event(),
+            Some(ServerEvent::Discover { query, .. }) if query.protocol_version == V + 1
+        ));
+    }
+
+    #[test]
+    fn a_host_that_does_not_know_a_kind_drops_it_silently() {
+        // What a host of an earlier build does with a discover query: its
+        // kind byte is one it has no name for. The same path drops any kind
+        // a later build adds.
+        let mut server = host();
+        let asker: SocketAddr = "10.0.0.9:40000".parse().unwrap();
+        let mut unknown = query(V, 1);
+        unknown[4] = 10;
+        let crc = packet::checksum(PacketKind::Discover, V, &unknown[4..]);
+        unknown[..4].copy_from_slice(&crc.to_le_bytes());
+        server.receive(Duration::ZERO, asker, &unknown, &mut accept_all);
+        assert!(server.poll_event().is_none() && server.poll_transmit().is_none());
+        assert_eq!(server.counters().invalid, 1);
+        // A host that ignores the event (an old caller) sends nothing.
+        server.receive(Duration::ZERO, asker, &query(V, 1), &mut accept_all);
+        let _ = server.poll_event();
+        assert!(server.poll_transmit().is_none());
+    }
+
+    #[test]
+    fn queries_are_limited_per_address_apart_from_joins() {
+        let mut server = host();
+        let asker: SocketAddr = "10.0.0.9:40000".parse().unwrap();
+        let now = Duration::from_millis(2500);
+        for i in 0..30 {
+            server.receive(now, asker, &query(V, i), &mut accept_all);
+        }
+        let mut events = 0;
+        while server.poll_event().is_some() {
+            events += 1;
+        }
+        assert_eq!(events, RATE_LIMIT_PER_ADDRESS);
+        assert_eq!(server.counters().rate_limited, 30 - u64::from(events));
+        // The joins' allowance is untouched by the queries.
+        let request = Packet::ConnectRequest(packet::ConnectRequest {
+            protocol_version: V,
+            nonce: 5,
+            game_version: "0.1.3".into(),
+            game_commit: "abc".into(),
+        })
+        .encode(V)
+        .unwrap();
+        server.receive(now, asker, &request, &mut accept_all);
+        assert!(matches!(
+            server
+                .poll_transmit()
+                .map(|t| Packet::decode(&t.datagram, V)),
+            Some(Ok(Packet::Challenge(_)))
+        ));
+        // A new second allows more.
+        server.receive(
+            now + Duration::from_secs(1),
+            asker,
+            &query(V, 1),
+            &mut accept_all,
+        );
+        assert!(server.poll_event().is_some());
+    }
+
+    #[test]
+    fn a_query_of_the_wrong_size_is_malformed() {
+        let mut server = host();
+        let asker: SocketAddr = "10.0.0.9:40000".parse().unwrap();
+        let mut short = query(V, 1);
+        short.truncate(999);
+        server.receive(Duration::ZERO, asker, &short, &mut accept_all);
+        assert!(server.poll_event().is_none());
+        assert_eq!(server.counters().invalid + server.counters().malformed, 1);
+    }
 
     #[test]
     fn truncate_respects_characters() {

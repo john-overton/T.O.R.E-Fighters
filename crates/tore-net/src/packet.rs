@@ -1,11 +1,12 @@
-//! Packets: the header, the checksum and the seven kinds.
+//! Packets: the header, the checksum and the nine kinds.
 //!
 //! Every packet starts with a CRC-32 checksum (4 bytes, least significant
 //! byte first) and a kind byte. The checksum covers a 10-byte protocol id that
-//! is never sent, followed by every byte after the checksum. Connect request
-//! and Refuse use the fixed id `TORE-HELLO`, so a host of any version can read
-//! and answer them; the other kinds use `TORE-NET` and the protocol version
-//! (16 bits), so a packet from another program or version fails its checksum.
+//! is never sent, followed by every byte after the checksum. Connect request,
+//! Refuse and the two discovery kinds use the fixed id `TORE-HELLO`, so a host
+//! of any version can read and answer them; the other kinds use `TORE-NET`
+//! and the protocol version (16 bits), so a packet from another program or
+//! version fails its checksum.
 //! See "Packets" and "Connecting" in
 //! [`docs/formats/net-protocol.md`](../../../docs/formats/net-protocol.md).
 //!
@@ -45,7 +46,17 @@ pub const HELLO_ID: [u8; 10] = *b"TORE-HELLO";
 /// The name part of the versioned protocol id.
 pub const PROTOCOL_NAME: [u8; 8] = *b"TORE-NET";
 
-/// The seven packet kinds.
+/// The exact size of a Discover query: the longest answer it may be given.
+pub const DISCOVER_LEN: usize = PADDED_LEN;
+/// The longest game version or commit text a discover answer carries, in
+/// bytes (longer is cut by [`DiscoverAnswer::fit`]).
+pub const MAX_DISCOVER_BUILD: usize = 64;
+/// The longest game name a discover answer carries, in bytes.
+pub const MAX_DISCOVER_NAME: usize = 64;
+/// The longest mission summary a discover answer carries, in bytes.
+pub const MAX_DISCOVER_SUMMARY: usize = 200;
+
+/// The nine packet kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum PacketKind {
@@ -63,6 +74,12 @@ pub enum PacketKind {
     Payload = 6,
     /// Both ways: the connection ends.
     Disconnect = 7,
+    /// Anyone to a host, `TORE-HELLO` id, padded to 1,000 bytes: "who is
+    /// hosting here?" (slice EF5).
+    Discover = 8,
+    /// Host to the asker, `TORE-HELLO` id, never longer than the query: the
+    /// game's summary.
+    DiscoverAnswer = 9,
 }
 
 impl PacketKind {
@@ -76,13 +93,18 @@ impl PacketKind {
             5 => Self::Refuse,
             6 => Self::Payload,
             7 => Self::Disconnect,
+            8 => Self::Discover,
+            9 => Self::DiscoverAnswer,
             _ => return None,
         })
     }
 
-    /// True for the two kinds checked with the fixed `TORE-HELLO` id.
+    /// True for the kinds checked with the fixed `TORE-HELLO` id.
     pub fn uses_hello_id(self) -> bool {
-        matches!(self, Self::ConnectRequest | Self::Refuse)
+        matches!(
+            self,
+            Self::ConnectRequest | Self::Refuse | Self::Discover | Self::DiscoverAnswer
+        )
     }
 }
 
@@ -104,7 +126,7 @@ pub enum PacketError {
     TooShort,
     /// Longer than 1,200 bytes.
     TooLong,
-    /// A kind byte that is not one of the seven.
+    /// A kind byte that is not one of the nine.
     UnknownKind(u8),
     /// The checksum does not match: another program, another version or
     /// damage. Dropped silently.
@@ -238,6 +260,139 @@ pub struct Disconnect {
     pub reason: u8,
 }
 
+/// Discover query: "who is hosting here?" The protocol version and the nonce
+/// come first and never move, so a host of any build reads them. 1,000 bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Discover {
+    /// The asker's protocol version.
+    pub protocol_version: u16,
+    /// The asker's random nonce, which the answer repeats.
+    pub nonce: u64,
+}
+
+/// Where a game is, as a game list shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DiscoverPhase {
+    /// In the lobby: the mission is chosen and not flying.
+    Lobby = 0,
+    /// The mission is flying.
+    Flying = 1,
+    /// The mission has ended or the host is stopping: joins are refused.
+    Closed = 2,
+}
+
+impl DiscoverPhase {
+    fn from_bits(bits: u64) -> Option<Self> {
+        Some(match bits {
+            0 => Self::Lobby,
+            1 => Self::Flying,
+            2 => Self::Closed,
+            _ => return None,
+        })
+    }
+}
+
+/// Discover answer: a game's summary for the list. Its layout never changes
+/// under this kind, so a later build's host is still read and shown as
+/// another version. Never longer than the query it answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoverAnswer {
+    /// The nonce of the query it answers.
+    pub nonce: u64,
+    /// The host's protocol version.
+    pub protocol_version: u16,
+    /// The host's game version and commit.
+    pub game_version: String,
+    /// The commit its build stamps.
+    pub game_commit: String,
+    /// The host's session id, which names one game across addresses.
+    pub session_id: u64,
+    /// The game's name.
+    pub name: String,
+    /// The mission's one-line summary.
+    pub summary: String,
+    /// Players connected.
+    pub players: u8,
+    /// Players the game seats at most.
+    pub capacity: u8,
+    /// A password is needed to join.
+    pub password: bool,
+    /// No place for another player.
+    pub full: bool,
+    /// Lobby, flying or closed.
+    pub phase: DiscoverPhase,
+    /// The King's callsign; empty when the game has no King (a dedicated
+    /// server).
+    pub king: String,
+    /// The players' callsigns, as many as fit the query's length.
+    pub callsigns: Vec<String>,
+    /// `callsigns` leaves players out.
+    pub truncated: bool,
+}
+
+impl DiscoverAnswer {
+    /// The answer with its texts cut to their limits and as many callsigns
+    /// as keep the packet within `max_len` bytes; `truncated` says when some
+    /// are left out. The fixed part always fits 1,000 bytes; for a smaller
+    /// `max_len` that cannot hold it, [`Packet::encode_within`] says so.
+    pub fn fit(mut self, max_len: usize) -> Self {
+        self.game_version = cut(&self.game_version, MAX_DISCOVER_BUILD);
+        self.game_commit = cut(&self.game_commit, MAX_DISCOVER_BUILD);
+        self.name = cut(&self.name, MAX_DISCOVER_NAME);
+        self.summary = cut(&self.summary, MAX_DISCOVER_SUMMARY);
+        self.king = cut(&self.king, MAX_CALLSIGN);
+        let listed = self.callsigns.len();
+        self.callsigns.retain(|c| valid_callsign(c));
+        self.callsigns.truncate(usize::from(u8::MAX));
+        self.truncated |= self.callsigns.len() < listed;
+        let mut size = self.fixed_len();
+        let mut keep = 0;
+        for callsign in &self.callsigns {
+            if size + 1 + callsign.len() > max_len {
+                break;
+            }
+            size += 1 + callsign.len();
+            keep += 1;
+        }
+        if keep < self.callsigns.len() {
+            self.callsigns.truncate(keep);
+            self.truncated = true;
+        }
+        self
+    }
+
+    /// The packet's length without the callsigns.
+    fn fixed_len(&self) -> usize {
+        // Header 5, nonce 8, protocol 2, flags 1, players 1, capacity 1,
+        // session 8, five strings with their length bytes, the count.
+        5 + 8
+            + 2
+            + 1
+            + 1
+            + 1
+            + 8
+            + 5
+            + self.game_version.len()
+            + self.game_commit.len()
+            + self.name.len()
+            + self.summary.len()
+            + self.king.len()
+            + 1
+    }
+}
+
+/// `text` cut to at most `max` bytes at a character boundary.
+fn cut(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_owned();
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_owned()
+}
+
 /// The fixed part of a Payload after the checksum and kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PayloadHeader {
@@ -280,6 +435,10 @@ pub enum Packet {
     Payload(PayloadHeader, Vec<Section>),
     /// Kind 7.
     Disconnect(Disconnect),
+    /// Kind 8.
+    Discover(Discover),
+    /// Kind 9.
+    DiscoverAnswer(DiscoverAnswer),
 }
 
 impl Packet {
@@ -293,7 +452,20 @@ impl Packet {
             Self::Refuse(_) => PacketKind::Refuse,
             Self::Payload(..) => PacketKind::Payload,
             Self::Disconnect(_) => PacketKind::Disconnect,
+            Self::Discover(_) => PacketKind::Discover,
+            Self::DiscoverAnswer(_) => PacketKind::DiscoverAnswer,
         }
+    }
+
+    /// Writes the packet like [`Packet::encode`], and refuses one longer than
+    /// `max_len` bytes ([`EncodeError::TooLarge`]): how a host keeps an answer
+    /// within the query it answers.
+    pub fn encode_within(&self, version: u16, max_len: usize) -> Result<Vec<u8>, EncodeError> {
+        let bytes = self.encode(version)?;
+        if bytes.len() > max_len {
+            return Err(EncodeError::TooLarge);
+        }
+        Ok(bytes)
     }
 
     /// Writes the packet with its checksum for protocol `version`.
@@ -350,6 +522,37 @@ impl Packet {
                 w.write_bits(u64::from(p.connection), 32).ok();
                 w.write_bits(u64::from(p.reason), 8).ok();
             }
+            Self::Discover(p) => {
+                w.write_bits(u64::from(p.protocol_version), 16).ok();
+                w.write_bits(p.nonce, 64).ok();
+                pad(&mut w)?;
+            }
+            Self::DiscoverAnswer(p) => {
+                if p.callsigns.len() > usize::from(u8::MAX)
+                    || p.callsigns.iter().any(|c| !valid_callsign(c))
+                {
+                    return Err(EncodeError::BadString);
+                }
+                w.write_bits(p.nonce, 64).ok();
+                w.write_bits(u64::from(p.protocol_version), 16).ok();
+                let flags = u64::from(p.password)
+                    | u64::from(p.full) << 1
+                    | u64::from(p.truncated) << 2
+                    | (p.phase as u64) << 3;
+                w.write_bits(flags, 8).ok();
+                w.write_bits(u64::from(p.players), 8).ok();
+                w.write_bits(u64::from(p.capacity), 8).ok();
+                w.write_bits(p.session_id, 64).ok();
+                put_str(&mut w, &p.game_version)?;
+                put_str(&mut w, &p.game_commit)?;
+                put_str(&mut w, &p.name)?;
+                put_str(&mut w, &p.summary)?;
+                put_str(&mut w, &p.king)?;
+                w.write_bits(p.callsigns.len() as u64, 8).ok();
+                for callsign in &p.callsigns {
+                    put_str(&mut w, callsign)?;
+                }
+            }
         }
         seal(w.finish(), version)
     }
@@ -372,6 +575,8 @@ impl Packet {
                 Self::Payload(header, decode_sections(rest)?)
             }
             PacketKind::Disconnect => Self::Disconnect(decode_disconnect(body)?),
+            PacketKind::Discover => Self::Discover(decode_discover(datagram.len(), body, version)?),
+            PacketKind::DiscoverAnswer => Self::DiscoverAnswer(decode_discover_answer(body)?),
         })
     }
 }
@@ -504,6 +709,72 @@ pub fn decode_connect_request(
         nonce,
         game_version,
         game_commit,
+    })
+}
+
+/// Decodes a Discover query's body. `len` is the whole datagram's length,
+/// which must be exactly 1,000. The padding must be zero when the asker's
+/// protocol version is `version`; a query of another version may use it.
+pub fn decode_discover(len: usize, body: &[u8], version: u16) -> Result<Discover, PacketError> {
+    if len != DISCOVER_LEN {
+        return Err(PacketError::Malformed);
+    }
+    let mut r = BitReader::new(body);
+    let protocol_version = u16_of(&mut r)?;
+    let nonce = r.read_bits(64)?;
+    if protocol_version == version {
+        padding(&r)?;
+    }
+    Ok(Discover {
+        protocol_version,
+        nonce,
+    })
+}
+
+/// Decodes a Discover answer's body.
+pub fn decode_discover_answer(body: &[u8]) -> Result<DiscoverAnswer, PacketError> {
+    let mut r = BitReader::new(body);
+    let nonce = r.read_bits(64)?;
+    let protocol_version = u16_of(&mut r)?;
+    let flags = r.read_bits(8)?;
+    if flags >> 5 != 0 {
+        return Err(PacketError::Malformed);
+    }
+    let phase = DiscoverPhase::from_bits((flags >> 3) & 3).ok_or(PacketError::Malformed)?;
+    let players = u8_of(&mut r)?;
+    let capacity = u8_of(&mut r)?;
+    let session_id = r.read_bits(64)?;
+    let game_version = r.read_str()?;
+    let game_commit = r.read_str()?;
+    let name = r.read_str()?;
+    let summary = r.read_str()?;
+    let king = r.read_str()?;
+    let count = usize::from(u8_of(&mut r)?);
+    let mut callsigns = Vec::with_capacity(count);
+    for _ in 0..count {
+        let callsign = r.read_str()?;
+        if !valid_callsign(&callsign) {
+            return Err(PacketError::Malformed);
+        }
+        callsigns.push(callsign);
+    }
+    end(&r)?;
+    Ok(DiscoverAnswer {
+        nonce,
+        protocol_version,
+        game_version,
+        game_commit,
+        session_id,
+        name,
+        summary,
+        players,
+        capacity,
+        password: flags & 1 != 0,
+        full: flags & 2 != 0,
+        phase,
+        king,
+        callsigns,
+        truncated: flags & 4 != 0,
     })
 }
 
@@ -718,7 +989,34 @@ mod tests {
                 connection: 8,
                 reason: 2,
             }),
+            Packet::Discover(Discover {
+                protocol_version: V,
+                nonce: 0xFEDC_BA98_7654_3210,
+            }),
+            Packet::DiscoverAnswer(answer(&["Viper", "Maverick 1"])),
         ]
+    }
+
+    fn answer(callsigns: &[&str]) -> DiscoverAnswer {
+        DiscoverAnswer {
+            nonce: 0xFEDC_BA98_7654_3210,
+            protocol_version: V,
+            game_version: "0.1.3".into(),
+            game_commit: "fb9c2ec".into(),
+            session_id: 0x1122_3344_5566_7788,
+            name: "Friday night".into(),
+            summary:
+                "UKR, clear, airborne at 20000 ft: F/A-18D Hornet x4 against MiG-29 Fulcrum-C x4"
+                    .into(),
+            players: callsigns.len() as u8,
+            capacity: 8,
+            password: true,
+            full: false,
+            phase: DiscoverPhase::Lobby,
+            king: callsigns.first().copied().unwrap_or_default().into(),
+            callsigns: callsigns.iter().map(|c| (*c).to_owned()).collect(),
+            truncated: false,
+        }
     }
 
     #[test]
@@ -744,6 +1042,166 @@ mod tests {
         assert_eq!(sizes[3], 31);
         assert_eq!(sizes[5], PAYLOAD_HEADER_LEN + 3 + 3 + 3);
         assert_eq!(sizes[6], 10);
+        // The query is padded to the longest answer it may be given.
+        assert_eq!(sizes[7], DISCOVER_LEN);
+        assert!(sizes[8] < DISCOVER_LEN);
+    }
+
+    #[test]
+    fn the_answers_fixed_part_is_counted_exactly() {
+        let bare = answer(&[]);
+        let size = Packet::DiscoverAnswer(bare.clone())
+            .encode(V)
+            .unwrap()
+            .len();
+        assert_eq!(size, bare.fixed_len());
+        let two = answer(&["Viper", "Maverick 1"]);
+        let size = Packet::DiscoverAnswer(two.clone()).encode(V).unwrap().len();
+        assert_eq!(size, two.fixed_len() + 6 + 11);
+    }
+
+    #[test]
+    fn no_answer_is_longer_than_its_query_for_the_largest_lobby() {
+        // 30 players with 15-character callsigns, the longest texts.
+        let callsigns: Vec<String> = (0..30).map(|i| format!("Callsign_{i:06}")).collect();
+        assert!(callsigns.iter().all(|c| c.len() == MAX_CALLSIGN));
+        let mut biggest = answer(&[]);
+        biggest.game_version = "9".repeat(300);
+        biggest.game_commit = "f".repeat(300);
+        biggest.name = "n".repeat(300);
+        biggest.summary = "s\u{e9}".repeat(300);
+        biggest.king = callsigns[0].clone();
+        biggest.players = 30;
+        biggest.callsigns = callsigns;
+        let fitted = biggest.clone().fit(DISCOVER_LEN);
+        let bytes = Packet::DiscoverAnswer(fitted.clone())
+            .encode_within(V, DISCOVER_LEN)
+            .unwrap();
+        assert!(bytes.len() <= DISCOVER_LEN, "{} bytes", bytes.len());
+        // Everything fits: the cuts keep the texts at their limits and the
+        // whole player list in.
+        assert_eq!(fitted.callsigns.len(), 30);
+        assert!(!fitted.truncated);
+        assert_eq!(fitted.name.len(), MAX_DISCOVER_NAME);
+        assert!(fitted.summary.len() <= MAX_DISCOVER_SUMMARY);
+        assert_eq!(fitted.game_version.len(), MAX_DISCOVER_BUILD);
+        // A shorter allowance drops callsigns from the end and says so.
+        for max in [500, 700, 800] {
+            let small = biggest.clone().fit(max);
+            let bytes = Packet::DiscoverAnswer(small.clone())
+                .encode_within(V, max)
+                .unwrap();
+            assert!(bytes.len() <= max);
+            assert!(small.truncated && small.callsigns.len() < 30);
+            assert_eq!(small.callsigns[0], "Callsign_000000");
+            let Packet::DiscoverAnswer(back) = Packet::decode(&bytes, V).unwrap() else {
+                panic!("not an answer")
+            };
+            assert_eq!(back, small);
+        }
+        // An answer that is too long is refused, never sent.
+        assert_eq!(
+            Packet::DiscoverAnswer(fitted).encode_within(V, 100),
+            Err(EncodeError::TooLarge)
+        );
+    }
+
+    #[test]
+    fn a_query_is_exactly_the_padded_length_with_zero_padding() {
+        let query = samples()[7].encode(V).unwrap();
+        assert_eq!(query.len(), DISCOVER_LEN);
+        assert!(Packet::decode(&query[..DISCOVER_LEN - 1], V).is_err());
+        let mut long = query.clone();
+        long.push(0);
+        let crc = checksum(PacketKind::Discover, V, &long[4..]);
+        long[..4].copy_from_slice(&crc.to_le_bytes());
+        assert_eq!(Packet::decode(&long, V), Err(PacketError::Malformed));
+        // Padding of the asker's own version must be zero; another version
+        // may use it, and is still read to its nonce.
+        let mut bad = query.clone();
+        bad[DISCOVER_LEN - 1] = 1;
+        let crc = checksum(PacketKind::Discover, V, &bad[4..]);
+        bad[..4].copy_from_slice(&crc.to_le_bytes());
+        assert_eq!(Packet::decode(&bad, V), Err(PacketError::Malformed));
+        assert!(matches!(
+            Packet::decode(&bad, V + 1),
+            Ok(Packet::Discover(d)) if d.nonce == 0xFEDC_BA98_7654_3210 && d.protocol_version == V
+        ));
+    }
+
+    #[test]
+    fn an_answer_with_trailing_bytes_or_reserved_flags_is_malformed() {
+        let mut bytes = samples()[8].encode(V).unwrap();
+        bytes.push(0);
+        let crc = checksum(PacketKind::DiscoverAnswer, V, &bytes[4..]);
+        bytes[..4].copy_from_slice(&crc.to_le_bytes());
+        assert_eq!(Packet::decode(&bytes, V), Err(PacketError::Malformed));
+        let mut bytes = samples()[8].encode(V).unwrap();
+        bytes[5 + 8 + 2] |= 0x20;
+        let crc = checksum(PacketKind::DiscoverAnswer, V, &bytes[4..]);
+        bytes[..4].copy_from_slice(&crc.to_le_bytes());
+        assert_eq!(Packet::decode(&bytes, V), Err(PacketError::Malformed));
+        // A phase of 3 does not exist.
+        let mut bytes = samples()[8].encode(V).unwrap();
+        bytes[5 + 8 + 2] |= 3 << 3;
+        let crc = checksum(PacketKind::DiscoverAnswer, V, &bytes[4..]);
+        bytes[..4].copy_from_slice(&crc.to_le_bytes());
+        assert_eq!(Packet::decode(&bytes, V), Err(PacketError::Malformed));
+    }
+
+    /// The discovery packets' encodings, one line each: their layout never
+    /// changes under their kinds (a later layout is a later kind), so they
+    /// have a golden file of their own, outside the protocol version's. Refresh
+    /// it with `TORE_UPDATE_DISCOVER_GOLDEN=1 cargo test -p tore-net
+    /// discover_golden`, only when adding a line.
+    #[test]
+    fn discover_golden() {
+        use std::fmt::Write as _;
+        let hex = |bytes: &[u8]| {
+            bytes.iter().fold(String::new(), |mut out, b| {
+                let _ = write!(out, "{b:02x}");
+                out
+            })
+        };
+        let mut text = String::from(
+            "# T.O.R.E discovery golden: kinds 8 and 9, checked with the TORE-HELLO id.\n\
+             # Version-free: these bytes never change.\n",
+        );
+        let samples = samples();
+        for (name, packet) in [
+            ("discover", &samples[7]),
+            ("answer", &samples[8]),
+            ("answer-empty", &Packet::DiscoverAnswer(answer(&[]))),
+        ] {
+            // The query is zeros after its first 15 bytes; the line keeps the
+            // head and the length.
+            let bytes = packet.encode(V).unwrap();
+            let shown = if name == "discover" {
+                &bytes[..15]
+            } else {
+                &bytes[..]
+            };
+            let _ = writeln!(text, "{name} {} {}", bytes.len(), hex(shown));
+        }
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("discover-golden.txt");
+        if std::env::var_os("TORE_UPDATE_DISCOVER_GOLDEN").is_some() {
+            std::fs::write(&path, &text).unwrap();
+            return;
+        }
+        let committed = std::fs::read_to_string(&path).unwrap_or_default();
+        assert_eq!(
+            text, committed,
+            "the discovery encodings changed: they are version-free, so add a new kind instead"
+        );
+        // And the committed bytes decode back to the samples.
+        for (name, packet) in [("discover", &samples[7]), ("answer", &samples[8])] {
+            let line = committed
+                .lines()
+                .find(|l| l.starts_with(name) && l[name.len()..].starts_with(' '))
+                .unwrap();
+            let encoded = packet.encode(V).unwrap();
+            assert_eq!(line.split(' ').nth(1).unwrap(), encoded.len().to_string());
+        }
     }
 
     #[test]
@@ -752,7 +1210,9 @@ mod tests {
             let bytes = packet.encode(V).unwrap();
             let other = Packet::decode(&bytes, V + 1);
             match packet.kind() {
-                PacketKind::Refuse => assert_eq!(other.unwrap(), packet),
+                PacketKind::Refuse | PacketKind::Discover | PacketKind::DiscoverAnswer => {
+                    assert_eq!(other.unwrap(), packet)
+                }
                 PacketKind::ConnectRequest => {
                     // Read up to the nonce so the host can refuse by version.
                     let Packet::ConnectRequest(req) = other.unwrap() else {
