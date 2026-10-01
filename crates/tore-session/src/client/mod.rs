@@ -40,6 +40,8 @@ pub mod clock;
 pub mod diagnostics;
 pub mod interpolation;
 #[cfg(test)]
+mod lobby_tests;
+#[cfg(test)]
 mod matrix_tests;
 pub mod prediction;
 #[cfg(test)]
@@ -103,6 +105,9 @@ pub const INPUT_REDUNDANCY: u64 = 24;
 pub const MAX_TICKS_PER_UPDATE: u64 = 240;
 /// A correction within this long of seating snaps.
 pub const SEATING_SNAP: Duration = Duration::from_secs(1);
+/// The longest an exact state waits while the host still repeats late
+/// inputs, ticks (125 ms); see `Client::apply_own_states`.
+pub const CORRECTION_HOLD_TICKS: u64 = 15;
 /// Events held for the caller at most; older ones are dropped.
 const MAX_EVENTS: usize = 4096;
 
@@ -564,6 +569,8 @@ pub struct Client {
     /// meet a prediction that has caught up instead of being adopted one by
     /// one ahead of it.
     pending_own: Vec<(OwnStateHeader, ExactState)>,
+    /// The inputs the newest snapshot said the host repeated.
+    repeats_reported: u8,
     /// The lobby as the host last sent it.
     lobby: Option<LobbyState>,
     /// The newest Mission message's number, and the number of the newest
@@ -675,6 +682,7 @@ impl Client {
             snapshot_tick: None,
             early: Vec::new(),
             pending_own: Vec::new(),
+            repeats_reported: 0,
             lobby: None,
             number: None,
             loaded: None,
@@ -1828,6 +1836,9 @@ impl Client {
         self.unacked
             .retain(|c| tore_net::sequence_newer(c.number, applied));
         self.stats.inputs_repeated += u64::from(header.inputs_repeated);
+        if self.snapshot_tick == Some(tick) {
+            self.repeats_reported = header.inputs_repeated;
+        }
         self.stats.input_margin = Some(header.input_margin);
         if let Some(seat) = &mut self.seat {
             let round_trip = self.net.stats().map_or(Duration::ZERO, |s| s.round_trip);
@@ -1880,10 +1891,27 @@ impl Client {
     /// the states that queue up while the game stalls meet a prediction
     /// that has caught up; on arrival each was a tick the client had not
     /// reached, and was adopted as it stood, one correction a snapshot.
+    ///
+    /// Only the newest is applied: restoring it steps the stored ticks after
+    /// it again, so the older ones would only be corrected over and over.
+    /// While the host still reports repeating this player's late inputs (a
+    /// stall's backlog arriving), the newest waits, at most
+    /// [`CORRECTION_HOLD_TICKS`], so one stretch of lateness costs one
+    /// correction rather than one a snapshot.
     fn apply_own_states(&mut self) {
-        for (header, state) in std::mem::take(&mut self.pending_own) {
-            self.apply_own_state(header, state);
+        let Some(newest) = std::mem::take(&mut self.pending_own)
+            .into_iter()
+            .max_by_key(|(header, _)| header.tick)
+        else {
+            return;
+        };
+        let snapshot = self.snapshot_tick.map_or(0, u64::from);
+        if self.repeats_reported > 0 && u64::from(newest.0.tick) + CORRECTION_HOLD_TICKS > snapshot
+        {
+            self.pending_own.push(newest);
+            return;
         }
+        self.apply_own_state(newest.0, newest.1);
     }
 
     fn apply_own_state(&mut self, header: OwnStateHeader, state: ExactState) {
@@ -2011,9 +2039,18 @@ impl Client {
         let mut steps = 0;
         while seat.predictor.tick() < due && steps < MAX_TICKS_PER_UPDATE {
             let tick = seat.predictor.tick() + 1;
+            // The host repeats the controls of the newest tick it had.
+            let repeated = seat
+                .predictor
+                .history()
+                .iter()
+                .rev()
+                .find(|r| r.tick <= host_had)
+                .or(seat.predictor.history().back())
+                .map(|r| r.frame);
             if tick <= host_stepped
                 && tick > host_had
-                && let Some(last) = seat.predictor.history().back().map(|r| r.frame)
+                && let Some(last) = repeated
             {
                 if let Err(error) = seat
                     .predictor

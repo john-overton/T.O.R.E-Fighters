@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tore_formats::aircraft::AircraftId;
 use tore_net::{CloseReason, DisconnectReason, bind_udp};
 use tore_session::bot::Bot;
+use tore_session::wire::messages::Goodbye;
 use tore_session::{Client, ClientConfig, ClientEvent, ClientPhase};
 use tore_world::mission::{Skill, Start};
 use tore_world::test_support::resources::{THEATER, resources};
@@ -46,11 +47,23 @@ fn loopback() -> Listen {
     Listen::Address("127.0.0.1".parse().unwrap())
 }
 
+/// The hosted game's settings, as `tore-app --host` makes them.
+fn hosted_config() -> HostConfig {
+    config(&HostOptions {
+        mission: "duel.txt".into(),
+        spec: spec(),
+        port: 0,
+        name: "Host's game".into(),
+        open_planes: OpenPlanes::Friendly,
+        password: None,
+        callsign: "Host".into(),
+        slot: None,
+    })
+}
+
 /// A host on a free loopback port, with the hosted game's settings.
 fn start_host(port: u16) -> (HostThread, LinkEnd, SocketAddr) {
-    let mut config = HostConfig::new(build_id());
-    config.after_end = AfterEnd::Quit;
-    config.restart_delay = Duration::ZERO;
+    let config = hosted_config();
     let (thread, link) = HostThread::start(HostSetup {
         spec: spec(),
         resources: import(),
@@ -81,8 +94,12 @@ impl Game {
             ..ClientConfig::new(LINK_ADDRESS, "Host", build_id())
         };
         let client = Client::connect(config, import(), clock.now()).expect("a client");
+        let mut bot = Bot::new(client);
+        // The King starts each mission once everyone holding a slot is
+        // ready, as `tore-app --host` does.
+        bot.start_when_ready = true;
         Self {
-            bot: Bot::new(client),
+            bot,
             link,
             clock,
             events: Vec::new(),
@@ -100,7 +117,6 @@ impl Game {
         while let Some(event) = self.bot.client.poll_event() {
             match &event {
                 ClientEvent::Seated { tick, .. } => self.seated_tick = Some(u64::from(*tick)),
-                ClientEvent::SeatRefused(_) => self.bot.client.ready(None),
                 ClientEvent::Closed(reason) => self.closed = Some(reason.clone()),
                 _ => {}
             }
@@ -153,6 +169,9 @@ struct Remote {
     /// When each new snapshot arrived, and the newest frame's tick then.
     snapshots: Vec<(Instant, u64)>,
     corrections: u64,
+    /// The host said it left the game, and the words the player was shown.
+    host_left: bool,
+    close_text: Option<String>,
 }
 
 impl Remote {
@@ -214,7 +233,7 @@ fn remote(
             let _ = bot.client.receive_from(now, &mut socket);
             if leave_after.is_some_and(|at| now >= at) && !left {
                 left = true;
-                bot.client.leave(now);
+                bot.client.leave_game(now);
             }
             if let Some(frame) = bot.update(now) {
                 tick = frame.tick;
@@ -232,9 +251,14 @@ fn remote(
                         seen.seated = true;
                         seated.store(true, Ordering::SeqCst);
                     }
-                    ClientEvent::SeatRefused(_) => bot.client.ready(None),
                     ClientEvent::Debrief(_) => seen.debrief = true,
-                    ClientEvent::Closed(reason) => seen.closed = Some(reason.clone()),
+                    ClientEvent::Goodbye(goodbye) => {
+                        seen.host_left = *goodbye == Goodbye::HostLeft;
+                    }
+                    ClientEvent::Closed(reason) => {
+                        seen.close_text = Some(bot.client.close_text(reason));
+                        seen.closed = Some(reason.clone());
+                    }
                     _ => {}
                 }
                 seen.events.push(event);
@@ -402,15 +426,90 @@ fn a_two_second_window_stall_stalls_nobody() {
             ..
         })
     ));
-    // The hosting player flies on, and the stall's correction settles.
+    // The hosting player flies on, and recovers from the stall with at most
+    // one correction (EF4: before, every snapshot of the next two seconds
+    // was adopted 4 ticks ahead of the prediction).
     assert_eq!(game.bot.client.phase(), ClientPhase::Flying);
+    assert!(
+        after_recovery - before <= 1,
+        "corrections after the stall: {:?}",
+        &corrections[before..]
+    );
     assert_eq!(corrections.len(), after_recovery, "{corrections:?}");
     drop(thread);
 }
 
-/// Acceptance: the hosting player leaves; the game then stops the host. The
-/// remote player gets "Mission ended", its debrief and "server stopping"; the
-/// thread ends in time and the port binds again.
+/// Acceptance (EF4): the hosting player, the King, ends the mission; both
+/// players get their debriefs and are back in the lobby, still connected;
+/// the remote player readies again by itself, the King starts again, and
+/// both fly a second mission.
+#[test]
+fn the_king_ends_the_mission_and_everyone_flies_again() {
+    let (mut thread, link, server) = start_host(0);
+    let mut game = Game::join(link);
+    assert!(game.fly_until(Duration::from_secs(10), |g| g.seated_tick.is_some()));
+    let seated = Arc::new(AtomicBool::new(false));
+    let guest = remote(server, None, Duration::from_secs(30), Arc::clone(&seated));
+    assert!(wait_for(&mut game, &seated, Duration::from_secs(10)));
+    game.fly(Duration::from_secs(1));
+    game.bot.client.end_mission();
+    assert!(game.fly_until(Duration::from_secs(5), |g| {
+        g.events
+            .iter()
+            .any(|e| matches!(e, ClientEvent::Debrief(_)))
+    }));
+    assert_eq!(game.bot.client.phase(), ClientPhase::Lobby);
+    // The King's game starts again once everyone holding a slot is ready.
+    game.seated_tick = None;
+    assert!(
+        game.fly_until(Duration::from_secs(10), |g| g.seated_tick.is_some()),
+        "{:?}",
+        game.bot.client.lobby()
+    );
+    let lobby = game.bot.client.lobby().expect("the lobby").clone();
+    assert_eq!(
+        lobby.phase,
+        tore_session::wire::messages::LobbyPhase::Flying
+    );
+    assert_eq!(lobby.players.len(), 2, "{lobby:?}");
+    game.fly(Duration::from_secs(1));
+    assert!(
+        game.bot
+            .client
+            .lobby()
+            .unwrap()
+            .players
+            .iter()
+            .all(|p| p.flying),
+        "{:?}",
+        game.bot.client.lobby()
+    );
+    assert!(thread.stop(JOIN_LIMIT));
+    let guest = guest.join().expect("the guest's thread");
+    let seatings = guest
+        .events
+        .iter()
+        .filter(|e| matches!(e, ClientEvent::Seated { .. }))
+        .count();
+    assert_eq!(seatings, 2, "{:?}", guest.events);
+    let debriefs = guest
+        .events
+        .iter()
+        .filter(|e| matches!(e, ClientEvent::Debrief(_)))
+        .count();
+    assert_eq!(
+        debriefs, 2,
+        "the end, then the host leaving: {:?}",
+        guest.events
+    );
+    assert!(server_stopping(&guest.closed), "{:?}", guest.closed);
+    assert!(guest.host_left, "{:?}", guest.events);
+}
+
+/// Acceptance: the hosting player leaves the game; the host ends it for
+/// everyone. The remote player gets "Mission ended" (the host left), its
+/// debrief and "The host left the game"; the thread ends in time and the
+/// port binds again.
 #[test]
 fn the_hosting_player_leaving_ends_the_game_cleanly() {
     let (mut thread, link, server) = start_host(0);
@@ -421,7 +520,7 @@ fn the_hosting_player_leaving_ends_the_game_cleanly() {
     assert!(wait_for(&mut game, &seated, Duration::from_secs(10)));
     game.fly(Duration::from_secs(1));
     let now = game.clock.now();
-    game.bot.client.leave(now);
+    game.bot.client.leave_game(now);
     assert!(game.fly_until(Duration::from_secs(5), |g| g.closed.is_some()));
     assert!(
         game.events
@@ -436,13 +535,17 @@ fn the_hosting_player_leaving_ends_the_game_cleanly() {
     assert!(took < STOP_GRACE + Duration::from_millis(500), "{took:?}");
     assert_eq!(thread.end(), Some(&End::Stopped));
     assert!(
-        guest
-            .events
-            .iter()
-            .any(|e| matches!(e, ClientEvent::MissionEnded(_)))
+        guest.events.iter().any(|e| matches!(
+            e,
+            ClientEvent::MissionEnded(ended) if ended.reason == EndReason::HostLeft
+        )),
+        "{:?}",
+        guest.events
     );
     assert!(guest.debrief, "{:?}", guest.events);
     assert!(server_stopping(&guest.closed), "{:?}", guest.closed);
+    assert!(guest.host_left, "{:?}", guest.events);
+    assert_eq!(guest.close_text.as_deref(), Some("The host left the game."));
     assert!(port_is_free(server));
 }
 
@@ -469,6 +572,7 @@ fn quitting_the_hosting_game_ends_the_game_cleanly() {
     assert!(took < STOP_GRACE + Duration::from_millis(500), "{took:?}");
     assert!(guest.debrief, "{:?}", guest.events);
     assert!(server_stopping(&guest.closed), "{:?}", guest.closed);
+    assert!(guest.host_left, "{:?}", guest.events);
     assert!(port_is_free(server));
 }
 

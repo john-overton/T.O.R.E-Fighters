@@ -518,11 +518,13 @@ pub(crate) fn station_specs_loaded(
         let w = &station.weapon;
         let gun = w.source == config.aircraft.gun();
         let carried = u32::from(quantities.get(index).copied().unwrap_or(station.count));
+        // An empty station is the same record with no rounds.
         let mut spec = if gun {
-            simple_stations(0, carried, AI_STORE_SPEED).remove(0)
+            simple_stations(0, carried.max(1), AI_STORE_SPEED).remove(0)
         } else {
-            simple_stations(carried, 0, AI_STORE_SPEED).remove(0)
+            simple_stations(carried.max(1), 0, AI_STORE_SPEED).remove(0)
         };
+        spec.store.rounds = tore_sim::ai::weapon_service::Rounds::Finite(carried);
         if guns_only && !gun {
             spec.store.rounds = tore_sim::ai::weapon_service::Rounds::Finite(0);
         }

@@ -190,6 +190,10 @@ pub struct NetSession {
     /// Why the host this game runs ended without the session ending: its
     /// mission could not be built, or it panicked.
     host_failure: Option<String>,
+    /// The lobby state the King's automatic start was last asked for.
+    started_for: Option<tore_session::wire::messages::LobbyState>,
+    /// The lobby's last line in the log.
+    lobby_line: Option<String>,
 }
 
 /// How long after Leave the game waits for the debrief and the disconnect
@@ -275,7 +279,79 @@ impl NetSession {
             debrief: None,
             hosting: None,
             host_failure: None,
+            started_for: None,
+            lobby_line: None,
         })
+    }
+
+    /// Whether this game hosts the session: its player is the King.
+    pub fn hosting(&self) -> bool {
+        self.hosting.is_some()
+    }
+
+    /// The King's start for a game hosted from the command line (agent
+    /// decision, until the lobby screen's Fly button, EF8): as soon as
+    /// every player holding a slot is ready, when `allowed` (the hosting
+    /// player is not reading a debrief), once for each lobby state.
+    pub fn auto_start(&mut self, allowed: bool) {
+        if !allowed || self.hosting.is_none() {
+            return;
+        }
+        let Some(lobby) = self.client.lobby() else {
+            return;
+        };
+        if lobby.is_king()
+            && lobby.phase == tore_session::wire::messages::LobbyPhase::Lobby
+            && lobby.all_ready()
+            && self.started_for.as_ref() != Some(lobby)
+        {
+            self.started_for = Some(lobby.clone());
+            log::info!("Network: starting the mission; every player holding a slot is ready");
+            self.client.start_mission();
+        }
+    }
+
+    /// The lobby in one line for the log, when it changed since the last.
+    pub fn lobby_change(&mut self) -> Option<String> {
+        let lobby = self.client.lobby()?;
+        let players: Vec<String> = lobby
+            .players
+            .iter()
+            .map(|p| {
+                let mut text = p.callsign.clone();
+                if lobby.king == Some(p.id) {
+                    text.push_str(" (King)");
+                }
+                match p.slot {
+                    Some(plane) => text.push_str(&format!(" plane {plane}")),
+                    None => text.push_str(" no slot"),
+                }
+                if p.loadout {
+                    text.push_str(" armed");
+                }
+                if p.flying {
+                    text.push_str(" flying");
+                } else if p.ready {
+                    text.push_str(" ready");
+                }
+                if let Some(why) = &p.unable {
+                    text.push_str(&format!(" unable ({why})"));
+                }
+                text
+            })
+            .collect();
+        let line = format!(
+            "{:?}, mission {} ({}): {}",
+            lobby.phase,
+            lobby.mission,
+            lobby.summary,
+            players.join("; ")
+        );
+        if self.lobby_line.as_ref() == Some(&line) {
+            return None;
+        }
+        self.lobby_line = Some(line.clone());
+        Some(line)
     }
 
     /// Sends what the client has queued (a Disconnect, say) without turning
@@ -343,12 +419,20 @@ impl NetSession {
         self.sink.borrow_mut().take()
     }
 
-    /// Asks the host to end the mission for this player.
+    /// End Mission in flight. The hosting player, the King, ends the
+    /// mission for everyone, who return to the lobby with their debriefs
+    /// (and the King's game starts the next once the debrief is closed);
+    /// any other player leaves the game, with its debrief, since a game with
+    /// no lobby screen has nowhere else to go (agent decisions, EF4).
     pub fn leave(&mut self) {
+        if self.hosting.is_some() {
+            self.client.end_mission();
+            return;
+        }
         if self.left_at.is_none() {
             let now = self.clock.now();
             self.left_at = Some(now);
-            self.client.leave(now);
+            self.client.leave_game(now);
         }
     }
 

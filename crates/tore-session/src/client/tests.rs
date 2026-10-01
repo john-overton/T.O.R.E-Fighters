@@ -62,6 +62,8 @@ pub(super) struct Player {
     pub last_frame: Option<Duration>,
     pub digests: Vec<u64>,
     pub picture: Option<RenderSnapshot>,
+    /// Its game has stalled: nothing is received, stepped or sent.
+    pub stalled: bool,
 }
 
 /// A host and its players on one simulated network.
@@ -80,19 +82,26 @@ pub(super) struct Rig {
 
 impl Rig {
     pub fn new(spec: MissionSpec, link: LinkConfig, seed: u64) -> Self {
+        Self::with_config(spec, link, seed, |_| {})
+    }
+
+    /// [`Rig::new`] with the host's settings changed by `configure`.
+    pub fn with_config(
+        spec: MissionSpec,
+        link: LinkConfig,
+        seed: u64,
+        configure: impl FnOnce(&mut HostConfig),
+    ) -> Self {
         let net = SimNetwork::new(seed);
         net.set_default_link(link);
         let socket = net.bind(host_address()).unwrap();
         let resources = Arc::new(resources());
-        let host = Host::new(
-            spec,
-            Arc::clone(&resources),
-            HostConfig {
-                entropy: Entropy::Seeded(11),
-                ..HostConfig::new(build())
-            },
-        )
-        .unwrap();
+        let mut config = HostConfig {
+            entropy: Entropy::Seeded(11),
+            ..HostConfig::new(build())
+        };
+        configure(&mut config);
+        let host = Host::new(spec, Arc::clone(&resources), config).unwrap();
         Self {
             net,
             host,
@@ -127,8 +136,14 @@ impl Rig {
             last_frame: None,
             digests: Vec::new(),
             picture: None,
+            stalled: false,
         });
         self.players.len() - 1
+    }
+
+    /// The address the `n`th player joins from.
+    pub fn player_address(n: usize) -> SocketAddr {
+        format!("10.0.0.2:{}", 40_000 + n).parse().unwrap()
     }
 
     /// One millisecond for everyone.
@@ -146,6 +161,9 @@ impl Rig {
             self.record();
         }
         for player in &mut self.players {
+            if player.stalled {
+                continue;
+            }
             player.client.receive_from(now, &mut player.socket).unwrap();
             let controls = (player.script)(now, &player.client, player.picture.as_ref());
             player.client.update(now, &controls);

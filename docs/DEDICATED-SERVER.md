@@ -29,6 +29,7 @@ proposal unless it is credited to John.
 - [The configuration file](#the-configuration-file)
 - [The mission file](#the-mission-file)
 - [The mission lifecycle](#the-mission-lifecycle)
+- [The lobby](#the-lobby)
 - [Joining from the game](#joining-from-the-game)
 - [Hosting from the game](#hosting-from-the-game)
 - [Console, status and logs](#console-status-and-logs)
@@ -129,7 +130,7 @@ start, so a typo never passes silently.
 | `mission` | `mission.txt` | The [mission file](#the-mission-file), relative to the configuration file |
 | `open-planes` | `friendly` | Which planes humans may take: `friendly`, `all` (load tests; proper PvP is stage F) or a list of plane numbers |
 | `snapshot-rate` | `30` | Snapshots a second to each player: 10, 12, 15, 20, 24, 30, 40 or 60 |
-| `start` | `first-player` | `first-player`: the mission waits, not flying, until the first player is seated; `now`: it flies from the start |
+| `start` | `first-player` | `first-player`: the lobby waits, the mission not flying, until the first player holding a slot is ready; `now`: it flies from the start ([the lobby](#the-lobby)) |
 | `time-limit` | `0` | Minutes after which the mission ends; 0 for none |
 | `empty-timeout` | `60` | Seconds the mission keeps flying after the last player leaves, before it ends |
 | `after-end` | `restart` | `restart` the same mission, or `quit` |
@@ -197,7 +198,7 @@ twice.
 | `enemy-skill novice/average/none` | The game's `--enemy-skill`: every enemy wing at one level. `none` by default |
 | `fixture-wings yes/no` | The game's `--fixture-wings` development setting: straight-flight fixtures instead of AI wings. A server does not use it |
 | `loadout fuel POUNDS`, `loadout cheat yes/no`, `loadout station N WEAPON COUNT QUANTITY` | The loadout of plane 0 for a single-player start, as the creator's Load Ordnance page leaves it: the fuel, the loadout screen's Cheat, and one line for every station, in the aircraft's station order, naming its weapon's resource, its capacity and what it carries. **Used only by single player**: an open (networked) mission refuses it, since nobody flies from the start |
-| `plane-loadout PLANE fuel POUNDS`, `plane-loadout PLANE cheat no`, `plane-loadout PLANE station N WEAPON COUNT QUANTITY` | The loadout a player chose in the lobby for one plane of a networked mission, the same lines as `loadout` with the plane number first. *Built (EF4).* The host writes them into the mission it sends when a flight starts, so every player builds the same aircraft; a server's own file normally leaves them out, and a plane with none carries its aircraft's standard load. Each is checked as the [lobby's loadout rule](ARCHITECTURE.md#the-lobby) says, and single player refuses them |
+| `plane-loadout PLANE fuel POUNDS`, `plane-loadout PLANE cheat no`, `plane-loadout PLANE station N WEAPON COUNT QUANTITY` | The loadout a player chose in the lobby for one plane of a networked mission, the same lines as `loadout` with the plane number first. *Built (EF4).* The host writes them into the mission it sends when a flight starts, so every player builds the same aircraft; a server's own file normally leaves them out, and a plane with none carries its aircraft's standard load. Each is checked as the [lobby's loadout rule](#the-lobby) says, and single player refuses them |
 
 Planes are numbered as in the game: plane 0 is the lead of friendly wing 1,
 then every other aircraft in wing order. `--check` prints the list. Every
@@ -219,31 +220,35 @@ for the game's own use of the same text.
 
 ```mermaid
 flowchart TD
-  load["Load the import<br/>and build the mission"] --> wait["Waiting: not flying,<br/>players may connect"]
-  wait -->|"first player seated"| fly["Flying at 120 ticks a second;<br/>players join and leave,<br/>the AI flies every free plane"]
+  load["Load the import<br/>and build the mission"] --> wait["Lobby: not flying;<br/>players connect, take slots,<br/>arm and get ready"]
+  wait -->|"first player holding<br/>a slot is ready"| fly["Flying at 120 ticks a second;<br/>players join and leave,<br/>the AI flies every free plane"]
   fly -->|"time limit, empty,<br/>or end"| ended["Ended: every player gets<br/>their debrief"]
-  ended -->|"after the restart delay"| load
+  ended -->|"after the restart delay,<br/>players still connected"| load
   ended -->|"after-end quit"| stop["The server exits"]
 ```
 
-- **Waiting.** With `start first-player` the mission is built but does not
-  fly until someone is seated, so the first player starts it the way a single
-  player starts a Quick Mission. No snapshots are sent while it waits.
+- **Lobby.** With `start first-player` the mission is built but does not
+  fly until the first player holding a slot is ready, so the first player
+  starts it the way a single player starts a Quick Mission
+  ([the lobby](#the-lobby)). No snapshots are sent while it waits.
 - **Flying.** Players join and take free planes in flight and leave at any
   time. A player who leaves, or whose game goes silent for 5 seconds, gives
   the plane back to the AI at once; it is not held for a rejoin until stage K.
   A destroyed plane stays destroyed; respawns are stage F.
 - **Ending.** The mission ends at the time limit, once the last player has been
-  gone for the empty timeout, or on the console's `end`. Every seated player
-  gets "Mission ended" first and then their own debrief, and is then
-  disconnected with the text "server stopping" (every connection is, seated or
-  not, once acknowledged or after 5 seconds); players join again for the next
-  mission, and a join while the mission is ended is refused as shutting down,
-  with the seconds to the next one. A player who ends the mission on their side
-  gets their debrief at once and the mission flies on for the others.
+  out of the flight for the empty timeout, or on the console's `end`. Every
+  player gets "Mission ended" first and every seated player then its own
+  debrief. *Since EF4* the players stay connected, back in the lobby with their
+  slots and loadouts and their ready marks cleared, for the next mission; a
+  join while the mission is ended is refused as shutting down, with the
+  seconds to the next one. A player who ends the mission on their side gets
+  their debrief at once, is back in the lobby, and the mission flies on for
+  the others.
 - **Next.** After the restart delay the same mission starts again from its
-  file, fresh, or the server exits. With `after-end quit` the host stops once
-  the ended players are gone, or 5 seconds after the end.
+  file, fresh, back in the lobby (or flying, with `start now`), or the server
+  exits. With `after-end quit` every player is disconnected with the text
+  "server stopping" once its messages are acknowledged, and the host stops
+  once they are gone, or 5 seconds after the end.
 
 *Built (D7a, D7b), the host's settled rules:* the number of players a mission
 seats is the lesser of `max-players` and the planes open to humans (the status
@@ -253,6 +258,44 @@ seated player leaves (sends Leave or is dropped), not from the mission's start;
 everyone at once with "server stopping" and sends no debriefs. If a tick or the
 rebuild for the next mission fails, the host logs the fault, and ends the
 mission (or stops, when the rebuild itself failed).
+
+## The lobby
+
+*Built (EF4).* Before each mission flies, and again after it, the server is in
+its lobby: players are connected but not flying, take slots, choose their
+loadouts and mark ready, and every player is sent the lobby's state whenever
+it changes. The design is the architecture's
+[lobby](ARCHITECTURE.md#the-lobby); a game a player hosts has a King, a
+dedicated server has none. *The dedicated server's rules, agent decisions:*
+
+- **The mission** is the mission file's, always: nobody can change it. A
+  player whose import cannot play it is told why and stays connected in the
+  lobby, marked unable, and cannot take a slot.
+- **Slots** are the planes `open-planes` opens (every friendly plane by
+  default), one player a slot, held from the lobby across missions until the
+  player leaves it or the game. A player holding a slot may send a loadout
+  for it, which the host checks by the single-player Load Ordnance page's
+  rule (each store within its station's capacity, only weapons that fly,
+  fuel within the tanks, weight within the maximum take-off weight, nothing
+  but the gun with the mission's Guns only; cheat loading is refused) and
+  refuses with that rule's words; a plane with none flies its standard load.
+- **`start first-player`**: the mission starts flying when the first player
+  holding a slot marks ready, with every ready slot holder in its plane at
+  the first tick. Players who get ready later, or join later, take their
+  slot's plane (or any free one) in flight, as in stage D. Players who hold
+  no slot stay in the lobby while it flies.
+- **`start now`**: the mission flies from the start, and after each restart;
+  players who join, or get ready, take their slot's plane in flight.
+- **After a mission**: `after-end restart` keeps every player connected,
+  back in the lobby with its slot and loadout and its ready mark cleared,
+  and after the restart delay the fresh mission waits in the lobby (or flies,
+  with `start now`); `after-end quit` disconnects everyone and exits.
+- **Nobody is King**: the King's requests (change the mission, start, end the
+  mission, kick) are refused with "Only the King may do that."; the console
+  still ends, restarts and kicks by seat. A game with no lobby screen
+  (`tore-app --connect`, `tore-bot`) takes its slot and marks ready by
+  itself, so a server with `start first-player` starts as soon as the first
+  such player joins, as before.
 
 ## Joining from the game
 
@@ -285,8 +328,13 @@ rows that change the mission are refused or hidden (the server sets the
 cheats), and the Esc menu draws over the running flight: while it is up, or the
 window has lost focus, the aircraft flies on with the stick centred, the
 throttle held and the trigger released. A plane that is refused (taken,
-destroyed, not open) is asked for again as any free plane. End Mission leaves:
-the host sends the debrief, which the game shows before the main menu. A drop,
+destroyed, not open) is asked for again as any free plane. End Mission leaves
+the game: the host sends the debrief, which the game shows before the main
+menu. *Since EF4* the game joins the [lobby](#the-lobby): it takes `--slot`'s
+slot (or the first free one) with the standard loadout and marks ready by
+itself; when a mission ends it shows the debrief, stays connected, readies
+again and flies the next mission when it starts; the lobby's changes go to
+the game's log. A drop,
 a refusal, a data mismatch or a server stopping is a plain message on the
 main menu. A client draws gun rounds: its own at once from its trigger, and
 other aircraft's from the host's burst events. They are for the eye only; the
@@ -327,15 +375,19 @@ others join with `tore-app --connect` to the hosting machine's address, through
 the same port and firewall as a server ([ports and
 firewalls](#ports-and-firewalls)).
 
-*Built (EF3). Agent decisions until the lobby (EF4) has its own settings:*
-the server's defaults (`max-players 30`, `snapshot-rate 30`, no time limit),
-except that the mission starts when the first player is seated, in practice
-the hosting player, whose game joins at once, and the game ends when the
-mission does (`after-end quit`). When the hosting player leaves (End Mission)
-or quits (the window closes, Exit), the game ends the mission for everyone:
-each remote player gets "Mission ended", their debrief and "the server is
-stopping", as the console's `end` gives them, and the port is free again at
-once. A mission file that cannot be read, a line it does not take or an option
+*Built (EF3, EF4). Agent decisions:* the server's defaults (`max-players
+30`, `snapshot-rate 30`, no time limit), except that the hosting player is the
+King of the [lobby](ARCHITECTURE.md#the-lobby): the game takes its slot
+(`--slot`, or the first free one) and readies by itself, and starts each
+mission as soon as every player holding a slot is ready and the hosting player
+is not reading a debrief (until the lobby screen's Fly button, EF8). End
+Mission ends the mission for everyone: each player gets "Mission ended" and
+their debrief and is back in the lobby, still connected, and the next mission
+starts as before. A mission nobody flies any more ends at once (no empty
+timeout). When the hosting player leaves the game (the window closes, Exit),
+the game ends for everyone: each remote player gets "Mission ended" (the host
+left the game) and their debrief if they were flying, and "The host left the
+game", and the port is free again at once. A mission file that cannot be read, a line it does not take or an option
 out of range refuses the start with the file and line, as the server refuses
 them; a mission the import cannot build, an `--open-planes` plane the mission
 lacks or a port in use is a plain message on the main menu. If the host fails
@@ -353,7 +405,7 @@ The server reads commands from its standard input:
 | --- | --- |
 | `status` | One status line now |
 | `players` | Every connected player: seat, callsign, plane, round trip, loss, input margin, inputs repeated |
-| `kick SEAT` | Gives the plane back to the AI and disconnects the player |
+| `kick SEAT` | Gives the plane back to the AI and disconnects the player (a seated player; one in the lobby has no seat) |
 | `end` | Ends the mission now, with debriefs |
 | `restart` | Ends the mission and starts it again at once |
 | `quit` | Tells every player the server is stopping, then exits |
@@ -459,7 +511,7 @@ only its logs.
 
 ## Not in stage D
 
-One mission at a time, Quick Missions only. The lobby, the King, chat,
-respawns, PvP scoring, observers, loadout choice before flight, the server
-browser and NAT traversal are stages F, I and J; holding a dropped player's
-plane for a rejoin is stage K.
+One mission at a time, Quick Missions only. The lobby, slots and loadout
+choice before flight are built (EF4); the King's settings, chat, respawns,
+PvP scoring, observers, the server browser and NAT traversal are stages F, I
+and J; holding a dropped player's plane for a rejoin is stage K.

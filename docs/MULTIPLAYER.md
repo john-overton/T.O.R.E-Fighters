@@ -126,6 +126,13 @@ builds a mission as usual, then opens its slots to humans.
 Settings a player may not change are shown grayed out, as in retail. The
 revival and scoring ranges are retail's ([numbers](spec/multiplayer.md#numbers)).
 
+*Built on the wire (EF4, 2026-10-01; the lobby screen is EF8):* the lobby
+with its King (the hosting player), slots, each player's own loadout, ready
+and the King's start, the King's mission change, kick, and the return to the
+lobby after each mission with everyone still connected; a dedicated server's
+lobby has no King. The King's settings in the table above are phase 2.
+([architecture](ARCHITECTURE.md#the-lobby))
+
 **Start.** Everyone starts airborne, as in retail multiplayer. Late joiners take
 over aircraft already flying. *Retail gap-fill (agent):* until multiplayer
 ground starts exist, "back at a base" starts the player airborne near their
@@ -714,8 +721,10 @@ Raised while planning (2026-09-28):
 - **Dedicated server King.** *Agent proposal:* the first human to join a
   dedicated server becomes King, unless its config file fixes the mission and
   locks the settings. Stage D's server always takes its mission and settings
-  from its files ([server guide](DEDICATED-SERVER.md)); the King arrives with
-  the stage F lobby.
+  from its files ([server guide](DEDICATED-SERVER.md)). The stage F design and
+  EF4 built the server's lobby with no King: its mission comes from its file
+  and its `start` setting starts it ([rules](DEDICATED-SERVER.md#the-lobby)).
+  A King on a server stays open for phase 2.
 - **No eligible host.** If every peer can connect only through the relay, no one
   can be the calculated host. *Agent proposal:* the King sees a plain warning
   and can pin a relayed host anyway, or use a dedicated server.

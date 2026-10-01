@@ -2161,6 +2161,13 @@ mission: the AI flies every plane, plane 0 included, and humans take planes by
   wings (nobody would fly), a player loadout (nobody flies from the start;
   plane 0 carries the AI's standard stores, with Guns only applied as for any
   AI aircraft), and the legacy human or standard AI flight model.
+- **Per-plane loadouts.** *Built (EF4).* An open spec's `plane_loadouts`
+  are the loadouts the lobby's players chose for the planes they hold
+  (`plane-loadout` lines in the text form): the build checks each
+  ([the lobby's rule](#the-lobby)) and puts it on that plane's AI aircraft
+  (its stores, quantities and fuel), which a human taking the plane keeps
+  through the handoff; a plane with none carries its standard load. Single
+  player refuses them and keeps plane 0's `loadout` as before.
 - **Single player** takes the same path as before: the same start, the same
   build of the AI with its one human, and the baseline compares SAME.
 
@@ -2624,18 +2631,22 @@ plane's configuration and the events released since the last frame;
 `ClientFrame::flight_frame` makes the screens' `FlightFrame` from it with the
 game's smoke and devices. `poll_event` gives the session's events (connected,
 mission loaded, content refused, seat refused, seated, roster, notice,
-debrief, mission ended, closed with its reason). `leave(now)` sends Leave;
-`disconnect(now)` quits at once. `mission()` is the client's copy of the
-mission, `roster()`, `name(index)` and `stats()` the rest.
-`set_mission_builder` lets the game build the mission with its own hooks.
+debrief, mission ended, closed with its reason; EF4 adds the lobby, refused
+and goodbye). `leave(now)` sends Leave, which ends the player's flight (EF4:
+the player stays in the lobby); `leave_game(now)` ends the flight and quits
+once the debrief is in; `disconnect(now)` quits at once. `mission()` is the
+client's copy of the mission, `roster()`, `name(index)` and `stats()` the
+rest. `set_mission_builder` lets the game build the mission with its own
+hooks. The lobby's calls are [the lobby's](#the-lobby).
 
 **As built**, each an agent decision unless credited:
 
 - **Joining.** On the Mission message the client builds the mission from its
   own import with `World::new(spec, resources, Seating::Open)`, never stepped,
   and compares the manifest its build read with the host's: a difference sends
-  Content refused with the names and the host disconnects. Then Ready with the
-  plane wanted. On Seated it finds the plane's aircraft type and ownship
+  Content refused with the names (EF4: and the reason; the player stays in the
+  lobby, marked unable). Then Ready with the
+  plane wanted (EF4: Take plane, by the automatic ready). On Seated it finds the plane's aircraft type and ownship
   configuration in its copy of the mission as the host's handoff does (the AI
   wings' record, else the mission's for the type), decodes the exact state with
   that type's flight model, and starts its prediction; the standing ground
@@ -2665,7 +2676,12 @@ mission, `roster()`, `name(index)` and `stats()` the rest.
   the stored ticks again, and the drawn plane keeps where it was and slides to
   the new path with a 50 ms time constant; over 100 ft or 20 degrees, within a
   second of seating, or under 0.01 ft and 0.01 degrees it does not slide. One
-  for a tick the client has not reached is taken as it is.
+  for a tick the client has not reached is taken as it is. *EF4:* exact
+  states are read on arrival and applied after the update's steps, only the
+  newest, and held (at most 125 ms) while the host still reports repeating
+  the seat's late inputs; ticks the host has stepped without the seat's input
+  are predicted with the controls the host repeated
+  ([the stall](#the-lobby)).
 - **The clock.** Seating sets the predicted clock ahead of the Seated tick by
   a round trip and the margin. The first margin the host reports after it has
   had an input from the seat sets the clock outright, whatever the size: the
@@ -2991,20 +3007,21 @@ sequenceDiagram
   H->>C: Accepted (session, tick rates)
   H->>C: Mission (spec text, content manifest)
   C->>C: Load the mission from its own import, compare manifests
-  C->>H: Ready (wanted plane, or any)
-  H->>H: Take the plane at the next tick
+  H->>C: Lobby state (EF4), on every change
+  C->>H: Take plane (wanted plane, or any): slot and ready
+  H->>H: Take the plane at the first tick of the flight
   H->>C: Seated (seat, plane, exact state, loadout, roster)
   H->>C: Full snapshot, then snapshots 30 a second
   C->>H: Inputs 60 a second
   Note over C,H: The player ends the mission
   C->>H: Leave
   H->>H: Give the plane back to the AI
-  H->>C: Debrief, then disconnect
+  H->>C: Debrief, then back in the lobby (EF4)
 ```
 
-- **Which plane.** Until the stage F lobby, a joining player asks for a plane
+- **Which plane.** A joining player asks for a plane
   by id (`--slot`) or takes the first free friendly plane, Friendly Wing 1's
-  lead first. The server's configuration lists the planes open to humans
+  lead first (in the lobby, EF4, by taking that plane's slot). The server's configuration lists the planes open to humans
   (default: every friendly plane). A plane that is destroyed, has lost its
   pilot or is flown by a human cannot be taken. *Built (D7a):* a refused
   plane gets Seat refused with the reason and the player may ask again; with
@@ -3014,7 +3031,8 @@ sequenceDiagram
   2026-09-28), shortened first if the whole would pass 15 characters.
 - **Loadout.** A player keeps the loadout of the aircraft they take, the late
   joiner's rule of the [guide](MULTIPLAYER.md#slots-ai-fill-and-handoff).
-  Choosing one on the Load Ordnance screen before the mission is stage F.
+  A player in the lobby chooses one for its slot before the mission
+  (*built, EF4*, [the lobby](#the-lobby)).
 - **Leaving.** End Mission sends Leave; the host builds the player's debrief
   (`tore_world::debrief::capture` for the seat, moved out of the game in D7a
   so the server can build it; the game keeps the screen), sends it, and gives
@@ -3023,10 +3041,15 @@ sequenceDiagram
   A player whose packets stop for 5 seconds, or who is kicked, gives the plane
   back the same way with no debrief. A
   destroyed plane stays destroyed; the seat can end the mission as in single
-  player. Respawns are stage F.
+  player. Respawns are stage F. *EF4:* Leave ends the player's flight only:
+  after the debrief the player is back in the lobby, still connected, and
+  leaves the game by disconnecting (`Client::leave_game` does both).
 - **The end.** When the host ends the mission, every seated player gets
-  "Mission ended" and their debrief, and is then disconnected; players join
-  again for the next mission. *Built (D7a):* Mission ended goes first, then
+  "Mission ended" and their debrief. *EF4:* with a next mission every
+  player stays connected, back in the lobby with its slot and loadout and its
+  ready mark cleared ([the lobby](#the-lobby)); only a host that stops
+  disconnects them, as follows. *Built (D7a), and since EF4 only when the
+  host stops after the mission:* Mission ended goes first, then
   the debrief; every connection, seated or not, is disconnected with "server
   stopping" once they are acknowledged or after 5 seconds; a join while the
   mission is ended is refused as shutting down with the seconds to the next
@@ -3152,7 +3175,8 @@ taken together at John's request of 2026-10-01, written by the lead and
 reviewed by John the same day; his answers are in the guide's
 [decisions](MULTIPLAYER.md#decisions). Built so far: slice EF0, the research
 and the dialog reader, slice EF1, the import of the art, slice EF2, the widget
-kit, and slice EF3, the host inside the game (below); the rest is design.
+kit, slice EF3, the host inside the game, and slice EF4, the lobby on the wire
+(below); the rest is design.
 Every choice is an agent decision unless it is credited to John.
 
 John's direction (2026-10-01):
@@ -3273,22 +3297,26 @@ game hosts from the command line, `tore-app --host MISSION_FILE`
   sooner, sleeping and then spinning the last 0.4 ms (2 ms on Windows). The
   game's client starts joining at once; its first handshake packets wait in
   the link until the host is built (a client retries for 10 seconds).
-- **Commands and reports.** In: `Stop` (EF4 adds the lobby's verbs). Out:
+- **Commands and reports.** In: `Stop`. *EF4:* the lobby's verbs are not
+  commands: the hosting player's own connection is the King, so they go over
+  that connection as the King's messages, as a remote King's would. Out:
   `Started` (aircraft, capacity), every `HostLog` entry (joins, refusals,
   seats, departures, the mission's start and end, overloads, faults), the
   `Phase` when its kind changes, `Note` for a socket error, and `Ended` with
   why: stopped, finished (the mission ended), the build failed, or a panic.
   The game reads them once a frame in `NetSession::pump` and writes each to
   its log after `Host:`.
-- **Stopping.** `Stop` is the console's `end`: every player gets "Mission
-  ended" and their debrief, each is disconnected once that is acknowledged,
-  and the host stops when all are gone, or after 1.5 seconds disconnects the
-  rest with "server stopping". The thread closes its socket before it reports
-  its end; the game waits at most 3 seconds for it. A hosting player who
-  leaves gets their own debrief through their client first, as any player
-  does; the session then ends and stops the host. Quitting disconnects the
-  hosting player's client and drops the session. A game that loses its end of
-  the channels stops the thread the same way.
+- **Stopping.** `Stop` is the hosting player leaving the game
+  (`Host::host_left`, EF4; EF3 used the console's `end`): a flying mission
+  ends for every player with "Mission ended" (the host left the game) and
+  their debrief, every player gets a Goodbye saying the host left and is
+  disconnected once that is acknowledged, and the host stops when all are
+  gone, or after 1.5 seconds disconnects the rest with "server stopping". The
+  thread closes its socket before it reports its end; the game waits at most
+  3 seconds for it. Quitting disconnects the hosting player's client and
+  drops the session; the host takes the King's departure as the host
+  leaving too. A game that loses its end of the channels stops the thread
+  the same way.
 - **The panic rule.** A panic on the thread is caught. The thread tries once,
   itself guarded, to disconnect everyone with "server stopping" and send it,
   closes the socket and reports the panic; the hosting player's session ends
@@ -3380,6 +3408,134 @@ kick, pass the crown) and a protocol version bump. A dedicated server keeps the
 mission its file names and has no King: its players pick slots and get ready, and
 it starts as its `start` setting says. *Agent decisions.*
 
+*Built (EF4)*, on the wire and in the sessions, with no screen yet (EF8 builds
+it on this). Each an agent decision unless credited.
+
+- **The King** in a game a player hosts is the hosting player's own
+  connection: `HostConfig::king` is the in-process link's address
+  (`tore_net::LINK_ADDRESS`), which no UDP sender can have, with
+  `StartMode::King`. Only the King changes the mission, starts it, ends it
+  and kicks; anyone else asking is refused ("Only the King may do that.").
+  The King's departure, or the host's (`Host::host_left`), ends the game for
+  everyone: a flying mission ends with the reason "the host left the game"
+  and the debriefs, and each player gets a Goodbye before the disconnect,
+  which the client words as "The host left the game." A dedicated server has
+  no King. The host's house is the King's player in a hosted game and nobody
+  on a server. Passing the crown and the King's other settings are phase 2;
+  the lobby state carries an empty settings list, and message kinds 23 and 24
+  are kept for them.
+- **The lobby state** goes to every player whenever it changes: the game's
+  name, the mission's summary (`MissionSpec::summary`) and number, the phase
+  (lobby, flying, ended), the start rule, the King and the house, the
+  receiving player's own id, the players in the order they connected (lobby
+  id, callsign, slot, ready, armed, flying, and why the player's import
+  cannot play the mission, if it cannot), and the slots: the planes open to
+  players (every friendly plane by default; a server's `open-planes`), each
+  with its wing, member, aircraft and holder. A slot is held without seating
+  anyone; one holder a slot.
+- **Messages** (protocol 3, [layouts](formats/net-protocol.md#messages-as-built)).
+  Player to host: Slot (take a plane's slot, the first free one, or leave),
+  Loadout (for the player's own slot, or the standard load), Set ready, and
+  the King's Change mission, Start, Kick (with the reason the player sees)
+  and End mission. Host to player: Lobby, Refused (the request and why),
+  Goodbye (kicked, or the host left) and Flight loadouts. Stage D's Ready is
+  now Take plane: in the lobby it holds that plane's slot (or the first free
+  one) and marks ready, in flight it flies the plane now, which is what a
+  game with no lobby screen sends. Every lobby request names the lobby
+  mission's number, and one meant for an earlier mission is refused.
+- **Loadouts.** A player sends the loadout for its own slot; the host checks
+  it with the rule the single-player Load Ordnance page applies before Fly,
+  and refuses one it does not allow with that rule's words ("Station
+  quantity exceeds capacity."). The rule stays where it was, shared:
+  `tore_sim::combat::loadout::Loadout::validate` (each quantity within the
+  station's capacity for that weapon, only weapons connected to flight, the
+  fuel within the tanks, the weight within the maximum take-off weight).
+  `tore_world::mission::LoadoutSpec::check_for_plane` puts the loadout on the
+  aircraft's standard load and adds what the page's controls guarantee: one
+  station for each, each station's capacity the page's, and nothing but the
+  gun with the creator's Guns only. Cheat loading is refused until the phase
+  2 King's setting for loadouts. At the start the mission is built again
+  with the held slots' loadouts (`MissionSpec::plane_loadouts`), each player
+  is sent them (Flight loadouts) and builds its copy again with them, and a
+  joiner in flight gets the whole text with them, so its build and content
+  manifest match the host's.
+- **Ready and start.** A player holding a slot marks ready. The King's Start
+  is accepted in the lobby when every player holding a slot is ready and at
+  least one holds one ("Not ready: Hawk." otherwise). The host then builds
+  the mission and every ready player holding a slot takes its plane at the
+  first tick, airborne (John, 2026-09-28). A player with no slot stays in the
+  lobby while the mission flies; a player who joins, or gets ready, while it
+  flies takes its slot's plane (or any free one) in flight, as stage D does.
+- **The King's mission.** The host parses and builds the new mission to
+  check it (refused with the build's own words), keeps it, frees the slots
+  whose plane no longer exists (and the loadout of a plane whose aircraft
+  changed), clears every ready and unable mark, raises the mission's number
+  and sends it to every player, who builds it and runs the content check. A
+  player whose import cannot play it sends Content refused with the reason,
+  stays in the lobby marked unable (its slot freed; it cannot take one), and
+  every player, the King included, sees why. Only in the lobby.
+- **The return.** When a mission ends, every player gets Mission ended and,
+  if it flew, its debrief, and the host returns to the lobby with everyone
+  still connected, slots and loadouts kept and ready marks cleared (John,
+  2026-10-01). A player who leaves its flight (Leave) is back in the lobby
+  too, and the mission flies on for the others. The King's End mission ends
+  it for everyone.
+- **Kick.** The King's Kick sends the player a Goodbye with the King's words,
+  gives its plane back to the AI with no debrief, and disconnects it once the
+  goodbye is acknowledged. The King cannot kick the King.
+- **Flights.** A connection now outlives a flight, and a new mission's ticks
+  start again from 0, so each seating starts a new flight of the connection
+  whose sections never meet the last one's
+  ([protocol](formats/net-protocol.md#flights)).
+- **A game hosted from the command line** (`tore-app --host`) is the King:
+  its client takes its slot and readies by itself, and its game starts each
+  mission as soon as every player holding a slot is ready and the hosting
+  player is not reading a debrief (until EF8's Fly button); a mission's end
+  returns everyone to the lobby at once, a mission nobody flies any more ends
+  at once, and End Mission ends the mission for everyone. Leaving or quitting
+  ends the game for everyone. `tore-app --connect` takes `--slot` or the
+  first free slot with the standard loadout and readies by itself, shows each
+  mission's debrief and flies the next; its End Mission leaves the game. The
+  lobby's changes go to the game's log.
+- **The client session** exposes it all ([the calls](#the-client-session)):
+  `Client::lobby()` and `ClientEvent::Lobby` when it changes; `take_slot`,
+  `take_any_slot`, `leave_slot`, `send_loadout`, `set_ready`, and for the
+  King `change_mission`, `start_mission`, `kick` and `end_mission`, each
+  answered by the next lobby state or a `ClientEvent::Refused`; `unable()`,
+  `goodbye()` and `close_text`. `ClientConfig::auto_ready` (on by default)
+  makes the client take its slot (the plane asked for, else the first free
+  one) with the standard loadout and mark ready whenever it is in the lobby,
+  after each return and each mission change: what `tore-bot`, `--connect`
+  and `--host` use. A lobby screen turns it off.
+- **The bot** plays the lobby that way, and a bot that is the King
+  (`Bot::start_when_ready`) starts each mission once everyone holding a slot
+  is ready. `tore-bot` leaves the game after `--seconds` (ending its flight
+  first and waiting for its debrief) and prints the lobby's changes.
+- **The dedicated server's lobby** has no King: [its rules](DEDICATED-SERVER.md#the-lobby).
+- **Measured** (`client/lobby_tests.rs`, `host/tests.rs`, the synthetic
+  import on the network simulator; `net/hosting_tests.rs` in real time): a
+  King and two players took slots, armed (one loadout refused with the
+  page's reason), readied (the King's early Start refused, naming who was
+  not ready), flew with each player's loadout on its aircraft on the host,
+  were returned to the lobby by the King's End mission and flew a second
+  mission on a second flight of each connection; the King's mission change,
+  an import that cannot play the mission, a kick, a join in flight and the
+  server's start rules each behave as above. The hosted game, the King's
+  bot and a remote bot over loopback UDP flew, were returned to the lobby
+  and flew again.
+
+*Correction to EF3's finding (EF4):* after the game side stalls for 2
+seconds, the hosting player's plane was adopted at every queued snapshot (60
+corrections, 58 of them adoptions about 26 ft each), because the exact states
+that queued during the stall were applied on arrival, before the prediction
+had stepped to the update's time, so each was a tick the client had not
+reached. The client now applies only the newest exact state, after the
+update's steps, and holds it while the host still reports repeating its late
+inputs (at most 125 ms); it steps the ticks the host has already stepped
+without its input with the controls the host repeated; and its inputs start
+after the newest snapshot's tick. A 2-second stall now costs one correction
+(0.01 ft on the simulator) in the tests, and at most one in the hosted test.
+
 ### Chat
 
 Chat goes through the host, which forwards each line to its receivers:
@@ -3427,7 +3583,7 @@ second completes the plan's stage F and stage E's replays.
 | EF1 Import the art | Sonnet | EF0 | The import keeps the multiplayer screens' pictures, pieces, fonts, dialogs and menus and the retail `CHAT.TXT`; a marker makes an older import ask to re-import | Single-player baseline SAME; an import holds every new name; an older pack asks for a re-import | **Built (EF1, 2026-10-01):** `selection.rs` lists `MULTIPLAYER_ART` (35 pictures) and `MULTIPLAYER_DATA` (26 dialogs and menus), about 1.4 MB; `CHAT.TXT` is read loose from an installed folder and from the disc container's DCL entry and kept as `TORE_CHAT_V1`, parsed by `tore_formats::chat`; the marker `TORE_MULTIPLAYER_V1` is written by every import and asked for by the game's pack check only (`check_multiplayer_marker`), not by the dedicated server's; the game's check reads every new picture, dialog and menu, and the game holds them in `Assets::multiplayer_resources`, not in `theater_resources`, whose contents the combat tapes fingerprint. What was left out and why: [menu format notes](formats/menu.md#what-the-import-keeps-for-these-screens-ef1-2026-10-01) |
 | EF2 Widget kit | Sonnet | EF1 | Reusable retail-style widgets: text field, list with paging, scrolling message box, check box, the panel recipe, a background composed of two retail pictures, keyboard focus | Unit tests; headless renders compared with retail screenshots; single-player captures identical | **Built (EF2, 2026-10-01):** the kit is `crates/tore-app/src/widgets/` (how a screen uses it is the module's documentation): `Kit` (the pieces decoded in the screen's palette, the two backgrounds in their own), `draw_panel`, `Background` (`MODEM3` under `NETIPX3`'s top 80 rows), `Button` (with the disabled default from `ACTDFD0*` and `ACTDFLD`), `TextField` (retail edit control or NEWNET's flat bar; filters for callsign, address and port; `parse_address`), `List` (rows, columns, icons, rocker, "PAGE n of m"), `MessageBox`, `CheckBox`, `Focus`. No screen uses it yet and `main.rs` routing is unchanged: widgets take the key names and text the screens already receive. Agent decisions: the focus mark is a dotted pale rectangle that shows once the keyboard has been used; an empty list's page box reads `1  of  0` and its PREV and NEXT stay bright as on John's screenshot (they dim only at the ends of a list with rows); the selected row carries `LISTHI`'s gold stripe as a marker and the selection always stays on the shown page; the lock, crown and ready tick are authored pixel pictures (retail has none); the message box wraps with a two space hanging indent, keeps 200 lines, scrolls by wheel and keys and shows a thin bar when lines are hidden; buttons keep the existing pieces but label in `FONTACT`/`FONTDFT` as NEWNET does. A mock NETWORK CONNECTION built only of kit widgets is the same picture as EF0's render of the spec's numbers (0 of 307,200 pixels differ); drawing it whole (background, panel, three lists, a message box, two fields, a check box and four buttons) costs about 0.54 ms a frame in a release build and 1.1 ms in the dev build on this machine, of which the widgets are 0.31 ms and the rest the 640 by 480 background and panel; building the kit takes about 150 ms once, when a screen opens (the ignored tests in `widgets/mock_screen.rs`, 500 runs each) 
 | EF3 Host in the game | Opus | | **Built.** The host on a thread inside the game, the in-process link, the local client, lifecycle and the game's 120 Hz clock | A hosted mission with a bot flies with no correction on the host's own plane; a two-second window stall stalls nobody; the session ends cleanly on leave, quit and a host panic |
-| EF4 The lobby on the wire | Opus | EF3 | The host's lobby phase, slots, loadouts, ready and start, the King's mission, return to the lobby after a mission, the crown, kick; the dedicated server's lobby without a King; protocol version 3 | Simulator tests: players join a lobby, take slots, arm, ready, start, fly, return and fly again; the King's mission change reaches everyone; the wire golden test |
+| EF4 The lobby on the wire | Opus | EF3 | The host's lobby phase, slots, loadouts, ready and start, the King's mission, return to the lobby after a mission, the crown, kick; the dedicated server's lobby without a King; protocol version 3 | Simulator tests: players join a lobby, take slots, arm, ready, start, fly, return and fly again; the King's mission change reaches everyone; the wire golden test. **Built (EF4):** see [the lobby](#the-lobby); the crown stays the hosting player's (passing it is phase 2) |
 | EF5 Discovery and addresses | Sonnet | EF4 | The discovery query and answer, the search loop, names resolved off the screen's thread with every address tried, remembered addresses | A host is found on 127.0.0.1 and on this machine's network address; a different build is shown as such; no answer is larger than its query |
 | EF6 Chat | Sonnet | EF4 | Chat on the wire with the host's routing, the lobby's box and line, the flight line and keys, the top-left chat window with its colours, `CHAT.TXT` quick messages, limits; `docs/CONTROLS.md` | Routing tests for every receiver; a windowed run types and receives chat in flight with a bot; the controls list test |
 | EF7 Direct Connection screen | Sonnet | EF2, EF5 | The MULTI menu's rows and the screen of "Finding a game and joining" | Headless renders; a windowed run finds a host on this machine and joins it |

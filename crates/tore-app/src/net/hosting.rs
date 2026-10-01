@@ -12,12 +12,19 @@
 //! [`Command`]s in and [`Report`]s out. Every choice here is an agent
 //! decision unless it is credited.
 //!
-//! - **Stop.** [`Command::Stop`] ends the mission politely: every player
-//!   gets "Mission ended" and their debrief and is disconnected once that is
-//!   acknowledged. The thread waits at most [`STOP_GRACE`] for that, then
-//!   disconnects whoever is left with "server stopping", closes its socket and
-//!   ends; the game waits at most [`JOIN_LIMIT`] for it. A game that drops its
-//!   end of the channel stops the thread the same way.
+//! - **Stop.** [`Command::Stop`] is the hosting player leaving the game
+//!   (EF4): a flying mission ends for everyone with "the host left the
+//!   game" and their debriefs, every player is told the host left and is
+//!   disconnected once that is acknowledged. The thread waits at most
+//!   [`STOP_GRACE`] for that, then disconnects whoever is left with "server
+//!   stopping", closes its socket and ends; the game waits at most
+//!   [`JOIN_LIMIT`] for it. A game that drops its end of the channel stops
+//!   the thread the same way.
+//! - **The lobby** (EF4). The hosting player's own connection is the King
+//!   ([`HostConfig::king`] is the link's address), so the King's verbs
+//!   (change the mission, start, end the mission, kick) go over that
+//!   connection as messages, as a remote King's would in phase 2, and not
+//!   through [`Command`].
 //! - **Panic.** A panic on the thread is caught: it tries once to disconnect
 //!   every player with "server stopping" (best effort: the host may be
 //!   broken), closes the socket and reports [`End::Panicked`], which the game
@@ -71,10 +78,12 @@ pub struct HostSetup {
     pub port: u16,
 }
 
-/// What the game asks of the thread. EF4 adds the lobby's verbs here.
+/// What the game asks of the thread. The lobby's verbs are the King's
+/// messages over the game's own connection, not commands.
 #[derive(Debug)]
 pub enum Command {
-    /// End the mission politely and stop.
+    /// The hosting player leaves: end the game for everyone, politely, and
+    /// stop.
     Stop,
     /// Panic on the thread, for the tests of the panic rule.
     #[cfg(test)]
@@ -366,7 +375,7 @@ fn serve(
             }
         }
         if stop && stop_by.is_none() {
-            host.end();
+            host.host_left();
             stop_by = Some(now + STOP_GRACE);
             let _ = host.transmit(transport);
             forward(host, reports, &mut phase);
@@ -397,19 +406,22 @@ fn forward(host: &mut Host, reports: &Sender<Report>, phase: &mut Option<Phase>)
     }
 }
 
-/// The settings of a game hosted from the command line. *Agent decisions,*
-/// until the lobby (EF4) has its own: the server guide's defaults, except
-/// that the mission starts when the first player is seated (in practice the
-/// hosting player, who joins at once) and the session ends when the mission
-/// does (`after-end quit`).
+/// The settings of a game a player hosts (EF4). *Agent decisions:* the
+/// server guide's defaults, except that the hosting player's own connection
+/// is the King, who starts each mission (`StartMode::King`); a mission's
+/// end returns everyone to the lobby at once (`after-end restart` with no
+/// delay); and a mission nobody flies any more ends at once (no empty
+/// timeout), so the lobby returns when the last player leaves the flight.
 pub fn config(options: &HostOptions) -> HostConfig {
     let mut config = HostConfig::new(build_id());
     config.name = options.name.clone();
     config.password = options.password.clone();
     config.open_planes = options.open_planes.clone();
-    config.start = StartMode::FirstPlayer;
-    config.after_end = AfterEnd::Quit;
+    config.king = Some(LINK_ADDRESS);
+    config.start = StartMode::King;
+    config.after_end = AfterEnd::Restart;
     config.restart_delay = Duration::ZERO;
+    config.empty_timeout = Duration::ZERO;
     config.retail_stall_speeds = tore_sim::flight::retail_stall_speeds();
     config
 }
@@ -484,6 +496,7 @@ pub fn log_line(entry: &HostLog) -> String {
                 LeaveReason::Silent => "no packet for 5 seconds".to_owned(),
                 LeaveReason::Kicked => "kicked".to_owned(),
                 LeaveReason::MissionEnded => "the mission ended".to_owned(),
+                LeaveReason::HostLeft => "the host left the game".to_owned(),
                 LeaveReason::Replaced => {
                     "replaced by a new connection from the same address".to_owned()
                 }
@@ -499,6 +512,7 @@ pub fn log_line(entry: &HostLog) -> String {
                 EndReason::TimeLimit => "the time limit",
                 EndReason::ServerStopping => "the host is stopping",
                 EndReason::EndedByServer => "ended by the host",
+                EndReason::HostLeft => "the host left the game",
             }
         ),
         HostLog::MissionRestarted { .. } => "mission restarted".to_owned(),
@@ -507,6 +521,9 @@ pub fn log_line(entry: &HostLog) -> String {
         }
         HostLog::Fault { text, .. } => format!("fault: {text}"),
         HostLog::Stopped { .. } => "stopped".to_owned(),
+        HostLog::Lobby {
+            callsign, event, ..
+        } => format!("lobby: {callsign} {event}"),
     };
     format!("tick {}: {text}", entry.tick())
 }

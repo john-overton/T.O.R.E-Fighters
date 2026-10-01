@@ -25,7 +25,7 @@ use crate::{
 use std::time::{Duration, Instant};
 use tore_session::{
     ClientEvent, Controls,
-    client::describe,
+    client::ended_text,
     wire::{
         events::{ReceivedEvent, WireEvent},
         names::NameIndex,
@@ -173,6 +173,13 @@ impl App {
                 return;
             }
         }
+        // A game hosted from the command line starts each mission as soon as
+        // everyone holding a slot is ready and its player has closed the
+        // debrief.
+        let reading = self.quick.debrief.is_some();
+        if let Some(session) = &mut self.net {
+            session.auto_start(!reading && self.net_flight.is_none());
+        }
         if self.net_flight.is_none() && !self.begin_session_flight(event_loop) {
             return;
         }
@@ -227,16 +234,14 @@ impl App {
                     }
                     None => {}
                 }
-                self.message("Mission loaded; taking a plane...");
+                if self.net_flight.is_none() {
+                    self.message("Mission loaded; taking a plane...");
+                }
             }
-            ClientEvent::ContentRefused { names } => {
-                log::warn!("Network: the game data differs: {}", names.join(", "));
-                self.net_ending = Some(format!(
-                    "Your game data differs from the server's in {} file(s), such as {}. \
-                     Import the same version of the game.",
-                    names.len(),
-                    names.first().map_or("", String::as_str)
-                ));
+            ClientEvent::ContentRefused { names, reason } => {
+                log::warn!("Network: {reason} ({})", names.join(", "));
+                // With no lobby screen to wait in, the game leaves.
+                self.net_ending = Some(reason);
                 return false;
             }
             ClientEvent::MissionFailed(text) => {
@@ -244,36 +249,97 @@ impl App {
                 return false;
             }
             ClientEvent::SeatRefused(text) => {
-                self.message(format!("No plane: {text}. Asking for any free plane."));
-                if let Some(session) = &mut self.net {
-                    session.client.ready(None);
-                }
+                // The client asks for any free plane by itself.
+                self.message(format!("No plane: {text}"));
             }
             ClientEvent::Seated { plane, .. } => {
                 log::info!("Network: seated in plane {plane}");
             }
             ClientEvent::Roster => {}
             ClientEvent::Notice(text) => self.message(text),
-            ClientEvent::Debrief(_) => {}
-            ClientEvent::MissionEnded(ended) => {
-                self.message(match ended.next_in_seconds {
-                    Some(seconds) => {
-                        format!("Mission ended; the next one starts in {seconds} seconds")
+            ClientEvent::Debrief(debrief) => {
+                // A player leaving the game sees it when the session ends; one
+                // who stays sees it now, back in the lobby.
+                let leaving = self.net.as_ref().is_some_and(|s| s.left_at.is_some());
+                if !leaving {
+                    if let Some(session) = &mut self.net {
+                        session.debrief = None;
                     }
-                    None => "Mission ended".to_owned(),
-                });
+                    self.show_net_debrief(&debrief);
+                }
             }
+            ClientEvent::MissionEnded(ended) => {
+                let text = ended_text(&ended);
+                self.end_net_flight();
+                self.message(text);
+            }
+            ClientEvent::Lobby => {
+                if let Some(line) = self.net.as_mut().and_then(|s| s.lobby_change()) {
+                    log::info!("Network: lobby: {line}");
+                }
+            }
+            ClientEvent::Refused { reason, .. } => self.message(reason),
+            ClientEvent::Goodbye(_) => {}
             ClientEvent::Closed(reason) => {
                 let left = self.net.as_ref().is_some_and(|s| s.left_at.is_some());
-                self.net_ending = Some(if left {
-                    String::new()
-                } else {
-                    describe(&reason)
-                });
+                let text = self
+                    .net
+                    .as_ref()
+                    .map(|s| s.client.close_text(&reason))
+                    .unwrap_or_default();
+                self.net_ending = Some(if left { String::new() } else { text });
                 return false;
             }
         }
         true
+    }
+
+    /// The debrief the host sent, on its screen, which closes to the main
+    /// menu.
+    fn show_net_debrief(&mut self, debrief: &tore_session::wire::messages::Debrief) {
+        match crate::debrief::Debrief::new(debrief::report(debrief), &self.theater_resources, None)
+        {
+            Ok(screen) => {
+                self.quick.debrief = Some(screen);
+                self.quick.debrief_to_menu = true;
+                self.screen = Screen::Quick;
+                if let Some(renderer) = &self.renderer {
+                    renderer.window.set_title("T.O.R.E-Fighters - Debrief");
+                    renderer.window.request_redraw();
+                }
+            }
+            Err(error) => self.message(error.to_string()),
+        }
+    }
+
+    /// The flight is over but the session goes on (the mission ended, back
+    /// in the lobby): the flight is put away and single player's state put
+    /// back, as when a session ends.
+    fn end_net_flight(&mut self) {
+        let Some(flight) = self.net_flight.take() else {
+            return;
+        };
+        let stash = flight.stash;
+        self.world = stash.world;
+        self.combat_view = stash.combat_view;
+        self.hornet = stash.hornet;
+        self.scenery = stash.scenery;
+        if let Some(renderer) = &mut self.renderer {
+            renderer.set_scenery(&self.scenery);
+            renderer.prepare_aircraft(&self.hornet);
+            renderer.combat(&Default::default());
+            renderer
+                .window
+                .set_title("T.O.R.E-Fighters - Choose Activity");
+        }
+        self.flight_ui.reset_for_flight();
+        self.camera.keys.clear();
+        self.seat_commands.clear();
+        self.input.context(true, self.focused);
+        self.screen = Screen::Main;
+        if let Some(audio) = &self.audio {
+            audio.scene(crate::audio::music::Scene::Main);
+        }
     }
 
     /// Starts the flight once the host has seated the player and the mission
@@ -508,13 +574,18 @@ impl App {
         flight.frame = Some(frame);
     }
 
-    /// The player ends the mission: the host sends the debrief and ends the
-    /// connection.
+    /// End Mission: the hosting player ends the mission for everyone; any
+    /// other leaves the game with its debrief.
     pub(crate) fn leave_session(&mut self) {
+        let hosting = self.net.as_ref().is_some_and(NetSession::hosting);
         if let Some(session) = &mut self.net {
             session.leave();
         }
-        self.message("Leaving the mission...");
+        self.message(if hosting {
+            "Ending the mission for everyone..."
+        } else {
+            "Leaving the mission..."
+        });
     }
 
     /// The session is over: its files are done, the flight is put away, and

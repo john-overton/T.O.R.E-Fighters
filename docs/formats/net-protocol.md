@@ -217,7 +217,7 @@ together), 5 content mismatch, 6 server stopping, 7 kicked.
 ## Reliable messages
 
 For what must arrive once and in order: the mission, seating, the roster, the
-debrief, leaving.
+debrief, leaving, and (protocol 3) the lobby.
 
 - Each message has a 16-bit id, counting up from 0 in each direction, a kind
   (8 bits) and a body of at most 256 bytes.
@@ -245,17 +245,33 @@ debrief, leaving.
 
 | Kind | Direction | Body |
 | --- | --- | --- |
-| Mission | host to client | The `MissionSpec` in its text form, the content manifest (resource names and their FNV-1a 64 hashes), the host tick now, the contrail sortie number |
-| Content refused | client to host | The resource names whose hash differs or which are missing; the host disconnects with reason "content mismatch" and the client shows the list |
-| Ready | client to host | The plane wanted (its id), or any |
+| Mission | host to client | The `MissionSpec` in its text form, the content manifest (resource names and their FNV-1a 64 hashes), the host tick now, the contrail sortie number, and the lobby mission's number (protocol 3) |
+| Content refused | client to host | The mission's number, the resource names whose hash differs or which are missing, and the plain reason; in protocol 3 the player stays in the lobby, marked unable (before, the host disconnected with "content mismatch") |
+| Take plane (stage D's Ready) | client to host | The mission's number and the plane wanted, or any: in the lobby, hold that slot and mark ready; in flight, fly it now |
 | Seat refused | host to client | Reason text (plane taken, destroyed, lost its pilot, not open to humans, no free plane); the client may ask again |
-| Seated | host to client | Seat id, plane id, the tick of the state, the plane's exact state ([own aircraft](#the-own-aircraft)), its loadout (station weapon names, counts, mounts), the full roster, the standing and destroyed ground objects |
+| Seated | host to client | The connection's new [flight](#flights) (protocol 3), seat id, plane id, the tick of the state, the plane's exact state ([own aircraft](#the-own-aircraft)), its loadout (station weapon names, counts, mounts), the full roster, the standing and destroyed ground objects |
 | Roster | host to client | Every plane: id, side, wing, member, aircraft key, pilot (AI, or a human's seat and callsign); sent on every change |
-| Names | host to client | New entries of the connection's name table: weapon records, shapes and sound names used by snapshots and events |
+| Names | host to client | The [flight](#flights) whose table they extend (protocol 3), and new entries of the connection's name table: weapon records, shapes and sound names used by snapshots and events |
 | Notice | host to client | A line of text for the HUD, for example "Mission restarts in 30 seconds" |
-| Leave | client to host | The player ends the mission |
+| Leave | client to host | The player ends its flight: the debrief, then back in the lobby, still connected (protocol 3; before, the host disconnected the player) |
 | Debrief | host to client | The seat's debrief report as the single-player debrief shows it |
-| Mission ended | host to client | Why (every human left, time limit, server stopping, ended by the server's operator) and seconds until the next mission, if any; the host disconnects the player once it and the debrief are acknowledged |
+| Mission ended | host to client | Why (every human left, time limit, server stopping, ended by the server's operator or the King, the host left the game) and seconds until the next mission, if any; with a next mission the player stays, back in the lobby, otherwise the host disconnects the player once it and the debrief are acknowledged |
+
+The lobby's messages, protocol 3 ([the lobby](../ARCHITECTURE.md#the-lobby)):
+
+| Kind | Direction | Body |
+| --- | --- | --- |
+| Slot | client to host | The mission's number, and take a plane's slot, take the first free one, or leave it |
+| Loadout | client to host | The mission's number, the slot's plane, and the loadout for it or none (the standard load) |
+| Set ready | client to host | The mission's number, and ready or not |
+| Change mission | client to host, the King | The new `MissionSpec` text |
+| Start | client to host, the King | Nothing |
+| Kick | client to host, the King | The player's lobby id and the reason the player is told |
+| End mission | client to host, the King | Nothing: the mission ends for everyone, who return to the lobby |
+| Lobby | host to client | The lobby's state, sent to every player whenever it changes |
+| Refused | host to client | The refused request's message kind and the plain reason |
+| Goodbye | host to client | Why the host is about to disconnect the player: kicked (with the King's words) or the host left the game |
+| Flight loadouts | host to client | The mission starts flying: each loaded plane and its loadout, which every player builds the lobby's mission again with |
 
 ## What the transport settled
 
@@ -323,6 +339,7 @@ carried it is lost.
 
 | Field | Size | Meaning |
 | --- | --- | --- |
+| Flight | 8 | The connection's [flight](#flights) these inputs fly, the number the Seated message gave; the host drops inputs of another flight (protocol 3) |
 | Newest tick | 32 | The last tick in this section |
 | Tick count | 5 | How many ticks follow, 1 to 24, oldest first, ending at the newest |
 | View offset | 8 | The host tick the player's screen showed when the newest tick was sampled, as ticks before the newest; used for [lag compensation](../ARCHITECTURE.md#hits-and-lag-compensation) |
@@ -375,6 +392,7 @@ phase, and baselines (counted in snapshots back) are unaffected.
 
 | Field | Size | Meaning |
 | --- | --- | --- |
+| Flight | 8 | The connection's [flight](#flights) the snapshot belongs to (protocol 3); the Events section in the same packet shares it |
 | Tick | 32 | The host tick the snapshot shows (after that tick's step) |
 | Input received | 32 | The newest input tick received from this player |
 | Input margin | 8, signed | Over the inputs received since the last snapshot, the smallest number of ticks by which one arrived before the host needed it; negative when late |
@@ -415,7 +433,9 @@ bit and a slowly changing one a few bytes: about 200 to 350 bytes in all
 under 500 with no baseline). The
 baseline is an earlier exact state the client has acknowledged, named by how
 many own states back it was (5 bits, 1 to 31); 0 means no baseline
-([settled](#own-state-as-built)). The client decodes it bit for bit.
+([settled](#own-state-as-built)). The client decodes it bit for bit. The
+section starts with the connection's [flight](#flights) (8 bits, protocol 3),
+then its tick (32), its number (16) and how many back its baseline is (5).
 
 ### Cockpit readout
 
@@ -752,10 +772,17 @@ client keeps its last 64.
   entity's extra delay is not included).
 - Commands are numbered from 1 and wrap through 0 as the host's buffer
   expects; a snapshot's "commands applied" acknowledges every number up to it.
+- *EF4:* an Inputs section starts at the tick after the newest snapshot's
+  as well as after the newest input the host had: the host has stepped the
+  ticks before, so they would only arrive late and report a long delay in
+  the input margin. A section of a flight's inputs is never sent before the
+  Seated message of that flight.
 
 ### Messages as built
 
-Kind bytes 1 to 11 in the table's order (Mission to Mission ended). The
+Kind bytes 1 to 11 in the table's order (Mission to Mission ended), then the
+lobby's 12 to 22 in theirs (Slot to Flight loadouts); 23 and 24 are kept for
+the phase 2 lobby (passing the crown, the King's settings). The
 spec text and the exact state are long byte strings (a varint length); the
 exact state in Seated is coded with no baseline and the client decodes it with
 its plane's aircraft model. A loadout is the fuel as a 64-bit float, the
@@ -767,7 +794,63 @@ kill rows and the eight shot tallies). Mission ended carries its reason in 2
 bits (every human left 0, time limit 1, server stopping 2, ended by the
 server's operator 3, which slice D7 added under protocol 1 before anything
 shipped) and the seconds to the
-next mission, if any.
+next mission, if any. *Protocol 3 (EF4):* the reason takes 3 bits and adds the
+host left the game (4); the King's End mission is reason 3.
+
+*Built (EF4), the lobby's messages, each an agent decision:*
+
+- **Numbers.** The Mission message's number counts the lobby's missions on
+  the host, from 1, raised with each King's change; a flight's start sends
+  the same mission again (as Flight loadouts) under the same number. Take
+  plane, Slot, Loadout and Set ready carry the number the player last
+  received; one for another number is refused with "The mission has
+  changed; choose again." (Take plane as a Seat refused, the others as a
+  Refused).
+- **Content refused** is the mission's number (varint), the names (a count
+  and strings) and the reason (a string). A refusal for an earlier number
+  is logged and otherwise ignored.
+- **Take plane** is the number (varint), then a presence bit and the plane
+  (varint).
+- **Slot** is the number, then 2 bits (0 take, then the plane as a varint;
+  1 the first free; 2 leave). **Loadout** is the number, the plane (varints),
+  a presence bit and the loadout as Seated codes one. **Set ready** is the
+  number and a bit. **Change mission** is a long string. **Start** and
+  **End mission** are empty. **Kick** is the player's id (8 bits) and the
+  reason (a string).
+- **Lobby** is the game's name and the mission's summary (strings), the
+  number (varint), the phase (2 bits: lobby 0, flying 1, ended 2), the start
+  rule (2 bits: the King's start 0, the first ready player 1, flying from the
+  start 2), the King's id and the host's id (each a presence bit and 8 bits;
+  none on a dedicated server), the receiving player's own id (8 bits), the
+  players in the order they connected (a count, then each: id 8 bits,
+  callsign, a presence bit and the slot's plane, ready, armed with its own
+  loadout, flying (one bit each), a presence bit and why its import cannot
+  play the mission), the slots in plane order (a count, then each: plane
+  varint, side 1 bit, wing 2, member 8, aircraft 4, a presence bit and the
+  holder's id) and the King's settings (a count, then each a number of 8
+  bits and a varint value; none in phase 1).
+- **Refused** is the request's kind (8 bits) and the reason (a string).
+  **Goodbye** is 2 bits (kicked 0, then the reason as a string; the host
+  left 1). **Flight loadouts** is a count, then each plane (varint) and its
+  loadout as Seated codes one.
+
+### Flights
+
+*Built (EF4), protocol 3, agent decision.* A connection now outlives a
+flight: a player who leaves its flight, or whose mission ends, stays in the
+lobby and may fly again, and a new mission's ticks start again from 0. So
+each seating starts a new **flight** of the connection, numbered by the host
+from 1 (8 bits, wrapping): the host's wire state for the connection (entity
+and readout baselines, the event queue and its numbers, the name table, the
+own-state baselines) starts afresh, the Seated message names the flight,
+and every Snapshot and Own state section, every Names message and every
+Inputs section carries it. A client starts its own afresh at the Seated
+message or at the first section of a later flight, whichever comes first,
+and drops a section of an earlier flight that arrives late (an Own state
+section of the client's flight must still name a baseline it has; one of a
+later flight must name none). The host drops Inputs of another flight.
+Reliable delivery keeps a Names message of the earlier flight before the
+Seated message of the next, so the name table never mixes two flights.
 
 ## Limits
 
@@ -793,6 +876,7 @@ Decoders check every count and length against these before reading on.
 | Manifest entries, names in a refusal | 8,192 |
 | Destroyed ground objects at seating | 8,192 |
 | Seats per host | 30 |
+| Players and slots in a lobby state, settings, loadouts at a flight's start | 64 each |
 
 ## Captures
 
@@ -805,7 +889,7 @@ number changes on its own.
 
 The file starts with 12 bytes: the 8-byte magic `TORE-CAP`
 (`tore_session::capture::MAGIC`, which a game's pruner checks so that it only
-ever deletes captures), the capture format's version (16 bits, 1) and the
+ever deletes captures), the capture format's version (16 bits, 2 since EF4) and the
 protocol version (16 bits); a reader refuses another of either. Records follow, each a kind (8 bits), a body length (32 bits) and the
 body; a capture cut short ends at its last whole record. Numbers are least
 significant byte first, times are nanoseconds of the client's clock (64 bits),
@@ -813,17 +897,19 @@ and strings are a 16-bit length and UTF-8.
 
 | Kind | Record | Body |
 | --- | --- | --- |
-| 1 | Start | The time the join started, the seed of its randomness (64 bits: the nonce comes from it), the server's address, the callsign, the game version and commit, a release-build byte, and the plane asked for (a byte, then 32 bits when 1). Never the password |
+| 1 | Start | The time the join started, the seed of its randomness (64 bits: the nonce comes from it), the server's address, the callsign, the game version and commit, a release-build byte, the plane asked for (a byte, then 32 bits when 1), and whether the client readies by itself (a byte, format 2). Never the password |
 | 2 | Receive | The time, the sender's address, then the datagram as it arrived |
 | 3 | Update | The time, then the controls as the client rounded them, bit packed: pitch, roll and yaw (16 bits each), the throttle rate (8), the throttle position (1, then 16), the trigger (1), the scope's channel (2), range step (4) and history (1), the view subject (1, then its kind in 2 bits and its id as a varint), and the commands (a varint count, then each in its Inputs coding) |
 | 4 | Frame | The time a frame was drawn |
 | 5 | Leave | The time the player ended the mission |
 | 6 | Disconnect | The time the player quit |
 | 7 | Sent | The time, then an Inputs section the client sent |
+| 8 | Request | The time, then a lobby request the player made (its message kind and body), format 2; the automatic ready's own are not recorded, since the replayed client makes them again |
+| 9 | Leave game | The time the player left the game (its flight, then the connection once the debrief is in), format 2 |
 
 A replay (`capture::replay`) starts a client from the Start record, seeded
-the same, feeds it every Receive, Update, Frame, Leave and Disconnect at its
-time with no network, and hands back each frame. The replayed client writes a
+the same, feeds it every Receive, Update, Frame, Leave, Disconnect, Request
+and Leave game at its time with no network, and hands back each frame. The replayed client writes a
 capture of its own, which equals the original byte for byte when it behaved
 the same: same inputs sent, same frames. A capture holds what the client knew
 and nothing of the host, so it needs the same import to replay; converting one
@@ -832,7 +918,8 @@ to a replay is stage E.
 ## Versions
 
 - The **protocol version** is one number in `tore-session`
-  (`wire::PROTOCOL_VERSION`, 2 since the readout's coding). Any change to the bytes raises it. A test
+  (`wire::PROTOCOL_VERSION`, 2 since the readout's coding, 3 since the lobby,
+  EF4). Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt`; when
   they differ it fails and says to raise the version and refresh the copy
