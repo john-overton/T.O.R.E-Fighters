@@ -93,7 +93,10 @@ fn committed_version(text: &str) -> Option<u16> {
 #[test]
 fn wire_golden() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(GOLDEN);
-    let committed = std::fs::read_to_string(&path).unwrap_or_default();
+    // A Windows checkout may turn the file's line ends into CR LF.
+    let committed = std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
     let now = render(PROTOCOL_VERSION);
     if now == committed {
         return;

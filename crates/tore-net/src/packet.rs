@@ -1225,7 +1225,10 @@ mod tests {
             std::fs::write(&path, &text).unwrap();
             return;
         }
-        let committed = std::fs::read_to_string(&path).unwrap_or_default();
+        // A Windows checkout may turn the file's line ends into CR LF.
+        let committed = std::fs::read_to_string(&path)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
         assert_eq!(
             text, committed,
             "the discovery encodings changed: they are version-free, so add a new kind instead"
