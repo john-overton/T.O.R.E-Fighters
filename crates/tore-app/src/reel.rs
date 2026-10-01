@@ -2,8 +2,10 @@
 use crate::{
     AppResult,
     assets::Assets,
+    camera::Camera,
     replay::viewer::{Options, Viewer},
-    terrain::{Camera, World},
+    scenery::Scenery,
+    terrain::Terrain,
 };
 use std::{
     fs::File,
@@ -34,7 +36,7 @@ pub struct Gpu {
 }
 static WEATHER: std::sync::OnceLock<std::collections::BTreeMap<String, Vec<u8>>> =
     std::sync::OnceLock::new();
-pub fn visual_weather_module(world: &World) -> AppResult<tore_formats::weather::Module> {
+pub fn visual_weather_module(world: &Terrain) -> AppResult<tore_formats::weather::Module> {
     let bytes = WEATHER
         .get()
         .and_then(|m| m.get(&world.environment.layer))
@@ -60,7 +62,7 @@ fn target(device: &wgpu::Device, label: &str, format: wgpu::TextureFormat) -> wg
     })
 }
 impl Gpu {
-    async fn new(world: &World) -> AppResult<Self> {
+    async fn new(scenery: &Scenery) -> AppResult<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -78,7 +80,7 @@ impl Gpu {
             &device,
             &queue,
             format,
-            world,
+            scenery,
             crate::graphics::Options::default(),
             4,
         );
@@ -106,7 +108,7 @@ impl Gpu {
             buffer,
         })
     }
-    pub fn mirror(&mut self, camera: &Camera, world: &World) {
+    pub fn mirror(&mut self, camera: &Camera, world: &Terrain, scenery: &Scenery) {
         let view = self.cockpit.mirror_target.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
         self.sim.draw(
@@ -117,10 +119,16 @@ impl Gpu {
             crate::mirrors::SIZE,
             camera,
             world,
+            scenery,
         );
         self.queue.submit([encoder.finish()]);
     }
-    pub fn pixels(&mut self, camera: &Camera, world: &World) -> AppResult<Vec<u8>> {
+    pub fn pixels(
+        &mut self,
+        camera: &Camera,
+        world: &Terrain,
+        scenery: &Scenery,
+    ) -> AppResult<Vec<u8>> {
         let view = self.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
         self.sim.draw(
@@ -131,6 +139,7 @@ impl Gpu {
             [WIDTH, HEIGHT],
             camera,
             world,
+            scenery,
         );
         self.cockpit.draw(&mut encoder, &view);
         self.read(encoder, false)
@@ -394,7 +403,7 @@ pub fn run() -> AppResult<()> {
     if plan.iter().any(|f| f.tick > viewer.clock.last() as f64) {
         return Err("director frame past replay end".into());
     }
-    let mut gpu = pollster::block_on(Gpu::new(&viewer.world))?;
+    let mut gpu = pollster::block_on(Gpu::new(&viewer.scenery))?;
     viewer.director_guns(&mut gpu, &assets.theater_resources)?;
     // AI launch events retain weapon identity but not a cockpit release cue.
     // Resolve its own retail fire sample for the director's watched gun burst.

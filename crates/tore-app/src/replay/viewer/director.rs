@@ -15,10 +15,15 @@ impl Viewer {
             {
                 continue;
             }
-            let combat = crate::combat::Combat::new(model, resources, false)?;
-            if let Some(station) = combat
-                .state
-                .configuration()
+            // The weapon load the aircraft's own profile names, as combat
+            // would build it; the director needs only the stations.
+            let configuration =
+                tore_sim::combat::live::Configuration::from_source(&model.profile, |name| {
+                    resources.get(name).cloned().ok_or_else(|| {
+                        std::io::Error::other(format!("missing live-fire resource {name}"))
+                    })
+                })?;
+            if let Some(station) = configuration
                 .stations
                 .iter()
                 .find(|s| tore_sim::combat::live::is_gun(&s.weapon))
@@ -40,9 +45,14 @@ impl Viewer {
         self.clock.seek(frame.tick);
         let tick = self.clock.tick();
         let picture = self.playback.picture(tick, self.clock.alpha());
+        self.weather.build(
+            &mut self.world,
+            &mut self.scenery,
+            &self.tracks,
+            self.clock.last(),
+        );
         self.weather
-            .build(&mut self.world, &self.tracks, self.clock.last());
-        self.weather.seek(&mut self.world, &self.tracks, tick);
+            .seek(&mut self.world, &mut self.scenery, &self.tracks, tick);
         if let Some(minutes) = frame.time_minutes {
             let config = self.world.weather.configuration();
             let resources = crate::reel::visual_weather_module(&self.world)?;
@@ -52,7 +62,7 @@ impl Viewer {
                     minutes / 60,
                     minutes % 60,
                     config.parameter(),
-                    crate::terrain::Recorded::from_identity(&self.recording.header().world)?.wind,
+                    crate::replay::identity::recorded(&self.recording.header().world)?.wind,
                 )?);
         }
         let player = self.player_state(&picture, tick);
@@ -119,7 +129,7 @@ impl Viewer {
             })
             .unwrap_or(&self.ownship);
         let mut watched =
-            watched_pose.map(|p| render_snapshot::pose_state(&watched_model.start(&self.world), p));
+            watched_pose.map(|p| snapshot::pose_state(&watched_model.start(&self.world), p));
         if let (Some(state), Some(now)) = (&mut watched, &watched_now) {
             state.speed = now.airspeed;
             state.g = now.g;
@@ -197,8 +207,9 @@ impl Viewer {
                 }
             }
         }
-        self.world.resolve_palette(camera.position[1]);
-        self.world.set_origin(camera.position);
+        self.scenery
+            .resolve_palette(&self.world, camera.position[1]);
+        self.scenery.set_origin(camera.position);
         let device = &gpu.device;
         let queue = &gpu.queue;
         let sim = &mut gpu.sim;
@@ -249,8 +260,8 @@ impl Viewer {
         {
             self.airports = Some((
                 destroyed.clone(),
-                self.world.visible_static_vertices_where(&destroyed),
-                self.world.visible_static_lines_where(&destroyed),
+                self.scenery.visible_static_vertices_where(&destroyed),
+                self.scenery.visible_static_lines_where(&destroyed),
             ));
         }
         if let Some((_, vertices, lines)) = &self.airports {
@@ -269,14 +280,20 @@ impl Viewer {
                         .map(|p| (p.position, p.heading, p.phase)),
                     &self.ownship.palette,
                     camera.position,
-                    self.world.origin,
+                    self.scenery.origin,
                 ),
             );
         }
         sim.dummies(
             device,
             queue,
-            render_snapshot::aircraft_batches(&picture, &self.models, &camera, &self.world),
+            render_snapshot::aircraft_batches(
+                &picture,
+                &self.models,
+                &camera,
+                &self.world,
+                &self.scenery,
+            ),
         );
         sim.combat(
             device,
@@ -288,13 +305,16 @@ impl Viewer {
                 &player,
                 &camera,
                 &self.world,
+                &self.scenery,
             ),
         );
         sim.aircraft(
             device,
             queue,
             &self.ownship,
-            &self.ownship.vertices(&player, &camera, &self.world),
+            &self
+                .ownship
+                .vertices(&player, &camera, &self.world, &self.scenery),
         );
         if cockpit_view {
             let state = watched.as_ref().ok_or("missing cockpit state")?;
@@ -308,7 +328,8 @@ impl Viewer {
                 );
                 gpu.cockpit_aircraft = Some(watched_model.profile.id);
             }
-            let palette = watched_model.cockpit_palette(&self.world, camera.position[1], 0);
+            let palette =
+                watched_model.cockpit_palette(&self.world, &self.scenery, camera.position[1], 0);
             let color = palette[usize::from(watched_model.hud.primary_color)];
             let mut pixels = vec![0; 640 * 480 * 4];
             let zoom = (1. / crate::flight_canvas::HUD_SCALE) as f32;
@@ -384,14 +405,16 @@ impl Viewer {
                     device,
                     queue,
                     watched_model,
-                    &watched_model.vertices(state, &mirror, &self.world),
+                    &watched_model.vertices(state, &mirror, &self.world, &self.scenery),
                 );
-                gpu.mirror(&mirror, &self.world);
+                gpu.mirror(&mirror, &self.world, &self.scenery);
                 gpu.sim.aircraft(
                     &gpu.device,
                     &gpu.queue,
                     &self.ownship,
-                    &self.ownship.vertices(&player, &camera, &self.world),
+                    &self
+                        .ownship
+                        .vertices(&player, &camera, &self.world, &self.scenery),
                 );
             }
             if frame.anchor == 0 {
@@ -408,7 +431,7 @@ impl Viewer {
                 &[],
             );
         }
-        let mut pixels = gpu.pixels(&camera, &self.world)?;
+        let mut pixels = gpu.pixels(&camera, &self.world, &self.scenery)?;
         if gpu.symbols.is_some() {
             gpu.symbols = Some(if cockpit_view {
                 gpu.hud_symbols()?
