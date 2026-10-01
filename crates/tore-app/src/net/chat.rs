@@ -961,7 +961,7 @@ mod tests {
         assert!(six > 4 * rows_lit(&one), "six lines against one");
         assert!(six < 8 * rows_lit(&one));
         // A line of 80 characters wraps inside the window's width.
-        let words = vec!["word"; 16].join(" ");
+        let words = ["word"; 16].join(" ");
         let pieces = wrap(&font, &words, 300);
         assert!(pieces.len() > 1);
         assert!(pieces.iter().all(|p| text_width(&font, p) <= 300));
