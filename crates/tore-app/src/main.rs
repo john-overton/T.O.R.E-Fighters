@@ -2416,6 +2416,13 @@ impl App {
             let mouse = |app: &mut App, event: WindowEvent| app.window_event(event_loop, id, event);
             match step {
                 Step::Wait(_) | Step::WaitTick(..) => {}
+                Step::Stall(seconds) => {
+                    // The whole loop stops, as a long frame or a window held
+                    // still does; the session's keepalive thread carries on.
+                    println!("Input script: stalling {seconds} s");
+                    std::thread::sleep(std::time::Duration::from_secs_f64(seconds));
+                    println!("Input script: stall over");
+                }
                 Step::Tap(spec) => {
                     set_mods(self, &mut runner, spec.mods);
                     let action = self.key_input(event_loop, spec.input(true));

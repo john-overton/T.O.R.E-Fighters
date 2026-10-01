@@ -8,6 +8,10 @@
 //!
 //! ```text
 //! wait 1.5              seconds of wall clock
+//! stall 8               block the game's whole main loop for this many seconds (at most 600),
+//!                       frames, the session pump and the script included, as a dragged window or a
+//!                       long frame does; only a keepalive thread keeps a joined game connected
+//!                       through it (SIGSTOP freezes that thread too, so it cannot test it)
 //! waittick 600 [90]     until the flight has run this many 120 Hz ticks, or 90 s of wall
 //!                       clock (the default) whichever is first, so a stuck menu cannot hang a run
 //! key g                 press and release; Shift+e, Ctrl+B, F10, Space, Escape, Enter, Up
@@ -30,6 +34,9 @@ use std::time::Instant;
 use winit::event::MouseButton;
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey, SmolStr};
 
+/// The longest `stall` step, seconds: a typo cannot hang a run for hours.
+pub const MAX_STALL_SECONDS: f64 = 600.;
+
 /// A key press or release as the window handler sees it.
 #[derive(Clone, Debug)]
 pub struct KeyInput {
@@ -50,6 +57,8 @@ pub struct KeySpec {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Step {
     Wait(f64),
+    /// Blocks the main loop (the test of a stalled game's keepalive).
+    Stall(f64),
     WaitTick(u64, f64),
     Tap(KeySpec),
     Down(KeySpec),
@@ -259,6 +268,7 @@ pub fn parse(text: &str) -> Result<Vec<Step>, String> {
         let key = || key_spec(words.get(1).copied().unwrap_or_default()).map_err(at);
         steps.push(match words[0] {
             "wait" => Step::Wait(number(1)?.max(0.)),
+            "stall" => Step::Stall(number(1)?.clamp(0., MAX_STALL_SECONDS)),
             "waittick" => Step::WaitTick(
                 number(1)?.max(0.) as u64,
                 if words.len() > 2 {
@@ -365,6 +375,36 @@ mod tests {
         assert_eq!(steps[7], Step::Click(MouseButton::Right));
         assert_eq!(steps[10], Step::WaitTick(600, 90.));
         assert_eq!(steps[11], Step::Exit);
+    }
+
+    #[test]
+    fn a_stall_step_parses_with_its_seconds_and_is_bounded() {
+        assert_eq!(parse("stall 8\n").unwrap(), [Step::Stall(8.)]);
+        assert_eq!(
+            parse("stall 0.25 # a quarter\n").unwrap(),
+            [Step::Stall(0.25)]
+        );
+        assert_eq!(parse("stall -3\n").unwrap(), [Step::Stall(0.)]);
+        assert_eq!(
+            parse("stall 1e9\n").unwrap(),
+            [Step::Stall(MAX_STALL_SECONDS)]
+        );
+        assert!(
+            parse("stall\n")
+                .unwrap_err()
+                .contains("stall needs a number")
+        );
+        assert!(
+            parse("stall soon\n")
+                .unwrap_err()
+                .contains("needs a number")
+        );
+        // The runner hands it to the game like any other step, and the next
+        // step follows at once.
+        let mut runner = Runner::new(parse("stall 8\nexit\n").unwrap());
+        let now = Instant::now();
+        assert_eq!(runner.due(0, now), Some(Step::Stall(8.)));
+        assert_eq!(runner.due(0, now), Some(Step::Exit));
     }
 
     #[test]
