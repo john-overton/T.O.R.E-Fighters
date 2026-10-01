@@ -253,7 +253,8 @@ in the answer from its lobby state and queues it for the asker.
 **Where it is asked.** A game looks for others by sending a query every two
 seconds to the limited broadcast address (255.255.255.255) on the game port, to
 this machine's own network address and to its loopback address, and listens
-for answers on the same socket. Discovery is IPv4 only; IPv6 discovery, port
+for answers on the same socket, which is bound to the game port when that is
+free (so one firewall rule covers everything). Discovery is IPv4 only; IPv6 discovery, port
 mapping and the internet are stage J. A host on an IPv6 socket that also takes
 IPv4 receives IPv4 broadcast on Linux (checked on this machine with a query to
 the loopback network's broadcast address, which a firewall leaves alone); a

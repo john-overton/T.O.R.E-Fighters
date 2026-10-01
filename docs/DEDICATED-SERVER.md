@@ -32,6 +32,7 @@ proposal unless it is credited to John.
 - [The lobby](#the-lobby)
 - [Joining from the game](#joining-from-the-game)
 - [Hosting from the game](#hosting-from-the-game)
+- [Finding games from the command line](#finding-games-from-the-command-line)
 - [Console, status and logs](#console-status-and-logs)
 - [Ports and firewalls](#ports-and-firewalls)
 - [Discovery and the firewall](#discovery-and-the-firewall)
@@ -411,6 +412,28 @@ be sent, the usual "no packets for 5 seconds". The host's log lines go to the
 game's log with `Host:` in front, and the hosted session keeps the same
 diagnostics log and capture as a joined one, the capture named `hosted`.
 
+## Finding games from the command line
+
+*Built (EF5).* To check what a network shows without opening the game:
+
+```sh
+tore-app --find-games 8 [--port 26900]
+```
+
+It looks for games on the local network for that many seconds (0.1 to 3600)
+and prints each game when it first answers, one line each on stdout, fields
+separated by tabs: address, whether the build matches (`same build`, `other
+build` or `other protocol`, with the host's version and commit), name, mission
+summary, players and capacity, phase (`lobby`, `flying`, `closed`), the King
+(`-` for a dedicated server), `password` or `open`, `full` or `not full`.
+When nothing answers it prints `No games found.` and exits 0 all the same;
+what it is doing (and the version line) goes to stderr, so the output can be
+read by a script. It takes no window and no import. Run it on a second
+machine with a host or a server up on the first: it is the way to check
+[discovery](#discovery-and-the-firewall) between machines. `--port` is the
+game port the hosts use. Any other session option (`--connect`, `--host`, ...)
+is refused with it.
+
 ## Console, status and logs
 
 The server reads commands from its standard input:
@@ -490,6 +513,18 @@ UDP on the game port in. On the host's machine:
   broadcast. The server binds a separate IPv4 socket there, as it does for
   joins, which is what receives the broadcast (not yet measured on Windows).
 - **macOS.** The same first-run question; allow incoming connections.
+
+The searching machine matters too. The search socket is bound to the game
+port itself when that port is free, so the same firewall rule that lets joins
+in (`sudo ufw allow 26900/udp`) also lets the answers to a broadcast in: a
+stateful firewall such as ufw cannot match a reply to a 255.255.255.255 query
+and drops it on any other port, which is why a search from an ephemeral port
+found only the unicast targets (this machine's own addresses) on the
+development machine. When the game port is taken (this game is hosting, or a
+server runs on it) the search uses another port, the log says so, and answers
+to a broadcast may be dropped by such a firewall. The search holds the game
+port while it runs, so a server started on this machine meanwhile cannot bind
+it; the game's screen stops its search before it hosts.
 
 A machine on several networks (a laptop with Wi-Fi and a VPN) sends its
 question out of the default interface only; a host on another network is

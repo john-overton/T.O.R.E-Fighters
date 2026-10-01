@@ -11,6 +11,18 @@
 //! events. The packets are `tore_net::packet`'s kinds 8 and 9; the rules are
 //! in docs/formats/net-protocol.md, "Discovery".
 //!
+//! The search socket is bound to the game port itself when that port is free,
+//! so a firewall rule that lets the game port in (the one hosting and joining
+//! already need) also lets the answers to a broadcast query in: a stateful
+//! firewall such as ufw cannot match a reply to a 255.255.255.255 query and
+//! drops it on any other port. When the port is taken (this game hosts, or a
+//! server runs on it) the socket takes an ephemeral port instead and the log
+//! says so; the unicast targets still answer, the broadcast's answers may
+//! not. **The game port is held for as long as the search lives**, so the
+//! screen must drop its `Search` before this game hosts on the port (EF7's New
+//! stops the search first), and a server started on this machine meanwhile
+//! cannot bind it.
+//!
 //! IPv4 only. The standard library cannot list the machine's network
 //! interfaces, so the broadcast leaves by the interface the system picks for
 //! 255.255.255.255 (the default route's): a machine with several networks
@@ -196,17 +208,52 @@ pub struct Search<D: Datagrams = UdpSocket> {
     list: GameList,
     view: Vec<Game>,
     events: VecDeque<SearchEvent>,
+    /// The local port the socket is bound to, when it is known.
+    local_port: Option<u16>,
+    /// The socket holds the game port itself.
+    on_game_port: bool,
 }
 
 impl Search<UdpSocket> {
     /// Starts looking for games on UDP `port` at `now`: a socket with
-    /// broadcast on, and the first query ready to go out at the first
-    /// [`Search::update`]. The loop runs only while it exists: dropping it
-    /// stops the search.
+    /// broadcast on, bound to `port` itself when that is free and to an
+    /// ephemeral port when it is not (see the module's note), and the first
+    /// query ready to go out at the first [`Search::update`]. The loop runs
+    /// only while it exists: dropping it stops the search and frees the port.
     pub fn start(port: u16, own: Own, now: Duration) -> io::Result<Self> {
-        let socket = tore_net::bind_udp((Ipv4Addr::UNSPECIFIED, 0).into())?;
+        Self::start_at(port, targets(port), own, now)
+    }
+
+    /// [`Search::start`] with its own targets, binding to `bind_port` (0 for
+    /// an ephemeral port by choice, which is not a fallback).
+    pub fn start_at(
+        bind_port: u16,
+        targets: Vec<SocketAddr>,
+        own: Own,
+        now: Duration,
+    ) -> io::Result<Self> {
+        let (socket, on_game_port) = match tore_net::bind_udp(
+            (Ipv4Addr::UNSPECIFIED, bind_port).into(),
+        ) {
+            Ok(socket) => (socket, bind_port != 0),
+            Err(error) => {
+                let socket = tore_net::bind_udp((Ipv4Addr::UNSPECIFIED, 0).into())?;
+                log::info!(
+                    "Network: UDP port {bind_port} is busy ({error}); searching from port {} instead",
+                    socket.local_addr().map_or(0, |a| a.port())
+                );
+                (socket, false)
+            }
+        };
         socket.set_broadcast(true)?;
-        Self::with(socket, targets(port), own, reach::random_nonce(), now)
+        let local_port = socket.local_addr().ok().map(|a| a.port());
+        if on_game_port {
+            log::info!("Network: searching from the game port, UDP {bind_port}");
+        }
+        let mut search = Self::with(socket, targets, own, reach::random_nonce(), now)?;
+        search.local_port = local_port;
+        search.on_game_port = on_game_port;
+        Ok(search)
     }
 }
 
@@ -259,7 +306,20 @@ impl<D: Datagrams> Search<D> {
             list: GameList::default(),
             view: Vec::new(),
             events: VecDeque::new(),
+            local_port: None,
+            on_game_port: false,
         })
+    }
+
+    /// The local port the search listens on, when the socket reports one.
+    pub fn local_port(&self) -> Option<u16> {
+        self.local_port
+    }
+
+    /// True when the socket holds the game port itself, so a firewall rule
+    /// for the game port covers the answers; false after a fallback.
+    pub fn on_game_port(&self) -> bool {
+        self.on_game_port
     }
 
     /// The search's turn at `now`: sends the round's queries when one is due,
@@ -308,6 +368,81 @@ impl<D: Datagrams> Search<D> {
     pub fn next_round(&self) -> Duration {
         self.next_round
     }
+}
+
+/// One found game as `--find-games` prints it: tab-separated fields, one line.
+/// Address, build comparison, name, mission summary, players and capacity,
+/// phase, King (`-` for none), `password` or `open`, `full` or `not full`.
+pub fn game_line(game: &Game) -> String {
+    use tore_net::packet::DiscoverPhase;
+    let a = &game.answer;
+    let compat = match game.compat {
+        Compat::Same => "same build",
+        Compat::OtherBuild => "other build",
+        Compat::OtherProtocol => "other protocol",
+    };
+    let phase = match a.phase {
+        DiscoverPhase::Lobby => "lobby",
+        DiscoverPhase::Flying => "flying",
+        DiscoverPhase::Closed => "closed",
+    };
+    format!(
+        "{}\t{compat} ({} {})\t{}\t{}\t{}/{} players\t{phase}\tking {}\t{}\t{}",
+        game.address,
+        a.game_version,
+        a.game_commit.chars().take(9).collect::<String>(),
+        a.name,
+        a.summary,
+        a.players,
+        a.capacity,
+        if a.king.is_empty() { "-" } else { &a.king },
+        if a.password { "password" } else { "open" },
+        if a.full { "full" } else { "not full" },
+    )
+}
+
+/// Runs `search` for `seconds`, writing a line to `out` (see [`game_line`])
+/// for each game when it first appears; when none appeared, one line saying
+/// so. Returns how many games were found. Used by `tore-app --find-games`.
+pub fn find_games_with<D: Datagrams>(
+    mut search: Search<D>,
+    seconds: f64,
+    out: &mut dyn io::Write,
+) -> io::Result<usize> {
+    let clock = tore_net::RealClock::new();
+    let mut found = 0;
+    while clock.now().as_secs_f64() < seconds {
+        search.update(clock.now());
+        while let Some(event) = search.poll_event() {
+            if let SearchEvent::Added(game) = event {
+                writeln!(out, "{}", game_line(&game))?;
+                out.flush()?;
+                found += 1;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    if found == 0 {
+        writeln!(out, "No games found.")?;
+    }
+    Ok(found)
+}
+
+/// `tore-app --find-games SECONDS [--port N]`: looks for games on this
+/// network for `seconds` and prints each one on stdout. What the search is
+/// doing goes to stderr.
+pub fn find_games(seconds: f64, port: u16) -> io::Result<()> {
+    let search = Search::start(port, Own::this_game(), Duration::ZERO)?;
+    eprintln!(
+        "Looking for games on UDP port {port} for {seconds} seconds from port {} ({}).",
+        search.local_port().unwrap_or(0),
+        if search.on_game_port() {
+            "the game port"
+        } else {
+            "not the game port: it is busy, so answers to a broadcast may be dropped by a firewall"
+        }
+    );
+    find_games_with(search, seconds, &mut io::stdout().lock()).map(|_| ())
 }
 
 #[cfg(test)]
@@ -543,6 +678,118 @@ mod tests {
         search.update(at(0.1));
         let compat: Vec<_> = search.games().iter().map(|g| g.compat).collect();
         assert_eq!(compat, [Compat::OtherBuild, Compat::OtherProtocol]);
+    }
+
+    #[test]
+    fn the_search_holds_the_game_port_when_it_is_free_and_falls_back_when_it_is_not() {
+        let free = UdpSocket::bind("0.0.0.0:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let search = Search::start_at(free, vec![], own(), Duration::ZERO).unwrap();
+        assert_eq!(search.local_port(), Some(free));
+        assert!(search.on_game_port());
+        // While it holds the port nothing else binds it (so EF7's New must
+        // drop the search first), and dropping it frees the port.
+        assert!(UdpSocket::bind(("0.0.0.0", free)).is_err());
+        drop(search);
+        let taken = UdpSocket::bind(("0.0.0.0", free)).unwrap();
+        let fallback = Search::start_at(free, vec![], own(), Duration::ZERO).unwrap();
+        assert!(!fallback.on_game_port());
+        assert_ne!(fallback.local_port(), Some(free));
+        assert!(fallback.local_port().is_some());
+        drop(taken);
+    }
+
+    #[test]
+    fn answers_reach_a_search_bound_to_the_game_port() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use tore_net::{
+            ConnectDetails, Decision, Entropy, RefuseReason, Server, ServerConfig, ServerEvent,
+        };
+        // A host on another port, as another machine's would be.
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_millis(20)))
+            .unwrap();
+        let host = socket.local_addr().unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&stop);
+        let thread = std::thread::spawn(move || {
+            let mut server = Server::new(ServerConfig {
+                entropy: Entropy::Seeded(1),
+                ..ServerConfig::new(V)
+            });
+            let mut gate = |_: &ConnectDetails| Decision::Refuse {
+                reason: RefuseReason::ShuttingDown,
+                text: String::new(),
+            };
+            let started = std::time::Instant::now();
+            let mut buf = [0u8; 1201];
+            while !flag.load(Ordering::Relaxed) {
+                if let Ok((len, from)) = socket.recv_from(&mut buf) {
+                    server.receive(started.elapsed(), from, &buf[..len], &mut gate);
+                }
+                while let Some(ServerEvent::Discover { from, query }) = server.poll_event() {
+                    // The answer goes to the asker's source port: the game port.
+                    server.answer_discover(from, answer(query.nonce, 5, "From afar"));
+                }
+                while let Some(transmit) = server.poll_transmit() {
+                    socket.send_to(&transmit.datagram, transmit.to).unwrap();
+                }
+            }
+        });
+        let game_port = UdpSocket::bind("0.0.0.0:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let mut search = Search::start_at(game_port, vec![host], own(), Duration::ZERO).unwrap();
+        assert!(search.on_game_port());
+        let started = std::time::Instant::now();
+        while search.games().is_empty() && started.elapsed() < Duration::from_secs(3) {
+            search.update(started.elapsed());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        stop.store(true, Ordering::Relaxed);
+        thread.join().unwrap();
+        assert_eq!(search.games().len(), 1);
+    }
+
+    #[test]
+    fn find_games_prints_each_game_once_and_says_so_when_there_are_none() {
+        let fake = Fake::default();
+        let search =
+            Search::with(fake.clone(), targets(26_900), own(), 0xABCD, Duration::ZERO).unwrap();
+        let mut found = answer(0xABCD, 7, "Friday night");
+        found.password = true;
+        hear(&fake, "192.168.1.20:26900", &found);
+        hear(&fake, "192.168.1.20:26900", &found);
+        let mut out = Vec::new();
+        assert_eq!(find_games_with(search, 0.1, &mut out).unwrap(), 1);
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.lines().count(), 1, "{text}");
+        let fields: Vec<&str> = text.trim_end().split('\t').collect();
+        assert_eq!(
+            fields,
+            [
+                "192.168.1.20:26900",
+                "same build (0.1.3-2-gabc abc)",
+                "Friday night",
+                "UKR",
+                "1/4 players",
+                "lobby",
+                "king Viper",
+                "password",
+                "not full"
+            ]
+        );
+        let search = Search::with(Fake::default(), vec![], own(), 1, Duration::ZERO).unwrap();
+        let mut out = Vec::new();
+        assert_eq!(find_games_with(search, 0.05, &mut out).unwrap(), 0);
+        assert_eq!(String::from_utf8(out).unwrap(), "No games found.\n");
     }
 
     /// A host on loopback, on a thread of its own, answering queries from a

@@ -327,6 +327,29 @@ impl SessionArgs {
     }
 }
 
+/// The port `--find-games` searches: `--port`, else the default. Any other
+/// session option is refused, since `--find-games` joins and hosts nothing.
+pub fn find_games_port(args: &mut SessionArgs) -> Result<u16, String> {
+    let other = args.connect.is_some()
+        || args.host.is_some()
+        || args.callsign.is_some()
+        || args.slot.is_some()
+        || args.password.is_some()
+        || args.name.is_some()
+        || args.open_planes.is_some();
+    if other {
+        return Err("--find-games lists games and exits; only --port goes with it".into());
+    }
+    match args.port.take() {
+        Some(text) => text
+            .parse::<u16>()
+            .ok()
+            .filter(|port| *port != 0)
+            .ok_or_else(|| format!("--port must be a number from 1 to 65535, not {text:?}")),
+        None => Ok(DEFAULT_PORT),
+    }
+}
+
 /// Why `callsign` is not allowed, or `None` when it is.
 pub fn callsign_problem(callsign: &str) -> Option<&'static str> {
     if callsign.is_empty() {
@@ -565,6 +588,40 @@ mod tests {
             ));
         }
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn find_games_takes_a_port_and_nothing_else() {
+        let mut args = SessionArgs::default();
+        assert_eq!(find_games_port(&mut args), Ok(26_900));
+        args.port = Some("27000".into());
+        assert_eq!(find_games_port(&mut args), Ok(27_000));
+        assert!(args.port.is_none());
+        for bad in ["0", "x", "70000"] {
+            args.port = Some(bad.into());
+            assert!(find_games_port(&mut args).is_err(), "{bad}");
+        }
+        for args in [
+            SessionArgs {
+                connect: Some("h".into()),
+                ..SessionArgs::default()
+            },
+            SessionArgs {
+                callsign: Some("Viper".into()),
+                ..SessionArgs::default()
+            },
+            SessionArgs {
+                name: Some("n".into()),
+                ..SessionArgs::default()
+            },
+        ] {
+            let mut args = args;
+            assert!(
+                find_games_port(&mut args)
+                    .unwrap_err()
+                    .contains("only --port")
+            );
+        }
     }
 
     #[test]

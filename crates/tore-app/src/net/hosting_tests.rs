@@ -820,3 +820,42 @@ fn a_hosted_game_is_found_by_the_search_loop() {
         found.answer.summary
     );
 }
+
+/// The search holds the game port while it lives, so the screen must drop it
+/// before this game hosts on the port; with the search gone the host binds at
+/// once. The other way round the search falls back to another port and
+/// still finds the game (slice EF5).
+#[test]
+fn the_search_and_the_host_share_the_game_port_one_after_the_other() {
+    use crate::net::search::{Own, Search};
+    let port = bind_udp("0.0.0.0:0".parse().unwrap())
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let start = |listen| {
+        HostThread::start(HostSetup {
+            spec: spec(),
+            resources: import(),
+            config: hosted_config(),
+            listen,
+            port,
+        })
+    };
+    let search = Search::start(port, Own::this_game(), Duration::ZERO).unwrap();
+    assert!(search.on_game_port());
+    let refused = start(Listen::Any).err().expect("the port is held");
+    assert!(refused.starts_with("Cannot host on UDP port"), "{refused}");
+    drop(search);
+    let (_thread, _link) = start(Listen::Any).expect("the host binds once the search is gone");
+    // With the host up, a new search takes another port, and says so.
+    let mut search = Search::start(port, Own::this_game(), Duration::ZERO).unwrap();
+    assert!(!search.on_game_port());
+    let clock = RealClock::new();
+    let started = Instant::now();
+    while search.games().is_empty() && started.elapsed() < Duration::from_secs(5) {
+        search.update(clock.now());
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(search.games().len(), 1, "found through the unicast targets");
+}

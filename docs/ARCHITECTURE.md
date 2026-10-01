@@ -3413,6 +3413,21 @@ and the internet are stage J. *Agent decision.*
   at its best address (a network address before a loopback one) with a
   `Compat` that says the same build, another build or another protocol
   version; `poll_event()` takes the events. Dropping the `Search` stops it.
+  *Agent decision (the lead's, 2026-10-01):* the search socket is bound to the
+  game port itself when that port is free (`Search::start`), and to an
+  ephemeral port when it is not, with a log line saying which
+  (`local_port()` and `on_game_port()` tell the caller). A stateful firewall
+  (ufw) cannot match a reply to a 255.255.255.255 query and drops it on any
+  other port, so answering to the game port lets one rule, `ufw allow
+  26900/udp`, cover hosting, joining and discovery. **For EF7:** the search
+  holds the game port for as long as the `Search` lives, so the screen must
+  drop its `Search` before this game hosts: the New button stops the search
+  first, then starts the host, whose bind would otherwise fail with "Cannot
+  host on UDP port" (a test in `hosting_tests.rs` covers both orders; with the
+  host up, a new search falls back to another port and still finds the game
+  through its unicast targets). `tore-app --find-games SECONDS [--port N]`
+  runs the loop headlessly and prints each game found
+  ([the guide](DEDICATED-SERVER.md#finding-games-from-the-command-line)).
   *Agent decision:* the machine's own network address is a target beside
   loopback, found by pointing an unconnected UDP socket at a far address (no
   packet is sent), so a game hosted here is also found at the address other
