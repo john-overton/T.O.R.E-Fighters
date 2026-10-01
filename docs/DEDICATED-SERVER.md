@@ -306,7 +306,24 @@ dedicated server has none. *The dedicated server's rules, agent decisions:*
 
 ## Joining from the game
 
-Until the stage F lobby, the game joins a server from the command line:
+*Since EF7* the game joins a server from its menus too: Choose Activity, Multi,
+**Direct Connection**. The screen lists the games and servers found on the
+local network (a server answers the search on its game port), and **Join**
+joins the selected one; a server elsewhere is joined by typing its address or
+name in *Connect to* (and its port after a colon, when it is not the Options
+port). Callsign and password are the screen's too (the password is in
+Options). A refusal (full, wrong password, another version, a content check)
+is a line in the screen's Messages and the screen stays. While the screen is
+open it holds the game port for its search: a server started on this machine
+meanwhile cannot bind the port, and says so ("is a game's Direct Connection
+screen open on this machine?"); close the screen first, or give the server
+another `port`. When the server's port is already taken the other way round,
+the screen's search listens on another port, says so in Messages, and still
+finds the server on this machine. After a mission the debrief returns to the
+screen, which then reads *Leave* while the game is still connected;
+[how the screen works](ARCHITECTURE.md#the-direct-connection-screen-as-built-ef7).
+
+The game also joins a server from the command line:
 
 ```sh
 tore-app --connect 192.168.1.20 --callsign Viper
@@ -363,8 +380,17 @@ that differ. The game version and protocol must match as well
 
 ## Hosting from the game
 
-Until the lobby (stage F, slices EF7 and EF8), a player hosts a game from the
-command line, and the others join it with `--connect`:
+*Since EF7* a player hosts from the menus too: Choose Activity, Multi,
+**Direct Connection**, **New**. It hosts the Quick Mission creator's current
+mission (build it first on the creator's page) under the game name, port and
+password of Options, and the game's own player is the King; unlike `--host`
+it starts only the first mission by itself, then waits in the lobby with the
+debrief returning to the screen, where *Leave* closes the game. A port in use
+is a line in the screen's Messages. [How the screen
+works](ARCHITECTURE.md#the-direct-connection-screen-as-built-ef7).
+
+Until the lobby screen (EF8), a player can also host a game from the command
+line, and the others join it with `--connect`:
 
 ```sh
 tore-app --host duel.txt --callsign Viper
@@ -524,7 +550,7 @@ development machine. When the game port is taken (this game is hosting, or a
 server runs on it) the search uses another port, the log says so, and answers
 to a broadcast may be dropped by such a firewall. The search holds the game
 port while it runs, so a server started on this machine meanwhile cannot bind
-it; the game's screen stops its search before it hosts.
+it; the game's Direct Connection screen stops its search before it hosts.
 
 A machine on several networks (a laptop with Wi-Fi and a VPN) sends its
 question out of the default interface only; a host on another network is

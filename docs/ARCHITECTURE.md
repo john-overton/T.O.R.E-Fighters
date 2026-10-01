@@ -3185,8 +3185,9 @@ taken together at John's request of 2026-10-01, written by the lead and
 reviewed by John the same day; his answers are in the guide's
 [decisions](MULTIPLAYER.md#decisions). Built so far: slice EF0, the research
 and the dialog reader, slice EF1, the import of the art, slice EF2, the widget
-kit, slice EF3, the host inside the game, slice EF4, the lobby on the wire, and
-slice EF5, discovery and addresses (below); the rest is design.
+kit, slice EF3, the host inside the game, slice EF4, the lobby on the wire,
+slice EF5, discovery and addresses, and slice EF7, the Direct Connection screen
+(below); the rest is design.
 Every choice is an agent decision unless it is credited to John.
 
 John's direction (2026-10-01):
@@ -3385,7 +3386,7 @@ different version; the answer is never longer than the query, as the
 handshake already requires. IPv4 broadcast only: IPv6 discovery, port mapping
 and the internet are stage J. *Agent decision.*
 
-*Built (EF5), with no screen (EF7 draws it).* What the screen takes:
+*Built (EF5); EF7 draws it, [below](#the-direct-connection-screen-as-built-ef7).* What the screen takes:
 
 - **The packets** are `tore_net::packet` kinds 8 (Discover query, exactly 1,000
   bytes: the asker's protocol version, a nonce, zero padding) and 9 (Discover
@@ -3462,6 +3463,131 @@ and the internet are stage J. *Agent decision.*
   `port`, `game-name` and up to eight `address` lines, most recent first);
   `--connect` and `--host` remember their address, port, game name and an
   explicit callsign. *Agent decision:* the password is not kept.
+
+#### The Direct Connection screen as built (EF7)
+
+*Built (EF7), 2026-10-01.* The screen is `crates/tore-app/src/direct_screen/`
+(`mod.rs` the screen, `options.rs` its Options panel, `app.rs` the game's side,
+`preview.rs` the headless pictures, `tests.rs`), made of the widget kit at
+NEWNET's rectangles on `MODEM3` under `NETIPX3`'s title bar. Everything below
+is an agent decision unless it is credited to John.
+
+- **Reaching it.** Choose Activity's Multi menu has two rows now, *Direct
+  Connection...* and *Internet Lobby...* (the public lobby of stage I: it still
+  answers "coming soon"); retail's six rows (Serial, Modem, IPX/SPX, TCP/IP,
+  Disconnect, Airbase Assault) are not built. The screen covers Choose
+  Activity entirely, so the menu is not drawn under it; the window title reads
+  "Direct Connection". Single player's rows and screens do not change.
+- **The kit's life.** `Menu::new` consumes the imported `Assets`, so it keeps
+  what the kit is made of: `widgets::KitSource`, a copy of the menu pieces the
+  kit shares with Choose Activity and the multiplayer pieces as bytes (about 3
+  MB, built once at start-up for nothing but a copy). The first time the
+  screen opens, a thread of its own decodes the kit from it ("Opening Direct
+  Connection..." shows on Choose Activity's message line meanwhile, and the
+  window keeps running); the game then keeps the `Arc<Kit>` for the rest of
+  its life, so the second visit and the lobby (EF8) open at once. Measured:
+  the kit builds in about 1.1 ms in a release build, so the player never sees
+  the message there; the dev build takes longer.
+- **Controls.** Callsign (remembered; a first visit starts in it, and Join and
+  New ask for it in words: "Type your callsign first."), Connect to (an
+  address or a name with an optional port, an address typed without a port
+  uses Options' port), Show full games (kept in `network-v1.conf` as
+  `show-full`; John's approved mock puts it on the screen, not in Options),
+  Games, Players, Messages, New, Join, Options, Cancel.
+  - **Games** lists what the search holds, four a page with the rocker and
+    "PAGE n of m": the lock, the name, players over capacity and *Lobby*,
+    *Flying* or *Closed*. A game from another build or protocol shows its
+    version where the state goes, dimmed, and cannot be joined (so does a full
+    game, shown only with "Show full games", and a closing one). The selected
+    game's mission shows as a line under the Games box ("Mission: KOLA, clear,
+    ..."), and its players in the Players box with the King's crown (a game
+    with more players than its answer lists ends with "and N more"; the
+    Players box has no pager, the wheel scrolls it).
+  - **Join** goes to the selected game's address directly ("Attempting
+    connection to 'Friday night' at 192.168.1.20:26900..."), or, for a typed
+    address, through the lookup, which puts each step in Messages (looking up,
+    found, trying, no answer from ..., answered) and tries every address the
+    name gives; the lookup is cancelled by Cancel or Esc ("Cancelled."). When
+    both a game is selected and an address typed, Join goes to whichever the
+    player touched last (typing takes the list's selection away). A refusal,
+    whether the host's at the handshake (full, wrong password, wrong version,
+    a content check) or the lookup's, is a plain line in Messages and the
+    screen stays.
+  - **Enter** presses the default button: Join once a game is selected or an
+    address typed, New otherwise (the blue face moves between them). Tab and
+    Shift+Tab walk the controls, Esc is Cancel, Up and Down (or the wheel) in
+    Connect to step through the addresses joined before (the last eight,
+    most recent first), every control works by the mouse too.
+  - **Cancel** stops a lookup, else leaves a session the screen started (it
+    reads *Leave* then), else leaves the screen, in that order.
+  - **Options** is a panel over the screen: the port (saved), the password to
+    send when joining and to host with (typed as asterisks, kept while the
+    game runs, never written down), the game name when hosting (saved; empty
+    is "CALLSIGN's game"), and the retail quick messages, read only (editing
+    them is phase 2). OK keeps the values, Cancel and Esc drop them, a bad port
+    is refused in the panel.
+- **The search.** It starts on the first turn after the screen opens, on the
+  remembered port, and stops when the screen closes, when a join or New takes
+  over, and while Options is up; it starts again when a join is refused or a
+  session the screen started ends, and says what it is doing in Messages once
+  for each port and outcome, not each time. It never blocks a frame (`Search::update` every frame, which
+  sends one round of queries every two seconds). When the game port is
+  already in use on this machine (a dedicated server, or another game, is
+  running) the search listens on another port and says so in Messages: "UDP
+  port 26977 is busy on this machine (is a game or a server running?), so the
+  search listens on port 33590; other computers may not answer." The server
+  on this machine is still found, through the search's loopback and own-address
+  targets. `tore-server`'s port-in-use message now asks whether a game's Direct
+  Connection screen is open on this machine.
+- **New** drops the search first (EF5's note: the host needs the game port),
+  then starts the host on its thread (EF3) as King, hosting the **Quick
+  Mission creator's current mission** (its draft always exists, so "a default
+  quick mission if none was built" is the creator's own defaults) with the
+  game name from Options or "CALLSIGN's game", the port from Options, the
+  password from Options, `open-planes friendly` and the mission's other
+  settings at the spec's defaults (no cheats). It behaves as `--host` does:
+  the hosting player takes the first slot and readies, and the game starts the
+  mission once everyone holding a slot is ready. *One difference:* after that
+  first mission the game does **not** start another by itself
+  (`NetSession::auto_restart` is off for a game hosted from the screen). With
+  `--host` the next mission starts the moment the debrief closes, so the
+  hosting player could never get back to the screen; here the debrief returns to
+  the screen, which then reads *Leave*, until EF8's lobby has a Fly button. A
+  port in use or a build failure is a plain line in Messages ("Cannot host on
+  UDP port 26977: Address already in use. Is another game or server using it?
+  Choose another port in Options.").
+- **After a flight.** A joined player flies when the host starts, as with
+  `--connect`; when the mission ends (End Mission leaves the game) the debrief
+  shows and closes back to the screen with the session over, or, for a hosting
+  player or a player whose host goes on, with the session still running and
+  the button reading *Leave*. Leaving a session sends the goodbye and returns
+  the screen to idle with the search running again.
+- **Glue in other files.** `net/session.rs` has `Join::to(address, ...)` (a
+  join to a known address) and `NetSession::auto_restart`; `net/play.rs` has
+  `start_join` (shared with `--connect`), sends the session's messages to the
+  screen instead of the main menu's message line while it is open, and says
+  "Connected" there; `net/hosting.rs` has `begin_hosting`, which `--host`
+  and the screen share and which returns the reason instead of showing it;
+  `net/settings.rs` remembers `show-full`; the kit has `Button::set_default`,
+  `TextField::masked` and `KitSource`; `main.rs` holds the screen's field, the
+  event routing (keys, text, pointer, wheel, controller menu keys, focus and
+  resize) and the snapshot states `--snapshot-state direct`, `direct-games`,
+  `direct-trying`, `direct-refused` and `direct-options`.
+- **Cost.** The screen's update and draw cost about 0.3 ms a frame in a
+  release build with the search running: 0.29 ms in the ignored test
+  (`direct_screen::tests::time_screen_frame`, 500 frames, a game selected) and,
+  in the windowed game with a `tore-server` found and listed, 0.30 to 0.35 ms of
+  draw (worst 1.4 ms on a loaded machine) and 2 to 3 microseconds of update,
+  over 26,400 frames (88 windows of 300; `TORE_DIRECT_TIMING=1` logs this every 300 frames). The
+  static backdrop (the background, panel, title and headings) is drawn once and
+  copied, which took the draw from 0.75 ms to 0.3 ms. The window's present and
+  the rest of the frame are not in these numbers. The game redraws the screen
+  60 times a second while it is open, as it does for any session; a run with
+  `--input-script` spins faster than that (about 1,500 frames a second, as it
+  does on Choose Activity), so the script's frame rates say nothing.
+- **Not built.** The baked "?" bar of the title picture does nothing (retail's
+  second menu bar), the screen has no keyboard shortcut letters, and a name
+  chosen from a callsign list (`CALLSIGN.DLG`) is not offered.
 
 ### The lobby
 
@@ -3712,7 +3838,7 @@ second completes the plan's stage F and stage E's replays.
 | EF4 The lobby on the wire | Opus | EF3 | The host's lobby phase, slots, loadouts, ready and start, the King's mission, return to the lobby after a mission, the crown, kick; the dedicated server's lobby without a King; protocol version 3 | Simulator tests: players join a lobby, take slots, arm, ready, start, fly, return and fly again; the King's mission change reaches everyone; the wire golden test. **Built (EF4):** see [the lobby](#the-lobby); the crown stays the hosting player's (passing it is phase 2) |
 | EF5 Discovery and addresses | Sonnet | EF4 | The discovery query and answer, the search loop, names resolved off the screen's thread with every address tried, remembered addresses | A host is found on 127.0.0.1 and on this machine's network address; a different build is shown as such; no answer is larger than its query. **Built (EF5):** see [finding a game and joining](#finding-a-game-and-joining) |
 | EF6 Chat | Sonnet | EF4 | Chat on the wire with the host's routing, the lobby's box and line, the flight line and keys, the top-left chat window with its colours, `CHAT.TXT` quick messages, limits; `docs/CONTROLS.md` | Routing tests for every receiver; a windowed run types and receives chat in flight with a bot; the controls list test |
-| EF7 Direct Connection screen | Sonnet | EF2, EF5 | The MULTI menu's rows and the screen of "Finding a game and joining" | Headless renders; a windowed run finds a host on this machine and joins it |
+| EF7 Direct Connection screen | Sonnet | EF2, EF5 | The MULTI menu's rows and the screen of "Finding a game and joining" | Headless renders; a windowed run finds a host on this machine and joins it. **Built (EF7):** see [the Direct Connection screen as built](#the-direct-connection-screen-as-built-ef7) |
 | EF8 Lobby screen | Sonnet | EF2, EF4, EF6 | The lobby screen, the creator with Accept, Load Ordnance for one's own slot, the debrief and the return | A windowed run hosts, builds a mission, takes a slot, chats with a bot, starts, flies, ends and returns to the lobby |
 | EF9 Acceptance | lead, then John | all | The lead's smoke test on this machine (a hosting game, a joining game, a bot); then John on three machines (macOS, Linux, Windows) | John flies with friends from the menus |
 

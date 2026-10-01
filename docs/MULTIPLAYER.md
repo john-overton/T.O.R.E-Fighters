@@ -133,6 +133,21 @@ lobby after each mission with everyone still connected; a dedicated server's
 lobby has no King. The King's settings in the table above are phase 2.
 ([architecture](ARCHITECTURE.md#the-lobby))
 
+*Built (EF7, 2026-10-01): finding and joining.* Choose Activity's Multi menu
+opens the **Direct Connection** screen, the first half of the flow above. It
+lists the games found on the local network (name, players, whether they are in
+the lobby or flying, a lock for a password, another build shown as such), shows
+the selected game's mission and players, joins the selected game or a typed
+address or name (every address a name gives is tried, and a refusal comes back
+as a plain line), and **New** hosts a game from the Quick Mission creator's
+current mission. Options holds the port, the password and the game's name, and
+shows the retail quick messages. The game remembers the callsign, the port, the
+game name, the last eight addresses and "Show full games"; the password is
+never kept. Until the lobby screen (EF8) a joined player takes the first free
+slot and readies by itself, and a hosting player's game starts the first
+mission once everyone holding a slot is ready. How it works:
+[architecture](ARCHITECTURE.md#the-direct-connection-screen-as-built-ef7).
+
 **Start.** Everyone starts airborne, as in retail multiplayer. Late joiners take
 over aircraft already flying. *Retail gap-fill (agent):* until multiplayer
 ground starts exist, "back at a base" starts the player airborne near their
@@ -434,7 +449,9 @@ flowchart LR
 ```
 
 Direct connect by address stays available for dedicated servers and LAN, and
-skips the master entirely.
+skips the master entirely. *Built (EF7):* the game's Direct Connection screen
+joins a typed address or name, and lists games on the local network, without a
+master.
 
 ### Netcode model
 

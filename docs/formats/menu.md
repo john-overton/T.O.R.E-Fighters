@@ -101,7 +101,7 @@ The app previews that original PCM recording at low volume and allows disabling 
 - The six available activity buttons stay on the menu and briefly announce “coming soon.” Replay/continue are inert.
 - `?` contains stub Help/About and working Exit to Desktop (portable wording for the recovered Windows exit action).
 - `Pref` contains Graphics..., Sound..., Controls... and Re-import media.... Sound... opens the retail [Sound/Music Prefs](../spec/sound-prefs.md) dialog.
-- `Multi` contains stub Host Game/Join Game/Player Setup. These labels/groupings and dropdown chrome are authored scaffolding, not a claimed decoded retail tree.
+- `Multi` contains two authored rows (EF7, 2026-10-01): *Direct Connection...*, which opens the [Direct Connection screen](#the-direct-connection-screen-as-built-ef7), and *Internet Lobby...*, a stub that announces "coming soon" (the public lobby of stage I). They replace the earlier stub Host Game/Join Game/Player Setup. These labels/groupings and dropdown chrome are authored scaffolding, not a claimed decoded retail tree (retail's six rows are listed below).
 - Tab/arrows and Enter navigate; Escape dismisses; Command-Q/Alt-F4 and window close exit.
 
 ## Provenance and reproduction
@@ -455,8 +455,8 @@ with lines (*agent decision*; retail's handling is unknown).
   Campaign) has five other references and is a campaign-mode menu (I).
   "Disconnect is grayed out until connected" is the manual's; the tree has no
   state bytes (U).
-- The "Multi contains stub Host Game/Join Game/Player Setup" line above describes
-  the authored scaffolding; the retail tree is the one listed here.
+- The authored Multi rows (now *Direct Connection...* and *Internet Lobby...*,
+  see "Stub behavior") are scaffolding; the retail tree is the one listed here.
 
 ### Settled while building the widget kit (EF2, 2026-10-01)
 
@@ -479,3 +479,31 @@ with lines (*agent decision*; retail's handling is unknown).
   as EF0's does against the screenshot: a mean grey difference of 2.9 over the
   panel and 4.5 over the whole screen below the title bar, after a one pixel blur
   of the render (the rest is the screenshot's resampling).
+
+### The Direct Connection screen as built (EF7, 2026-10-01)
+
+Implementation mode, from the rectangles above. The screen is
+`crates/tore-app/src/direct_screen/`; its behaviour is in
+[the architecture notes](../ARCHITECTURE.md#the-direct-connection-screen-as-built-ef7).
+Everything on it is made of the widget kit at NEWNET's rectangles on `MODEM3`
+under `NETIPX3`'s top 80 rows (John's approved look), with these placements
+(agent decisions where the table above has no retail counterpart):
+
+| Item | Rectangle or position | Notes |
+| --- | --- | --- |
+| Background, panel, title, frame, headings | as the NEWNET table | The panel title still reads "TCP/IP Network connection" |
+| Callsign | field (88, 108), 139 by 13 | Flat `PANELFNT` bar; hint "your callsign" when empty |
+| Connect to | label (45, 139); `EDITL/M/R` field at (110, 132), 20 characters | An address or a name with an optional port; hint "host or address" |
+| Show full games | `CHECK0n` lamp at (330, 130) with its label | Kept in the settings; off hides full games |
+| Games | list at (48, 185), 200 wide, four rows; rocker, PREV/NEXT, PAGE and the page box as NEWNET | Columns from the row's text origin: lock (centred, 11 wide), name (x 14, 84 wide), players over capacity (x 100, 22 wide, right aligned), state (x 126, 46 wide: Lobby, Flying, Closed, or `vVERSION` for another build) |
+| Mission line | `PANELFNT` at (45, 290), up to 549 wide | The selected game's mission summary, or why the game cannot be joined; between the Games box (ends y 285) and the Messages heading (y 304) |
+| Players | list at (346, 185), 242 wide, five rows, no pager | Crown, then the callsign |
+| Messages | NEWNET's box, (45, 319), 549 by 88 | Grey system lines in the kit's colours |
+| Buttons | New, Join, Options, Cancel at NEWNET's positions | The blue default face with the striped cap is on Join once a game is selected or an address typed, on New otherwise; Cancel reads *Leave* while a session runs |
+| Options panel | panel (80, 100), 480 by 360; fields at (240, 136), (240, 166), (240, 196); quick messages box (115, 262), 410 by 128; OK (190, 408) and Cancel (330, 408) | Port (five digits), password (asterisks), game name; the box shows `F1  text  (to all)` lines |
+
+Headless renders, `--snapshot-state` `direct` (empty, searching), `direct-games`
+(six games on two pages, the last selected, with its players), `direct-trying`
+(an address being tried), `direct-refused` (refusals in Messages) and
+`direct-options`, are in the lead's notes (`.local/mp-notes/stage-ef/ef7/`),
+beside EF2's mock.

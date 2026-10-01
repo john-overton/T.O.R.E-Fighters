@@ -35,7 +35,7 @@ for size and blankness, and were also looked at by the agent that wrote them.
 | `menus-validate-text` | `--validate-text`: every imported string decodes without U+FFFD and is drawable in the original fonts |
 | `menus-window-terrain-*` | Real-window captures on every base theater (clear, night), four theaters in each other weather, and ground starts in all six weathers, checked for blank, black, one-colour, dark-day and bright-night frames |
 | `menus-validate-maps`, `menus-validate-weather` | Every imported map layout and every weather module and choice |
-| `menus-snap-*` | A CPU snapshot of every `--snapshot-state` value (main menu, Pref, controls tabs, graphics, sound, replays, locate), each checked for the right size and not being blank |
+| `menus-snap-*` | A CPU snapshot of every `--snapshot-state` value (main menu, Pref, controls tabs, graphics, sound, replays, locate, the Direct Connection screen), each checked for the right size and not being blank |
 | `menus-snap-quick-*` | The same for the creator, the aircraft and theater popups, the Load Ordnance page (normal, empty, drag, messages), the five debrief pages and both outcomes, for every aircraft and for every one of the 75 theater layouts |
 | `menus-start-*` | The headless AI probe starts a mission through the creator's launch layout code: every aircraft on three theaters, every weather choice, every separation, every wing size. No aircraft may start off the map |
 | `menus-loadout-*` | `--loadout none` and `--loadout guns` (stores taken off) for every aircraft, flown headless |
@@ -172,7 +172,7 @@ prints every in-flight menu item with what it does), a unit test, or the code pa
 | Replay Last Mission, Continue Old Campaign greyed; Play Single Mission and the campaign entries say "coming soon" | 11 | NOT IMPLEMENTED | `menus-snap-notice`, features row |
 | ? menu with Exit to Desktop | 12 | OK | `menus-snap-help` |
 | Pref menu: Graphics, Sound (Screen Resolution absent, Controls and Re-import media added) | 12, 326 | DIFFERS | `menus-snap-pref`; the game has one window size setting via `--window-size` and Alt-Enter |
-| Multi menu (retail: serial, modem, IPX, TCP) | 12 | DIFFERS | `menus-snap-multi`: Host, Join, Player Setup for the new multiplayer, not the retail transports |
+| Multi menu (retail: serial, modem, IPX, TCP) | 12 | DIFFERS | `menus-snap-multi`: Direct Connection and Internet Lobby (a stub) for the new multiplayer, not the retail transports; the Direct Connection screen's five states are `menus-snap-direct*` |
 | OK is Enter and Cancel is Escape on every screen | 12 | DIFFERS | Load Ordnance and debrief: Enter is OK, Escape backs out. Creator: Escape is Cancel, but Enter activates the focused field and OK is reached by Tab ([keyboard traversal spec](../spec/quick-mission-menu.md)) |
 | Text buttons: left click cycles forward, right backward, Shift-click opens the list | 13 | OK | `quick_mission` right-click tests, creator fuzz |
 | Aircraft menu: Fly All, Era | 14, 18, 326 | NOT IMPLEMENTED | the menu says "Aircraft era filters are not available yet" |
