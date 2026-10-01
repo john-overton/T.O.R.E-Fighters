@@ -1,7 +1,6 @@
-//! The game's side of networking: the wire messages and the host session
-//! now, and in later slices the client session (prediction, interpolation,
-//! clock steering, readouts) and the headless bot client. See
-//! docs/ARCHITECTURE.md, "Network sessions".
+//! The game's side of networking: the wire messages, the host session, the
+//! client session (prediction, interpolation, clock steering, readouts) and
+//! the headless bot. See docs/ARCHITECTURE.md, "Network sessions".
 //!
 //! [`wire`] knows the game's messages and their bytes
 //! ([`docs/formats/net-protocol.md`](../../../docs/formats/net-protocol.md),
@@ -14,12 +13,19 @@
 //! clock the caller drives with the time, the transport's server endpoint,
 //! joins, each seat's input buffer, the tick's sorting into events, the
 //! snapshots and the mission's lifecycle ([`Host`]).
+//!
+//! [`client`] is the client session, a player's game joined to a host with
+//! no window or audio ([`Client`]): it predicts its own plane, draws the rest
+//! in the past, and hands the game a frame each render, with a diagnostics
+//! log and a capture that replays offline. [`bot`] flies it with a scripted
+//! pilot, as the `tore-bot` program does.
 
 pub mod bot;
 pub mod client;
 pub mod host;
 pub mod wire;
 
+pub use client::capture;
 pub use client::{
     Client, ClientConfig, ClientError, ClientEvent, ClientFrame, ClientPhase, ClientStats, Controls,
 };

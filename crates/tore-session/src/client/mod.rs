@@ -329,6 +329,10 @@ pub struct ClientStats {
     /// Entities drawn over all frames, and of them past their newest state.
     pub entity_frames: u64,
     pub extrapolated: u64,
+    /// Of those, the ones drawn with an extra delay (sent twice a second),
+    /// and of them the ones past their newest state.
+    pub far_frames: u64,
+    pub far_extrapolated: u64,
     /// Ticks the host repeated the last input for, as its snapshots said.
     pub inputs_repeated: u64,
     pub input_packets: u64,
@@ -353,7 +357,8 @@ pub struct ClientFrame {
     pub picture: RenderSnapshot,
     /// The host tick the picture shows.
     pub render_tick: f64,
-    /// The newest cockpit readout received.
+    /// The newest cockpit readout received, its contacts' bearings,
+    /// elevations and distances worked out around `presented`.
     pub readout: Option<CockpitReadout>,
     /// The plane's ownship configuration (its loadout).
     pub config: Arc<Configuration>,
@@ -507,7 +512,6 @@ pub struct Client {
     early: Vec<Vec<u8>>,
     /// The clock was set from the host's first margin since seating.
     settled: bool,
-    readout: Option<CockpitReadout>,
     upstream: LossWindow,
     downstream: LossWindow,
     stats: ClientStats,
@@ -599,7 +603,6 @@ impl Client {
             snapshot_tick: None,
             early: Vec::new(),
             settled: false,
-            readout: None,
             upstream: LossWindow::default(),
             downstream: LossWindow::default(),
             stats: ClientStats::default(),
@@ -702,7 +705,8 @@ impl Client {
         }
         let margin = self.interpolation_margin(now);
         self.render_clock.advance(now, margin);
-        self.interp.advance(now);
+        let lossy = self.downstream.loss(now) > HIGH_LOSS;
+        self.interp.advance(now, lossy);
         self.diagnose(now);
     }
 
@@ -877,7 +881,8 @@ impl Client {
         let now = self.now;
         let margin = self.interpolation_margin(now);
         self.render_clock.advance(now, margin);
-        self.interp.advance(now);
+        let lossy = self.downstream.loss(now) > HIGH_LOSS;
+        self.interp.advance(now, lossy);
         let render = self.render_clock.render();
         if let Some(render) = render {
             while self
@@ -903,6 +908,8 @@ impl Client {
         self.stats.frames += 1;
         self.stats.entity_frames += drawn.entities as u64;
         self.stats.extrapolated += drawn.extrapolated as u64;
+        self.stats.far_frames += drawn.far as u64;
+        self.stats.far_extrapolated += drawn.far_extrapolated as u64;
 
         let seat = self.seat.as_ref()?;
         let own = seat.predictor.plane();
@@ -972,6 +979,11 @@ impl Client {
             pilots,
             models: mission.models.clone(),
         };
+        // The newest readout, its contacts placed around the drawn plane.
+        let readout = self.wire.as_ref().and_then(|wire| {
+            wire.cockpit_readout(&presented, Some(&mission.world.terrain.airport_scene))
+                .and_then(Result::ok)
+        });
         Some(ClientFrame {
             seat: seat.seat,
             plane: PlaneId(plane),
@@ -981,7 +993,7 @@ impl Client {
             presented,
             picture,
             render_tick: render,
-            readout: self.readout.clone(),
+            readout,
             config,
             events: std::mem::take(&mut self.released),
         })

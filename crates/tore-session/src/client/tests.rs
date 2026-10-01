@@ -397,6 +397,8 @@ struct Measured {
     drawn: u64,
     within: [u64; 3],
     worst_ft: f64,
+    /// Aircraft frames drawn with an extra delay (sent twice a second).
+    far: u64,
 }
 
 /// Two bots fight AI enemies for `seconds` against a host at `round_trip`
@@ -433,7 +435,15 @@ fn fight(seconds: u64, round_trip: Duration, loss: f64) {
             let render = player.client.render_tick().unwrap();
             m.frames += 1;
             for pose in picture.targets.iter().filter(|p| p.aircraft.is_some()) {
-                let Some(truth) = rig.truth_at(pose.id, render) else {
+                // Each is drawn at the render time less its own extra delay:
+                // compared with the host at that time.
+                let key = EntityKey {
+                    kind: crate::wire::entity::EntityKind::Aircraft,
+                    id: pose.id,
+                };
+                let extra = player.client.interpolator().extra(key).unwrap_or(0.);
+                m.far += u64::from(extra > 0.);
+                let Some(truth) = rig.truth_at(pose.id, render - extra) else {
                     continue;
                 };
                 let error = (0..3)
@@ -449,6 +459,21 @@ fn fight(seconds: u64, round_trip: Duration, loss: f64) {
         }
     }
     let ticks = seconds * 120;
+    let flying: Vec<ClientStats> = rig.players.iter_mut().map(|p| p.client.stats()).collect();
+    for i in [a, b] {
+        // The newest readout is the seat's own plane's, recent.
+        let now = rig.net.now();
+        let frame = rig.players[i].client.frame(now).unwrap();
+        let readout = frame.readout.as_ref().expect("a readout");
+        assert_eq!(readout.plane, frame.plane.0);
+        assert!(
+            readout.tick as f64 > frame.render_tick - 30.,
+            "{}",
+            readout.tick
+        );
+        assert_eq!(readout.stores.ammo.len(), frame.config.stations.len());
+        rig.players[i].digests.push(frame.digest());
+    }
     for i in [a, b] {
         let now = rig.net.now();
         rig.players[i].client.leave(now);
@@ -460,22 +485,34 @@ fn fight(seconds: u64, round_trip: Duration, loss: f64) {
         let corrections = p.client.corrections();
         let shown = corrections.iter().filter(|c| c.shown).count();
         let under_foot = corrections.iter().filter(|c| c.feet < 1.).count();
+        let pct = |n: u64, of: u64| 100. * n as f64 / of.max(1) as f64;
+        eprintln!("bot {i}: {:#?}", flying[i]);
         eprintln!(
-            "bot {i}: {stats:#?}\n  corrections {} (shown {shown}, under 1 ft {under_foot}), \
-             {} snapshots: {:.2} percent needed a visible correction\n  \
-             other aircraft drawn {}: within 1 ft {:.2} percent, 3 ft {:.2}, 10 ft {:.2}, \
-             worst {:.2} ft\n  extrapolated {:.3} percent of entity frames\n  \
-             inputs repeated {:.3} percent of {ticks} ticks\n  gun bursts by the bots' pilots",
+            "  corrections {} (shown {shown}, under 1 ft {under_foot}); {:.2} percent of {} \
+             snapshots needed a visible correction",
             corrections.len(),
-            stats.snapshots,
-            100. * shown as f64 / stats.snapshots.max(1) as f64,
+            pct(shown as u64, stats.snapshots),
+            stats.snapshots
+        );
+        eprintln!(
+            "  other aircraft drawn {} ({} far): within 1 ft {:.2} percent, 3 ft {:.2}, \
+             10 ft {:.2}; worst {:.2} ft",
             m.drawn,
-            100. * m.within[0] as f64 / m.drawn.max(1) as f64,
-            100. * m.within[1] as f64 / m.drawn.max(1) as f64,
-            100. * m.within[2] as f64 / m.drawn.max(1) as f64,
-            m.worst_ft,
-            100. * stats.extrapolated as f64 / stats.entity_frames.max(1) as f64,
-            100. * stats.inputs_repeated as f64 / ticks as f64,
+            m.far,
+            pct(m.within[0], m.drawn),
+            pct(m.within[1], m.drawn),
+            pct(m.within[2], m.drawn),
+            m.worst_ft
+        );
+        eprintln!(
+            "  extrapolated {:.3} percent of entity frames; far ones {} of {}",
+            pct(stats.extrapolated, stats.entity_frames),
+            stats.far_extrapolated,
+            stats.far_frames
+        );
+        eprintln!(
+            "  inputs repeated {:.3} percent of {ticks} ticks",
+            pct(stats.inputs_repeated, ticks)
         );
         assert!(
             p.events
@@ -527,4 +564,84 @@ fn two_bots_fight_and_a_capture_replays_into_the_same_frames() {
 #[ignore = "five minutes of simulated flight"]
 fn two_bots_fight_for_five_minutes() {
     fight(300, Duration::from_millis(150), 0.02);
+}
+
+/// A bot joins a host over real UDP sockets on 127.0.0.1, with the real
+/// clock and system entropy, flies for `seconds` and leaves with its
+/// debrief.
+fn real_udp(seconds: u64) {
+    let resources = Arc::new(resources());
+    let mut host = Host::new(
+        spec(2, 2, 20),
+        Arc::clone(&resources),
+        HostConfig::new(build()),
+    )
+    .unwrap();
+    let mut host_socket = tore_net::bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
+    let address = host_socket.local_addr().unwrap();
+    let mut socket = tore_net::bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
+    let clock = tore_net::RealClock::new();
+    let client = Client::connect(
+        ClientConfig::new(address, "Viper", build()),
+        resources,
+        clock.now(),
+    )
+    .unwrap();
+    let mut bot = crate::bot::Bot::new(client);
+    let mut events = Vec::new();
+    let mut left = false;
+    let deadline = Duration::from_secs(seconds + 10);
+    while clock.now() < deadline {
+        let now = clock.now();
+        host.receive_from(now, &mut host_socket).unwrap();
+        host.update(now);
+        host.transmit(&mut host_socket).unwrap();
+        bot.client.receive_from(now, &mut socket).unwrap();
+        if !left && bot.client.phase() == ClientPhase::Flying {
+            let seated = events
+                .iter()
+                .any(|e| matches!(e, ClientEvent::Seated { .. }));
+            if seated && now >= Duration::from_secs(seconds) {
+                bot.client.leave(now);
+                left = true;
+            }
+        }
+        bot.update(now);
+        bot.client.transmit(&mut socket).unwrap();
+        events.extend(std::iter::from_fn(|| bot.client.poll_event()));
+        if bot.client.phase() == ClientPhase::Closed {
+            break;
+        }
+        std::thread::sleep(
+            host.next_wake(now)
+                .min(bot.client.next_wake(now))
+                .max(Duration::from_micros(100)),
+        );
+    }
+    let stats = bot.client.clone_stats();
+    eprintln!("real UDP: {stats:#?}");
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, ClientEvent::Seated { .. }))
+    );
+    assert!(
+        events.iter().any(|e| matches!(e, ClientEvent::Debrief(_))),
+        "{events:?}"
+    );
+    assert_eq!(bot.client.phase(), ClientPhase::Closed);
+    assert!(stats.snapshots as f64 > seconds as f64 * 30. * 0.8);
+    assert!(bot.frames > 0);
+}
+
+#[test]
+fn a_bot_flies_over_real_udp_on_this_machine() {
+    real_udp(3);
+}
+
+/// The acceptance's minute; run with `--ignored`.
+#[test]
+#[ignore = "a minute of real time"]
+fn a_bot_flies_a_minute_over_real_udp() {
+    real_udp(60);
 }

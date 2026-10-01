@@ -31,6 +31,9 @@ use tore_world::snapshot::{
 pub const EXTRAPOLATE_TICKS: f64 = JUMP_TICKS;
 /// The longest extra delay (one second), however rarely an entity comes.
 pub const EXTRA_MAX: f64 = 120.;
+/// A far entity's interval before its gaps are known: the host's twice a
+/// second.
+pub const FAR_INTERVAL: f64 = 60.;
 /// States kept per entity.
 const KEPT: usize = 64;
 
@@ -40,7 +43,9 @@ struct Track {
     states: VecDeque<(u32, EntityState)>,
     removed: Option<u32>,
     extra: ExtraDelay,
-    target: f64,
+    /// The entity is sent twice a second, and its last gaps between states.
+    far: bool,
+    gaps: VecDeque<f64>,
     /// The entity has been drawn: its extra delay now only slides.
     drawn: bool,
 }
@@ -63,19 +68,38 @@ impl Track {
         if self.removed.is_some_and(|removed| removed < tick) {
             self.removed = None;
         }
-        // The entity's band, from the gap to the state before.
+        // The entity's band, from the gap to the state before: a far one's
+        // interval is the shortest of its last three gaps, so one lost
+        // update does not stretch it.
         if let Some(newest) = newest.filter(|n| tick > *n) {
             let gap = f64::from(tick - newest);
             let tps = f64::from(ticks_per_snapshot);
             if gap >= 4. * tps {
-                self.target = gap.min(EXTRA_MAX);
+                self.far = true;
+                self.gaps.push_back(gap);
+                while self.gaps.len() > 3 {
+                    self.gaps.pop_front();
+                }
             } else if gap <= 2. * tps {
-                self.target = 0.;
-            }
-            if !self.drawn {
-                self.extra.ticks = self.target;
+                self.far = false;
+                self.gaps.clear();
             }
         }
+    }
+
+    /// The extra delay the entity's band asks for: none for a near one, its
+    /// interval for a far one, two while loss is high.
+    fn target(&self, lossy: bool) -> f64 {
+        if !self.far {
+            return 0.;
+        }
+        let interval = self
+            .gaps
+            .iter()
+            .copied()
+            .reduce(f64::min)
+            .unwrap_or(FAR_INTERVAL);
+        (interval * if lossy { 2. } else { 1. }).min(EXTRA_MAX)
     }
 }
 
@@ -89,6 +113,10 @@ pub struct Drawn {
     /// Entities drawn, and of them the ones drawn past their newest state.
     pub entities: usize,
     pub extrapolated: usize,
+    /// Of the entities, the ones drawn with an extra delay, and of those
+    /// the ones past their newest state.
+    pub far: usize,
+    pub far_extrapolated: usize,
 }
 
 /// Every entity's received states, and their drawing.
@@ -136,14 +164,19 @@ impl Interpolator {
         }
     }
 
-    /// Slides every extra delay on to `now`.
-    pub fn advance(&mut self, now: Duration) {
+    /// Slides every extra delay on to `now`; `lossy` while snapshots lost
+    /// more than 1 percent over 10 seconds.
+    pub fn advance(&mut self, now: Duration, lossy: bool) {
         let last = *self.last.get_or_insert(now);
         let dt = ticks_of(now.saturating_sub(last));
         self.last = Some(now.max(last));
         for track in self.tracks.values_mut() {
-            let target = track.target;
-            track.extra.slide(target, dt);
+            let target = track.target(lossy);
+            if track.drawn {
+                track.extra.slide(target, dt);
+            } else {
+                track.extra.ticks = target;
+            }
         }
     }
 
@@ -189,8 +222,8 @@ impl Interpolator {
             // One state only and no second where a near entity would have
             // sent one: a far entity, drawn its interval back from the start.
             if track.states.len() == 1 && !track.drawn && at > f64::from(first) + 4. * tps {
-                track.target = (render - f64::from(first)).clamp(0., EXTRA_MAX).max(60.);
-                track.extra.ticks = track.target;
+                track.far = true;
+                track.extra.ticks = track.extra.ticks.max(FAR_INTERVAL);
                 continue;
             }
             let at = render - track.extra.ticks;
@@ -212,11 +245,17 @@ impl Interpolator {
                     let removed_soon = track.removed.is_some();
                     if ahead > 0. && !removed_soon {
                         drawn.extrapolated += 1;
+                        if track.extra.ticks > 0. {
+                            drawn.far_extrapolated += 1;
+                        }
                     }
                     beyond(&s0, ahead.min(EXTRAPOLATE_TICKS))
                 }
             };
             drawn.entities += 1;
+            if track.extra.ticks > 0. {
+                drawn.far += 1;
+            }
             let id = key.id;
             match (key.kind, sample) {
                 (EntityKind::Aircraft, Sample::Aircraft(pose)) => {
@@ -555,14 +594,24 @@ mod tests {
         };
         interp.receive(&snapshot(0, &[(7, aircraft([0.; 3], [0.; 3]))]));
         interp.receive(&snapshot(60, &[(7, aircraft([0.; 3], [0.; 3]))]));
+        interp.advance(Duration::ZERO, false);
         assert_eq!(interp.extra(key), Some(60.));
         let _ = interp.draw(100., 0, &no_names);
+        // One update lost: the interval is still its shortest gap.
+        interp.receive(&snapshot(180, &[(7, aircraft([0.; 3], [0.; 3]))]));
+        interp.advance(Duration::from_millis(500), false);
+        assert_eq!(interp.extra(key), Some(60.));
+        // While loss is high a far entity is drawn two intervals back,
+        // sliding there at a tenth of real time.
+        interp.advance(Duration::from_millis(1500), true);
+        assert!((interp.extra(key).unwrap() - 72.).abs() < 1e-9);
+        interp.advance(Duration::from_secs(10), true);
+        assert_eq!(interp.extra(key), Some(120.));
         // Now it comes every snapshot: the delay slides down at a tenth of
         // real time.
-        interp.receive(&snapshot(64, &[(7, aircraft([0.; 3], [0.; 3]))]));
-        interp.advance(Duration::ZERO);
-        interp.advance(Duration::from_secs(1));
-        assert!((interp.extra(key).unwrap() - 48.).abs() < 1e-9);
+        interp.receive(&snapshot(184, &[(7, aircraft([0.; 3], [0.; 3]))]));
+        interp.advance(Duration::from_secs(11), false);
+        assert!((interp.extra(key).unwrap() - 108.).abs() < 1e-9);
     }
 
     #[test]
