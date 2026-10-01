@@ -320,6 +320,7 @@ impl TestClient {
 struct Expected {
     entities: HashMap<EntityKey, Entity>,
     exact: ExactState,
+    readout: crate::wire::readout::QReadout,
 }
 
 /// The host, its socket, the test clients and, when watching, what the
@@ -412,11 +413,21 @@ impl Rig {
                 .find(|(p, _)| p.0 == plane)
                 .map(|(_, t)| *t);
             let exact = ExactState::of(&OwnPlane::of(cockpit), terms.as_ref());
+            let readout = world
+                .combat
+                .cockpit_readout(
+                    plane,
+                    tore_world::combat::launcher(&cockpit.flight),
+                    world.ai_wings.as_ref(),
+                    Some(cockpit),
+                )
+                .unwrap();
             self.expected.insert(
                 (tick, plane),
                 Expected {
                     entities: entities.into_iter().map(|e| (e.key(), e)).collect(),
                     exact,
+                    readout: crate::wire::readout::QReadout::of(&readout, tick as u32),
                 },
             );
             self.pictures.insert(plane, picture);
@@ -614,6 +625,38 @@ fn a_seated_client_rebuilds_the_hosts_entities_and_own_state() {
             }
         }
         assert!(checked > 200, "{checked} entity states checked");
+        // Every snapshot carries the seat's cockpit readout, and once the
+        // first second has brought it across the client holds the host's
+        // readout of that tick exactly.
+        let mut readouts = 0;
+        for (index, (header, received)) in c.snapshots.iter().enumerate() {
+            assert!(!received.readout_unresolved);
+            let readout = received.readout.as_ref().expect("a readout");
+            let expected = &rig.expected[&(u64::from(header.tick), plane)];
+            if index >= 30 {
+                assert_eq!(*readout, expected.readout, "tick {}", header.tick);
+                readouts += 1;
+            }
+        }
+        assert!(readouts > 30, "{readouts} readouts checked");
+        // And it reads back as a cockpit readout for the client's frame.
+        let scene = &rig.host.world().terrain.airport_scene;
+        let own = &rig
+            .host
+            .world()
+            .cockpits
+            .iter()
+            .find(|c| c.plane.0 == plane)
+            .unwrap()
+            .flight;
+        let readout = c
+            .wire
+            .as_ref()
+            .unwrap()
+            .cockpit_readout(own, Some(scene))
+            .unwrap()
+            .unwrap();
+        assert_eq!(readout.plane, plane);
         // The exact states decode to the host's, bit for bit.
         assert!(!c.own.is_empty());
         for (header, state) in &c.own {

@@ -284,6 +284,21 @@ impl ClientConnection {
         Ok((section.header, received))
     }
 
+    /// The newest cockpit readout received, for the client's flight frame
+    /// (`tore_world::frame::ReadoutSlot::ready`): contacts' bearings,
+    /// elevations and distances worked out around `own`, the client's
+    /// predicted plane, and the tower's service rebuilt on `scene`. `None`
+    /// before any readout has arrived.
+    pub fn cockpit_readout(
+        &self,
+        own: &tore_sim::flight::State,
+        scene: Option<&tore_sim::airport::Scene>,
+    ) -> Option<WireResult<CockpitReadout>> {
+        let (tick, readout) = self.readout.latest()?;
+        let basis = tore_sim::attitude::Basis::new(own.yaw, own.pitch, own.bank);
+        Some(readout.readout(tick, Some((own.position, &basis)), scene))
+    }
+
     /// Reads an Events section that came with the snapshot of `tick`: the
     /// new events, once each, ready to present.
     pub fn events(&mut self, body: &[u8], tick: u32) -> WireResult<Vec<ReceivedEvent>> {

@@ -659,7 +659,10 @@ seeker observation, estimates, estimate observation, targets, displayed
 target, viewed target, airport, target window, music, designated enemy, AI
 locks, inbound missiles, threat records, emitters, sensor scalars, contacts,
 strobes, plots, trails, visual contacts, map. The client's `CockpitReadout`
-comes back from them (`QReadout::readout`).
+comes back from them (`QReadout::readout`; `ClientConnection::cockpit_readout`
+gives the newest one around the client's predicted plane, for its flight
+frame's `ReadoutSlot::ready`). The host puts each seated player's readout,
+built from the tick's flight, in every snapshot.
 
 - **Scalar groups** (stores, damage, the seeker's status and tone, the
   estimates, the target ids, the airport, the target window, the music's

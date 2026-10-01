@@ -1656,7 +1656,16 @@ impl Host {
             .server
             .messages_due_bytes(connection, now)
             .min(FLIGHT_MESSAGE_BUDGET);
-        let packet = peer.wire.snapshot(&header, &entities, messages)?;
+        // The seat's cockpit readout, from the tick's flight.
+        let readout = world.combat.cockpit_readout(
+            plane.0,
+            tore_world::combat::launcher(&cockpit.flight),
+            world.ai_wings.as_ref(),
+            Some(cockpit),
+        );
+        let packet =
+            peer.wire
+                .snapshot_with_readout(&header, &entities, readout.as_ref(), messages)?;
         match self
             .server
             .send_payload(now, connection, &packet.sections())
