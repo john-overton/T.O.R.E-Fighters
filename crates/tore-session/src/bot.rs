@@ -5,7 +5,8 @@
 //! The pilot flies straight and level, then turns, in a 40-second cycle,
 //! holding its seating altitude; when an aircraft of the other side is within
 //! 3 nautical miles it turns towards it, and it fires short gun bursts at
-//! whatever aircraft is within 4,000 feet and 2 degrees of where it is going.
+//! an aircraft of the other side within 5,000 feet and 6 degrees of where it
+//! is going.
 //! It reads only what a player's game has: its predicted flight and the
 //! frame's picture.
 
@@ -21,10 +22,11 @@ use tore_world::snapshot::RenderSnapshot;
 const LEG: Duration = Duration::from_secs(10);
 /// An enemy this close is chased, feet (3 nm).
 const CHASE_FEET: f64 = 3. * 6076.;
-/// The gun fires at an aircraft this close, feet, and this near the flight
-/// path, radians.
-const GUN_FEET: f64 = 4000.;
-const GUN_ANGLE: f64 = 2. * PI / 180.;
+/// The gun fires at an enemy this close, feet, and this near the flight
+/// path, radians: wide enough that the scripted steering, which never holds a
+/// tight aim, still fires in a fight.
+const GUN_FEET: f64 = 5000.;
+const GUN_ANGLE: f64 = 6. * PI / 180.;
 /// A burst, and the pause after it.
 const BURST: Duration = Duration::from_millis(400);
 const PAUSE: Duration = Duration::from_millis(800);
@@ -86,7 +88,7 @@ impl ScriptedPilot {
                 }
                 let d: [f64; 3] = std::array::from_fn(|i| pose.position[i] - flight.position[i]);
                 let distance = d.iter().map(|v| v * v).sum::<f64>().sqrt();
-                if distance < GUN_FEET && distance > 1. {
+                if enemy(pose.id) && distance < GUN_FEET && distance > 1. {
                     let cos = (0..3).map(|i| d[i] * forward[i]).sum::<f64>() / distance;
                     if cos.clamp(-1., 1.).acos() < GUN_ANGLE {
                         fire = true;
