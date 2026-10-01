@@ -10,7 +10,7 @@ mod director;
 use crate::aircraft::Airframe;
 use crate::flight;
 use crate::flight_canvas::FlightCanvas;
-use crate::flight_views::{self, Body, Reference, Rig, Scene, Shot};
+use crate::flight_views::{self, Body, Reference, Rig, Scene};
 use crate::render_snapshot::{self, CombatArt};
 use crate::renderer::Renderer;
 use crate::replay::clock::{self, Clock, Direction};
@@ -25,7 +25,7 @@ use crate::replay::sound::{self, ReplaySound};
 use crate::replay::tracks::{Scanner, Tracks};
 use crate::replay::trails;
 use crate::replay::weather::WeatherTrack;
-use crate::snapshot::{self, AircraftPose, RenderSnapshot};
+use crate::snapshot::{self, RenderSnapshot};
 use crate::{AppResult, attitude::Basis};
 use crate::{camera::Camera, scenery::Scenery, terrain::Terrain};
 use std::collections::{BTreeMap, BTreeSet};
@@ -461,26 +461,6 @@ fn compose(
 /// Straight-line feet between two points.
 fn feet(a: [f64; 3], b: [f64; 3]) -> f64 {
     (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
-}
-
-/// The flight views' body for an aircraft as drawn, its velocity times
-/// `sign`: playing backwards, it moves the other way.
-fn aircraft_body(pose: &AircraftPose, sign: f64) -> Body {
-    let [yaw, pitch, bank] = pose.attitude;
-    Body::new(
-        pose.id,
-        pose.position,
-        pose.velocity.map(|v| v * sign),
-        Basis::new(yaw, pitch, bank),
-    )
-}
-
-/// The flight views' body for a weapon in flight, its velocity times `sign`.
-fn weapon_body(p: &crate::snapshot::ProjectilePose, sign: f64) -> Body {
-    let d = p.direction;
-    let speed = f64::from(p.speed_f8) / 256. * sign;
-    let basis = Basis::new(d[0].atan2(d[2]), d[1].atan2(d[0].hypot(d[2])), 0.);
-    Body::missile(p.id, p.position, d.map(|v| v * speed), basis)
 }
 
 /// An aircraft's label for people: its label, else its type, else its id.
@@ -1169,11 +1149,11 @@ impl Viewer {
     /// weapon in flight.
     fn body_of(&self, picture: &RenderSnapshot, tick: u64, object: Target) -> Option<Body> {
         match object {
-            Target::Aircraft(0) => Some(aircraft_body(&picture.player, 1.)),
+            Target::Aircraft(0) => Some(Body::posed(&picture.player, 1.)),
             Target::Aircraft(id) => picture
                 .target(id)
                 .filter(|pose| pose.airborne || pose.damage.hp > 0)
-                .map(|pose| aircraft_body(pose, 1.)),
+                .map(|pose| Body::posed(pose, 1.)),
             Target::Ground(id) => {
                 let object = self
                     .world
@@ -1196,7 +1176,7 @@ impl Viewer {
                 .projectiles
                 .iter()
                 .find(|p| p.id == id && !p.gun)
-                .map(|p| weapon_body(p, 1.)),
+                .map(|p| Body::weapon(p, 1.)),
             Target::Nothing => None,
         }
     }
@@ -2017,42 +1997,23 @@ impl Viewer {
         } else {
             1.
         };
-        let body = |pose: &AircraftPose| aircraft_body(pose, sign);
         let target = self.view_target(tick);
-        let flying = |pose: &&AircraftPose| pose.airborne && pose.damage.hp > 0;
-        let wings = picture
-            .targets
-            .iter()
-            .filter(flying)
-            .filter_map(|pose| {
-                let info = self.info.get(&pose.id)?;
-                (info.wing > 0).then(|| {
-                    (
-                        pose.id,
-                        info.side == Side::Friendly,
-                        u8::try_from(info.wing).unwrap_or(u8::MAX),
-                        u8::try_from(info.member).unwrap_or(u8::MAX),
-                    )
-                })
+        let wing_of = |id: u32| {
+            let info = self.info.get(&id)?;
+            (info.wing > 0).then(|| {
+                (
+                    info.side == Side::Friendly,
+                    u8::try_from(info.wing).unwrap_or(u8::MAX),
+                    u8::try_from(info.member).unwrap_or(u8::MAX),
+                )
             })
-            .collect();
-        let missiles = picture
-            .projectiles
-            .iter()
-            .filter(|p| !p.gun)
-            .map(|p| Shot::new(weapon_body(p, sign), p.owner, p.target, p.incoming))
-            .collect();
-        Scene::from_parts(
-            body(&picture.player),
+        };
+        Scene::of_picture(
+            Body::posed(&picture.player, sign),
             target,
-            picture
-                .targets
-                .iter()
-                .filter(|t| t.airborne || t.damage.hp > 0)
-                .map(body)
-                .collect(),
-            wings,
-            missiles,
+            picture,
+            wing_of,
+            sign,
         )
     }
 
@@ -2158,7 +2119,7 @@ impl Viewer {
             self.camera_error = Some(reason);
             self.toast(reason);
         }
-        let player = (!self.shown).then(|| aircraft_body(&picture.player, 1.));
+        let player = (!self.shown).then(|| Body::posed(&picture.player, 1.));
         match from.or(player) {
             Some(from) => {
                 let mut camera = flight_views::outside(from);
@@ -2378,7 +2339,7 @@ impl Viewer {
         // heard from the cockpit, as flight hears it.
         let seat = crate::mirrors::pilot_eye(
             picture.player.position,
-            aircraft_body(&picture.player, 1.).basis(),
+            Body::posed(&picture.player, 1.).basis(),
         );
         let listening = (self.drone.is_none()
             && self.view == 3
@@ -3465,7 +3426,7 @@ mod tests {
         let back = frame_at(&mut v, 300);
         let picture = v.playback.picture(300, 1.);
         let pose = picture.target(1).unwrap();
-        let body = aircraft_body(pose, 1.);
+        let body = Body::posed(pose, 1.);
         let eye = crate::mirrors::pilot_eye(pose.position, body.basis());
         assert!(feet(back.position, eye) < 1e-6);
         assert_eq!((back.hidden_target, back.hidden_projectile), (None, None));
@@ -3553,7 +3514,7 @@ mod tests {
         let tick = 300;
         let picture = v.playback.picture(tick, 1.);
         let pose = picture.player.clone();
-        let right = aircraft_body(&pose, 1.).basis().right;
+        let right = Body::posed(&pose, 1.).basis().right;
         let point = |sign: f64| -> [f64; 3] {
             std::array::from_fn(|i| {
                 pose.position[i]

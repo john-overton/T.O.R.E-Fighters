@@ -1240,6 +1240,39 @@ pub(crate) mod render_hash_tests {
         );
     }
 
+    /// A networked client has a picture and no combat: the scene its camera
+    /// views read, built from the picture, is the one live flight builds from
+    /// combat, wings and missiles included.
+    #[test]
+    fn a_scene_from_the_picture_is_the_scene_from_combat() {
+        let player = player();
+        let (mut combat, mut view) = pair(models(), (0..7).map(|i| (i % 3, [0.; 3])).collect());
+        let scene = scene(combat.state.own().configuration());
+        fixtures::load(&mut combat, &scene, true, &player);
+        view.present(&combat, 0.37);
+        let picture = view.presented(&combat);
+        let frame = FlightFrame {
+            seat: tore_world::seats::SeatId(0),
+            plane: tore_world::seats::PlaneId(combat.own_id()),
+            flight: &player,
+            previous: &player,
+            presented: std::borrow::Cow::Borrowed(&player),
+            picture: &picture,
+            smoke: [&Default::default(), &Default::default()],
+            devices: &Default::default(),
+            config: combat.state.own().configuration(),
+            readout: tore_world::frame::ReadoutSlot::ready(
+                combat
+                    .cockpit_readout(combat.own_id(), launcher(&player), None, None)
+                    .unwrap(),
+            ),
+            tick_cues: &[],
+        };
+        let live = crate::flight_views::Scene::new(&frame, &player, &combat, None, Some(&view));
+        let drawn = crate::flight_views::Scene::from_frame(&frame, &player, None);
+        assert!(drawn.same_as(&live, 1e-9), "{drawn:?} != {live:?}");
+    }
+
     /// A replay rebuilds the player's aircraft from snapshots alone and draws
     /// exactly what live flight draws from the presented flight state.
     #[test]

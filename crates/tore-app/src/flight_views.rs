@@ -49,7 +49,7 @@ pub fn key(key: &str) -> Option<u8> {
 }
 
 /// One aircraft, ground object or missile a view can follow.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Body {
     id: u32,
     position: Vector,
@@ -73,6 +73,24 @@ impl Body {
             ..Self::new(id, position, velocity, basis)
         }
     }
+    /// An aircraft or ground object as a picture draws it, its velocity
+    /// times `sign` (a replay played backwards moves the other way).
+    pub(crate) fn posed(pose: &crate::snapshot::AircraftPose, sign: f64) -> Self {
+        let [yaw, pitch, bank] = pose.attitude;
+        Self::new(
+            pose.id,
+            pose.position,
+            pose.velocity.map(|v| v * sign),
+            Basis::new(yaw, pitch, bank),
+        )
+    }
+    /// A weapon in flight as a picture draws it, its velocity times `sign`.
+    pub(crate) fn weapon(p: &crate::snapshot::ProjectilePose, sign: f64) -> Self {
+        let d = p.direction;
+        let speed = f64::from(p.speed_f8) / 256. * sign;
+        let basis = Basis::new(d[0].atan2(d[2]), d[1].atan2(d[0].hypot(d[2])), 0.);
+        Self::missile(p.id, p.position, d.map(|v| v * speed), basis)
+    }
     pub(crate) fn position(&self) -> Vector {
         self.position
     }
@@ -81,7 +99,7 @@ impl Body {
     }
 }
 /// A missile in flight: its body, who fired it and at what.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Shot {
     body: Body,
     owner: u32,
@@ -99,6 +117,7 @@ impl Shot {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Scene {
     player: Body,
     target: Option<u32>,
@@ -124,6 +143,74 @@ impl Scene {
             wings,
             missiles,
         }
+    }
+    /// The scene of a picture alone, which is all a networked client has: the
+    /// aircraft, ground objects and missiles it draws, so another human's
+    /// plane is as much a subject of the target and wing views as an AI one.
+    /// `wing_of` names the wing and member of an aircraft in the roster, and
+    /// whether it is friendly; `sign` turns every velocity round (a replay
+    /// played backwards). A replay builds its scene the same way.
+    pub(crate) fn of_picture(
+        player: Body,
+        target: Option<u32>,
+        picture: &crate::snapshot::RenderSnapshot,
+        wing_of: impl Fn(u32) -> Option<(bool, u8, u8)>,
+        sign: f64,
+    ) -> Self {
+        Self::from_parts(
+            player,
+            target,
+            picture
+                .targets
+                .iter()
+                .filter(|t| t.airborne || t.damage.hp > 0)
+                .map(|t| Body::posed(t, sign))
+                .collect(),
+            picture
+                .targets
+                .iter()
+                .filter(|pose| pose.airborne && pose.damage.hp > 0)
+                .filter_map(|pose| {
+                    let (friendly, wing, member) = wing_of(pose.id)?;
+                    Some((pose.id, friendly, wing, member))
+                })
+                .collect(),
+            picture
+                .projectiles
+                .iter()
+                .filter(|p| !p.gun)
+                .map(|p| Shot::new(Body::weapon(p, sign), p.owner, p.target, p.incoming))
+                .collect(),
+        )
+    }
+    /// The scene of the flight screen `frame` is for when it has no combat
+    /// to read, a networked client's: its plane is the scene's player, as in
+    /// [`Scene::new`], and everything else comes from the frame's picture.
+    #[allow(dead_code)] // The networked flight's scene, wired with the client (D8b).
+    pub fn from_frame(
+        frame: &crate::frame::FlightFrame,
+        player: &flight::State,
+        wings: Option<&crate::ai_wings::AiWings>,
+    ) -> Self {
+        Self::of_picture(
+            Body::new(
+                frame.plane.0,
+                player.view_position(),
+                player.velocity,
+                Basis::new(player.yaw, player.pitch, player.bank),
+            ),
+            frame.readout.targets.view.as_ref().map(|t| t.id),
+            frame.picture,
+            |id| {
+                let slot = wings?.slot(id)?;
+                Some((
+                    slot.side == tore_sim::ai::launch::Side::Friendly,
+                    slot.wing_number,
+                    slot.member_number,
+                ))
+            },
+            1.,
+        )
     }
     /// The scene of the flight screen `frame` is for, in the flight state
     /// `player`: the frame's plane is the scene's player and the frame's view
@@ -206,6 +293,35 @@ impl Scene {
                 })
                 .collect(),
         )
+    }
+    /// Whether two scenes hold the same subjects to within `tolerance` of a
+    /// foot, a foot a second or a unit of direction.
+    #[cfg(test)]
+    pub(crate) fn same_as(&self, other: &Self, tolerance: f64) -> bool {
+        let close = |a: Vector, b: Vector| (0..3).all(|i| (a[i] - b[i]).abs() <= tolerance);
+        let same = |a: &Body, b: &Body| {
+            a.id == b.id
+                && a.missile == b.missile
+                && close(a.position, b.position)
+                && close(a.velocity, b.velocity)
+                && close(a.basis.right, b.basis.right)
+                && close(a.basis.up, b.basis.up)
+                && close(a.basis.forward, b.basis.forward)
+        };
+        same(&self.player, &other.player)
+            && self.target == other.target
+            && self.wings == other.wings
+            && self.bodies.len() == other.bodies.len()
+            && self
+                .bodies
+                .iter()
+                .zip(&other.bodies)
+                .all(|(a, b)| same(a, b))
+            && self.missiles.len() == other.missiles.len()
+            && self.missiles.iter().zip(&other.missiles).all(|(a, b)| {
+                same(&a.body, &b.body)
+                    && (a.owner, a.target, a.incoming) == (b.owner, b.target, b.incoming)
+            })
     }
     fn body(&self, id: u32) -> Option<Body> {
         if id == self.player.id {
