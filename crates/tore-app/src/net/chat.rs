@@ -335,7 +335,7 @@ struct Spot {
 }
 
 impl Spot {
-    fn of(layout: Layout, [w, h]: [f64; 2], layer: f64) -> Self {
+    fn of(layout: Layout, [_, h]: [f64; 2], layer: f64) -> Self {
         match layout {
             Layout::Small => Self {
                 left: MARGIN * layer,
