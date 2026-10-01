@@ -35,7 +35,7 @@ use tore_sim::{
         live::{self, Launcher, Readiness, Station},
     },
 };
-use tore_world::readout::CockpitReadout;
+use tore_world::{readout::CockpitReadout, seats::SeatCommand};
 
 /// Ticks a frame catches the rounds up by at most: a stall is not caught up
 /// on.
@@ -104,6 +104,40 @@ impl Stores {
             rounds: readout.stores.rounds(selected),
             tick: readout.tick,
         }
+    }
+}
+
+/// The seat's trigger as the host reads it: the keyboard's Space key, which
+/// arrives as a seat command (`TriggerKey`, and `ReleaseTrigger` to let go),
+/// and the controller's button, which is the controls' trigger. Both are
+/// held by the world's own rule ([`crate::combat::FireInput`]), so the
+/// trigger this says is held is the one the host's step will find held.
+#[derive(Default)]
+pub struct Fire {
+    key: crate::combat::FireInput,
+    pad: crate::combat::FireInput,
+}
+
+impl Fire {
+    /// One turn's commands, in order, and the controller button; whether the
+    /// trigger is held after them.
+    pub fn turn(&mut self, commands: &[SeatCommand], pad: bool) -> bool {
+        for command in commands {
+            match *command {
+                SeatCommand::TriggerKey {
+                    down,
+                    repeat,
+                    blocked,
+                } => self.key.space(down, repeat, blocked),
+                SeatCommand::ReleaseTrigger => {
+                    self.key.cancel();
+                    self.pad.cancel();
+                }
+                _ => {}
+            }
+        }
+        self.pad.space(pad, false, false);
+        self.key.held || self.pad.held
     }
 }
 
@@ -851,6 +885,34 @@ mod tests {
     /// The seat's own plane in the host's burst events is not drawn again, and
     /// a burst of another aircraft that arrives late (its picture is already
     /// past the first rounds) is made up to where its rounds would be now.
+    #[test]
+    fn the_trigger_is_the_space_key_or_the_controller_as_the_world_holds_it() {
+        let key = |down, repeat, blocked| SeatCommand::TriggerKey {
+            down,
+            repeat,
+            blocked,
+        };
+        let mut fire = Fire::default();
+        assert!(!fire.turn(&[], false));
+        // Space goes down, and stays held while it repeats.
+        assert!(fire.turn(&[key(true, false, false)], false));
+        assert!(fire.turn(&[key(true, true, false)], false));
+        assert!(!fire.turn(&[key(false, false, false)], false));
+        // A press while blocked (a menu, a lost window) fires nothing and
+        // stays blocked until it is let go.
+        assert!(!fire.turn(&[key(true, false, true)], false));
+        assert!(!fire.turn(&[key(true, false, false)], false));
+        assert!(!fire.turn(&[key(false, false, false)], false));
+        // The controller's button holds it as long as it is down, and a
+        // release command lets go of both.
+        assert!(fire.turn(&[], true));
+        assert!(!fire.turn(&[SeatCommand::ReleaseTrigger], true));
+        assert!(!fire.turn(&[], true));
+        assert!(!fire.turn(&[], false));
+        assert!(fire.turn(&[key(true, false, false)], false));
+        assert!(!fire.turn(&[SeatCommand::ReleaseTrigger], false));
+    }
+
     #[test]
     fn the_seats_own_burst_is_not_drawn_twice_and_a_late_burst_catches_up() {
         let weapon = gun((4, 3, 2));

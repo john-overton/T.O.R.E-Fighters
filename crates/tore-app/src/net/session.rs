@@ -109,7 +109,9 @@ pub struct NetSession {
     releases: Vec<DeviceRelease>,
     /// The gun rounds the host does not send.
     guns: Guns,
-    /// Whether the player's trigger was held at the last turn.
+    /// The player's trigger, kept as the host will read it.
+    fire: guns::Fire,
+    /// Whether it was held at the last turn.
     trigger: bool,
     /// Each weapon record's motor, parsed once.
     motors: RefCell<BTreeMap<String, Option<Motor>>>,
@@ -197,6 +199,7 @@ impl NetSession {
             effects_tick: 0,
             releases: Vec::new(),
             guns: Guns::default(),
+            fire: guns::Fire::default(),
             trigger: false,
             motors: RefCell::new(BTreeMap::new()),
             events: Vec::new(),
@@ -221,7 +224,7 @@ impl NetSession {
     /// events collect for [`NetSession::take_events`].
     pub fn pump(&mut self, controls: &Controls) {
         let now = self.clock.now();
-        self.trigger = controls.trigger;
+        self.trigger = self.fire.turn(&controls.commands, controls.trigger);
         let _ = self.client.receive_from(now, &mut self.socket);
         self.client.update(now, controls);
         let _ = self.client.transmit(&mut self.socket);
