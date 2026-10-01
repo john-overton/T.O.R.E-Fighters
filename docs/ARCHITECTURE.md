@@ -3919,9 +3919,23 @@ choice below an agent decision unless credited.
   the synthetic import's radar sees nothing): routing for every receiver in
   the lobby and in flight (two sides, two wings, a target flown by a human
   and by the AI, no target, a player with no plane, a departed player), the
-  limits, the quick messages and the system line back to the sender. The
-  windowed run, its frame cost and the GPU comparison are in the EF6 row
-  below.
+  limits, the quick messages and the system line back to the sender. A
+  windowed run (a release game hosting with `--open-planes all`, a friendly
+  `tore-bot` and an enemy one, the player's keys from an input script, through
+  `tools/agent-run.sh`): the player opened the line with the backtick key,
+  typed to All and to Friendlies, sent two quick messages (F9 with no
+  target was refused by the host, F5 reached the friendly bot with its sound
+  name), and received the bots' lines; each bot printed what it heard with
+  its receiver (the friendly bot heard the player's lines to All and to
+  Friendlies, the enemy bot only the line to All) and the game's log holds
+  every line. Screenshots show the open line, a window with a line of each
+  colour and a line fading out. Frame cost, 9000 frames at 1280 by 960
+  with the bots silent and with each bot sending a line every 2 seconds (the
+  window always full): UI composition 1.10 ms and 1.66 ms a frame on
+  average, the frame interval 5.36 and 5.56 ms; the window's draw alone
+  (`net::chat::tests::time_chat_draw`, release) takes 0.28 ms at 1280 by 960
+  with six lines showing, 0.33 ms at 1920 by 1080 and 0.86 ms at 3840 by 2160, and
+  0.42, 0.51 and 1.44 ms with the line open; with no lines it costs nothing.
 
 ### How stages E and F land
 
