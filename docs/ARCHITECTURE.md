@@ -3486,8 +3486,8 @@ is an agent decision unless it is credited to John.
   Connection..." shows on Choose Activity's message line meanwhile, and the
   window keeps running); the game then keeps the `Arc<Kit>` for the rest of
   its life, so the second visit and the lobby (EF8) open at once. Measured:
-  the kit builds in about 1.1 ms in a release build, so the player never sees
-  the message there; the dev build takes longer.
+  the kit builds in about 1.1 ms in a release build and 66 ms in the dev build
+  (EF2 estimated 150 ms), so the player hardly sees the message at all.
 - **Controls.** Callsign (remembered; a first visit starts in it, and Join and
   New ask for it in words: "Type your callsign first."), Connect to (an
   address or a name with an optional port, an address typed without a port
