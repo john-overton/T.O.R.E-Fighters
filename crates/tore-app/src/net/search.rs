@@ -354,11 +354,14 @@ mod tests {
         Packet::DiscoverAnswer(answer.clone()).encode(V).unwrap()
     }
 
+    type Sent = Rc<RefCell<Vec<(SocketAddr, Vec<u8>)>>>;
+    type Inbox = Rc<RefCell<VecDeque<(Vec<u8>, SocketAddr)>>>;
+
     /// A socket that records what is sent and hands out what is queued.
     #[derive(Clone, Default)]
     struct Fake {
-        sent: Rc<RefCell<Vec<(SocketAddr, Vec<u8>)>>>,
-        inbox: Rc<RefCell<VecDeque<(Vec<u8>, SocketAddr)>>>,
+        sent: Sent,
+        inbox: Inbox,
     }
 
     impl Datagrams for Fake {
