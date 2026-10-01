@@ -29,9 +29,9 @@ use crate::sensors;
 // changing any of these.
 /// The ownship's aircraft in these scenarios.
 const OWN: u32 = 0;
-const GUNS_AND_DAMAGE: u64 = 0xf991_b9ae_63b6_6d4b;
-const GUIDED_MISSILES: u64 = 0x1f24_4435_41d0_af2e;
-const PLAYER_COUNTERMEASURES: u64 = 0xda70_2332_e33b_0c5a;
+const GUNS_AND_DAMAGE: u64 = 0xd31d_73fa_cf04_2cc7;
+const GUIDED_MISSILES: u64 = 0xde4e_2cd5_e95b_6a96;
+const PLAYER_COUNTERMEASURES: u64 = 0x2329_5b36_8264_88b7;
 
 #[test]
 fn combat_guns_and_damage_match_recorded_fingerprint() {

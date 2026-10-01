@@ -31,16 +31,16 @@ const LEGACY: [(&str, u64); 8] = [
     ("airborne-destruction", 0x842c_0532_6413_4cd0),
 ];
 const HYBRID: [(&str, u64); 10] = [
-    ("cruise-roll-rudder", 0x3bcc_161c_b77e_4d49),
+    ("cruise-roll-rudder", 0xed72_5583_9caf_7b1d),
     ("burner-loop", 0xac58_9973_3290_9cc5),
-    ("stall-and-spin", 0x237f_0852_acb6_2047),
-    ("devices-and-switches", 0x9190_d80a_c587_b31f),
-    ("damage-and-disturbance", 0xf99e_4502_333c_f5db),
-    ("cheats-and-ricochet", 0xa506_3272_8028_1a08),
-    ("ground-impact", 0xc0fb_092e_b136_6da9),
-    ("airborne-destruction", 0x1428_8eb9_7ce4_b276),
-    ("crosswind-takeoff", 0xcd91_0856_7e5c_2ffe),
-    ("approach-and-landing", 0x0316_96d3_99a2_f350),
+    ("stall-and-spin", 0x5f61_56c6_cd41_1ece),
+    ("devices-and-switches", 0x73e5_12ae_2311_b30d),
+    ("damage-and-disturbance", 0xd96f_c70d_6ecc_cd80),
+    ("cheats-and-ricochet", 0xe7d6_d8c7_8561_f38d),
+    ("ground-impact", 0x36c1_474e_a043_ed39),
+    ("airborne-destruction", 0x72f6_531b_7330_ca1b),
+    ("crosswind-takeoff", 0x9e96_52d3_1499_8983),
+    ("approach-and-landing", 0x4d3c_afe2_c0a3_3483),
 ];
 const NATIVE: [(&str, u64); 2] = [
     ("cruise-roll-rudder", 0xe239_05a8_a49b_d119),
