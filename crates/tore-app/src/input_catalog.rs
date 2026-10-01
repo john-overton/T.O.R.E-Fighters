@@ -574,6 +574,7 @@ pub const ENTRIES: &[Entry] = &[
         Communication,
         &["Alt-Shift-4"],
     ),
+    fixed("", "Chat line (network games only)", Communication, &["`"]),
     cmd("airport-next", "Next airport", Communication, &["Shift-n"]),
     cmd(
         "airport-request-landing",
@@ -649,6 +650,7 @@ pub fn key_label(key: &str) -> String {
         "Backspace" => "Backspace".into(),
         "Escape" => "Esc".into(),
         "'" => "Apostrophe".into(),
+        "`" => "Backquote (~)".into(),
         "\\" => "Backslash".into(),
         "," => "Comma".into(),
         ";" => "Semicolon".into(),

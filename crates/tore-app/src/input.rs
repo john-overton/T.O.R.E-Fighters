@@ -274,6 +274,17 @@ impl Input {
     pub fn claimed(&self, key: &str) -> bool {
         self.key_claims.contains_key(key)
     }
+    /// Lets go of every key the profile holds down, as if each had been
+    /// released, so what they drive stops: the chat line takes the
+    /// keyboard (slice EF6). The joystick and the mouse go on. The keys'
+    /// own releases, when they come, find nothing held.
+    pub fn release_keys(&mut self) {
+        for control in std::mem::take(&mut self.key_claims).into_values() {
+            if !control.is_empty() {
+                self.key_value(&control, 0.);
+            }
+        }
+    }
     pub fn key(
         &mut self,
         key: &str,

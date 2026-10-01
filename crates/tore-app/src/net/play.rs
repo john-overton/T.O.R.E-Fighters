@@ -278,6 +278,7 @@ impl App {
             }
             ClientEvent::Roster => {}
             ClientEvent::Notice(text) => self.message(text),
+            ClientEvent::Chat(line) => self.chat_line(line),
             ClientEvent::Debrief(debrief) => {
                 // A player leaving the game sees it when the session ends; one
                 // who stays sees it now, back in the lobby.
@@ -340,6 +341,9 @@ impl App {
         let Some(flight) = self.net_flight.take() else {
             return;
         };
+        if let Some(session) = &mut self.net {
+            session.chat.flight_ended();
+        }
         let stash = flight.stash;
         self.world = stash.world;
         self.combat_view = stash.combat_view;

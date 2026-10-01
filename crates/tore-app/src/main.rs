@@ -2640,6 +2640,11 @@ impl App {
             self.action(event_loop, action);
             return Action::None;
         }
+        // The chat line of a networked flight (net/chat.rs) takes the keyboard
+        // while it is open.
+        if self.chat_key(&event, &name) {
+            return Action::None;
+        }
         if self.screen == Screen::Flight
             && event.pressed
             && self.flight_ui.debug_panels
@@ -4185,6 +4190,11 @@ impl ApplicationHandler for App {
                             &mut self.flight_canvas,
                             &self.hornet.hud_font,
                             self.instruments.hud_color,
+                        );
+                        net::chat::draw_window(
+                            self.net_flight.as_ref().and(self.net.as_ref()),
+                            &mut self.flight_canvas,
+                            &self.hornet.hud_font,
                         );
                         self.flight_ui.draw(
                             &mut self.menu.pixels,
@@ -9907,6 +9917,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         return Ok(Outcome::Done);
     }
     let theater_resources = assets.theater_resources.clone();
+    net::chat::load_quick_messages(&assets.multiplayer_resources);
     let creator_options = assets.creator_options.clone();
     if let Some((airport_id, mut aircraft, angles)) = airport_probe
         && !(smoke_test && initial_screen == Screen::Flight)

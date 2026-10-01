@@ -214,6 +214,8 @@ pub struct NetSession {
     pub auto_restart: bool,
     /// The lobby's last line in the log.
     lobby_line: Option<String>,
+    /// The chat window's lines and the open line (slice EF6).
+    pub chat: crate::net::chat::Chat,
 }
 
 /// Whether the King may start a mission by itself now: always when it
@@ -308,6 +310,7 @@ impl NetSession {
             started_for: None,
             auto_restart: true,
             lobby_line: None,
+            chat: Default::default(),
         })
     }
 

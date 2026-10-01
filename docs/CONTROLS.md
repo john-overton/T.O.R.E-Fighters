@@ -218,6 +218,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Address wingman 2 | Alt+Shift+2 | - | - |
 | Address wingman 3 | Alt+Shift+3 | - | - |
 | Address wingman 4 | Alt+Shift+4 | - | - |
+| Chat line (network games only) | Backquote (~) | - | - |
 | Next airport | Shift+N | - | - |
 | Request landing | Shift+L | - | - |
 | Repeat tower reply | Ctrl+Shift+R | - | - |
@@ -257,6 +258,12 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Flight, debug menu open | Up / Down / Tab, Home / End, PageUp / PageDown, Enter / Space / Right, Esc / Left | Move, choose, close; other keys still fly |
 | Flight, debug panels shown | Left click, mouse wheel | Pin, close and filter buttons; scroll the panel under the pointer |
 | Flight | macOS Command+Q | Exit to desktop |
+| Networked flight (not single player) | Backquote (~), the key above Tab | Open the chat line. It is not rebindable and only a flight joined to a host has it; single player never opens it, and its Controls screen row says so |
+| Chat line open | Typed characters, Backspace | Type the line: printable ASCII, up to 80 characters. Every flight key you were holding is let go and the keyboard types instead of flying; the joystick and the mouse still fly |
+| Chat line open | Tab / Shift+Tab | Choose the receiver: All, Friendlies, Enemies, Wing, Target, round (Shift+Tab goes back) |
+| Chat line open | Enter | Send the line to the receiver and close the line (an empty line just closes). Closed, Enter designates the nearest visible aircraft as before |
+| Chat line open | Esc | Close the line without sending |
+| Chat line open | F1 to F12 | Send the matching line of `CHAT.TXT`, to the line's own receiver or the one chosen, and close the line. Closed, the F keys are the views |
 | Live map open | + / - | Zoom the map |
 | Live map open | Arrow keys | Pan the map |
 | Live map open | Home | Follow the player again |

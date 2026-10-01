@@ -7,10 +7,13 @@
 //! client (slice EF3, `hosting`). Slice EF5 adds finding games and servers
 //! without a screen: `search` (the local network), `lookup` (a typed address,
 //! off the screen's thread) and `settings` (what is remembered).
+pub mod chat;
 pub mod debrief;
 pub mod files;
 pub mod guns;
 pub mod hosting;
+#[allow(dead_code)] // Placed by the lobby screen (EF8).
+pub mod lobby_chat;
 pub mod lookup;
 pub mod options;
 pub mod play;
