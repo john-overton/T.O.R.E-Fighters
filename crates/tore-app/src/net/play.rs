@@ -283,6 +283,9 @@ impl App {
                 self.message(format!("No plane: {text}"));
             }
             ClientEvent::Seated { plane, .. } => {
+                if let Some(session) = &mut self.net {
+                    session.ended = None;
+                }
                 log::info!("Network: seated in plane {plane}");
             }
             ClientEvent::Roster => {}
@@ -304,10 +307,14 @@ impl App {
                     // A player who left its flight (the others fly on) sees
                     // no end of the mission: its flight ends here.
                     self.end_net_flight();
-                    self.show_net_debrief(&debrief);
+                    let cause = self.net_cause();
+                    self.show_net_debrief(&debrief, cause);
                 }
             }
             ClientEvent::MissionEnded(ended) => {
+                if let Some(session) = &mut self.net {
+                    session.ended = Some(ended.reason);
+                }
                 let text = ended_text(&ended);
                 self.end_net_flight();
                 self.message(text);
@@ -339,11 +346,40 @@ impl App {
         true
     }
 
+    /// Who ended the flight a debrief reports: the host, when it has just
+    /// ended the mission, else the player itself.
+    fn net_cause(&mut self) -> debrief::Cause {
+        match self.net.as_mut().and_then(|s| s.ended.take()) {
+            Some(reason) => debrief::Cause::Host(reason),
+            None => debrief::Cause::Left,
+        }
+    }
+
+    /// The screen for a debrief the host sent: a mission its objectives did
+    /// not decide says it ended, and by whom, instead of a failure.
+    fn net_debrief_screen(
+        &self,
+        debrief: &tore_session::wire::messages::Debrief,
+        cause: debrief::Cause,
+    ) -> crate::AppResult<crate::debrief::Debrief> {
+        let lobby = self.net.as_ref().and_then(|s| s.client.lobby());
+        let ended = debrief::ending(debrief, cause, lobby);
+        crate::debrief::Debrief::networked(
+            debrief::report(debrief),
+            &self.theater_resources,
+            None,
+            ended.as_ref(),
+        )
+    }
+
     /// The debrief the host sent, on its screen, which closes to the main
     /// menu.
-    fn show_net_debrief(&mut self, debrief: &tore_session::wire::messages::Debrief) {
-        match crate::debrief::Debrief::new(debrief::report(debrief), &self.theater_resources, None)
-        {
+    fn show_net_debrief(
+        &mut self,
+        debrief: &tore_session::wire::messages::Debrief,
+        cause: debrief::Cause,
+    ) {
+        match self.net_debrief_screen(debrief, cause) {
             Ok(screen) => {
                 self.quick.debrief = Some(screen);
                 self.quick.debrief_to_menu = true;
@@ -659,6 +695,10 @@ impl App {
         // reason shows on Direct Connection.
         self.close_lobby();
         let debrief = self.net.as_mut().and_then(|session| session.debrief.take());
+        let screen = debrief.as_ref().map(|wire| {
+            let cause = self.net_cause();
+            self.net_debrief_screen(wire, cause)
+        });
         let capture = self.net.as_ref().and_then(|s| s.capture.clone());
         if let Some(session) = &mut self.net {
             let now = session.now();
@@ -691,8 +731,8 @@ impl App {
             // The finished capture counts in the replays' pruning from now.
             log::info!("Network capture: {}", path.display());
         }
-        if let Some(report) = debrief.as_ref().map(debrief::report) {
-            match crate::debrief::Debrief::new(report, &self.theater_resources, None) {
+        if let Some(screen) = screen {
+            match screen {
                 Ok(screen) => {
                     self.quick.debrief = Some(screen);
                     self.quick.debrief_to_menu = true;

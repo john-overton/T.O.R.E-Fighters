@@ -298,6 +298,9 @@ pub struct NetSession {
     pub capture: Option<PathBuf>,
     /// The debrief the host sent, when it has.
     pub debrief: Option<tore_session::wire::messages::Debrief>,
+    /// Why the host last ended the mission, until the debrief that follows
+    /// it is shown or the player is seated again.
+    pub ended: Option<tore_session::wire::messages::EndReason>,
     /// The host this game runs, when it hosts the session; dropping the
     /// session stops it.
     pub hosting: Option<HostThread>,
@@ -406,6 +409,7 @@ impl NetSession {
             left_at: None,
             capture,
             debrief: None,
+            ended: None,
             hosting: None,
             host_failure: None,
             started_for: None,

@@ -64,14 +64,56 @@ fn cell(pilot: Option<&Pilot>, value: impl Fn(&Pilot) -> String) -> String {
     pilot.map(value).unwrap_or_else(|| "-".into())
 }
 
+/// How a networked flight's debrief says it ended when its objectives did
+/// not decide the result: the first page's heading and sentence, and the
+/// outcome line's word. Single player never has one (its debrief is
+/// unchanged); see `net::debrief::ending`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ended {
+    pub title: String,
+    pub sentence: String,
+}
+
+/// The first page of an ended mission: the retail page's own layout with its
+/// heading and result sentence replaced.
+fn ended_page(retail: &[String], ended: &Ended) -> Vec<String> {
+    let mut page = Vec::new();
+    let mut seen = 0;
+    for line in retail {
+        let trimmed = line.trim();
+        if trimmed.starts_with('.') || trimmed.is_empty() {
+            page.push(line.clone());
+            continue;
+        }
+        seen += 1;
+        match seen {
+            1 => page.push(ended.title.clone()),
+            2 => page.push(ended.sentence.clone()),
+            _ => {}
+        }
+    }
+    if seen == 0 {
+        page = vec![".center".into(), ".header".into(), ended.title.clone()];
+    }
+    if seen < 2 {
+        page.extend([".body".into(), String::new(), ended.sentence.clone()]);
+    }
+    page
+}
+
 /// Page markup in the mission-text grammar: `.center`, `.left`, `.header`,
 /// `.body`, `.bold`/`..bold`, `.underline`/`..underline` and tab columns.
-pub fn pages(report: &Report, text: &MissionText) -> Vec<Vec<String>> {
+/// `ended` is a networked flight's, which its objectives did not decide.
+pub fn pages_ended(report: &Report, text: &MissionText, ended: Option<&Ended>) -> Vec<Vec<String>> {
     let success = report.outcome == Outcome::Success;
-    let first = text
+    let retail = text
         .debrief(success)
         .map(<[String]>::to_vec)
         .unwrap_or_default();
+    let first = match ended {
+        Some(ended) => ended_page(&retail, ended),
+        None => retail,
+    };
     let player = Some(&report.player);
     let wing = report.wingman.as_ref();
     let row = |label: &str, value: &dyn Fn(&Pilot) -> String| {
@@ -97,7 +139,14 @@ pub fn pages(report: &Report, text: &MissionText) -> Vec<Vec<String>> {
     };
     let group = |title: &str| vec![".bold".to_string(), title.to_string(), "..bold".into()];
 
-    let mut outcome = heading(&format!("MISSION OUTCOME : {}", report.outcome.label()));
+    let mut outcome = heading(&format!(
+        "MISSION OUTCOME : {}",
+        if ended.is_some() {
+            "INCOMPLETE"
+        } else {
+            report.outcome.label()
+        }
+    ));
     for objective in &report.objectives {
         outcome.extend([String::new(), objective.sentence()]);
     }
@@ -218,6 +267,19 @@ impl Debrief {
         data: &BTreeMap<String, Vec<u8>>,
         background: Option<&str>,
     ) -> AppResult<Self> {
+        Self::networked(report, data, background, None)
+    }
+
+    /// A networked flight's debrief: `ended` is set when the flight ended
+    /// without its objectives deciding the result (the King, the server or
+    /// the player ended it), so it shows no success or failure it did not
+    /// earn.
+    pub fn networked(
+        report: Report,
+        data: &BTreeMap<String, Vec<u8>>,
+        background: Option<&str>,
+        ended: Option<&Ended>,
+    ) -> AppResult<Self> {
         let background = background.map_or_else(
             || {
                 // Menu-only randomness; never shares state with the simulation.
@@ -293,7 +355,7 @@ impl Debrief {
                 .ok_or("missing debrief resource QUICK.MT; re-import media")?,
         )?;
         Ok(Self {
-            pages: pages(&report, &text),
+            pages: pages_ended(&report, &text, ended),
             page: 0,
             sprites,
             background,
@@ -558,6 +620,9 @@ fn clipboard(c: &mut Canvas, s: &BTreeMap<String, Sprite>, lines: &[String], fir
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn pages(report: &Report, text: &MissionText) -> Vec<Vec<String>> {
+        pages_ended(report, text, None)
+    }
     fn text() -> MissionText {
         MissionText::parse(
             b".section 3\n.center\n.header\nWON\n.section 4\n.center\n.header\nLOST\n",
@@ -631,5 +696,37 @@ mod tests {
                 .iter()
                 .any(|l| l.starts_with("Cause\toverspeed"))
         );
+    }
+    #[test]
+    fn an_ended_mission_keeps_the_retail_layout_and_says_it_was_not_decided() {
+        let ended = Ended {
+            title: "MISSION ENDED".into(),
+            sentence: "The King ended the mission.".into(),
+        };
+        let retail = b".section 4\n.center\n.header\nMISSION FAILURE\n.left\n.body\n\nYou failed this Quick Mission.\n";
+        let text = MissionText::parse(retail).unwrap();
+        let ended_pages = pages_ended(&Report::default(), &text, Some(&ended));
+        assert_eq!(
+            ended_pages[0],
+            [
+                ".center",
+                ".header",
+                "MISSION ENDED",
+                ".left",
+                ".body",
+                "",
+                "The King ended the mission."
+            ]
+        );
+        assert!(ended_pages[1].contains(&"MISSION OUTCOME : INCOMPLETE".to_string()));
+        // Without it the page is the retail one, word for word.
+        let plain = pages_ended(&Report::default(), &text, None);
+        assert!(plain[0].contains(&"You failed this Quick Mission.".to_string()));
+        assert!(plain[1].contains(&"MISSION OUTCOME : FAILURE".to_string()));
+        // A mission text with no section still gets a page.
+        let empty = MissionText::parse(b".section 1\nX\n").unwrap();
+        let bare = pages_ended(&Report::default(), &empty, Some(&ended));
+        assert!(bare[0].contains(&"MISSION ENDED".to_string()));
+        assert!(bare[0].contains(&"The King ended the mission.".to_string()));
     }
 }
