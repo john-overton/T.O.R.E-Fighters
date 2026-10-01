@@ -252,6 +252,17 @@ impl Server {
         }
     }
 
+    /// Exempts a connection from the 5-second silence timeout, or not. The
+    /// caller decides which: a game that hosts exempts its own player's
+    /// connection over the in-process link, whose silence is the game's
+    /// window being held (dragged, resized, loading) rather than a lost
+    /// player; if that game goes away, the host goes with it.
+    pub fn set_silence_exempt(&mut self, connection: ConnectionId, exempt: bool) {
+        if let Some(e) = self.entry_mut(connection) {
+            e.connection.set_silence_exempt(exempt);
+        }
+    }
+
     /// Notes when a packet that arrived at `received` was sent, in the
     /// sender's time (for example the tick it carries), for the arrival
     /// spread statistic.

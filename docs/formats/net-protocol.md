@@ -184,7 +184,9 @@ The content check happens after the mission loads, as a reliable message
 (below), because only then can the client compare.
 
 **Disconnect reasons** (the codes are an agent decision, D2): 1 the player
-left, 2 timeout (5 seconds without a valid packet), 3 too many bad packets,
+left, 2 timeout (5 seconds without a valid packet; a host may exempt a
+connection, as a hosting game exempts its own player's over the in-process
+link, EF4), 3 too many bad packets,
 4 protocol error (a message ahead of its window, or fragments that do not fit
 together), 5 content mismatch, 6 server stopping, 7 kicked.
 

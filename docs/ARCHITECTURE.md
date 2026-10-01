@@ -2003,7 +2003,7 @@ dependency.
 | Crate | Kind | Holds | Depends on |
 | --- | --- | --- | --- |
 | `tore-codec` | library | Bit writer and bounded bit reader, variable-length integers, quantizers, FNV-1a and CRC-32. Shared by the wire, the exact own-plane coder and, in stage H, the checkpoints | std only |
-| `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator. **Built (D2).** The host and client are state machines that never read a clock or touch a socket: the caller passes the time in, feeds them datagrams and sends what they give, over a UDP socket or the simulator (agent decision). *Slice EF3 adds* the in-process link (`link`) a hosting game flies through, and takes from `tore-server`, unchanged, the dual-stack `ServerSocket` and the sleep-then-spin `wait_until`, which the dedicated server and the game's host thread now share ([the host inside the game](#the-host-inside-the-game-stage-e)) | tore-codec |
+| `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator. **Built (D2).** The host and client are state machines that never read a clock or touch a socket: the caller passes the time in, feeds them datagrams and sends what they give, over a UDP socket or the simulator (agent decision). *Slice EF3 adds* the in-process link (`link`) a hosting game flies through, and takes from `tore-server`, unchanged, the dual-stack `ServerSocket` and the sleep-then-spin `wait_until`, which the dedicated server and the game's host thread now share ([the host inside the game](#the-host-inside-the-game-stage-e)). *EF4 adds* `Server::set_silence_exempt`, which a hosting game uses for its own player's connection ([the lobby](#the-lobby)) | tore-codec |
 | `tore-import` | library | The data folder, the import pack's reader and writer, media detection and the import itself, moved out of `tore-app` so a server can import and load without the game. *Built (D3a).* | tore-formats |
 | `tore-session` | library | The game's side of networking: the wire messages, the host session (clock, inputs, snapshots, joins), the client session (prediction, interpolation, clock steering, readouts) and the headless bot client. *Wire built (D6)*: the module `wire` has every section and message, the cockpit readout's included, with each end's bookkeeping (acknowledged baselines, priorities, the event queue, the name table) and no clock or socket ([what it settled](formats/net-protocol.md#what-the-games-sections-settled)). *Host built (D7a)*: the module `host` ([the host session](#the-host-session)). *Client built (D8a)*: the modules `client` ([the client session](#the-client-session)) and `bot`, and the `tore-bot` program, which loads an import through `tore-import` | tore-world, tore-net, tore-codec, tore-import |
 | `tore-server` | binary | The dedicated server: configuration, import, logging and the console. **Built (D7b):** options, configuration file, `--import`, `--check`, start-up refusals, the real-time run loop, the console, status lines and the log, around `tore_session::Host`. The run loop drives the host through a small `Host` trait (`host.rs`) that `wiring.rs` implements with `tore_session::Host`, so the loop, console and log are tested against a scripted host on a fake clock (agent decision). Which build is a release is `app::is_release`, the stamped `TORE_BUILD_VERSION` tag, which the game's `--connect` (D8) must use too | tore-session, tore-import |
@@ -3316,7 +3316,8 @@ game hosts from the command line, `tore-app --host MISSION_FILE`
   3 seconds for it. Quitting disconnects the hosting player's client and
   drops the session; the host takes the King's departure as the host
   leaving too. A game that loses its end of the channels stops the thread
-  the same way.
+  the same way. The hosting player's own connection is never dropped for
+  silence ([below](#the-lobby)).
 - **The panic rule.** A panic on the thread is caught. The thread tries once,
   itself guarded, to disconnect everyone with "server stopping" and send it,
   closes the socket and reports the panic; the hosting player's session ends
@@ -3419,8 +3420,24 @@ it on this). Each an agent decision unless credited.
   The King's departure, or the host's (`Host::host_left`), ends the game for
   everyone: a flying mission ends with the reason "the host left the game"
   and the debriefs, and each player gets a Goodbye before the disconnect,
-  which the client words as "The host left the game." A dedicated server has
-  no King. The host's house is the King's player in a hosted game and nobody
+  which the client words as "The host left the game." *The King's
+  connection never times out:* the host exempts it from the transport's
+  5-second silence timeout (`tore_net::Server::set_silence_exempt`), and only
+  when the King is at the link's address, which the hosted game's `Linked`
+  transport refuses to any socket datagram, so no remote player can claim it.
+  A hosting window held still (dragged or resized on Windows, a long load, a
+  modal) stalls only that game: the mission flies on for everyone, the King's
+  plane with its last controls as any late player's, and when the window
+  comes back the client catches up as after any stall. The connection cannot
+  really go silent for good: if the game goes away, its host thread goes with
+  it, and a game that drops its host stops it politely. A King at a network
+  address (phase 2) is dropped for silence like any player. Measured
+  (`net/hosting_tests.rs`): an 8-second stall of the game side, with a remote
+  bot flying; the host stepped 959 to 961 ticks, the bot's longest gap between
+  snapshots was 36 to 39 ms, nobody was dropped, the hosting player recovered
+  with 0 to 3 corrections, all under 0.01 ft and 0.01 degrees, none adopted
+  or shown, and its End mission then returned both players to the lobby. A
+  dedicated server has no King. The host's house is the King's player in a hosted game and nobody
   on a server. Passing the crown and the King's other settings are phase 2;
   the lobby state carries an empty settings list, and message kinds 23 and 24
   are kept for them.

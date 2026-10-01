@@ -439,6 +439,80 @@ fn a_two_second_window_stall_stalls_nobody() {
     drop(thread);
 }
 
+/// The hosting player's window is held still for 8 seconds (a drag, a
+/// resize, a long load): the game side stops pumping. Its connection is not
+/// dropped for the silence, the host and a remote bot fly on with no drop,
+/// and afterwards the hosting player recovers and still holds the crown: its
+/// End mission ends the mission for everyone.
+#[test]
+fn an_eight_second_window_stall_drops_nobody_and_the_king_still_reigns() {
+    let (thread, link, server) = start_host(0);
+    let mut game = Game::join(link);
+    assert!(game.fly_until(Duration::from_secs(10), |g| g.seated_tick.is_some()));
+    let seated = Arc::new(AtomicBool::new(false));
+    let guest = remote(server, None, Duration::from_secs(40), Arc::clone(&seated));
+    assert!(wait_for(&mut game, &seated, Duration::from_secs(10)));
+    game.fly(Duration::from_secs(3));
+    let before = game.bot.client.corrections().len();
+    let stall = Instant::now();
+    thread::sleep(Duration::from_secs(8));
+    let resumed = Instant::now();
+    game.fly(Duration::from_secs(4));
+    let after = game.bot.client.corrections().len();
+    let stats = game.bot.client.clone_stats();
+    eprintln!(
+        "hosting player after an 8 s stall: {} corrections: {:?}\nstats: {stats:#?}",
+        after - before,
+        &game.bot.client.corrections()[before..]
+    );
+    assert!(game.closed.is_none(), "{:?}", game.closed);
+    assert_eq!(game.bot.client.phase(), ClientPhase::Flying);
+    // It recovers as the stall fix allows: no adoption, and nothing the
+    // player could see (each under the 0.01 ft and 0.01 degree the drawn
+    // plane does not even slide for). An 8-second backlog takes four
+    // updates to step, so a tick or two late on resuming can cost a second
+    // or third such correction.
+    let recovered = &game.bot.client.corrections()[before..];
+    assert!(recovered.len() <= 3, "{recovered:?}");
+    assert!(
+        recovered
+            .iter()
+            .all(|c| !c.shown && c.feet < 0.01 && c.degrees < 0.01),
+        "{recovered:?}"
+    );
+    assert_eq!(stats.adopted, 0, "{stats:#?}");
+    let lobby = game.bot.client.lobby().expect("the lobby").clone();
+    assert!(lobby.is_king());
+    assert_eq!(lobby.players.len(), 2, "{lobby:?}");
+    assert!(lobby.players.iter().all(|p| p.flying), "{lobby:?}");
+    // The King's verbs still work: End mission returns both to the lobby.
+    game.bot.client.end_mission();
+    assert!(game.fly_until(Duration::from_secs(5), |g| {
+        g.events
+            .iter()
+            .any(|e| matches!(e, ClientEvent::Debrief(_)))
+    }));
+    assert_eq!(game.bot.client.phase(), ClientPhase::Lobby);
+    game.fly(Duration::from_secs(1));
+    drop(thread);
+    let guest = guest.join().expect("the guest's thread");
+    let gap = guest.longest_gap(stall, resumed);
+    let ticks = guest.tick_at(resumed) - guest.tick_at(stall);
+    eprintln!("guest: longest snapshot gap in the stall {gap:?}, ticks in it {ticks}");
+    assert!((912..=1008).contains(&ticks), "{ticks} ticks in the stall");
+    assert!(gap <= Duration::from_millis(150), "a gap of {gap:?}");
+    assert!(guest.seated && !guest.refused(), "{:?}", guest.events);
+    assert!(
+        guest.events.iter().any(|e| matches!(
+            e,
+            ClientEvent::MissionEnded(ended) if ended.reason == EndReason::EndedByServer
+        )),
+        "the King's End mission reached the guest: {:?}",
+        guest.events
+    );
+    assert!(guest.host_left, "{:?}", guest.events);
+}
+
 /// Acceptance (EF4): the hosting player, the King, ends the mission; both
 /// players get their debriefs and are back in the lobby, still connected;
 /// the remote player readies again by itself, the King starts again, and

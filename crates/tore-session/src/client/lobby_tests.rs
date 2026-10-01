@@ -640,3 +640,27 @@ fn a_stalled_game_recovers_with_at_most_one_correction() {
         "the host repeated the stall's ticks"
     );
 }
+
+/// Only the hosting game's own connection over the in-process link is
+/// exempt from the silence timeout: a King at a network address that goes
+/// silent is dropped after 5 seconds like anyone, and the game ends.
+#[test]
+fn a_king_at_a_network_address_is_still_dropped_for_silence() {
+    let mut rig = kings_rig(2);
+    let king = manual(&mut rig, "Viper");
+    let cobra = manual(&mut rig, "Cobra");
+    gathered(&mut rig, &[king, cobra]);
+    rig.players[king].stalled = true;
+    assert!(rig.run_until(Duration::from_secs(8), |r| r.closed(cobra)));
+    assert!(rig.logs.iter().any(|l| matches!(
+        l,
+        HostLog::Left {
+            reason: crate::host::LeaveReason::Silent,
+            ..
+        }
+    )));
+    assert_eq!(
+        rig.players[cobra].client.goodbye(),
+        Some(&crate::wire::messages::Goodbye::HostLeft)
+    );
+}

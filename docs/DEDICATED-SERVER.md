@@ -384,7 +384,9 @@ is not reading a debrief (until the lobby screen's Fly button, EF8). End
 Mission ends the mission for everyone: each player gets "Mission ended" and
 their debrief and is back in the lobby, still connected, and the next mission
 starts as before. A mission nobody flies any more ends at once (no empty
-timeout). When the hosting player leaves the game (the window closes, Exit),
+timeout). The hosting player's own connection is never dropped for silence, so
+dragging or resizing the window, or a long load, stalls only that game while
+the others fly on. When the hosting player leaves the game (the window closes, Exit),
 the game ends for everyone: each remote player gets "Mission ended" (the host
 left the game) and their debrief if they were flying, and "The host left the
 game", and the port is free again at once. A mission file that cannot be read, a line it does not take or an option

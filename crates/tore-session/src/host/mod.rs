@@ -1112,6 +1112,15 @@ impl Host {
             address: details.address,
             callsign,
         });
+        // The King's connection is the hosting game's own, over the
+        // in-process link (a King at any other address is not exempt, and
+        // the link drops socket datagrams that claim its address): it is never
+        // dropped for silence. A window held still (dragged, resized, a
+        // long load) stalls only that game; its plane flies on with its
+        // last controls, as any late player's does, until it catches up.
+        if king && details.address == tore_net::LINK_ADDRESS {
+            self.server.set_silence_exempt(connection, true);
+        }
         let mission = self.mission_message();
         self.send(connection, &mission);
         let roster = Message::Roster(self.roster());

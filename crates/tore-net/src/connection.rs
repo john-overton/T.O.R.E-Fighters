@@ -272,6 +272,9 @@ pub(crate) struct Connection {
     last_sent: Option<Duration>,
     now: Duration,
     message_budget: usize,
+    /// Never closed for silence: the host's own player's connection over
+    /// the in-process link, which cannot go silent while its game lives.
+    silence_exempt: bool,
     pub events: VecDeque<Event>,
     pub closed: Option<CloseReason>,
 }
@@ -313,6 +316,7 @@ impl Connection {
             last_sent: None,
             now,
             message_budget: MAX_DATAGRAM,
+            silence_exempt: false,
             events: VecDeque::new(),
             closed: None,
         }
@@ -320,6 +324,10 @@ impl Connection {
 
     pub(crate) fn set_message_budget(&mut self, bytes: usize) {
         self.message_budget = bytes;
+    }
+
+    pub(crate) fn set_silence_exempt(&mut self, exempt: bool) {
+        self.silence_exempt = exempt;
     }
 
     pub(crate) fn note_arrival(&mut self, sent: Duration, received: Duration) {
@@ -560,7 +568,7 @@ impl Connection {
             return;
         }
         self.now = now;
-        if now.saturating_sub(self.last_received) >= TIMEOUT {
+        if !self.silence_exempt && now.saturating_sub(self.last_received) >= TIMEOUT {
             self.close(DisconnectReason::Timeout, out);
             return;
         }
