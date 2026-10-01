@@ -842,3 +842,64 @@ fn time_screen_frame() {
         );
     }
 }
+
+/// After a session ends because the host left, the host's game, still
+/// answering Closed for a few seconds, is not listed; it is listed again if
+/// it answers anything else.
+#[test]
+fn the_game_just_left_is_not_listed_as_closed() {
+    let mut s = with_games();
+    let games = sample_games();
+    let address = games[0].address;
+    let name = games[0].answer.name.clone();
+    let rows = |s: &DirectScreen| s.games.rows().len();
+    let listed = |s: &DirectScreen| {
+        s.games
+            .rows()
+            .iter()
+            .any(|row| row.cells.contains(&Cell::Text(name.clone())))
+    };
+    assert!(listed(&s));
+    // A session with that game ends.
+    s.session_with = Some(address);
+    s.session = true;
+    s.turn(Duration::ZERO, false);
+    assert_eq!(s.left, Some(address));
+    // The search finds it closing: not listed.
+    let before = rows(&s);
+    let mut closing = sample_games();
+    closing[0].answer.phase = DiscoverPhase::Closed;
+    s.hear(closing.clone());
+    assert!(!listed(&s), "a closing game just left is not shown");
+    assert_eq!(rows(&s), before - 1);
+    assert_eq!(s.left, Some(address), "still waiting for it to go");
+    // It is dropped from the search: the mark goes, nothing is hidden.
+    closing.remove(0);
+    s.hear(closing);
+    assert_eq!(s.left, None);
+    // A game that closes that was not just left shows as Closed, as before.
+    let mut other = sample_games();
+    other[0].answer.phase = DiscoverPhase::Closed;
+    s.hear(other);
+    assert!(listed(&s));
+    // The game just left, answering Lobby again (a server's next mission),
+    // is listed and the mark is gone.
+    s.session_with = Some(address);
+    s.session = true;
+    s.turn(Duration::ZERO, false);
+    s.hear(sample_games());
+    assert!(listed(&s));
+    assert_eq!(s.left, None);
+}
+
+/// A game found at the machine's network address is the game hosted at its
+/// loopback address.
+#[test]
+fn a_loopback_address_and_a_network_address_with_one_port_are_one_game() {
+    let lan: SocketAddr = "192.168.1.20:5171".parse().unwrap();
+    let local: SocketAddr = "127.0.0.1:5171".parse().unwrap();
+    assert!(same_game(lan, local));
+    assert!(same_game(lan, lan));
+    assert!(!same_game(lan, "192.168.1.21:5171".parse().unwrap()));
+    assert!(!same_game(lan, "127.0.0.1:5172".parse().unwrap()));
+}

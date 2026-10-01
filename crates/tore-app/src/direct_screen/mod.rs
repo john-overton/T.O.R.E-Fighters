@@ -148,6 +148,13 @@ pub struct DirectScreen {
     looking_for: String,
     /// A session this screen's join or host started is running.
     session: bool,
+    /// The address of the game that session is with: the one joined, or the
+    /// port this game hosts on (a loopback address).
+    session_with: Option<SocketAddr>,
+    /// The game the last session ended with. A game at this address that
+    /// answers Closed is the game just left, going away, so it is not listed
+    /// (EF-F); it is listed again as soon as it answers anything else.
+    left: Option<SocketAddr>,
     /// The search's clock.
     clock: tore_net::RealClock,
     pointer: Option<Point>,
@@ -256,6 +263,8 @@ impl DirectScreen {
             lookup: None,
             looking_for: String::new(),
             session: false,
+            session_with: None,
+            left: None,
             clock: tore_net::RealClock::new(),
             pointer: None,
             searched_port: 0,
@@ -386,6 +395,7 @@ impl DirectScreen {
         if self.session && !session {
             // The session ended (the game said why in Messages).
             self.search_failed = false;
+            self.left = self.session_with.take();
         }
         self.session = session;
         self.sync_search(now);
@@ -462,12 +472,20 @@ impl DirectScreen {
         search.update(now);
         let mut changed = false;
         let mut lines = Vec::new();
+        let left = self.left;
         while let Some(event) = search.poll_event() {
             changed = true;
+            // The game just left, closing, is neither found nor lost.
+            let leaving = |game: &Game| {
+                left.is_some_and(|address| same_game(address, game.address))
+                    && game.answer.phase == DiscoverPhase::Closed
+            };
             match event {
+                SearchEvent::Added(game) if leaving(&game) => {}
                 SearchEvent::Added(game) => {
                     lines.push(format!("Found {} at {}.", game.answer.name, game.address))
                 }
+                SearchEvent::Dropped(game) if leaving(&game) => {}
                 SearchEvent::Dropped(game) => {
                     lines.push(format!("{} is no longer on the network.", game.answer.name));
                 }
@@ -475,12 +493,27 @@ impl DirectScreen {
             }
         }
         if changed {
-            self.found = search.games().to_vec();
+            let games = search.games().to_vec();
+            self.hear(games);
             for line in lines {
                 self.say(&line);
             }
-            self.rebuild_games();
         }
+    }
+
+    /// The search's games now: the list follows them.
+    fn hear(&mut self, games: Vec<Game>) {
+        self.found = games;
+        // Once the game just left is gone from the search, or answers
+        // something other than Closed, it is an ordinary game again.
+        if let Some(address) = self.left
+            && !self.found.iter().any(|game| {
+                same_game(address, game.address) && game.answer.phase == DiscoverPhase::Closed
+            })
+        {
+            self.left = None;
+        }
+        self.rebuild_games();
     }
 
     /// Takes a lookup's progress into Messages; a reached address is a join.
@@ -493,6 +526,7 @@ impl DirectScreen {
                 lines.push(progress.to_string());
                 match progress {
                     Progress::Reached(address) => {
+                        self.session_with = Some(address);
                         outcome = Outcome::Join(JoinRequest {
                             address,
                             label: self.looking_for.clone(),
@@ -544,6 +578,12 @@ impl DirectScreen {
             .found
             .iter()
             .filter(|game| show_full || !game.answer.full || game.compat != Compat::Same)
+            .filter(|game| {
+                !(game.answer.phase == DiscoverPhase::Closed
+                    && self
+                        .left
+                        .is_some_and(|address| same_game(address, game.address)))
+            })
             .map(game_row)
             .collect();
         self.games.set_rows(rows);
@@ -695,6 +735,7 @@ impl DirectScreen {
         if self.search.take().is_some() {
             log::info!("Direct Connection: search stopped before hosting");
         }
+        self.session_with = Some(SocketAddr::from(([127, 0, 0, 1], self.settings.port)));
         Outcome::Host(HostRequest {
             callsign,
             name,
@@ -746,6 +787,7 @@ impl DirectScreen {
         self.save();
         // The join takes over from the search.
         self.search = None;
+        self.session_with = Some(address);
         Outcome::Join(JoinRequest {
             address,
             label: name,
@@ -1261,6 +1303,13 @@ impl Timing {
         self.worst.set(Duration::ZERO);
         self.since.set(Instant::now());
     }
+}
+
+/// Whether two addresses are the same game: the same address, or the same
+/// port when one is this machine (a game found on the local network may be
+/// found at its network address and joined or hosted at the loopback one).
+fn same_game(a: SocketAddr, b: SocketAddr) -> bool {
+    a == b || (a.port() == b.port() && (a.ip().is_loopback() || b.ip().is_loopback()))
 }
 
 /// One found game as a row of the Games list: the lock, the name, players and
