@@ -50,6 +50,8 @@ pub fn weapon_label<'a>(
 pub fn label_font() -> Sprite {
     crate::menu::flat_font([232, 233, 230])
 }
+/// Said on the lobby's page when Cheat loading is asked for.
+pub const LOBBY_CHEAT_NOTICE: &str = "Cheat loading is not allowed in a multiplayer game.";
 pub struct Ordnance {
     pub loadout: Loadout,
     pub visible: bool,
@@ -71,6 +73,10 @@ pub struct Ordnance {
     controls: Vec<(usize, Rect)>,
     pub message: Option<String>,
     menu: bool,
+    /// The page is open from a multiplayer lobby (EF8): Fly reads Accept and
+    /// sends the loadout for the player's own slot, Select Plane reads
+    /// Cancel, and Cheat loading is not offered (a game's host refuses it).
+    pub lobby: bool,
 }
 impl Ordnance {
     pub fn new(mut loadout: Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
@@ -160,6 +166,7 @@ impl Ordnance {
             controls: vec![],
             message: None,
             menu: false,
+            lobby: false,
         };
         ordnance.rebuild_catalog();
         Ok(ordnance)
@@ -425,6 +432,10 @@ impl Ordnance {
                 self.loadout.quantities.fill(0);
                 self.menu = false;
             }
+            13 if self.lobby => {
+                self.menu = false;
+                self.message = Some(LOBBY_CHEAT_NOTICE.into());
+            }
             13 => {
                 // Toggling unloads every station, then rebuilds the catalog.
                 self.loadout.quantities.fill(0);
@@ -673,8 +684,16 @@ impl Ordnance {
             c.blit(lamp, (115, y), 0, lamp.width, 1.);
         }
         for (id, label, r) in [
-            (7, "Fly", (493, 414, 80, 24)),
-            (8, "Select Plane", (363, 414, 100, 24)),
+            (
+                7,
+                if self.lobby { "Accept" } else { "Fly" },
+                (493, 414, 80, 24),
+            ),
+            (
+                8,
+                if self.lobby { "Cancel" } else { "Select Plane" },
+                (363, 414, 100, 24),
+            ),
         ] {
             let hit = c.action_button(
                 &self.sprites,
@@ -692,6 +711,8 @@ impl Ordnance {
                 &self.sprites["MENUFONT.PIC"],
                 if self.loadout.cheat {
                     "Cheat  On"
+                } else if self.lobby {
+                    "Cheat  Off (not allowed)"
                 } else {
                     "Cheat  Off"
                 },
@@ -1436,6 +1457,7 @@ mod tests {
             controls: vec![],
             message: None,
             menu: false,
+            lobby: false,
         };
         ui.render(&mut vec![0; WIDTH * HEIGHT * 4]);
         ui
@@ -1485,6 +1507,27 @@ mod tests {
         drag(&mut ui, (400., 145.), (100., 120.));
         assert_eq!(ui.loadout.quantities, [0, 0, 500]);
         assert!(ui.selected.is_none());
+    }
+    #[test]
+    fn the_lobbys_page_refuses_cheat_loading_and_still_answers_fly_with_accept() {
+        let mut ui = fixture();
+        ui.lobby = true;
+        // The Cheat row of the page's menu is not offered to a multiplayer
+        // game: the notice says so and nothing is unloaded or turned on.
+        let before = ui.loadout.quantities.clone();
+        ui.activate(11);
+        ui.activate(13);
+        assert!(!ui.loadout.cheat);
+        assert_eq!(ui.loadout.quantities, before);
+        assert_eq!(ui.message.as_deref(), Some(LOBBY_CHEAT_NOTICE));
+        // Accept is the page's Fly button; Cancel is Select Plane.
+        assert_eq!(ui.activate(7), Action::MissionFly);
+        ui.activate(8);
+        assert!(!ui.visible);
+        // Single player's page still toggles Cheat.
+        let mut sp = fixture();
+        sp.activate(13);
+        assert!(sp.loadout.cheat);
     }
     #[test]
     fn normal_catalog_hides_unimplemented_weapons_even_when_they_fit() {

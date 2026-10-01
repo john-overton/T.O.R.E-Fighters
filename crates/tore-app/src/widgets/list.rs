@@ -47,6 +47,9 @@ pub struct Row {
     /// Drawn in a dimmer text (a game from another version, one that is
     /// full).
     pub dim: bool,
+    /// Drawn in this colour instead (the lobby's unable players, EF8). A
+    /// dimmed row stays dim.
+    pub tint: Option<[u8; 3]>,
 }
 
 impl Row {
@@ -55,6 +58,7 @@ impl Row {
             key: key.into(),
             cells,
             dim: false,
+            tint: None,
         }
     }
     /// A one-column row of text, keyed by the text.
@@ -64,6 +68,11 @@ impl Row {
     }
     pub fn dimmed(mut self) -> Self {
         self.dim = true;
+        self
+    }
+    /// The row's text in `colour`.
+    pub fn tinted(mut self, colour: [u8; 3]) -> Self {
+        self.tint = Some(colour);
         self
     }
 }
@@ -167,23 +176,18 @@ impl List {
         self.enabled = enabled;
     }
 
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.rows.len()
     }
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.rows.is_empty()
     }
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub fn rows(&self) -> &[Row] {
         &self.rows
     }
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
-    pub fn visible(&self) -> usize {
-        self.visible
-    }
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn selected(&self) -> Option<usize> {
         self.selected
     }
@@ -191,7 +195,7 @@ impl List {
         self.selected.and_then(|i| self.rows.get(i))
     }
     /// The page shown, from 0.
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn page(&self) -> usize {
         self.page
     }
@@ -236,7 +240,7 @@ impl List {
     }
 
     /// The text of the page box, as retail formats it, for example `1  of  3`.
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn page_counter(&self) -> String {
         let (left, right) = self.counter_parts();
         format!("{left}{right}")
@@ -290,7 +294,9 @@ impl List {
             ((x, y, HALF.0, HALF.1), (x, y + HALF.1, HALF.0, HALF.1))
         })
     }
-    fn row_at(&self, point: Point) -> Option<usize> {
+    /// The index of the row under `point` on the shown page, if any (the
+    /// rocker is not a row).
+    pub fn row_at(&self, point: Point) -> Option<usize> {
         (0..self.visible).find_map(|slot| {
             let index = self.page * self.visible + slot;
             (index < self.rows.len() && inside(self.bar_rect(slot), point)).then_some(index)
@@ -400,7 +406,11 @@ impl List {
                     1.0,
                 );
             }
-            let tint = row.dim.then_some([118, 118, 118]);
+            let tint = if row.dim {
+                Some([118, 118, 118])
+            } else {
+                row.tint
+            };
             let origin = x + TEXT_ORIGIN;
             for (column, cell) in self.columns.iter().zip(&row.cells) {
                 match cell {

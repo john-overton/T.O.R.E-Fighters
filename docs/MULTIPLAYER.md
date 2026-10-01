@@ -126,7 +126,7 @@ builds a mission as usual, then opens its slots to humans.
 Settings a player may not change are shown grayed out, as in retail. The
 revival and scoring ranges are retail's ([numbers](spec/multiplayer.md#numbers)).
 
-*Built on the wire (EF4, 2026-10-01; the lobby screen is EF8):* the lobby
+*Built on the wire (EF4, 2026-10-01; the screen is EF8, below):* the lobby
 with its King (the hosting player), slots, each player's own loadout, ready
 and the King's start, the King's mission change, kick, and the return to the
 lobby after each mission with everyone still connected; a dedicated server's
@@ -143,10 +143,37 @@ as a plain line), and **New** hosts a game from the Quick Mission creator's
 current mission. Options holds the port, the password and the game's name, and
 shows the retail quick messages. The game remembers the callsign, the port, the
 game name, the last eight addresses and "Show full games"; the password is
-never kept. Until the lobby screen (EF8) a joined player takes the first free
-slot and readies by itself, and a hosting player's game starts the first
-mission once everyone holding a slot is ready. How it works:
+never kept. A join or New opens the lobby (EF8, below). How it works:
 [architecture](ARCHITECTURE.md#the-direct-connection-screen-as-built-ef7).
+
+*Built (EF8, 2026-10-01): the lobby screen.* Join and New open the **lobby**
+(the screen reads "Lobby"). Its head shows the game's name, the mission's
+summary and the start rule in plain words. **Slots** lists every friendly
+aircraft (wing, member, aircraft, who holds it or AI, a tick when the holder is
+ready); a click on a free slot takes it, a click on one's own frees it, and a
+slot another player holds is dimmed and cannot be clicked. **Players** lists
+the callsigns with the King's crown, the house of the player whose machine runs
+the game, a tick for ready and a red cross with the reason (shown under the
+lists) for a player whose game cannot play the mission. **Messages** is the
+chat box and its line (Enter sends to all). The buttons: **Mission...** (the
+King) opens the Quick Mission creator with its OK reading **Accept**, Start
+locked to Airborne ("Multiplayer: everyone starts airborne") and what a host
+cannot take refused before anything is sent; **Loadout** opens Load Ordnance
+for the player's own aircraft, with Accept and Cancel, the mission's Guns only
+applied and Cheat loading refused on the page; **Ready** toggles (a player who
+readies without choosing a loadout flies the standard stores, and Messages says
+so); **Fly** (the King, blue when everyone holding a slot is ready) starts the
+mission, and says "Not ready: Hawk." otherwise; **Kick** (the King, on a
+selected player) asks for the reason the player will see; **Leave** returns to
+Direct Connection, and asks "Leaving ends the game for everyone. Leave?" of the
+King. While a mission flies the lobby stays open to a late joiner or to a
+player who ended their flight: take a slot and press **Join** to fly at once,
+with the standard stores; the King's Fly then reads **End Mission**. After a
+mission each player reads the debrief and returns to the lobby, still
+connected, slots and loadouts kept and ready cleared. A dedicated server's
+lobby is the same without the King's buttons. How it works, the layout and
+what was measured:
+[architecture](ARCHITECTURE.md#the-lobby-screen-as-built-ef8).
 
 **Start.** Everyone starts airborne, as in retail multiplayer. Late joiners take
 over aircraft already flying. *Retail gap-fill (agent):* until multiplayer

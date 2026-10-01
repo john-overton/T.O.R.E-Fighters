@@ -1,0 +1,888 @@
+//! The lobby screen (slice EF8): where the players of a game gather before a
+//! mission, and where everyone returns after it. Built of the widget kit
+//! ([`crate::widgets`]) on the Direct Connection screen's background and panel
+//! (the look John approved on 2026-10-01); the design and the choices below
+//! are in `docs/ARCHITECTURE.md`, "Lobby and hosting".
+//!
+//! The screen is plain state, as Direct Connection is: the game gives it the
+//! lobby's state each frame ([`LobbyScreen::update`]) and its events (keys,
+//! text, the pointer, the wheel), and it answers with a [`Request`] for the
+//! game to send through the client session. It owns no session, so every
+//! rule on it is tested without a window. What each button does, and who may
+//! press it, is in [`facts`].
+//!
+//! # What is on it
+//!
+//! - **The head**: the game's name, the mission's summary and the start rule
+//!   in plain words.
+//! - **Slots**: every aircraft a player may take (wing, member, aircraft,
+//!   who holds it, or AI). Click a free slot to take it; click one's own again
+//!   to free it. A slot another player holds is dimmed and cannot be clicked.
+//! - **Players**: callsigns, the King's crown, the house of the player whose
+//!   machine runs the game, a tick when ready, a red mark and the reason
+//!   when a player's game cannot play the mission.
+//! - **Messages and the chat line** (EF6's [`LobbyChat`]): the game's words
+//!   and chat; Enter in the line sends to All.
+//! - **Buttons**: Mission... and Fly (the King; Fly reads End Mission while
+//!   the mission flies), Loadout, Ready (Join while the mission flies), Kick
+//!   (the King, on a player selected in Players) and Leave. A dedicated
+//!   server's lobby has no King, so it shows only Loadout, Ready and Leave.
+//!   A button that cannot be pressed says why when it is clicked.
+//! - Two small panels: Kick (with the reason the player sees) and the King's
+//!   Leave ("Leaving ends the game for everyone. Leave?").
+//!
+//! # Keys
+//!
+//! Tab and Shift+Tab walk Slots, Players, Messages, the chat line and the
+//! buttons; Enter on a slot clicks it, in the chat line sends (or, with the
+//! line empty, presses the blue button: Fly when it can be pressed, else
+//! Ready); Esc is Leave. Every control also works by the mouse.
+pub mod app;
+pub mod facts;
+mod modal;
+pub mod preview;
+#[cfg(test)]
+mod tests;
+
+use crate::menu::{Canvas, text_width};
+use crate::net::lobby_chat::LobbyChat;
+use crate::widgets::{
+    Align, Background, Button, Column, Focus, Kit, List, Outcome as Wo, Pager, Point, Route,
+    Widget, draw_panel, fit, inside,
+};
+use facts::{Buttons, DefaultButton, Facts, FlyAs, SlotClick};
+use modal::{Answer, Modal, Purpose};
+use std::sync::Arc;
+use std::time::Instant;
+use tore_session::wire::chat::ChatLine;
+use tore_session::wire::messages::LobbyState;
+
+/// The screen's own frame lines: the colour measured on John's screenshot.
+const LINE: [u8; 4] = [174, 174, 174, 255];
+
+/// The controls Tab visits, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Id {
+    Slots,
+    Players,
+    Messages,
+    Line,
+    Mission,
+    Loadout,
+    Ready,
+    Kick,
+    Fly,
+    Leave,
+}
+
+/// What the player asked the game to do. The game sends it through the
+/// client session (or opens a page, or ends the session).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Request {
+    /// Take this plane's slot.
+    Take(u32),
+    /// Free the slot held.
+    LeaveSlot,
+    /// Ready, or not ready.
+    SetReady(bool),
+    /// The King's Fly.
+    Start,
+    /// The King ends the flying mission for everyone.
+    EndMission,
+    Kick {
+        player: u8,
+        reason: String,
+    },
+    /// Open the Quick Mission creator in Accept mode (the King).
+    Mission,
+    /// Open Load Ordnance for the player's own slot.
+    Loadout,
+    /// A chat line to All.
+    Chat(String),
+    /// Leave the game: back to Direct Connection. The King has been asked.
+    Leave,
+}
+
+const BUTTON_Y: i32 = 419;
+const BUTTON_W: i32 = 85;
+/// The six places of the button row.
+const SLOT_X: [i32; 6] = [45, 138, 231, 324, 417, 510];
+
+/// The slots list's pager: its rocker, the PREV and NEXT labels and the page
+/// box, to the right of the list (the Players box starts at 399).
+const SLOTS_PAGER: Pager = Pager {
+    rocker: (364, 183),
+    prev: (336, 184),
+    next: (336, 207),
+    page_label: (336, 226),
+    counter_box: (336, 240),
+};
+
+/// The screen.
+pub struct LobbyScreen {
+    kit: Arc<Kit>,
+    /// What the game is called until its lobby state arrives.
+    label: String,
+    /// This player's game runs the host: leaving ends the game.
+    hosting: bool,
+    slots: List,
+    players: List,
+    /// Messages and the chat line (slice EF6).
+    pub chat: LobbyChat,
+    mission: Button,
+    loadout: Button,
+    ready: Button,
+    kick: Button,
+    fly: Button,
+    leave: Button,
+    focus: Focus<Id>,
+    modal: Option<Modal>,
+    state: Option<LobbyState>,
+    unable: Option<String>,
+    facts: Facts,
+    buttons: Buttons,
+    default: Option<DefaultButton>,
+    pointer: Option<Point>,
+    /// A button that cannot be pressed was pressed on: its release says why.
+    blocked: Option<Id>,
+    backdrop: std::cell::OnceCell<Vec<u8>>,
+    /// The screen's own frame cost, logged every 300 frames when
+    /// `TORE_DIRECT_TIMING` is set (the Direct Connection screen's switch).
+    timing: Option<crate::direct_screen::Timing>,
+}
+
+impl LobbyScreen {
+    /// A lobby screen on `kit` (in `MODEM3`'s palette). `label` names the
+    /// game while the lobby's state is on its way; `hosting` says this game
+    /// runs the host, so the player is the King and Leave asks first.
+    pub fn new(kit: Arc<Kit>, label: &str, hosting: bool) -> Self {
+        let slot_columns = vec![
+            Column {
+                x: 0,
+                width: 11,
+                align: Align::Centre,
+            },
+            Column {
+                x: 14,
+                width: 54,
+                align: Align::Left,
+            },
+            Column {
+                x: 70,
+                width: 104,
+                align: Align::Left,
+            },
+            Column {
+                x: 176,
+                width: 62,
+                align: Align::Left,
+            },
+            Column {
+                x: 242,
+                width: 12,
+                align: Align::Centre,
+            },
+        ];
+        let player_columns = vec![
+            Column {
+                x: 0,
+                width: 11,
+                align: Align::Centre,
+            },
+            Column {
+                x: 12,
+                width: 10,
+                align: Align::Centre,
+            },
+            Column {
+                x: 24,
+                width: 10,
+                align: Align::Centre,
+            },
+            Column {
+                x: 37,
+                width: 78,
+                align: Align::Left,
+            },
+            Column {
+                x: 118,
+                width: 40,
+                align: Align::Left,
+            },
+        ];
+        let order = vec![
+            Id::Slots,
+            Id::Players,
+            Id::Messages,
+            Id::Line,
+            Id::Mission,
+            Id::Loadout,
+            Id::Ready,
+            Id::Kick,
+            Id::Fly,
+            Id::Leave,
+        ];
+        let mut focus = Focus::new(order, None);
+        // Typing starts in the chat line.
+        focus.set(Id::Line);
+        let button =
+            |label: &str, place: usize| Button::new(label, (SLOT_X[place], BUTTON_Y), BUTTON_W);
+        let facts = Facts::of(None, None);
+        let buttons = facts::buttons(&facts, false);
+        let mut screen = Self {
+            kit,
+            label: label.to_owned(),
+            hosting,
+            slots: List::new((45, 168), 286, 5)
+                .with_pager(SLOTS_PAGER)
+                .with_columns(slot_columns),
+            players: List::new((404, 168), 186, 5).with_columns(player_columns),
+            chat: LobbyChat::new((45, 294, 549, 78), (45, 377), 549),
+            mission: button("Mission...", 0),
+            loadout: button("Loadout", 1),
+            ready: button("Ready", 2),
+            kick: button("Kick", 3),
+            fly: button("Fly", 4),
+            leave: button("Leave", 5),
+            focus,
+            modal: None,
+            state: None,
+            unable: None,
+            facts,
+            buttons,
+            default: None,
+            pointer: None,
+            blocked: None,
+            backdrop: std::cell::OnceCell::new(),
+            timing: std::env::var_os("TORE_DIRECT_TIMING")
+                .map(|_| crate::direct_screen::Timing::new("Lobby")),
+        };
+        screen.refresh();
+        screen
+    }
+
+    // ---- what the game reads ----
+
+    #[cfg(test)]
+    pub fn facts(&self) -> &Facts {
+        &self.facts
+    }
+    #[cfg(test)]
+    pub fn buttons(&self) -> Buttons {
+        self.buttons
+    }
+    /// A panel (Kick, or the King's Leave) is open.
+    #[cfg(test)]
+    pub fn modal_open(&self) -> bool {
+        self.modal.is_some()
+    }
+    /// What the screen shows to be read: the game's name.
+    pub fn game_name(&self) -> &str {
+        self.state.as_ref().map_or(&self.label, |s| &s.name)
+    }
+    /// True when typed text goes to a field.
+    pub fn typing(&self) -> bool {
+        match &self.modal {
+            Some(modal) => modal.typing(),
+            None => self.focus.is(Id::Line),
+        }
+    }
+    /// The lines in Messages, oldest first.
+    #[cfg(test)]
+    pub fn message_lines(&self) -> Vec<String> {
+        self.chat
+            .messages
+            .lines()
+            .map(|(text, _)| text.to_owned())
+            .collect()
+    }
+    /// The button Enter presses now.
+    #[cfg(test)]
+    pub fn default_button(&self) -> Option<DefaultButton> {
+        self.default
+    }
+    #[cfg(test)]
+    pub fn typed(&self) -> &str {
+        self.chat.field.text()
+    }
+    /// The plane of the slot the selection is on, for tests.
+    #[cfg(test)]
+    pub fn selected_slot(&self) -> Option<u32> {
+        self.selected_plane()
+    }
+
+    // ---- words ----
+
+    /// Adds a line to Messages in the game's own colour.
+    pub fn say(&mut self, text: &str) {
+        log::info!("Lobby: {text}");
+        self.chat.system(&self.kit, text);
+    }
+
+    /// A chat line from the session.
+    pub fn chat_line(&mut self, line: &ChatLine) {
+        self.chat.push(&self.kit, line);
+    }
+
+    // ---- the turn ----
+
+    /// The screen's turn each frame: the lobby's state taken in (the changes
+    /// said in Messages, the rows and buttons rebuilt only when it changed),
+    /// and the widgets animated. `unable` is the client's word on whether its
+    /// game plays the mission. Never blocks.
+    pub fn update(&mut self, lobby: Option<&LobbyState>, unable: Option<&str>) {
+        let started = self.timing.as_ref().map(|_| Instant::now());
+        self.turn(lobby, unable);
+        if let (Some(timing), Some(started)) = (&self.timing, started) {
+            timing.update.set(timing.update.get() + started.elapsed());
+        }
+    }
+
+    fn turn(&mut self, lobby: Option<&LobbyState>, unable: Option<&str>) {
+        if lobby != self.state.as_ref() || unable != self.unable.as_deref() {
+            self.take(lobby, unable);
+        }
+        let at = Instant::now();
+        self.slots.advance(at);
+        self.players.advance(at);
+    }
+
+    fn take(&mut self, lobby: Option<&LobbyState>, unable: Option<&str>) {
+        if let Some(new) = lobby {
+            for line in facts::change_lines(self.state.as_ref(), new) {
+                self.say(&line);
+            }
+        }
+        // A player whose own game cannot play it is told once.
+        if unable != self.unable.as_deref()
+            && let Some(why) = unable
+            && lobby.is_none_or(|l| l.me().is_none_or(|m| m.unable.is_none()))
+        {
+            self.say(&format!("Your game cannot play this mission: {why}"));
+        }
+        self.state = lobby.cloned();
+        self.unable = unable.map(str::to_owned);
+        if let Some(state) = &self.state {
+            self.slots.set_rows(facts::slot_rows(state));
+            self.players.set_rows(facts::player_rows(state));
+        } else {
+            self.slots.set_rows(Vec::new());
+            self.players.set_rows(Vec::new());
+        }
+        self.refresh();
+    }
+
+    /// The facts, the button states, their labels and the blue button, from
+    /// what the screen holds now.
+    fn refresh(&mut self) {
+        self.facts = Facts::of(self.state.as_ref(), self.unable.as_deref());
+        self.buttons = facts::buttons(&self.facts, self.kick_target().is_some());
+        self.default = facts::default_button(&self.facts, &self.buttons);
+        let b = self.buttons;
+        self.mission.set_enabled(b.mission.is_enabled());
+        self.loadout.set_enabled(b.loadout.is_enabled());
+        self.ready.set_enabled(b.ready.is_enabled());
+        self.kick.set_enabled(b.kick.is_enabled());
+        self.fly.set_enabled(b.fly.is_enabled());
+        self.ready.set_label(facts::ready_label(&self.facts));
+        self.fly.set_label(match b.fly_as {
+            FlyAs::Fly => "Fly",
+            FlyAs::EndMission => "End Mission",
+        });
+        self.fly
+            .set_default(self.default == Some(DefaultButton::Fly));
+        self.ready
+            .set_default(self.default == Some(DefaultButton::Ready));
+        // The buttons shown fill the row from the left for the King and from
+        // the right for the others, so Leave is always in the last place.
+        let places: &[(Id, usize)] = if b.mission.is_shown() {
+            &[
+                (Id::Mission, 0),
+                (Id::Loadout, 1),
+                (Id::Ready, 2),
+                (Id::Kick, 3),
+                (Id::Fly, 4),
+                (Id::Leave, 5),
+            ]
+        } else {
+            &[(Id::Loadout, 3), (Id::Ready, 4), (Id::Leave, 5)]
+        };
+        for (id, place) in places {
+            self.button_mut(*id).place((SLOT_X[*place], BUTTON_Y));
+        }
+    }
+
+    fn button_mut(&mut self, id: Id) -> &mut Button {
+        match id {
+            Id::Mission => &mut self.mission,
+            Id::Loadout => &mut self.loadout,
+            Id::Ready => &mut self.ready,
+            Id::Kick => &mut self.kick,
+            Id::Fly => &mut self.fly,
+            _ => &mut self.leave,
+        }
+    }
+
+    fn button_ref(&self, id: Id) -> &Button {
+        match id {
+            Id::Mission => &self.mission,
+            Id::Loadout => &self.loadout,
+            Id::Ready => &self.ready,
+            Id::Kick => &self.kick,
+            Id::Fly => &self.fly,
+            _ => &self.leave,
+        }
+    }
+
+    /// For each control, indexed by [`Id`], whether Tab may stop on it.
+    fn usable(&self) -> [bool; 10] {
+        let mut ok = [true; 10];
+        for id in [Id::Mission, Id::Loadout, Id::Ready, Id::Kick, Id::Fly] {
+            ok[id as usize] = self.shown(id) && Widget::enabled(self.button_ref(id));
+        }
+        ok
+    }
+
+    /// The buttons drawn now, which are the ones the pointer can reach.
+    fn shown_buttons(&self) -> Vec<Id> {
+        [
+            Id::Mission,
+            Id::Loadout,
+            Id::Ready,
+            Id::Kick,
+            Id::Fly,
+            Id::Leave,
+        ]
+        .into_iter()
+        .filter(|id| self.shown(*id))
+        .collect()
+    }
+
+    /// Which buttons are drawn, and so can be reached.
+    fn shown(&self, id: Id) -> bool {
+        match id {
+            Id::Mission | Id::Kick | Id::Fly => self.buttons.mission.is_shown(),
+            _ => true,
+        }
+    }
+
+    /// The plane of the slot selected in Slots.
+    fn selected_plane(&self) -> Option<u32> {
+        self.slots.selected_row()?.key.parse().ok()
+    }
+
+    /// The player selected in Players that the King may kick: anyone but
+    /// themself, with the King the only one who has the button.
+    fn kick_target(&self) -> Option<(u8, String)> {
+        let state = self.state.as_ref()?;
+        let id: u8 = self.players.selected_row()?.key.parse().ok()?;
+        if id == state.you || state.king == Some(id) {
+            return None;
+        }
+        Some((id, state.player(id)?.callsign.clone()))
+    }
+
+    // ---- what the buttons do ----
+
+    fn press(&mut self, id: Id) -> Option<Request> {
+        if !self.shown(id) {
+            return None;
+        }
+        let enabled = match id {
+            Id::Mission => self.buttons.mission.is_enabled(),
+            Id::Loadout => self.buttons.loadout.is_enabled(),
+            Id::Ready => self.buttons.ready.is_enabled(),
+            Id::Kick => self.buttons.kick.is_enabled(),
+            Id::Fly => self.buttons.fly.is_enabled(),
+            _ => true,
+        };
+        if !enabled {
+            if let Some(why) = facts::disabled_reason(&self.facts, id, self.kick_target().is_some())
+            {
+                self.say(&why);
+            }
+            return None;
+        }
+        match id {
+            Id::Mission => Some(Request::Mission),
+            Id::Loadout => Some(Request::Loadout),
+            Id::Ready => {
+                let ready = !self.facts.ready;
+                if ready && !self.facts.armed {
+                    self.say(
+                        if self.facts.phase == tore_session::wire::messages::LobbyPhase::Flying {
+                            "Joining with the aircraft's standard stores."
+                        } else {
+                            "Ready with the standard stores. Press Loadout first to choose others."
+                        },
+                    );
+                }
+                Some(Request::SetReady(ready))
+            }
+            Id::Kick => {
+                let (player, callsign) = self.kick_target()?;
+                self.modal = Some(Modal::kick(player, &callsign));
+                None
+            }
+            Id::Fly => Some(match self.buttons.fly_as {
+                FlyAs::Fly => Request::Start,
+                FlyAs::EndMission => Request::EndMission,
+            }),
+            Id::Leave => self.leave_pressed(),
+            _ => None,
+        }
+    }
+
+    /// Leave, and Esc: the King is asked first, since the game ends for
+    /// everyone.
+    fn leave_pressed(&mut self) -> Option<Request> {
+        if self.facts.king || (self.hosting && !self.facts.connected) {
+            self.modal = Some(Modal::leave());
+            None
+        } else {
+            Some(Request::Leave)
+        }
+    }
+
+    fn press_default(&mut self) -> Option<Request> {
+        match self.default {
+            Some(DefaultButton::Fly) => self.press(Id::Fly),
+            Some(DefaultButton::Ready) => self.press(Id::Ready),
+            None => None,
+        }
+    }
+
+    /// A click, or Enter, on the slot of `plane`.
+    fn slot_clicked(&mut self, plane: u32) -> Option<Request> {
+        let state = self.state.as_ref()?;
+        match facts::slot_click(state, &self.facts, plane) {
+            SlotClick::Take(plane) => Some(Request::Take(plane)),
+            SlotClick::Leave => Some(Request::LeaveSlot),
+            SlotClick::Refused(why) => {
+                self.say(why);
+                None
+            }
+        }
+    }
+
+    fn modal_answer(&mut self, answer: Answer) -> Option<Request> {
+        match answer {
+            Answer::None => None,
+            Answer::Cancel => {
+                self.modal = None;
+                None
+            }
+            Answer::Ok(reason) => {
+                let modal = self.modal.take()?;
+                match modal.purpose {
+                    Purpose::Kick(player, _) => Some(Request::Kick { player, reason }),
+                    Purpose::Leave => Some(Request::Leave),
+                }
+            }
+        }
+    }
+
+    // ---- events ----
+
+    /// A key press by the window's name for it.
+    pub fn key(&mut self, name: &str, shift: bool) -> Option<Request> {
+        if let Some(modal) = &mut self.modal {
+            let answer = modal.key(name, shift);
+            return self.modal_answer(answer);
+        }
+        if name == "Escape" {
+            return self.leave_pressed();
+        }
+        let ok = self.usable();
+        let usable = |id: Id| ok[id as usize];
+        match self.focus.key(name, shift, usable) {
+            Route::Moved => None,
+            Route::Ignored | Route::Default(_) => {
+                if name == "Enter" {
+                    self.press_default()
+                } else {
+                    None
+                }
+            }
+            Route::Widget(id) => match id {
+                Id::Slots => match self.slots.key(name) {
+                    Wo::Activated => {
+                        let plane = self.selected_plane()?;
+                        self.slot_clicked(plane)
+                    }
+                    _ => None,
+                },
+                Id::Players => {
+                    if self.players.key(name) == Wo::Changed {
+                        self.refresh();
+                    }
+                    None
+                }
+                Id::Messages => {
+                    if name == "Enter" {
+                        self.press_default()
+                    } else {
+                        self.chat.messages.key(name);
+                        None
+                    }
+                }
+                Id::Line => match self.chat.key(name) {
+                    Wo::Activated => match self.chat.take_text() {
+                        Some(text) => Some(Request::Chat(text)),
+                        None => self.press_default(),
+                    },
+                    _ => None,
+                },
+                button => {
+                    if self.shown(button) && self.button_mut(button).key(name) == Wo::Activated {
+                        self.press(button)
+                    } else {
+                        None
+                    }
+                }
+            },
+        }
+    }
+
+    /// Typed text for the field that has the keyboard.
+    pub fn text_input(&mut self, text: &str) {
+        if let Some(modal) = &mut self.modal {
+            modal.text_input(text);
+            return;
+        }
+        if self.focus.is(Id::Line) {
+            self.chat.text_input(text);
+        }
+    }
+
+    /// The pointer moved (canvas pixels), or left the canvas.
+    pub fn moved(&mut self, point: Option<(f64, f64)>) {
+        self.pointer = point.map(|(x, y)| (x as i32, y as i32));
+        let point = self.pointer;
+        if let Some(modal) = &mut self.modal {
+            modal.moved(point);
+            return;
+        }
+        for id in [
+            Id::Mission,
+            Id::Loadout,
+            Id::Ready,
+            Id::Kick,
+            Id::Fly,
+            Id::Leave,
+        ] {
+            self.button_mut(id).pointer_move(point);
+        }
+    }
+
+    /// The left mouse button went down or up at the pointer.
+    pub fn button(&mut self, pressed: bool) -> Option<Request> {
+        let point = self.pointer;
+        if let Some(modal) = &mut self.modal {
+            let answer = modal.button(&self.kit, point, pressed);
+            return self.modal_answer(answer);
+        }
+        let now = Instant::now();
+        let Some(p) = point else {
+            if !pressed {
+                self.cancel_press();
+            }
+            return None;
+        };
+        if pressed {
+            return self.pressed_at(p, now);
+        }
+        // Released.
+        self.slots.release(now);
+        let mut fired = None;
+        let blocked = self.blocked.take();
+        for id in self.shown_buttons() {
+            let button = self.button_mut(id);
+            let bounds = button.bounds();
+            if button.release(p) == Wo::Activated || (blocked == Some(id) && inside(bounds, p)) {
+                // A click on a button that cannot be pressed says why
+                // ([`LobbyScreen::press`]).
+                fired = Some(id);
+            }
+        }
+        match fired {
+            Some(id) if self.shown(id) => {
+                self.focus.set(id);
+                self.press(id)
+            }
+            _ => None,
+        }
+    }
+
+    fn pressed_at(&mut self, p: Point, now: Instant) -> Option<Request> {
+        let mut request = None;
+        if self.chat.field.hit(p) {
+            self.focus.set(Id::Line);
+            self.chat.field.press(p, &self.kit);
+        }
+        if self.slots.hit(p) {
+            self.focus.set(Id::Slots);
+        }
+        // The rocker is outside the rows' rectangle: the list sorts out what
+        // it was pressed on. A row clicked is a slot clicked, once (a
+        // double-click's second press is not another click).
+        let row = self.slots.row_at(p);
+        let outcome = self.slots.press(p, now);
+        if let Some(index) = row
+            && outcome != Wo::Activated
+            && let Some(plane) = self
+                .slots
+                .rows()
+                .get(index)
+                .and_then(|row| row.key.parse().ok())
+        {
+            request = self.slot_clicked(plane);
+        }
+        if self.players.hit(p) {
+            self.focus.set(Id::Players);
+        }
+        if self.players.press(p, now) == Wo::Changed {
+            self.refresh();
+        }
+        if self.chat.messages.hit(p) {
+            self.focus.set(Id::Messages);
+        }
+        self.chat.messages.press(p);
+        for id in self.shown_buttons() {
+            let button = self.button_mut(id);
+            button.press(p);
+            if !Widget::enabled(button) && inside(button.bounds(), p) {
+                self.blocked = Some(id);
+            }
+        }
+        request
+    }
+
+    /// Lets go of anything held (the window lost focus or was resized).
+    pub fn cancel_press(&mut self) {
+        let off = (-1, -1);
+        self.slots.release(Instant::now());
+        for id in [
+            Id::Mission,
+            Id::Loadout,
+            Id::Ready,
+            Id::Kick,
+            Id::Fly,
+            Id::Leave,
+        ] {
+            let button = self.button_mut(id);
+            button.release(off);
+            button.pointer_move(None);
+        }
+        self.pointer = None;
+        self.blocked = None;
+    }
+
+    /// A wheel step over the pointer's place. Positive is up.
+    pub fn wheel(&mut self, notches: i32) {
+        let Some(p) = self.pointer else {
+            return;
+        };
+        if self.modal.is_some() {
+            return;
+        }
+        if self.chat.messages.hit(p) {
+            self.chat.messages.wheel(notches);
+        } else if self.players.hit(p) {
+            if self.players.wheel(notches) == Wo::Changed {
+                self.refresh();
+            }
+        } else if self.slots.hit(p) {
+            self.slots.wheel(notches);
+        }
+    }
+
+    // ---- drawing ----
+
+    /// The part of the screen that never changes: the composed background,
+    /// the panel, the title, the frame lines, the headings and the boxes the
+    /// lists sit in. Drawn once and kept.
+    fn draw_backdrop(&self, canvas: &mut Canvas) {
+        let kit = &*self.kit;
+        Background::direct_connection().draw(canvas, kit);
+        draw_panel(canvas, kit, (10, 80, 619, 395));
+        let font = kit.sprite("PANELFNT");
+        let title = "Lobby";
+        canvas.text(
+            font,
+            title,
+            10 + (619 - text_width(font, title)) / 2,
+            87,
+            None,
+        );
+        canvas.outline((30, 100, 579, 355), LINE);
+        for (label, x, y) in [
+            ("Slots", 45, 152),
+            ("Players", 400, 152),
+            ("Messages", 45, 282),
+        ] {
+            canvas.text(font, label, x, y, None);
+        }
+        canvas.outline((40, 164, 355, 97), LINE);
+        canvas.rect((400, 165, 194, 95), [81, 81, 81, 255]);
+        canvas.outline((399, 164, 196, 97), LINE);
+    }
+
+    /// Draws the whole screen onto the 640 by 480 canvas.
+    pub fn draw(&self, canvas: &mut Canvas) {
+        let started = self.timing.as_ref().map(|_| Instant::now());
+        self.draw_frame(canvas);
+        if let (Some(timing), Some(started)) = (&self.timing, started) {
+            timing.drew(started.elapsed());
+        }
+    }
+
+    fn draw_frame(&self, canvas: &mut Canvas) {
+        let kit = &*self.kit;
+        let backdrop = self.backdrop.get_or_init(|| {
+            let mut pixels = vec![0u8; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
+            self.draw_backdrop(&mut Canvas(&mut pixels));
+            pixels
+        });
+        canvas.0[..backdrop.len()].copy_from_slice(backdrop);
+        let font = kit.sprite("PANELFNT");
+        let dim = kit.sprite("PANELFND");
+        let game = format!("Game: {}", self.game_name());
+        canvas.text(font, &fit(font, &game, 549), 45, 106, None);
+        match &self.state {
+            Some(state) => {
+                let mission = format!("Mission: {}", state.summary);
+                canvas.text(font, &fit(font, &mission, 549), 45, 120, None);
+                canvas.text(dim, &fit(dim, &facts::rule_text(state), 549), 45, 134, None);
+            }
+            None => canvas.text(dim, "Waiting for the game's lobby...", 45, 120, None),
+        }
+        let hint = self
+            .state
+            .as_ref()
+            .zip(self.players.selected_row())
+            .and_then(|(state, row)| facts::player_detail(state, row.key.parse().ok()?))
+            .unwrap_or_else(|| facts::hint(&self.facts));
+        canvas.text(font, &fit(font, &hint, 549), 45, 266, None);
+        let marked = |id| self.focus.marked(id);
+        self.slots.draw(canvas, kit, marked(Id::Slots));
+        self.players.draw(canvas, kit, marked(Id::Players));
+        self.chat
+            .draw(canvas, kit, marked(Id::Messages), self.focus.is(Id::Line));
+        for id in [
+            Id::Mission,
+            Id::Loadout,
+            Id::Ready,
+            Id::Kick,
+            Id::Fly,
+            Id::Leave,
+        ] {
+            if self.shown(id) {
+                self.button_ref(id).draw(canvas, kit, marked(id));
+            }
+        }
+        if let Some(modal) = &self.modal {
+            modal.draw(canvas, kit);
+        }
+    }
+}

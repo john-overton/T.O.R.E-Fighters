@@ -1,7 +1,7 @@
 //! The check box: retail's lamp, `CHECK00` (off) to `CHECK06` (on), lit
 //! through the middle frames.
 use super::{Kit, Outcome, Point, Rect, Widget, draw::focus_mark, inside};
-use crate::menu::{Canvas, text_width};
+use crate::menu::Canvas;
 use crate::rocker::Rocker;
 use std::time::Instant;
 
@@ -45,7 +45,7 @@ impl CheckBox {
         }
     }
     /// Turns the frame-by-frame lamp off or on (on by default).
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn animated(mut self, animate: bool) -> Self {
         self.animate = animate;
         self
@@ -57,7 +57,7 @@ impl CheckBox {
         self.checked
     }
     /// The frame drawn now, 0 to 6.
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn frame(&self) -> usize {
         self.frame
     }
@@ -144,9 +144,9 @@ impl CheckBox {
         }
     }
     /// The width of the box and its label, for placing what follows it.
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn width(&self, kit: &Kit) -> i32 {
-        HIT + 10 + text_width(kit.sprite("PANELFNT"), &self.label)
+        HIT + 10 + crate::menu::text_width(kit.sprite("PANELFNT"), &self.label)
     }
 }
 

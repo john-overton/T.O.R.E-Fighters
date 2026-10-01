@@ -149,6 +149,10 @@ impl App {
         log::info!("Network: {text}");
         if self.screen == Screen::Flight {
             self.flight_ui.message(text);
+        } else if let Some(screen) = &mut self.lobby.screen {
+            // The lobby is where the player is looking, over Direct
+            // Connection (EF8).
+            screen.say(&text);
         } else if let Some(screen) = &mut self.direct.screen {
             // The Direct Connection screen is where the player is looking.
             screen.say(&text);
@@ -241,8 +245,8 @@ impl App {
     fn net_event(&mut self, event: ClientEvent) -> bool {
         match event {
             ClientEvent::Connected { .. } => {
-                if let Some(screen) = &mut self.direct.screen {
-                    screen.say("Connected. Loading the game's mission...");
+                if self.lobby.screen.is_some() || self.direct.screen.is_some() {
+                    self.message("Connected. Loading the game's mission...");
                 }
             }
             ClientEvent::MissionLoaded => {
@@ -255,15 +259,20 @@ impl App {
                     }
                     None => {}
                 }
-                if self.net_flight.is_none() {
+                // A lobby screen has the player take a plane itself.
+                if self.net_flight.is_none() && self.lobby.screen.is_none() {
                     self.message("Mission loaded; taking a plane...");
                 }
             }
             ClientEvent::ContentRefused { names, reason } => {
                 log::warn!("Network: {reason} ({})", names.join(", "));
-                // With no lobby screen to wait in, the game leaves.
-                self.net_ending = Some(reason);
-                return false;
+                // With a lobby screen the player stays in the lobby, marked
+                // unable with the reason (the screen reads it from the
+                // client); with none to wait in, the game leaves.
+                if self.lobby.screen.is_none() {
+                    self.net_ending = Some(reason);
+                    return false;
+                }
             }
             ClientEvent::MissionFailed(text) => {
                 self.net_ending = Some(format!("The mission could not be built: {text}"));
@@ -278,7 +287,12 @@ impl App {
             }
             ClientEvent::Roster => {}
             ClientEvent::Notice(text) => self.message(text),
-            ClientEvent::Chat(line) => self.chat_line(line),
+            ClientEvent::Chat(line) => {
+                if let Some(screen) = &mut self.lobby.screen {
+                    screen.chat_line(&line);
+                }
+                self.chat_line(line);
+            }
             ClientEvent::Debrief(debrief) => {
                 // A player leaving the game sees it when the session ends; one
                 // who stays sees it now, back in the lobby.
@@ -287,6 +301,9 @@ impl App {
                     if let Some(session) = &mut self.net {
                         session.debrief = None;
                     }
+                    // A player who left its flight (the others fly on) sees
+                    // no end of the mission: its flight ends here.
+                    self.end_net_flight();
                     self.show_net_debrief(&debrief);
                 }
             }
@@ -300,7 +317,13 @@ impl App {
                     log::info!("Network: lobby: {line}");
                 }
             }
-            ClientEvent::Refused { reason, .. } => self.message(reason),
+            ClientEvent::Refused { request, reason } => {
+                if self.lobby.screen.is_some() {
+                    self.lobby_refused(request, &reason);
+                } else {
+                    self.message(reason);
+                }
+            }
             ClientEvent::Goodbye(_) => {}
             ClientEvent::Closed(reason) => {
                 let left = self.net.as_ref().is_some_and(|s| s.left_at.is_some());
@@ -380,6 +403,8 @@ impl App {
             return true;
         };
         let plane = plane.0;
+        // A page of the lobby still open gives way to the flight.
+        self.close_lobby_page();
         let crate::net::session::Built { mut world, models } = built;
         let aircraft = match world.ai_wings.as_ref().and_then(|wings| wings.slot(plane)) {
             Some(slot) => slot.aircraft,
@@ -618,6 +643,9 @@ impl App {
     /// words on the main menu.
     pub(crate) fn end_session(&mut self, event_loop: &ActiveEventLoop) {
         let reason = self.net_ending.take().unwrap_or_default();
+        // The lobby goes with the session: its pages are put away, and the
+        // reason shows on Direct Connection.
+        self.close_lobby();
         let debrief = self.net.as_mut().and_then(|session| session.debrief.take());
         let capture = self.net.as_ref().and_then(|s| s.capture.clone());
         if let Some(session) = &mut self.net {

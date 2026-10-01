@@ -17,10 +17,8 @@ pub mod tone {
     /// What the game says: joins, refusals, status.
     pub const SYSTEM: [u8; 3] = [214, 214, 208];
     /// Chat to the player's side, wing or target.
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub const OWN_SIDE: [u8; 3] = [116, 232, 124];
     /// Chat to everyone from the player's side.
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     pub const ALL: [u8; 3] = [128, 176, 255];
     /// Chat from the enemy side.
     pub const ENEMY: [u8; 3] = [255, 118, 104];
@@ -82,7 +80,7 @@ impl MessageBox {
         Self::new((45, 319, 549, 88))
     }
     /// A different number of kept lines (at least a screenful).
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn with_cap(mut self, cap: usize) -> Self {
         self.cap = cap.max(self.visible());
         self
@@ -92,16 +90,16 @@ impl MessageBox {
     pub fn visible(&self) -> usize {
         ((self.rect.3 - 2 * PAD) / LINE).max(1) as usize
     }
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.lines.len()
     }
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.lines.is_empty()
     }
     /// The kept lines, oldest first, as wrapped.
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn lines(&self) -> impl Iterator<Item = (&str, [u8; 3])> {
         self.lines.iter().map(|l| (l.text.as_str(), l.colour))
     }
@@ -115,14 +113,9 @@ impl MessageBox {
             .collect()
     }
     /// How far the view is scrolled back, in lines (0 at the newest).
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn scrolled_back(&self) -> usize {
         self.back
-    }
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
-    pub fn clear(&mut self) {
-        self.lines.clear();
-        self.back = 0;
     }
     fn max_back(&self) -> usize {
         self.lines.len().saturating_sub(self.visible())

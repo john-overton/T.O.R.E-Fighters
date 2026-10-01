@@ -417,6 +417,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/net/hosting*", (), "the game's host thread; only --host reaches it; no scenario yet"),
     _r("crates/tore-app/src/widgets/*", ("menus-screens",), "the multiplayer widget kit; the Direct Connection screen draws it (menus-snap-direct*)", windowed=True),
     _r("crates/tore-app/src/direct_screen/*", ("menus-screens",), "the Direct Connection screen; its snapshot states are menus-snap-direct*", windowed=True),
+    _r("crates/tore-app/src/lobby_screen/*", ("menus-screens",), "the lobby screen; its snapshot states are menus-snap-lobby*", windowed=True),
+    _r("crates/tore-app/src/net/lobby_chat.rs", ("menus-screens",), "the lobby's chat box and line; the lobby screen draws it (menus-snap-lobby*)", windowed=True),
     _r("crates/tore-app/src/net/search.rs", (), "the local-network game search; only the Direct Connection screen and --find-games reach it; no scenario yet"),
     _r("crates/tore-app/src/net/lookup.rs", (), "the typed-address lookup thread; only the Direct Connection screen reaches it; no scenario yet"),
     _r("crates/tore-app/src/net/settings.rs", (), "the remembered multiplayer settings; the Direct Connection screen, --connect and --host reach it; no scenario yet"),

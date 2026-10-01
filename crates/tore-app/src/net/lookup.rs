@@ -153,7 +153,7 @@ impl Lookup {
     }
 
     /// True once the last event has been taken, or the lookup was cancelled.
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn finished(&self) -> bool {
         self.finished
     }

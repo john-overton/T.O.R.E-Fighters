@@ -44,6 +44,7 @@ mod input_catalog;
 mod input_script;
 mod instruments;
 mod lens_flare;
+mod lobby_screen;
 mod locate;
 mod look;
 mod menu;
@@ -327,6 +328,8 @@ struct App {
     net_ending: Option<String>,
     /// The Direct Connection screen, open over the main menu (EF7).
     direct: direct_screen::app::Direct,
+    /// The lobby screen and the pages opened over it (EF8).
+    lobby: lobby_screen::app::Lobby,
 }
 /// Wing vapor line segments: position then RGBA, two vertices per segment.
 /// The five native colors are patterned fill types resolved through LAY
@@ -2043,6 +2046,9 @@ impl App {
             event_loop.exit();
             return;
         }
+        // A page opened over the lobby (the creator, Load Ordnance) answers to
+        // the lobby: Accept and Cancel.
+        let action = self.lobby_page_action(action);
         // End Mission in a networked flight leaves the session: the host
         // answers with the debrief and ends the connection.
         if action == Action::Back && self.net_flight.is_some() && self.screen == Screen::Flight {
@@ -2310,6 +2316,9 @@ impl App {
                     "T.O.R.E-Fighters - {} Free Flight",
                     self.hornet.profile.id.label()
                 ),
+                Screen::Main if self.lobby.screen.is_some() => {
+                    "T.O.R.E-Fighters - Lobby".to_string()
+                }
                 Screen::Main if self.direct.screen.is_some() => {
                     "T.O.R.E-Fighters - Direct Connection".to_string()
                 }
@@ -2997,9 +3006,7 @@ impl ApplicationHandler for App {
                 if let Some(screen) = &mut self.replays_screen {
                     screen.cancel_press();
                 }
-                if let Some(screen) = &mut self.direct.screen {
-                    screen.cancel_press();
-                }
+                self.direct_cancel_press();
                 self.mouse_look = None;
                 self.pointer = None;
                 self.live_debug.release();
@@ -3019,10 +3026,8 @@ impl ApplicationHandler for App {
                     }
                     return;
                 }
-                if self.screen == Screen::Main
-                    && let Some(screen) = &mut self.direct.screen
-                {
-                    screen.moved(point);
+                if self.screen == Screen::Main && self.direct.screen.is_some() {
+                    direct_screen::app::pointer_moved(&mut self.lobby, &mut self.direct, point);
                     return;
                 }
                 if self.controls.is_some()
@@ -3099,10 +3104,8 @@ impl ApplicationHandler for App {
                 {
                     let result = screen.wheel(notches);
                     self.replays_result(result)
-                } else if self.direct_open()
-                    && let Some(screen) = &mut self.direct.screen
-                {
-                    screen.wheel(notches);
+                } else if self.direct_open() {
+                    self.direct_wheel(notches);
                     Action::None
                 } else if self.screen == Screen::Flight && !self.flight_ui.frozen() {
                     self.input.mouse_wheel(notches);
@@ -3115,9 +3118,7 @@ impl ApplicationHandler for App {
                 self.pointer = None;
                 self.live_debug.release();
                 self.quick.pointer(None);
-                if let Some(screen) = &mut self.direct.screen {
-                    screen.moved(None);
-                }
+                direct_screen::app::pointer_moved(&mut self.lobby, &mut self.direct, None);
                 self.menu.state.pointer(None)
             }
             WindowEvent::Focused(true) => {
@@ -3146,9 +3147,7 @@ impl ApplicationHandler for App {
                 if let Some(screen) = &mut self.replays_screen {
                     screen.cancel_press();
                 }
-                if let Some(screen) = &mut self.direct.screen {
-                    screen.cancel_press();
-                }
+                self.direct_cancel_press();
                 self.mouse_look = None;
                 self.pointer = None;
                 self.live_debug.release();
@@ -3409,8 +3408,11 @@ impl ApplicationHandler for App {
                         }
                         // Direct Connection covers the whole menu; it draws its
                         // own background, so the menu is not drawn under it.
-                        let mut animating = if let Some(screen) = &self.direct.screen {
-                            screen.draw(&mut menu::Canvas(&mut self.menu.pixels));
+                        let mut animating = if direct_screen::app::draw_screen(
+                            &self.lobby,
+                            &self.direct,
+                            &mut menu::Canvas(&mut self.menu.pixels),
+                        ) {
                             true
                         } else {
                             self.menu.render() || self.direct.is_building()
@@ -9996,6 +9998,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     | "ordnance-drag"
                     | "ordnance-message"
                     | "ordnance-message-long"
+                    | "lobby-ordnance"
+                    | "lobby-ordnance-refused"
+                    | "lobby-ordnance-cheat"
             ) {
                 quick.ordnance = Some(ordnance::Ordnance::new(
                     tore_sim::combat::loadout::Loadout::new(&hornet.profile, |n| {
@@ -10006,6 +10011,33 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     })?,
                     &theater_resources,
                 )?);
+            }
+            // Load Ordnance as a lobby opens it (EF8): Accept and Cancel,
+            // the mission's Guns only on the page, and the host's own rule
+            // (the words Accept would show) when a missile is loaded.
+            if snapshot_state.starts_with("lobby-ordnance")
+                && let Some(page) = quick.ordnance.as_mut()
+            {
+                page.lobby = true;
+                page.message = Some(
+                    "Guns only: this mission allows the gun alone. Accept sends your loadout to the lobby."
+                        .into(),
+                );
+                if snapshot_state == "lobby-ordnance-refused" {
+                    let refused = mission::LoadoutSpec::of(&page.loadout).check_for_plane(
+                        &hornet.profile,
+                        &theater_resources,
+                        true,
+                    );
+                    page.message = Some(
+                        refused
+                            .err()
+                            .map_or_else(|| "(accepted)".to_owned(), |e| e.to_string()),
+                    );
+                }
+                if snapshot_state == "lobby-ordnance-cheat" {
+                    page.message = Some(ordnance::LOBBY_CHEAT_NOTICE.into());
+                }
             }
             if let Some(page) = snapshot_state.strip_prefix("debrief") {
                 let mut report = debrief::Report::sample();
@@ -10082,6 +10114,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             menu.preview_state("normal")?;
             menu.render();
             editor.draw(&mut menu.pixels, &hornet.font);
+            use std::io::Write;
+            let mut f = std::fs::File::create(&path)?;
+            write!(f, "P6\n640 480\n255\n")?;
+            for p in menu.pixels.chunks_exact(4) {
+                f.write_all(&p[..3])?;
+            }
+        } else if snapshot_state.starts_with("lobby") {
+            // The lobby screen with a synthetic lobby and lines.
+            lobby_screen::preview::render(&menu.kit_source, &snapshot_state, &mut menu.pixels)?;
             use std::io::Write;
             let mut f = std::fs::File::create(&path)?;
             write!(f, "P6\n640 480\n255\n")?;
@@ -10974,6 +11015,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         net_flight: None,
         net_ending: None,
         direct: Default::default(),
+        lobby: Default::default(),
         connect,
         launch_creator,
         quick_loadout: stripped_loadout.clone(),

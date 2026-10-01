@@ -1,7 +1,9 @@
 //! The game's side of the Direct Connection screen: opening it, building its
 //! kit once, routing the window's events to it and carrying out what it asks
 //! for (join, host, leave). `main.rs` only calls these; the screen itself is
-//! [`super::DirectScreen`].
+//! [`super::DirectScreen`]. A join or New that starts a session opens the
+//! lobby screen ([`crate::lobby_screen`]) over it, and these calls hand the
+//! window's events to whichever is up.
 use super::{DirectScreen, HostRequest, JoinRequest, Outcome};
 use crate::menu::Action;
 use crate::net::{options::HostOptions, session::Join};
@@ -26,6 +28,10 @@ pub struct Direct {
 }
 
 impl Direct {
+    /// The kit the screens are made of, once it has been built.
+    pub fn kit(&self) -> Option<Arc<Kit>> {
+        self.kit.clone()
+    }
     /// The kit is being built.
     pub fn is_building(&self) -> bool {
         self.building.is_some()
@@ -107,6 +113,7 @@ impl App {
                 }
             }
         }
+        self.lobby_tick();
         let session = self.net.is_some();
         // Flying, or under a debrief with no session, the screen has no turn.
         if self.screen == Screen::Flight || (self.screen != Screen::Main && !session) {
@@ -149,14 +156,20 @@ impl App {
         match Join::to(address, &callsign, &password, &label) {
             Ok(join) => {
                 // `start_join` says "Joining ..." and any failure in Messages.
-                self.start_join(join, &label);
+                // A join the screen starts opens the lobby, which shows the
+                // joining and a refusal ends it back here.
+                let mut join = join;
+                join.lobby = true;
+                if self.start_join(join, &label) {
+                    self.open_lobby(&label, false);
+                }
             }
             Err(error) => self.message(error),
         }
     }
 
-    /// New: hosts the Quick Mission creator's current mission (until the
-    /// lobby screen of EF8 builds one), as `--host` does.
+    /// New: hosts the Quick Mission creator's current mission, airborne, and
+    /// opens the lobby as King (EF8).
     fn direct_host(&mut self, request: HostRequest) {
         let HostRequest {
             callsign,
@@ -164,10 +177,8 @@ impl App {
             port,
             password,
         } = request;
-        let spec = match self.quick.unsupported() {
-            Some(problem) => Err(problem),
-            None => self.quick.mission_spec(),
-        };
+        let label = name.clone();
+        let spec = self.quick.lobby_spec();
         let spec = match spec {
             Ok(spec) => spec,
             Err(problem) => {
@@ -185,16 +196,12 @@ impl App {
             slot: None,
             password,
         };
-        match self.begin_hosting(options) {
-            // The first mission starts by itself; after it the game waits in
-            // the lobby, so the player can come back here and leave.
+        match self.begin_hosting(options, true) {
+            // The lobby opens; its King presses Fly when everyone is ready.
             Ok(()) => {
-                if let Some(session) = &mut self.net {
-                    session.auto_restart = false;
+                if self.net.is_some() {
+                    self.open_lobby(&label, true);
                 }
-                self.message(
-                    "The mission starts once everyone holding a plane is ready, and the game waits here after it. Leave closes the game.",
-                );
             }
             Err(error) => {
                 // The command line's hint is about --port; the screen has
@@ -214,6 +221,16 @@ impl App {
         let typed = text
             .filter(|_| !self.modifiers.control_key() && !self.modifiers.alt_key())
             .filter(|text| text.chars().any(|c| !c.is_control()));
+        if let Some(screen) = &mut self.lobby.screen {
+            if let Some(text) = typed
+                && screen.typing()
+            {
+                screen.text_input(text);
+                return Action::None;
+            }
+            let request = screen.key(name, shift);
+            return self.lobby_outcome(request);
+        }
         let Some(screen) = &mut self.direct.screen else {
             return Action::None;
         };
@@ -229,11 +246,34 @@ impl App {
 
     /// The left mouse button on the open screen.
     pub(crate) fn direct_button(&mut self, pressed: bool) -> Action {
+        if let Some(screen) = &mut self.lobby.screen {
+            let request = screen.button(pressed);
+            return self.lobby_outcome(request);
+        }
         let Some(screen) = &mut self.direct.screen else {
             return Action::None;
         };
         let outcome = screen.button(pressed);
         self.direct_outcome(outcome)
+    }
+
+    /// A wheel step over the open screen.
+    pub(crate) fn direct_wheel(&mut self, notches: i32) {
+        if let Some(screen) = &mut self.lobby.screen {
+            screen.wheel(notches);
+        } else if let Some(screen) = &mut self.direct.screen {
+            screen.wheel(notches);
+        }
+    }
+
+    /// Lets go of anything held on the screens (resize, lost focus).
+    pub(crate) fn direct_cancel_press(&mut self) {
+        if let Some(screen) = &mut self.lobby.screen {
+            screen.cancel_press();
+        }
+        if let Some(screen) = &mut self.direct.screen {
+            screen.cancel_press();
+        }
     }
 
     /// Leaves the screen.
@@ -249,5 +289,38 @@ impl App {
             self.net_ending = Some("You left the game.".into());
             self.end_session(event_loop);
         }
+    }
+}
+
+/// The pointer moved over the screen that is up (canvas pixels), or left
+/// the canvas. A function of the two fields, so the window event handler can
+/// call it while it holds the renderer.
+pub(crate) fn pointer_moved(
+    lobby: &mut crate::lobby_screen::app::Lobby,
+    direct: &mut Direct,
+    point: Option<(f64, f64)>,
+) {
+    if let Some(screen) = &mut lobby.screen {
+        screen.moved(point);
+    } else if let Some(screen) = &mut direct.screen {
+        screen.moved(point);
+    }
+}
+
+/// Draws the screen that is up (the lobby over Direct Connection); false
+/// when neither is.
+pub(crate) fn draw_screen(
+    lobby: &crate::lobby_screen::app::Lobby,
+    direct: &Direct,
+    canvas: &mut crate::menu::Canvas,
+) -> bool {
+    if let Some(screen) = &lobby.screen {
+        screen.draw(canvas);
+        true
+    } else if let Some(screen) = &direct.screen {
+        screen.draw(canvas);
+        true
+    } else {
+        false
     }
 }

@@ -96,7 +96,23 @@ pub struct QuickMission {
     ground_notice: bool,
     pub help: bool,
     pub shift: bool,
+    /// The creator is open from a multiplayer lobby (EF8): its OK button
+    /// reads Accept and sends the mission to the game, Start is locked to
+    /// Airborne, and only what a host supports can be accepted.
+    pub lobby: bool,
 }
+/// What the creator keeps for the lobby's Cancel to put back: the draft and
+/// everything beside it that Accept would send.
+#[derive(Clone)]
+pub struct Saved {
+    draft: Draft,
+    group_objectives: [GroupObjective; OBJECTIVE_COUNT],
+    group_must_survive: [bool; OBJECTIVE_COUNT],
+    ai_mission: crate::ai_wings::Preset,
+}
+/// Said when the lobby opens the creator, and when the locked Start is
+/// touched.
+pub const AIRBORNE_NOTICE: &str = "Multiplayer: everyone starts airborne, so Start is locked to Airborne. Accept sends this mission to the lobby.";
 /// Maps a creator condition onto the six recovered source weather choices.
 /// The two lists are both recovered but the engine holds no table joining
 /// them, so this match is by label: dawn, clear, cloudy, foggy, sunset and
@@ -206,6 +222,7 @@ impl QuickMission {
             ground_notice: false,
             help: false,
             shift: false,
+            lobby: false,
         }
     }
     /// The ground-start airports of one theater layout (names and object ids),
@@ -690,6 +707,78 @@ impl QuickMission {
         }
         None
     }
+    /// What the lobby's Cancel puts back.
+    pub fn save(&self) -> Saved {
+        Saved {
+            draft: self.draft.clone(),
+            group_objectives: self.group_objectives,
+            group_must_survive: self.group_must_survive,
+            ai_mission: self.ai_mission,
+        }
+    }
+    pub fn restore(&mut self, saved: Saved) {
+        self.draft = saved.draft;
+        self.group_objectives = saved.group_objectives;
+        self.group_must_survive = saved.group_must_survive;
+        self.ai_mission = saved.ai_mission;
+        self.aircraft_selection = self.draft.values[6];
+        self.selection = self.theater_index();
+    }
+    /// Opens the creator for a multiplayer lobby (EF8): Start becomes
+    /// Airborne and stays there (John, 2026-09-28: everyone starts airborne),
+    /// and the notice says so.
+    pub fn enter_lobby(&mut self) {
+        self.lobby = true;
+        self.cancel();
+        if self.draft.values[33] != 0 {
+            self.apply(33, 0);
+        }
+        self.focus = 3;
+        self.notice = Some(AIRBORNE_NOTICE.into());
+    }
+    /// Closes the lobby's creator.
+    pub fn leave_lobby(&mut self) {
+        self.lobby = false;
+        self.cancel();
+        self.notice = None;
+    }
+    /// What a host will not take from the creator, in words (EF8): what
+    /// single player cannot fly either, and a developer theater layout,
+    /// which the mission's text form cannot name.
+    pub fn lobby_problem(&self) -> Option<String> {
+        if let Some(problem) = self.unsupported() {
+            return Some(problem);
+        }
+        if self
+            .theater_codes
+            .get(self.draft.values[13])
+            .is_some_and(|code| code.starts_with('~'))
+        {
+            return Some(
+                "A developer theater layout cannot be hosted. Choose one of the sixteen theaters."
+                    .into(),
+            );
+        }
+        None
+    }
+    /// The mission a host takes from this draft: [`QuickMission::mission_spec`]
+    /// starting airborne, with what the lobby refuses reported first.
+    pub fn lobby_spec(&self) -> Result<MissionSpec, String> {
+        if let Some(problem) = self.lobby_problem() {
+            return Err(problem);
+        }
+        let mut spec = self.mission_spec()?;
+        if let Start::Ground { altitude_ft, .. } = spec.start {
+            spec.start = Start::Airborne { altitude_ft };
+        }
+        // The host reads the mission as text: what the text cannot carry
+        // would silently change on the way.
+        match MissionSpec::from_text(&spec.to_text()) {
+            Ok(read) if read == spec => Ok(spec),
+            Ok(_) => Err("This mission cannot be sent to a host as it is.".into()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
     fn apply(&mut self, id: usize, value: usize) {
         self.draft.values[id] = value;
         self.draft.values[4] = self.draft.values[4].max(1);
@@ -737,6 +826,17 @@ impl QuickMission {
     pub fn preview_selector(&mut self, name: &str) -> crate::AppResult<()> {
         match name {
             "normal" | "ordnance" => {}
+            // The creator opened from a multiplayer lobby (EF8), and after the
+            // host refused an Accept.
+            "lobby-creator" => self.enter_lobby(),
+            "lobby-creator-refused" => {
+                self.enter_lobby();
+                self.notice = Some(
+                    "The mission could not be built: Choose a theater with enough room for the enemy separation."
+                        .into(),
+                );
+            }
+            "lobby-ordnance" | "lobby-ordnance-refused" | "lobby-ordnance-cheat" => {}
             "ordnance-empty" | "ordnance-drag" | "ordnance-message" | "ordnance-message-long" => {
                 if let Some(ordnance) = &mut self.ordnance {
                     ordnance.preview(name);
@@ -867,6 +967,11 @@ impl QuickMission {
         };
         if matches!(id, 30..=32 | GROUND_SECTION) {
             self.show_ground_notice();
+            return Action::Click;
+        }
+        if self.lobby && matches!(id, 33 | 34) {
+            self.focus = id;
+            self.notice = Some(AIRBORNE_NOTICE.into());
             return Action::Click;
         }
         if id == 34 && !self.ground_start() {
@@ -1000,6 +1105,10 @@ impl QuickMission {
             }
             CANCEL => return Action::Back,
             30..=32 | GROUND_SECTION => self.show_ground_notice(),
+            33 | 34 if self.lobby => {
+                self.focus = id;
+                self.notice = Some(AIRBORNE_NOTICE.into());
+            }
             3..=34 => {
                 if id == 34 && !self.ground_start() {
                     return Action::None;
@@ -1042,7 +1151,8 @@ impl QuickMission {
             };
         }
         if key == "Escape" {
-            if self.selector.is_some() || self.help || self.notice.is_some() {
+            // The lobby's notice is not in the way of Cancel (EF8).
+            if self.selector.is_some() || self.help || (self.notice.is_some() && !self.lobby) {
                 self.cancel();
                 self.notice = None;
                 return Action::None;
@@ -1285,10 +1395,20 @@ impl QuickMission {
                 x += width + text_width(font, " ") + if id.is_some() { 2 } else { 0 };
             }
         }
-        self.button(&mut c, sprites, OK, "OK", (387, 419, 85, 24));
+        self.button(
+            &mut c,
+            sprites,
+            OK,
+            if self.lobby { "Accept" } else { "OK" },
+            (387, 419, 85, 24),
+        );
         self.button(&mut c, sprites, CANCEL, "Cancel", (492, 419, 85, 24));
         if let Some(message) = &self.notice {
-            notice(&mut c, &sprites["SMLFONT.PIC"], message);
+            if self.lobby {
+                lobby_notice(&mut c, &sprites["SMLFONT.PIC"], message);
+            } else {
+                notice(&mut c, &sprites["SMLFONT.PIC"], message);
+            }
         }
         if self.help {
             c.rect((84, 60, 180, 25), [212, 215, 218, 255]);
@@ -1484,6 +1604,47 @@ pub fn notice(c: &mut Canvas, font: &Sprite, text: &str) {
         line.push(' ');
     }
     c.text(font, &line, 36, y, Some([235, 225, 179]));
+}
+/// The lobby creator's notice (EF8): a box at the lower left, beside the
+/// buttons, of up to three lines, so it does not cover the Start line that
+/// the notice is about. A longer message ends in an ellipsis.
+fn lobby_notice(c: &mut Canvas, font: &Sprite, text: &str) {
+    const WIDTH: i32 = 340;
+    const LINES: usize = 3;
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let next = if line.is_empty() {
+            word.to_owned()
+        } else {
+            format!("{line} {word}")
+        };
+        if text_width(font, &next) > WIDTH - 12 && !line.is_empty() {
+            lines.push(std::mem::take(&mut line));
+            line = word.to_owned();
+        } else {
+            line = next;
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    if lines.len() > LINES {
+        lines.truncate(LINES);
+        let last = lines[LINES - 1].clone();
+        lines[LINES - 1] = fit(font, &format!("{last} ..."), WIDTH - 12);
+    }
+    let height = 6 + 13 * lines.len() as i32;
+    c.rect((30, 438 - height, WIDTH, height), [35, 44, 46, 255]);
+    for (i, line) in lines.iter().enumerate() {
+        c.text(
+            font,
+            line,
+            36,
+            438 - height + 4 + 13 * i as i32,
+            Some([235, 225, 179]),
+        );
+    }
 }
 pub fn hud(
     pixels: &mut [u8],
@@ -1828,6 +1989,53 @@ mod tests {
         assert!(q.unsupported().unwrap().contains("No imported runways"));
         q.apply(33, 0);
         assert!(q.unsupported().is_none());
+    }
+    #[test]
+    fn the_lobbys_creator_locks_start_to_airborne_and_accepts_only_what_a_host_takes() {
+        let mut q = setup();
+        q.airport_names[0] = vec!["First Field".into()];
+        q.airport_objects[0] = vec![0x40000000];
+        q.theater_codes = vec!["UKR".into(), "~UKR1".into()];
+        // Single player keeps its own Start and its OK.
+        q.activate(33);
+        assert!(q.ground_start() && !q.lobby);
+        // The lobby takes a ground draft back to Airborne, and says why.
+        let saved = q.save();
+        q.enter_lobby();
+        assert!(q.lobby && !q.ground_start());
+        assert_eq!(q.notice.as_deref(), Some(AIRBORNE_NOTICE));
+        // Touching Start (left or right click) changes nothing and says why.
+        q.notice = None;
+        assert_eq!(q.activate(33), Action::Click);
+        assert!(!q.ground_start());
+        assert_eq!(q.notice.as_deref(), Some(AIRBORNE_NOTICE));
+        q.notice = None;
+        q.hover = Some(34);
+        q.right(true);
+        q.right(false);
+        assert!(!q.ground_start());
+        assert_eq!(q.notice.as_deref(), Some(AIRBORNE_NOTICE));
+        // The mission it makes starts airborne, and a developer layout is
+        // refused before Accept, with the ground targets.
+        let spec = q.lobby_spec().expect("a mission");
+        assert!(matches!(spec.start, Start::Airborne { .. }));
+        q.apply(13, 1);
+        assert!(q.lobby_problem().unwrap().contains("developer theater"));
+        assert!(q.lobby_spec().is_err());
+        q.apply(13, 0);
+        q.draft.values[30] = 1;
+        assert!(q.lobby_problem().unwrap().contains("Ground targets"));
+        q.draft.values[30] = 0;
+        // OK is Accept: it still answers Mission, which the lobby takes.
+        assert_eq!(q.activate(OK), Action::Mission);
+        // Esc leaves with the notice up, and Cancel puts the draft back.
+        assert_eq!(q.key("Escape", false), Action::Back);
+        q.apply(4, 3);
+        q.restore(saved);
+        assert!(q.ground_start());
+        assert_ne!(q.draft.values[4], 3);
+        q.leave_lobby();
+        assert!(!q.lobby && q.notice.is_none());
     }
     #[test]
     fn a_short_strip_is_no_ground_start() {

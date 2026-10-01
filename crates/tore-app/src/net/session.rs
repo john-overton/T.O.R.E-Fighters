@@ -131,6 +131,11 @@ pub struct Join {
     pub password: String,
     /// The host as the capture's file name shows it.
     pub label: String,
+    /// A lobby screen drives the session (EF8): the client does not take a
+    /// slot or ready by itself, the King's game does not start missions by
+    /// itself, and a joiner's End Mission returns it to the lobby instead of
+    /// leaving the game. False for `--connect` and `--host`.
+    pub lobby: bool,
 }
 
 impl Join {
@@ -166,6 +171,7 @@ impl Join {
             slot: None,
             password: password.to_owned(),
             label: label.to_owned(),
+            lobby: false,
         })
     }
 }
@@ -206,22 +212,12 @@ pub struct NetSession {
     host_failure: Option<String>,
     /// The lobby state the King's automatic start was last asked for.
     started_for: Option<tore_session::wire::messages::LobbyState>,
-    /// The King starts every mission by itself (a game hosted from the
-    /// command line). A game hosted from the Direct Connection screen starts
-    /// the first one and then waits in the lobby, so its player can come back
-    /// to the screen and leave (EF7, agent decision; EF8's Fly button
-    /// replaces both).
-    pub auto_restart: bool,
+    /// A lobby screen drives the session (EF8, [`Join::lobby`]).
+    pub lobby_screen: bool,
     /// The lobby's last line in the log.
     lobby_line: Option<String>,
     /// The chat window's lines and the open line (slice EF6).
     pub chat: crate::net::chat::Chat,
-}
-
-/// Whether the King may start a mission by itself now: always when it
-/// restarts missions, and otherwise only before the first.
-fn restart_due<T>(auto_restart: bool, started_for: &Option<T>) -> bool {
-    auto_restart || started_for.is_none()
 }
 
 /// How long after Leave the game waits for the debrief and the disconnect
@@ -244,6 +240,7 @@ impl NetSession {
             slot,
             password,
             label,
+            lobby,
         } = join;
         let clock = RealClock::new();
         let config = ClientConfig {
@@ -251,6 +248,7 @@ impl NetSession {
             plane: slot,
             entropy: Entropy::System,
             retail_stall_speeds: tore_sim::flight::retail_stall_speeds(),
+            auto_ready: !lobby,
             ..ClientConfig::new(server, &callsign, build_id())
         };
         let mut client = Client::connect(config, Arc::clone(&resources), clock.now())
@@ -308,7 +306,7 @@ impl NetSession {
             hosting: None,
             host_failure: None,
             started_for: None,
-            auto_restart: true,
+            lobby_screen: lobby,
             lobby_line: None,
             chat: Default::default(),
         })
@@ -320,13 +318,12 @@ impl NetSession {
     }
 
     /// The King's start for a game hosted from the command line (agent
-    /// decision, until the lobby screen's Fly button, EF8): as soon as
-    /// every player holding a slot is ready, when `allowed` (the hosting
-    /// player is not reading a debrief), once for each lobby state, and, when
-    /// [`NetSession::auto_restart`] is off, only the first mission.
+    /// decision): as soon as every player holding a slot is ready, when
+    /// `allowed` (the hosting player is not reading a debrief), once for each
+    /// lobby state. A game with a lobby screen never starts by itself: its
+    /// King presses Fly.
     pub fn auto_start(&mut self, allowed: bool) {
-        if !allowed || self.hosting.is_none() || !restart_due(self.auto_restart, &self.started_for)
-        {
+        if !allowed || self.hosting.is_none() || self.lobby_screen {
             return;
         }
         let Some(lobby) = self.client.lobby() else {
@@ -455,10 +452,18 @@ impl NetSession {
     /// mission for everyone, who return to the lobby with their debriefs
     /// (and the King's game starts the next once the debrief is closed);
     /// any other player leaves the game, with its debrief, since a game with
-    /// no lobby screen has nowhere else to go (agent decisions, EF4).
+    /// no lobby screen has nowhere else to go (agent decisions, EF4). With a
+    /// lobby screen (EF8) any other player returns to the lobby, its debrief
+    /// shown, while the others fly on.
     pub fn leave(&mut self) {
         if self.hosting.is_some() {
             self.client.end_mission();
+            return;
+        }
+        if self.lobby_screen {
+            // Back to the lobby while the others fly on (EF8).
+            let now = self.clock.now();
+            self.client.leave(now);
             return;
         }
         if self.left_at.is_none() {
@@ -629,16 +634,6 @@ fn release_of(
 mod tests {
     use super::*;
     use tore_sim::combat::live::DeviceRelease as Combat;
-
-    /// A game hosted from the Direct Connection screen starts its first
-    /// mission by itself and then leaves the next to the lobby screen.
-    #[test]
-    fn a_game_that_does_not_restart_starts_only_its_first_mission() {
-        assert!(restart_due(true, &None::<u8>));
-        assert!(restart_due(true, &Some(1u8)));
-        assert!(restart_due(false, &None::<u8>));
-        assert!(!restart_due(false, &Some(1u8)));
-    }
 
     /// What combat released, sent by the host and read back here, is the
     /// release combat made to within the wire's steps.

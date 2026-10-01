@@ -542,15 +542,20 @@ impl crate::App {
     /// Starts hosting the game the command line described: the host thread,
     /// then this game's own join over the in-process link.
     pub(crate) fn start_hosting(&mut self, options: HostOptions) {
-        if let Err(error) = self.begin_hosting(options) {
+        if let Err(error) = self.begin_hosting(options, false) {
             self.message(error);
         }
     }
 
     /// Starts hosting `options`, naming why it could not (a port in use, a
     /// mission that does not build) in plain words. The Direct Connection
-    /// screen's New calls this and shows the reason in its Messages.
-    pub(crate) fn begin_hosting(&mut self, options: HostOptions) -> Result<(), String> {
+    /// screen's New calls this (with `lobby`, so its lobby screen drives the
+    /// game, [`Join::lobby`]) and shows the reason in its Messages.
+    pub(crate) fn begin_hosting(
+        &mut self,
+        options: HostOptions,
+        lobby: bool,
+    ) -> Result<(), String> {
         let data = match crate::assets::data_directory() {
             Ok(data) => data,
             Err(error) => {
@@ -581,6 +586,7 @@ impl crate::App {
             slot: options.slot,
             password: options.password.clone().unwrap_or_default(),
             label: "hosted".into(),
+            lobby,
         };
         // Dropping the thread, on an error, stops it.
         let mut session = NetSession::start(join, resources, &data, self.replay_library.as_ref())?;

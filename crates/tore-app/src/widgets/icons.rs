@@ -11,8 +11,13 @@ pub enum Icon {
     /// The King, the player who built the mission.
     Crown,
     /// A player who is ready to fly.
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
     Ready,
+    /// The house: the player whose machine runs the game (EF8).
+    House,
+    /// The player's own mark: their slot in the lobby's Slots (EF8).
+    You,
+    /// A player whose game cannot play the mission (EF8).
+    Unable,
 }
 
 const LOCK: &[&str] = &[
@@ -47,6 +52,23 @@ const READY: &[&str] = &[
     "...G......",
 ];
 
+const HOUSE: &[&str] = &[
+    "....h....",
+    "...hhh...",
+    "..hhhhh..",
+    ".hhhhhhh.",
+    "..wwwww..",
+    "..wwkww..",
+    "..wwkww..",
+    "..wwwww..",
+];
+const YOU: &[&str] = &[
+    "Y......", "YYY....", "YYYYY..", "YYYYYYY", "YYYYY..", "YYY....", "Y......",
+];
+const UNABLE: &[&str] = &[
+    "R.....R", ".R...R.", "..R.R..", "...R...", "..R.R..", ".R...R.", "R.....R",
+];
+
 fn colour(code: char) -> Option<[u8; 4]> {
     Some(match code {
         'g' => [255, 205, 60, 255],
@@ -54,6 +76,10 @@ fn colour(code: char) -> Option<[u8; 4]> {
         's' => [214, 218, 228, 255],
         'k' => [52, 44, 30, 255],
         'G' => [110, 235, 120, 255],
+        'h' => [214, 112, 72, 255],
+        'w' => [228, 216, 182, 255],
+        'Y' => [140, 200, 255, 255],
+        'R' => [255, 100, 88, 255],
         _ => return None,
     })
 }
@@ -64,6 +90,9 @@ impl Icon {
             Icon::Lock => LOCK,
             Icon::Crown => CROWN,
             Icon::Ready => READY,
+            Icon::House => HOUSE,
+            Icon::You => YOU,
+            Icon::Unable => UNABLE,
         }
     }
     /// Width and height in pixels.

@@ -86,12 +86,6 @@ pub fn blit_part(
     }
 }
 
-/// The whole of `sprite` at `(x, y)`.
-#[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
-pub fn blit_all(canvas: &mut Canvas, sprite: &Sprite, at: (i32, i32)) {
-    canvas.blit(sprite, at, 0, sprite.width, 1.0);
-}
-
 /// Text in `font` at `(x, y)` (the top of the font cell), clipped to `clip`,
 /// optionally tinted. Returns the pen's end x.
 pub fn text_clipped(
@@ -127,18 +121,6 @@ pub fn text_clipped(
         x += w as i32;
     }
     x
-}
-
-/// Text with no clip beyond the canvas, optionally tinted.
-#[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
-pub fn text_at(
-    canvas: &mut Canvas,
-    font: &Sprite,
-    text: &str,
-    at: (i32, i32),
-    tint: Option<[u8; 3]>,
-) {
-    canvas.text(font, text, at.0, at.1, tint);
 }
 
 /// A bar made of a left cap, a repeating middle and a right cap, as the list
@@ -184,10 +166,4 @@ pub fn fit(font: &Sprite, text: &str, width: i32) -> String {
     }
     out.push('~');
     out
-}
-
-/// The height of the lit rows of a font, for centring a line of text.
-#[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
-pub fn glyph_height(font: &Sprite) -> i32 {
-    font.height as i32
 }

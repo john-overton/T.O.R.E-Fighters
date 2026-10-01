@@ -319,9 +319,25 @@ meanwhile cannot bind the port, and says so ("is a game's Direct Connection
 screen open on this machine?"); close the screen first, or give the server
 another `port`. When the server's port is already taken the other way round,
 the screen's search listens on another port, says so in Messages, and still
-finds the server on this machine. After a mission the debrief returns to the
-screen, which then reads *Leave* while the game is still connected;
+finds the server on this machine;
 [how the screen works](ARCHITECTURE.md#the-direct-connection-screen-as-built-ef7).
+
+*Since EF8* a successful join opens the **lobby screen**, the same screen a
+hosting player sees without the King's buttons
+([how it works](ARCHITECTURE.md#the-lobby-screen-as-built-ef8)). A server has
+no King, so the lobby shows the server's start rule in plain words: with
+`start first-player` "This server starts the mission as soon as the first
+player holding a slot is ready", with `start now` "This server's mission is
+always flying: take a slot and press Ready to join it". The player clicks a
+free slot to take it, may press **Loadout** to arm that aircraft (the server
+checks it with the Load Ordnance page's rules and refuses Cheat loading),
+and presses **Ready** (it reads **Join** while the mission flies). End Mission in
+flight returns that player to the server's lobby with its debrief, while the
+server's mission goes on; **Leave** returns to Direct Connection, and a server
+that stops or kicks the player puts its reason in Direct Connection's
+Messages ("The server ended the connection: the server is stopping.").
+A game with no lobby screen (`tore-app --connect`, `tore-bot`) still takes a
+slot and marks ready by itself.
 
 The game also joins a server from the command line:
 
@@ -384,13 +400,16 @@ that differ. The game version and protocol must match as well
 **Direct Connection**, **New**. It hosts the Quick Mission creator's current
 mission (build it first on the creator's page) under the game name, port and
 password of Options, and the game's own player is the King; unlike `--host`
-it starts only the first mission by itself, then waits in the lobby with the
-debrief returning to the screen, where *Leave* closes the game. A port in use
-is a line in the screen's Messages. [How the screen
-works](ARCHITECTURE.md#the-direct-connection-screen-as-built-ef7).
+it opens the lobby, where the King builds the mission with **Mission...**
+(the Quick Mission creator, its OK reading Accept), takes a slot, arms the
+aircraft with **Loadout**, readies, and presses **Fly** when everyone holding a
+slot is ready; after the mission the debrief returns everyone to the lobby.
+**Leave** closes the game for everyone (the King is asked first). A port in use
+is a line in the screen's Messages. [How the screens
+work](ARCHITECTURE.md#the-lobby-screen-as-built-ef8).
 
-Until the lobby screen (EF8), a player can also host a game from the command
-line, and the others join it with `--connect`:
+A player can also host a game from the command line, and the others join it
+with `--connect` (or from their menus):
 
 ```sh
 tore-app --host duel.txt --callsign Viper
@@ -419,7 +438,7 @@ firewalls](#ports-and-firewalls)).
 King of the [lobby](ARCHITECTURE.md#the-lobby): the game takes its slot
 (`--slot`, or the first free one) and readies by itself, and starts each
 mission as soon as every player holding a slot is ready and the hosting player
-is not reading a debrief (until the lobby screen's Fly button, EF8). End
+is not reading a debrief (a game hosted from the menus never starts by itself: its King presses Fly). End
 Mission ends the mission for everyone: each player gets "Mission ended" and
 their debrief and is back in the lobby, still connected, and the next mission
 starts as before. A mission nobody flies any more ends at once (no empty

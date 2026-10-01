@@ -49,7 +49,7 @@ impl Button {
         self.default = true;
         self
     }
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn is_default(&self) -> bool {
         self.default
     }
@@ -59,9 +59,14 @@ impl Button {
     pub fn set_default(&mut self, default: bool) {
         self.default = default;
     }
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn label(&self) -> &str {
         &self.label
+    }
+    /// Moves the button (a screen whose row of buttons changes with who the
+    /// player is, the lobby).
+    pub fn place(&mut self, at: Point) {
+        self.at = at;
     }
     pub fn set_label(&mut self, label: impl Into<String>) {
         self.label = label.into();
@@ -73,7 +78,7 @@ impl Button {
             self.pressed = false;
         }
     }
-    #[allow(dead_code)] // Kit or search API for the tests and the lobby screen (EF8).
+    #[cfg(test)]
     pub fn is_pressed(&self) -> bool {
         self.pressed
     }

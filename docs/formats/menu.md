@@ -512,3 +512,47 @@ Headless renders, `--snapshot-state` `direct` (empty, searching), `direct-games`
 (an address being tried), `direct-refused` (refusals in Messages) and
 `direct-options`, are in the lead's notes (`.local/mp-notes/stage-ef/ef7/`),
 beside EF2's mock.
+
+### The lobby screen as built (EF8, 2026-10-01)
+
+Implementation mode. The screen is `crates/tore-app/src/lobby_screen/`; its
+behaviour, who may press which button and what was measured are in
+[the architecture notes](../ARCHITECTURE.md#the-lobby-screen-as-built-ef8). It
+reuses Direct Connection's background (`MODEM3` under `NETIPX3`'s top 77 rows),
+panel (10, 80, 619 by 395), frame lines and grey text fields, with these
+placements (all agent decisions; retail's `NETNEW` is a reference, not a
+template):
+
+| Item | Rectangle or position | Notes |
+| --- | --- | --- |
+| Title | "Lobby" centred on the panel at y 87 | |
+| Game, Mission, start rule | `PANELFNT` lines at (45, 106), (45, 120), (45, 134), up to 549 wide; the rule in `PANELFND` | The game's name, the mission's summary, the start rule in words |
+| Slots | heading (45, 152); list (45, 168), 286 wide, five rows; frame (40, 164, 355, 97) | Columns from the text origin: own mark (centred, 11 wide, x 0), "Wing 1 #3" (x 14, 54), aircraft (x 70, 104), holder or AI (x 176, 62), ready tick (x 242, 12). Pager: PREV (336, 184), NEXT (336, 207), rocker (364, 183), PAGE (336, 226), page box (336, 240) |
+| Players | heading (400, 152); list (404, 168), 186 wide, five rows, no pager; grey box (400, 165, 194, 95) | Columns: crown (x 0, 11), house (x 12, 10), ready tick or red cross (x 24, 10), callsign (x 37, 78), state word (x 118, 40) |
+| Hint line | `PANELFNT` at (45, 266), up to 549 wide | |
+| Messages | heading (45, 282); EF6's box (45, 294), 549 by 78 (seven lines) | |
+| Chat line | grey box (45, 377), 549 by 18 | Hint "type a message, Enter sends to all"; 80 characters |
+| Buttons | y 419, 85 wide, x 45, 138, 231, 324, 417, 510 | King: Mission..., Loadout, Ready, Kick, Fly, Leave. Others: Loadout (324), Ready (417), Leave (510) |
+| Kick and Leave panels | panel (110, 150), 420 by 180, over the screen | Kick: a grey line (132, 234), 376 by 18, for the reason (60 characters); Kick (210, 282) and Cancel (345, 282). Leave: Leave (210, 270) and Cancel (345, 270), Cancel has the blue face and the keyboard |
+
+New pixel icons (authored, no retail art): the house (9 by 8), the player's own
+arrow (7 by 7) and the unable cross (7 by 7), beside the crown, lock and ready
+tick of EF2.
+
+**The creator in Accept mode** (the King's Mission...) is the creator page of
+this file's Quick Mission notes with one change of label and one of lock:
+OK (387, 419) reads **Accept**, Start (field 33) and its airport (34) cannot be
+changed (a click, left or right, says "Multiplayer: everyone starts airborne,
+so Start is locked to Airborne. Accept sends this mission to the lobby."), and
+the notice box sits at the lower left (30, 438 less its height), 340 wide and
+up to three lines, so it does not cover the Start line. **Load Ordnance in
+lobby mode** reads **Accept** on Fly (493, 414) and **Cancel** on Select Plane
+(363, 414), and its menu's Cheat row reads "Cheat  Off (not allowed)". Single
+player's two pages draw and behave as before.
+
+Headless renders, `--snapshot-state` `lobby-king`, `lobby-joiner`,
+`lobby-unable`, `lobby-flying`, `lobby-server`, `lobby-kick`, `lobby-leave` and
+`lobby-ready`, and with `--quick-mission` `lobby-creator`,
+`lobby-creator-refused`, `lobby-ordnance`, `lobby-ordnance-refused` and
+`lobby-ordnance-cheat`, are in the lead's notes
+(`.local/mp-notes/stage-ef/ef8/`).

@@ -176,12 +176,26 @@ flight-model telemetry and every radio call and order, with why each
 happened. Recordings export to mission logs and to a Tacview file, not yet
 checked in Tacview itself ([mission replays](docs/REPLAYS.md)).
 
+**Multiplayer (in development, Milestone 2):** to host a game, open Choose
+Activity, Multi, **Direct Connection**, type a callsign and press **New**. You
+become the King of a lobby: **Mission...** builds the mission with the Quick
+Mission creator (press **Accept**), click a free slot to take an aircraft,
+**Loadout** arms it, **Ready** marks you set, and **Fly** starts the mission
+once everyone holding a slot is ready. Friends on the same network see your game
+in their Direct Connection list and press **Join** (or type your address in
+*Connect to*); they take a slot, arm and ready the same way. After the mission
+everyone returns to the lobby. A dedicated server (`tore-server`) can be joined
+the same way. Open UDP port 26900 on the host's firewall; the
+[multiplayer guide](docs/MULTIPLAYER.md) and the
+[dedicated server guide](docs/DEDICATED-SERVER.md) have the rest. The public
+lobby, replays of networked flights and the King's settings are not built yet.
+
 **Not yet:** surface AI (SAM sites, AAA, vehicles and ships as active
-opponents), the remaining weapons, carriers, missions, campaigns, the
-original's Replay Last Mission (flying it again) and multiplayer.
-Multiplayer is [Milestone 2](docs/ROADMAP.md#milestone-2-multiplayer). Its
-[design](docs/MULTIPLAYER.md) and [delivery plan](docs/multiplayer-plan.md) are
-drafted; nothing is built yet.
+opponents), the remaining weapons, carriers, missions, campaigns and the
+original's Replay Last Mission (flying it again). Multiplayer is
+[Milestone 2](docs/ROADMAP.md#milestone-2-multiplayer); its
+[design](docs/MULTIPLAYER.md) and [delivery plan](docs/multiplayer-plan.md) say
+what is built.
 
 ## Build from source
 

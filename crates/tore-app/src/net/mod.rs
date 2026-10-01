@@ -12,7 +12,6 @@ pub mod debrief;
 pub mod files;
 pub mod guns;
 pub mod hosting;
-#[allow(dead_code)] // Placed by the lobby screen (EF8).
 pub mod lobby_chat;
 pub mod lookup;
 pub mod options;
