@@ -533,6 +533,23 @@ fn a_busy_game_port_is_said_in_messages() {
 }
 
 #[test]
+fn a_search_that_starts_again_says_nothing_new() {
+    let port = free_port();
+    let mut s = screen();
+    s.settings.port = port;
+    s.update_at(Duration::ZERO, false);
+    let said = lines(&s);
+    s.update_at(Duration::from_secs(1), true);
+    s.update_at(Duration::from_secs(2), false);
+    assert!(s.searching());
+    assert_eq!(lines(&s), said, "no second \"Searching\" line");
+    // Another port is news.
+    s.settings.port = free_port();
+    s.update_at(Duration::from_secs(3), false);
+    assert_ne!(lines(&s), said);
+}
+
+#[test]
 fn changing_the_port_restarts_the_search_on_it() {
     let (a, b) = (free_port(), free_port());
     let mut s = screen();

@@ -153,6 +153,8 @@ pub struct DirectScreen {
     pointer: Option<Point>,
     /// The port the search was asked for (kept to tell what changed).
     searched_port: u16,
+    /// The port and outcome the search last said in Messages.
+    search_said: Option<(u16, bool)>,
     /// The backdrop, drawn the first time the screen is.
     backdrop: std::cell::OnceCell<Vec<u8>>,
     /// The screen's own frame cost, logged every 300 frames when
@@ -257,6 +259,7 @@ impl DirectScreen {
             clock: tore_net::RealClock::new(),
             pointer: None,
             searched_port: 0,
+            search_said: None,
             backdrop: std::cell::OnceCell::new(),
             timing: std::env::var_os("TORE_DIRECT_TIMING").map(|_| Timing::new()),
         };
@@ -424,17 +427,23 @@ impl DirectScreen {
         self.searched_port = port;
         match Search::start(port, Own::this_game(), now) {
             Ok(search) => {
-                if search.on_game_port() {
-                    self.say(&format!(
-                        "Searching for games on the local network (UDP port {port})..."
-                    ));
-                } else {
-                    let local = search
-                        .local_port()
-                        .map_or_else(String::new, |p| format!(" {p}"));
-                    self.say(&format!(
-                        "Searching for games on the local network. UDP port {port} is busy on this machine (is a game or a server running?), so the search listens on port{local}; other computers may not answer."
-                    ));
+                // Said once for each port and outcome: a search that starts
+                // again after a refused join or a session says nothing new.
+                let on_game_port = search.on_game_port();
+                if self.search_said != Some((port, on_game_port)) {
+                    self.search_said = Some((port, on_game_port));
+                    if on_game_port {
+                        self.say(&format!(
+                            "Searching for games on the local network (UDP port {port})..."
+                        ));
+                    } else {
+                        let local = search
+                            .local_port()
+                            .map_or_else(String::new, |p| format!(" {p}"));
+                        self.say(&format!(
+                            "Searching for games on the local network. UDP port {port} is busy on this machine (is a game or a server running?), so the search listens on port{local}; other computers may not answer."
+                        ));
+                    }
                 }
                 self.search = Some(search);
             }
