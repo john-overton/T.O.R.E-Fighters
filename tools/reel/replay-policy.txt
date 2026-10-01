@@ -1,0 +1,5 @@
+Replays are intentionally not committed. The complete reproducible recording
+recipes are the [[scenario]] entries in shots.toml. They run the existing Quick
+Mission setup and fixed 120 Hz simulation. Files are created only underneath
+ignored out/reel/replays, together with their input receipts and event exports.
+The event checks fail production if the selected recorded kill is absent.

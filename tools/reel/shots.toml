@@ -1,0 +1,502 @@
+# First Flight reel, second pass: the production recipe.
+#
+# Every gameplay picture is an exact recorded tick drawn by the engine. Edit
+# cameras, clocks and the edit here; render.sh rebuilds everything from it.
+#
+# Units: camera keys are feet in the anchor aircraft's heading frame (X right,
+# Y up, Z forward); `fov` is vertical degrees. Key frames count output frames
+# from the start of a capture. `interp = "pchip"` passes smoothly through every
+# key; "smoothstep" eases in and out of each key, which holds when two keys
+# match. FOV always interpolates in zoom space, so a pullback reads evenly.
+# `eye_tick` fixes the eye where the anchor's frame was at that tick while the
+# look target keeps following the anchor.
+
+[reel]
+fps = 60
+width = 1920
+height = 1080
+duration = 32
+repo = "github.com/john-overton/T.O.R.E-Fighters"
+stills = [190, 420, 520, 640, 1040, 1135, 1460, 1760]
+aircraft_roster = ["F/A-18D HORNET", "RAFALE C", "F-14D TOMCAT", "A-4E SKYHAWK", "X-31 EFM", "MiG-29 FULCRUM-C", "Su-27 FLANKER-B", "MiG-21 FISHBED", "Su-25 FROGFOOT-A", "MiG-23 FLOGGER-B", "Su-35", "F-22A RAPTOR", "F-22N RAPTOR", "F/A-XX (CONCEPT)"]
+theater_roster = ["PANAMA", "THE BALTICS", "CUBA", "EGYPT", "FRANCE", "GREECE", "IRAQ", "KURIL ISLANDS", "FALKLAND ISLANDS", "NORTH/SOUTH KOREA", "PERSIAN GULF", "PAKISTAN", "NORTH VIETNAM", "UKRAINE", "VLADIVOSTOK", "TAIWAN"]
+
+# Retail score phrases, exported at render time by --reel-music. Tempo, beat
+# and loudness figures are this production's measurements of the rendered PCM.
+[music]
+# Every cut after the boot lands on a beat of this grid, counted from the
+# launch downbeat.
+grid_bpm = 142.72
+downbeat_frame = 90
+# The bed: briefing track XFI204CA, picked by John on 2026-09-30. Its pitch-
+# preserving stretch onto the grid moves it 3.2 % faster. Its first downbeat
+# lands on the launch; its pickup hit sounds just before it, under the boot.
+bed = "XFI204CA.11K"
+bed_bpm = 138.34
+bed_first_beat = 0.400
+bed_entry_bar = 0
+stretch_bed = true
+# Loudness matched to the first cut's bed (AIR006 at -13.1 LUFS).
+bed_gain_db = -3.25
+# The ending, also John's pick: AIR003 from the mission-success score kicks in
+# on the first frame of `kick_shot`, from its bar 1, plays the whole bars that
+# fit, then splices into the phrase's own final stinger and rings out.
+ending = "AIR003.11K"
+ending_bpm = 142.0
+ending_first_beat = 0.015
+ending_kick_bar = 1
+ending_stinger = 23.679
+ending_gain_db = 0.43
+kick_shot = "replay-impact"
+level = 0.4
+duck_db = 12.0
+# Lighter under the call that overlaps the kick, so the kick keeps its punch.
+ending_duck_db = 6.0
+# Retail cockpit recordings used as editorial Foley on the boot screen.
+effects = ["&SWITCH.11K", "&BUTTON.11K"]
+
+# Recording recipes: real Quick Mission probes at the fixed 120 Hz.
+[[scenario]]
+id = "launch-calm"
+aircraft = "f18"
+map = "UKR"
+time_of_day = "07:15"
+ticks = 2400
+args = ["--ground-start", "1", "--maneuver", "takeoff", "--probe-wing-size", "1", "--probe-wing-only"]
+wind = "0,0"
+
+[[scenario]]
+id = "formation"
+aircraft = "f18"
+map = "UKR"
+time_of_day = "10:30"
+ticks = 2400
+args = ["--probe-wing-size", "4", "--probe-wing-only", "--probe-wing-order", "1440:bug-out"]
+
+[[scenario]]
+id = "dogfight"
+aircraft = "f22"
+map = "UKR"
+time_of_day = "17:30"
+ticks = 3000
+args = ["--probe-fight", "4:4", "--probe-enemy-aircraft", "mig21", "--probe-enemy-skill", "novice", "--separation", "5", "--probe-attack", "120:3", "--probe-wing-order", "120:attack-on-contact", "--ai-mission", "intercept"]
+
+[[scenario]]
+id = "pursuit-close-mig21"
+aircraft = "f22"
+map = "GRE"
+time_of_day = "14:00"
+ticks = 14400
+args = ["--probe-fight", "2:1", "--probe-enemy-aircraft", "mig21", "--probe-enemy-skill", "novice", "--separation", "1", "--probe-geometry", "rear", "--probe-ai-guns-only", "--probe-wing-order", "1:attack-on-contact", "--ai-mission", "intercept"]
+
+[[scenario]]
+id = "hero-f14"
+aircraft = "f14"
+map = "VLA"
+time_of_day = "11:00"
+ticks = 720
+args = ["--probe-wing-size", "1", "--probe-wing-only"]
+
+[[scenario]]
+id = "hero-rafale"
+aircraft = "rafale"
+map = "EGY"
+time_of_day = "11:00"
+ticks = 720
+args = ["--probe-wing-size", "1", "--probe-wing-only"]
+
+[[scenario]]
+id = "map-GRE"
+aircraft = "f18"
+map = "GRE"
+time_of_day = "11:00"
+ticks = 720
+args = ["--probe-wing-size", "1", "--probe-wing-only"]
+
+[[scenario]]
+id = "map-TVIET"
+aircraft = "f18"
+map = "TVIET"
+time_of_day = "11:00"
+ticks = 720
+args = ["--probe-wing-size", "1", "--probe-wing-only"]
+
+# Captures: one replay window each, drawn twice for the repeat check.
+[[capture]]
+id = "launch"
+replay = "replays/launch-calm.tore-replay"
+map = "UKR"
+frames = 202
+tail = 24
+in_tick = 1180
+anchor = 0
+view = "external"
+clock = [420, 420]
+interp = "pchip"
+camera = [
+  { frame = 0, eye = [-40, 5, 80], target = [0, 5, -6], fov = 42 },
+  { frame = 95, eye = [-72, 7, 12], target = [0, 6, 0], fov = 42 },
+  { frame = 201, eye = [-84, 12, -82], target = [0, 9, 20], fov = 40 }
+]
+
+[[capture]]
+id = "formation"
+replay = "replays/formation.tore-replay"
+map = "UKR"
+frames = 75
+in_tick = 1360
+anchor = 0
+view = "external"
+interp = "pchip"
+camera = [
+  { frame = 0, eye = [-3300, -250, -330], target = [230, 40, -470], fov = 10.6 },
+  { frame = 74, eye = [-3300, -232, -470], target = [230, 36, -500], fov = 10.4 }
+]
+
+# The same recording from the next tick: #4 rolling away into the Bug Out.
+[[capture]]
+id = "formation-break"
+replay = "replays/formation.tore-replay"
+map = "UKR"
+frames = 76
+in_tick = 1510
+anchor = 3
+view = "external"
+interp = "pchip"
+camera = [
+  { frame = 0, eye = [-92, -6, 72], target = [0, 0, 0], fov = 36 },
+  { frame = 75, eye = [-104, 2, 38], target = [0, 0, 4], fov = 35 }
+]
+
+[[capture]]
+id = "hero-f14"
+replay = "replays/hero-f14.tore-replay"
+map = "VLA"
+frames = 126
+in_tick = 300
+anchor = 0
+view = "external"
+interp = "pchip"
+camera = [
+  { frame = 0, eye = [96, 34, 112], target = [0, -2, 4], fov = 29, aim = [-0.33, 0.12] },
+  { frame = 125, eye = [132, 12, 26], target = [0, 0, 0], fov = 28, aim = [-0.35, 0.10] }
+]
+
+[[capture]]
+id = "hero-rafale"
+replay = "replays/hero-rafale.tore-replay"
+map = "EGY"
+frames = 126
+in_tick = 300
+anchor = 0
+view = "external"
+interp = "pchip"
+camera = [
+  { frame = 0, eye = [62, 52, -62], target = [0, 0, 2], fov = 30, aim = [-0.34, 0.10] },
+  { frame = 125, eye = [112, 16, 12], target = [0, 0, 0], fov = 28, aim = [-0.34, 0.12] }
+]
+
+[[capture]]
+id = "vista-GRE"
+replay = "replays/map-GRE.tore-replay"
+map = "GRE"
+frames = 126
+in_tick = 240
+anchor = 0
+view = "external"
+interp = "pchip"
+camera = [
+  { frame = 0, eye = [5200, 14400, -23600], target = [13000, -5000, 9500], fov = 56 },
+  { frame = 125, eye = [4300, 13400, -21300], target = [12500, -5000, 9800], fov = 55 }
+]
+
+[[capture]]
+id = "vista-TVIET"
+replay = "replays/map-TVIET.tore-replay"
+map = "TVIET"
+frames = 101
+in_tick = 240
+anchor = 0
+view = "external"
+interp = "pchip"
+camera = [
+  { frame = 0, eye = [-6700, 17100, -18200], target = [0, -5000, 4000], fov = 58 },
+  { frame = 100, eye = [-4900, 16400, -17000], target = [0, -5000, 4000], fov = 58 }
+]
+
+[[capture]]
+id = "night"
+replay = "replays/dogfight.tore-replay"
+map = "UKR"
+frames = 177
+tail = 24
+in_tick = 1506
+anchor = 6
+view = "external"
+clock = [1230, 1230]
+interp = "pchip"
+camera = [
+  { frame = 0, eye = [-150, -14, 64], target = [250, -10, -110], fov = 46 },
+  { frame = 176, eye = [-178, -26, 4], target = [262, -6, -160], fov = 46 }
+]
+
+# One continuous capture from the HUD close-up to the full cockpit. The engine
+# zoom magnifies the scene, HUD and cockpit art together about the forward
+# datum. 26.0078 degrees is exactly 2.5x the normal 60-degree cockpit view.
+[[capture]]
+id = "cockpit"
+replay = "replays/pursuit-close-mig21.tore-replay"
+map = "GRE"
+frames = 302
+tail = 24
+in_tick = 8280
+anchor = 1
+view = "cockpit"
+hud_layer = true
+interp = "smoothstep"
+camera = [
+  { frame = 0, eye = [0, 0, 0], target = [0, 0, 1], fov = 26.0078 },
+  { frame = 76, eye = [0, 0, 0], target = [0, 0, 1], fov = 26.0078 },
+  { frame = 151, eye = [0, 0, 0], target = [0, 0, 1], fov = 60 },
+  { frame = 301, eye = [0, 0, 0], target = [0, 0, 1], fov = 60 }
+]
+
+# The separate missile-kill recording, inside the actual replay viewer.
+[[capture]]
+id = "replay-alt"
+replay = "replays/dogfight.tore-replay"
+map = "UKR"
+frames = 51
+tail = 48
+in_tick = 1796
+anchor = 6
+view = "replay"
+speed = 1
+clock = [1030, 1030]
+interp = "pchip"
+camera = [
+  { frame = 0, eye = [96, 34, -118], target = [0, 0, 0], fov = 44 },
+  { frame = 50, eye = [112, 42, -132], target = [0, 0, 0], fov = 44 }
+]
+
+[[capture]]
+id = "replay-freeze"
+replay = "replays/dogfight.tore-replay"
+map = "UKR"
+frames = 25
+in_tick = 1896
+anchor = 6
+view = "replay"
+clock = [1030, 1030]
+freeze_tick = 1896
+camera = [
+  { frame = 0, eye = [112, 42, -132], target = [0, 0, 0], fov = 44 },
+  { frame = 24, eye = [112, 42, -132], target = [0, 0, 0], fov = 44 }
+]
+
+[[capture]]
+id = "replay-rewind"
+replay = "replays/dogfight.tore-replay"
+map = "UKR"
+frames = 25
+in_tick = 1896
+anchor = 6
+view = "replay"
+speed = -4
+clock = [1030, 1030]
+camera = [
+  { frame = 0, eye = [112, 42, -132], target = [0, 0, 0], fov = 44 },
+  { frame = 24, eye = [112, 42, -132], target = [0, 0, 0], fov = 44 }
+]
+
+[[capture]]
+id = "replay-impact"
+replay = "replays/dogfight.tore-replay"
+map = "UKR"
+frames = 101
+tail = 24
+in_tick = 1887
+anchor = 6
+view = "replay"
+speed = 1
+clock = [1030, 1030]
+interp = "pchip"
+camera = [
+  { frame = 0, eye = [-150, 55, 225], target = [0, 0, 0], fov = 44 },
+  { frame = 100, eye = [-178, 66, 205], target = [0, 0, 0], fov = 44 }
+]
+
+# The 32-second edit. Every cut after the boot lands on a beat of the grid:
+# frame 90 + 25.2196 * beats. `vcrop` is the portrait crop centre (0..1 of the
+# landscape width) at shot frames; portrait text stays in its central square.
+[[shot]]
+id = "boot"
+layout = "boot"
+start = 0
+frames = 90
+clips = []
+transition = "power-on"
+
+[[shot]]
+id = "launch"
+layout = "full"
+start = 90
+frames = 202
+clips = ["launch"]
+transition = "flash"
+vcrop = [[0, 0.40], [100, 0.46], [201, 0.52]]
+
+[[shot]]
+id = "formation"
+layout = "full"
+start = 292
+frames = 75
+clips = ["formation"]
+transition = "wobble"
+bloom = 0.3
+vcrop = [[0, 0.62], [74, 0.62]]
+
+[[shot]]
+id = "formation-break"
+layout = "full"
+start = 367
+frames = 76
+clips = ["formation-break"]
+transition = "cut"
+vcrop = [[0, 0.46], [75, 0.50]]
+
+[[shot]]
+id = "hero-f14"
+layout = "aircraft"
+start = 443
+frames = 126
+clips = ["hero-f14"]
+overlay = "F-14D TOMCAT"
+transition = "wobble"
+vcrop = [[0, 0.40], [125, 0.42]]
+vzoom = 1.32
+
+[[shot]]
+id = "hero-rafale"
+layout = "aircraft"
+start = 569
+frames = 126
+clips = ["hero-rafale"]
+overlay = "RAFALE C"
+transition = "cut"
+vcrop = [[0, 0.38], [125, 0.42]]
+vzoom = 1.32
+
+[[shot]]
+id = "vista-gre"
+layout = "theater"
+start = 695
+frames = 126
+clips = ["vista-GRE"]
+overlay = "GREECE"
+transition = "wobble"
+vcrop = [[0, 0.40], [125, 0.42]]
+vzoom = 1.12
+
+[[shot]]
+id = "vista-tviet"
+layout = "theater"
+start = 821
+frames = 101
+clips = ["vista-TVIET"]
+overlay = "NORTH VIETNAM"
+transition = "cut"
+vcrop = [[0, 0.34], [100, 0.36]]
+vzoom = 1.12
+
+[[shot]]
+id = "night"
+layout = "full"
+start = 922
+frames = 177
+clips = ["night"]
+transition = "static"
+bloom = 2.2
+vcrop = [[0, 0.36], [176, 0.44]]
+
+# Tape treatment holds to `tape[0]`, then fades out by `tape[1]` while the
+# engine zoom pulls back into the cockpit.
+[[shot]]
+id = "cockpit"
+layout = "cockpit"
+start = 1099
+frames = 302
+clips = ["cockpit"]
+transition = "tape"
+tape = [76, 151]
+vcrop = [[0, 0.5], [301, 0.5]]
+
+# The missile's explosion reaches this camera eight frames after its flash, as
+# the game delays sound with distance. The edit advances this shot's sound by
+# six frames and lets the blast ring on over the paused frame.
+[[shot]]
+id = "replay-alt"
+layout = "replay"
+start = 1401
+frames = 51
+clips = ["replay-alt"]
+transition = "wobble"
+audio_offset = 6
+audio_tail = 40
+
+[[shot]]
+id = "replay-freeze"
+layout = "replay"
+start = 1452
+frames = 25
+clips = ["replay-freeze"]
+transition = "cut"
+
+[[shot]]
+id = "replay-rewind"
+layout = "replay"
+start = 1477
+frames = 25
+clips = ["replay-rewind"]
+transition = "cut"
+
+[[shot]]
+id = "replay-impact"
+layout = "replay"
+start = 1502
+frames = 101
+clips = ["replay-impact"]
+transition = "cut"
+
+[[shot]]
+id = "end"
+layout = "end"
+start = 1603
+frames = 317
+clips = []
+overlay = "v0.1 FIRST FLIGHT"
+transition = "slam"
+
+# The 15-second edit: [shot, first frame, frames]. It keeps the continuous
+# HUD-to-cockpit reveal and the whole replay sequence. Its music is rebuilt:
+# the same kick on its own replay cut, two bars, then the stinger.
+[cutdown]
+segments = [["boot", 0, 90], ["launch", 0, 101], ["cockpit", 0, 302], ["replay-alt", 0, 51], ["replay-freeze", 0, 25], ["replay-rewind", 0, 25], ["replay-impact", 0, 101], ["end", 0, 205]]
+
+[[event_check]]
+scenario = "dogfight"
+kind = "combat.destroyed"
+tick = 1885
+subject = 6
+
+[[event_check]]
+scenario = "pursuit-close-mig21"
+kind = "weapon.launch"
+tick = 8603
+subject = 1
+
+[[event_check]]
+scenario = "launch-calm"
+kind = "aircraft.took_off"
+tick = 1301
+subject = 0
