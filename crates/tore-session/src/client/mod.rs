@@ -1140,17 +1140,25 @@ impl Client {
     }
 
     /// The plain words for why the connection ended: the host's goodbye
-    /// when it said one ("The host left the game"), else [`describe`].
+    /// when it said one ("The host left the game"), else [`describe`]. A
+    /// player who was removed is told by whom: the King, or the server when
+    /// the game has no King (the lobby state says: a dedicated server's
+    /// `king` is empty).
     pub fn close_text(&self, reason: &CloseReason) -> String {
+        let remover = if self.lobby.as_ref().is_some_and(|l| l.king.is_none()) {
+            "The server"
+        } else {
+            "The King"
+        };
         match (&self.goodbye, reason) {
             (Some(Goodbye::HostLeft), CloseReason::Disconnected { .. }) => {
                 "The host left the game.".into()
             }
             (Some(Goodbye::Kicked(why)), CloseReason::Disconnected { .. }) if why.is_empty() => {
-                "The King removed you from the game.".into()
+                format!("{remover} removed you from the game.")
             }
             (Some(Goodbye::Kicked(why)), CloseReason::Disconnected { .. }) => {
-                format!("The King removed you from the game: {why}")
+                format!("{remover} removed you from the game: {why}")
             }
             _ => describe(reason),
         }
@@ -1453,7 +1461,9 @@ impl Client {
                         CloseReason::Refused { .. } => "refused",
                         _ => "closed",
                     };
-                    self.log(kind, &[&describe(&reason)]);
+                    // The log says what the screen says.
+                    let text = self.close_text(&reason);
+                    self.log(kind, &[&text]);
                     self.event(ClientEvent::Closed(reason));
                 }
                 tore_net::ClientEvent::Connection(event) => match event {

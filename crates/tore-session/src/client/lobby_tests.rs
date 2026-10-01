@@ -14,6 +14,31 @@ use tore_world::test_support::resources::resources;
 
 const MS: Duration = Duration::from_millis(1);
 
+/// A diagnostics writer the test keeps a handle on.
+#[derive(Clone, Default)]
+struct Log(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Log {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Log {
+    /// The `closed` line's words, when the log has one.
+    fn closed(&self) -> Option<String> {
+        let text = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();
+        text.lines().find_map(|line| {
+            let mut fields = line.split('\t').skip(1);
+            (fields.next() == Some("closed")).then(|| fields.next().unwrap_or_default().to_owned())
+        })
+    }
+}
+
 /// A game a player hosts: the first player to join is the King, who starts
 /// each mission; a mission's end returns everyone to the lobby at once.
 fn kings_rig(friendly: usize) -> Rig {
@@ -508,6 +533,41 @@ fn a_player_joining_in_flight_takes_an_ai_aircraft() {
     }));
 }
 
+/// A player a dedicated server's console removes is told the server did it
+/// (it has no King), in the screen's words and in the diagnostics log.
+#[test]
+fn a_dedicated_servers_kick_says_the_server_removed_the_player() {
+    let mut rig = servers_rig(StartMode::FirstPlayer, |_| {});
+    let viper = manual(&mut rig, "Viper");
+    let log = Log::default();
+    rig.players[viper]
+        .client
+        .set_diagnostics(Box::new(log.clone()));
+    gathered(&mut rig, &[viper]);
+    assert_eq!(lobby(&rig, viper).unwrap().king, None);
+    let id = me(&rig, viper).unwrap().id;
+    rig.host.kick_player(id, "Test kick").expect("a kick");
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.closed(viper)));
+    let p = &rig.players[viper];
+    let reason = p
+        .events
+        .iter()
+        .find_map(|e| match e {
+            ClientEvent::Closed(reason) => Some(reason.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        p.client.close_text(&reason),
+        "The server removed you from the game: Test kick"
+    );
+    assert_eq!(
+        log.closed().as_deref(),
+        Some("The server removed you from the game: Test kick"),
+        "the diagnostics say what the screen says"
+    );
+}
+
 /// A dedicated server: no King, the mission from its file, started by its
 /// `start` setting.
 fn servers_rig(start: StartMode, configure: impl FnOnce(&mut crate::host::HostConfig)) -> Rig {
@@ -652,9 +712,15 @@ fn a_king_at_a_network_address_is_still_dropped_for_silence() {
     let mut rig = kings_rig(2);
     let king = manual(&mut rig, "Viper");
     let cobra = manual(&mut rig, "Cobra");
+    let log = Log::default();
+    rig.players[cobra]
+        .client
+        .set_diagnostics(Box::new(log.clone()));
     gathered(&mut rig, &[king, cobra]);
     rig.players[king].stalled = true;
     assert!(rig.run_until(Duration::from_secs(8), |r| r.closed(cobra)));
+    // The diagnostics say what the screen says, not the transport's words.
+    assert_eq!(log.closed().as_deref(), Some("The host left the game."));
     assert!(rig.logs.iter().any(|l| matches!(
         l,
         HostLog::Left {
