@@ -39,6 +39,13 @@ right-clicking it turns back, each with a matching tap of the rocker. Requested
 by John on 2026-09-23 (`opinionated`). OK, Enter, Space or Escape close the debrief. Cancel is
 never available. `?` offers Exit to Desktop, like the Quick Mission creator.
 
+A networked flight's debrief (multiplayer) changes only the first page and the
+outcome line, and only when nobody's objectives decided the mission: the page
+reads **MISSION ENDED** and says who ended it, and page 2 reads **MISSION
+OUTCOME : INCOMPLETE**, retail's word for a multiplayer mission cut short
+(`agent decision`, EF-F; [details](../ARCHITECTURE.md#smoke-test-fixes-ef-f)).
+Single player never shows it.
+
 Closing the debrief returns to the **Quick Mission creator with every setting
 of the mission just flown**, not to the ordnance screen. Requested by John on
 2026-09-23 (`opinionated`). Retail appears to return to the main menu after a

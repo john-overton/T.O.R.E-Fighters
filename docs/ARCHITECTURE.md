@@ -4140,6 +4140,88 @@ joined a flying mission as described above; a fourth saw the server stop while
 the game sat in its lobby and showed "The server ended the connection: the
 server is stopping." on Direct Connection.
 
+**Smoke-test fixes (EF-F).** *Built (EF-F), 2026-10-01; each an agent decision
+unless it is the lead's brief.* The EF9 smoke test (a hosting game, two more
+games and a bot, in the lead's notes `.local/mp-notes/ef9/`) found these and
+they are fixed:
+
+- **Leaving one's own flight and joining it again.** A player who ended its
+  flight (Ctrl+Q, back in the lobby while the others fly) and pressed Join was
+  seated by the host, but its window stayed on the lobby saying "You are
+  flying." with Loadout and Join greyed, and its plane flew neutral; only
+  Leave worked. The cause: the game's own build of the mission
+  (`net::session::Built`: the world the screens read and the drawn model of
+  every aircraft type) is made once for each mission the host sends, when the
+  client loads it, and `begin_session_flight` took it (`net_built.take()`) for
+  the first seating. A second seating in the same running mission found none
+  and waited for a build that never came. The session now keeps the mission's
+  spec and the import (`NetSession::rebuild`) and `begin_session_flight`
+  builds the mission again for a seating that has no build left (about the
+  time the mission takes to load; the player has just pressed Join). A player
+  can leave and join the same flight any number of times. The King has no such
+  path to mend: its End Mission ends the mission for everyone, and the next
+  mission is a new load (`Fly` in the lobby). Test:
+  `net/rejoin_tests.rs` seats a lobby-mode `NetSession` three times in one
+  running mission with its End Mission between (the synthetic import has no
+  aircraft models, so the test checks that a build is made and kept for each
+  seating; the windowed run flies it with the real import).
+- **The debrief's headline.** The host's report says only whether the
+  objectives were met, so a mission the King ended, or a joiner's own End
+  Mission, read "MISSION FAILURE / You failed this Quick Mission." The
+  networked debrief now decides in `net::debrief::ending` from the report and
+  who ended it (the host's `MissionEnded` reason, which arrives just before the
+  debrief, or the player's own Leave): the result stands, with the retail page,
+  when the objectives were met (**MISSION SUCCESS**), or when the flight was
+  lost (the player's pilot dead or ejected, or a friendly objective destroyed:
+  **MISSION FAILURE**); anything else shows **MISSION ENDED** with one
+  sentence: "You left the mission." (the player's own End Mission),
+  "You ended the mission for everyone." (the King's own), "The King ended the
+  mission." (a player who is not the King), "The server ended the mission."
+  (a dedicated server's operator: the lobby has no King), "The time limit ended
+  the mission.", "Everyone left the mission.", "The host is stopping the
+  game." (a hosted game) or "The server is stopping.", and "The host left the
+  game.". The outcome line on the second page reads **MISSION OUTCOME : INCOMPLETE**
+  for these, retail's own word for a multiplayer mission that did not run to
+  its end ([the debrief format notes](formats/debrief.md#page-contents)); the
+  headline and sentences are the agent's. The retail first page's own layout is kept (its heading
+  and sentence are replaced); the objectives and tables are the report's.
+  Single player's debrief is unchanged: it still calls `Debrief::new`, which
+  is now `Debrief::networked` with no ending and draws and words exactly as
+  before (the existing page tests cover it).
+- **Who removed a player.** A removed player's screen read "The King removed
+  you from the game: ..." from a dedicated server, which has no King. The
+  client words it by the lobby state it holds (`king` is empty on a server):
+  "The server removed you from the game: ..." from a server and "The King
+  removed you from the game: ..." from a game a player hosts
+  (`Client::close_text`).
+- **The diagnostics log says what the screen says.** The client's `net-*.tsv`
+  `closed` and `refused` rows now use `Client::close_text`: a joiner whose
+  host left logged "The server ended the connection: the server is stopping."
+  while its screen read "The host left the game."; both now read "The host
+  left the game." (and a kick logs the kick's wording).
+- **A stale Closed row.** After a session ended, Direct Connection restarted
+  its search and listed the game just left as "0/4 Closed" for the few seconds
+  it still answered. The screen remembers the address of the game of the
+  session that ended (the game joined, or this machine's game port for a game
+  it hosted) and does not list that game while it answers Closed, nor say
+  that it was found or lost in Messages; it is a game like any other once it
+  answers anything else (a server's next mission) or has gone from the search.
+  A game closing that was not just left shows as Closed, as before.
+- **The cheat notice on the lobby's Load Ordnance page** ("Cheat loading is
+  not allowed in a multiplayer game.", and the page's other messages) sat at
+  the low left, over the names of the bottom two weapon rows. In lobby mode it
+  now sits in the strip of backdrop between the title bar and the two panels,
+  which covers no label. Single player's page is unchanged (the notice is
+  where it was; both places are tested).
+- **`stall SECONDS`**, a step of `--input-script` (at most 600 seconds): blocks
+  the game's whole main loop, frames, the session's pump and the script
+  itself, for that long, as a window held still or a long frame does. It is
+  how a smoke test checks the keepalive and the neutral flying of a stalled
+  game with a real loop stall: stopping the process (SIGSTOP) freezes the
+  keepalive thread too, so it cannot. Listed with the other steps in
+  [development](DEVELOPMENT.md#windowed-runs-from-scripts-and-agents) and in
+  `input_script.rs`.
+
 ### Chat
 
 Chat goes through the host, which forwards each line to its receivers:
@@ -4319,6 +4401,7 @@ second completes the plan's stage F and stage E's replays.
 | EF9 Acceptance | lead, then John | all | The lead's smoke test on this machine (a hosting game, a joining game, a bot); then John on three machines (macOS, Linux, Windows) | John flies with friends from the menus |
 | EF-K Keepalive | Opus | EF6 | A joined game whose loop is stalled is kept connected by a keepalive thread, under the connection's own identity, for at most a minute; protocol version 5 | A joined client stalled 15 seconds is not dropped and recovers; one stalled past the bound is dropped; a keepalive from elsewhere keeps nothing alive; the King is unaffected. **Built (EF-K):** see [a stalled game stays connected](#a-stalled-game-stays-connected-ef-k) |
 | EF-X CI on macOS and Windows | Opus | EF-K | Find and fix every macOS and Windows failure of `ci.yml` and `network.yml`, real platform behaviour or over-strict tests | One CI run green on all jobs; each system's game-port behaviour written down. **Built (EF-X):** see [the game port on each system](#the-game-port-on-each-system-ef-x) and [sleep and wait accuracy on each system](#sleep-and-wait-accuracy-on-each-system-ef-x); the macOS golden fingerprints were recorded again, Windows checkouts' CR LF line ends are read, and the real-time tests judge what a slow runner cannot change |
+| EF-F Smoke-test fixes | Sonnet | EF9 | What the lead's smoke test found: a player who ended its own flight is seated again (it was stuck in the lobby), a networked debrief says how the mission ended instead of "MISSION FAILURE", a server's kick says "The server", the net log and the screen say the same words, a game just left is not listed as Closed, the lobby's cheat notice covers no label, and a `stall SECONDS` input-script step | Tests for each; a windowed run of host, joiner and bot: leave and rejoin twice, an 8 second stall that keeps the joiner connected, the debrief headlines, a server's kick wording. **Built (EF-F):** see [smoke-test fixes](#smoke-test-fixes-ef-f) |
 
 **Phase 2: the rest of stage F, and stage E's replays.** The King's settings
 (co-op or PvP and sides, slot locks, password, join in progress, friendly fire,

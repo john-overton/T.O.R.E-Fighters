@@ -324,6 +324,19 @@ they eject counts as two kills. *Retail gap-fill (agent):* retail's INCOMPLETE o
 multiplayer, applies when the King ends a mission early, and every player can
 open a score board in flight, as retail's host could with Show Player Scores.
 
+*Built (EF-F, agent decisions):* the first page of a networked debrief does not
+call a mission that somebody ended a failure. When the mission's objectives
+decided it, the retail page stands: **MISSION SUCCESS**, or **MISSION
+FAILURE** when the player's pilot was lost or a friendly objective destroyed.
+Otherwise the page reads **MISSION ENDED** with who ended it ("You left the
+mission.", "The King ended the mission.", "The server ended the mission.",
+"The time limit ended the mission.", "The host left the game."), and the
+outcome line reads **INCOMPLETE**, retail's word for it. Single player's
+debrief is unchanged ([how it works](ARCHITECTURE.md#smoke-test-fixes-ef-f)).
+A player who ended its own flight can press Join and fly it again, any number
+of times; a player the server removes reads "The server removed you from the
+game: REASON" (a game a player hosts says "The King").
+
 ## Architecture
 
 There is one netcode path. The **server core** is the authoritative mission: the

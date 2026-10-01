@@ -597,6 +597,7 @@ rightly ignores most keys then). One step per line, `#` for comments:
 
 ```text
 wait 1.5           seconds of wall clock
+stall 8            block the game's whole main loop this long (at most 600 s), as a held window does
 waittick 600 [90]  until the flight has run this many 120 Hz ticks, or 90 s (default)
 key g              press and release: Shift+e, Ctrl+B, F10, Space, Escape, Enter, Up, ]
 down Up            hold a key          up Up     release it
@@ -607,6 +608,11 @@ snapshot out.ppm   the menu layer as drawn now (menu screens); relative paths go
 shot out.ppm       the flight as drawn now, cockpit, HUD and instruments included (same path rule)
 exit               quit
 ```
+
+`stall` is for the multiplayer keepalive: a joined game's loop stops for the time, its
+keepalive thread keeps it connected (the host logs "game stalled" and "game back after"), and
+its plane flies neutral. Stopping the process with SIGSTOP cannot test that, since it freezes
+the keepalive thread too.
 
 In a networked flight (`--connect`) `waittick` counts the client's ticks. To try the game
 against a server on this machine, import a profile for both, start `tore-server` on a spare

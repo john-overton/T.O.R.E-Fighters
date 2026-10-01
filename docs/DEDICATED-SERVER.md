@@ -356,7 +356,9 @@ and presses **Ready** (it reads **Join** while the mission flies). End Mission i
 flight returns that player to the server's lobby with its debrief, while the
 server's mission goes on; **Leave** returns to Direct Connection, and a server
 that stops or kicks the player puts its reason in Direct Connection's
-Messages ("The server ended the connection: the server is stopping.").
+Messages ("The server ended the connection: the server is stopping."; a
+player the console removes with `kick-player` reads "The server removed you
+from the game: REASON", since a server has no King).
 A game with no lobby screen (`tore-app --connect`, `tore-bot`) still takes a
 slot and marks ready by itself.
 
