@@ -285,7 +285,7 @@ fn a_client_joins_flies_and_leaves_with_its_debrief() {
     assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(player)));
     rig.run(Duration::from_secs(3));
     let now = rig.net.now();
-    rig.players[player].client.leave(now);
+    rig.players[player].client.leave_game(now);
     assert!(rig.run_until(Duration::from_secs(7), |r| r.closed(player)));
     let p = &rig.players[player];
     assert!(
@@ -299,7 +299,7 @@ fn a_client_joins_flies_and_leaves_with_its_debrief() {
         e,
         ClientEvent::Closed(CloseReason::Disconnected {
             reason: DisconnectReason::Left,
-            by_peer: true
+            by_peer: false
         })
     )));
     assert!(!p.digests.is_empty());
@@ -313,22 +313,28 @@ fn a_different_import_is_refused_with_the_names_that_differ() {
     other.get_mut(&name).unwrap().push(0);
     rig.resources = Arc::new(other);
     let player = rig.join(|_| {}, weave_script());
-    assert!(rig.run_until(Duration::from_secs(3), |r| r.closed(player)));
+    // The player is told why and stays in the lobby, marked unable.
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.players[player]
+            .client
+            .lobby()
+            .and_then(|l| l.me())
+            .is_some_and(|me| me.unable.is_some())
+    }));
+    rig.run(Duration::from_secs(1));
     let p = &rig.players[player];
     assert!(
-        p.events
-            .iter()
-            .any(|e| matches!(e, ClientEvent::ContentRefused { names } if names.contains(&name))),
+        p.events.iter().any(|e| matches!(
+            e,
+            ClientEvent::ContentRefused { names, reason }
+                if names.contains(&name) && reason.contains("differs")
+        )),
         "{:?}",
         p.events
     );
-    assert!(p.events.iter().any(|e| matches!(
-        e,
-        ClientEvent::Closed(CloseReason::Disconnected {
-            reason: DisconnectReason::ContentMismatch,
-            ..
-        })
-    )));
+    assert_eq!(p.client.phase(), ClientPhase::Lobby);
+    assert!(p.client.unable().is_some());
+    assert_eq!(rig.host.phase(), crate::host::Phase::Lobby);
 }
 
 /// Flies one client for `seconds` on a clean link and checks that, after
@@ -479,7 +485,7 @@ fn fight(seconds: u64, round_trip: Duration, loss: f64) {
     }
     for i in [a, b] {
         let now = rig.net.now();
-        rig.players[i].client.leave(now);
+        rig.players[i].client.leave_game(now);
     }
     assert!(rig.run_until(Duration::from_secs(8), |r| r.closed(a) && r.closed(b)));
     for (i, m) in measured.iter().enumerate() {
@@ -527,7 +533,7 @@ fn fight(seconds: u64, round_trip: Duration, loss: f64) {
             e,
             ClientEvent::Closed(CloseReason::Disconnected {
                 reason: DisconnectReason::Left,
-                by_peer: true
+                by_peer: false
             })
         )));
         assert!(m.drawn > 0);
@@ -605,7 +611,7 @@ fn real_udp(seconds: u64) {
                 .iter()
                 .any(|e| matches!(e, ClientEvent::Seated { .. }));
             if seated && now >= Duration::from_secs(seconds) {
-                bot.client.leave(now);
+                bot.client.leave_game(now);
                 left = true;
             }
         }

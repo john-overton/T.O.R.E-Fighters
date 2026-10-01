@@ -218,6 +218,7 @@ pub(crate) fn inputs(rng: &mut SplitMix64) -> InputsSection {
     let command_count = rng.below(65) as usize;
     let first = rng.below(65_536) as u16;
     InputsSection {
+        flight: rng.below(256) as u8,
         newest_tick,
         frames,
         view_offset: rng.below(256) as u8,
@@ -481,7 +482,7 @@ fn records_against_baselines_round_trip() {
 #[test]
 fn a_connection_carries_snapshots_events_and_names() {
     let mut host = HostConnection::new(4);
-    let mut client = ClientConnection::new(4);
+    let mut client = ClientConnection::for_flight(4, 0);
     let weapon = host.names.intern("AIM120.JT").unwrap();
     let names = host.names.take_new().unwrap();
     host.event(

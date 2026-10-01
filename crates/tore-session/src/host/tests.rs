@@ -4,10 +4,11 @@
 
 use super::*;
 use crate::wire::connection::ClientConnection;
+use crate::wire::connection::FlightOrder;
 use crate::wire::entity::{EntityKey, EntityState};
 use crate::wire::events::ReceivedEvent;
 use crate::wire::inputs::{Command, NumberedCommand};
-use crate::wire::messages::{Mission, Ready, Roster};
+use crate::wire::messages::{Goodbye, LobbyState, Mission, Roster, TakePlane};
 use crate::wire::names::{NameIndex, NameTable};
 use crate::wire::own_state::OwnStateHeader;
 use crate::wire::snapshot::ReceivedSnapshot;
@@ -82,8 +83,8 @@ fn script(tick: u32) -> InputFrame {
     )
 }
 
-fn ready(plane: Option<u32>) -> Message {
-    Message::Ready(Ready { plane })
+fn ready(mission: u32, plane: Option<u32>) -> Message {
+    Message::TakePlane(TakePlane { mission, plane })
 }
 
 /// A minimal player's game: the transport's client and the wire's
@@ -103,6 +104,7 @@ struct TestClient {
     next_command: u16,
     model: AircraftModel,
 
+    ticks_per_snapshot: u32,
     mission: Option<Mission>,
     roster: Option<Roster>,
     seated: Option<Seated>,
@@ -110,6 +112,12 @@ struct TestClient {
     debrief: Option<Debrief>,
     ended: Option<MissionEnded>,
     closed: Option<CloseReason>,
+    lobby: Option<LobbyState>,
+    loadouts: Vec<Vec<(u32, tore_world::mission::LoadoutSpec)>>,
+    refused: Vec<(u8, String)>,
+    goodbye: Option<Goodbye>,
+    /// Quit once the debrief is in.
+    quitting: bool,
     snapshots: Vec<(SnapshotHeader, ReceivedSnapshot)>,
     own: Vec<(OwnStateHeader, ExactState)>,
     events: Vec<ReceivedEvent>,
@@ -139,6 +147,7 @@ impl TestClient {
             commands: Vec::new(),
             next_command: 1,
             model: model(),
+            ticks_per_snapshot: 4,
             mission: None,
             roster: None,
             seated: None,
@@ -146,6 +155,11 @@ impl TestClient {
             debrief: None,
             ended: None,
             closed: None,
+            lobby: None,
+            loadouts: Vec::new(),
+            refused: Vec::new(),
+            goodbye: None,
+            quitting: false,
             snapshots: Vec::new(),
             own: Vec::new(),
             events: Vec::new(),
@@ -168,9 +182,28 @@ impl TestClient {
         self.next_command = self.next_command.wrapping_add(1);
     }
 
+    /// Ends the flight and leaves the game once the debrief is in.
     fn leave(&mut self) {
         self.flying = false;
+        self.quitting = true;
         self.send(&Message::Leave);
+    }
+
+    /// Ends the flight only: back in the lobby.
+    fn leave_flight(&mut self) {
+        self.flying = false;
+        self.send(&Message::Leave);
+    }
+
+    /// The mission's number, as last sent.
+    fn number(&self) -> u32 {
+        self.mission.as_ref().map_or(0, |m| m.number)
+    }
+
+    /// Asks for a plane (stage D's Ready).
+    fn take(&mut self, plane: Option<u32>) {
+        let number = self.number();
+        self.send(&ready(number, plane));
     }
 
     fn pump(&mut self, now: Duration, host_tick: u64) {
@@ -184,7 +217,8 @@ impl TestClient {
         while let Some(event) = self.client.poll_event() {
             match event {
                 ClientEvent::Connected(welcome) => {
-                    self.wire = Some(ClientConnection::new(u32::from(welcome.ticks_per_snapshot)));
+                    self.ticks_per_snapshot = u32::from(welcome.ticks_per_snapshot);
+                    self.wire = Some(ClientConnection::new(self.ticks_per_snapshot));
                 }
                 ClientEvent::Closed(reason) => self.closed = Some(reason),
                 ClientEvent::Connection(Event::Message { kind, body }) => {
@@ -213,7 +247,18 @@ impl TestClient {
 
     fn payload(&mut self, sections: Vec<tore_net::Section>) {
         let mut tick = None;
+        let tps = self.ticks_per_snapshot;
         for section in sections {
+            if let Some(flight) = ClientConnection::section_flight(section.kind, &section.body) {
+                let current = self.wire.as_ref().and_then(|w| w.flight);
+                match FlightOrder::of(flight, current) {
+                    FlightOrder::Earlier => continue,
+                    FlightOrder::Later => {
+                        self.wire = Some(ClientConnection::for_flight(tps, flight));
+                    }
+                    FlightOrder::Same => {}
+                }
+            }
             let wire = self.wire.as_mut().unwrap();
             match section.kind {
                 SECTION_SNAPSHOT => match wire.snapshot(&section.body) {
@@ -241,16 +286,29 @@ impl TestClient {
     fn message(&mut self, message: Message) {
         match message {
             Message::Mission(mission) => {
+                let first = self.mission.is_none();
+                let number = mission.number;
                 self.mission = Some(mission);
-                if let Some(plane) = self.ready {
-                    self.send(&ready(plane));
+                if first && let Some(plane) = self.ready {
+                    self.send(&ready(number, plane));
                 }
             }
             Message::Roster(roster) => self.roster = Some(roster),
             Message::Seated(seated) => {
+                let current = self.wire.as_ref().and_then(|w| w.flight);
+                if FlightOrder::of(seated.flight, current) == FlightOrder::Later {
+                    self.wire = Some(ClientConnection::for_flight(
+                        self.ticks_per_snapshot,
+                        seated.flight,
+                    ));
+                }
                 self.roster = Some(seated.roster.clone());
                 self.seated = Some(*seated);
             }
+            Message::Lobby(lobby) => self.lobby = Some(*lobby),
+            Message::Refused { request, reason } => self.refused.push((request, reason)),
+            Message::Goodbye(goodbye) => self.goodbye = Some(goodbye),
+            Message::FlightLoadouts(loadouts) => self.loadouts.push(loadouts),
             Message::SeatRefused(reason) => self.seat_refused.push(reason),
             Message::Names(names) => {
                 let wire = self.wire.as_mut().unwrap();
@@ -259,7 +317,12 @@ impl TestClient {
                     Err(error) => self.errors.push(format!("names: {error}")),
                 }
             }
-            Message::Debrief(debrief) => self.debrief = Some(*debrief),
+            Message::Debrief(debrief) => {
+                self.debrief = Some(*debrief);
+                if self.quitting {
+                    self.client.disconnect(DisconnectReason::Left);
+                }
+            }
             Message::MissionEnded(ended) => self.ended = Some(ended),
             Message::Notice(_) => {}
             other => self.errors.push(format!("unexpected {other:?}")),
@@ -276,6 +339,7 @@ impl TestClient {
             return;
         }
         let section = InputsSection {
+            flight: self.seated.as_ref().unwrap().flight,
             newest_tick: newest,
             frames: (oldest..=newest).map(script).collect(),
             view_offset: (self.lead + 12).min(255) as u8,
@@ -502,7 +566,22 @@ fn a_waiting_mission_holds_at_tick_0_until_the_first_player_is_seated() {
     let client = rig.join(|_| {});
     rig.clients[client].ready = None;
     rig.run(Duration::from_secs(1));
-    assert_eq!(rig.host.phase(), Phase::Waiting);
+    assert_eq!(rig.host.phase(), Phase::Lobby);
+    // The lobby: the player, no slot held, the friendly planes as slots and
+    // no King on a server.
+    let lobby = rig.clients[client]
+        .lobby
+        .clone()
+        .expect("the lobby's state");
+    assert_eq!(lobby.phase, LobbyPhase::Lobby);
+    assert_eq!(lobby.start, StartRule::FirstReady);
+    assert_eq!(lobby.king, None);
+    assert_eq!(lobby.players.len(), 1);
+    assert_eq!(lobby.me().unwrap().callsign, "Viper");
+    assert_eq!(
+        lobby.slots.iter().map(|s| s.plane).collect::<Vec<_>>(),
+        [0, 1]
+    );
     assert_eq!(rig.host.world().tick(), 0);
     let c = &rig.clients[client];
     assert!(c.mission.is_some() && c.roster.is_some());
@@ -520,7 +599,7 @@ fn a_waiting_mission_holds_at_tick_0_until_the_first_player_is_seated() {
         rig.host.world().combat.contrail_sortie()
     );
 
-    rig.clients[client].send(&ready(None));
+    rig.clients[client].take(None);
     assert!(rig.run_until(Duration::from_secs(1), |r| r.seated(client)));
     assert_eq!(rig.host.phase(), Phase::Flying);
     let seated = rig.clients[client].seated.clone().unwrap();
@@ -715,7 +794,7 @@ fn clients_join_fly_and_leave_a_hundred_times() {
             c.closed,
             Some(CloseReason::Disconnected {
                 reason: DisconnectReason::Left,
-                by_peer: true
+                by_peer: false
             }),
             "round {round}"
         );
@@ -726,21 +805,30 @@ fn clients_join_fly_and_leave_a_hundred_times() {
         );
     }
     assert!(rig.faults().is_empty(), "{:?}", rig.faults());
-    let left = rig
-        .logs
-        .iter()
-        .filter(|l| {
-            matches!(
-                l,
-                HostLog::Left {
-                    reason: LeaveReason::Left,
-                    plane: Some(_),
-                    ..
-                }
-            )
-        })
-        .count();
-    assert_eq!(left, 100);
+    // The last one's goodbye reaches the host.
+    rig.run(Duration::from_millis(100));
+    // Each left its flight, was back in the lobby, then left the game.
+    let count = |f: &dyn Fn(&HostLog) -> bool| rig.logs.iter().filter(|l| f(l)).count();
+    assert_eq!(
+        count(&|l| matches!(
+            l,
+            HostLog::Lobby {
+                event: LobbyEvent::BackInLobby,
+                ..
+            }
+        )),
+        100
+    );
+    assert_eq!(
+        count(&|l| matches!(
+            l,
+            HostLog::Left {
+                reason: LeaveReason::Left,
+                ..
+            }
+        )),
+        100
+    );
     assert!(rig.host.world().cockpits.is_empty());
 }
 
@@ -906,26 +994,36 @@ fn refusals_reach_the_client_with_their_reason() {
     assert!(rig.run_until(Duration::from_secs(2), |r| r.closed(second)));
     assert_eq!(refused(&rig, second).0, RefuseReason::ServerFull);
 
-    // Content: the client reports a difference and is disconnected.
+    // Content: the client reports a difference and stays in the lobby,
+    // marked unable, and may not take a plane.
     let mut rig = Rig::new(spec(2, 2, 20), config(), LinkConfig::one_way(5 * MS));
     let client = rig.join(|_| {});
     rig.clients[client].ready = None;
     assert!(rig.run_until(Duration::from_secs(2), |r| {
         r.clients[client].mission.is_some()
     }));
+    let mission = rig.clients[client].number();
     rig.clients[client].send(&Message::ContentRefused(
         crate::wire::messages::ContentRefused {
+            mission,
             names: vec!["F18.PT".into()],
+            reason: "Your game data differs from the host's in 1 file(s), such as F18.PT.".into(),
         },
     ));
-    assert!(rig.run_until(Duration::from_secs(2), |r| r.closed(client)));
-    assert_eq!(
-        rig.clients[client].closed,
-        Some(CloseReason::Disconnected {
-            reason: DisconnectReason::ContentMismatch,
-            by_peer: true
-        })
-    );
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        r.clients[client]
+            .lobby
+            .as_ref()
+            .and_then(|l| l.me())
+            .is_some_and(|me| me.unable.is_some())
+    }));
+    rig.clients[client].take(None);
+    assert!(rig.run_until(Duration::from_secs(1), |r| {
+        !r.clients[client].seat_refused.is_empty()
+    }));
+    assert!(rig.clients[client].seat_refused[0].contains("cannot play"));
+    assert!(!rig.closed(client));
+    assert_eq!(rig.host.phase(), Phase::Lobby);
     assert!(rig.logs.iter().any(|l| matches!(
         l,
         HostLog::ContentRefused { names, .. } if names == &["F18.PT".to_string()]
@@ -944,13 +1042,13 @@ fn a_taken_or_closed_plane_is_refused_and_the_player_may_ask_again() {
     }));
     assert!(rig.clients[second].seat_refused[0].contains("another player"));
     // An enemy plane is not open by default.
-    rig.clients[second].send(&ready(Some(2)));
+    rig.clients[second].take(Some(2));
     assert!(rig.run_until(
         Duration::from_secs(1),
         |r| r.clients[second].seat_refused.len() == 2
     ));
     assert!(rig.clients[second].seat_refused[1].contains("not open"));
-    rig.clients[second].send(&ready(None));
+    rig.clients[second].take(None);
     assert!(rig.run_until(Duration::from_secs(1), |r| r.seated(second)));
     assert_eq!(rig.clients[second].plane(), Some(PlaneId(1)));
     // Both friendly planes are flown: the host is full.
@@ -1041,7 +1139,9 @@ fn the_time_limit_ends_the_mission_with_debriefs_and_it_starts_again() {
         LinkConfig::one_way(5 * MS),
     );
     let client = rig.join(|_| {});
-    assert!(rig.run_until(Duration::from_secs(3), |r| r.closed(client)));
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        r.clients[client].debrief.is_some()
+    }));
     let c = &rig.clients[client];
     assert_eq!(
         c.ended,
@@ -1050,7 +1150,8 @@ fn the_time_limit_ends_the_mission_with_debriefs_and_it_starts_again() {
             next_in_seconds: Some(1)
         })
     );
-    assert!(c.debrief.is_some());
+    // The player stays connected, back in the lobby, its slot kept.
+    assert!(!rig.closed(client));
     assert!(matches!(
         rig.host.phase(),
         Phase::Ended { next_in: Some(_) }
@@ -1067,16 +1168,44 @@ fn the_time_limit_ends_the_mission_with_debriefs_and_it_starts_again() {
     let late = rig.join(|_| {});
     assert!(rig.run_until(Duration::from_millis(500), |r| r.closed(late)));
     assert_eq!(refused(&rig, late).0, RefuseReason::ShuttingDown);
-    // The fresh mission waits for its first player.
-    assert!(rig.run_until(Duration::from_secs(2), |r| r.host.phase() == Phase::Waiting));
+    // The fresh mission waits in the lobby for its first ready player.
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.host.phase() == Phase::Lobby));
     assert_eq!(rig.host.world().tick(), 0);
     assert!(
         rig.logs
             .iter()
             .any(|l| matches!(l, HostLog::MissionRestarted { .. }))
     );
+    assert!(rig.run_until(Duration::from_millis(200), |r| {
+        r.clients[client]
+            .lobby
+            .as_ref()
+            .is_some_and(|l| l.phase == LobbyPhase::Lobby && l.me().unwrap().slot == Some(0))
+    }));
+    let me = rig.clients[client]
+        .lobby
+        .as_ref()
+        .unwrap()
+        .me()
+        .unwrap()
+        .clone();
+    assert!(!me.ready && !me.flying, "{me:?}");
+    // The same player flies the next mission, a new flight of its
+    // connection.
+    rig.clients[client].take(None);
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        r.clients[client]
+            .seated
+            .as_ref()
+            .is_some_and(|s| s.flight == 2)
+    }));
     let again = rig.join(|_| {});
     assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(again)));
+    assert!(
+        rig.clients[client].errors.is_empty(),
+        "{:?}",
+        rig.clients[client].errors
+    );
 }
 
 #[test]
@@ -1125,7 +1254,7 @@ fn the_console_ends_restarts_and_stops_the_mission() {
     assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(a)));
     rig.run(Duration::from_millis(200));
     rig.host.end();
-    assert!(rig.run_until(Duration::from_secs(2), |r| r.closed(a)));
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.clients[a].debrief.is_some()));
     assert_eq!(
         rig.clients[a].ended,
         Some(MissionEnded {
@@ -1133,23 +1262,28 @@ fn the_console_ends_restarts_and_stops_the_mission() {
             next_in_seconds: Some(30)
         })
     );
-    assert!(rig.clients[a].debrief.is_some());
     assert!(matches!(rig.host.phase(), Phase::Ended { .. }));
 
-    // Restart starts the fresh mission at once.
+    // Restart starts the fresh mission at once, back in the lobby with the
+    // player still connected.
     rig.host.restart();
-    assert_eq!(rig.host.phase(), Phase::Waiting);
+    assert_eq!(rig.host.phase(), Phase::Lobby);
     assert_eq!(rig.host.world().tick(), 0);
     let b = rig.join(|_| {});
     assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(b)));
+    rig.clients[b].debrief = None;
     rig.host.restart();
-    assert!(rig.run_until(Duration::from_secs(2), |r| r.closed(b)));
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.clients[b].debrief.is_some()));
     assert_eq!(
         rig.clients[b].ended.map(|e| e.next_in_seconds),
         Some(Some(0))
     );
+    assert!(!rig.closed(a) && !rig.closed(b));
 
-    // Quit: everyone is told the server is stopping.
+    // Quit: everyone is told the server is stopping. (The two slots are
+    // held, so one player gives its up first.)
+    rig.clients[a].client.disconnect(DisconnectReason::Left);
+    assert!(rig.run_until(Duration::from_secs(1), |r| r.closed(a)));
     let c = rig.join(|_| {});
     assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(c)));
     rig.host.stop();
@@ -1240,4 +1374,52 @@ fn each_seats_snapshots_have_their_own_phase_of_the_interval() {
         let n = phases.iter().filter(|&&p| p == phase).count();
         assert!((1..=2).contains(&n), "phase {phase}: {n} seats");
     }
+}
+
+#[test]
+fn a_player_who_leaves_its_flight_stays_and_flies_again_as_a_new_flight() {
+    let mut rig = Rig::new(spec(2, 2, 20), config(), LinkConfig::one_way(10 * MS));
+    let a = rig.join(|_| {});
+    let b = rig.join(|_| {});
+    assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(a) && r.seated(b)));
+    rig.run(Duration::from_millis(500));
+    let plane = rig.clients[a].plane().unwrap();
+    rig.clients[a].leave_flight();
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        r.clients[a].debrief.is_some()
+            && r.clients[a]
+                .lobby
+                .as_ref()
+                .and_then(|l| l.me())
+                .is_some_and(|me| !me.flying && me.slot == Some(plane.0))
+    }));
+    assert!(!rig.closed(a));
+    assert_eq!(
+        rig.host.phase(),
+        Phase::Flying,
+        "the mission flies on for b"
+    );
+    assert_eq!(
+        rig.host.world().roster.plane(plane).unwrap().pilot,
+        Pilot::Ai
+    );
+    // Back in flight: the same plane, a new flight of the connection whose
+    // sections code against nothing of the last.
+    let snapshots = rig.clients[a].snapshots.len();
+    rig.clients[a].flying = true;
+    rig.clients[a].take(None);
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        r.clients[a].seated.as_ref().is_some_and(|s| s.flight == 2)
+    }));
+    assert_eq!(rig.clients[a].plane(), Some(plane), "its slot's plane");
+    rig.run(Duration::from_secs(1));
+    let c = &rig.clients[a];
+    assert!(c.snapshots.len() > snapshots + 20);
+    assert!(c.snapshots[snapshots..].iter().all(|(h, _)| h.flight == 2));
+    assert!(c.errors.is_empty(), "{:?}", c.errors);
+    assert!(rig.faults().is_empty());
+    // A player who leaves only its flight never leaves the game.
+    rig.clients[b].leave_flight();
+    rig.run(Duration::from_secs(1));
+    assert!(!rig.closed(b));
 }

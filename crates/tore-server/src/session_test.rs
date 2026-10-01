@@ -27,7 +27,7 @@ use tore_net::{Client, ClientConfig, ClientEvent, Entropy, Event, bind_udp};
 use tore_session::wire::{
     PROTOCOL_VERSION, SECTION_INPUTS,
     inputs::{InputFrame, InputsSection},
-    messages::{Message, Ready},
+    messages::{Message, TakePlane},
 };
 
 fn free_port() -> u16 {
@@ -44,6 +44,7 @@ struct Player {
     origin: Instant,
     mission: bool,
     seated: Option<u32>,
+    flight: u8,
     payloads: u32,
     closed: bool,
     last_inputs: Option<Duration>,
@@ -64,13 +65,19 @@ impl Player {
                 ClientEvent::Connected(_) => {}
                 ClientEvent::Connection(Event::Message { kind, body }) => {
                     match Message::decode(kind, &body) {
-                        Ok(Message::Mission(_)) => {
+                        Ok(Message::Mission(mission)) => {
                             self.mission = true;
-                            let body = Message::Ready(Ready { plane: None }).encode().unwrap();
-                            let kind = Message::Ready(Ready { plane: None }).kind();
-                            self.client.send_message(kind, &body).unwrap();
+                            let take = Message::TakePlane(TakePlane {
+                                mission: mission.number,
+                                plane: None,
+                            });
+                            let body = take.encode().unwrap();
+                            self.client.send_message(take.kind(), &body).unwrap();
                         }
-                        Ok(Message::Seated(seated)) => self.seated = Some(seated.plane),
+                        Ok(Message::Seated(seated)) => {
+                            self.seated = Some(seated.plane);
+                            self.flight = seated.flight;
+                        }
                         _ => {}
                     }
                 }
@@ -87,6 +94,7 @@ impl Player {
             let newest = (self.now().as_secs_f64() * 120.0) as u32 + 120;
             let frame = InputFrame::of(&Default::default(), false, Default::default());
             let section = InputsSection {
+                flight: self.flight,
                 newest_tick: newest,
                 frames: vec![frame; 24],
                 view_offset: 18,
@@ -167,6 +175,7 @@ fn a_scripted_client_joins_flies_and_leaves_and_quit_ends_the_server() {
         origin,
         mission: false,
         seated: None,
+        flight: 0,
         payloads: 0,
         closed: false,
         last_inputs: None,
@@ -178,7 +187,8 @@ fn a_scripted_client_joins_flies_and_leaves_and_quit_ends_the_server() {
     player.until("snapshots", |p| p.payloads >= 20);
     assert_eq!(player.seated, Some(0), "the first free friendly plane");
 
-    // Leave: the message, then the connection.
+    // Leave the flight: the message, then the player is back in the lobby,
+    // still connected, until the server quits.
     let leave = Message::Leave;
     player
         .client
@@ -201,9 +211,12 @@ fn a_scripted_client_joins_flies_and_leaves_and_quit_ends_the_server() {
         "Waiting for players",
         &format!("Listening on UDP 127.0.0.1:{port}"),
         "joined as Viper",
+        "Viper took the slot of plane 0",
+        "Viper is ready",
         "Viper took plane 0",
         "mission started",
-        "Viper (plane 0) left: left",
+        "Viper is back in the lobby",
+        "Viper left: the mission ended",
         "console: quit",
         "Stopped",
     ] {

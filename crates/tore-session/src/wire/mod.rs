@@ -68,7 +68,7 @@ use tore_codec::CodecError;
 /// transport's included. Any change to the bytes raises it; the wire golden
 /// test fails until it is raised and the committed copy refreshed
 /// (`TORE_UPDATE_WIRE_GOLDEN=1`).
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

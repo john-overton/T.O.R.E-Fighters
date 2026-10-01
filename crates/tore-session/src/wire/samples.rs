@@ -8,8 +8,10 @@ use super::entity::{
 use super::events::{EventsSection, Rumble, SectionEvent, WireEvent};
 use super::inputs::{Command, InputFrame, InputsSection, NumberedCommand};
 use super::messages::{
-    ContentRefused, Debrief, DebriefObjective, DebriefPilot, EndReason, Message, Mission,
-    MissionEnded, Names, PilotStatus, Ready, Roster, RosterPilot, RosterPlane, Seated,
+    ContentRefused, Debrief, DebriefObjective, DebriefPilot, EndReason, Goodbye, Kick, Loadout,
+    LobbyPhase, LobbyPlayer, LobbySlot, LobbyState, Message, Mission, MissionEnded, Names,
+    PilotStatus, Roster, RosterPilot, RosterPlane, Seated, SetReady, Slot, SlotRequest, StartRule,
+    TakePlane,
 };
 use super::names::NameIndex;
 use super::priority::Relevance;
@@ -106,6 +108,7 @@ pub fn inputs() -> InputsSection {
     next.yaw = -200;
     frames.push(next);
     InputsSection {
+        flight: 3,
         newest_tick: 10_000,
         frames,
         view_offset: 37,
@@ -228,6 +231,7 @@ pub fn entities() -> Vec<Entity> {
 /// A snapshot header with every field set.
 pub fn header(tick: u32) -> SnapshotHeader {
     SnapshotHeader {
+        flight: 3,
         tick,
         input_received: tick + 7,
         input_margin: -3,
@@ -479,14 +483,24 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
             },
             host_tick: 123_456,
             contrail_sortie: 3,
+            number: 7,
         }),
         Message::ContentRefused(ContentRefused {
+            mission: 7,
             names: vec!["UKR.T2".into(), "F18.PT".into()],
+            reason: "Your game data differs".into(),
         }),
-        Message::Ready(Ready { plane: Some(4) }),
-        Message::Ready(Ready { plane: None }),
+        Message::TakePlane(TakePlane {
+            mission: 7,
+            plane: Some(4),
+        }),
+        Message::TakePlane(TakePlane {
+            mission: 7,
+            plane: None,
+        }),
         Message::SeatRefused("plane taken".into()),
         Message::Seated(Box::new(Seated {
+            flight: 3,
             seat: 2,
             plane: 3,
             tick: 7_200,
@@ -512,6 +526,7 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
         })),
         Message::Roster(roster()),
         Message::Names(Names {
+            flight: 3,
             first: 12,
             names: vec!["AIM120.JT".into(), "FOX3".into()],
         }),
@@ -537,7 +552,134 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
             reason: EndReason::TimeLimit,
             next_in_seconds: Some(30),
         }),
+        Message::Slot(Slot {
+            mission: 7,
+            request: SlotRequest::Take(2),
+        }),
+        Message::Slot(Slot {
+            mission: 7,
+            request: SlotRequest::Any,
+        }),
+        Message::Slot(Slot {
+            mission: 7,
+            request: SlotRequest::Leave,
+        }),
+        Message::Loadout(Box::new(Loadout {
+            mission: 7,
+            plane: 2,
+            loadout: Some(LoadoutSpec {
+                fuel_lbs: 6_000.,
+                cheat: false,
+                stations: vec![StationLoad {
+                    weapon: "M61.JT".into(),
+                    count: 578,
+                    quantity: 300,
+                }],
+            }),
+        })),
+        Message::Loadout(Box::new(Loadout {
+            mission: 7,
+            plane: 2,
+            loadout: None,
+        })),
+        Message::SetReady(SetReady {
+            mission: 7,
+            ready: true,
+        }),
+        Message::ChangeMission("tore-mission 1\ntheater UKR\n".into()),
+        Message::Start,
+        Message::Kick(Kick {
+            player: 2,
+            reason: "AFK".into(),
+        }),
+        Message::EndMission,
+        Message::Lobby(Box::new(lobby())),
+        Message::Refused {
+            request: super::messages::kind::START,
+            reason: "Not ready: Viper.".into(),
+        },
+        Message::Goodbye(Goodbye::Kicked("AFK".into())),
+        Message::Goodbye(Goodbye::HostLeft),
+        Message::FlightLoadouts(vec![(
+            2,
+            LoadoutSpec {
+                fuel_lbs: 6_000.,
+                cheat: false,
+                stations: vec![StationLoad {
+                    weapon: "M61.JT".into(),
+                    count: 578,
+                    quantity: 300,
+                }],
+            },
+        )]),
     ]
+}
+
+/// A lobby with a King, a player flying, one unable, and three slots.
+pub fn lobby() -> LobbyState {
+    LobbyState {
+        name: "Viper's game".into(),
+        summary: "UKR, clear, airborne at 20000 ft: F/A-18D Hornet x4 against nobody".into(),
+        mission: 7,
+        phase: LobbyPhase::Flying,
+        start: StartRule::King,
+        king: Some(0),
+        host: Some(0),
+        you: 1,
+        players: vec![
+            LobbyPlayer {
+                id: 0,
+                callsign: "Viper".into(),
+                slot: Some(0),
+                ready: true,
+                loadout: true,
+                flying: true,
+                unable: None,
+            },
+            LobbyPlayer {
+                id: 1,
+                callsign: "Cobra".into(),
+                slot: Some(1),
+                ready: false,
+                loadout: false,
+                flying: false,
+                unable: None,
+            },
+            LobbyPlayer {
+                id: 3,
+                callsign: "Hawk".into(),
+                slot: None,
+                ready: false,
+                loadout: false,
+                flying: false,
+                unable: Some("Your game data differs".into()),
+            },
+        ],
+        slots: vec![
+            LobbySlot {
+                plane: 0,
+                wing: WingId::new(Side::Friendly, 0).unwrap(),
+                member: 0,
+                aircraft: AircraftId::F18,
+                holder: Some(0),
+            },
+            LobbySlot {
+                plane: 1,
+                wing: WingId::new(Side::Friendly, 0).unwrap(),
+                member: 1,
+                aircraft: AircraftId::F18,
+                holder: Some(1),
+            },
+            LobbySlot {
+                plane: 4,
+                wing: WingId::new(Side::Friendly, 1).unwrap(),
+                member: 0,
+                aircraft: AircraftId::F14,
+                holder: None,
+            },
+        ],
+        settings: Vec::new(),
+    }
 }
 
 /// A cockpit readout with every group and list filled, built by hand.

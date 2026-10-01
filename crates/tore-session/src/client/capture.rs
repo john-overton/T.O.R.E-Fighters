@@ -26,7 +26,7 @@ use tore_sim::sensors::{Channel, Controls as Scope};
 /// The file's first bytes.
 pub const MAGIC: &[u8; 8] = b"TORE-CAP";
 /// The capture format's version.
-pub const FORMAT_VERSION: u16 = 1;
+pub const FORMAT_VERSION: u16 = 2;
 
 /// Record kinds.
 pub mod kind {
@@ -37,6 +37,10 @@ pub mod kind {
     pub const LEAVE: u8 = 5;
     pub const DISCONNECT: u8 = 6;
     pub const SENT: u8 = 7;
+    /// A lobby request the player made (format 2, slice EF4).
+    pub const REQUEST: u8 = 8;
+    /// The player left the game: Leave, then quit once the debrief is in.
+    pub const LEAVE_GAME: u8 = 9;
 }
 
 /// A record body's largest size: a datagram and its header with room.
@@ -126,7 +130,25 @@ impl CaptureWriter {
             }
             None => body.push(0),
         }
+        body.push(u8::from(config.auto_ready));
         self.record(kind::START, &body);
+    }
+
+    /// A lobby request the player made at `now`: the message's kind and
+    /// body.
+    pub fn request(&mut self, now: Duration, kind: u8, message: &[u8]) {
+        let mut body = Vec::with_capacity(message.len() + 9);
+        put_time(&mut body, now);
+        body.push(kind);
+        body.extend_from_slice(message);
+        self.record(kind::REQUEST, &body);
+    }
+
+    /// The player left the game at `now`.
+    pub fn leave_game(&mut self, now: Duration) {
+        let mut body = Vec::with_capacity(8);
+        put_time(&mut body, now);
+        self.record(kind::LEAVE_GAME, &body);
     }
 
     /// A datagram that arrived at `now`.
@@ -283,6 +305,7 @@ pub enum Record {
         callsign: String,
         build: BuildId,
         plane: Option<u32>,
+        auto_ready: bool,
     },
     Receive {
         now: Duration,
@@ -305,6 +328,14 @@ pub enum Record {
     Sent {
         now: Duration,
         section: Vec<u8>,
+    },
+    Request {
+        now: Duration,
+        kind: u8,
+        body: Vec<u8>,
+    },
+    LeaveGame {
+        now: Duration,
     },
 }
 
@@ -414,6 +445,7 @@ impl<'a> Reader<'a> {
                     0 => None,
                     _ => Some(c.u32()?),
                 };
+                let auto_ready = c.u8()? != 0;
                 Record::Start {
                     started,
                     seed,
@@ -425,6 +457,7 @@ impl<'a> Reader<'a> {
                         release,
                     },
                     plane,
+                    auto_ready,
                 }
             }
             kind::RECEIVE => Record::Receive {
@@ -443,6 +476,12 @@ impl<'a> Reader<'a> {
                 now: c.time()?,
                 section: c.rest().to_vec(),
             },
+            kind::REQUEST => Record::Request {
+                now: c.time()?,
+                kind: c.u8()?,
+                body: c.rest().to_vec(),
+            },
+            kind::LEAVE_GAME => Record::LeaveGame { now: c.time()? },
             _ => return Err(CaptureError::Damaged("record kind")),
         };
         self.at += 5 + len;
@@ -492,12 +531,14 @@ pub fn replay(
         callsign,
         build,
         plane,
+        auto_ready,
     }) = reader.next_record()?
     else {
         return Err(CaptureError::Damaged("no start record"));
     };
     let config = ClientConfig {
         plane,
+        auto_ready,
         entropy: Entropy::Seeded(seed),
         ..ClientConfig::new(server, &callsign, build)
     };
@@ -528,6 +569,12 @@ pub fn replay(
             }
             Record::Leave { now } => client.leave(now),
             Record::Disconnect { now } => client.disconnect(now),
+            Record::Request { now, kind, body } => {
+                let message = crate::wire::messages::Message::decode(kind, &body)
+                    .map_err(|_| CaptureError::Damaged("lobby request"))?;
+                client.request(now, message);
+            }
+            Record::LeaveGame { now } => client.leave_game(now),
             // The replayed client writes its own; the comparison below
             // checks them.
             Record::Sent { .. } => {}

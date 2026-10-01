@@ -31,6 +31,9 @@ impl NameIndex {
 /// The host's table for one connection: names in the order they were added.
 #[derive(Clone, Debug, Default)]
 pub struct NameTable {
+    /// The connection's flight the table serves; its Names messages carry
+    /// it (protocol 3).
+    pub flight: u8,
     names: Vec<String>,
     index: HashMap<String, NameIndex>,
     /// Names from here on have not been put in a Names message yet.
@@ -83,7 +86,11 @@ impl NameTable {
         let first = self.unsent as u16;
         let names = self.names[self.unsent..].to_vec();
         self.unsent = self.names.len();
-        Some(Names { first, names })
+        Some(Names {
+            flight: self.flight,
+            first,
+            names,
+        })
     }
 }
 

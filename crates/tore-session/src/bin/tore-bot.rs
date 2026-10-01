@@ -1,17 +1,21 @@
 //! `tore-bot`: headless bot players for a T.O.R.E server, for the network
 //! tests and the LAN smoke test. Each bot is the client session with a
-//! scripted pilot (`tore_session::bot`): it joins, takes a plane, flies
-//! straight and level and turns, chases and fires at the other side, and
-//! after `--seconds` ends the mission and waits for its debrief.
+//! scripted pilot (`tore_session::bot`): it joins, takes its slot (`--slot`,
+//! or the first free one) with the standard loadout and marks ready, flies
+//! straight and level and turns, chases and fires at the other side, returns
+//! to the lobby after each mission and readies again, follows the King's
+//! mission changes, and after `--seconds` leaves the game (ending its flight
+//! first and waiting for its debrief).
 //!
 //! ```text
 //! tore-bot --connect HOST[:PORT] [--data-dir DIR] [--count N] [--callsign NAME]
 //!          [--slot PLANE] [--seconds S] [--password TEXT]
 //! ```
 //!
-//! It prints one line per join, seating, debrief and departure, and each
-//! bot's figures every five seconds. It exits 0 when every bot was seated,
-//! got its debrief and left cleanly.
+//! It prints one line per join, seating, debrief, lobby change and
+//! departure, and each bot's figures every five seconds. It exits 0 when
+//! every bot was seated, got a debrief and then left cleanly, or was told the
+//! host left the game.
 
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
@@ -20,7 +24,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tore_net::{CloseReason, DisconnectReason, Entropy, RealClock, bind_udp};
 use tore_session::bot::Bot;
-use tore_session::client::describe;
+use tore_session::client::ended_text;
+use tore_session::wire::messages::{Goodbye, LobbyState};
 use tore_session::{BuildId, Client, ClientConfig, ClientEvent, ClientPhase};
 
 const USAGE: &str = "usage: tore-bot --connect HOST[:PORT] [--data-dir DIR] [--count N] \
@@ -131,6 +136,43 @@ struct Running {
     debrief: bool,
     left_at: Option<Duration>,
     closed: Option<CloseReason>,
+    /// The last lobby line printed.
+    lobby: Option<String>,
+    /// The host said it left the game.
+    host_left: bool,
+}
+
+/// The lobby in one line: the phase, and each player's slot and marks.
+fn lobby_line(lobby: &LobbyState) -> String {
+    let players: Vec<String> = lobby
+        .players
+        .iter()
+        .map(|p| {
+            let mut text = p.callsign.clone();
+            if lobby.king == Some(p.id) {
+                text.push_str(" (King)");
+            }
+            match p.slot {
+                Some(plane) => text.push_str(&format!(" plane {plane}")),
+                None => text.push_str(" no slot"),
+            }
+            if p.flying {
+                text.push_str(" flying");
+            } else if p.ready {
+                text.push_str(" ready");
+            }
+            if p.unable.is_some() {
+                text.push_str(" unable");
+            }
+            text
+        })
+        .collect();
+    format!(
+        "{:?}, mission {}: {}",
+        lobby.phase,
+        lobby.mission,
+        players.join("; ")
+    )
 }
 
 fn main() -> ExitCode {
@@ -195,6 +237,8 @@ fn main() -> ExitCode {
             debrief: false,
             left_at: None,
             closed: None,
+            lobby: None,
+            host_left: false,
         });
     }
     let end = Duration::from_secs(options.seconds);
@@ -211,7 +255,7 @@ fn main() -> ExitCode {
                 if r.bot.client.phase() == ClientPhase::Connecting {
                     r.bot.client.disconnect(now);
                 } else {
-                    r.bot.client.leave(now);
+                    r.bot.client.leave_game(now);
                 }
             }
             if r.left_at
@@ -225,14 +269,26 @@ fn main() -> ExitCode {
                 match event {
                     ClientEvent::Connected { .. } => println!("{}: joined", r.name),
                     ClientEvent::MissionLoaded => println!("{}: mission loaded", r.name),
-                    ClientEvent::ContentRefused { names } => {
-                        println!("{}: the game data differs: {}", r.name, names.join(", "));
+                    ClientEvent::ContentRefused { names, reason } => {
+                        println!("{}: {reason} ({})", r.name, names.join(", "));
                     }
                     ClientEvent::MissionFailed(text) => println!("{}: {text}", r.name),
                     ClientEvent::SeatRefused(text) => {
                         println!("{}: no plane: {text}; asking for any", r.name);
-                        r.bot.client.ready(None);
                     }
+                    ClientEvent::Refused { reason, .. } => {
+                        println!("{}: refused: {reason}", r.name);
+                    }
+                    ClientEvent::Lobby => {
+                        if let Some(lobby) = r.bot.client.lobby() {
+                            let line = lobby_line(lobby);
+                            if r.lobby.as_deref() != Some(line.as_str()) {
+                                println!("{}: lobby: {line}", r.name);
+                                r.lobby = Some(line);
+                            }
+                        }
+                    }
+                    ClientEvent::Goodbye(_) => {}
                     ClientEvent::Seated { seat, plane, tick } => {
                         r.seated = true;
                         println!("{}: seat {seat}, plane {plane}, at tick {tick}", r.name);
@@ -253,10 +309,11 @@ fn main() -> ExitCode {
                         );
                     }
                     ClientEvent::MissionEnded(ended) => {
-                        println!("{}: the mission ended ({:?})", r.name, ended.reason);
+                        println!("{}: {}", r.name, ended_text(&ended));
                     }
                     ClientEvent::Closed(reason) => {
-                        println!("{}: {}", r.name, describe(&reason));
+                        println!("{}: {}", r.name, r.bot.client.close_text(&reason));
+                        r.host_left = r.bot.client.goodbye() == Some(&Goodbye::HostLeft);
                         r.closed = Some(reason);
                     }
                     ClientEvent::Roster => {}
@@ -304,13 +361,14 @@ fn main() -> ExitCode {
     let clean = bots.iter().all(|r| {
         r.seated
             && r.debrief
-            && matches!(
-                r.closed,
-                Some(CloseReason::Disconnected {
-                    reason: DisconnectReason::Left,
-                    ..
-                })
-            )
+            && (r.host_left
+                || matches!(
+                    r.closed,
+                    Some(CloseReason::Disconnected {
+                        reason: DisconnectReason::Left,
+                        ..
+                    })
+                ))
     });
     if clean {
         ExitCode::SUCCESS

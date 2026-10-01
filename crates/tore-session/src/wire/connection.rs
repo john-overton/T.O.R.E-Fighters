@@ -85,14 +85,31 @@ impl HostConnection {
     /// A new connection's state; the host sends a snapshot every
     /// `ticks_per_snapshot` ticks.
     pub fn new(ticks_per_snapshot: u32) -> Self {
+        Self::for_flight(ticks_per_snapshot, 0)
+    }
+
+    /// The state for one flight of a connection (protocol 3): a player who
+    /// returns to the lobby and flies again starts a new flight, with no
+    /// baseline, event or name of the last one, and its sections and Names
+    /// messages carry `flight`.
+    pub fn for_flight(ticks_per_snapshot: u32, flight: u8) -> Self {
+        let mut names = NameTable::new();
+        names.flight = flight;
+        let mut own = OwnStateSender::new();
+        own.flight = flight;
         Self {
             entities: EntitySender::new(ticks_per_snapshot),
             events: EventQueue::new(),
-            own: OwnStateSender::new(),
-            names: NameTable::new(),
+            own,
+            names,
             readout: ReadoutSender::new(ticks_per_snapshot),
             staged: Staged::None,
         }
+    }
+
+    /// The flight this state serves.
+    pub fn flight(&self) -> u8 {
+        self.names.flight
     }
 
     /// Queues an event that happened at `tick` for this connection.
@@ -242,6 +259,32 @@ pub struct ClientConnection {
     pub own: OwnStateReceiver,
     pub names: ReceivedNames,
     pub readout: ReadoutReceiver,
+    /// The flight this state serves; `None` before the first.
+    pub flight: Option<u8>,
+}
+
+/// How a section's flight stands to the client's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlightOrder {
+    /// Of a flight before the client's: it came late and is dropped.
+    Earlier,
+    /// The client's flight.
+    Same,
+    /// A flight after the client's: a new flight starts with it.
+    Later,
+}
+
+impl FlightOrder {
+    /// `flight` against `current`, the client's (`None` before any): a
+    /// flight up to 127 numbers ahead, wrapping, is later.
+    pub fn of(flight: u8, current: Option<u8>) -> Self {
+        match current {
+            None => Self::Later,
+            Some(current) if flight == current => Self::Same,
+            Some(current) if (flight.wrapping_sub(current) as i8) > 0 => Self::Later,
+            Some(_) => Self::Earlier,
+        }
+    }
 }
 
 impl ClientConnection {
@@ -254,17 +297,41 @@ impl ClientConnection {
             own: OwnStateReceiver::new(),
             names: ReceivedNames::new(),
             readout: ReadoutReceiver::new(ticks_per_snapshot),
+            flight: None,
         }
     }
 
+    /// The state for the connection's `flight`, empty.
+    pub fn for_flight(ticks_per_snapshot: u32, flight: u8) -> Self {
+        Self {
+            flight: Some(flight),
+            ..Self::new(ticks_per_snapshot)
+        }
+    }
+
+    /// The flight of a Snapshot or Own state section, from its first byte.
+    pub fn section_flight(kind: u8, body: &[u8]) -> Option<u8> {
+        matches!(kind, SECTION_SNAPSHOT | SECTION_OWN_STATE)
+            .then(|| body.first().copied())
+            .flatten()
+    }
+
     /// Checks one of a packet's sections before the transport accepts it:
-    /// every section must read, and an own state's baseline must be one the
-    /// client has. It changes nothing.
+    /// every section must read, and an own state of the client's flight
+    /// must name a baseline the client has (one of a later flight, none;
+    /// one of an earlier flight is dropped unread). It changes nothing.
     pub fn check(&self, kind: u8, body: &[u8]) -> bool {
         match kind {
             SECTION_SNAPSHOT => SnapshotSection::decode(body).is_ok(),
             SECTION_EVENTS => EventsSection::decode(body).is_ok(),
-            SECTION_OWN_STATE => self.own.baseline(body).is_ok(),
+            SECTION_OWN_STATE => match OwnStateHeader::peek(body) {
+                Ok(header) => match FlightOrder::of(header.flight, self.flight) {
+                    FlightOrder::Earlier => true,
+                    FlightOrder::Same => self.own.baseline(body).is_ok(),
+                    FlightOrder::Later => header.baseline().is_none(),
+                },
+                Err(_) => false,
+            },
             _ => false,
         }
     }
@@ -307,7 +374,13 @@ impl ClientConnection {
     }
 
     /// Takes a Names message: events held for these names are ready now.
+    /// A message of another flight than this state's is dropped: it is an
+    /// earlier flight's, which came before the new flight in the reliable
+    /// stream.
     pub fn names(&mut self, names: &Names) -> WireResult<Vec<ReceivedEvent>> {
+        if self.flight != Some(names.flight) {
+            return Ok(Vec::new());
+        }
         self.names.apply(names)?;
         Ok(self.events.names_arrived(self.names.len()))
     }

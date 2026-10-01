@@ -36,6 +36,7 @@ fn lines() -> Vec<(String, String)> {
     // which `tore-world` tests.
     let mut w = BitWriter::new();
     OwnStateHeader {
+        flight: 3,
         tick: 7_204,
         number: 65_535,
         back: 31,

@@ -2,7 +2,8 @@
 //! in its own packet beside a snapshot, coded against an exact state the
 //! client has acknowledged (net-protocol.md, "The own aircraft").
 //!
-//! The section is the tick of the state (32 bits), the state's number
+//! The section is the connection's flight (8 bits, protocol 3), the tick
+//! of the state (32 bits), the state's number
 //! (16 bits, counting the connection's own states), how many numbers back its
 //! baseline is (5 bits, 1 to 31; 0 is none), then
 //! [`ExactState`]'s bits and zero padding. *Agent decision:* the baseline is
@@ -23,6 +24,9 @@ const KEPT: usize = 64;
 /// The fields before the state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OwnStateHeader {
+    /// The connection's flight the state belongs to (protocol 3); see
+    /// [`super::snapshot::SnapshotHeader::flight`].
+    pub flight: u8,
     /// The host tick the state is at, after that tick's step.
     pub tick: u32,
     /// The state's number.
@@ -33,6 +37,7 @@ pub struct OwnStateHeader {
 
 impl OwnStateHeader {
     pub(crate) fn write(&self, w: &mut BitWriter) {
+        let _ = w.write_bits(u64::from(self.flight), 8);
         let _ = w.write_bits(u64::from(self.tick), 32);
         let _ = w.write_bits(u64::from(self.number), 16);
         let _ = w.write_bits(u64::from(self.back), 5);
@@ -40,6 +45,7 @@ impl OwnStateHeader {
 
     fn read(r: &mut BitReader<'_>) -> WireResult<Self> {
         Ok(Self {
+            flight: r.read_bits(8)? as u8,
             tick: r.read_bits(32)? as u32,
             number: r.read_bits(16)? as u16,
             back: r.read_bits(5)? as u8,
@@ -93,6 +99,8 @@ pub fn decode(
 /// The host's own-state bookkeeping for one connection.
 #[derive(Clone, Debug, Default)]
 pub struct OwnStateSender {
+    /// The connection's flight its sections carry.
+    pub flight: u8,
     next: u16,
     /// Acknowledged states, newest last.
     acked: VecDeque<(u16, ExactState)>,
@@ -118,6 +126,7 @@ impl OwnStateSender {
             (1..=MAX_BACK).contains(&back)
         });
         let header = OwnStateHeader {
+            flight: self.flight,
             tick,
             number,
             back: base.map_or(0, |(n, _)| number.wrapping_sub(*n) as u8),

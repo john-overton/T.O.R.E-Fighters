@@ -130,7 +130,7 @@ fn every_decoder_survives_random_and_mutated_bodies() {
                 let body = mutate(&mut rng, &events);
                 if let Ok(section) = EventsSection::decode(&body) {
                     decoded[2] += 1;
-                    let mut client = ClientConnection::new(4);
+                    let mut client = ClientConnection::for_flight(4, 0);
                     let _ = client
                         .events
                         .receive(&section, rng.below(1 << 32) as u32, 3);
@@ -161,7 +161,7 @@ fn every_decoder_survives_random_and_mutated_bodies() {
                     decoded[4] += 1;
                     let _ = own.clone().receive(&body, &model);
                 }
-                let client = ClientConnection::new(4);
+                let client = ClientConnection::for_flight(4, 0);
                 for kind in [SECTION_SNAPSHOT, SECTION_EVENTS, SECTION_OWN_STATE, 9] {
                     let _ = client.check(kind, &body);
                 }

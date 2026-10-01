@@ -9,6 +9,13 @@
 //! is going.
 //! It reads only what a player's game has: its predicted flight and the
 //! frame's picture.
+//!
+//! In the lobby (slice EF4) the bot plays as a game with no lobby screen:
+//! the client's automatic ready takes the slot asked for (or the first free
+//! one) with the standard loadout and marks ready, after each return to the
+//! lobby and each mission change too. A bot that is the King
+//! ([`Bot::start_when_ready`]) starts the mission as soon as every player
+//! holding a slot is ready.
 
 use crate::client::{Client, ClientFrame, Controls};
 use crate::wire::messages::RosterPlane;
@@ -177,6 +184,11 @@ pub struct Bot {
     picture: Option<RenderSnapshot>,
     /// Frames drawn.
     pub frames: u64,
+    /// As the King, start the mission once every player holding a slot is
+    /// ready.
+    pub start_when_ready: bool,
+    /// The lobby state the last Start was asked for.
+    asked: Option<crate::wire::messages::LobbyState>,
 }
 
 impl Bot {
@@ -188,6 +200,27 @@ impl Bot {
             last_frame: None,
             picture: None,
             frames: 0,
+            start_when_ready: false,
+            asked: None,
+        }
+    }
+
+    /// The King's start, when every player holding a slot is ready and the
+    /// lobby has changed since the last time it asked.
+    fn start_if_ready(&mut self) {
+        if !self.start_when_ready {
+            return;
+        }
+        let Some(lobby) = self.client.lobby() else {
+            return;
+        };
+        if lobby.is_king()
+            && lobby.phase == crate::wire::messages::LobbyPhase::Lobby
+            && lobby.all_ready()
+            && self.asked.as_ref() != Some(lobby)
+        {
+            self.asked = Some(lobby.clone());
+            self.client.start_mission();
         }
     }
 
@@ -220,6 +253,7 @@ impl Bot {
             None => Controls::default(),
         };
         self.client.update(now, &controls);
+        self.start_if_ready();
         drawn
     }
 }

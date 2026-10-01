@@ -16,14 +16,23 @@
 //! sorts the tick's output into each connection's events, notes what each
 //! player's game could not foresee, and every few ticks sends each seated
 //! player a snapshot and, when due, its plane's exact state.
+//!
+//! Before the mission flies, and again after each mission, the host is in its
+//! **lobby** (slice EF4, docs/ARCHITECTURE.md "The lobby"): players stay
+//! connected, take slots, choose loadouts and mark ready; the King (in a game
+//! a player hosts) changes the mission, starts it, ends it and kicks; a
+//! dedicated server starts as its `start` setting says. Every player is sent
+//! the lobby's state whenever it changes.
 
 pub mod config;
 pub mod inputs;
+mod lobby;
 mod sorting;
 #[cfg(test)]
 mod tests;
 
 pub use config::{AfterEnd, BuildId, HostConfig, HostError, OpenPlanes, StartMode};
+pub use lobby::LobbyEvent;
 pub use sorting::{BURST_SLACK_TICKS, round_interval};
 
 use crate::wire::connection::HostConnection;
@@ -31,12 +40,14 @@ use crate::wire::entity::{Entity, EntityKind};
 use crate::wire::events::WireEvent;
 use crate::wire::inputs::{InputFrame, InputsSection};
 use crate::wire::messages::{
-    self, Debrief, DebriefObjective, DebriefPilot, EndReason, Message, MissionEnded, PilotStatus,
-    RosterPilot, RosterPlane, Seated,
+    self, Debrief, DebriefObjective, DebriefPilot, EndReason, Goodbye, LobbyPhase, LobbyPlayer,
+    LobbySlot, LobbyState, Message, MissionEnded, PilotStatus, RosterPilot, RosterPlane, Seated,
+    SlotRequest, StartRule, kind,
 };
 use crate::wire::snapshot::SnapshotHeader;
 use crate::wire::{PROTOCOL_VERSION, SECTION_INPUTS, SECTION_OWN_STATE, WireError, from_world};
 use inputs::InputBuffer;
+use lobby::Entry;
 use sorting::{Timed, Tracker, Wide};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io;
@@ -96,9 +107,11 @@ fn whole_ticks(time: Duration) -> u64 {
 /// Where the host's mission is in its lifecycle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
-    /// Built, at tick 0, not flying and sending no snapshots, until the first
-    /// player is seated or the console says `start now`.
-    Waiting,
+    /// The lobby: the mission is chosen and built at tick 0 but not flying,
+    /// sending no snapshots, while players take slots, arm and mark ready,
+    /// until it starts by the host's start rule ([`StartMode`]) or the
+    /// console's `start now`.
+    Lobby,
     /// Flying at 120 ticks a second.
     Flying,
     /// Ended: players get their debriefs and are disconnected. `next_in` is
@@ -117,8 +130,10 @@ pub enum LeaveReason {
     Silent,
     /// The console's `kick`.
     Kicked,
-    /// The mission ended.
+    /// The mission ended and the host stopped.
     MissionEnded,
+    /// The player who hosts the game left it.
+    HostLeft,
     /// A new join from the same address replaced the connection.
     Replaced,
     /// The connection ended for another reason.
@@ -181,6 +196,12 @@ pub enum HostLog {
     Fault { tick: u64, text: String },
     /// The host stopped.
     Stopped { tick: u64 },
+    /// Something a player did in the lobby, or that happened to it there.
+    Lobby {
+        tick: u64,
+        callsign: String,
+        event: LobbyEvent,
+    },
 }
 
 impl HostLog {
@@ -198,7 +219,8 @@ impl HostLog {
             | Self::MissionRestarted { tick }
             | Self::Overloaded { tick, .. }
             | Self::Fault { tick, .. }
-            | Self::Stopped { tick } => *tick,
+            | Self::Stopped { tick }
+            | Self::Lobby { tick, .. } => *tick,
         }
     }
 }
@@ -208,12 +230,15 @@ impl HostLog {
 pub enum CommandError {
     /// No connected player has this seat.
     NoSuchSeat(u8),
+    /// No connected player has this lobby id.
+    NoSuchPlayer(u8),
 }
 
 impl std::fmt::Display for CommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NoSuchSeat(seat) => write!(f, "no player has seat {seat}"),
+            Self::NoSuchPlayer(id) => write!(f, "no player has the lobby id {id}"),
         }
     }
 }
@@ -251,6 +276,8 @@ pub struct HostStatus {
 /// One player's figures for the `players` command and the log.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayerStatus {
+    /// The player's lobby id.
+    pub id: u8,
     pub seat: Option<u8>,
     pub callsign: String,
     pub address: SocketAddr,
@@ -274,13 +301,14 @@ pub struct PlayerStatus {
 /// Where a connection is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Stage {
-    /// Accepted and sent the mission: loading it, then asking for a plane.
-    Loading,
+    /// In the lobby: accepted and sent the mission, not flying it.
+    Lobby,
     /// Takes `plane` from `seat` at the next tick.
     Taking { seat: SeatId, plane: PlaneId },
     /// Flies its plane.
     Seated,
-    /// Left: its debrief is sent and its plane goes back at the next tick.
+    /// Left the flight: its debrief is sent and its plane goes back at the
+    /// next tick, and then it is back in the lobby.
     Leaving,
     /// Done: disconnected with `reason` once its messages are acknowledged,
     /// or at `deadline`.
@@ -316,14 +344,24 @@ struct Peer {
     /// The seat's picture at its last snapshot, for debris and pilots'
     /// velocities.
     picture: Option<tore_world::snapshot::RenderSnapshot>,
-    /// The mission ended while it was connected.
+    /// The mission ended while it was connected, and the host stops.
     ended: bool,
+    /// Its place in the lobby.
+    lobby: Entry,
+    /// The connection's flight: raised each time it is seated, so one
+    /// flight's sections are never read against the last one's
+    /// (protocol 3).
+    flight: u8,
+    /// The King's own connection.
+    king: bool,
+    /// The host said goodbye: why it disconnects the player.
+    goodbye: Option<Goodbye>,
 }
 
 /// The lifecycle's own state.
 #[derive(Clone, Copy, Debug)]
 enum Life {
-    Waiting,
+    Lobby,
     Flying,
     Ended {
         /// When the next mission starts; `None` when the host stops.
@@ -345,8 +383,16 @@ struct Costs {
 /// The host session. See the module documentation.
 pub struct Host {
     config: HostConfig,
+    /// The lobby's mission: the King's or the mission file's, with no
+    /// player's loadout in it.
     spec: MissionSpec,
+    /// The mission a joining player is sent and builds: the lobby's, or the
+    /// flying one's with the players' loadouts.
     spec_text: String,
+    /// The lobby mission's number: raised with each King's change. A
+    /// flight's start sends the same mission again with the players'
+    /// loadouts, under the same number.
+    number: u32,
     resources: Arc<BTreeMap<String, Vec<u8>>>,
     world: World,
     manifest: Manifest,
@@ -368,6 +414,10 @@ pub struct Host {
     ever_seated: bool,
     empty_since: Option<Duration>,
     roster_dirty: bool,
+    /// The lobby changed: every player gets its state.
+    lobby_dirty: bool,
+    /// Connections so far, for the lobby's order.
+    joins: u64,
     logs: VecDeque<HostLog>,
     costs: Costs,
     overloads: u64,
@@ -554,13 +604,10 @@ impl Host {
             entropy: config.entropy,
         });
         let tracker = Tracker::new(&world);
-        let life = match config.start {
-            StartMode::FirstPlayer => Life::Waiting,
-            StartMode::Now => Life::Flying,
-        };
         let mut host = Host {
             session_id: session_id(config.entropy),
             spec_text: spec.to_text(),
+            number: 1,
             spec,
             resources,
             world,
@@ -570,13 +617,15 @@ impl Host {
             orphans: BTreeMap::new(),
             gives: Vec::new(),
             tracker,
-            life,
+            life: Life::Lobby,
             now: Duration::ZERO,
             origin: None,
             ticks_run: 0,
             ever_seated: false,
             empty_since: None,
             roster_dirty: false,
+            lobby_dirty: false,
+            joins: 0,
             logs: VecDeque::new(),
             costs: Costs::default(),
             overloads: 0,
@@ -585,8 +634,8 @@ impl Host {
             out: TickOutput::default(),
             config,
         };
-        if matches!(host.life, Life::Flying) {
-            host.log(HostLog::MissionStarted { tick: 0 });
+        if host.config.start == StartMode::Now {
+            host.start_flying();
         }
         Ok(host)
     }
@@ -601,6 +650,7 @@ impl Host {
         let logs = std::mem::take(&mut gate.logs);
         self.logs.extend(logs);
         self.pump();
+        self.send_lobby();
     }
 
     /// Reads every datagram waiting on `socket` (at most 1,024) and takes
@@ -616,6 +666,7 @@ impl Host {
         let logs = std::mem::take(&mut gate.logs);
         self.logs.extend(logs);
         self.pump();
+        self.send_lobby();
         result
     }
 
@@ -638,13 +689,14 @@ impl Host {
                     self.stop();
                 }
             }
-            Life::Waiting | Life::Stopped => {}
+            Life::Lobby | Life::Stopped => {}
         }
         self.close_departed(now);
         self.pump();
         if matches!(self.life, Life::Flying) {
             self.check_lifecycle(now);
         }
+        self.send_lobby();
     }
 
     /// The next datagram to send, oldest first.
@@ -677,10 +729,12 @@ impl Host {
 
     // ----- Console -----------------------------------------------------
 
-    /// The console's `start now`: a waiting mission starts flying.
+    /// The console's `start now`: the lobby's mission starts flying, every
+    /// ready player holding a slot in it.
     pub fn start_now(&mut self) {
-        if matches!(self.life, Life::Waiting) {
+        if matches!(self.life, Life::Lobby) {
             self.start_flying();
+            self.send_lobby();
         }
     }
 
@@ -698,25 +752,82 @@ impl Host {
             .ok_or(CommandError::NoSuchSeat(seat))?;
         self.server.disconnect(connection, DisconnectReason::Kicked);
         self.pump();
+        self.send_lobby();
         Ok(())
+    }
+
+    /// Removes the player with lobby id `player`, telling it `reason`
+    /// first (the King's kick): its plane, if it flies one, goes back to the
+    /// AI at the next tick with no debrief, and it is disconnected once the
+    /// goodbye is acknowledged.
+    pub fn kick_player(&mut self, player: u8, reason: &str) -> Result<(), CommandError> {
+        let connection = self
+            .peers
+            .iter()
+            .find(|(_, peer)| {
+                peer.lobby.id == player && !matches!(peer.stage, Stage::Closing { .. })
+            })
+            .map(|(id, _)| *id)
+            .ok_or(CommandError::NoSuchPlayer(player))?;
+        self.say_goodbye(
+            connection,
+            Goodbye::Kicked(reason.to_owned()),
+            DisconnectReason::Kicked,
+        );
+        if let Some(peer) = self.peers.get(&connection) {
+            let callsign = peer.callsign.clone();
+            self.lobby_log(callsign, LobbyEvent::Kicked(reason.to_owned()));
+        }
+        self.send_lobby();
+        Ok(())
+    }
+
+    /// The player who hosts the game left it: a flying mission ends for
+    /// everyone with "the host left the game" and their debriefs, every
+    /// player is told why and disconnected once that is acknowledged, and the
+    /// host stops when they are gone (or after [`CLOSE_GRACE`]).
+    pub fn host_left(&mut self) {
+        if matches!(self.life, Life::Stopped) {
+            return;
+        }
+        let now = self.now;
+        if matches!(self.life, Life::Flying) {
+            self.end_mission(EndReason::HostLeft, None);
+        }
+        let ids: Vec<ConnectionId> = self.peers.keys().copied().collect();
+        for id in ids {
+            self.say_goodbye(id, Goodbye::HostLeft, DisconnectReason::ServerStopping);
+        }
+        if !matches!(self.life, Life::Ended { next_at: None, .. }) {
+            self.life = Life::Ended {
+                next_at: None,
+                stop_at: now + CLOSE_GRACE,
+            };
+            let tick = self.world.tick();
+            self.log(HostLog::MissionEnded {
+                tick,
+                reason: EndReason::HostLeft,
+            });
+        }
+        self.send_lobby();
     }
 
     /// The console's `end`: every seated player gets "Mission ended" and
     /// their debrief and is disconnected; the next mission starts after the
     /// restart delay, or the host stops, as configured.
     pub fn end(&mut self) {
-        let next = match self.config.after_end {
-            AfterEnd::Restart => Some(self.config.restart_delay),
-            AfterEnd::Quit => None,
-        };
+        let next = self.after_end();
         self.end_mission(EndReason::EndedByServer, next);
+        self.send_lobby();
     }
 
     /// The console's `restart`: ends the mission and starts it again at
-    /// once.
+    /// once (back to the lobby with every player, or flying for
+    /// `start now`).
     pub fn restart(&mut self) {
         self.end_mission(EndReason::EndedByServer, Some(Duration::ZERO));
         self.next_mission();
+        self.send_lobby();
     }
 
     /// The console's `quit`: disconnects every player with "server stopping"
@@ -738,7 +849,7 @@ impl Host {
     /// Where the mission is in its lifecycle.
     pub fn phase(&self) -> Phase {
         match self.life {
-            Life::Waiting => Phase::Waiting,
+            Life::Lobby => Phase::Lobby,
             Life::Flying => Phase::Flying,
             Life::Ended { next_at, .. } => Phase::Ended {
                 next_in: next_at.map(|at| at.saturating_sub(self.now)),
@@ -790,6 +901,7 @@ impl Host {
                 let stats = self.server.stats(*id);
                 let seated = peer.seat.is_some();
                 PlayerStatus {
+                    id: peer.lobby.id,
                     seat: peer.seat.map(|s| s.0),
                     callsign: peer.callsign.clone(),
                     address: peer.address,
@@ -819,9 +931,19 @@ impl Host {
         &self.world
     }
 
-    /// The mission.
+    /// The lobby's mission (the players' loadouts are not in it).
     pub fn spec(&self) -> &MissionSpec {
         &self.spec
+    }
+
+    /// The Mission message's number now.
+    pub fn mission_number(&self) -> u32 {
+        self.number
+    }
+
+    /// The lobby as a player with lobby id `you` is sent it.
+    pub fn lobby_state(&self, you: u8) -> LobbyState {
+        self.lobby(you)
     }
 
     /// The content manifest: every resource the mission's build read.
@@ -868,7 +990,7 @@ impl Host {
 
     fn gate(&self) -> HostGate {
         let closed = match self.life {
-            Life::Waiting | Life::Flying => None,
+            Life::Lobby | Life::Flying => None,
             Life::Ended {
                 next_at: Some(at), ..
             } => Some(format!(
@@ -955,12 +1077,18 @@ impl Host {
             &details.callsign,
             self.peers.values().map(|p| p.callsign.as_str()),
         );
+        let used: BTreeSet<u8> = self.peers.values().map(|p| p.lobby.id).collect();
+        let id = (0..=u8::MAX)
+            .find(|id| !used.contains(id))
+            .expect("the transport holds at most 30 connections");
+        self.joins += 1;
+        let king = self.config.king == Some(details.address);
         self.peers.insert(
             connection,
             Peer {
                 address: details.address,
                 callsign: callsign.clone(),
-                stage: Stage::Loading,
+                stage: Stage::Lobby,
                 seat: None,
                 plane: None,
                 wire: HostConnection::new(self.config.ticks_per_snapshot()),
@@ -972,6 +1100,10 @@ impl Host {
                 terms: None,
                 picture: None,
                 ended: false,
+                lobby: Entry::new(id, self.joins),
+                flight: 0,
+                king,
+                goodbye: None,
             },
         );
         let tick = self.world.tick();
@@ -980,22 +1112,32 @@ impl Host {
             address: details.address,
             callsign,
         });
-        let mission = Message::Mission(messages::Mission {
-            spec: self.spec_text.clone(),
-            manifest: self.manifest.clone(),
-            host_tick: tick as u32,
-            contrail_sortie: self.world.combat.contrail_sortie(),
-        });
+        let mission = self.mission_message();
         self.send(connection, &mission);
         let roster = Message::Roster(self.roster());
         self.send(connection, &roster);
+        self.lobby_dirty = true;
+    }
+
+    /// The Mission message a player builds the mission from now.
+    fn mission_message(&self) -> Message {
+        Message::Mission(messages::Mission {
+            spec: self.spec_text.clone(),
+            manifest: self.manifest.clone(),
+            host_tick: self.world.tick() as u32,
+            contrail_sortie: self.world.combat.contrail_sortie(),
+            number: self.number,
+        })
     }
 
     fn closed(&mut self, connection: ConnectionId, reason: CloseReason) {
         let Some(peer) = self.peers.remove(&connection) else {
             return;
         };
-        let reason = if peer.ended {
+        self.lobby_dirty = true;
+        let reason = if peer.goodbye == Some(Goodbye::HostLeft) {
+            LeaveReason::HostLeft
+        } else if peer.ended {
             LeaveReason::MissionEnded
         } else {
             match reason {
@@ -1027,6 +1169,11 @@ impl Host {
             plane: plane.map(|p| p.0),
             reason,
         });
+        // The King's leaving ends a game a player hosts: nobody else can
+        // start or end its missions (passing the crown is phase 2's).
+        if peer.king && !matches!(self.life, Life::Stopped | Life::Ended { next_at: None, .. }) {
+            self.host_left();
+        }
     }
 
     fn message(&mut self, connection: ConnectionId, kind: u8, body: &[u8]) {
@@ -1035,29 +1182,192 @@ impl Host {
                 .disconnect(connection, DisconnectReason::ProtocolError);
             return;
         };
-        match message {
-            Message::Ready(ready) => self.ready(connection, ready.plane),
-            Message::Leave => self.leave(connection),
-            Message::ContentRefused(refused) => {
-                let callsign = self
-                    .peers
-                    .get(&connection)
-                    .map(|p| p.callsign.clone())
-                    .unwrap_or_default();
-                let tick = self.world.tick();
-                self.log(HostLog::ContentRefused {
-                    tick,
-                    callsign,
-                    names: refused.names,
-                });
-                self.server
-                    .disconnect(connection, DisconnectReason::ContentMismatch);
-            }
+        if !message.from_player() {
             // Host-to-client messages from a client break the protocol.
-            _ => self
-                .server
-                .disconnect(connection, DisconnectReason::ProtocolError),
+            self.server
+                .disconnect(connection, DisconnectReason::ProtocolError);
+            return;
         }
+        let Some(peer) = self.peers.get(&connection) else {
+            return;
+        };
+        if matches!(peer.stage, Stage::Closing { .. }) {
+            return;
+        }
+        let king = peer.king;
+        // A request for an earlier mission than the one the player has now
+        // been sent is refused: it was meant for a mission that changed.
+        let mission = match &message {
+            Message::TakePlane(m) => Some(m.mission),
+            Message::Slot(m) => Some(m.mission),
+            Message::Loadout(m) => Some(m.mission),
+            Message::SetReady(m) => Some(m.mission),
+            _ => None,
+        };
+        if mission.is_some_and(|number| number != self.number) {
+            let reason = "The mission has changed; choose again.".to_owned();
+            if let Message::TakePlane(_) = message {
+                self.refuse_seat(connection, reason);
+            } else {
+                self.refuse(connection, message.kind(), reason);
+            }
+            return;
+        }
+        let king_only = matches!(
+            message,
+            Message::ChangeMission(_) | Message::Start | Message::Kick(_) | Message::EndMission
+        );
+        if king_only && !king {
+            self.refuse(
+                connection,
+                message.kind(),
+                "Only the King may do that.".into(),
+            );
+            return;
+        }
+        match message {
+            Message::TakePlane(take) => self.take_plane(connection, take.plane),
+            Message::Leave => self.leave(connection),
+            Message::ContentRefused(refused) => self.content_refused(connection, refused),
+            Message::Slot(slot) => {
+                let result = self.slot(connection, slot.request);
+                self.answer(connection, kind::SLOT, "a slot", result);
+            }
+            Message::Loadout(load) => {
+                let result = self.loadout(connection, load.plane, load.loadout);
+                self.answer(connection, kind::LOADOUT, "a loadout", result);
+            }
+            Message::SetReady(ready) => {
+                let result = self.set_ready(connection, ready.ready);
+                self.answer(connection, kind::SET_READY, "ready", result);
+            }
+            Message::ChangeMission(text) => {
+                let result = self.change_mission(connection, &text);
+                self.answer(connection, kind::CHANGE_MISSION, "a new mission", result);
+            }
+            Message::Start => {
+                let result = self.king_start();
+                self.answer(connection, kind::START, "the start", result);
+            }
+            Message::Kick(kick) => {
+                let result = if self.peers.get(&connection).map(|p| p.lobby.id) == Some(kick.player)
+                {
+                    Err("The King cannot kick the King.".to_owned())
+                } else {
+                    self.kick_player(kick.player, &kick.reason)
+                        .map_err(|_| "There is no such player.".to_owned())
+                };
+                self.answer(connection, kind::KICK, "a kick", result);
+            }
+            Message::EndMission => {
+                let result = if matches!(self.life, Life::Flying) {
+                    let next = self.after_end();
+                    self.end_mission(EndReason::EndedByServer, next);
+                    Ok(())
+                } else {
+                    Err("The mission is not flying.".to_owned())
+                };
+                self.answer(connection, kind::END_MISSION, "the end", result);
+            }
+            _ => {}
+        }
+        self.lobby_dirty = true;
+    }
+
+    /// When the mission ends, how long until the next: `None` when the
+    /// host stops.
+    fn after_end(&self) -> Option<Duration> {
+        match self.config.after_end {
+            AfterEnd::Restart => Some(self.config.restart_delay),
+            AfterEnd::Quit => None,
+        }
+    }
+
+    /// Refuses a lobby request with `reason`, and logs it.
+    fn refuse(&mut self, connection: ConnectionId, request: u8, reason: String) {
+        self.send(
+            connection,
+            &Message::Refused {
+                request,
+                reason: reason.clone(),
+            },
+        );
+        let callsign = self
+            .peers
+            .get(&connection)
+            .map(|p| p.callsign.clone())
+            .unwrap_or_default();
+        let what = match request {
+            kind::SLOT => "a slot",
+            kind::LOADOUT => "a loadout",
+            kind::SET_READY => "ready",
+            kind::CHANGE_MISSION => "a new mission",
+            kind::START => "the start",
+            kind::KICK => "a kick",
+            kind::END_MISSION => "the end",
+            _ => "a request",
+        };
+        self.lobby_log(
+            callsign,
+            LobbyEvent::Refused {
+                request: what,
+                reason,
+            },
+        );
+    }
+
+    /// A lobby request's outcome: a refusal is sent back with its reason.
+    fn answer(
+        &mut self,
+        connection: ConnectionId,
+        request: u8,
+        _what: &'static str,
+        result: Result<(), String>,
+    ) {
+        if let Err(reason) = result {
+            self.refuse(connection, request, reason);
+        }
+    }
+
+    fn lobby_log(&mut self, callsign: String, event: LobbyEvent) {
+        let tick = self.world.tick();
+        self.log(HostLog::Lobby {
+            tick,
+            callsign,
+            event,
+        });
+    }
+
+    /// Sends `goodbye` and disconnects the player with `reason` once it is
+    /// acknowledged (or after [`CLOSE_GRACE`]); a flying player's plane goes
+    /// back to the AI at the next tick, with no debrief.
+    fn say_goodbye(
+        &mut self,
+        connection: ConnectionId,
+        goodbye: Goodbye,
+        reason: DisconnectReason,
+    ) {
+        let now = self.now;
+        let Some(peer) = self.peers.get(&connection) else {
+            return;
+        };
+        if matches!(peer.stage, Stage::Closing { .. }) && peer.goodbye.is_some() {
+            return;
+        }
+        if peer.stage == Stage::Seated
+            && let Some(seat) = peer.seat
+        {
+            self.gives.push((seat, peer.callsign.clone()));
+        }
+        self.send(connection, &Message::Goodbye(goodbye.clone()));
+        if let Some(peer) = self.peers.get_mut(&connection) {
+            peer.goodbye = Some(goodbye);
+            peer.stage = Stage::Closing {
+                deadline: now + CLOSE_GRACE,
+                reason,
+            };
+        }
+        self.lobby_dirty = true;
     }
 
     fn inputs(&mut self, connection: ConnectionId, body: &[u8]) {
@@ -1071,6 +1381,10 @@ impl Host {
         let Ok(section) = InputsSection::decode(body) else {
             return;
         };
+        // An earlier flight's inputs that came late fly nothing now.
+        if section.flight != peer.flight {
+            return;
+        }
         let refused = peer.inputs.receive(&section, next).is_err();
         // The arrival spread, in the player's own time: the tick it sampled.
         let sent = ticks_time(u64::from(section.newest_tick));
@@ -1105,8 +1419,9 @@ impl Host {
         SEAT_IDS.map(SeatId).find(|seat| !used.contains(seat))
     }
 
-    /// Why `plane` cannot be taken by `seat` now, if it cannot.
-    fn refusal(&self, seat: SeatId, plane: PlaneId) -> Option<String> {
+    /// Why `plane` cannot be taken by `seat` for `connection` now, if it
+    /// cannot: another player flies it or holds its slot, or it cannot fly.
+    fn refusal(&self, seat: SeatId, plane: PlaneId, connection: ConnectionId) -> Option<String> {
         let Some(entry) = self.world.roster.plane(plane) else {
             return Some(format!("There is no plane {}.", plane.0));
         };
@@ -1116,29 +1431,238 @@ impl Host {
         if entry.pilot != Pilot::Ai || self.reserved(plane) {
             return Some(format!("Plane {} is flown by another player.", plane.0));
         }
+        if let Some(other) = self.holder(plane, connection) {
+            return Some(format!(
+                "{} holds plane {}.",
+                self.peers[&other].callsign, plane.0
+            ));
+        }
         self.world
             .can_take(seat, plane)
             .err()
             .map(|_| format!("Plane {} is destroyed or has lost its pilot.", plane.0))
     }
 
-    fn ready(&mut self, connection: ConnectionId, wanted: Option<u32>) {
-        if !matches!(self.life, Life::Waiting | Life::Flying) {
-            return;
+    /// The slots: the planes open to players, in plane order.
+    fn slots(&self) -> Vec<tore_world::mission::OpenPlane> {
+        self.spec
+            .open_planes()
+            .into_iter()
+            .filter(|plane| {
+                self.config
+                    .open_planes
+                    .allows(plane.id, plane.wing.side == Side::Friendly)
+            })
+            .collect()
+    }
+
+    /// The connection holding `plane`'s slot, other than `except`.
+    fn holder(&self, plane: PlaneId, except: ConnectionId) -> Option<ConnectionId> {
+        self.peers
+            .iter()
+            .find(|(id, peer)| {
+                **id != except
+                    && peer.lobby.slot == Some(plane)
+                    && !matches!(peer.stage, Stage::Closing { .. })
+            })
+            .map(|(id, _)| *id)
+    }
+
+    /// Whether the player is flying or about to (taking, seated, leaving).
+    fn in_flight(peer: &Peer) -> bool {
+        matches!(
+            peer.stage,
+            Stage::Taking { .. } | Stage::Seated | Stage::Leaving
+        )
+    }
+
+    /// The player's slot request.
+    fn slot(&mut self, connection: ConnectionId, request: SlotRequest) -> Result<(), String> {
+        let peer = self.peers.get(&connection).ok_or("")?;
+        if Self::in_flight(peer) {
+            return Err("Leave your aircraft before you change your slot.".into());
         }
+        if let Some(reason) = &peer.lobby.unable {
+            return Err(format!("Your game cannot play this mission: {reason}"));
+        }
+        let held = peer.lobby.slot;
+        let wanted = match request {
+            SlotRequest::Leave => None,
+            SlotRequest::Take(plane) => {
+                if !self.slots().iter().any(|slot| slot.id == plane) {
+                    return Err(format!("Plane {plane} is not a slot players may take."));
+                }
+                if let Some(other) = self.holder(PlaneId(plane), connection) {
+                    return Err(format!(
+                        "{} holds plane {plane}.",
+                        self.peers[&other].callsign
+                    ));
+                }
+                Some(PlaneId(plane))
+            }
+            SlotRequest::Any => match held {
+                Some(plane) => Some(plane),
+                None => Some(
+                    self.slots()
+                        .into_iter()
+                        .map(|slot| PlaneId(slot.id))
+                        .find(|plane| self.holder(*plane, connection).is_none())
+                        .ok_or("No slot is free.")?,
+                ),
+            },
+        };
+        if wanted == held {
+            return Ok(());
+        }
+        let peer = self.peers.get_mut(&connection).ok_or("")?;
+        peer.lobby.release();
+        peer.lobby.slot = wanted;
+        let callsign = peer.callsign.clone();
+        self.lobby_log(callsign, LobbyEvent::Slot(wanted.map(|p| p.0)));
+        Ok(())
+    }
+
+    /// The loadout for the player's slot: checked by the Load Ordnance
+    /// page's rules for that plane's aircraft, kept for the next start.
+    fn loadout(
+        &mut self,
+        connection: ConnectionId,
+        plane: u32,
+        loadout: Option<tore_world::mission::LoadoutSpec>,
+    ) -> Result<(), String> {
+        let peer = self.peers.get(&connection).ok_or("")?;
+        if peer.lobby.slot != Some(PlaneId(plane)) {
+            return Err(format!("You do not hold plane {plane}'s slot."));
+        }
+        if let Some(load) = &loadout {
+            let aircraft = self
+                .spec
+                .open_planes()
+                .into_iter()
+                .find(|p| p.id == plane)
+                .ok_or("There is no such plane.")?
+                .aircraft;
+            let kind = self
+                .world
+                .combat
+                .dummy_types()
+                .iter()
+                .find(|kind| kind.profile.id == aircraft)
+                .ok_or("The mission holds no such aircraft.")?;
+            load.check_for_plane(&kind.profile, &*self.resources, self.spec.guns_only)
+                .map_err(|error| error.to_string())?;
+        }
+        let own = loadout.is_some();
+        let peer = self.peers.get_mut(&connection).ok_or("")?;
+        peer.lobby.loadout = loadout;
+        let callsign = peer.callsign.clone();
+        self.lobby_log(callsign, LobbyEvent::Loadout { plane, own });
+        Ok(())
+    }
+
+    /// Ready or not. In the lobby the start rule may then start the
+    /// mission; in flight, a player who gets ready takes its slot's plane.
+    fn set_ready(&mut self, connection: ConnectionId, ready: bool) -> Result<(), String> {
+        let peer = self.peers.get(&connection).ok_or("")?;
+        if let Some(reason) = &peer.lobby.unable {
+            return Err(format!("Your game cannot play this mission: {reason}"));
+        }
+        if ready && peer.lobby.slot.is_none() {
+            return Err("Take a slot first.".into());
+        }
+        if Self::in_flight(peer) {
+            return if ready {
+                Ok(())
+            } else {
+                Err("You are flying.".into())
+            };
+        }
+        match self.life {
+            Life::Lobby | Life::Flying => {}
+            Life::Ended { .. } | Life::Stopped => {
+                return Err("The mission has ended.".into());
+            }
+        }
+        let slot = peer.lobby.slot;
+        let peer = self.peers.get_mut(&connection).ok_or("")?;
+        if peer.lobby.ready != ready {
+            peer.lobby.ready = ready;
+            let callsign = peer.callsign.clone();
+            self.lobby_log(callsign, LobbyEvent::Ready(ready));
+        }
+        if ready {
+            match self.life {
+                Life::Lobby if self.config.start == StartMode::FirstPlayer => {
+                    self.start_flying();
+                }
+                Life::Flying => {
+                    if let Some(plane) = slot {
+                        self.take_now(connection, Some(plane.0));
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Take a plane (stage D's Ready): in the lobby, hold its slot (or the
+    /// first free one, or the one held) and mark ready; in flight, fly it
+    /// now. A refusal is a Seat refused, which a game with no lobby screen
+    /// answers by asking for any plane.
+    fn take_plane(&mut self, connection: ConnectionId, wanted: Option<u32>) {
         let Some(peer) = self.peers.get(&connection) else {
             return;
         };
-        if peer.stage != Stage::Loading {
+        if Self::in_flight(peer) {
             return;
         }
-        let callsign = peer.callsign.clone();
-        let Some(seat) = self.free_seat() else {
-            self.refuse_seat(connection, callsign, "No seat is free.".into());
+        if let Some(reason) = peer.lobby.unable.clone() {
+            self.refuse_seat(
+                connection,
+                format!("Your game cannot play this mission: {reason}"),
+            );
+            return;
+        }
+        match self.life {
+            Life::Lobby => {
+                let request = match wanted {
+                    Some(plane) => SlotRequest::Take(plane),
+                    None => SlotRequest::Any,
+                };
+                let taken = self
+                    .slot(connection, request)
+                    .and_then(|()| self.set_ready(connection, true));
+                if let Err(reason) = taken {
+                    self.refuse_seat(connection, reason);
+                }
+            }
+            Life::Flying => self.take_now(connection, wanted),
+            Life::Ended { .. } | Life::Stopped => {
+                self.refuse_seat(connection, "The mission has ended.".into());
+            }
+        }
+        self.lobby_dirty = true;
+    }
+
+    /// A player in the lobby takes a plane of the flying mission at the
+    /// next tick: `wanted`, or its slot's, or the first free friendly one
+    /// (Friendly Wing 1's lead first), then any.
+    fn take_now(&mut self, connection: ConnectionId, wanted: Option<u32>) {
+        let Some(peer) = self.peers.get(&connection) else {
             return;
         };
+        if peer.stage != Stage::Lobby {
+            return;
+        }
+        let held = peer.lobby.slot;
+        let Some(seat) = self.free_seat() else {
+            self.refuse_seat(connection, "No seat is free.".into());
+            return;
+        };
+        let wanted = wanted.or(held.map(|p| p.0));
         let chosen = match wanted {
-            Some(plane) => match self.refusal(seat, PlaneId(plane)) {
+            Some(plane) => match self.refusal(seat, PlaneId(plane), connection) {
                 None => Ok(PlaneId(plane)),
                 Some(reason) => Err(reason),
             },
@@ -1156,25 +1680,35 @@ impl Host {
                     .filter(|(_, friendly)| *friendly)
                     .chain(planes.iter().filter(|(_, friendly)| !*friendly))
                     .map(|(id, _)| *id)
-                    .find(|plane| self.refusal(seat, *plane).is_none())
+                    .find(|plane| self.refusal(seat, *plane, connection).is_none())
                     .ok_or_else(|| "No plane is free.".to_string())
             }
         };
         match chosen {
             Ok(plane) => {
+                let is_slot = self.slots().iter().any(|slot| slot.id == plane.0);
                 if let Some(peer) = self.peers.get_mut(&connection) {
                     peer.stage = Stage::Taking { seat, plane };
+                    peer.lobby.ready = true;
+                    if peer.lobby.slot != Some(plane) && is_slot {
+                        peer.lobby.release();
+                        peer.lobby.slot = Some(plane);
+                        peer.lobby.ready = true;
+                    }
                 }
-                if matches!(self.life, Life::Waiting) {
-                    self.start_flying();
-                }
+                self.lobby_dirty = true;
             }
-            Err(reason) => self.refuse_seat(connection, callsign, reason),
+            Err(reason) => self.refuse_seat(connection, reason),
         }
     }
 
-    fn refuse_seat(&mut self, connection: ConnectionId, callsign: String, reason: String) {
+    fn refuse_seat(&mut self, connection: ConnectionId, reason: String) {
         self.send(connection, &Message::SeatRefused(reason.clone()));
+        let callsign = self
+            .peers
+            .get(&connection)
+            .map(|p| p.callsign.clone())
+            .unwrap_or_default();
         let tick = self.world.tick();
         self.log(HostLog::SeatRefused {
             tick,
@@ -1183,8 +1717,153 @@ impl Host {
         });
     }
 
-    /// The player ends the mission: its debrief now, its plane back to the
-    /// AI at the next tick, then the disconnect.
+    /// The player's import cannot play the mission numbered `refused.mission`:
+    /// it stays, marked unable, its slot free; a player the host was seating
+    /// goes back to the lobby.
+    fn content_refused(
+        &mut self,
+        connection: ConnectionId,
+        refused: crate::wire::messages::ContentRefused,
+    ) {
+        let Some((callsign, stage, seat)) = self
+            .peers
+            .get(&connection)
+            .map(|peer| (peer.callsign.clone(), peer.stage, peer.seat))
+        else {
+            return;
+        };
+        let tick = self.world.tick();
+        self.log(HostLog::ContentRefused {
+            tick,
+            callsign: callsign.clone(),
+            names: refused.names.clone(),
+        });
+        if refused.mission != self.number {
+            return;
+        }
+        let reason = if refused.reason.is_empty() {
+            format!("its game data differs in {}", refused.names.join(", "))
+        } else {
+            refused.reason
+        };
+        if stage == Stage::Seated
+            && let Some(seat) = seat
+        {
+            self.gives.push((seat, callsign.clone()));
+        }
+        if let Some(peer) = self.peers.get_mut(&connection) {
+            peer.lobby.release();
+            peer.lobby.unable = Some(reason.clone());
+            if matches!(stage, Stage::Taking { .. } | Stage::Seated) {
+                peer.stage = Stage::Leaving;
+            }
+        }
+        self.lobby_log(callsign, LobbyEvent::Unable(reason));
+        self.lobby_dirty = true;
+    }
+
+    /// The King's new mission: built to check it, kept, slots that no
+    /// longer exist freed, every ready flag cleared, and sent to everyone.
+    fn change_mission(&mut self, connection: ConnectionId, text: &str) -> Result<(), String> {
+        if !matches!(self.life, Life::Lobby) {
+            return Err("The mission can change only in the lobby.".into());
+        }
+        let spec = MissionSpec::from_text(text).map_err(|error| error.to_string())?;
+        if !spec.plane_loadouts.is_empty() {
+            return Err(
+                "A lobby's mission carries no loadouts: each player arms their own.".into(),
+            );
+        }
+        let (world, manifest) =
+            build_world(&spec, &self.resources).map_err(|error| match error {
+                HostError::Mission(text) => text,
+                other => other.to_string(),
+            })?;
+        let old = self.spec.open_planes();
+        self.spec = spec;
+        self.spec_text = self.spec.to_text();
+        self.world = world;
+        self.manifest = manifest;
+        self.tracker = Tracker::new(&self.world);
+        self.orphans.clear();
+        self.gives.clear();
+        self.number = self.number.wrapping_add(1);
+        let slots = self.slots();
+        for peer in self.peers.values_mut() {
+            peer.lobby.ready = false;
+            peer.lobby.unable = None;
+            if let Some(plane) = peer.lobby.slot {
+                match slots.iter().find(|slot| slot.id == plane.0) {
+                    None => peer.lobby.release(),
+                    Some(slot) => {
+                        // A plane now flying another aircraft loses the
+                        // loadout chosen for the old one.
+                        let before = old.iter().find(|p| p.id == plane.0).map(|p| p.aircraft);
+                        if before != Some(slot.aircraft) {
+                            peer.lobby.loadout = None;
+                        }
+                    }
+                }
+            }
+        }
+        let mission = self.mission_message();
+        let to: Vec<ConnectionId> = self
+            .peers
+            .iter()
+            .filter(|(_, peer)| !matches!(peer.stage, Stage::Closing { .. }))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in to {
+            self.send(id, &mission);
+        }
+        let callsign = self
+            .peers
+            .get(&connection)
+            .map(|p| p.callsign.clone())
+            .unwrap_or_default();
+        let summary = self.spec.summary();
+        let number = self.number;
+        self.lobby_log(callsign, LobbyEvent::MissionChanged { number, summary });
+        self.roster_dirty = false;
+        let roster = Message::Roster(self.roster());
+        let to: Vec<ConnectionId> = self.peers.keys().copied().collect();
+        for id in to {
+            self.send(id, &roster);
+        }
+        Ok(())
+    }
+
+    /// The King's Start: accepted in the lobby when every player holding a
+    /// slot is ready, and at least one holds one.
+    fn king_start(&mut self) -> Result<(), String> {
+        if !matches!(self.life, Life::Lobby) {
+            return Err("The mission is not in the lobby.".into());
+        }
+        let holders: Vec<&Peer> = self
+            .peers
+            .values()
+            .filter(|peer| {
+                peer.lobby.slot.is_some() && !matches!(peer.stage, Stage::Closing { .. })
+            })
+            .collect();
+        if holders.is_empty() {
+            return Err("Nobody holds a slot.".into());
+        }
+        let waiting: Vec<&str> = holders
+            .iter()
+            .filter(|peer| !peer.lobby.ready)
+            .map(|peer| peer.callsign.as_str())
+            .collect();
+        if !waiting.is_empty() {
+            return Err(format!("Not ready: {}.", waiting.join(", ")));
+        }
+        self.start_flying();
+        Ok(())
+    }
+
+    /// The player ends its flight: its debrief now, its plane back to the
+    /// AI at the next tick, then it is back in the lobby, still connected,
+    /// its slot and loadout kept and its ready mark cleared.
     fn leave(&mut self, connection: ConnectionId) {
         let Some(peer) = self.peers.get(&connection) else {
             return;
@@ -1200,18 +1879,18 @@ impl Host {
                 self.gives.push((seat, callsign));
                 if let Some(peer) = self.peers.get_mut(&connection) {
                     peer.stage = Stage::Leaving;
+                    peer.lobby.ready = false;
                 }
             }
-            Stage::Loading | Stage::Taking { .. } => {
+            Stage::Taking { .. } => {
                 if let Some(peer) = self.peers.get_mut(&connection) {
-                    peer.stage = Stage::Closing {
-                        deadline: self.now + CLOSE_GRACE,
-                        reason: DisconnectReason::Left,
-                    };
+                    peer.stage = Stage::Lobby;
+                    peer.lobby.ready = false;
                 }
             }
-            Stage::Leaving | Stage::Closing { .. } => {}
+            Stage::Lobby | Stage::Leaving | Stage::Closing { .. } => {}
         }
+        self.lobby_dirty = true;
     }
 
     /// Disconnects every departing connection whose last messages are
@@ -1287,12 +1966,163 @@ impl Host {
         }
     }
 
+    /// The lobby as the player with lobby id `you` sees it.
+    fn lobby(&self, you: u8) -> LobbyState {
+        let mut peers: Vec<&Peer> = self
+            .peers
+            .values()
+            .filter(|peer| !matches!(peer.stage, Stage::Closing { .. }))
+            .collect();
+        peers.sort_by_key(|peer| peer.lobby.order);
+        let holder = |plane: u32| {
+            peers
+                .iter()
+                .find(|peer| peer.lobby.slot == Some(PlaneId(plane)))
+                .map(|peer| peer.lobby.id)
+        };
+        let king = peers
+            .iter()
+            .find(|peer| peer.king)
+            .map(|peer| peer.lobby.id);
+        LobbyState {
+            name: self.config.name.clone(),
+            summary: self.spec.summary(),
+            mission: self.number,
+            phase: match self.life {
+                Life::Lobby => LobbyPhase::Lobby,
+                Life::Flying => LobbyPhase::Flying,
+                Life::Ended { .. } | Life::Stopped => LobbyPhase::Ended,
+            },
+            start: match self.config.start {
+                StartMode::King => StartRule::King,
+                StartMode::FirstPlayer => StartRule::FirstReady,
+                StartMode::Now => StartRule::Flying,
+            },
+            king,
+            // In a game a player hosts, the King's machine runs the host.
+            host: king,
+            you,
+            players: peers
+                .iter()
+                .map(|peer| LobbyPlayer {
+                    id: peer.lobby.id,
+                    callsign: peer.callsign.clone(),
+                    slot: peer.lobby.slot.map(|p| p.0),
+                    ready: peer.lobby.ready,
+                    loadout: peer.lobby.loadout.is_some(),
+                    flying: Self::in_flight(peer),
+                    unable: peer.lobby.unable.clone(),
+                })
+                .collect(),
+            slots: self
+                .slots()
+                .into_iter()
+                .map(|slot| LobbySlot {
+                    plane: slot.id,
+                    wing: slot.wing,
+                    member: slot.member,
+                    aircraft: slot.aircraft,
+                    holder: holder(slot.id),
+                })
+                .collect(),
+            settings: Vec::new(),
+        }
+    }
+
+    /// Sends every player the lobby's state when it changed.
+    fn send_lobby(&mut self) {
+        if !std::mem::take(&mut self.lobby_dirty) {
+            return;
+        }
+        let to: Vec<(ConnectionId, u8)> = self
+            .peers
+            .iter()
+            .filter(|(_, peer)| !matches!(peer.stage, Stage::Closing { .. }))
+            .map(|(id, peer)| (*id, peer.lobby.id))
+            .collect();
+        for (id, you) in to {
+            let message = Message::Lobby(Box::new(self.lobby(you)));
+            self.send(id, &message);
+        }
+    }
+
     // ----- The clock and the tick ----------------------------------------
 
+    /// The mission starts flying: built again with the loadouts of the held
+    /// slots, which every player is sent to build its copy again with, and
+    /// every ready player holding a slot takes its plane at the first tick.
     fn start_flying(&mut self) {
+        let mut spec = self.spec.clone();
+        for peer in self.peers.values() {
+            if let (Some(plane), Some(load)) = (peer.lobby.slot, &peer.lobby.loadout)
+                && !matches!(peer.stage, Stage::Closing { .. })
+            {
+                spec.plane_loadouts.insert(plane.0, load.clone());
+            }
+        }
+        if !spec.plane_loadouts.is_empty() || self.world.tick() != 0 || self.ticks_run != 0 {
+            match build_world(&spec, &self.resources) {
+                Ok((world, manifest)) => {
+                    self.world = world;
+                    self.manifest = manifest;
+                    self.tracker = Tracker::new(&self.world);
+                }
+                Err(error) => {
+                    // Every loadout was checked when it was chosen, so this
+                    // is a fault: the lobby stays.
+                    let tick = self.world.tick();
+                    self.log(HostLog::Fault {
+                        tick,
+                        text: format!("the mission could not be built to fly: {error}"),
+                    });
+                    return;
+                }
+            }
+        }
+        // The same mission, with the loadouts: its number stays, so a
+        // request made just before the start still counts.
+        self.spec_text = spec.to_text();
+        self.orphans.clear();
+        self.gives.clear();
+        self.ever_seated = false;
+        self.empty_since = None;
         self.life = Life::Flying;
         self.origin = None;
         self.ticks_run = 0;
+        // The players have the lobby's mission already: the loadouts are
+        // all they need to build the flight's (a joiner in flight gets the
+        // whole text, loadouts included).
+        let loadouts = Message::FlightLoadouts(
+            spec.plane_loadouts
+                .iter()
+                .map(|(plane, load)| (*plane, load.clone()))
+                .collect(),
+        );
+        let ids: Vec<ConnectionId> = self
+            .peers
+            .iter()
+            .filter(|(_, peer)| !matches!(peer.stage, Stage::Closing { .. }))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in ids {
+            self.send(id, &loadouts);
+            let peer = &self.peers[&id];
+            if peer.stage == Stage::Lobby
+                && peer.lobby.ready
+                && peer.lobby.unable.is_none()
+                && let Some(plane) = peer.lobby.slot
+            {
+                match self.free_seat() {
+                    Some(seat) => {
+                        if let Some(peer) = self.peers.get_mut(&id) {
+                            peer.stage = Stage::Taking { seat, plane };
+                        }
+                    }
+                    None => self.refuse_seat(id, "No seat is free.".into()),
+                }
+            }
+        }
+        self.lobby_dirty = true;
         let tick = self.world.tick();
         self.log(HostLog::MissionStarted { tick });
     }
@@ -1367,13 +2197,13 @@ impl Host {
                 commands.push(MissionCommand::Take { seat, plane });
                 takes.push((connection, seat, plane));
             } else {
-                let callsign = self.peers[&connection].callsign.clone();
                 if let Some(peer) = self.peers.get_mut(&connection) {
-                    peer.stage = Stage::Loading;
+                    peer.stage = Stage::Lobby;
+                    peer.lobby.ready = false;
                 }
+                self.lobby_dirty = true;
                 self.refuse_seat(
                     connection,
-                    callsign,
                     format!("Plane {} is destroyed or has lost its pilot.", plane.0),
                 );
             }
@@ -1417,18 +2247,25 @@ impl Host {
         if !given.is_empty() || !takes.is_empty() {
             self.roster_dirty = true;
         }
-        // Players whose plane went back are done: disconnect them once their
-        // debrief is acknowledged.
+        // Players whose plane went back are back in the lobby, still
+        // connected; the lobby's messages may fill their packets again.
+        let mut back = Vec::new();
         for seat in &given {
-            for peer in self.peers.values_mut() {
+            for (id, peer) in self.peers.iter_mut() {
                 if peer.seat == Some(*seat) && peer.stage == Stage::Leaving {
-                    peer.stage = Stage::Closing {
-                        deadline: now + CLOSE_GRACE,
-                        reason: DisconnectReason::Left,
-                    };
+                    peer.stage = Stage::Lobby;
+                    peer.seat = None;
+                    peer.plane = None;
+                    back.push((*id, peer.callsign.clone()));
                 }
             }
         }
+        for (id, callsign) in back {
+            self.server.set_message_budget(id, tore_net::MAX_DATAGRAM);
+            self.lobby_log(callsign, LobbyEvent::BackInLobby);
+            self.lobby_dirty = true;
+        }
+        let _ = now;
         let wide = self.tracker.sort(&mut self.world, &out, tick);
         for (connection, seat, plane) in takes {
             self.seated(connection, seat, plane, tick, &out);
@@ -1493,6 +2330,10 @@ impl Host {
         let Some(peer) = self.peers.get_mut(&connection) else {
             return;
         };
+        // A new flight of the connection: its sections start afresh, apart
+        // from any of an earlier flight still on the way.
+        peer.flight = peer.flight.wrapping_add(1);
+        peer.wire = HostConnection::for_flight(self.config.ticks_per_snapshot(), peer.flight);
         peer.stage = Stage::Seated;
         peer.seat = Some(seat);
         peer.plane = Some(plane);
@@ -1506,11 +2347,14 @@ impl Host {
         for Timed { tick, event } in Tracker::standing(&self.world, tick) {
             queue(peer, tick, &event);
         }
-        self.server
-            .set_message_budget(connection, FLIGHT_MESSAGE_BUDGET);
+        // The flight's budget for messages starts once the Seated message
+        // and whatever was queued before it are through (see the hold in
+        // `snapshot`), so they are not held to 256 bytes a packet.
         self.ever_seated = true;
         self.empty_since = None;
+        let flight = self.peers[&connection].flight;
         let seated = Message::Seated(Box::new(Seated {
+            flight,
             seat: seat.0,
             plane: plane.0,
             tick: tick as u32,
@@ -1686,6 +2530,7 @@ impl Host {
         let exact = ExactState::of(&OwnPlane::of(cockpit), terms.as_ref());
         let (input_margin, inputs_repeated) = peer.inputs.report();
         let header = SnapshotHeader {
+            flight: peer.flight,
             tick: tick as u32,
             input_received: peer.inputs.newest(),
             input_margin,
@@ -1739,6 +2584,8 @@ impl Host {
                 .is_some_and(|stats| stats.messages_queued == 0);
             if acknowledged || tick.saturating_sub(since) >= SEATED_HOLD_TICKS {
                 peer.holding_since = None;
+                self.server
+                    .set_message_budget(connection, FLIGHT_MESSAGE_BUDGET);
             }
         }
         let mismatch = peer.inputs.mismatch > peer.mismatch_answered;
@@ -1777,10 +2624,7 @@ impl Host {
         } else if self.ever_seated && self.empty_since.is_none() {
             self.empty_since = Some(now);
         }
-        let next = match self.config.after_end {
-            AfterEnd::Restart => Some(self.config.restart_delay),
-            AfterEnd::Quit => None,
-        };
+        let next = self.after_end();
         let flown = ticks_time(self.world.tick());
         if self.config.time_limit.is_some_and(|limit| flown >= limit) {
             self.end_mission(EndReason::TimeLimit, next);
@@ -1793,8 +2637,10 @@ impl Host {
     }
 
     /// Ends the mission: "Mission ended" to every player, and each seated
-    /// player's debrief; each is disconnected once they are acknowledged.
-    /// `next` is the delay to the next mission, `None` to stop.
+    /// player's debrief. `next` is the delay to the next mission: every
+    /// player stays connected, back in the lobby with its slot and loadout
+    /// and its ready mark cleared. With `None` the host stops: each player is
+    /// disconnected once its messages are acknowledged.
     fn end_mission(&mut self, reason: EndReason, next: Option<Duration>) {
         if matches!(self.life, Life::Ended { .. } | Life::Stopped) {
             return;
@@ -1821,13 +2667,24 @@ impl Host {
                 self.send(id, &Message::Debrief(Box::new(debrief_message(&report))));
             }
             if let Some(peer) = self.peers.get_mut(&id) {
-                peer.ended = true;
-                peer.stage = Stage::Closing {
-                    deadline: now + CLOSE_GRACE,
-                    reason: DisconnectReason::ServerStopping,
-                };
+                peer.lobby.ready = false;
+                if next.is_some() {
+                    peer.stage = Stage::Lobby;
+                    peer.seat = None;
+                    peer.plane = None;
+                } else {
+                    peer.ended = true;
+                    peer.stage = Stage::Closing {
+                        deadline: now + CLOSE_GRACE,
+                        reason: DisconnectReason::ServerStopping,
+                    };
+                }
+            }
+            if next.is_some() {
+                self.server.set_message_budget(id, tore_net::MAX_DATAGRAM);
             }
         }
+        self.lobby_dirty = true;
         self.gives.clear();
         self.life = Life::Ended {
             next_at: next.map(|delay| now + delay),
@@ -1837,12 +2694,14 @@ impl Host {
         self.log(HostLog::MissionEnded { tick, reason });
     }
 
-    /// A fresh copy of the mission, from its spec.
+    /// A fresh copy of the lobby's mission, from its spec: back to the
+    /// lobby, or flying again for `start now`.
     fn next_mission(&mut self) {
         match build_world(&self.spec, &self.resources) {
             Ok((world, manifest)) => {
                 self.world = world;
                 self.manifest = manifest;
+                self.spec_text = self.spec.to_text();
                 self.tracker = Tracker::new(&self.world);
                 self.orphans.clear();
                 self.gives.clear();
@@ -1850,9 +2709,10 @@ impl Host {
                 self.ticks_run = 0;
                 self.ever_seated = false;
                 self.empty_since = None;
+                self.lobby_dirty = true;
                 self.log(HostLog::MissionRestarted { tick: 0 });
                 match self.config.start {
-                    StartMode::FirstPlayer => self.life = Life::Waiting,
+                    StartMode::FirstPlayer | StartMode::King => self.life = Life::Lobby,
                     StartMode::Now => self.start_flying(),
                 }
             }
@@ -1871,10 +2731,7 @@ impl Host {
     fn fault(&mut self, text: String) {
         let tick = self.world.tick();
         self.log(HostLog::Fault { tick, text });
-        let next = match self.config.after_end {
-            AfterEnd::Restart => Some(self.config.restart_delay),
-            AfterEnd::Quit => None,
-        };
+        let next = self.after_end();
         self.end_mission(EndReason::EndedByServer, next);
     }
 }

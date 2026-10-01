@@ -12,8 +12,16 @@
 //!   Mission message it builds the mission from its own import
 //!   (`World::new(spec, resources, Seating::Open)`, never stepped: the
 //!   terrain, the aircraft types, the ground objects and the roster), compares
-//!   the content manifests and refuses on a difference, then asks for its
-//!   plane. On Seated it decodes its plane's exact state.
+//!   the content manifests and tells the host when its import cannot play it.
+//!   On Seated it decodes its plane's exact state.
+//! - **The lobby** (slice EF4): the lobby's state as the host last sent it
+//!   ([`Client::lobby`], [`ClientEvent::Lobby`]), and the calls a lobby
+//!   screen makes: take or leave a slot, send a loadout, mark ready, and for
+//!   the King change the mission, start, kick and end the mission. With
+//!   [`ClientConfig::auto_ready`] (the default) the client takes its slot
+//!   (the plane asked for, or the first free one) with the standard loadout
+//!   and marks ready by itself whenever it is in the lobby, after a mission
+//!   change and after each return, as a game with no lobby screen does.
 //! - **Prediction** ([`prediction`]): each tick of its clock it steps its
 //!   plane with the pilot's quantized input, and sends the inputs with their
 //!   redundancy and the numbered commands.
@@ -39,13 +47,16 @@ mod tests;
 
 use crate::host::BuildId;
 use crate::wire::connection::ClientConnection;
+use crate::wire::connection::FlightOrder;
 use crate::wire::entity::EntityKey;
 use crate::wire::events::{ReceivedEvent, WireEvent};
 use crate::wire::inputs::{Command, InputFrame, InputsSection, NumberedCommand, quantize_command};
 use crate::wire::messages::{
-    ContentRefused, Debrief, Message, Mission, MissionEnded, Ready, Roster, Seated,
+    ContentRefused, Debrief, Goodbye, Kick, LobbyPhase, LobbyState, Message, Mission, MissionEnded,
+    Roster, Seated, SetReady, Slot, SlotRequest, TakePlane,
 };
 use crate::wire::names::NameIndex;
+use crate::wire::own_state::OwnStateHeader;
 use crate::wire::{
     PROTOCOL_VERSION, SECTION_EVENTS, SECTION_INPUTS, SECTION_OWN_STATE, SECTION_SNAPSHOT,
 };
@@ -72,11 +83,12 @@ use tore_world::WorldResult;
 use tore_world::frame::{FlightFrame, ReadoutSlot};
 use tore_world::mission::{LoadoutSpec, MissionSpec};
 use tore_world::readout::CockpitReadout;
-use tore_world::resources::{ResourceReads, ResourceSource};
+use tore_world::resources::{Manifest, ResourceReads, ResourceSource};
 use tore_world::seats::{PlaneId, SeatCommand, SeatId};
 use tore_world::snapshot::{
     AircraftPose, Damage, Draw, EffectPose, Engine, MarkPose, PilotPose, RenderSnapshot,
 };
+use tore_world::world::plane::ExactState;
 use tore_world::world::{Seating, World};
 
 /// Ticks between two input packets at 60 a second: the input margin is one
@@ -114,6 +126,11 @@ pub struct ClientConfig {
     /// The retail stall-speed switch is on for this process: a client
     /// refuses to join with it.
     pub retail_stall_speeds: bool,
+    /// Takes a slot and marks ready by itself whenever it is in the lobby
+    /// (the default): `plane`'s slot, or after a refusal the first free one,
+    /// with the standard loadout. A lobby screen turns it off and calls
+    /// [`Client::take_slot`], [`Client::set_ready`] and the rest itself.
+    pub auto_ready: bool,
 }
 
 impl ClientConfig {
@@ -128,6 +145,7 @@ impl ClientConfig {
             plane: None,
             entropy: Entropy::System,
             retail_stall_speeds: false,
+            auto_ready: true,
         }
     }
 }
@@ -217,11 +235,14 @@ pub enum ClientPhase {
     Connecting,
     /// Accepted; waiting for or loading the mission.
     Loading,
+    /// In the lobby, the mission loaded (or refused): taking a slot, arming,
+    /// marking ready, or waiting for the next mission.
+    Lobby,
     /// Asked for a plane.
     Seating,
     /// Flying a plane.
     Flying,
-    /// Sent Leave; waiting for the debrief and the disconnect.
+    /// Sent Leave; waiting for the debrief, then back in the lobby.
     Leaving,
     /// Done; the [`ClientEvent::Closed`] event says why.
     Closed,
@@ -236,13 +257,23 @@ pub enum ClientEvent {
         ticks_per_snapshot: u8,
         host_tick: u32,
     },
-    /// The mission is built from the import and matches the host's.
+    /// The mission is built from the import and matches the host's: the
+    /// first one, the King's change, or a flight's start.
     MissionLoaded,
-    /// The import differs from the host's in these resources: the client
-    /// told the host, which disconnects it.
-    ContentRefused { names: Vec<String> },
-    /// The mission could not be built from the import.
+    /// The import differs from the host's in these resources, or cannot
+    /// build the mission (`reason`): the client told the host and stays in
+    /// the lobby, marked unable, until the mission changes.
+    ContentRefused { names: Vec<String>, reason: String },
+    /// The mission text could not be read: the client leaves.
     MissionFailed(String),
+    /// The lobby changed; read it with [`Client::lobby`].
+    Lobby,
+    /// A lobby request was refused: the request's message kind
+    /// ([`crate::wire::messages::kind`]) and why.
+    Refused { request: u8, reason: String },
+    /// The host is about to disconnect the player, and why; the
+    /// [`ClientEvent::Closed`] that follows reads with [`Client::close_text`].
+    Goodbye(Goodbye),
     /// No plane: the reason. The client may ask again with [`Client::ready`].
     SeatRefused(String),
     /// The player has a plane.
@@ -257,6 +288,22 @@ pub enum ClientEvent {
     MissionEnded(MissionEnded),
     /// The connection ended; nothing follows.
     Closed(CloseReason),
+}
+
+/// The plain words for a mission's end, for the player.
+pub fn ended_text(ended: &MissionEnded) -> String {
+    use crate::wire::messages::EndReason;
+    let why = match ended.reason {
+        EndReason::EveryoneLeft => "Mission ended: everyone left",
+        EndReason::TimeLimit => "Mission ended: the time limit",
+        EndReason::ServerStopping => "Mission ended: the server is stopping",
+        EndReason::EndedByServer => "Mission ended by the host",
+        EndReason::HostLeft => "Mission ended: the host left the game",
+    };
+    match ended.next_in_seconds {
+        Some(0) | None => format!("{why}."),
+        Some(seconds) => format!("{why}; the next starts in {seconds} seconds."),
+    }
 }
 
 /// A plain-language line for why the connection ended.
@@ -512,6 +559,29 @@ pub struct Client {
     /// Own state sections that arrived before the Seated message they
     /// follow, read once it has.
     early: Vec<Vec<u8>>,
+    /// Exact states received and read, applied once the prediction has
+    /// stepped to the update's time: after a stall the queued ones then
+    /// meet a prediction that has caught up instead of being adopted one by
+    /// one ahead of it.
+    pending_own: Vec<(OwnStateHeader, ExactState)>,
+    /// The lobby as the host last sent it.
+    lobby: Option<LobbyState>,
+    /// The newest Mission message's number, and the number of the newest
+    /// mission built and matched.
+    number: Option<u32>,
+    loaded: Option<u32>,
+    /// Why this import cannot play the mission, when it cannot.
+    unable: Option<String>,
+    /// Why the host said it disconnects the player.
+    goodbye: Option<Goodbye>,
+    /// The automatic ready ([`ClientConfig::auto_ready`]): a Take plane is
+    /// on its way; the plane to ask for (`None` after a refusal: any); a
+    /// refused request waits for the lobby to change before asking again.
+    auto_pending: bool,
+    auto_plane: Option<u32>,
+    auto_wait: bool,
+    /// The player is leaving the game: disconnect once the debrief is in.
+    quit_after_debrief: bool,
     /// The clock was set from the host's first margin since seating.
     settled: bool,
     upstream: LossWindow,
@@ -604,6 +674,16 @@ impl Client {
             mismatch: 0,
             snapshot_tick: None,
             early: Vec::new(),
+            pending_own: Vec::new(),
+            lobby: None,
+            number: None,
+            loaded: None,
+            unable: None,
+            goodbye: None,
+            auto_pending: false,
+            auto_plane: None,
+            auto_wait: false,
+            quit_after_debrief: false,
             settled: false,
             upstream: LossWindow::default(),
             downstream: LossWindow::default(),
@@ -612,6 +692,10 @@ impl Client {
             diagnostics: None,
             capture: None,
             now,
+        })
+        .map(|mut client| {
+            client.auto_plane = client.config.plane;
+            client
         })
     }
 
@@ -704,7 +788,9 @@ impl Client {
         self.view_subject = sampled.view_subject;
         if self.phase == ClientPhase::Flying {
             self.fly(now, sampled.frame);
+            self.apply_own_states();
         }
+        self.auto_ready();
         let margin = self.interpolation_margin(now);
         self.render_clock.advance(now, margin);
         let lossy = self.downstream.loss(now) > HIGH_LOSS;
@@ -744,29 +830,227 @@ impl Client {
         self.events.pop_front()
     }
 
-    /// Asks for a plane again after a refusal: `plane`, or any.
+    /// Takes a plane at once: in the lobby `plane`'s slot (or the first
+    /// free one) and ready; in flight, that plane (or any) now. Stage D's
+    /// call, for a game with no lobby screen.
     pub fn ready(&mut self, plane: Option<u32>) {
-        if self.phase == ClientPhase::Seating || self.phase == ClientPhase::Loading {
-            self.send(&Message::Ready(Ready { plane }));
-            self.phase = ClientPhase::Seating;
-        }
+        let now = self.now;
+        self.request(
+            now,
+            Message::TakePlane(TakePlane {
+                mission: self.number.unwrap_or(0),
+                plane,
+            }),
+        );
     }
 
-    /// The player ends the mission: Leave goes to the host, which sends the
-    /// debrief and then disconnects.
+    /// The player ends its flight: Leave goes to the host, which sends the
+    /// debrief, gives the plane back to the AI and keeps the player in the
+    /// lobby, still connected.
     pub fn leave(&mut self, now: Duration) {
         if let Some(capture) = &mut self.capture {
             capture.leave(now);
         }
         self.now = self.now.max(now);
-        if matches!(
-            self.phase,
-            ClientPhase::Loading | ClientPhase::Seating | ClientPhase::Flying
-        ) {
+        if matches!(self.phase, ClientPhase::Seating | ClientPhase::Flying) {
             self.send(&Message::Leave);
             self.phase = ClientPhase::Leaving;
             self.net.update(self.now);
             self.pump();
+        }
+    }
+
+    /// The player leaves the game: a flying player ends its flight and the
+    /// client quits once the debrief is in (the caller gives it a few
+    /// seconds); anywhere else it quits at once.
+    pub fn leave_game(&mut self, now: Duration) {
+        if let Some(capture) = &mut self.capture {
+            capture.leave_game(now);
+        }
+        self.now = self.now.max(now);
+        match self.phase {
+            ClientPhase::Seating | ClientPhase::Flying | ClientPhase::Leaving => {
+                self.quit_after_debrief = true;
+                if self.phase != ClientPhase::Leaving {
+                    self.send(&Message::Leave);
+                    self.phase = ClientPhase::Leaving;
+                }
+                self.net.update(self.now);
+                self.pump();
+            }
+            ClientPhase::Closed => {}
+            _ => {
+                self.net.disconnect(DisconnectReason::Left);
+                self.pump();
+            }
+        }
+    }
+
+    // ----- The lobby -----------------------------------------------------
+
+    /// The lobby as the host last sent it; `None` before the first.
+    pub fn lobby(&self) -> Option<&LobbyState> {
+        self.lobby.as_ref()
+    }
+
+    /// Why this game's import cannot play the lobby's mission, when it
+    /// cannot (the King sees it in the lobby too).
+    pub fn unable(&self) -> Option<&str> {
+        self.unable.as_deref()
+    }
+
+    /// Hold `plane`'s slot. The answer is the next lobby state, or a
+    /// [`ClientEvent::Refused`].
+    pub fn take_slot(&mut self, plane: u32) {
+        self.slot_request(SlotRequest::Take(plane));
+    }
+
+    /// Hold the first free slot.
+    pub fn take_any_slot(&mut self) {
+        self.slot_request(SlotRequest::Any);
+    }
+
+    /// Hold no slot.
+    pub fn leave_slot(&mut self) {
+        self.slot_request(SlotRequest::Leave);
+    }
+
+    fn slot_request(&mut self, request: SlotRequest) {
+        let now = self.now;
+        self.request(
+            now,
+            Message::Slot(Slot {
+                mission: self.number.unwrap_or(0),
+                request,
+            }),
+        );
+    }
+
+    /// The loadout for the slot this player holds (`None`: the aircraft's
+    /// standard load). The host checks it with the Load Ordnance page's rules
+    /// and refuses one they do not allow, with the reason.
+    pub fn send_loadout(&mut self, loadout: Option<LoadoutSpec>) {
+        let Some(plane) = self
+            .lobby
+            .as_ref()
+            .and_then(|l| l.me())
+            .and_then(|me| me.slot)
+        else {
+            self.event(ClientEvent::Refused {
+                request: crate::wire::messages::kind::LOADOUT,
+                reason: "Take a slot first.".into(),
+            });
+            return;
+        };
+        let now = self.now;
+        self.request(
+            now,
+            Message::Loadout(Box::new(crate::wire::messages::Loadout {
+                mission: self.number.unwrap_or(0),
+                plane,
+                loadout,
+            })),
+        );
+    }
+
+    /// Ready, or not. In flight, a player holding a slot who gets ready
+    /// takes that plane.
+    pub fn set_ready(&mut self, ready: bool) {
+        let now = self.now;
+        self.request(
+            now,
+            Message::SetReady(SetReady {
+                mission: self.number.unwrap_or(0),
+                ready,
+            }),
+        );
+    }
+
+    /// The King's new mission for everyone, in the lobby.
+    pub fn change_mission(&mut self, spec: &MissionSpec) {
+        let now = self.now;
+        self.request(now, Message::ChangeMission(spec.to_text()));
+    }
+
+    /// The King starts the mission: accepted when every player holding a
+    /// slot is ready.
+    pub fn start_mission(&mut self) {
+        let now = self.now;
+        self.request(now, Message::Start);
+    }
+
+    /// The King removes the player with lobby id `player`, who is told
+    /// `reason`.
+    pub fn kick(&mut self, player: u8, reason: &str) {
+        let now = self.now;
+        self.request(
+            now,
+            Message::Kick(Kick {
+                player,
+                reason: reason.to_owned(),
+            }),
+        );
+    }
+
+    /// The King ends the mission for everyone: every player gets the
+    /// debrief and the lobby returns.
+    pub fn end_mission(&mut self) {
+        let now = self.now;
+        self.request(now, Message::EndMission);
+    }
+
+    /// Sends a lobby request (any message a player's game sends but Leave),
+    /// recorded in the capture so a replay sends it again.
+    pub fn request(&mut self, now: Duration, message: Message) {
+        if !message.from_player() || matches!(message, Message::Leave) {
+            return;
+        }
+        if let Some(capture) = &mut self.capture
+            && let Ok(body) = message.encode()
+        {
+            capture.request(now, message.kind(), &body);
+        }
+        self.now = self.now.max(now);
+        self.send_request(message);
+    }
+
+    /// Sends a lobby request, not recorded: the automatic ready's, which a
+    /// replay makes again by itself.
+    fn send_request(&mut self, message: Message) {
+        if matches!(self.phase, ClientPhase::Connecting | ClientPhase::Closed) {
+            return;
+        }
+        if let Message::TakePlane(_) = message
+            && matches!(self.phase, ClientPhase::Lobby | ClientPhase::Loading)
+            && self
+                .lobby
+                .as_ref()
+                .is_some_and(|l| l.phase == LobbyPhase::Flying)
+        {
+            self.phase = ClientPhase::Seating;
+        }
+        self.send(&message);
+    }
+
+    /// Why the host said goodbye, when it did.
+    pub fn goodbye(&self) -> Option<&Goodbye> {
+        self.goodbye.as_ref()
+    }
+
+    /// The plain words for why the connection ended: the host's goodbye
+    /// when it said one ("The host left the game"), else [`describe`].
+    pub fn close_text(&self, reason: &CloseReason) -> String {
+        match (&self.goodbye, reason) {
+            (Some(Goodbye::HostLeft), CloseReason::Disconnected { .. }) => {
+                "The host left the game.".into()
+            }
+            (Some(Goodbye::Kicked(why)), CloseReason::Disconnected { .. }) if why.is_empty() => {
+                "The King removed you from the game.".into()
+            }
+            (Some(Goodbye::Kicked(why)), CloseReason::Disconnected { .. }) => {
+                format!("The King removed you from the game: {why}")
+            }
+            _ => describe(reason),
         }
     }
 
@@ -1092,8 +1376,11 @@ impl Client {
             }
             Message::Seated(seated) => self.seated(*seated),
             Message::SeatRefused(reason) => {
-                self.phase = ClientPhase::Seating;
+                if self.phase == ClientPhase::Seating {
+                    self.phase = ClientPhase::Lobby;
+                }
                 self.log("seat-refused", &[&reason]);
+                self.auto_refused();
                 self.event(ClientEvent::SeatRefused(reason));
             }
             Message::Names(names) => {
@@ -1115,20 +1402,103 @@ impl Client {
             Message::Debrief(debrief) => {
                 self.log("debrief", &[]);
                 self.event(ClientEvent::Debrief(debrief));
+                // The flight is over for this player: back in the lobby.
+                if self.phase == ClientPhase::Leaving {
+                    self.end_flight();
+                }
+                if self.quit_after_debrief {
+                    self.net.disconnect(DisconnectReason::Left);
+                }
             }
             Message::MissionEnded(ended) => {
                 self.log("mission-ended", &[&format!("{:?}", ended.reason)]);
+                self.end_flight();
                 self.event(ClientEvent::MissionEnded(ended));
             }
-            // Client-to-host messages from the host break the protocol.
-            Message::ContentRefused(_) | Message::Ready(_) | Message::Leave => {
-                self.net.disconnect(DisconnectReason::ProtocolError);
+            Message::Lobby(lobby) => {
+                if lobby.me().is_some_and(|me| me.ready || me.flying) {
+                    self.auto_pending = false;
+                }
+                if self.lobby.as_ref() != Some(&*lobby) {
+                    self.auto_wait = false;
+                }
+                self.lobby = Some(*lobby);
+                self.event(ClientEvent::Lobby);
             }
+            Message::Refused { request, reason } => {
+                self.log("refused", &[&request.to_string(), &reason]);
+                self.auto_refused();
+                self.event(ClientEvent::Refused { request, reason });
+            }
+            Message::Goodbye(goodbye) => {
+                self.goodbye = Some(goodbye.clone());
+                self.event(ClientEvent::Goodbye(goodbye));
+            }
+            Message::FlightLoadouts(loadouts) => self.flight_loadouts(loadouts),
+            // Client-to-host messages from the host break the protocol.
+            _ => self.net.disconnect(DisconnectReason::ProtocolError),
         }
     }
 
-    /// The mission: built from the import, its manifest compared, then the
-    /// plane asked for.
+    /// The player's flight is over (it left, or the mission ended): no
+    /// plane, back in the lobby.
+    fn end_flight(&mut self) {
+        if matches!(self.phase, ClientPhase::Closed | ClientPhase::Connecting) {
+            return;
+        }
+        self.seat = None;
+        self.pending_own.clear();
+        self.early.clear();
+        self.auto_pending = false;
+        if self.phase != ClientPhase::Loading {
+            self.phase = ClientPhase::Lobby;
+        }
+    }
+
+    /// A lobby request of the automatic ready was refused: ask for any slot
+    /// next time, once the lobby has changed.
+    fn auto_refused(&mut self) {
+        if self.auto_pending {
+            self.auto_pending = false;
+            if self.auto_plane.is_none() {
+                self.auto_wait = true;
+            }
+            self.auto_plane = None;
+        }
+    }
+
+    /// The automatic ready ([`ClientConfig::auto_ready`]): in the lobby with
+    /// the mission loaded and not ready, take the slot asked for (or any)
+    /// and mark ready.
+    fn auto_ready(&mut self) {
+        if !self.config.auto_ready
+            || self.auto_pending
+            || self.auto_wait
+            || self.quit_after_debrief
+            || self.unable.is_some()
+            || self.phase != ClientPhase::Lobby
+        {
+            return;
+        }
+        let Some(lobby) = &self.lobby else {
+            return;
+        };
+        if self.loaded != Some(lobby.mission)
+            || self.number != Some(lobby.mission)
+            || lobby.phase == LobbyPhase::Ended
+            || lobby.me().is_none_or(|me| me.ready || me.flying)
+        {
+            return;
+        }
+        let plane = self.auto_plane.or(lobby.me().and_then(|me| me.slot));
+        self.auto_pending = true;
+        let mission = lobby.mission;
+        self.send_request(Message::TakePlane(TakePlane { mission, plane }));
+    }
+
+    /// The mission: built from the import and its manifest compared. A
+    /// player whose import cannot play it tells the host and stays in the
+    /// lobby, marked unable; one whose mission text cannot be read leaves.
     fn mission_arrived(&mut self, mission: Mission) {
         let spec = match mission.spec() {
             Ok(spec) => spec,
@@ -1139,29 +1509,73 @@ impl Client {
                 return;
             }
         };
+        self.number = Some(mission.number);
+        self.auto_pending = false;
+        self.auto_wait = false;
+        self.log("mission", &[&mission.host_tick.to_string()]);
+        self.build_mission(spec, mission.number, Some(&mission.manifest));
+    }
+
+    /// The flight starts with these planes' loadouts: the lobby's mission
+    /// is built again with them. The lobby's content check stands; only
+    /// the build can fail now.
+    fn flight_loadouts(&mut self, loadouts: Vec<(u32, LoadoutSpec)>) {
+        let (Some(mut spec), Some(number)) = (self.spec.clone(), self.number) else {
+            return;
+        };
+        if self.unable.is_some() {
+            return;
+        }
+        spec.plane_loadouts = loadouts.into_iter().collect();
+        self.build_mission(spec, number, None);
+    }
+
+    /// Builds `spec` from the import, comparing the manifest with the
+    /// host's when there is one.
+    fn build_mission(&mut self, spec: MissionSpec, number: u32, manifest: Option<&Manifest>) {
         let reads = ResourceReads::new(&self.resources);
         let built = match &mut self.builder {
             Some(builder) => builder(&spec, &reads),
             None => World::new(&spec, &reads, Seating::Open),
         };
-        let differences = reads.manifest().differences(&mission.manifest);
-        if !differences.is_empty() {
-            self.log("content-refused", &[&differences.join(" ")]);
+        let differences = manifest
+            .map(|manifest| reads.manifest().differences(manifest))
+            .unwrap_or_default();
+        let refusal = if !differences.is_empty() {
+            Some(format!(
+                "Your game data differs from the host's in {} file(s), such as {}. Import the \
+                 same version of the game.",
+                differences.len(),
+                differences[0]
+            ))
+        } else {
+            built
+                .as_ref()
+                .err()
+                .map(|error| format!("Your game cannot build this mission: {error}"))
+        };
+        if let Some(reason) = refusal {
+            self.log("content-refused", &[&differences.join(" "), &reason]);
             self.send(&Message::ContentRefused(ContentRefused {
+                mission: number,
                 names: differences.clone(),
+                reason: reason.clone(),
             }));
-            self.event(ClientEvent::ContentRefused { names: differences });
+            self.unable = Some(reason.clone());
+            self.mission = None;
+            self.loaded = None;
+            self.spec = Some(spec);
+            self.end_flight();
+            if self.phase == ClientPhase::Loading {
+                self.phase = ClientPhase::Lobby;
+            }
+            self.event(ClientEvent::ContentRefused {
+                names: differences,
+                reason,
+            });
             return;
         }
-        let world = match built {
-            Ok(world) => world,
-            Err(error) => {
-                self.log("mission-failed", &[&error.to_string()]);
-                self.event(ClientEvent::MissionFailed(error.to_string()));
-                self.net.disconnect(DisconnectReason::Other(0));
-                return;
-            }
-        };
+        let world = built.expect("a build that did not fail");
         let ground = ground_poses(&world);
         let mut models: Vec<AircraftId> = world
             .combat
@@ -1178,19 +1592,26 @@ impl Client {
             start_seconds,
         });
         self.spec = Some(spec);
-        self.log("mission", &[&mission.host_tick.to_string()]);
+        self.unable = None;
+        self.loaded = Some(number);
+        if self.phase == ClientPhase::Loading {
+            self.phase = ClientPhase::Lobby;
+        }
         self.event(ClientEvent::MissionLoaded);
-        self.phase = ClientPhase::Seating;
-        self.send(&Message::Ready(Ready {
-            plane: self.config.plane,
-        }));
     }
 
     /// The plane is the player's: its exact state decoded, the prediction
     /// started and the clock set ahead of the host.
     fn seated(&mut self, seated: Seated) {
+        let current = self.wire.as_ref().and_then(|wire| wire.flight);
+        if FlightOrder::of(seated.flight, current) == FlightOrder::Later {
+            self.begin_flight(seated.flight);
+        }
         let Some(mission) = &self.mission else {
-            self.net.disconnect(DisconnectReason::ProtocolError);
+            // The host seated a player whose import could not build the
+            // mission; its refusal is on the way and the host will take the
+            // plane back.
+            self.log("seat-failed", &["the mission is not loaded"]);
             return;
         };
         let world = &mission.world;
@@ -1310,15 +1731,53 @@ impl Client {
         }
     }
 
+    /// A new flight of the connection starts (its Seated message, or a
+    /// section of it that came first): the wire's baselines, events and
+    /// names start afresh, as the host's did, and so do the picture's
+    /// clocks and what it held.
+    fn begin_flight(&mut self, flight: u8) {
+        self.wire = Some(ClientConnection::for_flight(
+            self.ticks_per_snapshot,
+            flight,
+        ));
+        self.interp = Interpolator::new(self.ticks_per_snapshot);
+        self.render_clock = RenderClock::new();
+        self.held.clear();
+        self.effects.clear();
+        self.marks.clear();
+        self.destroyed.clear();
+        self.snapshot_tick = None;
+        self.pending_own.clear();
+        self.early.retain(|body| {
+            crate::wire::connection::own_state_header(body).is_ok_and(|h| h.flight == flight)
+        });
+    }
+
     fn payload(&mut self, sections: Vec<tore_net::Section>) {
         let mut tick = self.snapshot_tick.unwrap_or(0);
+        // The flight of the packet's snapshot, which its events share.
+        let mut stale = false;
         for section in sections {
+            if let Some(flight) = ClientConnection::section_flight(section.kind, &section.body) {
+                let current = self.wire.as_ref().and_then(|wire| wire.flight);
+                match FlightOrder::of(flight, current) {
+                    FlightOrder::Earlier => {
+                        // An earlier flight's, come late: nothing of it
+                        // applies now.
+                        stale |= section.kind == SECTION_SNAPSHOT;
+                        continue;
+                    }
+                    FlightOrder::Later => self.begin_flight(flight),
+                    FlightOrder::Same => {}
+                }
+            }
             match section.kind {
                 SECTION_SNAPSHOT => {
                     if let Some(t) = self.snapshot(&section.body) {
                         tick = t;
                     }
                 }
+                SECTION_EVENTS if stale => {}
                 SECTION_EVENTS => {
                     let Some(wire) = self.wire.as_mut() else {
                         continue;
@@ -1393,7 +1852,6 @@ impl Client {
 
     /// An Own state section: the host's exact state of the plane.
     fn own_state(&mut self, body: &[u8]) {
-        let now = self.now;
         if self.seat.is_none() {
             // The host sends its exact states as soon as it has seated the
             // player, and they can overtake the long Seated message. The
@@ -1402,21 +1860,37 @@ impl Client {
             self.early.push(body.to_vec());
             return;
         }
-        let (Some(wire), Some(seat), Some(mission)) = (
-            self.wire.as_mut(),
-            self.seat.as_mut(),
-            self.mission.as_ref(),
-        ) else {
+        let (Some(wire), Some(seat)) = (self.wire.as_mut(), self.seat.as_mut()) else {
             return;
         };
-        let (header, state) = match wire.own_state(body, &seat.model) {
-            Ok(read) => read,
-            Err(_) => {
-                self.net.disconnect(DisconnectReason::ProtocolError);
-                return;
+        // Read now, so the baselines stay in step with the host's; applied
+        // once the prediction has stepped to the update's time.
+        match wire.own_state(body, &seat.model) {
+            Ok(read) => {
+                self.stats.own_states += 1;
+                self.pending_own.push(read);
             }
+            Err(_) => self.net.disconnect(DisconnectReason::ProtocolError),
+        }
+    }
+
+    /// Applies the exact states received since the last update, oldest
+    /// first, to a prediction that has stepped to now. *Agent decision
+    /// (EF4):* applied after the update's steps rather than on arrival, so
+    /// the states that queue up while the game stalls meet a prediction
+    /// that has caught up; on arrival each was a tick the client had not
+    /// reached, and was adopted as it stood, one correction a snapshot.
+    fn apply_own_states(&mut self) {
+        for (header, state) in std::mem::take(&mut self.pending_own) {
+            self.apply_own_state(header, state);
+        }
+    }
+
+    fn apply_own_state(&mut self, header: OwnStateHeader, state: ExactState) {
+        let now = self.now;
+        let (Some(seat), Some(mission)) = (self.seat.as_mut(), self.mission.as_ref()) else {
+            return;
         };
-        self.stats.own_states += 1;
         let before = pose(&seat.predictor.plane().flight);
         let at = seat.predictor.tick();
         let restored =
@@ -1528,9 +2002,33 @@ impl Client {
             return;
         };
         let due = self.input_clock.position().floor().max(0.) as u64;
+        // Ticks the host has stepped already without this player's input
+        // (the game stalled): it repeated the last controls with no
+        // commands, so the prediction does the same and stays the host's
+        // (agent decision, EF4). The commands wait for the next tick.
+        let host_stepped = self.snapshot_tick.map_or(0, u64::from);
+        let host_had = u64::from(self.input_acked);
         let mut steps = 0;
         while seat.predictor.tick() < due && steps < MAX_TICKS_PER_UPDATE {
             let tick = seat.predictor.tick() + 1;
+            if tick <= host_stepped
+                && tick > host_had
+                && let Some(last) = seat.predictor.history().back().map(|r| r.frame)
+            {
+                if let Err(error) = seat
+                    .predictor
+                    .step(last, Vec::new(), &mission.world.terrain)
+                {
+                    let text = error.to_string();
+                    if let Some(d) = &mut self.diagnostics {
+                        d.line(now, "prediction-failed", &[&text]);
+                    }
+                    self.net.disconnect(DisconnectReason::Other(0));
+                    return;
+                }
+                steps += 1;
+                continue;
+            }
             let commands: Vec<Command> = std::mem::take(&mut self.pending);
             for command in &commands {
                 self.unacked.push_back(NumberedCommand {
@@ -1571,9 +2069,12 @@ impl Client {
         let Some(first) = history.front().map(|r| r.tick) else {
             return;
         };
+        // Ticks the host has stepped already would come too late, and their
+        // margins would read as a long delay (agent decision, EF4).
         let oldest = (u64::from(self.input_acked) + 1)
             .max(newest.saturating_sub(INPUT_REDUNDANCY - 1))
-            .max(first);
+            .max(first)
+            .max(self.snapshot_tick.map_or(0, |tick| u64::from(tick) + 1));
         let frames: Vec<InputFrame> = history
             .iter()
             .filter(|r| r.tick >= oldest && r.tick <= newest)
@@ -1586,6 +2087,7 @@ impl Client {
             (newest as f64 - render.floor()).clamp(0., 255.) as u8
         });
         let section = InputsSection {
+            flight: self.wire.as_ref().and_then(|wire| wire.flight).unwrap_or(0),
             newest_tick: newest as u32,
             frames,
             view_offset: view,

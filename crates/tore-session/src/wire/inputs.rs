@@ -164,6 +164,9 @@ pub type ViewSubject = EntityKey;
 /// The Inputs section.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InputsSection {
+    /// The connection's flight these inputs fly: the number the Seated
+    /// message gave (protocol 3). The host drops inputs of another flight.
+    pub flight: u8,
     /// The last tick in the section.
     pub newest_tick: u32,
     /// One frame per tick, oldest first, ending at `newest_tick`: 1 to 24.
@@ -217,6 +220,7 @@ impl InputsSection {
             return Err(WireError::Invalid("interpolation delay"));
         }
         let mut w = BitWriter::with_capacity(64);
+        let _ = w.write_bits(u64::from(self.flight), 8);
         let _ = w.write_bits(u64::from(self.newest_tick), 32);
         let _ = w.write_bits(count as u64, 5);
         let _ = w.write_bits(u64::from(self.view_offset), 8);
@@ -253,6 +257,7 @@ impl InputsSection {
     /// Reads a section [`Self::encode`] wrote.
     pub fn decode(bytes: &[u8]) -> WireResult<Self> {
         let mut r = BitReader::new(bytes);
+        let flight = r.read_bits(8)? as u8;
         let newest_tick = r.read_bits(32)? as u32;
         let count = r.read_bits(5)? as usize;
         if !(1..=limits::INPUT_TICKS).contains(&count) {
@@ -302,6 +307,7 @@ impl InputsSection {
         }
         bits::end(&mut r)?;
         Ok(Self {
+            flight,
             newest_tick,
             frames,
             view_offset,

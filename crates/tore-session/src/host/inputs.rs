@@ -242,6 +242,7 @@ mod tests {
     /// from `first`, each applied at its tick.
     fn section(newest: u32, frames: &[i16], first: u16, commands: &[u32]) -> InputsSection {
         InputsSection {
+            flight: 0,
             newest_tick: newest,
             frames: frames.iter().map(|&p| frame(p)).collect(),
             view_offset: 10,

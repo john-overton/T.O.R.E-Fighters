@@ -265,10 +265,14 @@ fn run(cell: Cell, seconds: u64) -> Vec<Figures> {
         .iter()
         .map(|&i| rig.players[i].client.clone_stats())
         .collect();
+    let seats: Vec<_> = bots
+        .iter()
+        .map(|&i| rig.players[i].client.seat().expect("seated").0)
+        .collect();
     // Leave cleanly: a refusal or a drop would show here.
     for &i in &bots {
         let now = rig.net.now();
-        rig.players[i].client.leave(now);
+        rig.players[i].client.leave_game(now);
     }
     assert!(
         rig.run_until(Duration::from_secs(12), |r| r.closed(a) && r.closed(b)),
@@ -288,7 +292,7 @@ fn run(cell: Cell, seconds: u64) -> Vec<Figures> {
                 e,
                 ClientEvent::Closed(CloseReason::Disconnected {
                     reason: DisconnectReason::Left,
-                    by_peer: true
+                    by_peer: false
                 })
             )),
             "{cell:?}: bot {n} left cleanly: {:?}",
@@ -300,7 +304,7 @@ fn run(cell: Cell, seconds: u64) -> Vec<Figures> {
         let player = &rig.players[i];
         let f = &mut figures[n];
         let stats = &at_end[n];
-        let seat = player.client.seat().expect("seated").0;
+        let seat = seats[n];
         let seated_tick = player
             .events
             .iter()

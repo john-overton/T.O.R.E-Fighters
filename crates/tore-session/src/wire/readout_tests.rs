@@ -47,7 +47,7 @@ fn the_numbers_stand_for_the_readout() {
 #[test]
 fn a_connection_carries_the_readout() {
     let mut host = HostConnection::new(4);
-    let mut client = ClientConnection::new(4);
+    let mut client = ClientConnection::for_flight(4, 0);
     let readout = samples::readout();
     let packet = host
         .snapshot_with_readout(&samples::header(400), &[], Some(&readout), 0)
@@ -226,7 +226,7 @@ fn a_busy_readout_stays_within_the_packet() {
         .collect();
     for messages in [0, 256] {
         let mut host = HostConnection::new(4);
-        let mut client = ClientConnection::new(4);
+        let mut client = ClientConnection::for_flight(4, 0);
         for tick in 0..20 {
             host.event(
                 tick,

@@ -43,6 +43,11 @@ const ID_LADDER: [u32; 3] = [0, 4, 10];
 /// The snapshot header.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SnapshotHeader {
+    /// The connection's flight the snapshot belongs to: the number the
+    /// Seated message gave (protocol 3). Each flight's sections code against
+    /// that flight's baselines only, so a client drops those of an earlier
+    /// flight that arrive late.
+    pub flight: u8,
     /// The host tick the snapshot shows, after that tick's step.
     pub tick: u32,
     /// The newest input tick received from this player.
@@ -62,6 +67,7 @@ pub struct SnapshotHeader {
 
 impl SnapshotHeader {
     fn write(&self, w: &mut BitWriter) {
+        let _ = w.write_bits(u64::from(self.flight), 8);
         let _ = w.write_bits(u64::from(self.tick), 32);
         let _ = w.write_bits(u64::from(self.input_received), 32);
         let _ = w.write_signed(i64::from(self.input_margin), 8);
@@ -74,6 +80,7 @@ impl SnapshotHeader {
 
     fn read(r: &mut BitReader<'_>) -> WireResult<Self> {
         Ok(Self {
+            flight: r.read_bits(8)? as u8,
             tick: r.read_bits(32)? as u32,
             input_received: r.read_bits(32)? as u32,
             input_margin: r.read_signed(8)? as i8,

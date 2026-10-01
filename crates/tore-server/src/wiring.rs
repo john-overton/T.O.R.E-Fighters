@@ -72,6 +72,7 @@ fn leave_text(reason: LeaveReason) -> String {
         LeaveReason::Silent => "no packet for 5 seconds".into(),
         LeaveReason::Kicked => "kicked".into(),
         LeaveReason::MissionEnded => "the mission ended".into(),
+        LeaveReason::HostLeft => "the host left the game".into(),
         LeaveReason::Replaced => "replaced by a new connection from the same address".into(),
         LeaveReason::Disconnected(why) => format!("disconnected ({why:?})"),
     }
@@ -84,6 +85,7 @@ fn end_text(reason: tore_session::wire::messages::EndReason) -> &'static str {
         EndReason::TimeLimit => "the time limit",
         EndReason::ServerStopping => "the server is stopping",
         EndReason::EndedByServer => "ended from the console",
+        EndReason::HostLeft => "the host left the game",
     }
 }
 
@@ -150,6 +152,9 @@ impl SessionHost {
                 HostLog::Fault { text, .. } => Event::Note(format!("fault: {text}")),
                 // The program logs "Stopped" itself.
                 HostLog::Stopped { .. } => continue,
+                HostLog::Lobby {
+                    callsign, event, ..
+                } => Event::Note(format!("{callsign} {event}")),
             });
         }
     }

@@ -36,11 +36,16 @@ impl OpenPlanes {
 /// When the mission starts flying.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StartMode {
-    /// The mission waits at tick 0, not flying and sending no snapshots,
-    /// until the first player is seated (the default).
+    /// The lobby waits, the mission not flying and sending no snapshots,
+    /// until the first player holding a slot is ready (the default; the
+    /// dedicated server's `start first-player`). Later ready players join
+    /// in flight.
     FirstPlayer,
-    /// It flies from the start.
+    /// It flies from the start; players who get ready join in flight.
     Now,
+    /// The King starts it, once every player holding a slot is ready: a game
+    /// a player hosts ([`HostConfig::king`]).
+    King,
 }
 
 /// What follows a mission's end.
@@ -114,6 +119,13 @@ pub struct HostConfig {
     /// The retail stall-speed switch is on for this process: a host refuses
     /// to start with it (as it does when `tore_sim::flight` reports it on).
     pub retail_stall_speeds: bool,
+    /// The King's address: in a game a player hosts, the hosting player's
+    /// own connection over the in-process link (`tore_net::LINK_ADDRESS`),
+    /// which no UDP sender can have. Only the King changes the mission,
+    /// starts it, ends it and kicks, and the King's leaving ends the game for
+    /// everyone. `None` on a dedicated server, which has no King. Set with
+    /// [`StartMode::King`].
+    pub king: Option<std::net::SocketAddr>,
 }
 
 impl HostConfig {
@@ -133,6 +145,7 @@ impl HostConfig {
             build,
             entropy: Entropy::System,
             retail_stall_speeds: false,
+            king: None,
         }
     }
 
@@ -173,6 +186,9 @@ impl HostConfig {
         }
         if self.time_limit.is_some_and(|t| t.is_zero()) {
             return bad("time-limit of 0 is written as none".into());
+        }
+        if (self.start == StartMode::King) != self.king.is_some() {
+            return bad("a King starts the mission exactly when the game has one".into());
         }
         if self.retail_stall_speeds || tore_sim::flight::retail_stall_speeds() {
             return Err(HostError::RetailStallSpeeds);
@@ -256,6 +272,14 @@ mod tests {
             },
             HostConfig {
                 time_limit: Some(Duration::ZERO),
+                ..base.clone()
+            },
+            HostConfig {
+                start: StartMode::King,
+                ..base.clone()
+            },
+            HostConfig {
+                king: Some("[100::]:0".parse().unwrap()),
                 ..base.clone()
             },
         ] {

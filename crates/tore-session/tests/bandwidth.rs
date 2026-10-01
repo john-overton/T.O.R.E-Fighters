@@ -335,6 +335,7 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
         busiest =
             busiest.max(readout.sensors.contacts.len() + readout.visual.len() + readout.map.len());
         let header = SnapshotHeader {
+            flight: 1,
             tick: tick32,
             input_received: tick32,
             input_margin: 3,
