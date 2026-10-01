@@ -209,18 +209,29 @@ mod tests {
         };
         let keepalive =
             Keepalive::start(game.try_clone().unwrap(), to, vec![7; 9], config).unwrap();
-        // Turning every 20 ms keeps it quiet.
+        // Turning every 20 ms keeps it quiet. A sleep of 20 ms can last 150
+        // on a macOS CI runner (slice EF-X), and a turn that late is a stall
+        // the thread rightly speaks for, so only those may bring one.
         let start = Instant::now();
+        let mut last = Instant::now();
+        let mut stalls = 0;
         while start.elapsed() < 400 * MS {
             keepalive.turned();
             thread::sleep(20 * MS);
+            stalls += u64::from(last.elapsed() >= config.quiet);
+            last = Instant::now();
         }
-        assert_eq!(keepalive.sent(), 0);
+        assert!(
+            keepalive.sent() <= stalls,
+            "{} keepalives while the loop turned, {stalls} turns late by the quiet time",
+            keepalive.sent()
+        );
+        let quiet = keepalive.sent();
         // Stalled: one about every 100 ms from 100 ms on, then none past
         // 700 ms.
         thread::sleep(1500 * MS);
         let sent = keepalive.sent();
-        assert!((3..=7).contains(&sent), "{sent} keepalives");
+        assert!((3..=7).contains(&(sent - quiet)), "{sent} keepalives");
         thread::sleep(300 * MS);
         assert_eq!(keepalive.sent(), sent, "none past the bound");
         let mut buf = [0u8; 64];
