@@ -1306,6 +1306,8 @@ impl Host {
                 .seat(seat)
                 .is_none_or(|s| s.plane.is_none())
             {
+                // Nothing to give back; a leaving player is done all the same.
+                given.push(seat);
                 continue;
             }
             if self.world.can_give_back(seat).is_ok() {
