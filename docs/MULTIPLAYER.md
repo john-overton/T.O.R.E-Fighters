@@ -537,6 +537,14 @@ duplicated packets):
 | Inputs the host had to repeat | Under 0.5 percent of ticks at up to 2 percent loss, under 2 percent at 5 percent, after the first 5 seconds |
 | Bandwidth | Measured each way per player and recorded against the [plan's budget](multiplayer-plan.md#bandwidth-budget) |
 
+*Measured (D10):* the matrix is a test in `tore-session` (`client/matrix_tests.rs`),
+a short form of 60 simulated seconds a cell in the normal suite and the five
+minutes an ignored test; every limit holds in all nine cells, with the own
+aircraft needing no correction at all after the first second of seating
+([baseline](baselines/net-2026-09-30.md)). The mission is the synthetic
+fixtures', whose AI never fires, so no bot is hit; corrections after a hit are
+covered by the D4 and D8a tests instead.
+
 ### Transport
 
 Hand-rolled UDP on the standard library's sockets, identical on Linux, Windows

@@ -124,6 +124,10 @@ struct Figures {
     // Extrapolation and repeats.
     entity_frames: u64,
     extrapolated: u64,
+    /// Of the entity frames and the extrapolated ones, those drawn with an
+    /// extra delay (sent twice a second).
+    far_frames: u64,
+    far_extrapolated: u64,
     ticks_judged: u64,
     repeated_judged: u64,
     repeated_all: u64,
@@ -145,7 +149,7 @@ impl Figures {
         format!(
             "{name}: own: {} hashes, {} snapshots, {} corrections ({} after seating, {} unexplained, {} visible = {:.2}%), \
              outside events {}/{} under 1 ft (worst {:.2} ft); others {} frames: within 1 ft \
-             {:.2}%, limit {:.2}%, worst {:.1} ft; extrapolated {:.3}%; repeated {:.3}% \
+             {:.2}%, limit {:.2}%, worst {:.1} ft; extrapolated {:.3}% ({} of {} far frames); repeated {:.3}% \
              (after settle {:.3}%); host to player {:.0} B/s (max {}), player to host \
              {:.0} B/s (max {}); rtt {:?}",
             self.hashes,
@@ -163,6 +167,8 @@ impl Figures {
             pct(self.within_limit, self.drawn),
             self.worst_other_ft,
             pct(self.extrapolated, self.entity_frames),
+            self.far_extrapolated,
+            self.far_frames,
             pct(self.repeated_all, self.ticks_judged.max(1)),
             pct(self.repeated_judged, self.ticks_judged),
             self.down_mean,
@@ -341,6 +347,8 @@ fn run(cell: Cell, seconds: u64) -> Vec<Figures> {
             .count() as u64;
         f.entity_frames = stats.entity_frames;
         f.extrapolated = stats.extrapolated;
+        f.far_frames = stats.far_frames;
+        f.far_extrapolated = stats.far_extrapolated;
         f.ticks_judged = settled_ticks;
         f.repeated_all = stats.inputs_repeated;
         f.repeated_judged = stats

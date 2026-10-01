@@ -31,7 +31,7 @@ How much to run depends on the moment. Three tiers, from cheapest to most thorou
 | --- | --- | --- | --- |
 | Per change | While you work, after each edit worth checking | `python3 tools/quick_check.py` | 5 minutes |
 | Before merge | Before you finish, and what the pre-push hook runs | The [AGENTS.md](../../AGENTS.md) check list, and the full single-player baseline where it exists | The list, plus about 5 minutes for the baseline |
-| Before a release | Ad hoc, by hand, before tagging | The whole battery with `TORE_AI_FUZZ=all`, and the lane pages' human checks | About 85 minutes of wall clock at 6 to 8 jobs |
+| Before a release | Ad hoc, by hand, before tagging | The whole battery with `TORE_AI_FUZZ=all`, and the lane pages' human checks; once multiplayer ships, also the [network matrix](#the-network-matrix) at five minutes a cell | About 85 minutes of wall clock at 6 to 8 jobs, and about 2 minutes more for the matrix |
 
 The pre-push hook stays as it is. The full battery and the seeded fuzz games are not
 part of any routine: run them when a release is near, or when you change something
@@ -126,6 +126,27 @@ TORE_AI_FUZZ=all python3 tools/battery.py --jobs 8
 
 Then read the lane pages' lists of things that need a human eye or ear. Record the
 result as a pass in [`docs/baselines/`](../baselines/) (see "Reports").
+
+### The network matrix
+
+The network code has its own matrix, a test rather than a battery lane: a host and two
+bots fly a scripted fight on the network simulator for each round trip (50, 150 and
+300 ms) and each loss (0, 2 and 5 percent each way, with 1 percent duplicates), and every
+limit of the [netcode acceptance table](../MULTIPLAYER.md#netcode-numbers) is measured
+and asserted. It uses the synthetic fixtures, so it needs no import and runs anywhere.
+
+```sh
+cargo test --locked -p tore-session --lib matrix_tests                      # 60 simulated seconds a cell, in the normal suite
+cargo test --locked -p tore-session --lib matrix_tests::full -- --ignored --nocapture   # five minutes a cell, before a release
+```
+
+The short form is part of `cargo test --workspace` (about 12 seconds on a quiet
+machine); the full form takes about 2 minutes 15 seconds at four cells at a time and
+prints one line of figures per bot. The CI job `Network loopback`
+(`.github/workflows/network.yml`) runs a host and two real `tore-bot` processes over
+loopback UDP on Linux, Windows and macOS. The measurements with real data, which need an
+import, are the ignored `host_players` test; see [the baseline](../baselines/net-2026-09-30.md)
+for the commands and results.
 
 ## Running it
 

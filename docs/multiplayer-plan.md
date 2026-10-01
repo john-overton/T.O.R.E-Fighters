@@ -363,22 +363,25 @@ planned.
 
 ## Bandwidth budget
 
-Agent estimates, to be replaced by measurements in stages D and H. The first
-stage D measurements (slice D6, 2026-09-30) are in the rows below: seat 0's
+Agent estimates, to be replaced by measurements in stages D and H. The stage D
+measurements are in the rows below. Slice D6 (2026-09-30) measured seat 0's
 snapshot packets on a three-minute 15 against 15 Quick Mission in the Ukraine
 theater, 10 nm apart, every aircraft within 20 nm and so at the full rate,
-acknowledged 100 ms later (`crates/tore-session/tests/bandwidth.rs`).
+acknowledged 100 ms later (`crates/tore-session/tests/bandwidth.rs`). Slice D10
+measured whole sessions, the player's packets and the host's together, with 2
+to 30 bots on the same mission (`crates/tore-session/tests/host_players.rs`,
+[the baseline](baselines/net-2026-09-30.md)).
 
 | Item | Estimate | Basis |
 | --- | --- | --- |
 | One remote aircraft per snapshot | about 20 bytes; **measured about 9** | Replays measure 10 to 12 bytes per aircraft per tick; snapshots are 4 ticks apart and delta against an older acknowledged state. Measured: the Snapshot section's bytes over its records, missiles included, against states 100 to 130 ms old |
 | Full 30-aircraft snapshot | about 750 bytes; **measured 177 to 879, mean 350** | Fits one 1,200-byte packet. Measured with 29 other aircraft, up to 31 missiles, 4 pilots and 2 debris pieces; the whole packet with its events 199 to 940 bytes, mean 386. Keeping 256 bytes for messages left a due entity waiting a snapshot in 5 percent of snapshots, all during missile-heavy moments; keeping none, never after the first second |
 | The player's own aircraft and cockpit readout per snapshot | 8 bytes of own-state hash and up to 200 bytes of readout per snapshot; 200 to 350 bytes of exact own state when needed and at least once a second; **measured** own state 54 to 363 bytes, mean 80, once a second for a gently turning plane (363 with no baseline); the readout **measured** at 4 to 506 bytes a snapshot, mean 52, against its plain 1,895, within its 200-byte share but for the first second | Stage D's client checks its own aircraft against a hash and receives the exact state only when it cannot match, plus the cockpit's readouts (contacts, RWR, weapon estimates) that only the host can compute ([architecture](ARCHITECTURE.md#the-flight-screen-draws-a-frame)). The host upload rows below are from before the readout; stage D measures them |
-| Client download | about 22 KB/s (175 kbit/s) before relevance filtering; **measured 13.2 KB/s (105 kbit/s)** with the readout, before the messages (11.7 KB/s without the readout) | 30 snapshots a second; the same at 5 percent loss |
-| Client upload | 2 to 4 KB/s | Inputs sent 60 times a second, each packet repeating recent unacknowledged ticks |
-| Host upload, 4-player co-op | about 0.5 Mbit/s | 3 clients |
-| Host upload, 15-player co-op | about 2.5 Mbit/s | 14 clients |
-| Host upload, 30 players | about 5 Mbit/s unfiltered, roughly half with filtering | 29 clients |
+| Client download | about 22 KB/s (175 kbit/s) before relevance filtering; **measured 13.2 KB/s (105 kbit/s)** with the readout, before the messages (11.7 KB/s without the readout); **measured (D10) with everything, 10.5 to 13.8 KB/s on average and up to 38 KB/s in a peak second** | 30 snapshots a second; the same at 5 percent loss |
+| Client upload | 2 to 4 KB/s; **measured (D10) 2.5 to 2.6 KB/s** with 2 to 30 players on a perfect link, and 3.0 to 4.8 KB/s at round trips of 50 to 300 ms (the synthetic matrix), above the estimate at 300 ms | Inputs sent 60 times a second, each packet repeating every unacknowledged tick, so the upload grows with the round trip up to the 24-tick cap |
+| Host upload, 4-player co-op | about 0.5 Mbit/s; **measured (D10) 0.17 Mbit/s with 2 players, 0.79 with 8** | 3 clients |
+| Host upload, 15-player co-op | about 2.5 Mbit/s; **measured (D10) 1.49 Mbit/s** (peak second 4.2) | 14 clients; 15 against 15, every player 12.4 KB/s on average |
+| Host upload, 30 players | about 5 Mbit/s unfiltered, roughly half with filtering; **measured (D10) 3.32 Mbit/s** (peak second 6.4) | 29 clients; every player 13.8 KB/s on average, 27.5 at the peak |
 | Checkpoint | 150 to 600 KB before compression; unknown until measured | 5 to 20 KB of state per aircraft, AI included |
 | Standby stream | 15 to 60 KB/s per standby, plus about 5 KB/s of inputs | One checkpoint every 10 seconds; could be delta-coded against the previous one |
 | Relay cost per relayed player | about 90 MB per hour | Snapshots and inputs forwarded |
