@@ -313,6 +313,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-formats/src/weather.rs", ("flight-environment",), "weather data"),
     _r("crates/tore-formats/src/weather/*", ("flight-environment",), "weather data"),
     _r("crates/tore-formats/src/weapons.rs", ("flight-combat", "menus-creator", "ai-fights"), "weapon data"),
+    _r("crates/tore-formats/src/chat.rs", ("menus-validate",), "quick chat messages (CHAT.TXT)"),
     _r("crates/tore-formats/src/text.rs", ("menus-validate", "menus-screens"), "text decoding"),
     _r("crates/tore-formats/src/ui.rs", MENU_FAMILIES, "menu data", windowed=True),
     _r("crates/tore-formats/src/ui/*", MENU_FAMILIES, "menu data", windowed=True),

@@ -14,8 +14,8 @@
 //! - [`import`]: the import itself, with progress and its report file.
 //! - [`pack`]: the pack format, loading the newest good pack and pruning older
 //!   generations. Behaviour: `docs/spec/import-cache.md`.
-//! - [`selection`]: the resource lists the import keeps for the menus and the
-//!   debrief.
+//! - [`selection`]: the resource lists the import keeps for the menus, the
+//!   debrief and the multiplayer screens.
 //! - [`files`]: the two bounded file helpers the settings files also use.
 //! - [`set_log`]: where this crate's notes go (it has no logging dependency).
 
@@ -29,7 +29,7 @@ pub mod selection;
 
 pub use import::{Imported, Progress, import_with_progress};
 pub use media_source::{DetectError, Kind, MediaSource};
-pub use pack::{Loaded, check_markers, load, load_with};
+pub use pack::{Loaded, check_markers, check_multiplayer_marker, load, load_with};
 
 /// The same boxed error as the game's `AppResult`, so the two mix freely.
 pub type ImportResult<T> = Result<T, Box<dyn std::error::Error>>;

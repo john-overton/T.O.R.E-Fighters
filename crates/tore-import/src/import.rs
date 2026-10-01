@@ -6,10 +6,19 @@ use crate::{
     ImportResult, Level, Resources,
     media_source::{self, MediaSource},
     note,
-    pack::{cleanup_previous_imports, load_pack, write_pack},
-    selection::{DEBRIEF_ART, DEBRIEF_DATA, MENU_ART, MENU_DATA},
+    pack::{
+        MULTIPLAYER_MARKER, MULTIPLAYER_MARKER_VALUE, cleanup_previous_imports, load_pack,
+        write_pack,
+    },
+    selection::{
+        CHAT_FILE, CHAT_RESOURCE, DEBRIEF_ART, DEBRIEF_DATA, MENU_ART, MENU_DATA, MULTIPLAYER_ART,
+        MULTIPLAYER_DATA,
+    },
 };
 use std::{fs, path::Path};
+
+/// The most `CHAT.TXT` bytes the import will read (the retail file is 591).
+const CHAT_LIMIT: usize = 16 * 1024;
 
 /// How far an import has got, for the first-run screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -97,9 +106,9 @@ pub fn import_with_progress<T>(
         &aircraft_libs.iter().collect::<Vec<_>>(),
         &scene_layouts,
     )?;
-    for (filename, names, debrief) in [
-        ("FA_1.LIB", MENU_ART, DEBRIEF_ART),
-        ("FA_2.LIB", MENU_DATA, DEBRIEF_DATA),
+    for (filename, names, debrief, multiplayer) in [
+        ("FA_1.LIB", MENU_ART, DEBRIEF_ART, MULTIPLAYER_ART),
+        ("FA_2.LIB", MENU_DATA, DEBRIEF_DATA, MULTIPLAYER_DATA),
     ] {
         let lib = source.archive(filename)?;
         report.push_str(&format!(
@@ -113,6 +122,7 @@ pub fn import_with_progress<T>(
             .filter(|n| {
                 names.contains(&n.as_str())
                     || debrief.contains(&n.as_str())
+                    || multiplayer.contains(&n.as_str())
                     || n.as_str() == "MCICONS.PIC"
                     || aircraft_names.contains(*n)
                     || scene_names.contains(*n)
@@ -229,6 +239,38 @@ pub fn import_with_progress<T>(
             total: Some(scores.len()),
         });
     }
+    // CHAT.TXT lies loose beside the archives (installed game) or inside the
+    // disc's installer container. Without it chat has no quick messages, which
+    // is not a reason to refuse the import.
+    match source.loose_file(CHAT_FILE, CHAT_LIMIT) {
+        Ok(Some(bytes)) => {
+            let count = tore_formats::chat::parse(&bytes).len();
+            report.push_str(&format!(
+                "{CHAT_FILE}: {} bytes, {count} quick messages\n",
+                bytes.len()
+            ));
+            if count == 0 {
+                summary.push(format!("{CHAT_FILE} holds no quick messages"));
+            }
+            resources.insert(CHAT_RESOURCE.into(), bytes);
+        }
+        Ok(None) => {
+            report.push_str(&format!(
+                "Optional quick chat messages unavailable: {CHAT_FILE} is not in this source\n"
+            ));
+            summary.push("Chat quick messages unavailable: CHAT.TXT is not in this source".into());
+        }
+        Err(error) => {
+            note(
+                Level::Warn,
+                &format!("Optional quick chat messages unavailable: {error}"),
+            );
+            report.push_str(&format!(
+                "Optional quick chat messages unavailable: {error}\n"
+            ));
+            summary.push(format!("Chat quick messages unreadable: {error}"));
+        }
+    }
     let mut missing_scores = 0;
     for name in tore_formats::music::SCORES {
         if let Some(bytes) = resources.get(*name) {
@@ -254,6 +296,7 @@ pub fn import_with_progress<T>(
     resources.insert("TORE_COMBAT_V1".into(), b"RAW1".to_vec());
     resources.insert("TORE_AIRPORTS_V1".into(), b"SCENE1".to_vec());
     resources.insert("TORE_SPEECH_V1".into(), b"ALL1".to_vec());
+    resources.insert(MULTIPLAYER_MARKER.into(), MULTIPLAYER_MARKER_VALUE.to_vec());
     drop(decode(&resources)?);
     fs::create_dir_all(destination)?;
     // Generation files keep the previous import usable until the new pack is complete.

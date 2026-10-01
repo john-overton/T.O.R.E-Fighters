@@ -301,6 +301,36 @@ impl MediaSource {
         }
     }
 
+    /// A small file that lies loose in an installed game folder and in the
+    /// disc's installer container, in no archive (`CHAT.TXT`). `Ok(None)` means
+    /// the source does not carry it; an error means it is there but could not
+    /// be read or is larger than `limit`. A disc entry is decompressed in
+    /// memory; nothing is written.
+    pub fn loose_file(&self, name: &str, limit: usize) -> ImportResult<Option<Vec<u8>>> {
+        match self.kind {
+            Kind::Installed => {
+                let Some(path) = named(&files(&self.path)?, name).cloned() else {
+                    return Ok(None);
+                };
+                if fs::metadata(&path)?.len() > limit as u64 {
+                    return Err(format!("{name} exceeds its {limit} byte bound").into());
+                }
+                let mut bytes = Vec::new();
+                fs::File::open(path)?
+                    .take(limit as u64 + 1)
+                    .read_to_end(&mut bytes)?;
+                Ok(Some(bytes))
+            }
+            Kind::Disc => {
+                let container = self.container()?;
+                if container.entry(name).is_none() {
+                    return Ok(None);
+                }
+                Ok(Some(container.read(name, limit)?))
+            }
+        }
+    }
+
     /// The reviewed executable's bytes. Never executed, only read as data.
     pub fn executable(&self) -> ImportResult<Vec<u8>> {
         match self.kind {
@@ -580,6 +610,69 @@ mod tests {
         assert_eq!(source.archive("FA_1.LIB").unwrap().entries.len(), 1);
         assert_eq!(source.executable().unwrap(), b"synthetic executable");
         assert!(source.optional_archive("FA_4B.LIB").unwrap().is_none());
+    }
+
+    #[test]
+    fn a_loose_file_is_read_from_an_installed_folder_whatever_its_case() {
+        let directory = TempDir::new();
+        installed(&directory);
+        let source = MediaSource::detect(&directory.0).unwrap();
+        assert_eq!(source.loose_file("CHAT.TXT", 64).unwrap(), None);
+        directory.file("chat.txt", b"send to all\\hello\r\n");
+        assert_eq!(
+            source.loose_file("CHAT.TXT", 64).unwrap().unwrap(),
+            b"send to all\\hello\r\n"
+        );
+        // A file over the bound is an error, not a truncated read.
+        assert!(source.loose_file("CHAT.TXT", 4).is_err());
+    }
+
+    #[test]
+    fn a_loose_file_is_read_from_the_disc_container() {
+        let directory = TempDir::new();
+        directory.file(
+            "SETUP.ESA",
+            &container(&[
+                ("FA.EXE", b"synthetic executable"),
+                ("CHAT.TXT", b"send to all\\hello\r\n"),
+            ]),
+        );
+        let source = MediaSource::detect(&directory.0).unwrap();
+        assert_eq!(source.kind, Kind::Disc);
+        assert_eq!(
+            source.loose_file("CHAT.TXT", 64).unwrap().unwrap(),
+            b"send to all\\hello\r\n"
+        );
+        assert_eq!(source.loose_file("BRIEFING.TXT", 64).unwrap(), None);
+        assert!(source.loose_file("CHAT.TXT", 4).is_err());
+    }
+
+    /// The retail disc and the installed game, when both are present (the
+    /// `gameassets` link or `TORE_GAME_DIR`): the disc's compressed `CHAT.TXT`
+    /// decodes to the installed file's bytes. Skips quietly otherwise.
+    #[test]
+    fn the_retail_disc_holds_the_installed_chat_file() {
+        let root = std::env::var_os("TORE_GAME_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gameassets/fighters-anthology")
+            });
+        let (Ok(installed), Ok(disc)) = (
+            MediaSource::detect(&root),
+            MediaSource::detect(&root.join("disc1")),
+        ) else {
+            eprintln!("skipped: no retail install and disc");
+            return;
+        };
+        let (Some(from_install), Some(from_disc)) = (
+            installed.loose_file("CHAT.TXT", 16 * 1024).unwrap(),
+            disc.loose_file("CHAT.TXT", 16 * 1024).unwrap(),
+        ) else {
+            eprintln!("skipped: CHAT.TXT is not in both");
+            return;
+        };
+        assert_eq!(from_install, from_disc);
+        assert_eq!(tore_formats::chat::parse(&from_disc).len(), 12);
     }
 
     #[test]

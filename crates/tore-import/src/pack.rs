@@ -90,6 +90,25 @@ pub fn check_markers(resources: &Resources) -> ImportResult<()> {
     Ok(())
 }
 
+/// The marker of the multiplayer screens' art (slice EF1): pictures, dialogs,
+/// menus and the quick-message file listed in [`crate::selection`]. The import
+/// writes it with the others, but [`check_markers`] does not ask for it: the
+/// dedicated server needs none of that art and must keep running on a pack an
+/// older import made. The game asks with [`check_multiplayer_marker`].
+pub const MULTIPLAYER_MARKER: &str = "TORE_MULTIPLAYER_V1";
+/// What the marker holds.
+pub const MULTIPLAYER_MARKER_VALUE: &[u8] = b"ART1";
+
+/// The game's extra check: a pack from before the multiplayer art was kept
+/// must be re-imported once. Call it after [`check_markers`] in the game's
+/// decoder. The dedicated server and the bot do not call it.
+pub fn check_multiplayer_marker(resources: &Resources) -> ImportResult<()> {
+    if resources.get(MULTIPLAYER_MARKER).map(Vec::as_slice) != Some(MULTIPLAYER_MARKER_VALUE) {
+        return Err("cache predates the multiplayer screens' art; re-import media".into());
+    }
+    Ok(())
+}
+
 /// Loads the newest pack in `directory` that `decode` accepts, then deletes the
 /// older generations. A pack `decode` refuses is skipped and kept, and the next
 /// older one is tried; if none is good the error names the last one tried.
@@ -408,5 +427,40 @@ mod tests {
         resources.insert("TORE_COMBAT_V1".to_string(), b"RAW0".to_vec());
         let error = check_markers(&resources).unwrap_err().to_string();
         assert!(error.contains("re-import media"), "{error}");
+    }
+
+    #[test]
+    fn a_pack_without_the_multiplayer_marker_is_refused_by_the_game_only() {
+        let mut resources = marked();
+        // The shared check, used by the dedicated server and the bot, accepts
+        // a pack an older import wrote.
+        check_markers(&resources).unwrap();
+        let error = check_multiplayer_marker(&resources)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("re-import media"), "{error}");
+        resources.insert(MULTIPLAYER_MARKER.to_string(), b"ART0".to_vec());
+        assert!(check_multiplayer_marker(&resources).is_err());
+        resources.insert(
+            MULTIPLAYER_MARKER.to_string(),
+            MULTIPLAYER_MARKER_VALUE.to_vec(),
+        );
+        check_multiplayer_marker(&resources).unwrap();
+        check_markers(&resources).unwrap();
+    }
+
+    #[test]
+    fn the_multiplayer_marker_name_fits_the_pack() {
+        assert!((1..=32).contains(&MULTIPLAYER_MARKER.len()));
+        assert!((1..=32).contains(&crate::selection::CHAT_RESOURCE.len()));
+        let directory = CacheDirectory::new();
+        let mut resources = marked();
+        resources.insert(
+            MULTIPLAYER_MARKER.to_string(),
+            MULTIPLAYER_MARKER_VALUE.to_vec(),
+        );
+        let path = directory.0.join("menu-1.pack");
+        write_pack(&path, &resources).unwrap();
+        assert_eq!(read_pack(&path).unwrap(), resources);
     }
 }

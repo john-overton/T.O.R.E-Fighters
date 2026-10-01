@@ -1,6 +1,7 @@
 //! Bounded readers for user-owned Fighters Anthology menu and theater resources.
 //! No executable resource is ever executed. See docs/formats/menu.md and theater.md.
 pub mod aircraft;
+pub mod chat;
 mod dcl;
 pub mod esa;
 pub mod executable;
