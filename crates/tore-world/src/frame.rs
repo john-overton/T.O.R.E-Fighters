@@ -9,13 +9,13 @@
 //! plane is plane 0. Nothing here draws.
 
 use crate::{
-    combat::launcher,
+    combat::launcher as combat_launcher,
     readout::CockpitReadout,
     seats::{PlaneId, SeatId},
     snapshot::RenderSnapshot,
     world::{Cue, World},
 };
-use std::borrow::Cow;
+use std::{borrow::Cow, cell::OnceCell};
 use tore_sim::{
     combat::{
         countermeasures::Devices,
@@ -24,6 +24,46 @@ use tore_sim::{
     },
     flight,
 };
+
+/// The readout of a frame, built on first use. A host or a client that has
+/// the readout already makes it with [`ReadoutSlot::ready`]; `World::flight_frame`
+/// makes one that builds it from the world when a display first reads it, and
+/// [`World::flight_frame_sharing`] one that keeps what it builds in a cell
+/// the caller owns, so the frames of one tick build it once between them.
+/// It reads as a [`CockpitReadout`].
+pub struct ReadoutSlot<'a> {
+    shared: Option<&'a OnceCell<CockpitReadout>>,
+    own: OnceCell<CockpitReadout>,
+    make: Box<dyn Fn() -> CockpitReadout + 'a>,
+}
+impl<'a> ReadoutSlot<'a> {
+    /// A slot holding `readout`.
+    pub fn ready(readout: CockpitReadout) -> Self {
+        Self {
+            shared: None,
+            own: OnceCell::from(readout),
+            make: Box::new(|| unreachable!("a ready slot is full")),
+        }
+    }
+    fn lazy(
+        shared: Option<&'a OnceCell<CockpitReadout>>,
+        make: impl Fn() -> CockpitReadout + 'a,
+    ) -> Self {
+        Self {
+            shared,
+            own: OnceCell::new(),
+            make: Box::new(make),
+        }
+    }
+}
+impl std::ops::Deref for ReadoutSlot<'_> {
+    type Target = CockpitReadout;
+    fn deref(&self) -> &CockpitReadout {
+        self.shared
+            .unwrap_or(&self.own)
+            .get_or_init(|| (self.make)())
+    }
+}
 
 /// What the flight screen draws this frame, for the plane `plane` of `seat`.
 pub struct FlightFrame<'a> {
@@ -54,7 +94,10 @@ pub struct FlightFrame<'a> {
     /// What the seat's displays and cockpit sounds show that only the host
     /// knows, for the flight `presented` is (a tick's frame and a frozen
     /// flight show the flight as the last tick left it).
-    pub readout: CockpitReadout,
+    ///
+    /// It is built when first read, so a frame that never reads it costs
+    /// nothing; read it through the slot like the readout itself.
+    pub readout: ReadoutSlot<'a>,
     /// The cues of the tick this frame presents, every seat's; read them with
     /// [`FlightFrame::cues`]. Empty for a frame drawn between ticks.
     pub tick_cues: &'a [Cue],
@@ -182,14 +225,36 @@ impl World {
         picture: &'a RenderSnapshot,
         cues: &'a [Cue],
     ) -> Option<FlightFrame<'a>> {
+        self.frame(seat, presented, picture, cues, None)
+    }
+
+    /// [`World::flight_frame`] for the flight as the last tick left it, whose
+    /// readout is kept in `shared` once built: every frame made with the same
+    /// cell between two steps of the world builds it once. Give each tick's
+    /// frames a cell of their own.
+    pub fn flight_frame_sharing<'a>(
+        &'a self,
+        seat: SeatId,
+        picture: &'a RenderSnapshot,
+        cues: &'a [Cue],
+        shared: &'a OnceCell<CockpitReadout>,
+    ) -> Option<FlightFrame<'a>> {
+        self.frame(seat, None, picture, cues, Some(shared))
+    }
+
+    fn frame<'a>(
+        &'a self,
+        seat: SeatId,
+        presented: Option<flight::State>,
+        picture: &'a RenderSnapshot,
+        cues: &'a [Cue],
+        shared: Option<&'a OnceCell<CockpitReadout>>,
+    ) -> Option<FlightFrame<'a>> {
         let cockpit = &self.cockpits[self.cockpit_of(seat)?];
+        let config = self.combat.state.ownship(cockpit.plane.0)?.configuration();
+        let launcher = combat_launcher(presented.as_ref().unwrap_or(&cockpit.flight));
         let presented = presented.map_or(Cow::Borrowed(&cockpit.flight), Cow::Owned);
-        let readout = self.combat.cockpit_readout(
-            cockpit.plane.0,
-            launcher(&presented),
-            self.ai_wings.as_ref(),
-            Some(cockpit),
-        )?;
+        let plane = cockpit.plane.0;
         Some(FlightFrame {
             seat,
             plane: cockpit.plane,
@@ -199,8 +264,12 @@ impl World {
             picture,
             smoke: [&self.combat.state.smoke, &self.combat.contrails],
             devices: &self.combat.state.devices,
-            config: self.combat.state.ownship(cockpit.plane.0)?.configuration(),
-            readout,
+            config,
+            readout: ReadoutSlot::lazy(shared, move || {
+                self.combat
+                    .cockpit_readout(plane, launcher, self.ai_wings.as_ref(), Some(cockpit))
+                    .expect("the seat's plane has an ownship")
+            }),
             tick_cues: cues,
         })
     }

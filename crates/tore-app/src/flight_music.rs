@@ -218,14 +218,10 @@ mod tests {
             smoke: [&parts.smoke, &parts.smoke],
             devices: &parts.devices,
             config: combat.own().configuration(),
-            readout: tore_world::readout::build(
-                combat,
-                0,
-                crate::combat::launcher(flight),
-                None,
-                None,
-            )
-            .unwrap(),
+            readout: tore_world::frame::ReadoutSlot::ready(
+                tore_world::readout::build(combat, 0, crate::combat::launcher(flight), None, None)
+                    .unwrap(),
+            ),
             tick_cues: &[],
         }
     }

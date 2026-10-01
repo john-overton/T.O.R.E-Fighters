@@ -2547,7 +2547,12 @@ flight, where the weapon HUD and the target cue draw; the instruments, the
 scope's reprojection and the target window's bearing use the flight as the last
 tick left it, as before; and the seeker tone is the readout of the tick frame,
 as before. Per-tick readers (the RWR tone, the situation music, the view rig's
-target, the navigation page) read the readout of the tick's frame. The app
+target) read the readout of the tick's frame. The frame's readout is built when
+a display first reads it (`ReadoutSlot`), and the frames of one tick share one
+build (`World::flight_frame_sharing`), so a windowed tick builds it once and a
+rendered frame once more; `OwnshipView::at(launcher)` works the observation and
+the firing solution out once for all the estimates. The navigation page still
+reads the plane's tower service from its cockpit, at the start of each tick. The app
 reads it in `weapon_hud`, `scope`, `combat_view`, `flight_map`, `flight_views`,
 `flight_music`, `rwr_tone` and the redraw; `combat_view::PlaneState` is gone.
 The airport group holds a clone of the plane's `airport::Service`, for the ILS

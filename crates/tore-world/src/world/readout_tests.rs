@@ -155,7 +155,7 @@ fn the_frame_carries_the_readout_for_the_flight_it_presents() {
     let frame = world
         .flight_frame(SeatId(1), Some(presented), picture, &[])
         .unwrap();
-    assert_eq!(frame.readout, expected);
+    assert_eq!(*frame.readout, expected);
     assert_eq!(frame.readout.plane, F_HUMAN.0);
     assert_eq!(
         frame.config.aircraft,

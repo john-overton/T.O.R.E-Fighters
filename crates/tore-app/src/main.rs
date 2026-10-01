@@ -431,6 +431,19 @@ fn tick_frame<'a>(
         .expect("the presented seat flies a plane")
 }
 
+/// [`tick_frame`] whose readout is built once, when the first of the tick's
+/// frames reads it, and kept in `shared` for the rest of the tick's frames.
+fn shared_tick_frame<'a>(
+    world: &'a world::World,
+    seat: seats::SeatId,
+    cues: &'a [world::Cue],
+    shared: &'a std::cell::OnceCell<tore_world::readout::CockpitReadout>,
+) -> frame::FlightFrame<'a> {
+    world
+        .flight_frame_sharing(seat, world.combat.render_snapshot(), cues, shared)
+        .expect("the presented seat flies a plane")
+}
+
 /// Everything that presents a tick, borrowed from `App` apart from the
 /// renderer, which the redraw handler holds while the ticks run.
 struct TickPresenter<'a> {
@@ -461,6 +474,8 @@ impl TickPresenter<'_> {
     /// docs/ARCHITECTURE.md, "One tick". Returns false when a fault in the
     /// native research adapter stopped the tick, which pauses the flight.
     fn present(&mut self, input: &seats::SeatInput, out: &world::TickOutput) -> bool {
+        // The tick's readout, built when a presenter first reads it.
+        let shared = std::cell::OnceCell::new();
         let mut weapon_cycled = false;
         for (index, cue) in out.cues.iter().enumerate() {
             if index == out.commanded {
@@ -485,9 +500,9 @@ impl TickPresenter<'_> {
                         audio.radio(stems, true);
                     }
                 }
-                world::Cue::Flown => self.flown(input.seat),
+                world::Cue::Flown => self.flown(input.seat, &shared),
                 world::Cue::CombatStepped => {
-                    let frame = tick_frame(self.world, input.seat, &out.cues);
+                    let frame = shared_tick_frame(self.world, input.seat, &out.cues, &shared);
                     let (before, after) = (frame.previous, frame.flight);
                     if let Some(view) = self.flight_ui.pilot_death_view(
                         before.systems.pilot.dead || before.escape.is_some(),
@@ -512,7 +527,7 @@ impl TickPresenter<'_> {
                 }
                 world::Cue::Picture => {
                     // The mission recording reads the tick's picture.
-                    let frame = tick_frame(self.world, input.seat, &out.cues);
+                    let frame = shared_tick_frame(self.world, input.seat, &out.cues, &shared);
                     if let Some(recording) = &mut self.recorder {
                         let idle = flight::PilotInput::default();
                         let others = other_crews(&self.world.cockpits, frame.plane, &idle);
@@ -562,7 +577,7 @@ impl TickPresenter<'_> {
         }
         if weapon_cycled {
             show_selected_weapon_page(
-                &tick_frame(self.world, input.seat, &out.cues),
+                &shared_tick_frame(self.world, input.seat, &out.cues, &shared),
                 &self.world.combat,
                 self.instruments,
             );
@@ -578,7 +593,7 @@ impl TickPresenter<'_> {
         if let Some(recording) = &mut self.recorder {
             recording.drain_comms(&mut self.world.comms);
         }
-        let frame = tick_frame(self.world, input.seat, &out.cues);
+        let frame = shared_tick_frame(self.world, input.seat, &out.cues, &shared);
         let (plane, flight) = (frame.plane.0, frame.flight);
         let danger = tore_sim::ejection::assess(flight, |x, z| {
             f64::from(self.world.terrain.height(x as f32, z as f32))
@@ -679,6 +694,7 @@ impl TickPresenter<'_> {
         }
         self.input.afterburner_feedback(flight.afterburner_active());
         self.input.feedback_tick();
+        drop(frame);
         if let Some(recording) = &mut self.recorder {
             recording.end(Some(&mut self.flight_ui), &mut self.world.combat);
         }
@@ -698,8 +714,12 @@ impl TickPresenter<'_> {
     /// Presentation that follows the player's flight, the weather clock and
     /// turbulence: each camera slot's weather, the view rig, blackout and
     /// redout, wing vapor and control-surface sounds.
-    fn flown(&mut self, seat: seats::SeatId) {
-        let frame = tick_frame(self.world, seat, &[]);
+    fn flown(
+        &mut self,
+        seat: seats::SeatId,
+        shared: &std::cell::OnceCell<tore_world::readout::CockpitReadout>,
+    ) {
+        let frame = shared_tick_frame(self.world, seat, &[], shared);
         let flight = frame.flight;
         let speed = flight.speed;
         let scene = flight_views::Scene::new(
@@ -3277,14 +3297,12 @@ impl ApplicationHandler for App {
                         for _ in 0..steps {
                             // Navigation-page clicks become airport commands,
                             // from the state at the start of the tick.
-                            let start = tick_frame(&self.world, SEAT, &[]);
-                            if let Some(service) = &start.readout.airport.service {
-                                self.instruments.navigation.refresh(
-                                    &self.world.terrain.airport_scene,
-                                    service,
-                                    start.flight.position,
-                                );
-                            }
+                            let start = seat_cockpit(&self.world, SEAT);
+                            self.instruments.navigation.refresh(
+                                &self.world.terrain.airport_scene,
+                                &start.airport_service,
+                                start.flight.position,
+                            );
                             for button in std::mem::take(&mut self.instruments.navigation.pending) {
                                 if let Some(id) = self.instruments.navigation.control(button) {
                                     queue_command(

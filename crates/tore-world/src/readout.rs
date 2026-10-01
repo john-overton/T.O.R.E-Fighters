@@ -418,16 +418,19 @@ pub fn build(
     let display = view.display_target();
     let here = launcher.position;
 
+    // One view of the launcher, which works out the observation and the
+    // firing solution once for all of these.
+    let at = view.at(launcher);
     let estimates = Estimates {
-        readiness: view.readiness(launcher),
+        readiness: at.readiness(),
         guidance_available: view.guidance_available(launcher),
-        can_lock: view.can_lock(launcher),
-        observation: view.weapon_observation(launcher),
-        max_range: view.estimated_max_range(launcher),
-        band: view.favorable_firing_band(launcher),
-        in_range: view.in_estimated_range(launcher),
-        hit_percent: view.estimated_hit_percent(launcher),
-        solution_seconds: view.mounted_solution(launcher).map(|s| s.seconds),
+        can_lock: at.can_lock(),
+        observation: at.weapon_observation(),
+        max_range: at.estimated_max_range(),
+        band: at.favorable_firing_band(),
+        in_range: at.in_estimated_range(),
+        hit_percent: at.estimated_hit_percent(),
+        solution_seconds: at.mounted_solution().map(|s| s.seconds),
     };
 
     let sensors = &own.sensors;
@@ -545,7 +548,7 @@ pub fn build(
             status: own.mounted.status,
             target: own.mounted.target,
             observation: own.mounted.observation,
-            tone: view.seeker_tone(launcher),
+            tone: at.seeker_tone(),
         },
         estimates,
         targets: Targets {

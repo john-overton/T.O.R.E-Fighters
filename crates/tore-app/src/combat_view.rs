@@ -1223,9 +1223,11 @@ pub(crate) mod render_hash_tests {
             smoke: [&smoke, &smoke],
             devices: &devices,
             config: combat.state.own().configuration(),
-            readout: combat
-                .cockpit_readout(combat.own_id(), launcher(&player), None, None)
-                .unwrap(),
+            readout: tore_world::frame::ReadoutSlot::ready(
+                combat
+                    .cockpit_readout(combat.own_id(), launcher(&player), None, None)
+                    .unwrap(),
+            ),
             tick_cues: &[],
         };
         let glows = view.afterburner_glows(&combat, &frame);

@@ -1444,48 +1444,120 @@ impl<'a> OwnshipView<'a> {
             self.contact(id).filter(|target| target.hp > 0)
         })
     }
+    /// The view for one launcher, which remembers what it works out.
+    pub fn at(&self, launcher: Launcher) -> LauncherView<'a> {
+        LauncherView {
+            view: *self,
+            launcher,
+            observation: Default::default(),
+            solution: Default::default(),
+            readiness: Default::default(),
+            solution_readiness: Default::default(),
+        }
+    }
     pub fn readiness(&self, launcher: Launcher) -> Readiness {
-        if !launcher.alive || self.own.hp <= 0 {
+        self.at(launcher).readiness()
+    }
+
+    pub fn can_lock(&self, launcher: Launcher) -> bool {
+        self.at(launcher).can_lock()
+    }
+
+    pub fn seeker_tone(&self, launcher: Launcher) -> Option<SeekerTone> {
+        self.at(launcher).seeker_tone()
+    }
+
+    pub fn weapon_observation(&self, launcher: Launcher) -> Option<seeker::Observation> {
+        self.at(launcher).weapon_observation()
+    }
+
+    pub fn mounted_solution(&self, launcher: Launcher) -> Option<missiles::Solution> {
+        self.at(launcher).mounted_solution()
+    }
+
+    pub fn estimated_max_range(&self, launcher: Launcher) -> Option<f64> {
+        self.at(launcher).estimated_max_range()
+    }
+
+    pub fn favorable_firing_band(&self, launcher: Launcher) -> Option<missiles::FiringBand> {
+        self.at(launcher).favorable_firing_band()
+    }
+
+    pub fn in_estimated_range(&self, launcher: Launcher) -> bool {
+        self.at(launcher).in_estimated_range()
+    }
+
+    pub fn estimated_hit_percent(&self, launcher: Launcher) -> u8 {
+        self.at(launcher).estimated_hit_percent()
+    }
+    /// Any current observation of this object, on the selected scope channel
+    /// or visually. Channels are never collapsed into one another.
+    pub fn detects(&self, target: &Target) -> bool {
+        self.own.sensors.observation(target.id).is_some()
+    }
+}
+/// One ownship read for one launcher, so what the cockpit shows of the selected
+/// weapon is worked out once: the observation, the firing solution and the
+/// readiness are each computed on first use and kept. [`OwnshipView`] answers
+/// each question by making one of these for the launcher it is given.
+pub struct LauncherView<'a> {
+    view: OwnshipView<'a>,
+    launcher: Launcher,
+    observation: std::cell::OnceCell<Option<seeker::Observation>>,
+    solution: std::cell::OnceCell<Option<missiles::Solution>>,
+    readiness: std::cell::OnceCell<Readiness>,
+    solution_readiness: std::cell::OnceCell<Readiness>,
+}
+impl<'a> LauncherView<'a> {
+    fn compute_readiness(&self) -> Readiness {
+        let launcher = self.launcher;
+        if !launcher.alive || self.view.own.hp <= 0 {
             return Readiness::LauncherLost;
         }
-        if !self.own.armed {
+        if !self.view.own.armed {
             return Readiness::Safe;
         }
-        if self.own.ammo[self.own.selected] & 0x8000 != 0 {
+        if self.view.own.ammo[self.view.own.selected] & 0x8000 != 0 {
             return Readiness::StationFailed;
         }
-        if self.own.rounds(self.own.selected) == 0 {
+        if self.view.own.rounds(self.view.own.selected) == 0 {
             return Readiness::Empty;
         }
-        if self.state.projectiles.len() >= MAX_PROJECTILES {
+        if self.view.state.projectiles.len() >= MAX_PROJECTILES {
             return Readiness::Capacity;
         }
-        let solution = self.launch_solution(launcher);
+        let solution = self.launch_solution();
         // A closed bay only delays a shot: the trigger opens it, so the
         // closed bay shows while a release waits on the doors.
         if solution == Readiness::Ready
-            && self.own.bay_waits(launcher)
-            && self.own.bay_release.is_some()
+            && self.view.own.bay_waits(launcher)
+            && self.view.own.bay_release.is_some()
         {
             return Readiness::BayClosed;
         }
         solution
     }
-    fn launch_solution(&self, launcher: Launcher) -> Readiness {
-        let w = &self.own.config.stations[self.own.selected].weapon;
+
+    pub fn readiness(&self) -> Readiness {
+        *self.readiness.get_or_init(|| self.compute_readiness())
+    }
+
+    fn compute_launch_solution(&self) -> Readiness {
+        let launcher = self.launcher;
+        let w = &self.view.own.config.stations[self.view.own.selected].weapon;
         if w.seeker.signature == 0 {
             return Readiness::Ready;
         }
-        let profile = (self.state.weapon_rules == Rules::Spec)
+        let profile = (self.view.state.weapon_rules == Rules::Spec)
             .then(|| missiles::Profile::for_weapon(w))
             .flatten();
         if profile.is_some_and(|p| !p.guidance_available(launcher.radar_power)) {
             return Readiness::Ready;
         }
         if profile.is_some_and(|p| p.supports_boresight())
-            && self.own.launch_mode == LaunchMode::Boresight
+            && self.view.own.launch_mode == LaunchMode::Boresight
         {
-            if self.own.bore_observation.is_some_and(|o| {
+            if self.view.own.bore_observation.is_some_and(|o| {
                 missiles::length(sub(o.position, launcher.position))
                     < f64::from(w.seeker.zones[1].minimum_range.max(0))
             }) {
@@ -1493,7 +1565,7 @@ impl<'a> OwnshipView<'a> {
             }
             return Readiness::Ready;
         }
-        let Some(t) = self.designated().and_then(|id| self.contact(id)) else {
+        let Some(t) = self.view.designated().and_then(|id| self.view.contact(id)) else {
             return Readiness::NoTarget;
         };
         if profile.is_some_and(|p| !p.accepts(t)) {
@@ -1505,7 +1577,7 @@ impl<'a> OwnshipView<'a> {
         if w.seeker.signature == 3 {
             // Equipment state answers immediately, before the shared support
             // result, so a failure reported between steps is not stale.
-            if self.own.radar_failed {
+            if self.view.own.radar_failed {
                 return Readiness::RadarFailed;
             }
             if !launcher.radar {
@@ -1513,7 +1585,7 @@ impl<'a> OwnshipView<'a> {
             }
             // One shared support answer for this specific target. The weapon
             // keeps its own envelope test below.
-            match self.own.sensors.support(t.id) {
+            match self.view.own.sensors.support(t.id) {
                 Support::Tracked => {}
                 Support::RadarFailed => return Readiness::RadarFailed,
                 Support::RadarOff => return Readiness::RadarOff,
@@ -1545,12 +1617,12 @@ impl<'a> OwnshipView<'a> {
                 };
             }
             if matches!(profile.guidance, Guidance::Infrared | Guidance::Emitter)
-                && (self.own.mounted.target != Some(t.id)
-                    || self.own.mounted.status != Status::Locked)
+                && (self.view.own.mounted.target != Some(t.id)
+                    || self.view.own.mounted.status != Status::Locked)
             {
                 return Readiness::RadarAcquiring;
             }
-            if self.mounted_solution(launcher).is_none() {
+            if self.mounted_solution().is_none() {
                 return Readiness::MaximumRange;
             }
             return Readiness::Ready;
@@ -1562,43 +1634,54 @@ impl<'a> OwnshipView<'a> {
             t.position,
         )
     }
-    /// Any current observation of this object, on the selected scope channel
-    /// or visually. Channels are never collapsed into one another.
-    pub fn detects(&self, target: &Target) -> bool {
-        self.own.sensors.observation(target.id).is_some()
+
+    fn launch_solution(&self) -> Readiness {
+        *self
+            .solution_readiness
+            .get_or_init(|| self.compute_launch_solution())
     }
-    pub fn can_lock(&self, launcher: Launcher) -> bool {
-        if self.state.weapon_rules == Rules::Spec && !self.own.guidance_available(launcher) {
+
+    pub fn can_lock(&self) -> bool {
+        let launcher = self.launcher;
+        if self.view.state.weapon_rules == Rules::Spec
+            && !self.view.own.guidance_available(launcher)
+        {
             return false;
         }
-        if self.state.weapon_rules == Rules::Spec
-            && missiles::Profile::for_weapon(&self.own.config.stations[self.own.selected].weapon)
-                .is_some_and(|p| p.independent())
+        if self.view.state.weapon_rules == Rules::Spec
+            && missiles::Profile::for_weapon(
+                &self.view.own.config.stations[self.view.own.selected].weapon,
+            )
+            .is_some_and(|p| p.independent())
         {
-            return self.own.mounted.target == self.own.designated()
-                && self.own.mounted.target.is_some()
-                && matches!(self.own.mounted.status, Status::Locked | Status::Pitbull);
+            return self.view.own.mounted.target == self.view.own.designated()
+                && self.view.own.mounted.target.is_some()
+                && matches!(
+                    self.view.own.mounted.status,
+                    Status::Locked | Status::Pitbull
+                );
         }
-        self.own.config.stations[self.own.selected]
+        self.view.own.config.stations[self.view.own.selected]
             .weapon
             .seeker
             .signature
             != 0
-            && self.launch_solution(launcher) == Readiness::Ready
+            && self.launch_solution() == Readiness::Ready
     }
 
     /// The seeker tone plays only while the seeker is actively tracking:
     /// silence with nothing in it (John, 2026-09-23).
-    pub fn seeker_tone(&self, launcher: Launcher) -> Option<SeekerTone> {
-        let w = &self.own.config.stations[self.own.selected].weapon;
+    pub fn seeker_tone(&self) -> Option<SeekerTone> {
+        let launcher = self.launcher;
+        let w = &self.view.own.config.stations[self.view.own.selected].weapon;
         let profile = missiles::Profile::for_weapon(w)?;
-        if self.state.weapon_rules != Rules::Spec
-            || !self.own.guidance_available(launcher)
-            || !self.own.armed
+        if self.view.state.weapon_rules != Rules::Spec
+            || !self.view.own.guidance_available(launcher)
+            || !self.view.own.armed
             || !launcher.alive
-            || self.own.hp <= 0
-            || self.own.rounds(self.own.selected) == 0
-            || self.own.ammo[self.own.selected] & 0x8000 != 0
+            || self.view.own.hp <= 0
+            || self.view.own.rounds(self.view.own.selected) == 0
+            || self.view.own.ammo[self.view.own.selected] & 0x8000 != 0
             || profile.guidance == Guidance::Emitter
         {
             return None;
@@ -1611,8 +1694,8 @@ impl<'a> OwnshipView<'a> {
         };
         // A radar missile in boresight sounds its lock tone on the bore return,
         // with or without a designated target (John, 2026-09-23).
-        if radar && self.own.launch_mode == LaunchMode::Boresight {
-            let o = self.own.bore_observation.filter(|o| !too_close(*o))?;
+        if radar && self.view.own.launch_mode == LaunchMode::Boresight {
+            let o = self.view.own.bore_observation.filter(|o| !too_close(*o))?;
             return Some(SeekerTone {
                 strength: 0.4 + 0.6 * o.quality.clamp(0., 1.),
                 ground: false,
@@ -1620,10 +1703,10 @@ impl<'a> OwnshipView<'a> {
                 locked: true,
             });
         }
-        let bore_ir = if self.own.launch_mode == LaunchMode::Boresight {
+        let bore_ir = if self.view.own.launch_mode == LaunchMode::Boresight {
             // Use the HUD's eligible return, never a stale or hidden target.
-            let observed = self.weapon_observation(launcher)?;
-            let tracked = self.own.mounted.observation?;
+            let observed = self.weapon_observation()?;
+            let tracked = self.view.own.mounted.observation?;
             if tracked.id != observed.id {
                 return None;
             }
@@ -1632,33 +1715,38 @@ impl<'a> OwnshipView<'a> {
             None
         };
         // Otherwise sound only while the mounted seeker is tracking.
-        if self.own.mounted.observation.is_none_or(too_close) {
+        if self.view.own.mounted.observation.is_none_or(too_close) {
             return None;
         }
-        let locked = matches!(self.own.mounted.status, Status::Locked | Status::Pitbull)
-            && bore_ir.is_none_or(|o| self.own.mounted.target == Some(o.id));
+        let locked = matches!(
+            self.view.own.mounted.status,
+            Status::Locked | Status::Pitbull
+        ) && bore_ir.is_none_or(|o| self.view.own.mounted.target == Some(o.id));
         Some(SeekerTone {
             strength: if radar {
-                self.own.mounted.tone()
+                self.view.own.mounted.tone()
             } else {
-                SeekerTone::ir_strength(self.estimated_hit_percent(launcher), locked)
+                SeekerTone::ir_strength(self.estimated_hit_percent(), locked)
             },
             ground: !radar && w.flags & 0x10000 == 0,
             radar,
             locked,
         })
     }
+
     /// Current observation used by the display, separate from launch authority.
-    pub fn weapon_observation(&self, launcher: Launcher) -> Option<seeker::Observation> {
-        if !self.own.armed
-            || (self.state.weapon_rules == Rules::Spec && !self.own.guidance_available(launcher))
+    fn compute_weapon_observation(&self) -> Option<seeker::Observation> {
+        let launcher = self.launcher;
+        if !self.view.own.armed
+            || (self.view.state.weapon_rules == Rules::Spec
+                && !self.view.own.guidance_available(launcher))
         {
             return None;
         }
-        if self.own.launch_mode == LaunchMode::Boresight {
-            let w = &self.own.config.stations[self.own.selected].weapon;
+        if self.view.own.launch_mode == LaunchMode::Boresight {
+            let w = &self.view.own.config.stations[self.view.own.selected].weapon;
             let profile = missiles::Profile::for_weapon(w)?;
-            return self.own.bore_observation.filter(|o| {
+            return self.view.own.bore_observation.filter(|o| {
                 profile.guidance != Guidance::Infrared
                     || (missiles::geometry(
                         &missiles::launch_geometry(w),
@@ -1679,16 +1767,16 @@ impl<'a> OwnshipView<'a> {
                     .is_some())
             });
         }
-        self.own.mounted.observation.or_else(|| {
-            let id = self.own.designated()?;
-            let w = &self.own.config.stations[self.own.selected].weapon;
-            if self.state.weapon_rules == Rules::Spec
+        self.view.own.mounted.observation.or_else(|| {
+            let id = self.view.own.designated()?;
+            let w = &self.view.own.config.stations[self.view.own.selected].weapon;
+            if self.view.state.weapon_rules == Rules::Spec
                 && missiles::Profile::for_weapon(w)
-                    .is_some_and(|p| self.contact(id).is_none_or(|t| !p.accepts(t)))
+                    .is_some_and(|p| self.view.contact(id).is_none_or(|t| !p.accepts(t)))
             {
                 return None;
             }
-            let contact = self.own.sensors.observation(id)?;
+            let contact = self.view.own.sensors.observation(id)?;
             let delta = missiles::sub(contact.position, launcher.position);
             Some(seeker::Observation {
                 id: contact.id,
@@ -1702,10 +1790,18 @@ impl<'a> OwnshipView<'a> {
             })
         })
     }
-    pub fn mounted_solution(&self, launcher: Launcher) -> Option<missiles::Solution> {
-        let w = &self.own.config.stations[self.own.selected].weapon;
+
+    pub fn weapon_observation(&self) -> Option<seeker::Observation> {
+        *self
+            .observation
+            .get_or_init(|| self.compute_weapon_observation())
+    }
+
+    fn compute_mounted_solution(&self) -> Option<missiles::Solution> {
+        let launcher = self.launcher;
+        let w = &self.view.own.config.stations[self.view.own.selected].weapon;
         let profile = missiles::Profile::for_weapon(w)?;
-        let observed = self.weapon_observation(launcher)?;
+        let observed = self.weapon_observation()?;
         missiles::intercept(
             &w.movement,
             Motion::launch(w, launcher.velocity, launcher.position[1]),
@@ -1717,68 +1813,81 @@ impl<'a> OwnshipView<'a> {
             profile.guidance_ticks,
         )
     }
-    pub fn estimated_max_range(&self, launcher: Launcher) -> Option<f64> {
-        let observed = self.weapon_observation(launcher)?;
-        self.own
+
+    pub fn mounted_solution(&self) -> Option<missiles::Solution> {
+        *self
+            .solution
+            .get_or_init(|| self.compute_mounted_solution())
+    }
+
+    pub fn estimated_max_range(&self) -> Option<f64> {
+        let observed = self.weapon_observation()?;
+        self.view
+            .own
             .range_estimate
             .filter(|e| {
-                e.station == self.own.selected
+                e.station == self.view.own.selected
                     && e.target == observed.id
-                    && e.mode == self.own.launch_mode
+                    && e.mode == self.view.own.launch_mode
             })
             .map(|e| e.maximum)
     }
-    pub fn favorable_firing_band(&self, launcher: Launcher) -> Option<missiles::FiringBand> {
-        let observed = self.weapon_observation(launcher)?;
-        self.own
+
+    pub fn favorable_firing_band(&self) -> Option<missiles::FiringBand> {
+        let observed = self.weapon_observation()?;
+        self.view
+            .own
             .range_estimate
             .filter(|e| {
-                e.station == self.own.selected
+                e.station == self.view.own.selected
                     && e.target == observed.id
-                    && e.mode == self.own.launch_mode
+                    && e.mode == self.view.own.launch_mode
             })
             .and_then(|e| e.favorable)
     }
+
     /// Physical range validity is independent of rounded probability text.
-    pub fn in_estimated_range(&self, launcher: Launcher) -> bool {
-        let Some(o) = self.weapon_observation(launcher) else {
+    pub fn in_estimated_range(&self) -> bool {
+        let Some(o) = self.weapon_observation() else {
             return false;
         };
         let min = f64::from(
-            self.own.config.stations[self.own.selected]
+            self.view.own.config.stations[self.view.own.selected]
                 .weapon
                 .seeker
                 .zones[1]
                 .minimum_range,
         );
-        self.readiness(launcher) == Readiness::Ready
+        self.readiness() == Readiness::Ready
             && self
-                .estimated_max_range(launcher)
+                .estimated_max_range()
                 .is_some_and(|max| max > min && (min..=max).contains(&o.range))
-            && self.mounted_solution(launcher).is_some()
+            && self.mounted_solution().is_some()
     }
-    pub fn estimated_hit_percent(&self, launcher: Launcher) -> u8 {
-        let Some(observation) = self.weapon_observation(launcher) else {
+
+    pub fn estimated_hit_percent(&self) -> u8 {
+        let Some(observation) = self.weapon_observation() else {
             return 0;
         };
-        let w = &self.own.config.stations[self.own.selected].weapon;
+        let w = &self.view.own.config.stations[self.view.own.selected].weapon;
         let Some(profile) = missiles::Profile::for_weapon(w) else {
             return 0;
         };
         let mut zone = w.seeker.zones[1];
-        zone.maximum_range = self.estimated_max_range(launcher).unwrap_or(0.).floor() as _;
+        zone.maximum_range = self.estimated_max_range().unwrap_or(0.).floor() as _;
         missiles::estimated_hit_percent(
             observation,
-            self.mounted_solution(launcher),
+            self.mounted_solution(),
             &zone,
             profile
                 .guidance_ticks
                 .min(u64::from(w.movement.remove_t) * 30) as f64
                 / 120.,
-            (self.own.launch_mode == LaunchMode::Boresight).then(|| profile.search_cap()),
+            (self.view.own.launch_mode == LaunchMode::Boresight).then(|| profile.search_cap()),
         )
     }
 }
+
 impl Ownship {
     pub fn guidance_available(&self, launcher: Launcher) -> bool {
         missiles::Profile::for_weapon(&self.config.stations[self.selected].weapon)
