@@ -2003,7 +2003,7 @@ dependency.
 | `tore-codec` | library | Bit writer and bounded bit reader, variable-length integers, quantizers, FNV-1a and CRC-32. Shared by the wire, the exact own-plane coder and, in stage H, the checkpoints | std only |
 | `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator. **Built (D2).** The host and client are state machines that never read a clock or touch a socket: the caller passes the time in, feeds them datagrams and sends what they give, over a UDP socket or the simulator (agent decision) | tore-codec |
 | `tore-import` | library | The data folder, the import pack's reader and writer, media detection and the import itself, moved out of `tore-app` so a server can import and load without the game. *Built (D3a).* | tore-formats |
-| `tore-session` | library | The game's side of networking: the wire messages, the host session (clock, inputs, snapshots, joins), the client session (prediction, interpolation, clock steering, readouts) and the headless bot client. *Wire built (D6)*, the cockpit readout's coding excepted: the module `wire` has every section and message with each end's bookkeeping (acknowledged baselines, priorities, the event queue, the name table) and no clock or socket ([what it settled](formats/net-protocol.md#what-the-games-sections-settled)) | tore-world, tore-net, tore-codec |
+| `tore-session` | library | The game's side of networking: the wire messages, the host session (clock, inputs, snapshots, joins), the client session (prediction, interpolation, clock steering, readouts) and the headless bot client. *Wire built (D6)*, the cockpit readout's coding excepted: the module `wire` has every section and message with each end's bookkeeping (acknowledged baselines, priorities, the event queue, the name table) and no clock or socket ([what it settled](formats/net-protocol.md#what-the-games-sections-settled)). *Host built (D7a)*: the module `host` ([the host session](#the-host-session)) | tore-world, tore-net, tore-codec |
 | `tore-server` | binary | The dedicated server: configuration, import, logging and the console | tore-session, tore-import |
 
 `tore-sim` and `tore-world` gain `tore-codec` for the exact own-plane state and
@@ -2313,7 +2313,10 @@ bytes without a panic, are in `tore-sim`.
 
 ### The host session
 
-`tore_session::Host` owns the `World`, the network endpoint and one record per
+*Built (D7a), the cockpit readout excepted*, which waits for its wire coding
+(slice D5b and D6's second part): `tore_session::Host` (`crates/tore-session/src/host`).
+`tore_session::Host` owns the `World` (built with `World::new(spec, resources,
+Seating::Open)`), the network endpoint and one record per
 connection: its seat, its input buffer, what it has acknowledged and its queue
 of events. It is driven by a fixed clock: once the mission flies, 120 ticks a
 second of real time, never paused, never compressed. Before that, a server
@@ -2353,6 +2356,77 @@ the plane's exact state in a second packet. The
 The dedicated server runs the host on its main thread: it waits on the socket
 with a short timeout, steps due ticks and sends due packets. Stage E runs the
 same host on a thread inside the game.
+
+**The calls** (agreed with the server slice, D7b). `Host::new(spec,
+resources, HostConfig)` refuses a setting out of range
+(`HostConfig::validate`), the retail stall-speed switch and a mission the
+import cannot build. The caller passes the time in and moves datagrams:
+`receive` or `receive_from` (a socket or the simulator), `update(now)` for
+the due ticks, snapshots, timeouts and the lifecycle, `poll_transmit` or
+`transmit`, and `next_wake(now)`, the time until the next tick (at most
+10 ms), for the socket's wait. The console's commands are `start_now`,
+`kick(seat)`, `end`, `restart` and `stop`; `phase()` says where the mission
+is. `poll_log` gives every join, refusal, seat change, departure with its
+reason, the mission's start, end and restart, overloads and faults, each with
+its tick; `status(now)` gives the server's status line (tick, mission time,
+players, capacity, aircraft, mean and longest tick cost since the last call,
+load as a fraction of one core, overloads, bytes each way) and `players()`
+each player's figures (round trip, loss, input arrival spread, input margin,
+inputs repeated, bytes each way). The host reads no clock for the mission;
+only the tick-cost figure reads the process's clock.
+
+**As built**, each an agent decision unless credited:
+
+- **Inputs.** The buffer keeps each tick's controls once (a repeated or
+  forged copy of a tick already held is ignored), drops ticks already stepped
+  and ticks more than a second ahead, and gives each tick the view of the
+  section's newest tick shifted back by the ticks between. A repeated tick's
+  view moves on with it. Commands are numbered from 1 by the player's game,
+  so a snapshot's "commands applied" of 0 means none; a number already taken
+  is a duplicate, and a command waits for its tick unless it names one more
+  than a second ahead. A command that names an already stepped tick is
+  applied at the next one and marks the plane's state unforeseeable. At most
+  256 commands wait; more ends the connection.
+- **The input margin** in a snapshot header is the worst margin of the
+  inputs first received since the last snapshot (each tick counted once, when
+  it first arrives); with none received it repeats the last figure.
+- **No mission command but handoffs.** The host never sends `Settings`: the
+  mission file's cheats are applied when `World::new` builds the mission, and
+  a default `Settings` would clear the AI's guns-only flag.
+- **Gun bursts.** A burst starts with the first new gun round of a shooter's
+  gun station and is sent at once with no length; it ends when that station
+  fires no round for its weapon's round interval (its burst time times 30
+  over its physical rounds, in ticks, as combat's gun cadence spaces them)
+  plus 2 ticks, and is then sent again from its first tick with its length.
+  A launch event goes out for every new missile, rocket or bomb.
+- **"Your aircraft exploded"** comes from the tick's own lines for the seat
+  ("Your aircraft exploded", "... on impact"), sent as that event instead of
+  a HUD line.
+- **Unforeseeable** for a seat: a repeated input, a command at another tick,
+  a change of its ownship terms, and any combat event about its plane (it
+  fired, was damaged, had a subsystem hit, was destroyed, lost its pilot, hit
+  the ground, was jolted by a blast or burst).
+- **Relevance.** Distance and a missile aimed at the plane come from the
+  positions; the player's own flight is its wing; "tracked by a friendly
+  sensor" is a contact or visual contact of any human-flown plane on the
+  player's side (the AI's sensors are not consulted yet); the view's subject
+  is the input's view subject.
+- **Room for messages** in a snapshot packet is what the transport says the
+  due reliable messages take (`Server::messages_due_bytes`), at most 256
+  bytes, so no entity waits for room a message does not use. New names go in
+  a Names message just before the packet that first uses them.
+- **Seating.** Seat ids are the lowest free from 0. The Seated message's
+  loadout is the plane's stations as they are (weapon, capacity, rounds left)
+  and its fuel. A newly seated player's first snapshot queues the mission as
+  it stands: every mark and every effect still showing.
+- **A plane that cannot go back.** When a player leaves a plane that is
+  destroyed or whose pilot is dead or gone, the AI cannot take it; it stays
+  with the departed player's seat, flown with neutral input, and the roster
+  keeps that callsign on it. Its seat id is not given out again during the
+  mission.
+- **Capacity.** A join is refused as full when the connected players reach
+  the lesser of `max-players` and the open planes; connections already
+  leaving do not count.
 
 ### The client session
 
@@ -2671,20 +2745,35 @@ sequenceDiagram
   by id (`--slot`) or takes the first free friendly plane, Friendly Wing 1's
   lead first. The server's configuration lists the planes open to humans
   (default: every friendly plane). A plane that is destroyed, has lost its
-  pilot or is flown by a human cannot be taken.
+  pilot or is flown by a human cannot be taken. *Built (D7a):* a refused
+  plane gets Seat refused with the reason and the player may ask again; with
+  `open-planes all` a player asking for any plane gets the first free
+  friendly one before any enemy one.
 - **Callsigns.** A callsign already in use gets a suffix (`Viper_2`, John
   2026-09-28), shortened first if the whole would pass 15 characters.
 - **Loadout.** A player keeps the loadout of the aircraft they take, the late
   joiner's rule of the [guide](MULTIPLAYER.md#slots-ai-fill-and-handoff).
   Choosing one on the Load Ordnance screen before the mission is stage F.
 - **Leaving.** End Mission sends Leave; the host builds the player's debrief
-  (`debrief::capture` for the seat), sends it, and gives the plane back to the
-  AI. A player whose packets stop for 5 seconds is dropped the same way. A
+  (`tore_world::debrief::capture` for the seat, moved out of the game in D7a
+  so the server can build it; the game keeps the screen), sends it, and gives
+  the plane back to the AI at the next tick. *Built (D7a):* the host then
+  disconnects the player once the debrief is acknowledged, or after 5 seconds.
+  A player whose packets stop for 5 seconds, or who is kicked, gives the plane
+  back the same way with no debrief. A
   destroyed plane stays destroyed; the seat can end the mission as in single
   player. Respawns are stage F.
 - **The end.** When the host ends the mission, every seated player gets
   "Mission ended" and their debrief, and is then disconnected; players join
-  again for the next mission. The dedicated server's rules for starting,
+  again for the next mission. *Built (D7a):* Mission ended goes first, then
+  the debrief; every connection, seated or not, is disconnected with "server
+  stopping" once they are acknowledged or after 5 seconds; a join while the
+  mission is ended is refused as shutting down with the seconds to the next
+  one. The console's `end` and `restart` send the end reason "ended by the
+  server" ([protocol](formats/net-protocol.md#messages-as-built)); `quit`
+  disconnects everyone with "server stopping" and sends no debriefs. The empty
+  timeout counts from the moment the last seated player leaves (sends Leave
+  or is dropped). The dedicated server's rules for starting,
   ending and restarting are in the [server guide](DEDICATED-SERVER.md#the-mission-lifecycle).
 - **Settings.** The mission's cheats come from the server's mission file and
   apply to everyone. On a client the Cheats menu keeps only the settings that
@@ -2740,7 +2829,7 @@ risky refactors, as John asked; the rest are Sonnet.
 | D5b Cockpit readout | `mp/d-readout` | Sonnet | D5a | The cockpit readout and its builder; the HUD, weapon HUD, scope, RWR, target window, map and music read it | Single-player baseline SAME and every capture byte-identical; readouts for two seats of the crowd fixture each name their own plane's stores, contacts and damage. **Built (D5b):** see [the flight screen draws a frame](#the-flight-screen-draws-a-frame) |
 | D3c Open seating | `mp/d-open` | Opus | D5a | `Seating::Open`: plane 0 on the AI, a tick with no human, combat with no ownship | Single-player baseline SAME; a headless test builds an open mission with every plane on the AI, steps it 1,200 ticks, then a seat takes plane 0, flies, and gives it back. **Built (D3c):** see [open seating and no human](#a-mission-with-no-window); the run repeats to the bit, and two seats hand planes in both wings through a fight, the last leaving the mission with no human |
 | D6 Wire | `mp/d-wire` | Opus | D1, D3b, D4, D5b | `tore-session`'s messages: inputs, snapshots with acknowledged baselines, priorities and relevance, own-state hash and exact state, readouts, events (bursts and launches included), join messages, debrief | Every message round-trips; a snapshot decodes with any earlier packet lost; entities always get their share of the packet; a wire golden test fails when the bytes change without a protocol version bump; bytes per snapshot measured on the 15 against 15 mission against the [budget](multiplayer-plan.md#bandwidth-budget). **Built (D6), but the cockpit readout's coding, which waits for D5b:** seeded round trips of every section and message; a 3,000-snapshot run dropping, duplicating and reordering packets and acknowledgements rebuilds every entity exactly; 100,000 fuzzed bodies; the golden copy `crates/tore-session/wire-golden.txt`. On the 15 against 15 mission (29 other aircraft, up to 31 missiles in flight) the Snapshot section is 177 to 879 bytes, mean 350, and the whole download 11.7 KB/s before the readout and the messages ([details](formats/net-protocol.md#what-the-games-sections-settled)) |
-| D7 Host and server | `mp/d-host` | Opus | D2, D3c, D6 | The host session, its clock and input buffers; `tore-server` with its configuration, import and console | A server flies a 15 against 15 mission for 10 minutes with nobody connected under 20 percent of one core; scripted test clients join and leave 100 times without an error; late, early, missing and duplicated inputs are applied as specified |
+| D7 Host and server | `mp/d-host` | Opus | D2, D3c, D6 | The host session, its clock and input buffers; `tore-server` with its configuration, import and console | A server flies a 15 against 15 mission for 10 minutes with nobody connected under 20 percent of one core; scripted test clients join and leave 100 times without an error; late, early, missing and duplicated inputs are applied as specified. **Host built (D7a):** [the host session](#the-host-session), the cockpit readout's slot left empty until its coding lands; on the simulator scripted clients join, fly and leave 100 times with no error, each plane going back to the AI; a seated client's entities, own-state hashes and exact states match the host's world at every snapshot tick, with and without 5 percent loss and duplication; the 15 against 15 UKR mission with nobody connected flies 10 minutes at 1.46 ms a tick, 17.5 percent of one core (release, Ryzen 9 7900X), the world's own step alone costing the same within 2 percent; its first minute, while all 30 aircraft fight, costs 3.4 ms a tick (41 percent) with or without the host, the remaining minutes 1.2 to 1.3 ms |
 | D8 Client, bot and `--connect` | `mp/d-client` | Opus | D5b, D6, D7 | The client session: join, prediction, reconciliation, smoothing, interpolation (the slow entities' longer delay included), clock steering, local effects, neutral controls in menus; the headless bot (the client session with a scripted pilot); the game's `--connect`; the capture and the diagnostics log | On the simulator with no loss, one platform and no hit, the prediction never differs from the host; two bots fly a 5-minute fight against a server; a windowed client flies against a server on this machine through `tools/agent-run.sh` |
 | D9 Lag compensation | `mp/d-lagcomp` | Opus | D4 | The hit-volume history in combat, the view tick in `SeatInput`, rewound gun hit tests | Single-player baseline SAME; a burst aimed at the drawn position of a target crossing at 500 knots, with a 150 ms round trip and a 100 ms interpolation delay, hits with compensation and misses without; the cap holds. **Built (D9):** see [hits and lag compensation](#hits-and-lag-compensation); missiles fired by the same seat carry no rewind |
 | D10 Matrix and measurements | `mp/d-bots` | Sonnet | D8, D9 | The simulator matrix as a test, a CI job with a server and two bots, load and bandwidth at 2, 8, 15 and 30 humans | The [matrix limits](MULTIPLAYER.md#netcode-numbers) hold; CI passes on all three platforms; `docs/baselines/net-<date>.md` records the matrix, bandwidth against the budget and host CPU per human |

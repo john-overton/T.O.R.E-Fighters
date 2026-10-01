@@ -509,7 +509,7 @@ snapshot's tick.
 | Mark | everyone | Crater or crash-site fire, position |
 | Ground destroyed | everyone | Ground object id |
 | Countermeasure | everyone | Aircraft, chaff or flare, the release geometry the replay viewer flies it from, number left |
-| Gun burst | everyone | Shooter, gun station, first tick, last tick (0 while still firing) |
+| Gun burst | everyone | Shooter, gun station, first tick, last tick (0 while still firing). *Built (D7a):* sent when the burst starts, and again from its first tick with its length once the station has fired no round for its weapon's round interval plus 2 ticks |
 | Sound | everyone | Emission kind, position, the aircraft it came from |
 
 Recording stems, weapon and sound names are sent by their index in the
@@ -573,6 +573,13 @@ position to 1/65,535, a step to 1/32,767, each clamped to its range), and the
 client steps what it returns. The host takes the frames and the commands with
 their ticks; `InputFrame::seat_input` makes the `SeatInput` of a tick and
 `InputsSection::view` the `SeatView` lag compensation reads.
+
+*Settled by the host (D7a):* a client numbers its commands from 1, so a
+snapshot header's "commands applied" of 0 means none yet; a command is sent
+only once the client's game has reached its tick (a reader refuses a command
+after the section's newest tick). Each earlier frame of a section takes the
+newest frame's view, as many ticks earlier. The host's buffer rules are in
+the [architecture](../ARCHITECTURE.md#the-host-session).
 
 ### Snapshots as built
 
