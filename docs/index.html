@@ -166,6 +166,7 @@
     .milestone-label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font: 9px/1.4 var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
     .milestone-label strong { font: 700 35px/1 var(--display); color: #b8b697; }
     .current .milestone-label span { color: #e4deaf; }
+    .delivered .milestone-label span { color: #bdc58e; }
     .milestone h3 { font: 700 23px/1.05 var(--display); text-transform: uppercase; margin: 24px 0 12px; }
     .milestone h3 a { text-decoration: none; }
     .milestone h3 a:hover { text-decoration: underline; }
@@ -323,7 +324,7 @@
         <div class="box-band"><span>Classic at heart</span><span>Modern foundations</span><span>Open source / GPL-3.0</span></div>
       </div>
     </section>
-    <div class="status-line"><span class="status-dot" aria-hidden="true"></span><span>Currently building: Milestone 1, faithful quick fight.</span><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/parity-plan.md">Read the development status <span aria-hidden="true">↗</span></a></div>
+    <div class="status-line"><span class="status-dot" aria-hidden="true"></span><span>Milestone 1, faithful quick fight, delivered in v0.1.x. Currently building: Milestone 2, multiplayer.</span><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/parity-plan.md">Read the development status <span aria-hidden="true">↗</span></a></div>
 
     <section id="downloads" class="downloads" aria-labelledby="downloads-title">
       <div class="downloads-heading">
@@ -429,19 +430,19 @@
     <section id="roadmap" class="roadmap" aria-labelledby="roadmap-title">
       <div class="roadmap-intro">
         <div><p class="eyebrow">04 / The flight plan</p><h2 id="roadmap-title">A long-range mission.</h2></div>
-        <p>First, a faithful quick fight. Then fly together, return to the campaigns, and open the world to more. This is the broad sequence, not a release calendar.</p>
+        <p>The faithful quick fight is delivered. Next, fly together, return to the campaigns, and open the world to more. This is the broad sequence, not a release calendar.</p>
       </div>
       <ol class="milestones" start="0">
         <li class="milestone"><div class="milestone-label"><strong>00</strong><span>Foundation / ongoing</span></div><h3><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md#milestone-0-spec-and-salvage">Spec &amp; salvage</a></h3><p>Recover formats, record the behavior that matters to players, and establish a portable Rust engine. Research continues as the game grows.</p></li>
-        <li class="milestone current"><div class="milestone-label"><strong>01</strong><span>In development</span></div><h3><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md#milestone-1-faithful-quick-fight">Faithful quick fight</a></h3><p>Bring menus, terrain, flight, opponents, sensors, and weapons into a complete quick-fight loop, with installation and first-run import.</p></li>
-        <li class="milestone"><div class="milestone-label"><strong>02</strong><span>Next milestone</span></div><h3><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md#milestone-2-multiplayer">Multiplayer</a></h3><p>Meet in an online lobby, configure a shared Quick Mission, and fly together. Later milestones extend multiplayer to more modes.</p></li>
+        <li class="milestone delivered"><div class="milestone-label"><strong>01</strong><span>Delivered / v0.1.x</span></div><h3><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md#milestone-1-faithful-quick-fight">Faithful quick fight</a></h3><p>Menus, terrain, flight, opponents, sensors, and weapons in a complete quick-fight loop, with installers and first-run import on all three platforms.</p></li>
+        <li class="milestone current"><div class="milestone-label"><strong>02</strong><span>In development</span></div><h3><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md#milestone-2-multiplayer">Multiplayer</a></h3><p>Meet in an online lobby, configure a shared Quick Mission, and fly together. Later milestones extend multiplayer to more modes.</p></li>
         <li class="milestone"><div class="milestone-label"><strong>03</strong><span>Planned / 1.0 target</span></div><h3><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md#milestone-3-missions-and-campaigns">Missions &amp; campaigns</a></h3><p>Original campaigns, objectives, pilot records, saves, carrier operations, and more aircraft. Multiplayer expands to campaigns, then single missions.</p></li>
         <li class="milestone"><div class="milestone-label"><strong>04</strong><span>Planned</span></div><h3><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md#milestone-4-tools">Tools for creators</a></h3><p>Aircraft and asset tools, a mission editor, sound profiles, and a mod loader. Build and share without having to write the engine.</p></li>
         <li class="milestone"><div class="milestone-label"><strong>05</strong><span>Planned</span></div><h3><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md#milestone-5-remaster-layer">The remaster layer</a></h3><p>Optional upgrades to menus, terrain, cockpits, lighting, and systems. Keep the classic presentation available with the extra layers switched off.</p></li>
         <li class="milestone"><div class="milestone-label"><strong>06</strong><span>Planned</span></div><h3><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md#milestone-6-persistent-campaigns">A persistent war</a></h3><p>A shared, lasting campaign with air and ground operations. Choose roles, support the wider battle, and return to a world that carries on.</p></li>
         <li class="milestone"><div class="milestone-label"><strong>07</strong><span>Planned</span></div><h3><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md#milestone-7-custom-maps-and-community-theaters">Beyond the original maps</a></h3><p>Tools for custom terrain, shareable community theaters, and new aircraft and objects built through the creator tools.</p></li>
       </ol>
-      <div class="roadmap-link"><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md">Read the full development roadmap <span aria-hidden="true">↗</span></a><a href="releases.html">What changed in each release</a><span>OUTLINE UPDATED 23 SEP 2026 · PLANS MAY EVOLVE</span></div>
+      <div class="roadmap-link"><a href="https://github.com/john-overton/T.O.R.E-Fighters/blob/main/docs/ROADMAP.md">Read the full development roadmap <span aria-hidden="true">↗</span></a><a href="releases.html">What changed in each release</a><span>OUTLINE UPDATED 1 OCT 2026 · PLANS MAY EVOLVE</span></div>
     </section>
 
     <section class="join" aria-labelledby="join-title">
