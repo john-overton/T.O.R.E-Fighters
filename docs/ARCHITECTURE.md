@@ -3140,3 +3140,243 @@ codec when D1 merges); D2 follows D1. D3b, D5a, D5b and D3c
 all edit `main.rs` or combat's first-ownship code, so they run in that order,
 each rebased on the one before; D5b and D3c may overlap once D5a has taken the
 app off `own()`. D9 merged before them; D3c rebases on its change to combat's hit search.
+
+## Lobby and hosting
+
+Design for stages E and F of the [multiplayer plan](multiplayer-plan.md#stages),
+taken together at John's request of 2026-10-01, written by the lead and
+reviewed by John the same day; his answers are in the guide's
+[decisions](MULTIPLAYER.md#decisions). Nothing in this section is built yet.
+Every choice is an agent decision unless it is credited to John.
+
+John's direction (2026-10-01):
+
+- A player hosts a game from inside the game and builds its mission with the
+  Quick Mission creator.
+- The menus reuse retail backgrounds and pieces, not necessarily retail's
+  layouts: for the first mode, the MODEM CONNECTION background with the
+  TCP/IP Network connection panel, retail buttons and other pieces.
+- The first mode is a direct, unpublished lobby for friends: the game lists
+  games broadcast on the local network and connects directly to an IP address
+  or a domain name. A public lobby through the master server is stage I.
+- Chat in the lobby and in flight.
+- He tests "the whole shebang" together on his three machines; there is no
+  separate command-line test of stage D.
+
+In short:
+
+- The hosting player's game runs the stage D host on a thread of its own, and
+  flies its own aircraft as a client of that host over an in-process link, so a
+  hosted game is presented exactly like a joined one and a stalled window never
+  stalls the mission.
+- A new **Direct Connection** screen finds games on the local network and
+  joins one, or an address. **New** opens a **lobby**: the King builds the
+  mission with the creator, players pick slots, arm their aircraft, chat, say
+  they are ready, and the King starts. After the mission everyone returns to
+  the lobby.
+- Chat runs through the host with retail's receivers, in the lobby's message
+  box and on a line in flight opened with `~`.
+- Single player does not change.
+
+### Surveys behind the design
+
+Three read-only surveys of 2026-10-01 (in the lead's local notes):
+
+- **Retail art.** The MODEM CONNECTION screen is `MODEM3.PIC` (its title text,
+  the ANTHOLOGY badge, the help bar and a bolted panel are baked into it) and
+  `MODEM.DLG`. The NETWORK CONNECTION screen is `NETIPX3.PIC` with `NEWNET.DLG`
+  (New, Join, Options, Cancel, a Games list with a PREV/NEXT rocker), the panel
+  drawn by the game from `PANEL.PIC` and six `EDGE*.PIC` pieces. The lobby's
+  host and joiner dialogs are `NETNEW.DLG` and `NETJOIN.DLG`, the options
+  panels `NETTCP.DLG` and `NETIPX2.DLG`, the message prompt `NETCEDT.DLG`, and
+  the in-flight message pane `MPSTATUS.PIC` with `MPFONT.PIC`. The widget
+  pieces are `EDITL/M/R`, `LISTLFT/MID/RT/HI`, `PAGEBOX`, `CHECK00-06` and
+  `ROCKERH0-4`. The King's settings are small dialogs (`MC_LIVES`, `MC_KILLS`,
+  `MC_TIME`, `MC_DELAY`, `MC_DIST` and others). `CHAT.TXT` lies loose in the
+  install: twelve lines of `receiver\text\sound` for F1 to F12. The import keeps
+  almost none of this today (about 40 names to add), the 1.0 and 1.02F copies
+  are byte-identical, and the existing readers decode all of it with three small
+  additions to the dialog reader.
+- **Menus.** There is no widget toolkit: each screen draws into the 640 by 480
+  canvas with its own hit areas. Reusable today: the retail action buttons with
+  the striped default cap, the PREV/NEXT rocker, the creator's paged list and
+  bolted panel, two text fields (the controls search and the first-run path).
+  There is no scrolling message box, no retail check box, no list built from the
+  `LIST` pieces. The MULTI menu holds three "coming soon" rows. The creator
+  produces a `MissionSpec`; its Fly passes through Load Ordnance into
+  `build_mission`.
+- **Hosting and chat.** `Host`, `World` and the transport can move to a thread
+  as they are. Every seat is a network connection; there is no local seat. The
+  host has no lobby phase (the first Ready starts the mission and everyone is
+  disconnected at its end), no discovery and no chat. Flight's HUD shows seven
+  message lines for five seconds each; `~` is unbound in flight.
+
+### The host inside the game (stage E)
+
+When a player presses New, the game starts a `tore_session::Host` on a thread
+of its own with its own fixed 120 Hz clock and its UDP socket on the game port,
+exactly as the dedicated server runs it. The hosting player's own game then
+joins that host as a client, over an **in-process link** (a pair of queues that
+implement the transport's datagram trait, no socket and no delay), and flies
+through the same client session and screens a remote player uses.
+
+*Agent decision:* this is the plan's stage E with one change. The plan had the
+host's seat "fed directly" and the renderer reading the host's snapshots; a
+local client gives the same zero-delay flight (its prediction matches the host
+exactly on one machine, so nothing is ever corrected) with no second code path
+for the host's screens. It costs one more copy of the mission's static data and
+the own plane's prediction, both small.
+
+- The host thread owns the `World` and never waits for the window: dragging,
+  minimizing or a long frame on the hosting machine does not stall anyone.
+- The thread stops when the host leaves or quits, telling every player; a
+  panic on it ends the session for everyone with a plain message.
+- On Windows the thread sleeps to just before each tick and finishes with a
+  short spin, as the dedicated server does.
+- A hosted game records the same capture and diagnostics as a joined one.
+
+### Finding a game and joining
+
+The **Direct Connection** screen replaces the MULTI menu's stubs:
+
+| Element | What it does |
+| --- | --- |
+| Callsign | The player's callsign, remembered between sessions |
+| Games | Games found on the local network, paged with PREV/NEXT and "PAGE n of m": name, mission (theater, aircraft), players and capacity, a lock when it has a password, and whether it is in the lobby or flying |
+| Players | The players of the selected game, with the King's crown |
+| Messages | What the screen is doing: searching, found, joining, refused and why |
+| Connect to | An address or a domain name, with an optional port; the last few are remembered |
+| New | Host a game: start the host and open its lobby as King |
+| Join | Join the selected game, or the address typed |
+| Options | Port, password to send, the quick messages |
+| Cancel | Back to Choose Activity |
+
+The look (approved by John, 2026-10-01): `MODEM3`'s red background with the
+title bar of `NETIPX3` laid over it, so it reads NETWORK CONNECTION, and the
+TCP/IP Network connection panel at retail's size and place, drawn from the
+panel pieces, with retail's buttons, edit fields, list wells, rocker and page
+box. The full-size panel covers most of the red photo, which shows at its
+edges.
+
+**Local discovery.** While the screen is open the game sends a small query to
+the local network's broadcast address on the game port every two seconds. Any
+host on that port, player-hosted or dedicated, answers the sender with its
+game's summary. The query and answer are two new packet kinds under the
+version-free hello id, so a different build still shows up, marked as a
+different version; the answer is never longer than the query, as the
+handshake already requires. IPv4 broadcast only: IPv6 discovery, port mapping
+and the internet are stage J. *Agent decision.*
+
+**Addresses.** A typed name is resolved on a background thread, every address
+it returns is tried in turn, and an IPv6 address may carry a port in brackets.
+
+### The lobby
+
+A host has a new phase, **Lobby**, before Flying and after each mission. In it
+the mission is chosen but not flying, players are connected but not seated,
+and the host sends every player the lobby's state whenever it changes.
+
+| Element | Who | What it does |
+| --- | --- | --- |
+| Mission | everyone sees; the King edits | The mission's summary. **Mission...** opens the Quick Mission creator as it is, with its Fly button reading Accept; Accept returns to the lobby and sends the new mission to everyone |
+| Slots | everyone | Every friendly aircraft (co-op): wing, member, type, and who flies it (a callsign, or AI). A player takes a free slot by clicking it |
+| Players | everyone | Callsigns with the King's crown and the host's house, and who is ready |
+| Messages and chat line | everyone | System lines and chat; Enter sends |
+| Loadout | a seated player | The Load Ordnance page for the player's own slot; every player arms their own aircraft (John, 2026-10-01) |
+| Ready | a seated player | Ready or not; a player marks ready once their loadout is chosen (John, 2026-10-01) |
+| Fly | the King | Starts the mission when every seated player is ready |
+| Leave | everyone | Back to Direct Connection; the King's leaving ends the session for a player-hosted game |
+
+When the King presses Fly the host builds the mission (`World::new` with open
+seating), seats every ready player in the slot they chose with the loadout they
+armed, and starts its clock; everyone starts airborne (John, 2026-09-28). A
+player who joins while the mission flies takes an AI aircraft in flight, as
+stage D does, with that aircraft's loadout. When the mission ends each player
+sees the debrief, then the lobby again, still connected (John, 2026-10-01); the
+King can change the mission and fly again.
+
+On the wire the lobby is a handful of new reliable messages (lobby state, take
+or leave a slot, loadout, ready, the King's mission and settings, start, chat,
+kick, pass the crown) and a protocol version bump. A dedicated server keeps the
+mission its file names and has no King: its players pick slots and get ready, and
+it starts as its `start` setting says. *Agent decisions.*
+
+### Chat
+
+Chat goes through the host, which forwards each line to its receivers:
+
+| Receiver | Who hears it |
+| --- | --- |
+| All | Everyone (the only receiver in the lobby, as in retail) |
+| Friendlies | The sender's side |
+| Enemies | The other side |
+| Wing | The sender's wing |
+| Target | The human flying the sender's designated target |
+
+- **Lobby:** the Messages box shows chat and system lines; a line at the
+  bottom of the panel takes text, Enter sends.
+- **In flight** (John, 2026-10-01, kept simple): the `~` key (backtick on the
+  same key) opens the chat line; while it is open Tab chooses the receiver,
+  Enter sends and Esc closes it. Enter designates the nearest visible aircraft
+  in flight, so it sends only while the line is open. While the line is open
+  the keyboard types instead of flying; the joystick still flies. F1 to F12 send
+  the matching line of `CHAT.TXT` only while the chat line is open, since the F
+  keys are the views (*agent decision*).
+- **The chat window** in flight is at the top left of the screen (John,
+  2026-10-01), apart from the HUD's messages at the bottom, each line coloured
+  by who sent it and to whom: **green** for the player's own side (to the side,
+  the wing or the player), **blue** for a line to everyone from the player's
+  side, **red** for a line from the enemy side. The window may use retail's
+  `MPSTATUS` art and font.
+- Limits (*agent proposal*): 80 characters a line, five lines in five seconds
+  a player, observers never chat (John, 2026-09-28).
+
+### How stages E and F land
+
+Two phases. The first is everything John's three-machine test needs; the
+second completes the plan's stage F and stage E's replays.
+
+**Phase 1: fly together.**
+
+| Slice | Model | After | Work | Acceptance |
+| --- | --- | --- | --- | --- |
+| EF0 Connection screens research | Sonnet | | Fold the retail survey into `docs/spec/multiplayer.md` and `docs/formats/menu.md`; settle the unknowns (NEWNET's field rectangles, the panel fonts, the list row count); the dialog reader learns `_DrawText`, a dialog's PIC name and a list's row count | Spec written with evidence; reader tests decode every network dialog |
+| EF1 Import the art | Sonnet | EF0 | The import keeps the multiplayer screens' pictures, pieces, fonts, dialogs and menus and the retail `CHAT.TXT`; a marker makes an older import ask to re-import | Single-player baseline SAME; an import holds every new name; an older pack asks for a re-import |
+| EF2 Widget kit | Sonnet | EF1 | Reusable retail-style widgets: text field, list with paging, scrolling message box, check box, the panel recipe, a background composed of two retail pictures, keyboard focus | Unit tests; headless renders compared with retail screenshots; single-player captures identical |
+| EF3 Host in the game | Opus | | The host on a thread inside the game, the in-process link, the local client, lifecycle and the game's 120 Hz clock | A hosted mission with a bot flies with no correction on the host's own plane; a two-second window stall stalls nobody; the session ends cleanly on leave, quit and a host panic |
+| EF4 The lobby on the wire | Opus | EF3 | The host's lobby phase, slots, loadouts, ready and start, the King's mission, return to the lobby after a mission, the crown, kick; the dedicated server's lobby without a King; protocol version 3 | Simulator tests: players join a lobby, take slots, arm, ready, start, fly, return and fly again; the King's mission change reaches everyone; the wire golden test |
+| EF5 Discovery and addresses | Sonnet | EF4 | The discovery query and answer, the search loop, names resolved off the screen's thread with every address tried, remembered addresses | A host is found on 127.0.0.1 and on this machine's network address; a different build is shown as such; no answer is larger than its query |
+| EF6 Chat | Sonnet | EF4 | Chat on the wire with the host's routing, the lobby's box and line, the flight line and keys, the top-left chat window with its colours, `CHAT.TXT` quick messages, limits; `docs/CONTROLS.md` | Routing tests for every receiver; a windowed run types and receives chat in flight with a bot; the controls list test |
+| EF7 Direct Connection screen | Sonnet | EF2, EF5 | The MULTI menu's rows and the screen of "Finding a game and joining" | Headless renders; a windowed run finds a host on this machine and joins it |
+| EF8 Lobby screen | Sonnet | EF2, EF4, EF6 | The lobby screen, the creator with Accept, Load Ordnance for one's own slot, the debrief and the return | A windowed run hosts, builds a mission, takes a slot, chats with a bot, starts, flies, ends and returns to the lobby |
+| EF9 Acceptance | lead, then John | all | The lead's smoke test on this machine (a hosting game, a joining game, a bot); then John on three machines (macOS, Linux, Windows) | John flies with friends from the menus |
+
+**Phase 2: the rest of stage F, and stage E's replays.** The King's settings
+(co-op or PvP and sides, slot locks, password, join in progress, friendly fire,
+respawn rules with retail's revival settings, PvP scoring, locked realism, kick
+and release, passing the crown, and **loadout rules**: any store on any
+aircraft, or the stores each aircraft really carries, John 2026-10-01); reply
+and request keys for human wingmen;
+friend-or-foe cues (the lock box's X, the IFF squawk, callsigns under labels);
+the multiplayer debrief with every aircraft; the basic observer view; the AI
+taking over an idle player's aircraft (an open question); captures converted to
+smoothed replays.
+
+```mermaid
+flowchart TD
+  EF0["EF0 Research"] --> EF1["EF1 Import the art"]
+  EF1 --> EF2["EF2 Widget kit"]
+  EF3["EF3 Host in the game"] --> EF4["EF4 Lobby on the wire"]
+  EF4 --> EF5["EF5 Discovery"]
+  EF4 --> EF6["EF6 Chat"]
+  EF2 --> EF7["EF7 Direct Connection screen"]
+  EF5 --> EF7
+  EF2 --> EF8["EF8 Lobby screen"]
+  EF4 --> EF8
+  EF6 --> EF8
+  EF7 --> EF9["EF9 Acceptance"]
+  EF8 --> EF9
+```
+
+EF0 and EF3 start together. EF7 and EF8 both edit the menus and `main.rs`, so
+they run one after the other.

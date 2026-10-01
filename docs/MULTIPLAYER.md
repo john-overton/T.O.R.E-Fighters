@@ -677,6 +677,21 @@ Made by John on 2026-09-30 at the stage D design review
 | Stage D acceptance | Agents smoke-test a dedicated server with clients on the development machine; John then tests on three machines on his LAN, macOS, Linux and Windows |
 | Stage D agent proposals | Approved as designed: the five new crates, UDP port 26900, the server's mission lifecycle, the build match rule, a joining player keeps the plane's loadout, own tracers at once and own missiles when the host launches them, 1.0 and 1.02F imports together once verified, and the retail stall-speed switch refused in networked play |
 
+Made by John on 2026-10-01 for stages E and F
+([lobby and hosting](ARCHITECTURE.md#lobby-and-hosting)):
+
+| Question | Decision |
+| --- | --- |
+| Testing stage D | Networking is done; John tests everything together on his three machines once the menus exist, not stage D from the command line |
+| Direct play first | The first mode is a direct, unpublished lobby for friends: games broadcast on the local network are listed, and a player connects directly to an IP address or a domain name. A public lobby is stage I |
+| Hosting and the mission | A player hosts from inside the game and builds the mission with the Quick Mission creator as the template |
+| The look | Retail backgrounds and pieces, not necessarily retail layouts: the MODEM CONNECTION background (red photo) with the NETWORK CONNECTION title bar and the TCP/IP Network connection panel, retail buttons and other pieces |
+| Re-import | Expected: every player re-imports once for the new screens' art |
+| Phase 1 | Everything the base test in the game needs: Direct Connection, hosting with the creator, the lobby with slots, loadout, ready, chat and start, flight with chat, the debrief and the return; the King's settings are phase 2 |
+| Loadouts | Each player chooses their own loadout as part of the lobby and marks ready once it is chosen. Phase 2 adds a setting: any store on any aircraft, or restricted to what each aircraft carries |
+| Chat in flight | The `~` key (backtick) opens the chat line, since Enter designates in flight; while it is open Tab chooses the receiver and Enter sends. The chat window is at the top left, coloured green for the player's side, blue for a line to everyone from the player's side, red for a line from the enemy |
+| After a mission | Everyone returns to the lobby, still connected |
+
 ## Open questions
 
 From the feature spec. Mission start, PvP scoring and collisions were settled by
