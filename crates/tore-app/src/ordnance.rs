@@ -727,7 +727,7 @@ impl Ordnance {
             ];
         }
         if let Some(message) = &self.message {
-            notice(&mut c, font, message);
+            notice(&mut c, font, message, self.lobby);
         }
         if let Some(drag) = self.drag.as_ref().filter(|drag| drag.moved)
             && let Some((x, y)) = self.pointer
@@ -752,17 +752,25 @@ impl Ordnance {
         animating
     }
 }
-fn notice(c: &mut Canvas, font: &Sprite, message: &str) {
+/// Where the page's notice sits: single player's low on the left, over the
+/// bottom of the catalog; the lobby's in the strip of backdrop between the
+/// title bar and the two panels, which covers no label (EF-F; the low place
+/// hid the bottom weapon rows' names).
+const NOTICE_Y: i32 = 335;
+const LOBBY_NOTICE_Y: i32 = 64;
+
+fn notice(c: &mut Canvas, font: &Sprite, message: &str, lobby: bool) {
     let line = message.split_whitespace().collect::<Vec<_>>().join(" ");
     let line = fit(font, &line, 572);
     if line.is_empty() {
         return;
     }
+    let y = if lobby { LOBBY_NOTICE_Y } else { NOTICE_Y };
     c.rect(
-        (30, 335, text_width(font, &line) + 8, font.height as i32 + 4),
+        (30, y, text_width(font, &line) + 8, font.height as i32 + 4),
         [35, 44, 46, 255],
     );
-    c.text(font, &line, 34, 337, Some([235, 225, 179]));
+    c.text(font, &line, 34, y + 2, Some([235, 225, 179]));
 }
 fn grouped(value: f64) -> String {
     let digits = format!("{value:.0}");
@@ -1507,6 +1515,43 @@ mod tests {
         drag(&mut ui, (400., 145.), (100., 120.));
         assert_eq!(ui.loadout.quantities, [0, 0, 500]);
         assert!(ui.selected.is_none());
+    }
+    /// The pixels a notice changes, as the rows they span.
+    fn notice_rows(lobby: bool) -> Option<(usize, usize)> {
+        let width = crate::menu::WIDTH;
+        let mut bare = fixture();
+        bare.lobby = lobby;
+        let mut said = fixture();
+        said.lobby = lobby;
+        said.message = Some(LOBBY_CHEAT_NOTICE.into());
+        let mut plain = vec![0u8; width * crate::menu::HEIGHT * 4];
+        let mut with = plain.clone();
+        bare.render(&mut plain);
+        said.render(&mut with);
+        let rows: Vec<usize> = (0..crate::menu::HEIGHT)
+            .filter(|row| {
+                plain[row * width * 4..(row + 1) * width * 4]
+                    != with[row * width * 4..(row + 1) * width * 4]
+            })
+            .collect();
+        Some((*rows.first()?, *rows.last()?))
+    }
+    #[test]
+    fn the_lobbys_notice_sits_above_the_panels_and_single_players_stays_low() {
+        // Single player's notice is where it always was (over the catalog's
+        // bottom edge).
+        let (top, bottom) = notice_rows(false).expect("single player's notice draws");
+        assert!(
+            top >= NOTICE_Y as usize && bottom < NOTICE_Y as usize + 20,
+            "{top} {bottom}"
+        );
+        // The lobby's is in the strip between the title bar and the panels,
+        // clear of every weapon label.
+        let (top, bottom) = notice_rows(true).expect("the lobby's notice draws");
+        assert!(
+            top >= LOBBY_NOTICE_Y as usize && bottom < 86,
+            "{top} {bottom}"
+        );
     }
     #[test]
     fn the_lobbys_page_refuses_cheat_loading_and_still_answers_fly_with_accept() {
