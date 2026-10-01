@@ -2358,9 +2358,11 @@ for them. When the player's game cannot have predicted its plane exactly (step
 the plane's exact state in a second packet. The
 [wire protocol](formats/net-protocol.md#snapshots) has the rules.
 
-The dedicated server runs the host on its main thread: it waits on the socket
-with a short timeout, steps due ticks and sends due packets. Stage E runs the
-same host on a thread inside the game.
+The dedicated server runs the host on its main thread: it polls its
+non-blocking sockets at least every 4 ms, steps due ticks and sends due
+packets, sleeping and then spinning to each tick's deadline
+(`tore_net::wait_until`). Stage E runs the same host, with the same loop, on a
+thread inside the game ([the host inside the game](#the-host-inside-the-game-stage-e)).
 
 **The calls** (agreed with the server slice, D7b). `Host::new(spec,
 resources, HostConfig)` refuses a setting out of range
@@ -3147,7 +3149,8 @@ Design for stages E and F of the [multiplayer plan](multiplayer-plan.md#stages),
 taken together at John's request of 2026-10-01, written by the lead and
 reviewed by John the same day; his answers are in the guide's
 [decisions](MULTIPLAYER.md#decisions). Built so far: slice EF0, the research
-and the dialog reader (below); the rest is design.
+and the dialog reader, and slice EF3, the host inside the game (below); the
+rest is design.
 Every choice is an agent decision unless it is credited to John.
 
 John's direction (2026-10-01):
@@ -3238,6 +3241,68 @@ the own plane's prediction, both small.
 - On Windows the thread sleeps to just before each tick and finishes with a
   short spin, as the dedicated server does.
 - A hosted game records the same capture and diagnostics as a joined one.
+
+*Built (EF3)*, each an agent decision. Until the menus exist (EF7, EF8), the
+game hosts from the command line, `tore-app --host MISSION_FILE`
+([hosting from the game](DEDICATED-SERVER.md#hosting-from-the-game)).
+
+- **The pieces.** The thread is `HostThread` in
+  `crates/tore-app/src/net/hosting.rs`. `NetSession` (`net/session.rs`) runs
+  over a `Transport`, a UDP socket or the link, and holds the thread when it
+  hosts, so ending the session stops the host. The link is `tore_net::link`;
+  the dual-stack `ServerSocket` and the sleep-then-spin `wait_until` moved
+  from `tore-server` to `tore-net` unchanged, and the dedicated server and the
+  host thread share them.
+- **The link.** Two ends behind the transport's `Datagrams` trait, a locked
+  queue each way of at most 1,024 datagrams; a full queue, or an end that is
+  gone, drops the send, as a network would. The host's transport is
+  `Linked<ServerSocket>`: the link is read first, then the socket. Datagrams
+  from the link come from the reserved address `[100::]:0`, in the IPv6
+  discard-only prefix and on port 0, which no UDP sender can have, and a
+  datagram from the socket that claims it is dropped. The handshake treats it
+  as any address: its own rate-limit budget, its own cookies, and an answer
+  never larger than its request (a test joins over the link beside a remote
+  client with no rate limiting and no cookie failure).
+- **The thread** (`tore-host`, an 8 MiB stack like a main thread's). The game
+  binds the socket itself, so a port in use is refused at once, then the
+  thread builds the `Host` and runs the dedicated server's loop: receive,
+  update, transmit, then wait until the next wake or 4 ms, whichever is
+  sooner, sleeping and then spinning the last 0.4 ms (2 ms on Windows). The
+  game's client starts joining at once; its first handshake packets wait in
+  the link until the host is built (a client retries for 10 seconds).
+- **Commands and reports.** In: `Stop` (EF4 adds the lobby's verbs). Out:
+  `Started` (aircraft, capacity), every `HostLog` entry (joins, refusals,
+  seats, departures, the mission's start and end, overloads, faults), the
+  `Phase` when its kind changes, `Note` for a socket error, and `Ended` with
+  why: stopped, finished (the mission ended), the build failed, or a panic.
+  The game reads them once a frame in `NetSession::pump` and writes each to
+  its log after `Host:`.
+- **Stopping.** `Stop` is the console's `end`: every player gets "Mission
+  ended" and their debrief, each is disconnected once that is acknowledged,
+  and the host stops when all are gone, or after 1.5 seconds disconnects the
+  rest with "server stopping". The thread closes its socket before it reports
+  its end; the game waits at most 3 seconds for it. A hosting player who
+  leaves gets their own debrief through their client first, as any player
+  does; the session then ends and stops the host. Quitting disconnects the
+  hosting player's client and drops the session. A game that loses its end of
+  the channels stops the thread the same way.
+- **The panic rule.** A panic on the thread is caught. The thread tries once,
+  itself guarded, to disconnect everyone with "server stopping" and send it,
+  closes the socket and reports the panic; the hosting player's session ends
+  with "The game you were hosting stopped: ..." on the main menu. A remote
+  player that disconnect does not reach sees the client's timeout message.
+  The game's panic hook still writes its fatal report, since the panic is a
+  bug. Tests make the thread panic with a test-only command.
+- **Measured** (the tests, synthetic import, debug build, this machine): a 30
+  second hosted flight with a remote bot made no correction of the hosting
+  player's plane at all and no hash mismatch. In a 2 second stall of the game
+  side the host stepped exactly 240 ticks and the remote bot's longest gap
+  between snapshots was 34 ms, one snapshot interval. After the stall the
+  hosting player's plane was corrected at every snapshot for about 2 seconds
+  (60 corrections, all adoptions of a state 4 ticks ahead of the prediction,
+  while the client's input clock recovered) and never after. Leave and quit
+  ended the host in 16 to 33 ms with a loopback guest; a panic was reported in
+  10 ms.
 
 ### Finding a game and joining
 
@@ -3351,7 +3416,7 @@ second completes the plan's stage F and stage E's replays.
 | EF0 Connection screens research | Sonnet | | Fold the retail survey into `docs/spec/multiplayer.md` and `docs/formats/menu.md`; settle the unknowns (NEWNET's field rectangles, the panel fonts, the list row count); the dialog reader learns `_DrawText`, a dialog's PIC name and a list's row count | Spec written with evidence; reader tests decode every network dialog. **Built (EF0, 2026-10-01):** the spec and format notes above, a headless render of NETWORK CONNECTION from the spec's numbers beside John's screenshot, and `ui::dialog` now reads text records (position, label, tail), a size-zero dialog's picture name, a list's row count, edit boxes and check boxes |
 | EF1 Import the art | Sonnet | EF0 | The import keeps the multiplayer screens' pictures, pieces, fonts, dialogs and menus and the retail `CHAT.TXT`; a marker makes an older import ask to re-import | Single-player baseline SAME; an import holds every new name; an older pack asks for a re-import |
 | EF2 Widget kit | Sonnet | EF1 | Reusable retail-style widgets: text field, list with paging, scrolling message box, check box, the panel recipe, a background composed of two retail pictures, keyboard focus | Unit tests; headless renders compared with retail screenshots; single-player captures identical |
-| EF3 Host in the game | Opus | | The host on a thread inside the game, the in-process link, the local client, lifecycle and the game's 120 Hz clock | A hosted mission with a bot flies with no correction on the host's own plane; a two-second window stall stalls nobody; the session ends cleanly on leave, quit and a host panic |
+| EF3 Host in the game | Opus | | **Built.** The host on a thread inside the game, the in-process link, the local client, lifecycle and the game's 120 Hz clock | A hosted mission with a bot flies with no correction on the host's own plane; a two-second window stall stalls nobody; the session ends cleanly on leave, quit and a host panic |
 | EF4 The lobby on the wire | Opus | EF3 | The host's lobby phase, slots, loadouts, ready and start, the King's mission, return to the lobby after a mission, the crown, kick; the dedicated server's lobby without a King; protocol version 3 | Simulator tests: players join a lobby, take slots, arm, ready, start, fly, return and fly again; the King's mission change reaches everyone; the wire golden test |
 | EF5 Discovery and addresses | Sonnet | EF4 | The discovery query and answer, the search loop, names resolved off the screen's thread with every address tried, remembered addresses | A host is found on 127.0.0.1 and on this machine's network address; a different build is shown as such; no answer is larger than its query |
 | EF6 Chat | Sonnet | EF4 | Chat on the wire with the host's routing, the lobby's box and line, the flight line and keys, the top-left chat window with its colours, `CHAT.TXT` quick messages, limits; `docs/CONTROLS.md` | Routing tests for every receiver; a windowed run types and receives chat in flight with a bot; the controls list test |

@@ -312,8 +312,8 @@ struct App {
     replays_screen: Option<replay::screen::Replays>,
     /// `--input-script`: key presses and clicks fed in as if from the window.
     script: Option<input_script::Runner>,
-    /// `--connect`: the server to join once the window is up.
-    connect: Option<net::options::ConnectOptions>,
+    /// `--connect` or `--host`: the session to start once the window is up.
+    connect: Option<net::options::Session>,
     /// The joined (or joining) server.
     net: Option<net::session::NetSession>,
     /// The mission the game built for the session, until the flight starts.
@@ -2783,8 +2783,11 @@ impl ApplicationHandler for App {
                 diagnostics::stage_done();
                 renderer.window.request_redraw();
                 self.renderer = Some(renderer);
-                if let Some(options) = self.connect.take() {
-                    self.start_session(options);
+                if let Some(session) = self.connect.take() {
+                    match session {
+                        net::options::Session::Join(options) => self.start_session(options),
+                        net::options::Session::Host(options) => self.start_hosting(*options),
+                    }
                     if self.error.is_some() {
                         event_loop.exit();
                         return;
@@ -4286,12 +4289,14 @@ impl ApplicationHandler for App {
         );
     }
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        // A session ends politely when the game does.
+        // A session ends politely when the game does; a hosted one stops its
+        // host, which ends the mission for everyone.
         if let Some(session) = &mut self.net {
             let now = session.now();
             session.client.disconnect(now);
             session.flush();
         }
+        self.net = None;
         // Release GPU backends while the event loop's display connection is alive.
         self.input.stop();
         self.finish_replay_recording("exit");
@@ -7602,8 +7607,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     // Mission replay viewer; see docs/REPLAYS.md.
     let mut watch_replay: Option<PathBuf> = None;
     let mut replay_capture: Option<PathBuf> = None;
-    // Joining a dedicated server; see docs/DEDICATED-SERVER.md.
-    let (mut connect, mut callsign, mut slot, mut password) = (None, None, None, None);
+    // Joining a dedicated server, or hosting; see docs/DEDICATED-SERVER.md.
+    let mut session_args = net::options::SessionArgs::default();
     let mut input_script_steps: Option<Vec<input_script::Step>> = None;
     let mut replay_options = replay::viewer::Options::default();
     while let Some(arg) = args.next() {
@@ -8274,13 +8279,31 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--viewer" => initial_screen = Screen::Viewer,
             "--connect" => {
-                connect = Some(args.next().ok_or("--connect needs HOST or HOST:PORT")?);
+                session_args.connect =
+                    Some(args.next().ok_or("--connect needs HOST or HOST:PORT")?);
+            }
+            "--host" => {
+                session_args.host = Some(PathBuf::from(
+                    args.next().ok_or("--host needs a mission file")?,
+                ));
             }
             "--callsign" => {
-                callsign = Some(args.next().ok_or("--callsign needs a name")?);
+                session_args.callsign = Some(args.next().ok_or("--callsign needs a name")?);
             }
-            "--slot" => slot = Some(args.next().ok_or("--slot needs a plane number")?),
-            "--password" => password = Some(args.next().ok_or("--password needs the password")?),
+            "--slot" => {
+                session_args.slot = Some(args.next().ok_or("--slot needs a plane number")?)
+            }
+            "--password" => {
+                session_args.password = Some(args.next().ok_or("--password needs the password")?)
+            }
+            "--port" => session_args.port = Some(args.next().ok_or("--port needs a port number")?),
+            "--name" => session_args.name = Some(args.next().ok_or("--name needs a name")?),
+            "--open-planes" => {
+                session_args.open_planes = Some(
+                    args.next()
+                        .ok_or("--open-planes needs friendly, all or plane numbers")?,
+                )
+            }
             "--watch-replay" => {
                 watch_replay = Some(PathBuf::from(
                     args.next().ok_or("--watch-replay needs a recording")?,
@@ -8424,7 +8447,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched, --probe-ai-flight-model standard|all-hybrid and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-lose-player TICK crashes the player's aircraft at that tick; --probe-wing-route EAST_NM:NORTH_NM:ALT_FT (repeatable) gives the player's wing waypoints, flown by an AI that takes the lead from the lost player once its search finds nothing; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
-                    "Multiplayer: --connect HOST[:PORT] joins a dedicated server (docs/DEDICATED-SERVER.md); --callsign NAME (1 to 15 printable ASCII characters), --slot N (the plane to take) and --password TEXT go with it."
+                    "Multiplayer: --connect HOST[:PORT] joins a dedicated server (docs/DEDICATED-SERVER.md); --callsign NAME (1 to 15 printable ASCII characters), --slot N (the plane to take) and --password TEXT go with it. --host MISSION_FILE hosts a game of that mission file (the dedicated server's format) and flies in it: other players join with --connect; --port N (default 26900), --name TEXT, --open-planes friendly|all|N,N and --password TEXT (the password joining players must give) set the game, and --callsign and --slot are the hosting player's own."
                 );
                 println!(
                     "Replays: --watch-replay FILE plays a mission recording (docs/REPLAYS.md). With it, --capture-replay OUT.ppm writes one GPU frame and exits (OUT.png saves the clean view as P does); --replay-tick N pauses at a tick; --flight-view 0..11 and --replay-aircraft ID choose the view; --replay-drone starts in the follow drone; --replay-speed 0.125..16 starts playing at that speed, negative for reverse; --replay-ui labels,timer,trails,comms,subtitles chooses the interface parts; --replay-panels thought,telemetry,guidance,comms,menu opens debug panels, or the right-click menu, on the selected aircraft; --replay-clean starts with the interface hidden, as H hides it; --replay-menu ?|pref|time|help|graphics|sound|controls opens the Escape menu at that page, or that screen over it; --replay-look-at aircraft:ID, ground:ID or weapon:ID starts in the object view looking at it."
@@ -8444,36 +8467,18 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             _ => return Err(format!("Unknown argument: {arg}").into()),
         }
     }
-    let connect = match connect {
-        Some(server) => {
-            if snapshot.is_some()
-                || import_only
-                || capture_terrain.is_some()
-                || ai_probe.is_some()
-                || headless_ticks.is_some()
-                || launch_creator
-                || watch_replay.is_some()
-                || record_input.is_some()
-                || replay_input.is_some()
-                || smoke_test
-            {
-                return Err("--connect joins a server and cannot combine with captures, probes, recordings or the replay viewer".into());
-            }
-            if let Some(problem) = net::options::process_problem() {
-                return Err(problem.into());
-            }
-            Some(net::options::ConnectOptions::new(
-                &server,
-                callsign.as_deref(),
-                slot.as_deref(),
-                password.as_deref(),
-            )?)
-        }
-        None if callsign.is_some() || slot.is_some() || password.is_some() => {
-            return Err("--callsign, --slot and --password go with --connect".into());
-        }
-        None => None,
-    };
+    let connect = session_args.session(
+        snapshot.is_some()
+            || import_only
+            || capture_terrain.is_some()
+            || ai_probe.is_some()
+            || headless_ticks.is_some()
+            || launch_creator
+            || watch_replay.is_some()
+            || record_input.is_some()
+            || replay_input.is_some()
+            || smoke_test,
+    )?;
     if watch_replay.is_none()
         && (replay_capture.is_some() || replay_options != replay::viewer::Options::default())
     {

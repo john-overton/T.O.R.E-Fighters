@@ -12,8 +12,11 @@ Stage D design of 2026-09-30, reviewed by John the same day. **Built (D7b, on
 the host session of D7a):** the program: the options, the configuration file,
 the import, `--check`, the start-up refusals, the real-time run loop, the
 console, the status line and the log; on 127.0.0.1 a scripted client joins over
-a real UDP socket, flies and leaves, and `quit` stops the server. **Not yet
-built:** the joining game (stage D8), so no real game has joined one. The dedicated server is part of the [multiplayer plan](multiplayer-plan.md#stages)
+a real UDP socket, flies and leaves, and `quit` stops the server. **Built
+(D8b):** the game joins one with `--connect` ([joining from the
+game](#joining-from-the-game)). **Built (EF3):** a player's game hosts the
+same host session itself with `--host` ([hosting from the
+game](#hosting-from-the-game)). The dedicated server is part of the [multiplayer plan](multiplayer-plan.md#stages)
 and the [multiplayer guide](MULTIPLAYER.md#dedicated-servers). Fighters
 Anthology had no dedicated server; everything on this page is an agent
 proposal unless it is credited to John.
@@ -27,6 +30,7 @@ proposal unless it is credited to John.
 - [The mission file](#the-mission-file)
 - [The mission lifecycle](#the-mission-lifecycle)
 - [Joining from the game](#joining-from-the-game)
+- [Hosting from the game](#hosting-from-the-game)
 - [Console, status and logs](#console-status-and-logs)
 - [Ports and firewalls](#ports-and-firewalls)
 - [Running it as a service](#running-it-as-a-service)
@@ -293,6 +297,51 @@ A 1.0 disc import and a 1.02F import play together, since they differ only in
 menu and HUD resources. A difference is refused with the names of the files
 that differ. The game version and protocol must match as well
 ([wire protocol](formats/net-protocol.md#versions)). *Decided with the lead, 2026-09-30:* a build is a tagged release when the build stamped `TORE_BUILD_VERSION` at compile time (`option_env!("TORE_BUILD_VERSION").is_some()`, as the game's `version::version()` already tests); release builds match by version and other builds by commit. The server's rule is `app::is_release` in `crates/tore-server/src/app.rs`, and the game's `--connect` must use the same test.
+
+## Hosting from the game
+
+Until the lobby (stage F, slices EF7 and EF8), a player hosts a game from the
+command line, and the others join it with `--connect`:
+
+```sh
+tore-app --host duel.txt --callsign Viper
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--host MISSION_FILE` | Host this [mission file](#the-mission-file), the dedicated server's format |
+| `--port N` | The UDP port to listen on, on every IPv4 and IPv6 address; default 26900 |
+| `--name TEXT` | The game's name, shown to joining players; 1 to 60 printable characters, default `CALLSIGN's game` |
+| `--open-planes friendly\|all\|N,N` | Which planes players may take, as the `open-planes` setting; default `friendly` |
+| `--password TEXT` | The password joining players must give; the hosting player's own game gives it too |
+| `--callsign NAME`, `--slot N` | The hosting player's own, as for `--connect` |
+
+The game runs the same host session as `tore-server`, on a thread of its own
+with its own 120 ticks a second, and joins it as an ordinary client over an
+in-process link: the hosting player flies through exactly the screens a
+joining player sees, with no delay, and a stalled or minimized window stalls
+nobody else ([design](ARCHITECTURE.md#the-host-inside-the-game-stage-e)). The
+others join with `tore-app --connect` to the hosting machine's address, through
+the same port and firewall as a server ([ports and
+firewalls](#ports-and-firewalls)).
+
+*Built (EF3). Agent decisions until the lobby (EF4) has its own settings:*
+the server's defaults (`max-players 30`, `snapshot-rate 30`, no time limit),
+except that the mission starts when the first player is seated, in practice
+the hosting player, whose game joins at once, and the game ends when the
+mission does (`after-end quit`). When the hosting player leaves (End Mission)
+or quits (the window closes, Exit), the game ends the mission for everyone:
+each remote player gets "Mission ended", their debrief and "the server is
+stopping", as the console's `end` gives them, and the port is free again at
+once. A mission file that cannot be read, a line it does not take or an option
+out of range refuses the start with the file and line, as the server refuses
+them; a mission the import cannot build, an `--open-planes` plane the mission
+lacks or a port in use is a plain message on the main menu. If the host fails
+while flying, the hosting player is told "The game you were hosting stopped:
+..." and the remote players "the server is stopping", or, if even that cannot
+be sent, the usual "no packets for 5 seconds". The host's log lines go to the
+game's log with `Host:` in front, and the hosted session keeps the same
+diagnostics log and capture as a joined one, the capture named `hosted`.
 
 ## Console, status and logs
 

@@ -1,10 +1,15 @@
 //! `--connect HOST[:PORT]` with `--callsign`, `--slot` and `--password`
-//! (docs/DEDICATED-SERVER.md, "Joining from the game").
+//! (docs/DEDICATED-SERVER.md, "Joining from the game"), and `--host
+//! MISSION_FILE` with `--port`, `--name`, `--open-planes` and the same three
+//! ("Hosting from the game").
 //!
 //! Parsing and checking are here and need no network: the host name is looked
 //! up only when the game starts the session ([`ConnectOptions::resolve`]).
 //! Every default is an agent decision.
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::path::{Path, PathBuf};
+use tore_session::OpenPlanes;
+use tore_world::mission::MissionSpec;
 
 /// The port a server listens on unless it is told another.
 pub const DEFAULT_PORT: u16 = 26_900;
@@ -85,6 +90,215 @@ impl ConnectOptions {
         } else {
             format!("{}:{}", self.host, self.port)
         }
+    }
+}
+
+/// The longest game name, in characters: the dedicated server's limit.
+pub const MAX_NAME: usize = 60;
+/// Plane numbers run from 0 to this, less one: six wings of five.
+pub const MAX_PLANES: u32 = 30;
+
+/// What the player asked for to host a game from the command line.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HostOptions {
+    /// The mission file, read and parsed.
+    pub mission: PathBuf,
+    pub spec: MissionSpec,
+    /// The UDP port to listen on, on every address.
+    pub port: u16,
+    /// The game's name, shown to joining players.
+    pub name: String,
+    /// Which planes players may take.
+    pub open_planes: OpenPlanes,
+    /// The hosting player's callsign and plane.
+    pub callsign: String,
+    pub slot: Option<u32>,
+    /// The password joining players must give, `None` for none.
+    pub password: Option<String>,
+}
+
+impl HostOptions {
+    /// Reads and checks the mission file and the options, as the dedicated
+    /// server reads its own: a file that cannot be read or a line it does not
+    /// take is refused with the file's name and the line.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        mission: &Path,
+        port: Option<&str>,
+        name: Option<&str>,
+        open_planes: Option<&str>,
+        callsign: Option<&str>,
+        slot: Option<&str>,
+        password: Option<&str>,
+    ) -> Result<Self, String> {
+        let joining = ConnectOptions::new("localhost", callsign, slot, password)?;
+        let port = match port {
+            Some(text) => text
+                .parse::<u16>()
+                .ok()
+                .filter(|port| *port != 0)
+                .ok_or_else(|| format!("--port must be a number from 1 to 65535, not {text:?}"))?,
+            None => DEFAULT_PORT,
+        };
+        let name = match name {
+            Some(name) => {
+                if name.is_empty()
+                    || name.chars().count() > MAX_NAME
+                    || name.chars().any(char::is_control)
+                {
+                    return Err(format!(
+                        "--name must be 1 to {MAX_NAME} printable characters"
+                    ));
+                }
+                name.to_owned()
+            }
+            None => format!("{}'s game", joining.callsign),
+        };
+        let open_planes = match open_planes {
+            Some(text) => parse_open_planes(text)?,
+            None => OpenPlanes::Friendly,
+        };
+        let spec = load_mission(mission)?;
+        Ok(Self {
+            mission: mission.to_owned(),
+            spec,
+            port,
+            name,
+            open_planes,
+            callsign: joining.callsign,
+            slot: joining.slot,
+            password: Some(joining.password).filter(|p| !p.is_empty()),
+        })
+    }
+}
+
+/// Reads and parses a mission file; an error names the file and its line.
+pub fn load_mission(path: &Path) -> Result<MissionSpec, String> {
+    let text = tore_import::files::read(path)
+        .map_err(|error| format!("Cannot read the mission file {}: {error}", path.display()))?;
+    MissionSpec::from_text(&text).map_err(|error| format!("{}: {error}", path.display()))
+}
+
+/// `friendly`, `all` or plane numbers separated by commas or spaces, as the
+/// dedicated server's `open-planes` setting takes them.
+pub fn parse_open_planes(value: &str) -> Result<OpenPlanes, String> {
+    match value.trim() {
+        "friendly" => Ok(OpenPlanes::Friendly),
+        "all" => Ok(OpenPlanes::All),
+        list => {
+            let mut planes = Vec::new();
+            for word in list.split([',', ' ', '\t']).filter(|w| !w.is_empty()) {
+                let plane = word.parse::<u32>().map_err(|_| {
+                    format!(
+                        "--open-planes must be `friendly`, `all` or plane numbers, not `{word}`"
+                    )
+                })?;
+                if plane >= MAX_PLANES {
+                    return Err(format!(
+                        "--open-planes plane {plane} is out of range: a mission has planes 0 to {}",
+                        MAX_PLANES - 1
+                    ));
+                }
+                if planes.contains(&plane) {
+                    return Err(format!("--open-planes lists plane {plane} twice"));
+                }
+                planes.push(plane);
+            }
+            if planes.is_empty() {
+                return Err("--open-planes needs `friendly`, `all` or plane numbers".into());
+            }
+            Ok(OpenPlanes::List(planes))
+        }
+    }
+}
+
+/// What the command line asked the game to do with a session.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Session {
+    /// `--connect`: join a server.
+    Join(ConnectOptions),
+    /// `--host`: host a game and fly in it.
+    Host(Box<HostOptions>),
+}
+
+/// The session options as the command line gave them, before they are
+/// checked together.
+#[derive(Clone, Debug, Default)]
+pub struct SessionArgs {
+    pub connect: Option<String>,
+    pub host: Option<PathBuf>,
+    pub callsign: Option<String>,
+    pub slot: Option<String>,
+    pub password: Option<String>,
+    pub port: Option<String>,
+    pub name: Option<String>,
+    pub open_planes: Option<String>,
+}
+
+impl SessionArgs {
+    /// The session the options ask for, checked. `other_mode` is true when
+    /// the command line also asks for a capture, probe, recording or the
+    /// replay viewer, which a session cannot combine with.
+    pub fn session(self, other_mode: bool) -> Result<Option<Session>, String> {
+        let Self {
+            connect,
+            host,
+            callsign,
+            slot,
+            password,
+            port,
+            name,
+            open_planes,
+        } = self;
+        let hosting_only = port.is_some() || name.is_some() || open_planes.is_some();
+        let session = match (connect, host) {
+            (Some(_), Some(_)) => {
+                return Err("--connect and --host cannot be used together".into());
+            }
+            (Some(server), None) => {
+                if hosting_only {
+                    return Err("--port, --name and --open-planes go with --host".into());
+                }
+                if other_mode {
+                    return Err("--connect joins a server and cannot combine with captures, probes, recordings or the replay viewer".into());
+                }
+                Session::Join(ConnectOptions::new(
+                    &server,
+                    callsign.as_deref(),
+                    slot.as_deref(),
+                    password.as_deref(),
+                )?)
+            }
+            (None, Some(mission)) => {
+                if other_mode {
+                    return Err("--host hosts a game and cannot combine with captures, probes, recordings or the replay viewer".into());
+                }
+                Session::Host(Box::new(HostOptions::new(
+                    &mission,
+                    port.as_deref(),
+                    name.as_deref(),
+                    open_planes.as_deref(),
+                    callsign.as_deref(),
+                    slot.as_deref(),
+                    password.as_deref(),
+                )?))
+            }
+            (None, None) => {
+                if hosting_only {
+                    return Err("--port, --name and --open-planes go with --host".into());
+                }
+                if callsign.is_some() || slot.is_some() || password.is_some() {
+                    return Err(
+                        "--callsign, --slot and --password go with --connect or --host".into(),
+                    );
+                }
+                return Ok(None);
+            }
+        };
+        if let Some(problem) = process_problem() {
+            return Err(problem.into());
+        }
+        Ok(Some(session))
     }
 }
 
@@ -235,6 +449,125 @@ mod tests {
         assert!(ConnectOptions::new("host", None, Some("-1"), None).is_err());
         assert!(ConnectOptions::new("host", None, Some("first"), None).is_err());
         assert!(ConnectOptions::new("host", None, None, Some("bad\npassword")).is_err());
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("tore-host-options-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    const MISSION: &str = "tore-mission 1\ntheater UKR\nstart airborne 10000\nseparation-nm 2\nwing friendly 1 F18.PT 2 average\nwing enemy 1 F18.PT 2 average\n";
+
+    #[test]
+    fn hosting_reads_the_mission_file_and_takes_the_servers_defaults() {
+        let dir = scratch("good");
+        let path = dir.join("duel.txt");
+        std::fs::write(&path, MISSION).unwrap();
+        let host = HostOptions::new(&path, None, None, None, Some("Viper"), None, None).unwrap();
+        assert_eq!(host.spec.theater, "UKR");
+        assert_eq!((host.port, host.name.as_str()), (26_900, "Viper's game"));
+        assert_eq!(host.open_planes, OpenPlanes::Friendly);
+        assert_eq!((host.slot, host.password.as_deref()), (None, None));
+        let host = HostOptions::new(
+            &path,
+            Some("27000"),
+            Some("Friday night"),
+            Some("0, 1 3"),
+            None,
+            Some("1"),
+            Some("open sesame"),
+        )
+        .unwrap();
+        assert_eq!((host.port, host.name.as_str()), (27_000, "Friday night"));
+        assert_eq!(host.open_planes, OpenPlanes::List(vec![0, 1, 3]));
+        assert_eq!(host.callsign, "Pilot");
+        assert_eq!(
+            (host.slot, host.password.as_deref()),
+            (Some(1), Some("open sesame"))
+        );
+        assert_eq!(
+            HostOptions::new(&path, None, None, Some("all"), None, None, None)
+                .unwrap()
+                .open_planes,
+            OpenPlanes::All
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn hosting_refuses_a_bad_mission_file_and_bad_options_plainly() {
+        let dir = scratch("bad");
+        let path = dir.join("mission.txt");
+        std::fs::write(&path, "tore-mission 1\ntheater UKR\ntheater MOON\n").unwrap();
+        let host =
+            |port, name, planes| HostOptions::new(&path, port, name, planes, None, None, None);
+        let error = host(None, None, None).unwrap_err();
+        assert!(error.contains("mission.txt: line 3"), "{error}");
+        let missing = HostOptions::new(&dir.join("none.txt"), None, None, None, None, None, None);
+        assert!(
+            missing
+                .unwrap_err()
+                .contains("Cannot read the mission file")
+        );
+        std::fs::write(&path, MISSION).unwrap();
+        for (port, name, planes, needle) in [
+            (Some("0"), None, None, "1 to 65535"),
+            (Some("x"), None, None, "1 to 65535"),
+            (None, Some(""), None, "printable"),
+            (None, Some("tab\there"), None, "printable"),
+            (None, None, Some("some"), "`some`"),
+            (None, None, Some("30"), "out of range"),
+            (None, None, Some("2,2"), "twice"),
+            (None, None, Some(" , "), "plane numbers"),
+        ] {
+            let error = host(port, name, planes).unwrap_err();
+            assert!(error.contains(needle), "{needle} in {error}");
+        }
+        let long = "x".repeat(MAX_NAME + 1);
+        assert!(host(None, Some(&long), None).is_err());
+        assert!(HostOptions::new(&path, None, None, None, Some(" bad"), None, None).is_err());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_session_options_go_together_and_with_nothing_else() {
+        let dir = scratch("args");
+        let path = dir.join("mission.txt");
+        std::fs::write(&path, MISSION).unwrap();
+        let args = |connect: Option<&str>, host: bool| SessionArgs {
+            connect: connect.map(str::to_owned),
+            host: host.then(|| path.clone()),
+            ..SessionArgs::default()
+        };
+        assert_eq!(SessionArgs::default().session(false), Ok(None));
+        let error = |args: SessionArgs, other| args.session(other).unwrap_err();
+        assert!(error(args(Some("h"), true), false).contains("cannot be used together"));
+        assert!(error(args(Some("h"), false), true).contains("--connect joins a server"));
+        assert!(error(args(None, true), true).contains("--host hosts a game"));
+        let lonely = SessionArgs {
+            callsign: Some("Viper".into()),
+            ..SessionArgs::default()
+        };
+        assert!(error(lonely, false).contains("go with --connect or --host"));
+        let port = |connect, host| SessionArgs {
+            port: Some("27000".into()),
+            ..args(connect, host)
+        };
+        assert!(error(port(Some("h"), false), false).contains("go with --host"));
+        assert!(error(port(None, false), false).contains("go with --host"));
+        if process_problem().is_none() {
+            assert!(matches!(
+                args(Some("h:4000"), false).session(false),
+                Ok(Some(Session::Join(options))) if options.port == 4000
+            ));
+            assert!(matches!(
+                port(None, true).session(false),
+                Ok(Some(Session::Host(options))) if options.port == 27_000
+            ));
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

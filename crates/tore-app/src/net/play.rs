@@ -105,8 +105,15 @@ impl App {
             }
         };
         let server = options.server();
+        let join = match crate::net::session::Join::connect(&options) {
+            Ok(join) => join,
+            Err(error) => {
+                self.message(error);
+                return;
+            }
+        };
         match NetSession::start(
-            options,
+            join,
             std::sync::Arc::clone(&self.theater_resources),
             &data,
             self.replay_library.as_ref(),
@@ -155,6 +162,11 @@ impl App {
         }
         let session = self.net.as_mut().expect("a session");
         session.pump(&controls);
+        if let Some(failure) = session.take_host_failure() {
+            self.net_ending = Some(failure);
+            self.end_session(event_loop);
+            return;
+        }
         for event in session.take_events() {
             if !self.net_event(event) {
                 self.end_session(event_loop);

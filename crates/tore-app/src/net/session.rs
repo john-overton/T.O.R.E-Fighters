@@ -16,6 +16,7 @@ use crate::{
     net::{
         files::{self, DatedLog},
         guns::{self, Guns},
+        hosting::{HostThread, Report},
         options::ConnectOptions,
     },
     regen::{self, DeviceRelease, Effects, Motor},
@@ -24,15 +25,15 @@ use crate::{
 use std::{
     cell::RefCell,
     collections::BTreeMap,
-    io::BufWriter,
-    net::UdpSocket,
+    io::{self, BufWriter},
+    net::{SocketAddr, UdpSocket},
     path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 use tore_formats::aircraft::AircraftId;
-use tore_net::{Entropy, RealClock};
+use tore_net::{Datagrams, Entropy, LinkEnd, RealClock};
 use tore_session::{
     BuildId, Client, ClientConfig, ClientEvent, ClientFrame, Controls, wire::events::WireEvent,
 };
@@ -95,10 +96,70 @@ fn build_mission(spec: &MissionSpec, resources: &BTreeMap<String, Vec<u8>>) -> W
 /// Where the second build of the mission is left for the game.
 type Sink = Rc<RefCell<Option<WorldResult<Built>>>>;
 
+/// What carries the session's datagrams: a UDP socket to a server, or the
+/// in-process link to the host this game runs itself.
+pub enum Transport {
+    Udp(UdpSocket),
+    Link(LinkEnd),
+}
+
+impl Datagrams for Transport {
+    fn send_datagram(&mut self, to: SocketAddr, datagram: &[u8]) -> io::Result<()> {
+        match self {
+            Self::Udp(socket) => socket.send_datagram(to, datagram),
+            Self::Link(link) => link.send_datagram(to, datagram),
+        }
+    }
+
+    fn recv_datagram(&mut self, buf: &mut [u8]) -> io::Result<Option<(usize, SocketAddr)>> {
+        match self {
+            Self::Udp(socket) => socket.recv_datagram(buf),
+            Self::Link(link) => link.recv_datagram(buf),
+        }
+    }
+}
+
+/// Where and how a session joins: the host's address, the transport that
+/// reaches it, and what the player gives.
+pub struct Join {
+    pub server: SocketAddr,
+    pub transport: Transport,
+    pub callsign: String,
+    /// The plane to ask for; `None` for the first free one.
+    pub slot: Option<u32>,
+    /// Empty when the host has no password.
+    pub password: String,
+    /// The host as the capture's file name shows it.
+    pub label: String,
+}
+
+impl Join {
+    /// A join to the server `options` name: the name looked up, a socket
+    /// opened.
+    pub fn connect(options: &ConnectOptions) -> Result<Self, String> {
+        let server = options.resolve()?;
+        let local: SocketAddr = if server.is_ipv4() {
+            ([0, 0, 0, 0], 0).into()
+        } else {
+            "[::]:0".parse().expect("an address")
+        };
+        let socket =
+            tore_net::bind_udp(local).map_err(|error| format!("Cannot open a socket: {error}"))?;
+        Ok(Self {
+            server,
+            transport: Transport::Udp(socket),
+            callsign: options.callsign.clone(),
+            slot: options.slot,
+            password: options.password.clone(),
+            label: options.host.clone(),
+        })
+    }
+}
+
 /// A joined (or joining) session.
 pub struct NetSession {
     pub client: Client,
-    socket: UdpSocket,
+    socket: Transport,
     clock: RealClock,
     sink: Sink,
     /// Chaff, flares, smoke and contrails, stepped once per client tick.
@@ -123,6 +184,12 @@ pub struct NetSession {
     pub capture: Option<PathBuf>,
     /// The debrief the host sent, when it has.
     pub debrief: Option<tore_session::wire::messages::Debrief>,
+    /// The host this game runs, when it hosts the session; dropping the
+    /// session stops it.
+    pub hosting: Option<HostThread>,
+    /// Why the host this game runs ended without the session ending: its
+    /// mission could not be built, or it panicked.
+    host_failure: Option<String>,
 }
 
 /// How long after Leave the game waits for the debrief and the disconnect
@@ -130,29 +197,29 @@ pub struct NetSession {
 pub const LEAVE_GRACE: Duration = Duration::from_secs(8);
 
 impl NetSession {
-    /// Opens the socket and starts the join. The mission is built when the
-    /// host sends it.
+    /// Starts the join over `join`'s transport. The mission is built when
+    /// the host sends it.
     pub fn start(
-        options: ConnectOptions,
+        join: Join,
         resources: Arc<BTreeMap<String, Vec<u8>>>,
         data: &Path,
         replays: Option<&Library>,
     ) -> Result<Self, String> {
-        let server = options.resolve()?;
-        let local: std::net::SocketAddr = if server.is_ipv4() {
-            ([0, 0, 0, 0], 0).into()
-        } else {
-            "[::]:0".parse().expect("an address")
-        };
-        let socket =
-            tore_net::bind_udp(local).map_err(|error| format!("Cannot open a socket: {error}"))?;
+        let Join {
+            server,
+            transport: socket,
+            callsign,
+            slot,
+            password,
+            label,
+        } = join;
         let clock = RealClock::new();
         let config = ClientConfig {
-            password: options.password.clone(),
-            plane: options.slot,
+            password,
+            plane: slot,
             entropy: Entropy::System,
             retail_stall_speeds: tore_sim::flight::retail_stall_speeds(),
-            ..ClientConfig::new(server, &options.callsign, build_id())
+            ..ClientConfig::new(server, &callsign, build_id())
         };
         let mut client = Client::connect(config, Arc::clone(&resources), clock.now())
             .map_err(|error| error.to_string())?;
@@ -170,7 +237,7 @@ impl NetSession {
                     path.display()
                 );
             }
-            match files::create_capture(library, now, &options.host) {
+            match files::create_capture(library, now, &label) {
                 Ok((path, file)) => {
                     client.set_capture(Box::new(BufWriter::new(file)));
                     capture = Some(path);
@@ -206,6 +273,8 @@ impl NetSession {
             left_at: None,
             capture,
             debrief: None,
+            hosting: None,
+            host_failure: None,
         })
     }
 
@@ -223,6 +292,15 @@ impl NetSession {
     /// Receives, runs what is due with `controls`, and sends. The session's
     /// events collect for [`NetSession::take_events`].
     pub fn pump(&mut self, controls: &Controls) {
+        if let Some(hosting) = &mut self.hosting {
+            for report in hosting.poll() {
+                if let Report::Ended(end) = report
+                    && let Some(text) = end.failure()
+                {
+                    self.host_failure.get_or_insert(text);
+                }
+            }
+        }
         let now = self.clock.now();
         self.trigger = self.fire.turn(&controls.commands, controls.trigger);
         let _ = self.client.receive_from(now, &mut self.socket);
@@ -246,6 +324,12 @@ impl NetSession {
     /// How long until the session next needs a turn, at most 10 ms.
     pub fn next_wake(&self) -> Duration {
         self.client.next_wake(self.clock.now())
+    }
+
+    /// The plain message for a host this game runs that failed (its
+    /// mission could not be built, or it panicked), once.
+    pub fn take_host_failure(&mut self) -> Option<String> {
+        self.host_failure.take()
     }
 
     /// The session events since the last call, oldest first.
