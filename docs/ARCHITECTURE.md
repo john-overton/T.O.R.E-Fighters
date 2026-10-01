@@ -3302,7 +3302,14 @@ game hosts from the command line, `tore-app --host MISSION_FILE`
   (60 corrections, all adoptions of a state 4 ticks ahead of the prediction,
   while the client's input clock recovered) and never after. Leave and quit
   ended the host in 16 to 33 ms with a loopback guest; a panic was reported in
-  10 ms.
+  10 ms. A windowed run (release build, 1280 by 960, a 12-aircraft mission
+  with a `tore-bot` joined) hosted, flew, left with the debrief and stopped
+  the host, and the bot was told. Hosting and joining the same mission cost
+  the same per frame within the runs' noise (simulation and cameras 2.15 ms a
+  frame hosting in both runs, against 2.20 and 2.33 ms joining a dedicated
+  server; 9,000 frames each), and the hosting game held about 4 MB more at its
+  peak (589 MB against 585 MB): the host's copy of the mission shares the
+  game's import, so it is small.
 
 ### Finding a game and joining
 
