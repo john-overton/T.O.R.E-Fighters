@@ -28,6 +28,7 @@
 //! 333 by 80 block that would hide a sixth of the top of the view (*agent
 //! decision*).
 use crate::flight_canvas::{FlightCanvas, HUD_SCALE};
+use crate::instruments::Layout;
 use crate::widgets::tone;
 use std::collections::VecDeque;
 use std::sync::OnceLock;
@@ -53,6 +54,11 @@ const HISTORY: usize = 64;
 const WIDTH: f64 = 320.;
 /// The gap to the left and top edges, in layer units.
 const MARGIN: f64 = 5.;
+/// The small instruments' top edge, layer units: the window stays above it.
+const SMALL_ROW_TOP: f64 = 377.;
+/// What the window keeps clear of the large instruments around it, layer
+/// units: the band's own padding and a little more.
+const GAP_PAD: f64 = 4.;
 /// The translucent band behind the text.
 const BACKING: f64 = 0.6;
 /// The key hint under the open line.
@@ -249,13 +255,17 @@ impl Chat {
 
     /// Draws the window and, when open, the line, on the flight view's
     /// overlay.
-    pub fn draw(&self, canvas: &mut FlightCanvas, font: &Font, now: Instant) {
+    pub fn draw(&self, canvas: &mut FlightCanvas, font: &Font, now: Instant, layout: Layout) {
         let open = self.is_open();
         let [w, h] = canvas.size.map(f64::from);
         let layer = (w / 640.).min(h / 480.);
         let scale = layer * HUD_SCALE;
-        let room = (WIDTH * layer / scale) as usize;
-        let mut lines: Vec<(String, [u8; 3], f64)> = Vec::new();
+        let spot = Spot::of(layout, [w, h], layer);
+        let room = (spot.width * layer / scale) as usize;
+        let line_height = (font.height + 1) as f64 * scale;
+        // Whole lines that fit between the top of the spot and its bottom.
+        let fit = (((spot.bottom - spot.top) / line_height).floor() as usize).max(1);
+        let mut body: Vec<(String, [u8; 3], f64)> = Vec::new();
         let keep = if open { OPEN_LINES } else { WINDOW_LINES };
         for entry in &self.entries {
             let age = now.saturating_duration_since(entry.at).as_secs_f64();
@@ -267,11 +277,12 @@ impl Chat {
                 ((LINE_SECONDS - age) / FADE_SECONDS).min(1.)
             };
             for piece in wrap(font, &entry.text, room) {
-                lines.push((piece, colour(entry.tone), alpha));
+                body.push((piece, colour(entry.tone), alpha));
             }
         }
-        let skip = lines.len().saturating_sub(keep);
-        lines.drain(..skip);
+        // The open line, with the tail of what is typed in view, and the
+        // key hint under it; the hint goes first when the room is short.
+        let mut tail: Vec<(String, [u8; 3], f64)> = Vec::new();
         if let Some(text) = &self.line {
             let caret = if (now.saturating_duration_since(self.opened).as_millis()
                 / BLINK.as_millis())
@@ -286,21 +297,68 @@ impl Chat {
             } else {
                 Tone::Own
             };
-            // The line keeps its tail in view when it runs long.
             let prompt = format!("SEND TO {}: {text}{caret}", receiver_label(self.receiver));
-            let mut shown = wrap(font, &prompt, room);
-            let keep_from = shown.len().saturating_sub(2);
-            lines.extend(
-                shown
-                    .drain(keep_from..)
-                    .map(|piece| (piece, colour(tone), 1.)),
-            );
-            lines.push((HINT.to_owned(), [170, 170, 170], 1.));
+            let shown = wrap(font, &prompt, room);
+            let from = shown.len().saturating_sub(2);
+            tail.extend(shown[from..].iter().map(|p| (p.clone(), colour(tone), 1.)));
+            let hint = wrap(font, HINT, room);
+            if tail.len() + hint.len() < fit {
+                tail.extend(hint.into_iter().map(|p| (p, [170, 170, 170], 1.)));
+            }
+            let from = tail.len().saturating_sub(fit);
+            tail.drain(..from);
         }
-        if lines.is_empty() {
+        let room_left = fit.saturating_sub(tail.len()).min(keep);
+        let skip = body.len().saturating_sub(room_left);
+        body.drain(..skip);
+        body.extend(tail);
+        if body.is_empty() {
             return;
         }
-        draw_lines(canvas, font, &lines, layer, scale);
+        draw_lines(canvas, font, &body, &spot, layer, scale);
+    }
+}
+
+/// Where the window sits and how big it may be (*John, 2026-10-01*): at the
+/// top left, but with the large cockpit instruments (the default layout) on
+/// the left side in the gap between the upper-left and lower-left ones, in
+/// the instruments' own column, so it covers neither. Sizes are in screen
+/// pixels except `width`, in layer units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Spot {
+    left: f64,
+    top: f64,
+    /// The text's width, layer units.
+    width: f64,
+    /// The lowest the text may reach.
+    bottom: f64,
+}
+
+impl Spot {
+    fn of(layout: Layout, [w, h]: [f64; 2], layer: f64) -> Self {
+        match layout {
+            Layout::Small => Self {
+                left: MARGIN * layer,
+                top: MARGIN * layer,
+                width: WIDTH,
+                // Above the row of small instruments across the bottom.
+                bottom: (SMALL_ROW_TOP - MARGIN) * layer,
+            },
+            Layout::Large => {
+                // The large instruments are scaled to fit and anchored to
+                // the window's corners (`Layout::rect_on`, whatever the
+                // window's shape): slot 0 at (8, 8) from the top left and
+                // slot 1 at (8, 312) of 480, i.e. 8 from the bottom left,
+                // each 162 by 160.
+                let (x, top_end) = (8., 8. + crate::instruments::HEIGHT as f64);
+                Self {
+                    left: (x + GAP_PAD) * layer,
+                    top: top_end * layer + GAP_PAD * layer,
+                    width: crate::instruments::WIDTH as f64 - 2. * GAP_PAD,
+                    bottom: h - top_end * layer - GAP_PAD * layer,
+                }
+            }
+        }
     }
 }
 
@@ -370,12 +428,13 @@ fn draw_lines(
     canvas: &mut FlightCanvas,
     font: &Font,
     lines: &[(String, [u8; 3], f64)],
+    spot: &Spot,
     layer: f64,
     scale: f64,
 ) {
     let line_height = (font.height + 1) as f64 * scale;
     let pad = 2. * layer;
-    let (left, top) = (MARGIN * layer, MARGIN * layer);
+    let (left, top) = (spot.left, spot.top);
     let widest = lines
         .iter()
         .map(|(text, _, _)| text_width(font, text))
@@ -551,9 +610,10 @@ pub(crate) fn draw_window(
     session: Option<&crate::net::session::NetSession>,
     canvas: &mut FlightCanvas,
     font: &Font,
+    layout: Layout,
 ) {
     if let Some(session) = session {
-        session.chat.draw(canvas, font, Instant::now());
+        session.chat.draw(canvas, font, Instant::now(), layout);
     }
 }
 
@@ -753,7 +813,7 @@ mod tests {
         chat.push(&line(Standing::Enemy, Receiver::All, false, "enemy"), t0);
         chat.system("No one hears you.", t0);
         let mut c = canvas();
-        chat.draw(&mut c, &font, t0 + Duration::from_secs(1));
+        chat.draw(&mut c, &font, t0 + Duration::from_secs(1), Layout::Small);
         let drawn = colours_drawn(&c);
         for want in [tone::OWN_SIDE, tone::ALL, tone::ENEMY, tone::SYSTEM] {
             assert!(drawn.contains(&want), "{want:?} in {drawn:?}");
@@ -775,6 +835,7 @@ mod tests {
             &mut faded,
             &font,
             t0 + Duration::from_secs_f64(LINE_SECONDS - 1.5),
+            Layout::Small,
         );
         let peak = |c: &FlightCanvas| c.pixels.chunks_exact(4).map(|p| p[3]).max().unwrap();
         assert!(peak(&faded) < peak(&c) && peak(&faded) > 0);
@@ -784,19 +845,94 @@ mod tests {
             &mut gone,
             &font,
             t0 + Duration::from_secs_f64(LINE_SECONDS + 0.1),
+            Layout::Small,
         );
         assert_eq!(peak(&gone), 0);
         // The open line shows old lines again, and what is typed.
         chat.open(t0);
         typed(&mut chat, "hello");
         let mut open = canvas();
-        chat.draw(&mut open, &font, t0 + Duration::from_secs(60));
+        chat.draw(
+            &mut open,
+            &font,
+            t0 + Duration::from_secs(60),
+            Layout::Small,
+        );
         assert!(peak(&open) > 0, "an open line brings the lines back");
         let lit = |c: &FlightCanvas| c.pixels.chunks_exact(4).filter(|p| p[3] > 0).count();
         let mut closed_again = canvas();
         chat.key("Escape", None, false, true);
-        chat.draw(&mut closed_again, &font, t0 + Duration::from_secs(60));
+        chat.draw(
+            &mut closed_again,
+            &font,
+            t0 + Duration::from_secs(60),
+            Layout::Small,
+        );
         assert!(lit(&open) > lit(&closed_again));
+    }
+
+    #[test]
+    fn with_large_instruments_the_window_sits_in_the_left_gap_at_every_window_shape() {
+        let font = font();
+        let t0 = Instant::now();
+        for [w, h] in [
+            [640u32, 480],
+            [1280, 720],
+            [1920, 1080],
+            [1000, 1000],
+            [3840, 2160],
+        ] {
+            for open in [false, true] {
+                let mut chat = Chat::default();
+                for n in 0..12 {
+                    chat.push(
+                        &line(
+                            Standing::Own,
+                            Receiver::All,
+                            false,
+                            &format!("a long line number {n} that must wrap inside the narrow gap"),
+                        ),
+                        t0,
+                    );
+                }
+                if open {
+                    chat.open(t0);
+                    typed(&mut chat, &"y".repeat(80));
+                }
+                let mut c = FlightCanvas::default();
+                c.size = [w, h];
+                c.pixels = vec![0; (w * h * 4) as usize];
+                chat.draw(&mut c, &font, t0, Layout::Large);
+                let layer = (f64::from(w) / 640.).min(f64::from(h) / 480.);
+                let column = 8. * layer;
+                // The gap between the upper-left and lower-left instruments
+                // (each 162 by 160 layer units at 8 from the corners).
+                let (gap_top, gap_bottom) = (168. * layer, f64::from(h) - 168. * layer);
+                let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0, 0);
+                for (i, p) in c.pixels.chunks_exact(4).enumerate() {
+                    if p[3] != 0 {
+                        let (x, y) = (i as u32 % w, i as u32 / w);
+                        (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+                    }
+                }
+                assert!(x1 > x0, "{w}x{h} open={open}: something is drawn");
+                assert!(
+                    f64::from(x0) >= column - 1. && f64::from(x1) <= column + 162. * layer + 1.,
+                    "{w}x{h}: x {x0}..{x1} within the instruments' column {column}"
+                );
+                assert!(
+                    f64::from(y0) >= gap_top - 1. && f64::from(y1) <= gap_bottom + 1.,
+                    "{w}x{h} open={open}: y {y0}..{y1} within the gap {gap_top}..{gap_bottom}"
+                );
+            }
+        }
+        // Small instruments leave the top left to the window.
+        let mut chat = Chat::default();
+        chat.push(&line(Standing::Own, Receiver::All, false, "x"), t0);
+        let mut c = canvas();
+        chat.draw(&mut c, &font, t0, Layout::Small);
+        let first = c.pixels.chunks_exact(4).position(|p| p[3] != 0).unwrap();
+        assert!(first / 1280 < 20, "the top left, not a gap lower down");
     }
 
     #[test]
@@ -811,7 +947,7 @@ mod tests {
             );
         }
         let mut c = canvas();
-        chat.draw(&mut c, &font, t0);
+        chat.draw(&mut c, &font, t0, Layout::Small);
         let rows_lit = |c: &FlightCanvas| {
             (0..960)
                 .filter(|y| (0..1280).any(|x| c.pixels[(y * 1280 + x) * 4 + 3] > 200))
@@ -821,7 +957,7 @@ mod tests {
         let mut one = canvas();
         let mut chat1 = Chat::default();
         chat1.push(&line(Standing::Own, Receiver::All, false, "line 0"), t0);
-        chat1.draw(&mut one, &font, t0);
+        chat1.draw(&mut one, &font, t0, Layout::Small);
         assert!(six > 4 * rows_lit(&one), "six lines against one");
         assert!(six < 8 * rows_lit(&one));
         // A line of 80 characters wraps inside the window's width.
@@ -900,13 +1036,13 @@ mod tests {
                     chat.key("Escape", None, false, true);
                 }
                 for _ in 0..20 {
-                    chat.draw(&mut canvas, &font, t0);
+                    chat.draw(&mut canvas, &font, t0, Layout::Small);
                 }
                 let runs = 500;
                 let started = Instant::now();
                 for _ in 0..runs {
                     canvas.pixels.fill(0);
-                    chat.draw(&mut canvas, &font, t0);
+                    chat.draw(&mut canvas, &font, t0, Layout::Small);
                 }
                 let each = started.elapsed() / runs;
                 // The clear is the benchmark's own: take it out.

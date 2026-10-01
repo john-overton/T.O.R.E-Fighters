@@ -964,12 +964,14 @@ requests count against the 20 a second the host answers.
   (side and wing index), Target to the human flying the aircraft the sender
   has designated (an AI-flown or non-aircraft target, or none, reaches no
   one). A player flying hears Friendlies, Enemies, Wing and Target lines;
-  one with no plane hears All only. A player who left, or whose plane the
+  one with no plane hears All only. While a mission flies, a connection
+  with no plane is an observer (John, 2026-10-01), and an observer's All
+  reaches only the other connections with no plane (the lead's reading);
+  a flyer's All reaches everyone. A player who left, or whose plane the
   AI flies again, hears nothing more. The sender is sent its own line back
   (no sound), so it sees what went out; when no one else heard it, the host
   follows with "No one hears you."; Target with nothing designated is
-  refused ("You have no target designated."). Observers (phase 2) never
-  chat.
+  refused ("You have no target designated.").
 - **Sounds.** The receivers play a quick message's sound; the sender does
   not hear its own.
 

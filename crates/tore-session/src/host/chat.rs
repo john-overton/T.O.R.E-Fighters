@@ -17,7 +17,7 @@
 //! The sender is sent its own line back, so it sees what went out, and when
 //! no one else hears it, the host's words "No one hears you.".
 
-use super::{Host, HostLog, Message, Peer, Stage};
+use super::{Host, HostLog, Life, Message, Peer, Stage};
 use crate::wire::chat::{ChatFrom, ChatLine, ChatSend, NO_ONE_HEARS, Receiver, Refusal, Standing};
 use tore_net::ConnectionId;
 use tore_sim::ai::launch::WingId;
@@ -141,13 +141,16 @@ impl Host {
             (Receiver::Target, Some(place)) => self.designated_seat(place.plane)?,
             _ => None,
         };
+        let observing = place.is_none() && matches!(self.life, Life::Flying);
         let mut hearers = Vec::new();
         for (&connection, peer) in &self.peers {
             if connection == sender || matches!(peer.stage, Stage::Closing { .. }) {
                 continue;
             }
             let hears = match receiver {
-                Receiver::All => true,
+                // An observer's line stays among observers while the mission
+                // flies; everyone else's All reaches everyone.
+                Receiver::All => !(observing && self.place_of(connection).is_some()),
                 _ => {
                     // Everything but All goes to those flying, and the
                     // sender flies (a lobby sender was refused before).

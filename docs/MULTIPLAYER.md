@@ -194,7 +194,8 @@ return, they rejoin as an observer until the round ends.
 
 **Observers** use the replay viewer's camera and playback controls on the live
 session. This covers players whose aircraft was destroyed, players who join with
-no slot available, and pure spectators. Observers cannot chat with any team. In
+no slot available, and pure spectators. Observers cannot chat to the players
+flying, but they talk among themselves ([decision](#decisions)). In
 PvP the King can set an observer delay so observers cannot relay live positions
 to a side. The delay is applied by the host before anything is sent, so an
 observer's machine never holds live positions.
@@ -717,6 +718,8 @@ Made by John on 2026-10-01 for stages E and F
 | Phase 1 | Everything the base test in the game needs: Direct Connection, hosting with the creator, the lobby with slots, loadout, ready, chat and start, flight with chat, the debrief and the return; the King's settings are phase 2 |
 | Loadouts | Each player chooses their own loadout as part of the lobby and marks ready once it is chosen. Phase 2 adds a setting: any store on any aircraft, or restricted to what each aircraft carries |
 | Chat in flight | The `~` key (backtick) opens the chat line, since Enter designates in flight; while it is open Tab chooses the receiver and Enter sends. The chat window is at the top left, coloured green for the player's side, blue for a line to everyone from the player's side, red for a line from the enemy |
+| Chat window place | John, 2026-10-01: top left, unless the player uses large instruments (the default layout; the Small layout is six across the bottom). Then it sits on the left side in the gap between the upper-left and lower-left instruments, covering neither. The game chooses from the instruments' layout setting each frame, so changing the setting moves the window; the lines are fitted to the gap at every window shape (fewer lines when the room is short) |
+| Observers and chat | John, 2026-10-01: observers cannot chat to the active players, but can talk amongst themselves. While a mission flies, a connection with no plane (in the lobby, not flying) is an observer. *The lead's reading of who hears whom, implemented in EF6:* an observer's lines go only to other observers, and their All reaches only the other plane-less connections; observers still receive the flying players' lines to All; flying players send and receive as before; with nothing flying everyone is in the lobby and All reaches everyone |
 | After a mission | Everyone returns to the lobby, still connected |
 
 ## Open questions

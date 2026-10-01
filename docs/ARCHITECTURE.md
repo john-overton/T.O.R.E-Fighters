@@ -3819,7 +3819,8 @@ Chat goes through the host, which forwards each line to its receivers:
   retail's in-flight pane is unknown and only a reference; EF6 did not use
   them (below).
 - Limits (*agent proposal*, built in EF6): 80 characters a line, five lines in five seconds
-  a player, observers never chat (John, 2026-09-28).
+  a player, and observers do not reach the players flying (John,
+  2026-09-28, refined 2026-10-01: they talk among themselves).
   Retail keeps `CHAT.TXT` text to 50 characters a line (EF0, S), shorter than
   this limit.
 
@@ -3830,21 +3831,23 @@ choice below an agent decision unless credited.
 - **On the host** (`tore_session::host::chat`). A player's line goes to the host,
   which trims it, checks it, routes it and logs it (`HostLog::Chat`: the
   dedicated server writes `chat: Viper to friendlies (2 heard): Form up` to
-  its console and log, and the hosting game to its log). A player with no
-  plane, in the lobby (whether or not the mission is flying), sends to All
-  only and hears All only; a player flying hears every receiver. **All** goes
+  its console and log, and the hosting game to its log). **All** goes
   to every other connection, **Friendlies** and **Enemies** to the players
   flying on the sender's side or the other, **Wing** to those in the sender's
   wing, **Target** to the human flying the aircraft the sender has designated
-  (`world.combat.state.view(plane).designated()`, an aircraft only). The sender is sent its
-  own line back (retail's `YOU TO ALL`), so it sees what went out; then, if
-  no other player heard it, "No one hears you." An AI-flown target hears
-  nothing, so that is the case there; with nothing designated Target is
-  refused ("You have no target designated."). A departed player is no
-  longer a connection, and a plane the AI flies again has no human in it, so
-  neither hears anything. *Observers* (phase 2) will be refused all chat; today a player
-  with no plane is in the lobby, which sends to All as the lobby does (the
-  host's one place to refuse them is `Host::chat`).
+  (`world.combat.state.view(plane).designated()`, an aircraft only). A player
+  with no plane sends to All only and hears All only. **Observers** (John,
+  2026-10-01): while a mission flies, a connection with no plane is an
+  observer. *The lead's reading of who hears whom:* an observer's All reaches
+  only the other observers, never a player flying; a flying player's All
+  reaches observers and flyers alike. With nothing flying everyone is in the
+  lobby and All reaches everyone. The sender is sent its own line back
+  (retail's `YOU TO ALL`), so it sees what went out; then, if no other player
+  heard it (an observer alone hears no one), "No one hears you." An AI-flown
+  target hears nothing, so that is the case there; with nothing designated
+  Target is refused ("You have no target designated."). A departed player is
+  no longer a connection, and a plane the AI flies again has no human in it,
+  so neither hears anything. The one place that decides is `Host::chat`.
 - **Limits.** 80 characters of printable ASCII (space to `~`, the retail
   fonts' range), spaces trimmed from both ends, an empty line dropped
   silently, five lines in five seconds a player (a sliding window over the
@@ -3880,9 +3883,17 @@ choice below an agent decision unless credited.
   line (network games only)", Communication) and not rebindable; the keys
   while the line is open are in [the controls list](CONTROLS.md#built-in-controls-outside-the-tables).
   Single player never opens it (the hook needs a networked flight).
-- **The window** (`Chat::draw`). The last 6 lines (after wrapping at 320 of
-  the 640-unit layer) at the top left, 5 layer units from the edges, in the
-  HUD font at the HUD's scale with its filtered edges, over a band of
+- **The window** (`Chat::draw`). The last 6 lines, at a place John chose
+  (2026-10-01) from the instruments' layout setting (`App.instruments.layout`)
+  at every draw, so changing the setting moves it: with the Small layout (six
+  across the bottom) the top left, 5 layer units from the edges, wrapped at
+  320 of the 640-unit layer; with the Large layout (the default) the left gap
+  between the upper-left and lower-left instruments, in their column (162
+  layer units wide less 4 either side, from 4 below the upper instrument to 4
+  above the lower, anchored to the window's left edge like the instruments), so it covers neither
+  at any window shape. Whole lines that do not fit the gap's height are
+  dropped, oldest first, and the key hint goes before the open line does. The
+  text is in the HUD font at the HUD's scale with its filtered edges, over a band of
   translucent black (60 percent) so every colour reads on sky or ground. A
   line stays 15 seconds and fades over the last 3; the band fades with the
   brightest line. While the line is open the window shows the last 8 lines
@@ -3894,9 +3905,7 @@ choice below an agent decision unless credited.
   side or the lobby; red `[255, 118, 104]` from the other side whatever the
   receiver; pale grey `[214, 214, 208]` for the host's words. Retail's
   `MPSTATUS` pane and `MPFONT` are not used: the pane is an opaque 333 by 80
-  black block that would hide a sixth of the top of the view. The window
-  covers the top-left instrument (SYSTEMS) of the cockpit view, as John's
-  placement requires.
+  black block that would hide a sixth of the top of the view.
 - **Lines read** `YOU TO ALL: text` for the player's own and `VIPER TO WING:
   text` for another's (retail's `YOU TO ...` forms; retail shows only the
   sender's name on a line from another, the receiver here tells the player

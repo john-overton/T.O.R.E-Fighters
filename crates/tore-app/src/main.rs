@@ -4195,6 +4195,7 @@ impl ApplicationHandler for App {
                             self.net_flight.as_ref().and(self.net.as_ref()),
                             &mut self.flight_canvas,
                             &self.hornet.hud_font,
+                            self.instruments.layout,
                         );
                         self.flight_ui.draw(
                             &mut self.menu.pixels,

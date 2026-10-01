@@ -41,7 +41,7 @@ pub enum Refusal {
     /// A quick message number outside 1 to 12, or a sound name that is not
     /// one.
     BadQuick,
-    /// Before flight only All works.
+    /// A player with no plane sends to All only.
     OnlyAll,
     /// More than [`RATE_LINES`] lines in [`RATE_WINDOW`].
     TooFast,
@@ -59,7 +59,7 @@ impl Refusal {
             Self::TooLong => "That line is too long: 80 characters at most.",
             Self::Unprintable => "Chat takes letters, digits and punctuation only.",
             Self::BadQuick => "There is no such quick message.",
-            Self::OnlyAll => "Before flight you can only send to All.",
+            Self::OnlyAll => "Only Send to All works until you fly.",
             Self::TooFast => "You are sending too fast: 5 lines in 5 seconds at most.",
             Self::NoTarget => "You have no target designated.",
             Self::NotConnected => "You are not connected to a game.",

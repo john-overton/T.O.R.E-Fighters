@@ -15,9 +15,9 @@ use tore_sim::ai::launch::Side;
 const MS: Duration = Duration::from_millis(1);
 
 /// Friendly wing 1 of two, friendly wing 2 of one, the enemy's wing 1 of
-/// two, 2 nm apart so a designation by identity can reach.
+/// three, 2 nm apart so a designation by identity can reach.
 fn mission() -> MissionSpec {
-    let mut spec = spec(2, 2, 2);
+    let mut spec = spec(2, 3, 2);
     spec.wings[1].count = 1;
     spec
 }
@@ -119,7 +119,7 @@ fn flight() -> Flight {
     let f1 = wing(&rig, Side::Friendly, 0);
     let f2 = wing(&rig, Side::Friendly, 1);
     let e1 = wing(&rig, Side::Enemy, 0);
-    assert_eq!((f1.len(), f2.len(), e1.len()), (2, 1, 2));
+    assert_eq!((f1.len(), f2.len(), e1.len()), (2, 1, 3));
     let viper = pilot(&mut rig, "Viper", f1[0]);
     let cobra = pilot(&mut rig, "Cobra", f1[1]);
     let hawk = pilot(&mut rig, "Hawk", f2[0]);
@@ -321,27 +321,47 @@ fn a_line_nobody_hears_comes_back_with_the_hosts_words() {
 }
 
 #[test]
-fn a_player_with_no_plane_hears_all_and_sends_only_all_while_the_mission_flies() {
+fn observers_talk_among_themselves_and_hear_the_flyers_but_never_reach_them() {
     let mut f = flight();
     let (viper, hawk) = (f.viper, f.hawk);
-    // A player who joins and takes no slot while the mission flies is in
-    // the lobby, as an observer will be.
-    let late = lobby_player(&mut f.rig, "Late");
-    assert!(f.rig.run_until(Duration::from_secs(3), |r| {
-        r.players[late].client.phase() == ClientPhase::Lobby
-    }));
+    // Two players who join and take no slot while the mission flies are
+    // observers (John, 2026-10-01).
+    let (late, later) = (
+        lobby_player(&mut f.rig, "Late"),
+        lobby_player(&mut f.rig, "Later"),
+    );
+    let ok = f.rig.run_until(Duration::from_secs(10), |r| {
+        [late, later]
+            .iter()
+            .all(|&p| r.players[p].client.phase() == ClientPhase::Lobby)
+    });
+    assert!(ok, "both observers are in the lobby");
+    // They hear a flyer's All, with no side to colour by, and not its
+    // team talk.
     f.say(viper, Receiver::All, "Welcome");
-    assert_eq!(texts(&f.rig, late), ["Viper TO ALL: Welcome"]);
-    assert_eq!(from(&lines(&f.rig, late)[0]).1, Standing::Neutral);
+    for p in [late, later] {
+        assert_eq!(texts(&f.rig, p), ["Viper TO ALL: Welcome"]);
+        assert_eq!(from(&lines(&f.rig, p)[0]).1, Standing::Neutral);
+    }
     f.say(viper, Receiver::Friendlies, "Team talk");
     assert_eq!(texts(&f.rig, late).len(), 1, "Friendlies are the flyers'");
-    // It sends to All, heard by the flyers with no side to colour by.
+    // An observer's All reaches the other observer and no flyer.
+    let flyers_before = (lines(&f.rig, viper).len(), lines(&f.rig, hawk).len());
     f.say(late, Receiver::All, "Good luck");
-    let heard = lines(&f.rig, hawk).pop().unwrap();
-    assert_eq!(heard.display(), "Late TO ALL: Good luck");
-    assert_eq!(from(&heard).1, Standing::Neutral);
-    assert_eq!(heard.tone(), Tone::Everyone);
-    // And the host refuses it anything else.
+    assert_eq!(
+        texts(&f.rig, later).last().unwrap(),
+        "Late TO ALL: Good luck"
+    );
+    assert_eq!(texts(&f.rig, late).last().unwrap(), "YOU TO ALL: Good luck");
+    assert_eq!(
+        (lines(&f.rig, viper).len(), lines(&f.rig, hawk).len()),
+        flyers_before,
+        "no flyer hears an observer"
+    );
+    // The host logged it as heard by the one other observer.
+    assert!(f.rig.logs.iter().any(|l| matches!(l,
+        HostLog::Chat { callsign, heard: 1, .. } if callsign == "Late")));
+    // And the host refuses an observer anything but All.
     let now = f.rig.net.now();
     f.rig.players[late].client.request(
         now,
@@ -349,11 +369,34 @@ fn a_player_with_no_plane_hears_all_and_sends_only_all_while_the_mission_flies()
     );
     f.rig.run(Duration::from_millis(300));
     assert_eq!(texts(&f.rig, late).last().unwrap(), Refusal::OnlyAll.text());
+}
+
+#[test]
+fn an_observer_alone_hears_no_one_and_everyone_hears_everyone_with_nothing_flying() {
+    let mut f = flight();
+    let alone = lobby_player(&mut f.rig, "Alone");
+    assert!(f.rig.run_until(Duration::from_secs(3), |r| {
+        r.players[alone].client.phase() == ClientPhase::Lobby
+    }));
+    f.say(alone, Receiver::All, "Anyone?");
     assert_eq!(
-        texts(&f.rig, hawk).len(),
-        3,
-        "Welcome, Team talk and Late's"
+        texts(&f.rig, alone),
+        ["YOU TO ALL: Anyone?", NO_ONE_HEARS],
+        "no flyer hears it, and there is no other observer"
     );
+    assert!(lines(&f.rig, f.hawk).is_empty());
+    // Nothing flying: the lobby is one room (the lobby test above).
+    let mut rig = Rig::new(mission(), LinkConfig::PERFECT, 3);
+    let a = lobby_player(&mut rig, "A");
+    let b = lobby_player(&mut rig, "B");
+    assert!(rig.run_until(Duration::from_secs(3), |r| {
+        [a, b]
+            .iter()
+            .all(|&p| r.players[p].client.phase() == ClientPhase::Lobby)
+    }));
+    rig.players[a].client.chat(Receiver::All, "hi").unwrap();
+    rig.run(Duration::from_millis(200));
+    assert_eq!(texts(&rig, b), ["A TO ALL: hi"]);
 }
 
 #[test]
