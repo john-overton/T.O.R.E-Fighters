@@ -3146,7 +3146,8 @@ app off `own()`. D9 merged before them; D3c rebases on its change to combat's hi
 Design for stages E and F of the [multiplayer plan](multiplayer-plan.md#stages),
 taken together at John's request of 2026-10-01, written by the lead and
 reviewed by John the same day; his answers are in the guide's
-[decisions](MULTIPLAYER.md#decisions). Nothing in this section is built yet.
+[decisions](MULTIPLAYER.md#decisions). Built so far: slice EF0, the research
+and the dialog reader (below); the rest is design.
 Every choice is an agent decision unless it is credited to John.
 
 John's direction (2026-10-01):
@@ -3180,23 +3181,26 @@ In short:
 
 ### Surveys behind the design
 
-Three read-only surveys of 2026-10-01 (in the lead's local notes):
+Three read-only surveys of 2026-10-01 (in the lead's local notes); the first
+is now the spec:
 
-- **Retail art.** The MODEM CONNECTION screen is `MODEM3.PIC` (its title text,
-  the ANTHOLOGY badge, the help bar and a bolted panel are baked into it) and
-  `MODEM.DLG`. The NETWORK CONNECTION screen is `NETIPX3.PIC` with `NEWNET.DLG`
-  (New, Join, Options, Cancel, a Games list with a PREV/NEXT rocker), the panel
-  drawn by the game from `PANEL.PIC` and six `EDGE*.PIC` pieces. The lobby's
-  host and joiner dialogs are `NETNEW.DLG` and `NETJOIN.DLG`, the options
-  panels `NETTCP.DLG` and `NETIPX2.DLG`, the message prompt `NETCEDT.DLG`, and
-  the in-flight message pane `MPSTATUS.PIC` with `MPFONT.PIC`. The widget
-  pieces are `EDITL/M/R`, `LISTLFT/MID/RT/HI`, `PAGEBOX`, `CHECK00-06` and
-  `ROCKERH0-4`. The King's settings are small dialogs (`MC_LIVES`, `MC_KILLS`,
-  `MC_TIME`, `MC_DELAY`, `MC_DIST` and others). `CHAT.TXT` lies loose in the
-  install: twelve lines of `receiver\text\sound` for F1 to F12. The import keeps
-  almost none of this today (about 40 names to add), the 1.0 and 1.02F copies
-  are byte-identical, and the existing readers decode all of it with three small
-  additions to the dialog reader.
+- **Retail art.** Settled in EF0 and written down in the
+  [multiplayer spec](spec/multiplayer.md#retail-connection-screens) (what the
+  player sees, with the rectangles, fonts, strings and `CHAT.TXT`) and the
+  [menu format notes](formats/menu.md#multiplayer-connection-screens-dlg-records-panels-and-widget-pieces-ef0-2026-10-01)
+  (the dialog records, the panel recipe and the widget pieces). In short: the
+  NETWORK CONNECTION screen is `NETIPX3.PIC` plus a panel the game draws from
+  `PANEL.PIC` and six `EDGE*.PIC` pieces plus `NEWNET.DLG`'s controls; MODEM
+  CONNECTION is `MODEM3.PIC` with its panel baked in. The lobby's host and
+  joiner dialogs are `NETNEW.DLG` and `NETJOIN.DLG`, the options panels
+  `NETTCP.DLG` and `NETIPX2.DLG`, the message prompt `NETCEDT.DLG`; `MPSTATUS.PIC`
+  and `MPFONT.PIC` are the connected-state status window of the menus (upper
+  right), not the in-flight pane. The widget pieces are `EDITL/M/R` (typed in
+  `WHEELFNT`, which the import also needs), `LISTLFT/MID/RT/HI`, `PAGEBOX` and
+  `CHECK00-06`; panel text is `PANELFNT`, list rows and the page counter
+  `SMLFONT`, buttons `FONTACT` and `FONTDFT`. `CHAT.TXT` lies loose in the
+  install. The import keeps almost none of this today (about 40 names to add,
+  with `WHEELFNT`), and the 1.0 and 1.02F copies are byte-identical.
 - **Menus.** There is no widget toolkit: each screen draws into the 640 by 480
   canvas with its own hit areas. Reusable today: the retail action buttons with
   the striped default cap, the PREV/NEXT rocker, the creator's paged list and
@@ -3327,9 +3331,13 @@ Chat goes through the host, which forwards each line to its receivers:
   by who sent it and to whom: **green** for the player's own side (to the side,
   the wing or the player), **blue** for a line to everyone from the player's
   side, **red** for a line from the enemy side. The window may use retail's
-  `MPSTATUS` art and font.
+  `MPSTATUS` art and font (EF0: retail uses them for the menus' connected-state
+  window, not in flight, so retail's in-flight pane is unknown and only a
+  reference).
 - Limits (*agent proposal*): 80 characters a line, five lines in five seconds
   a player, observers never chat (John, 2026-09-28).
+  Retail keeps `CHAT.TXT` text to 50 characters a line (EF0, S), shorter than
+  this limit.
 
 ### How stages E and F land
 
@@ -3340,7 +3348,7 @@ second completes the plan's stage F and stage E's replays.
 
 | Slice | Model | After | Work | Acceptance |
 | --- | --- | --- | --- | --- |
-| EF0 Connection screens research | Sonnet | | Fold the retail survey into `docs/spec/multiplayer.md` and `docs/formats/menu.md`; settle the unknowns (NEWNET's field rectangles, the panel fonts, the list row count); the dialog reader learns `_DrawText`, a dialog's PIC name and a list's row count | Spec written with evidence; reader tests decode every network dialog |
+| EF0 Connection screens research | Sonnet | | Fold the retail survey into `docs/spec/multiplayer.md` and `docs/formats/menu.md`; settle the unknowns (NEWNET's field rectangles, the panel fonts, the list row count); the dialog reader learns `_DrawText`, a dialog's PIC name and a list's row count | Spec written with evidence; reader tests decode every network dialog. **Built (EF0, 2026-10-01):** the spec and format notes above, a headless render of NETWORK CONNECTION from the spec's numbers beside John's screenshot, and `ui::dialog` now reads text records (position, label, tail), a size-zero dialog's picture name, a list's row count, edit boxes and check boxes |
 | EF1 Import the art | Sonnet | EF0 | The import keeps the multiplayer screens' pictures, pieces, fonts, dialogs and menus and the retail `CHAT.TXT`; a marker makes an older import ask to re-import | Single-player baseline SAME; an import holds every new name; an older pack asks for a re-import |
 | EF2 Widget kit | Sonnet | EF1 | Reusable retail-style widgets: text field, list with paging, scrolling message box, check box, the panel recipe, a background composed of two retail pictures, keyboard focus | Unit tests; headless renders compared with retail screenshots; single-player captures identical |
 | EF3 Host in the game | Opus | | The host on a thread inside the game, the in-process link, the local client, lifecycle and the game's 120 Hz clock | A hosted mission with a bot flies with no correction on the host's own plane; a two-second window stall stalls nobody; the session ends cleanly on leave, quit and a host panic |

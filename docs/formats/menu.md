@@ -79,7 +79,7 @@ These differ from the USNF/ATF records described in the older menu port. Runtime
 - **EALIB:** validates magic, directory bounds, monotonic offsets, flags, and terminal sentinel. Flag 0 reads stored content; flag 4 reads a size prefix and DCL stream. Lookup is case-insensitive, last duplicate wins. No resource paths are used for extraction.
 - **DCL:** raw literals (mode 0), dictionary bits 4–6, canonical length/distance codes, overlapping back-references, explicit terminator, and exact output size. The menu uses a 16 MiB output cap; the general extractor has a configurable cap. All 7,372 compressed entries advertise `00 06` and were successfully decompressed by the general extractor. The 22 menu resources also matched independent reference output byte for byte. Coded-literal mode 1 is rejected. See [third-party notices](../../THIRD_PARTY_NOTICES.md).
 - **PIC:** bounded raw rasters and span sprites, 6-bit palette expansion, row-offset checks, span terminator/coverage checks, and 256 glyph records. Menu images are capped at 4,194,304 pixels. Font-strip index 255 is transparent; ordinary sprite transparency comes from span coverage, not a universal palette key.
-- **DLG:** narrow CHOOSEAC reader. Parses PE/PL sections and relocation records as data, identifies plausible relocated label fields, and validates eight in-bounds button records. This is not a general widget/thunk-class decoder. It never executes x86 resource code.
+- **DLG:** `tore_formats::ui::dialog` parses PE/PL sections and relocation records as data and identifies draw records by their relocated imported draw thunks. It reads actions, list boxes, rockers, text, edit boxes and check boxes, and a size-zero dialog's picture name (see [Multiplayer connection screens](#multiplayer-connection-screens-dlg-records-panels-and-widget-pieces-ef0-2026-10-01)). It does not decode sliders, dials or the setup thunk's work. It never executes x86 resource code.
 - **MNU:** reference decoder recovers some labels, including `Exit to Windows` with `Alt-F4` in `MAINMENU.MNU` and `Pref`, `Graphics...`, `Sound...`, `Multi` in `FMENUD.MNU`. Tree flags, exact activity-menu composition, and native dropdown drawing are unresolved.
 - **PCM:** unsigned 8-bit mono; `.11K` is treated as 11,025 Hz and `.5K` as 5,512 Hz following the reference convention. The application uses original sample bytes with linear resampling and authored gains, loop, and cue scheduling. No XMI synthesizer or instrument bank has been implemented.
 
@@ -185,3 +185,204 @@ native text compositor supplies separate briefing rectangles. This supersedes
 using stale QUICKB strings as active choices. See [the source contract](quick-mission.md)
 and [validation](../baselines/menu-options-geometry.md). Screen rendering and
 runtime inline hit regions remain unimplemented by this research step.
+
+## Multiplayer connection screens: DLG records, panels and widget pieces (EF0, 2026-10-01)
+
+Research mode. This section holds the facts behind the retail connection
+screens a player sees in multiplayer; the player-visible behaviour is in the
+[multiplayer spec](../spec/multiplayer.md#retail-connection-screens). The
+stage E and F slices that import and draw these screens read both.
+
+Build identity: installed game `FA.EXE` 1.02F, SHA-256
+`e31560c2a6d6adb4aa1493f0308f6ae5640f67a4e886dbdf5887489e6e99244c`;
+`FA_2.LIB` SHA-256 begins `fb8b30216e739292` and `FA_1.LIB` `657254c5bb3bcf36`.
+The 1.0 disc (`disc1/SETUP.ESA`) holds the same pictures byte for byte and
+dialogs that differ by four bytes (the module link timestamp, file offsets 137
+to 140); the decoded geometry is identical.
+
+Evidence labels: **R** read from a retail resource with a repository reader,
+**S** static reading of `FA.EXE` (addresses are virtual addresses), **M**
+measured on John's retail screenshot of 2026-10-01 (`NETWORK CONNECTION`, taken
+at 2403 by 1801 pixels), **I** inference, **U** unknown.
+
+### Screenshot registration (M)
+
+The screenshot is the 640 by 480 screen enlarged by 3.770 horizontally and
+3.768 vertically and cropped, not 2403 divided by 640. Registering it on the
+`NETIPX3.PIC` background (its top 80 rows are untouched by the dialog; the fit
+reaches a correlation of 0.998) gives x = 3.770 (px + 0.5) - 4.25 and
+y = 3.768 (py + 0.5) - 2.0. After that every rectangle below matches a whole
+pixel, and the dialog rectangle from the header (10, 80, 619 by 395) is exact.
+Anyone measuring a screenshot of the game must register it first; with the
+nominal scale every edge is off by up to two pixels.
+
+### DLG records (R, S)
+
+All DLGs are PE-style modules whose CODE section holds the data; the reader
+returns, per draw record, its static local position. Positions are local to the
+dialog origin.
+
+Header (code offsets):
+
+| Offset | Meaning |
+| --- | --- |
+| 0 | Pointer to a setup thunk, or zero. `_MultiPreload` on `NEWNET`, `NETNEW`, `NETJOIN`, `NETTCP`, `NETIPX2`, `NETDIR`, `FORTAIRB`; `_ChoosePreload` on `CHOOSEAC` and `MC_DLG`. The loader calls it when the dialog opens (S, `0x487c35`). What it does is not decoded (U) |
+| 4, 6 | Origin x, y (signed 16 bit) |
+| 8, 10 | Width, height. **Zero means the dialog is a picture** (see below) |
+| 12 | Zero |
+| 14 | For a size-zero dialog, the name of the picture, a NUL-terminated string (`MODEM`, `MODEMCOM`, `SERIAL`, `COM`, `NETIPX`, `NETDIR`, `MC`). For a sized dialog the bytes are `ff 00 00 00` (meaning unknown) |
+
+A sized dialog gets the **generic panel** of that size drawn at its origin
+(recipe below). A size-zero dialog draws the named `.PIC` at its origin and
+nothing else. `MODEMSTS` is the one exception to the rule: it has a size
+(360 by 190) and a `MODEMSTS.PIC` (361 by 192) exists (U which is drawn).
+
+Draw records, found through relocated pointers to import thunks. Offsets are
+within the record:
+
+| Draw | Fields |
+| --- | --- |
+| `_DrawAction` (24 bytes) | +4 x, +6 y, +17 action id, +18 width, +20 label pointer. Id 1 is the default (blue) button, 2 is Cancel, 0 any other. A label pointing at an import thunk is `_okString` (OK) or `_cancelString` (Cancel); otherwise it is a string. Width 0 leaves the width to the toolkit (`CALLSIGN`, `EDITSIGN`, the `MC_*` dialogs; the value is not established, U) |
+| `_DrawListBox` | +4 x, +6 y, +8 width in pixels, +16 **row count** (visible rows). `NEWNET` 4 (confirmed by four rows on the screenshot, M), `NETNEW` and `NETJOIN` 8, `MODLIST` and `COMLIST` 10, `CALLSIGN` 14 |
+| `_DrawRocker` | +4 x, +6 y. The vertical PREV/NEXT rocker that pages the list. Position (0, 0) on `MODLIST` and `COMLIST` means the toolkit places it |
+| `_DrawText` (18 to 22 bytes) | +4 label pointer (zero when the game fills the words in), +12 x, +14 y, +16 a 16 bit value of unknown meaning: 9 on a text that another record follows, 10 on the last text of a dialog, 3 on the text beside a check box (I: it looks like the type of the record that follows) |
+| `_DrawEditBox` | +4 x, +6 y, +8 a value, 40 on every network prompt and 25 on the pilot name (`MC_NAME`). The edit routine sizes the field as ten pixels a character plus 16 and 24 high (S, `0x48c710`), so the value is probably the longest entry (I; but 40 characters would not fit `NETEDT`'s 295 pixel panel, so this is U) |
+| `_DrawCheck` | +4 x, +6 y (repeated at +8, +10), +12, +14 the size, 19 by 19 |
+| `_DrawSliderHoriz`, `_DrawSliderVert`, `_DrawDial` | Not decoded (`MC_DLG` holds both sliders, `GRAFPREF` and `LOADORD` the dial) |
+
+Texts and inline words that are not in the DLG are drawn by the screen's own
+code (the labels of `NEWNET`, the list rows, the status words).
+
+Decoded dialogs (origin, size or picture, controls in file order; all rows R):
+
+| Dialog | Origin | Size or picture | Controls |
+| --- | --- | --- | --- |
+| `NEWNET` | 10, 80 | 619 by 395 | New (96, 339, default), Join (219, 339), Options (342, 339), Cancel (465, 339), all 85 wide; list (38, 105) 200 wide, 4 rows; rocker (270, 120) |
+| `NETNEW` (host's players) | 10, 100 | 619 by 375 | Start (138, 319, default), Reject (282, 319), Cancel (426, 319), 85 wide; list (35, 46) 549 wide, 8 rows |
+| `NETJOIN` (joiner's players) | 10, 100 | 619 by 375 | Cancel (267, 319); list (35, 46) 549 wide, 8 rows |
+| `NETTCP` | 89, 80 | 465 by 395 | OK (113, 339), Default (208, 339), Cancel (303, 339), 85 wide |
+| `NETIPX2` | 89, 80 | 465 by 275 | OK (113, 219), Default (208, 219), Cancel (303, 219) |
+| `NETCEDT` (message prompt) | 10, 200 | 620 by 124 | OK (60, 75), Cancel (155, 75); edit box (56, 20) |
+| `NETEDT`, `NETBEDT` | 172, 200 and 60, 200 | 295 and 514 by 124 | OK (60, 75), Cancel (150, 75) and (155, 75); edit box (20, 40) and (42, 40) |
+| `EDITSIGN` (callsign prompt) | 168, 148 | 303 by 125 | OK (66, 90), Cancel (200, 90); edit box (25, 20); text "Enter your callsign:" (38, 20) |
+| `CALLSIGN` (callsign list) | 230, 80 | 220 by 370 | OK (52, 337), Cancel (120, 337); list (30, 35) 160 wide, 14 rows; rocker (160, 295); text "Choose your callsign." (43, 10) |
+| `MODEM` | 80, 84 | picture `MODEM` | Call (335, 322, default), Answer (335, 287), Cancel (335, 252), 118 wide; texts "Player name" (106, 32) and "Phone number" (286, 32) |
+| `MODEMCOM` | 86, 96 | picture `MODEMCOM` | OK (253, 300), Cancel (348, 300); eight texts: "AT command strings:" (39, 90), "Initialization:" (66, 110), "Dial prefix:" (66, 176), "Listen for caller prefix:" (66, 210), "Hangup prefix:" (66, 244), "Dial suffix:" (243, 176), "Listen for caller suffix:" (243, 210), "Hangup suffix:" (243, 244) |
+| `MODEMSTS` | 140, 174 | 360 by 190 | text "Connection status" (135, 35) |
+| `MODLIST`, `COMLIST` | 138, 125 and 170, 125 | 364 and 300 by 270 | OK (32, 237), Cancel (127, 237); list (20, 20) 324 and 260 wide, 10 rows; rocker |
+| `SERIAL` | 139, 98 | picture `SERIAL` | Call (53, 293, default), Answer (152, 293), Cancel (247, 293), 85 wide; text "Connection status" (135, 184) |
+| `COM` | 146, 150 | picture `COM` | OK (225, 189), Cancel (225, 154) |
+| `NETIPX`, `NETDIR` | 140, 92 and 89, 80 | pictures `NETIPX`, `NETDIR` | Left over from the earlier game; the 1.02F executable never names them (S) |
+
+The mission-setting dialogs `MC_*` (the host's, listed in the
+[spec](../spec/multiplayer.md#the-hosts-mission-setting-dialogs)) are all sized
+panels of 220 by 220 (the single-list ones), 220 by 380 (`MC_NAT2`), 250 by 190
+(`MC_SCR`), 380 by 95 (`MC_NAME`), 520 by 235 and 620 by 404 (`MC_NAT`,
+`MC_NATF`, with check boxes), and `MC_DLG`, a picture (`MC`) at (0, 77) with OK
+(482, 373) and Cancel (563, 373), 75 wide, two sliders and a rocker. All decode
+with the reader.
+
+### The generic panel (S, M)
+
+The routine at `0x487e90` takes (x, y, w, h) and builds the panel from six
+pieces plus a fill, all drawn in the screen's own embedded palette (never the
+flight palette). On `NEWNET` the rectangle is the DLG header's (10, 80, 619 by
+395) (M, whole-pixel scan against the registered screenshot).
+
+1. **Fill.** `PANEL.PIC` (640 by 480, grey scratched texture, almost flat: palette
+   entries 73 and 81) blitted into the rectangle. It fits whole; whether it tiles
+   for a larger panel is not established (U).
+2. **Corners.** `EDGETL` (31 by 35) at (x, y), `EDGETR` (30 by 35) at
+   (x + w - 30, y), `EDGEBL` (31 by 35) at (x, y + h - 35), `EDGEBR` (30 by 35)
+   at (x + w - 30, y + h - 35). Only `EDGETL` and `EDGEBR` carry a bolt head,
+   which matches the screenshot (bolts at the top left and bottom right).
+3. **Edges.** `EDGETB` (47 by 4): its top two rows tile along the top edge from
+   x + 31 to x + w - 31 and its bottom two rows along the bottom edge (at
+   y + h - 2). `EDGELR` (4 by 26): its left two columns tile down the left edge
+   from y + 35 to y + h - 34 and its right two columns down the right edge, in
+   25 pixel steps. The frame is two pixels thick.
+
+The screenshot matches this recipe by eye and by a per-region difference of 2.9
+grey levels over the panel (the remainder is resampling blur).
+
+### What `NEWNET` adds on top of the panel (S, M)
+
+Everything else on the NETWORK CONNECTION screen is drawn by the screen function
+at `0x492740`. Coordinates are absolute on the 640 by 480 canvas; `(x, y)` of a
+text is where its glyph strip starts.
+
+| Item | Rectangle or position | Notes |
+| --- | --- | --- |
+| Background | `NETIPX3.PIC`, no panel | Its own 256 colour palette |
+| Menu bar | "?" at (84, 40) | `MULTI.MNU`: `?` and `Exit to Windows [Alt-F4]` (R) |
+| Title | `PANELFNT`, centred in the dialog, top at y 87 (x 255 for "TCP/IP Network connection", 128 wide) | The text is `%s Network connection` with `TCP/IP` or `IPX/SPX`; y is the dialog's y + 7 (S, `0x493db0`) |
+| Inner frame | outline (30, 100) to (608, 454), one pixel | The dialog inset by 20 on every side (S, `0x493d60`); colour is palette entry 94 (value 198) (S) |
+| "Callsign:" | `PANELFNT` at (45, 110) | x is the dialog's x + 35, y its y + 30 (S) |
+| Callsign field | (88, 108), 139 by 13, flat fill (grey 97) | The game's inline field markup `Callsign:  .button` + 69 spaces + `..button`: 69 spaces of `PANELFNT` are 138 pixels. Empty, it is a flat lighter bar without the `EDIT*` pieces. Its text font while typing is not established (U; next step in "Unknowns") |
+| "Games" | `PANELFNT` at (45, 165) | |
+| Games box | outline (45, 180) to (313, 284), 269 by 105 | One pixel, colour as the inner frame; no fill |
+| List rows | 4 rows at (48, 185 + 18 i), 200 wide | Row bar `LISTLFT` (30 by 17), `LISTMID` (20 by 17) tiled, `LISTRT` (30 by 17); row pitch 18 pixels (S, add `0x12` per row at `0x48afc7`, and M). Row text is drawn in `SMLFONT` (S, `0x48b233`); the selected row is painted with `LISTHI` (24 by 12 striped) 12 pixels high, starting 4 pixels in (S) |
+| Rocker | `ROCKER02` at (280, 200) | The idle frame; the DLG position (270, 120) plus the origin |
+| "PREV", "NEXT" | `PANELFNT` at (252, 201) and (252, 224) | `PANELFND` (the dim face) when disabled (S) |
+| "PAGE" | `PANELFNT` at (91, 265) | Drawn by the list widget (S, `0x48b02e`) |
+| Page box | `PAGEBOX` (50 by 17) at (120, 261) | Drawn at (x - 1, y - 4) of the counter's origin (S, `0x48b294`) |
+| Page counter | `SMLFONT`, at y 264 | `"%d "` (the current page; no trailing space from 10 up) then `" of  %d"` (two spaces before the count; one from 10 up) joined into one string; the string starts at the counter's x + 15 minus the width of the first part, so the current page number is right aligned and "1  of  0" starts at x 129 (S, `0x48a7d0`, and M). The dark fill is palette entry 118 (value 12) |
+| "Players" | `PANELFNT` at (340, 165) | |
+| Players box | outline (340, 180) to (593, 284), 254 by 105 | Filled flat grey 81 (nearest palette entry 109) (M) |
+| "Messages" | `PANELFNT` at (45, 304) | The retail heading line also holds a Send Message button (the string `Messages` + 25 spaces + `.button Send Message ..button`, S); it is not on the screenshot, taken before any connection (U when it shows) |
+| Messages area | outline (45, 319) to (593, 406), 549 by 88, flat grey 81 | Eight lines of `PANELFNT` at its line height of 10 pixels plus 8 (S, `0x47f100`: height = 8 lines + 8); x = dialog x + 35, width = dialog width - 70 |
+| Buttons | New face (106, 416) with the default cap `ACTDFLT` (20 by 27) at (86, 416); Join (229, 419), Options (352, 419), Cancel (475, 419); 85 wide | The DLG positions plus the origin; the default button is drawn three pixels higher with its cap to the left, exactly as `Menu::action_button` does today |
+| Button labels | New in `FONTDFT` (bluish glyphs, brightest pixel about 223), the others in `FONTACT` (greenish, about 215) | Centred in the face: x = button x + (73 - text width) / 2 rounded down (the default button's label 1 pixel further left); glyph strip top at y + 6 (default: face y + 10) (M, fit; the two fonts score 24.2 and 24.4 against the next best 27 to 30, and the glyph colours settle it) |
+
+A render of the whole screen made only from these numbers, beside the
+screenshot, is kept with the lead's notes (`.local/mp-notes/stage-ef/ef0/`).
+
+### Fonts (S, M)
+
+| Font (all `FA_1.LIB` PIC glyph strips, 256 records) | Height | Draws |
+| --- | --- | --- |
+| `PANELFNT` (`PANELFND` the dim copy) | 10, line height 10 | Panel title, labels, headings, "PAGE", "PREV", "NEXT", the Messages area; each connection function loads `PANELFNT.PIC` (S: `0x49284e`, `0x4931a3`, `0x4937ec` and others). Widths: "TCP/IP Network connection" 128, "Callsign:" 40, "Games" 28, "Players" 34, "Messages" 43, all matching the screenshot to a pixel |
+| `SMLFONT` | 12 | List row text and the page counter |
+| `FONTACT` (`FONTACD` dim), `FONTDFT` (`FONTDFD` dim) | 12 | Button labels, normal and default |
+| `WHEELFNT` | 14, ten pixels a glyph (monospaced) | Text in the `EDIT*` fields (S: `0x48c78a` loads it in the edit routine; the caret moves 10 pixels a character, `0x48bec0`). Not in the current import and not in the survey's list |
+| `MPFONT` | 9 | The connected-state status window (below) |
+| `PANLFNT2`, `FONT4X6`, `MFONT320` | | Present in `FA_1.LIB`, not used by these screens (U) |
+
+### Widget pieces (R, S)
+
+- **Edit field** `EDITL` (8 by 24), `EDITM` (20 by 24, tiled), `EDITR` (8 by 24):
+  a recessed dark bar with a lighter red half, 24 high; the field is the
+  entry count times 10 plus 16 wide (S). The caret is a white (palette 10)
+  vertical line 12 high at the field's x + 8 + 10 times the cursor index, 5
+  below its top; it is erased by blitting a one pixel slice of `EDITM`.
+- **List** `LISTLFT` (30 by 17), `LISTMID` (20 by 17), `LISTRT` (30 by 17),
+  `LISTHI` (24 by 12): see the table above. The `LISTMID` rows are: row 0 a
+  light edge (73), rows 1 and 2 dark, rows 3 to 13 near black (12), rows 14 to 16
+  a light bevel.
+- **Check box** `CHECK00` to `CHECK06` (28 to 33 square). Frame order (S, `0x48b320`):
+  `CHECK00` is the box off at rest, `CHECK06` the box on at rest. When the
+  animation is on, switching on plays `CHECK01` to `CHECK06` and switching off plays
+  `CHECK05` back to `CHECK00`, one frame per screen update; with the animation off
+  only `CHECK00` or `CHECK06` is drawn. So 00 to 03 are unlit and 04 to 06 lit amber
+  because the lamp warms up and cools down through the middle frames. `CHECK320`
+  (48 by 12) is the 320 by 200 mode's version.
+- **Rockers** `ROCKER00` to `ROCKER04` vertical (27 by 40 with the shadow), the
+  idle frame `ROCKER02`; `ROCKERH0` to `ROCKERH4` horizontal (39 by 29), unused by the
+  screens here (S: the code builds `ROCKERH%d`, U where it is used).
+- **Buttons** `ACTION0L/M/R` green, `ACTDFT0L/M/R` blue default,
+  `ACTIOD0L/M/R` and `ACTDFD0L/M/R` the disabled copies, `ACTDFLT`/`ACTDFLD` the
+  20 by 27 cap. The disabled default pieces are needed wherever Start or Call
+  can be unavailable.
+
+### Corrections to the notes above (EF0)
+
+- The Choose Activity menu bar is `CHOOSEM.MNU`, not `MAINMENU.MNU`: the setup
+  code at `0x4a0966` pushes `CHOOSEM` (`0x502834`) for all five backgrounds (S).
+  Its Multi menu holds `Serial... [e]`, `Modem... [m]`, `IPX/SPX Network... [x]`,
+  `TCP/IP  Network... [t]` (two spaces), `Disconnect... [d]` and `Airbase Assault
+  [a]` (R). `MAINMENU.MNU` (`?`, `Campaign` with Replay This Mission and Exit
+  Campaign) has five other references and is a campaign-mode menu (I).
+  "Disconnect is grayed out until connected" is the manual's; the tree has no
+  state bytes (U).
+- The "Multi contains stub Host Game/Join Game/Player Setup" line above describes
+  the authored scaffolding; the retail tree is the one listed here.
