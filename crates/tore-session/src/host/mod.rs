@@ -1607,6 +1607,16 @@ impl Host {
         if !self.open(plane) {
             return Some(format!("Plane {} is not open to players.", plane.0));
         }
+        // A departed player's plane that could not go back to the AI stays
+        // with that player's seat, but nobody flies it.
+        if let Pilot::Human(seat) = entry.pilot
+            && self.orphans.contains_key(&seat)
+        {
+            return Some(format!(
+                "Plane {} is destroyed or has lost its pilot.",
+                plane.0
+            ));
+        }
         if entry.pilot != Pilot::Ai || self.reserved(plane) {
             return Some(format!("Plane {} is flown by another player.", plane.0));
         }

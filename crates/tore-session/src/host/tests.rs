@@ -1125,6 +1125,16 @@ fn a_player_whose_plane_cannot_go_back_leaves_it_where_it_is() {
             callsign: "Viper".into()
         }
     );
+    // Asking for the lost plane says why, not that someone flies it.
+    let third = rig.join(|_| {});
+    rig.clients[third].ready = Some(Some(0));
+    assert!(rig.run_until(Duration::from_secs(2), |r| {
+        !r.clients[third].seat_refused.is_empty()
+    }));
+    assert_eq!(
+        rig.clients[third].seat_refused[0],
+        "Plane 0 is destroyed or has lost its pilot."
+    );
     assert!(rig.faults().is_empty(), "{:?}", rig.faults());
 }
 
