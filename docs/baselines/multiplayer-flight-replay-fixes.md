@@ -8,7 +8,9 @@
 > the original's internals, it is out of date.
 > <!-- tore-header v2 -->
 
-Implementation mode, 2026-10-01. Base: multiplayer `b1f2a7cb`. Worktree:
+Implementation mode, 2026-10-01. Review base: multiplayer `f7cd05e5`; initial
+diagnosis and captures used `b1f2a7cb`. The rebase adds the upstream test-isolation
+and timing-test fixes, with no new flight changes. Worktree:
 `T.O.R.E-Fighters-flight-replay-fixes`, branch `mp/flight-replay-fixes`.
 Retail media were read locally; no original executable was run and no media
 or captures are committed. This is host validation, not a retail parity claim.
@@ -38,6 +40,11 @@ or captures are committed. This is host validation, not a retail parity claim.
   Native-flight, pure decision and standalone controller fingerprints stayed
   unchanged. All 1,004 other sim tests passed there. Linux checks repeatability
   but does not compare against the Apple Silicon saved bit patterns.
+  After those sim comparisons passed, the subsequent
+  [world test job](https://github.com/john-overton/T.O.R.E-Fighters/actions/runs/36958049119/job/110685347896)
+  measured the corresponding mission-tick fingerprint, now `f0cb0dc46965e136`.
+  Its other 329 world tests passed. The mission tick's scheduling and calls are
+  unchanged; its named behavior fields include the requested flight response.
 - Synthetic tests verify engine-off rudder motion, mirrored rudder input,
   nosewheel speed boundaries, overspeed roll times for 99 seeds in both
   adapters, timer reset, Invulnerable, and exact snapshot restore before a roll.

@@ -47,7 +47,7 @@ use tore_sim::{
 };
 
 /// The recorded fingerprint of [`fly`], or `None` until macOS CI records it.
-const RECORDED: Option<u64> = Some(0x1884_0072_2761_391d);
+const RECORDED: Option<u64> = Some(0xf0cb_0dc4_6965_e136);
 
 /// Recorded values are compared only where they are generated.
 const RECORDED_PLATFORM: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
