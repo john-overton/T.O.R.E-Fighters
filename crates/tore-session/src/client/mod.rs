@@ -548,6 +548,8 @@ struct Seat {
     offset: Offset,
     seated_at: Duration,
     seated_tick: u64,
+    /// Initial forecast span: the host has no controls for its elapsed part.
+    bootstrap_until: u64,
     loadout: LoadoutSpec,
 }
 
@@ -1831,9 +1833,10 @@ impl Client {
             standing,
         );
         let now = self.now;
-        // Ahead of the host by a round trip and the margin: the inputs of the
-        // ticks before that reach it late, and the exact state that answers
-        // them snaps.
+        // Ahead of the host by a round trip and the margin. Fill this initial
+        // forecast with neutral input, which is what the host uses before it
+        // hears from us. Fresh controls and commands start on the next tick,
+        // so they never rewrite the elapsed part of the seating interval.
         let round_trip = self.net.stats().map_or(Duration::ZERO, |s| s.round_trip);
         let lead = clock::ticks_of(round_trip) + self.input_margin_target(now) + 1.;
         self.input_clock
@@ -1849,6 +1852,7 @@ impl Client {
             offset,
             seated_at: now,
             seated_tick: u64::from(seated.tick),
+            bootstrap_until: u64::from(seated.tick) + lead.ceil() as u64,
             loadout: seated.loadout.clone(),
         });
         self.unacked.clear();
@@ -2259,10 +2263,14 @@ impl Client {
                 .find(|r| r.tick <= host_had)
                 .or(seat.predictor.history().back())
                 .map(|r| r.frame);
-            if tick <= host_stepped
-                && tick > host_had
-                && let Some(last) = repeated
-            {
+            let catch_up = if tick <= seat.bootstrap_until {
+                Some(InputFrame::default())
+            } else if tick <= host_stepped && tick > host_had {
+                repeated
+            } else {
+                None
+            };
+            if let Some(last) = catch_up {
                 if let Err(error) = seat
                     .predictor
                     .step(last, Vec::new(), &mission.world.terrain)

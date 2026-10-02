@@ -27,6 +27,16 @@ or captures are committed. This is host validation, not a retail parity claim.
 | Pilot texture | Imported pilot panels have opposing skins at the same depth with different UV regions. The pilot builder emitted both without the normal-facing test used by aircraft. It now selects the facing skin. | UV normalization and atlas binding were already correct. One pilot batch is submitted once per scene pass; there was no second pilot draw. Source pose geometry remains unchanged. |
 | Replay weapons | The empty-space menu built only aircraft rows; F12 chose the newest missile instead of keeping a cycle identity. Active weapon rows now refresh at the playhead and F12 cycles live missile ids, advancing past expired ones. | Guns are excluded, bombs and rockets are listed, F12 cycles missiles only. Alt/Ctrl references retain their existing meaning. |
 
+The rebase's strict hosting check exposed a client initialization discrepancy:
+wind-induced roll made the scripted pilot correct its bank immediately on joining.
+The client applied this new input to its initial catch-up ticks, while the host
+had already flown part of that interval with neutral input. Three short runs
+reproduced a tiny tick-8 correction. A synthetic held-stick case at 60 ms RTT
+reproduced three mismatches and a 1.69-degree startup correction. The client now
+fills its initial forecast with neutral input and retains commands for the next
+tick. Flight dynamics, host scheduling and strict test assertions are unchanged.
+This is an integration fix in `tore-session`, not autonomous-behavior work.
+
 ## Validation
 
 - Workspace formatting, strict clippy, build and all Rust tests passed on Linux.
@@ -63,6 +73,9 @@ or captures are committed. This is host validation, not a retail parity claim.
 - Twelve additional takeoff, landing, spin and spin-recovery scenarios passed
   for F/A-18D and Rafale C, checking the side-force and tire changes against
   existing flight behavior.
+- All four strict real-time tests added by the upstream rebase passed after
+  the startup fix, with the zero-correction assertions unchanged. The full
+  session suite and the simulated 60/120 ms held-input regression also passed.
 - All 14 sustained full-power sprint scenarios passed with the new overspeed
   timer, bringing the targeted battery total to 86 passing runs.
 - The GPU smoke test passed through `tools/agent-run.sh`. Local evidence is in

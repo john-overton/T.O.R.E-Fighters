@@ -2699,7 +2699,14 @@ hooks. The lobby's calls are [the lobby's](#the-lobby).
   are predicted with the controls the host repeated
   ([the stall](#the-lobby)).
 - **The clock.** Seating sets the predicted clock ahead of the Seated tick by
-  a round trip and the margin. The first margin the host reports after it has
+  a round trip and the margin. The initial forecast through that tick uses neutral
+  input, matching the host before it receives the first controls. Held controls
+  and queued commands begin on the following predicted tick. This fitted client
+  initialization rule avoids applying new input retroactively to the elapsed
+  seating interval; commands are retained, not discarded. A synthetic test holds
+  nonzero roll and rudder and sends an immediate airbrake command across 60 and
+  120 ms round trips, requiring zero mismatches from startup and command delivery.
+  The first margin the host reports after it has
   had an input from the seat sets the clock outright, whatever the size: the
   Seated message can be late by retransmitted fragments, and seating snaps
   anyway (*correction to the design*, which jumped only past 250 ms). After

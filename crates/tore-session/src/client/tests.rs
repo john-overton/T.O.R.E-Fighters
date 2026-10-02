@@ -366,6 +366,64 @@ fn a_different_import_is_refused_with_the_names_that_differ() {
     assert_eq!(rig.host.phase(), crate::host::Phase::Lobby);
 }
 
+#[test]
+fn initial_stick_and_commands_do_not_rewrite_ticks_before_the_host_can_receive_them() {
+    for rtt_ms in [60, 120] {
+        let mut rig = Rig::new(
+            spec(1, 1, 20),
+            LinkConfig::for_round_trip(rtt_ms * MS, 0., 0., 0.),
+            5,
+        );
+        let mut commanded = false;
+        let player = rig.join(
+            |_| {},
+            Box::new(move |_, client, _| {
+                let mut controls = Controls {
+                    pilot: PilotInput {
+                        roll: 0.4,
+                        yaw: 0.3,
+                        ..Default::default()
+                    },
+                    ..Controls::default()
+                };
+                if client.phase() == ClientPhase::Flying && !commanded {
+                    controls.pilot.commands.push(tore_input::PilotCommand::Set(
+                        tore_input::Switch::Airbrake,
+                        true,
+                    ));
+                    commanded = true;
+                }
+                controls
+            }),
+        );
+        assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(player)));
+        rig.run(Duration::from_secs(3));
+        let client = &rig.players[player].client;
+        let stats = client.clone_stats();
+        assert!(stats.hashes_compared > 60);
+        assert_eq!(
+            stats.mismatches,
+            0,
+            "rtt={rtt_ms}: {:?}",
+            client.corrections()
+        );
+        assert_eq!(stats.corrections, 0);
+        let flight = &client.prediction().unwrap().plane().flight;
+        assert!(
+            flight.aileron > 0.3 && flight.rudder > 0.2,
+            "live inputs were lost"
+        );
+        assert!(
+            flight.brake_out,
+            "the first command was lost during bootstrap"
+        );
+        assert!(
+            client.unacked.is_empty(),
+            "the command was not acknowledged"
+        );
+    }
+}
+
 /// Flies one client for `seconds` on a clean link and checks that, after
 /// seating settles, the prediction equals the host at every snapshot.
 fn prediction_matches_the_host(seconds: u64) {
