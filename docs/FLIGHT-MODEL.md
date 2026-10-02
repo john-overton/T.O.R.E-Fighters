@@ -269,7 +269,8 @@ release. Each aircraft's own tuning includes `sideslip_drag=0.5`: drag/weight is
 that coefficient times squared lateral airspeed fraction times low-speed authority.
 This symmetric continuous loss is authored, not the native display-slip drag law.
 [Lateral flight](spec/lateral-flight.md) adds fitted slip side force and roll coupling,
-and the requested 0 to 25 mph nosewheel schedule.
+and the requested 0 to 25 mph nosewheel schedule. The sim exposes its available
+steering fraction for the NSW HUD readout, independently of pedal position.
 Roll retains its single response filter and existing source/hybrid versus fitted/
 legacy cap. No new native rudder-to-roll law is asserted.
 

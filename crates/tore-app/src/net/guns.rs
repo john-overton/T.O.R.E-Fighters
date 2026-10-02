@@ -533,6 +533,7 @@ mod tests {
             radar: true,
             jammer: false,
             alive: true,
+            body_present: true,
             controls: tore_sim::sensors::Controls::default(),
         }
     }

@@ -461,7 +461,9 @@ impl Live {
             | Action::DroneMissile(_)
             | Action::Trails
             | Action::ViewFrom(_)
-            | Action::LookAt(_) => {}
+            | Action::LookAt(_)
+            | Action::Camera(_)
+            | Action::DroneMode(_) => {}
         }
         None
     }

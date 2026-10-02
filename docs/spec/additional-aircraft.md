@@ -94,8 +94,8 @@ Full weapon catalog parity is not implied by import success.
 
 ## Fitted exterior behavior
 
-Agent choices for the initial port, 2026-09-16: preserve FA neutral geometry,
-texture mapping and source device endpoints. Keep the existing host scale of
+The fitted rigs use FA texture mapping and source device endpoints. The F-14
+wing-height correction below also applies at zero sweep. Keep the host scale of
 one-third foot per unit, multiplied by four for F14's exponent-10 shape.
 A4 and F31 have exponent 8. Absolute scale remains a host fit.
 
@@ -105,6 +105,14 @@ extended wings with full flaps. Sweep affects wing meshes, flaps and fitted
 wingtip vapor origins. No extra aerodynamic effect is asserted. FA's F14 CE
 points do not coincide with its quantized base mesh; use the reviewed visible
 wing tips as fitted attachments. Do not describe these as decoded CE placement.
+
+The 2026-10-02 correction uses the front inner roots, left `(-7,4,1)` and right
+`(8,4,1)`, in source right/forward/up coordinates. The previous rear-root pivots
+made the swept panels pull away from the fuselage. John also requested raising
+the panels: the fitted lift is 1.0625 source units, or 17 inches at this model's
+scale. This places the wing above the source deck at up=2 with 1/16 source unit
+clearance. Wing faces, flaps and vapor tips share the sweep and height correction.
+The sweep schedule and flight dynamics stay unchanged.
 
 Flaps droop up to 0.4 rad. F-14 tailplanes mix -0.3 rad pitch and ±0.2 rad roll;
 A-4 elevators use -0.3 rad pitch and outboard ailerons ±0.2 rad roll.

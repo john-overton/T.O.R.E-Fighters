@@ -2871,6 +2871,7 @@ impl AiMission {
             radar: actor.flight.radar,
             radar_power: actor.flight.radar,
             alive: actor.alive(),
+            body_present: !actor.flight.wreck_gone(),
             bay_ready: true,
             jammer: false,
             controls: crate::sensors::Controls::default(),

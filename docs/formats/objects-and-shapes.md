@@ -364,7 +364,10 @@ F14 flap neutral subcalls are guarded by 0x82fe/0x8304; A4 by
 fitted hinges. F31's 0x65ca selects a rudder alternative. The rigs validate
 CODE length, state-word sets, face counts and texture names before using their
 own address mappings. Gear/brake/burner groups come from bounded per-word
-projection differences. No old ATF offsets or SWPATCH shapes are substituted.
+projection differences. Steering further selects each model's reviewed wheel/strut
+skins, leaving separate support braces and doors fixed; the full group still
+retracts. [Steering presentation](../spec/aircraft-animation.md#nosewheel-steering).
+No old ATF offsets or SWPATCH shapes are substituted.
 
 Inspect user-owned data with `cargo run --locked -p tore-formats --example
 shape_inspect -- FILE.SH HEX_WORD=1`. Raw geometry output stays local.

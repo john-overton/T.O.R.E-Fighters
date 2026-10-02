@@ -214,6 +214,8 @@ already in use is reported in the Head tracker status line and on the console.
 ```text
 modifier DEVICE CONTROL         # up to 64 in total; CONTROL may be a D-pad direction
 disable keyboard KEY            # a stock key the player removed
+disable replay-keyboard KEY     # a stock drone key removed only in replays
+disable replay-mouse CONTROL    # a stock drone mouse input removed only in replays
 disable mouse wheel:up          # a stock mouse binding the player removed
 mouse-look on|off               # default on
 mouse-sensitivity 0.1..5        # default 1
@@ -1014,7 +1016,12 @@ The [replay viewer](REPLAYS.md#viewer) has its own built-in keys, an agent
 design from 2026-09-26. They are listed in the
 [controls master list](CONTROLS.md#built-in-controls-outside-the-tables) and on
 the Replay sheet of the [keyboard map](tore-keyboard-map.html#replay). They
-cannot be rebound yet, and profiles do not change them.
+remain built in except the drone commands. **Controls > Replay drone** configures
+mode cycling, follow/free selection, movement, boost, look hold and speed changes.
+Keyboard/mouse drone bindings are separate from flight bindings. Profiles store
+them under the replay-keyboard and replay-mouse device names. Custom controller
+bindings use their ordinary device identity, and act only in the replay.
+The drone still moves while playback is paused; the Escape menu stops input.
 
 - **Playback:** Space plays or pauses. J, K and L play backwards, pause and
   play forwards, as in video editors; J or L again doubles the speed up to

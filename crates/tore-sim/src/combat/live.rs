@@ -697,6 +697,10 @@ impl LocalizedDamage {
     }
 }
 impl Target {
+    /// A destroyed aircraft remains a solid body until its wreck disappears.
+    pub fn body_present(&self) -> bool {
+        self.hp > 0 || (self.role == TargetRole::Aircraft && self.airborne)
+    }
     pub fn damage_fraction(&self) -> f64 {
         (1. - f64::from(self.hp.max(0)) / f64::from(self.initial_hp.max(1))).clamp(0., 1.)
     }
@@ -1049,6 +1053,8 @@ pub struct Launcher {
     pub radar: bool,
     pub jammer: bool,
     pub alive: bool,
+    /// Includes a falling wreck, but excludes a body after impact or airburst.
+    pub body_present: bool,
     /// Player sensor controls, applied as an input at each step so replay
     /// reproduces channel, scope range and history changes.
     pub controls: sensors::Controls,
@@ -1137,7 +1143,7 @@ fn ownship_target(own: &Ownship, launcher: Launcher) -> Target {
         signature: own.config.sensors.signature,
         jammer: None,
         jammer_active: false,
-        airborne: launcher.alive,
+        airborne: launcher.body_present,
         on_ground: false,
         radius: AIRCRAFT_RADIUS_FT,
         hp: if launcher.alive { own.hp } else { 0 },
@@ -1434,14 +1440,14 @@ impl<'a> OwnshipView<'a> {
         } else {
             self.own.designated()
         }?;
-        self.contact(id).filter(|target| target.hp > 0)
+        self.contact(id).filter(|target| target.body_present())
     }
     /// The target the flight views follow: the display target, or without
     /// Easy targeting a dropped selection the pilot can still see.
     pub fn view_target(&self) -> Option<&'a Target> {
         self.display_target().or_else(|| {
             let id = self.own.sight_hold?;
-            self.contact(id).filter(|target| target.hp > 0)
+            self.contact(id).filter(|target| target.body_present())
         })
     }
     /// The view for one launcher, which remembers what it works out.
@@ -1571,7 +1577,7 @@ impl<'a> LauncherView<'a> {
         if profile.is_some_and(|p| !p.accepts(t)) {
             return Readiness::WrongTarget;
         }
-        if t.hp <= 0 {
+        if !t.body_present() {
             return Readiness::TargetDestroyed;
         }
         if w.seeker.signature == 3 {
@@ -3158,7 +3164,7 @@ impl State {
             own.sight_hold = own.designated().or(in_view.filter(|id| {
                 self.targets.iter().any(|t| {
                     t.id == *id
-                        && t.hp > 0
+                        && t.body_present()
                         && (0..3)
                             .map(|i| (t.position[i] - launcher.position[i]).powi(2))
                             .sum::<f64>()
@@ -3235,7 +3241,7 @@ impl State {
                         .targets
                         .iter()
                         .chain(peers(&rows, k))
-                        .filter(|t| t.hp > 0)
+                        .filter(|t| t.body_present())
                         .filter(|t| bore || assigned == Some(t.id))
                         .filter_map(|t| seeker::observe(w, profile, &view, t))
                         .filter(|o| {
@@ -3712,9 +3718,9 @@ impl State {
                 }
                 if let Some(t) = p.target.and_then(|id| {
                     rows.iter()
-                        .find(|r| r.target.id == id && r.target.hp > 0)
+                        .find(|r| r.target.id == id && r.target.body_present())
                         .map(|r| &r.target)
-                        .or_else(|| self.targets.iter().find(|t| t.id == id && t.hp > 0))
+                        .or_else(|| self.targets.iter().find(|t| t.id == id && t.body_present()))
                 }) {
                     // Required illumination is specific to this missile's own
                     // target, never to whatever the cockpit has selected now.
@@ -3817,9 +3823,9 @@ impl State {
                     // never the shooter's own.
                     let hitbox = if p.owner == t.id { 1. } else { hitbox };
                     if (!is_gun(w) || p.owner != t.id)
-                        && !spares(t.side)
-                        && p.guidance.as_ref().is_none_or(|f| f.eligible(w, t))
-                        && t.hp > 0
+                        && (t.hp <= 0 || !spares(t.side))
+                        && (t.hp <= 0 || p.guidance.as_ref().is_none_or(|f| f.eligible(w, t)))
+                        && t.body_present()
                         && let Some(at) = if is_gun(w) {
                             if let Some(v) = past(t.id) {
                                 rewound_contact(p, v, hitbox)
@@ -3848,11 +3854,11 @@ impl State {
             }
             if armed {
                 for (i, t) in self.targets.iter().enumerate().filter(|(_, t)| {
-                    t.hp > 0
+                    t.body_present()
                         && (!is_gun(w) || t.id != p.owner)
-                        && !(t.role == TargetRole::Aircraft && spares(t.side))
+                        && !(t.hp > 0 && t.role == TargetRole::Aircraft && spares(t.side))
                 }) {
-                    if p.guidance.as_ref().is_some_and(|f| !f.eligible(w, t)) {
+                    if t.hp > 0 && p.guidance.as_ref().is_some_and(|f| !f.eligible(w, t)) {
                         continue;
                     }
                     let hitbox = if p.owner == t.id { 1. } else { hitbox };
@@ -3897,6 +3903,23 @@ impl State {
             if let Some((at, target)) = first {
                 let position =
                     std::array::from_fn(|i| p.previous[i] + (p.position[i] - p.previous[i]) * at);
+                let wreck = match target {
+                    Some(Hit::Ownship(n)) => Some(&rows[n].target),
+                    Some(Hit::Target(i)) => Some(&self.targets[i]),
+                    None => None,
+                }
+                .filter(|t| t.hp <= 0);
+                if let Some(wreck) = wreck {
+                    // Physical contact consumes the round without repeating the
+                    // kill, damaging its pilot, or changing the last attacker.
+                    self.ledger.resolve(p.id, Resolution::Hit(0));
+                    events.push(Event::Hit(wreck.id));
+                    impacts.push((position, EffectKind::Hit, w.effects.object_explosion, 0));
+                    if by_ownship {
+                        scored.push((p.owner, false));
+                    }
+                    return false;
+                }
                 if let Some(Hit::Ownship(n)) = target {
                     let r = &rows[n];
                     let own = &ships[r.index];
@@ -5551,6 +5574,13 @@ mod tests {
         assert!(state.own_view().weapon_observation(ownship).is_none());
         assert_eq!(state.own_view().display_target().map(|t| t.id), Some(id));
         state.targets.iter_mut().find(|t| t.id == id).unwrap().hp = 0;
+        assert_eq!(state.own_view().display_target().map(|t| t.id), Some(id));
+        state
+            .targets
+            .iter_mut()
+            .find(|t| t.id == id)
+            .unwrap()
+            .airborne = false;
         assert!(state.own_view().display_target().is_none());
         state.targets.iter_mut().find(|t| t.id == id).unwrap().hp = 10;
         state.command(0, Command::ClearDesignation, ownship);
@@ -6177,6 +6207,7 @@ mod tests {
             radar: true,
             jammer: false,
             alive: true,
+            body_present: true,
             controls: sensors::Controls::default(),
         }
     }
@@ -6410,9 +6441,11 @@ mod tests {
                 ));
                 strikes.extend(s.take_strikes());
             }
-            // Every damaging hit names its owner and victim for the radio.
+            // Every hit through the killing hit names its owner and victim
+            // for the radio. Later wreck impacts produce no new damage call.
             let hits: Vec<_> = collected
                 .iter()
+                .take_while(|e| !matches!(e, Event::Destroyed(_)))
                 .filter_map(|e| match e {
                     Event::Hit(id) => Some(*id),
                     _ => None,
@@ -6791,13 +6824,13 @@ mod tests {
         }
         assert_eq!(
             (s.own().hits, s.own().kills, kills, s.targets[0].hp),
-            (2, 1, 1, 0)
+            (6, 1, 1, 0) // Two damaging hits and four physical wreck impacts.
         );
         assert!(exploded);
         // The debrief ledger saw the same rounds, hits, damage and kill.
         let fired = s.ledger.total(|k| k.owner == OWN);
         assert_eq!(fired.launched, s.own().shots);
-        assert_eq!((fired.hit, fired.damage), (2, 20));
+        assert_eq!((fired.hit, fired.damage), (6, 20));
         assert_eq!(
             s.ledger.kills(),
             [Kill {
@@ -7397,7 +7430,7 @@ mod tests {
         assert_eq!(s.own().ammo, ammo);
     }
     #[test]
-    fn autonomous_tracking_survives_radar_off_but_dead_target_is_retired() {
+    fn independent_tracking_retains_a_wreck_until_its_body_is_retired() {
         let mut s = fixture(true);
         s.own_mut().config.stations[0].weapon.flags &= !0x200;
         s.range_target(0, launcher());
@@ -7425,6 +7458,17 @@ mod tests {
         );
         assert_eq!(s.projectiles[0].target, Some(1));
         s.targets[0].hp = 0;
+        let events = s.step(
+            &[OwnshipInput {
+                aircraft: 0,
+                held: false,
+                launcher: l,
+            }],
+            |_, _| 0.,
+        );
+        assert_eq!(s.projectiles[0].target, Some(1));
+        assert!(!events.contains(&Event::TrackLost(1)));
+        s.targets[0].airborne = false;
         let events = s.step(
             &[OwnshipInput {
                 aircraft: 0,
@@ -7746,10 +7790,10 @@ mod tests {
         observe(&mut s, l, ACQUISITION);
         s.targets[0].hp = 0;
         observe(&mut s, l, 1);
-        // Hit points reaching zero removes combat viability, not the return.
+        // A wreck remains selectable and shootable while its body is present.
         assert!(s.own().sensors.contact(1).is_some());
         assert_eq!(s.own_view().designated(), Some(1));
-        assert_eq!(s.own_view().readiness(l), Readiness::TargetDestroyed);
+        assert_eq!(s.own_view().readiness(l), Readiness::Ready);
         assert!(s.targets[0].airborne);
         for _ in 0..1200 {
             s.step(
@@ -8233,6 +8277,12 @@ fn guide_owned<'a>(
     let can_steer = profile.guidance != Guidance::Supported || supported.is_some();
     if can_steer && let Some(point) = flight.last_intercept {
         let motion = p.motion.unwrap();
+        // Keep searching for the same target, but do not turn back around a
+        // stale point after passing it. A fresh observation can guide again.
+        let measured = supported.is_some() || flight.seeker.observation.is_some();
+        if !measured && dot(sub(point, p.position), motion.velocity) <= 0. {
+            return;
+        }
         let desired = unit(sub(motion.aim(p.position, point), p.position));
         let heading = missiles::commanded_heading(p.direction, motion.velocity, desired);
         p.direction = missiles::steer(&w.movement, p.age, p.direction, heading);
@@ -8306,6 +8356,7 @@ mod pair_tests {
             radar: true,
             jammer: false,
             alive: true,
+            body_present: true,
             controls: sensors::Controls::default(),
         };
         let launchers = [
@@ -8473,6 +8524,7 @@ mod hit_rule_tests {
             radar: true,
             jammer: false,
             alive: true,
+            body_present: true,
             controls: sensors::Controls::default(),
         }
     }
@@ -8535,6 +8587,78 @@ mod hit_rule_tests {
         events
             .iter()
             .any(|e| matches!(e, Event::OwnshipDamaged { aircraft: 0, .. }))
+    }
+
+    #[test]
+    fn guns_and_missiles_hit_wrecks_once_without_another_kill() {
+        for gun in [false, true] {
+            for present in [false, true] {
+                for ownship in [false, true] {
+                    let mut s = scene();
+                    s.friendly_fire = FriendlyFire::Off;
+                    let victim = if ownship { 0 } else { 5 };
+                    if ownship {
+                        s.own_mut().hp = 0;
+                    } else {
+                        let mut wreck = target(victim, [0., 1000., 0.], 100, 0x80);
+                        wreck.hp = 0;
+                        wreck.airborne = present;
+                        wreck.side = s.own().side;
+                        s.targets.push(wreck);
+                    }
+                    let owner = if ownship { 7 } else { 0 };
+                    let mut round = shell(
+                        &s,
+                        owner,
+                        [0., 1000., 100.],
+                        [0., 1000., 0.],
+                        Some(victim),
+                        0,
+                    );
+                    if gun {
+                        round.weapon.as_mut().unwrap().source = "M61.JT".into();
+                    }
+                    s.projectiles.push(round);
+                    let mut input = launcher();
+                    if ownship {
+                        input.alive = false;
+                        input.body_present = present;
+                    } else {
+                        input.position[0] = 10000.;
+                    }
+                    let mut events = Vec::new();
+                    for _ in 0..30 {
+                        events.extend(s.step(
+                            &[OwnshipInput {
+                                aircraft: 0,
+                                held: false,
+                                launcher: input,
+                            }],
+                            |_, _| 0.,
+                        ));
+                    }
+                    let context = format!("gun={gun} present={present} ownship={ownship}");
+                    assert_eq!(
+                        events.iter().filter(|e| **e == Event::Hit(victim)).count(),
+                        usize::from(present),
+                        "{context}: {events:?}"
+                    );
+                    assert_eq!(s.projectiles.is_empty(), present, "{context}");
+                    assert!(s.ledger.kills().is_empty(), "{context}");
+                    assert!(s.history.is_empty(), "{context}");
+                    assert!(
+                        !events.iter().any(|e| matches!(
+                            e,
+                            Event::Destroyed(_)
+                                | Event::OwnshipDestroyed { .. }
+                                | Event::OwnshipDamaged { .. }
+                                | Event::Jolt(_)
+                        )),
+                        "{context}: {events:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -8699,6 +8823,7 @@ mod friendly_fire_tests {
             radar: true,
             jammer: false,
             alive: true,
+            body_present: true,
             controls: sensors::Controls::default(),
         }
     }

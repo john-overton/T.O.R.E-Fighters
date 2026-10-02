@@ -72,7 +72,8 @@ impl App {
 
     /// Shows `viewer`. The renderer switches to its world on the first
     /// frame drawn.
-    pub(crate) fn start_replay(&mut self, viewer: Viewer, capture: Option<Capture>) {
+    pub(crate) fn start_replay(&mut self, mut viewer: Viewer, capture: Option<Capture>) {
+        viewer.set_input_profile(&self.input.resolver.profile);
         self.replay = Some(Box::new(Replay { viewer, capture }));
         self.screen = Screen::Replay;
         self.mouse_look = None;
@@ -195,6 +196,13 @@ impl App {
                 {
                     return Some(event);
                 }
+                if self.replay.as_mut().is_some_and(|replay| {
+                    replay
+                        .viewer
+                        .bound_key(&name, pressed, key.repeat, self.modifiers)
+                }) {
+                    return None;
+                }
                 // Alt or Ctrl with a view key picks the view's reference, as
                 // in flight; the viewer's other keys take no Control, Alt
                 // or Command.
@@ -260,7 +268,15 @@ impl App {
                                     .right(pressed, window, Some(point), size, slop);
                             }
                         }
-                        _ => {}
+                        _ => {
+                            let control = match button {
+                                MouseButton::Middle => "button:middle",
+                                MouseButton::Back => "button:back",
+                                MouseButton::Forward => "button:forward",
+                                _ => return None,
+                            };
+                            replay.viewer.drone_mouse(control, pressed);
+                        }
                     }
                 }
                 None

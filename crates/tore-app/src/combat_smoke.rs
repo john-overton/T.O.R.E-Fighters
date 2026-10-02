@@ -38,6 +38,10 @@ fn first_difference(a: &str, b: &str) -> String {
 pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let world = Terrain::for_theater(data, "UKR")?;
     let mut combat = Combat::new(h, data, true)?;
+    wreck_contacts(
+        combat.state.own().configuration(),
+        launcher(&h.start(&world)),
+    )?;
     println!(
         "systems source {:?}: player capacity={} ECM={:?} weights={} repeat-limited=45",
         h.profile.id,
@@ -846,6 +850,78 @@ pub fn smoke(h: &AircraftType, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()
     Ok(())
 }
 
+/// Real imported gun and missile records must collide with a present ownship
+/// wreck, without damage or a second kill. This runs in the headless battery.
+fn wreck_contacts(config: &live::Configuration, mut input: Launcher) -> AppResult<()> {
+    use tore_sim::combat::missiles::{Profile, TargetRole};
+    let gun = config.stations.iter().position(|s| live::is_gun(&s.weapon));
+    let missile = config
+        .stations
+        .iter()
+        .position(|s| s.weapon.source == "AIM120.JT")
+        .or_else(|| {
+            config.stations.iter().position(|s| {
+                Profile::for_weapon(&s.weapon).is_some_and(|p| p.role == TargetRole::Aircraft)
+            })
+        });
+    input.position = [0., 10000., 0.];
+    input.basis = Basis::new(0., 0., 0.);
+    input.velocity = [0.; 3];
+    input.jammer = false;
+    let mut checked = 0;
+    for index in gun.into_iter().chain(missile) {
+        let mut state = live::State::new(config.clone(), true)?;
+        state.own_mut().selected = index;
+        input.alive = true;
+        input.body_present = true;
+        state.command(0, live::Command::Incoming, input);
+        state.own_mut().hp = 0;
+        input.alive = false;
+        let mut hits = 0;
+        for _ in 0..2400 {
+            for event in state.step(
+                &[OwnshipInput {
+                    aircraft: 0,
+                    held: false,
+                    launcher: input,
+                }],
+                |_, _| 0.,
+            ) {
+                if event == Event::Hit(0) {
+                    hits += 1;
+                }
+                if matches!(
+                    event,
+                    Event::OwnshipDamaged { .. }
+                        | Event::OwnshipDestroyed { .. }
+                        | Event::SubsystemDamaged { .. }
+                        | Event::Jolt(_)
+                ) {
+                    return Err(
+                        format!("wreck impact caused a second damage event: {event:?}").into(),
+                    );
+                }
+            }
+            if state.projectiles.is_empty() {
+                break;
+            }
+        }
+        if hits != 1 || !state.projectiles.is_empty() || !state.ledger.kills().is_empty() {
+            return Err(format!(
+                "wreck collision failed: {} hits={hits}",
+                config.stations[index].weapon.source
+            )
+            .into());
+        }
+        checked += 1;
+    }
+    if checked == 0 {
+        return Err("no wreck-contact weapon fixtures".into());
+    }
+    println!("wreck collision: weapons={checked} hits={checked} second_kills=0 PASS");
+    Ok(())
+}
+
 /// Writes the records combat has collected to the smoke harness's tape file
 /// and flushes it.
 fn write_tape(
@@ -889,6 +965,7 @@ fn ballistic_smoke(config: &live::Configuration, index: usize) -> AppResult<()> 
         radar: false,
         jammer: false,
         alive: true,
+        body_present: true,
         controls: Default::default(),
     };
     let initial = state.own().ammo[index];

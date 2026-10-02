@@ -66,6 +66,9 @@ pub enum Action {
     ViewFrom(Target),
     /// The replay's object view looks at this object.
     LookAt(Target),
+    /// A camera chosen directly from the replay transport bar.
+    Camera(u8),
+    DroneMode(super::drone::Mode),
 }
 
 /// One menu row: a heading, or an item with an optional detail on the
@@ -257,6 +260,8 @@ pub enum Outcome {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Menu {
     pub target: Target,
+    /// Camera choices are static; an empty-space object list refreshes each frame.
+    pub camera_choices: bool,
     pub title: String,
     pub items: Vec<Item>,
     rect: Rect,
@@ -334,6 +339,7 @@ impl Menu {
         };
         let mut menu = Self {
             target,
+            camera_choices: false,
             title,
             rect: (
                 place(x, width, crate::replay::panels::WIDTH),

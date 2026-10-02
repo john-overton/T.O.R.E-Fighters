@@ -188,6 +188,24 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Brighten HUD | Shift+] | - | - |
 | Live map | Shift+M | - | - |
 
+### Replay drone
+
+| Action | Keyboard | Mouse | Gamepad (Xbox) |
+| --- | --- | --- | --- |
+| Drone: cycle flight/follow/free | Backquote (~) | - | - |
+| Drone: follow aircraft | - | - | - |
+| Drone: free camera | - | - | - |
+| Drone: move forward | W | - | - |
+| Drone: move backward | S | - | - |
+| Drone: move left | A | - | - |
+| Drone: move right | D | - | - |
+| Drone: move up | E | - | - |
+| Drone: move down | Q | - | - |
+| Drone: four times faster | Shift | - | - |
+| Drone: hold to look with mouse | - | Right button | - |
+| Drone: increase movement speed | - | Wheel up | - |
+| Drone: decrease movement speed | - | Wheel down | - |
+
 ### Communication
 
 | Action | Keyboard | Mouse | Gamepad (Xbox) |
@@ -289,12 +307,10 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Replay viewer | O / Shift+O | Object view: look at the next or previous aircraft, weapon or ground object present now |
 | Replay viewer | Keypad 5 or Shift+/ | Recenter the look, keeping the view and zoom |
 | Replay viewer | + / - (keypad too) | Zoom in or out, 0.5x to 4x |
-| Replay viewer | Backquote (`) | Drone camera following the selected aircraft, then flying free, then back to the flight view |
-| Replay viewer | W A S D, E / Q | Drone: move, climb / descend; hold Shift for four times the speed |
-| Replay viewer | Mouse wheel | Scroll a debug panel or menu under the pointer; otherwise drone speed from 20 to 5,000 feet per second, or zoom in a flight view |
-| Replay viewer | Hold right button and drag | Look around, or turn the drone |
+| Replay viewer | Mouse wheel | Scroll a debug panel or menu under the pointer; otherwise configured drone speed controls (default wheel) from 20 to 5,000 feet per second, or zoom in a flight view |
+| Replay viewer | Hold right button and drag | Look around in a flight view; the drone uses its configured look hold (default right button) |
 | Replay viewer | Left click, drag on the timeline | Transport bar buttons; jump to or scrub through a moment |
-| Replay viewer | Right-click without dragging | The debug menu on the aircraft, weapon or ground object under the pointer, with View from here and Look at this for the object view, or a list of aircraft to jump to |
+| Replay viewer | Right-click without dragging | On the camera button, choose a specific view. In the scene, the debug menu on the aircraft, weapon or ground object under the pointer, with View from here and Look at this for the object view, or a list of aircraft to jump to |
 | Replay viewer, debug menu open | Up / Down / Tab, Home / End, PageUp / PageDown, Enter / Space / Right, Esc / Left | Move, choose, close |
 | Replay viewer | N / T / C | Name labels / mission timer / Comms panel on or off |
 | Replay viewer | I / F / G | AI thinking / telemetry panel of the selected aircraft / guidance panel of its newest missile in flight, on or off |

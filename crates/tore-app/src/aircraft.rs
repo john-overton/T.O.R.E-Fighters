@@ -324,18 +324,17 @@ impl Airframe {
             // fitted attachment uses its reviewed wing tips and rig pivots.
             let basis = tore_sim::attitude::Basis::new(s.yaw, s.pitch, s.bank);
             return Some(std::array::from_fn(|side| {
-                let (tip, pivot, sign) = if side == 0 {
-                    ([-23., -4., 1.], [-4., -1., 1.], -1.)
+                let (tip, sign) = if side == 0 {
+                    ([-23., -4., 1.], -1.)
                 } else {
-                    ([24., -4., 1.], [5., -1., 1.], 1.)
+                    ([24., -4., 1.], 1.)
                 };
-                let offset = crate::aircraft_animation::rotate(
-                    std::array::from_fn(|i| tip[i] - pivot[i]),
-                    [0., 0., 1.],
-                    -sign * crate::additional_animation::sweep(s),
+                let p = crate::additional_animation::f14_wing_point(
+                    tip,
+                    sign,
+                    crate::additional_animation::sweep(s),
                 );
-                let p: [f64; 3] =
-                    std::array::from_fn(|i| f64::from(pivot[i] + offset[i]) * 4. / 3.);
+                let p = p.map(|v| f64::from(v) * 4. / 3.);
                 std::array::from_fn(|i| {
                     s.position[i]
                         + basis.right[i] * p[0]

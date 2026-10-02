@@ -14,7 +14,9 @@ use crate::flight_views::{self, Body, Reference, Rig, Scene};
 use crate::render_snapshot::{self, CombatArt};
 use crate::renderer::Renderer;
 use crate::replay::clock::{self, Clock, Direction};
-use crate::replay::context_menu::{self, Action, Menu, Outcome, Pickable, RightClick, Target};
+use crate::replay::context_menu::{
+    self, Action, Item, Menu, Outcome, Pickable, RightClick, Target,
+};
 use crate::replay::devices::DeviceTrack;
 use crate::replay::drone::{Drone, Mode};
 use crate::replay::overlay::{self, Control, Marker, MarkerKind, Model, Placement};
@@ -757,6 +759,7 @@ pub struct Viewer {
     pause: pause::Menu,
     /// Held drone movement keys.
     held: BTreeSet<String>,
+    drone_input: crate::replay::drone::Controls,
     bar: overlay::Pointer,
     /// Where a right-drag last was, in window pixels.
     dragging: Option<[f64; 2]>,
@@ -946,6 +949,7 @@ impl Viewer {
             ui: options.ui,
             pause,
             held: BTreeSet::new(),
+            drone_input: crate::replay::drone::Controls::new(&tore_input::Profile::default()),
             bar: overlay::Pointer::default(),
             dragging: None,
             toast: None,
@@ -1412,12 +1416,9 @@ impl Viewer {
             let choice = self.pause.key(name, &mut self.clock);
             return self.pause_choice(choice);
         }
-        if matches!(name, "w" | "a" | "s" | "d" | "e" | "q") {
-            if pressed {
-                self.held.insert(name.to_owned());
-            } else {
-                self.held.remove(name);
-            }
+        let mut modifiers = winit::keyboard::ModifiersState::empty();
+        modifiers.set(winit::keyboard::ModifiersState::SHIFT, shift);
+        if self.bound_key(name, pressed, repeat, modifiers) {
             return Command::None;
         }
         if !pressed {
@@ -1474,7 +1475,6 @@ impl Viewer {
             }
             "Tab" => self.cycle_aircraft(!shift),
             "o" => self.cycle_look_at(!shift),
-            "`" => self.drone_mode(None),
             "h" => {
                 self.ui.hidden = !self.ui.hidden;
                 self.menu = None;
@@ -1524,6 +1524,80 @@ impl Viewer {
         Command::None
     }
 
+    pub fn set_input_profile(&mut self, profile: &tore_input::Profile) {
+        self.release();
+        self.drone_input = crate::replay::drone::Controls::new(profile);
+    }
+
+    /// Configured drone keys run before the fixed replay shortcuts. A release
+    /// uses the binding claimed on press, even if a modifier was released first.
+    pub fn bound_key(
+        &mut self,
+        name: &str,
+        pressed: bool,
+        repeat: bool,
+        modifiers: winit::keyboard::ModifiersState,
+    ) -> bool {
+        if pressed && repeat && !self.drone_input.claimed(name) {
+            return false;
+        }
+        if pressed && (self.pause.is_open() || self.menu.is_some() || name == "Escape") {
+            return false;
+        }
+        let taken = self.drone_input.key(name, pressed, modifiers);
+        self.apply_drone_controls();
+        taken
+    }
+
+    pub fn drone_event(&mut self, event: tore_input::Event) {
+        if self.pause.is_open() || self.menu.is_some() {
+            return;
+        }
+        self.drone_input.event(event);
+        self.apply_drone_controls();
+    }
+
+    pub fn drone_devices(&mut self, present: impl Fn(&str) -> bool) {
+        self.drone_input.retain_devices(present);
+        self.apply_drone_controls();
+    }
+
+    pub fn drone_mouse(&mut self, control: &str, pressed: bool) {
+        if pressed && (self.pause.is_open() || self.menu.is_some()) {
+            return;
+        }
+        self.drone_input.mouse(control, pressed);
+        self.apply_drone_controls();
+    }
+
+    fn apply_drone_controls(&mut self) {
+        self.held = [
+            ("drone-forward", "w"),
+            ("drone-backward", "s"),
+            ("drone-left", "a"),
+            ("drone-right", "d"),
+            ("drone-up", "e"),
+            ("drone-down", "q"),
+        ]
+        .into_iter()
+        .filter(|(action, _)| self.drone_input.held(action))
+        .map(|(_, key)| key.to_owned())
+        .collect();
+        for command in self.drone_input.commands() {
+            match command.as_str() {
+                "drone-cycle" => self.drone_mode(None),
+                "drone-follow" => self.drone_mode(Some(Mode::Follow)),
+                "drone-free" => self.drone_mode(Some(Mode::Free)),
+                "drone-faster" | "drone-slower" => {
+                    if let Some(drone) = &mut self.drone {
+                        drone.wheel(if command == "drone-faster" { 1 } else { -1 });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// The pointer left the window.
     pub fn pointer_left(&mut self) {
         self.bar.hover = None;
@@ -1535,6 +1609,7 @@ impl Viewer {
 
     /// Lets go of every held key and drag, when the window loses focus.
     pub fn release(&mut self) {
+        self.drone_input.release();
         self.held.clear();
         self.dragging = None;
         self.right_click = None;
@@ -1589,6 +1664,13 @@ impl Viewer {
             layer.filter(|_| !over_menu || self.bar.scrubbing),
             &mut self.clock,
         );
+        if self.drone.is_some() {
+            if !self.drone_input.held("drone-look") {
+                self.dragging = None;
+            } else if self.dragging.is_none() {
+                self.dragging = Some(window);
+            }
+        }
         if let Some(last) = self.dragging {
             let delta = [
                 (window[0] - last[0]) * radians[0],
@@ -1686,6 +1768,7 @@ impl Viewer {
             self.right_click = None;
             return;
         }
+        self.drone_mouse("button:right", pressed);
         if pressed {
             self.dragging = Some(window);
             self.right_click = point.map(|p| (RightClick::press(window, slop), p));
@@ -1722,13 +1805,20 @@ impl Viewer {
         if self.panels.wheel(self.layout, self.point, notches, &data) {
             return;
         }
-        match &mut self.drone {
-            Some(drone) => {
-                drone.wheel(notches);
-                let speed = drone.speed();
-                self.toast(format!("Drone speed {speed:.0} ft/s"));
+        if self.drone.is_some() {
+            let control = if notches > 0 {
+                "wheel:up"
+            } else {
+                "wheel:down"
+            };
+            for _ in 0..notches.unsigned_abs().min(8) {
+                self.drone_mouse(control, true);
+                self.drone_mouse(control, false);
             }
-            None => self.zoom = (self.zoom * 1.1f32.powi(notches)).clamp(0.5, 4.),
+            let speed = self.drone.as_ref().unwrap().speed();
+            self.toast(format!("Drone speed {speed:.0} ft/s"));
+        } else {
+            self.zoom = (self.zoom * 1.1f32.powi(notches)).clamp(0.5, 4.);
         }
     }
 
@@ -1872,6 +1962,10 @@ impl Viewer {
         }
         let placement = Placement::new(size);
         let layer = placement.centered(at);
+        if placement.layer(at).and_then(overlay::hit) == Some(Control::Camera) {
+            self.open_camera_menu(layer);
+            return;
+        }
         let on_panel = match self.panels.hit(self.layout, layer) {
             Some(panels::Hit::Body(side) | panels::Hit::Pin(side) | panels::Hit::Close(side)) => {
                 self.panels.slot(side).map(|p| match p.kind {
@@ -1891,6 +1985,55 @@ impl Viewer {
             )
         });
         self.menu = Some(self.build_menu(target, layer));
+    }
+
+    fn refresh_object_menu(&mut self) {
+        if self
+            .menu
+            .as_ref()
+            .is_some_and(|m| m.target == Target::Nothing && !m.camera_choices)
+        {
+            let items = self.object_list_items();
+            self.menu.as_mut().unwrap().replace_items(items);
+        }
+    }
+
+    fn open_camera_menu(&mut self, at: (f64, f64)) {
+        let mut items: Vec<_> = VIEW_ORDER
+            .into_iter()
+            .chain([2, OBJECT])
+            .map(|view| Item {
+                label: view_name(view).into(),
+                detail: if self.drone.is_none() && self.view == view {
+                    "Current"
+                } else {
+                    ""
+                }
+                .into(),
+                action: (view != OBJECT || self.look_at.is_some()).then_some(Action::Camera(view)),
+            })
+            .collect();
+        for (mode, label) in [(Mode::Follow, "Drone follow"), (Mode::Free, "Drone free")] {
+            items.push(Item {
+                label: label.into(),
+                detail: if self.drone.as_ref().is_some_and(|d| d.mode == mode) {
+                    "Current"
+                } else {
+                    ""
+                }
+                .into(),
+                action: Some(Action::DroneMode(mode)),
+            });
+        }
+        let mut menu = Menu::new(
+            Target::Nothing,
+            "Choose view".into(),
+            items,
+            at,
+            &self.ownship.font,
+        );
+        menu.camera_choices = true;
+        self.menu = Some(menu);
     }
 
     /// M: the right-click menu on the selected aircraft, where the last
@@ -1920,6 +2063,9 @@ impl Viewer {
     /// Does what a menu item says.
     fn perform(&mut self, action: Action) {
         match action {
+            Action::Camera(OBJECT) => self.object_view(),
+            Action::Camera(view) => self.set_view(view),
+            Action::DroneMode(mode) => self.drone_mode(Some(mode)),
             Action::Follow(id) => {
                 self.select(id);
                 self.set_view(EXTERNAL);
@@ -2095,7 +2241,14 @@ impl Viewer {
         self.compass = None;
         self.readout = None;
         if let Some(drone) = &mut self.drone {
-            drone.step(seconds, &self.held, shift, anchor, ground(&self.world));
+            self.drone_input.shift(shift);
+            drone.step(
+                seconds,
+                &self.held,
+                self.drone_input.held("drone-boost"),
+                anchor,
+                ground(&self.world),
+            );
             return drone.camera(anchor, ground(&self.world));
         }
         if self.view == OBJECT {
@@ -2418,14 +2571,7 @@ impl Viewer {
         }
         let tick = self.clock.tick();
         let picture = self.playback.picture(tick, self.clock.alpha());
-        if self
-            .menu
-            .as_ref()
-            .is_some_and(|m| m.target == Target::Nothing)
-        {
-            let items = self.object_list_items();
-            self.menu.as_mut().unwrap().replace_items(items);
-        }
+        self.refresh_object_menu();
         self.weather
             .seek(&mut self.world, &mut self.scenery, &self.tracks, tick);
         let player = self.player_state(&picture, tick);
@@ -2952,6 +3098,8 @@ mod tests {
     }
 
     fn press(viewer: &mut Viewer, key: &str) -> Command {
+        // A fresh press, with any previous press of this key released first.
+        viewer.key(key, false, false, false);
         viewer.key(key, true, false, false)
     }
 
@@ -3006,6 +3154,31 @@ mod tests {
         assert!(v.toast.is_some());
         press(&mut v, "PageUp");
         assert_eq!(v.clock.position(), f::BOOKMARK as f64);
+    }
+
+    #[test]
+    fn rebound_drone_keys_move_while_paused_and_release_after_modifier_or_focus_loss() {
+        use winit::keyboard::ModifiersState as M;
+        let dir = TempDir::new("viewer-drone-bindings");
+        let mut v = viewer(&dir, &Options::default());
+        let profile = tore_input::Profile::parse("tore-input 1\ndisable replay-keyboard w\nbind replay-keyboard Ctrl-u drone-forward hold\n").unwrap();
+        v.set_input_profile(&profile);
+        v.clock.pause();
+        v.drone_mode(Some(Mode::Free));
+        let tick = v.clock.tick();
+        let picture = v.playback.picture(tick, 0.);
+        let before = v.frame_camera(&picture, tick, 0., false).position;
+        assert!(!v.bound_key("w", true, false, M::empty()));
+        assert!(v.bound_key("u", true, false, M::CONTROL));
+        let moved = v.frame_camera(&picture, tick, 0.1, false).position;
+        assert!((0..3).map(|i| (moved[i] - before[i]).powi(2)).sum::<f64>() > 100.);
+        assert!(v.clock.paused());
+        assert!(v.bound_key("u", false, false, M::empty()));
+        assert_eq!(v.frame_camera(&picture, tick, 0.1, false).position, moved);
+        v.bound_key("u", true, false, M::CONTROL);
+        v.release();
+        assert!(!v.bound_key("u", true, true, M::CONTROL));
+        assert!(v.held.is_empty());
     }
 
     #[test]
@@ -3486,6 +3659,52 @@ mod tests {
     fn right_click(v: &mut Viewer, at: [f64; 2], size: [u32; 2]) {
         v.right(true, at, Some(at), size, 4.);
         v.right(false, [at[0] + 2., at[1] - 1.], Some(at), size, 4.);
+    }
+
+    #[test]
+    fn right_clicking_the_camera_button_chooses_views_directly() {
+        let dir = TempDir::new("viewer-camera-menu");
+        for size in [[1280, 960], [1920, 1080], [800, 1200]] {
+            let mut v = viewer(&dir, &Options::default());
+            let (x, y, w, h) = overlay::rect(Control::Camera);
+            let scale = Placement::new(size).scale();
+            let at = [
+                (f64::from(size[0]) - 640. * scale) / 2.
+                    + (f64::from(x) + f64::from(w) / 2.) * scale,
+                f64::from(size[1]) + (f64::from(y) + f64::from(h) / 2. - 480.) * scale,
+            ];
+            right_click(&mut v, at, size);
+            v.refresh_object_menu();
+            let menu = v.menu.as_mut().unwrap();
+            assert!(menu.camera_choices);
+            assert_eq!(menu.title, "Choose view");
+            assert_eq!(menu.items.len(), VIEW_ORDER.len() + 4);
+            menu.focus = menu
+                .items
+                .iter()
+                .position(|item| item.action == Some(Action::Camera(flight_views::FLY_BY)))
+                .unwrap();
+            press(&mut v, "Enter");
+            assert!(v.menu.is_none() && v.drone.is_none());
+            assert_eq!(v.view, flight_views::FLY_BY);
+            right_click(&mut v, at, size);
+            v.refresh_object_menu();
+            let menu = v.menu.as_mut().unwrap();
+            menu.focus = menu
+                .items
+                .iter()
+                .position(|item| item.action == Some(Action::DroneMode(Mode::Free)))
+                .unwrap();
+            press(&mut v, "Enter");
+            assert_eq!(v.drone.as_ref().unwrap().mode, Mode::Free);
+            // Scene clicks still open the object menu.
+            right_click(&mut v, [10., 10.], size);
+            assert!(!v.menu.as_ref().unwrap().camera_choices);
+            v.ui.hidden = true;
+            v.menu = None;
+            right_click(&mut v, at, size);
+            assert!(v.menu.is_none());
+        }
     }
 
     #[test]

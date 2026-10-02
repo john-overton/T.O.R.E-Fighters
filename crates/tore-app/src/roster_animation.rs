@@ -358,7 +358,9 @@ pub fn gear(id: Id, f: &mut Face, fraction: f64, steering: f64) {
             [1., 0., 0.],
             -std::f64::consts::FRAC_PI_2 * (1. - fraction),
         );
-        turn(f, front, [0., 0., 1.], -steering);
+        if crate::additional_animation::steerable_nose(id, f.address) {
+            turn(f, front, [0., 0., 1.], -steering);
+        }
     } else {
         turn(
             f,

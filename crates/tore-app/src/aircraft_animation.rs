@@ -112,7 +112,12 @@ pub fn animate(face: &Face, s: &State) -> Option<Face> {
             result.normal = Some([n[0], n[2], n[1]]);
         }
     }
-    if part == GearNose {
+    if part == GearNose
+        && crate::additional_animation::steerable_nose(
+            tore_formats::aircraft::AircraftId::F18,
+            face.address,
+        )
+    {
         crate::additional_animation::turn(
             &mut result,
             [0., 55., -6.],

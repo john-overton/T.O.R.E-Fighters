@@ -98,6 +98,19 @@ impl Action {
         if matches!(
             s,
             "fire"
+                | "drone-cycle"
+                | "drone-follow"
+                | "drone-free"
+                | "drone-forward"
+                | "drone-backward"
+                | "drone-left"
+                | "drone-right"
+                | "drone-up"
+                | "drone-down"
+                | "drone-boost"
+                | "drone-look"
+                | "drone-faster"
+                | "drone-slower"
                 | "weapon-seeker-mode"
                 | "weapon-next"
                 | "weapon-previous"
@@ -355,7 +368,10 @@ pub fn chord_parts(control: &str) -> (Vec<&str>, &str) {
 }
 fn valid_chord(device: &str, control: &str) -> bool {
     let parts: Vec<_> = control.split('+').collect();
-    if device == "keyboard" || device == "mouse" {
+    if matches!(
+        device,
+        "keyboard" | "mouse" | "replay-keyboard" | "replay-mouse"
+    ) {
         return parts.len() == 1 && !control.is_empty();
     }
     parts.len() <= 3
@@ -416,9 +432,11 @@ impl Profile {
                             p.modifiers.push(entry);
                         }
                     }
-                    ["disable", device @ ("keyboard" | "mouse"), control]
-                        if p.disabled.len() < 512 =>
-                    {
+                    [
+                        "disable",
+                        device @ ("keyboard" | "mouse" | "replay-keyboard" | "replay-mouse"),
+                        control,
+                    ] if p.disabled.len() < 512 => {
                         p.disabled.insert(((*device).into(), (*control).into()));
                     }
                     ["mouse-look", value] => p.mouse_look = on_off(value)?,
@@ -500,7 +518,9 @@ impl Profile {
                                 matches!(action, Action::Axis(a) if a != Axis::Throttle)
                             }
                             Mode::Unit => action == Action::Axis(Axis::Throttle),
-                            Mode::HoldState if action == Action::Ui("fire".into()) => true,
+                            Mode::HoldState if matches!(&action, Action::Ui(name) if name == "fire" || matches!(name.as_str(), "drone-forward" | "drone-backward" | "drone-left" | "drone-right" | "drone-up" | "drone-down" | "drone-boost" | "drone-look")) => {
+                                true
+                            }
                             Mode::Switch | Mode::Follow | Mode::HoldState => {
                                 matches!(action, Action::Pilot(PilotCommand::Toggle(_)))
                             }

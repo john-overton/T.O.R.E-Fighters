@@ -716,7 +716,8 @@ fn a_destroyed_aircraft_stays_a_contact_until_it_stops_being_airborne() {
     s.step(&o, &flying, &air);
     assert_eq!(s.contacts().len(), 1);
     assert!(s.contacts()[0].destroyed);
-    assert!(s.designate(1));
+    assert!(s.cycle(true, |_| false));
+    assert_eq!(s.selected(), Some(1));
     run(&mut s, &o, &flying, ACQUIRE);
     assert_eq!(s.acquired(), Some(1));
     assert_eq!(s.support(1), Support::Tracked);

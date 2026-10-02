@@ -44,7 +44,8 @@ Replay sheet with the [replay viewer's](REPLAYS.md#viewer) keys.
   and [its window routing](../crates/tore-app/src/replay/host.rs): Alt+Enter
   and Alt+F4 reach the game, Alt or Ctrl with a view key picks the view's
   reference (shown in the note beside the function keys), and every other
-  Ctrl or Alt combination is ignored.
+  Ctrl or Alt combination is ignored unless assigned to a drone command.
+  Drone keys shown are defaults; Controls > Replay drone can rebind them.
   Flight keys the viewer does not read stay dim. Ctrl+B, the flight's "Mark
   replay moment" default, is on this sheet because its purpose is replays;
   the sheet says it works in flight.

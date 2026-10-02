@@ -136,6 +136,8 @@ class WeaponTests(unittest.TestCase):
     def test_combat_smoke(self):
         self.assertTrue(flight.check_combat_smoke("combat smoke X FAIL"))
         self.assertEqual(flight.check_combat_smoke("PASS\n" * 9), [])
+        self.assertTrue(flight.check_wreck_contacts("PASS\n" * 9))
+        self.assertEqual(flight.check_wreck_contacts("PASS\n" * 9 + "wreck collision: weapons=2 hits=2 second_kills=0 PASS"), [])
 
 
 class SpinTests(unittest.TestCase):

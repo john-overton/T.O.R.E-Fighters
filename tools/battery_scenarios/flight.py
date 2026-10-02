@@ -674,6 +674,13 @@ def check_combat_smoke(output: str) -> list[str]:
     return problems
 
 
+def check_wreck_contacts(output: str) -> list[str]:
+    problems = check_combat_smoke(output)
+    if "wreck collision: weapons=2 hits=2 second_kills=0 PASS" not in output:
+        problems.append("gun and AIM-120 wreck-contact checks did not both pass")
+    return problems
+
+
 # Aircraft with no reviewed guided air-to-air missile in the default load.
 NO_MISSILES = {"a4e", "mig23"}
 # Aircraft whose missile acceptance run is too slow for the battery.
@@ -725,7 +732,9 @@ def check_combat_evidence(output: str) -> list[str]:
 
 
 def combat_scenarios() -> list[Scenario]:
-    out = []
+    out = [Scenario(name="flight-wreckcontact-f18", lane="flight",
+                    args=["--combat-smoke", "--aircraft", "f18", "--no-audio"],
+                    check=check_wreck_contacts, timeout=300)]
     for ac in AIRCRAFT:
         out.append(Scenario(name=f"flight-combatsmoke-{ac}", lane="flight", args=["--combat-smoke", "--aircraft", ac, "--no-audio"], check=check_combat_smoke, timeout=300))
         # The F-14 and Su-35 carry very long range missiles: their acceptance

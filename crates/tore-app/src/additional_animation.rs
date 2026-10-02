@@ -308,7 +308,7 @@ impl Rig {
                     [1., 0., 0.],
                     -std::f64::consts::FRAC_PI_2 * (1. - s.gear),
                 );
-                if pivot[0] == 0. {
+                if pivot[0] == 0. && steerable_nose(self.id, f.address) {
                     turn(&mut f, pivot, [0., 0., 1.], -s.nosewheel_angle());
                 }
             }
@@ -374,10 +374,13 @@ impl Rig {
                 if (0x4dba..=0x5434).contains(&a) {
                     turn(
                         &mut f,
-                        [if side < 0. { -4. } else { 5. }, -1., 1.],
+                        f14_wing_pivot(side),
                         [0., 0., 1.],
                         -side as f64 * sweep(s),
                     );
+                    for point in &mut f.positions {
+                        point[2] += F14_WING_LIFT;
+                    }
                 }
                 if matches!(a, 0x4828 | 0x4888 | 0x49c5 | 0x4a22) {
                     turn(
@@ -487,6 +490,46 @@ fn vector_angles(s: &State) -> [f64; 2] {
 /// Flaps hold the wings extended. This does not invent a new aerodynamic law.
 pub fn sweep(s: &State) -> f64 {
     ((s.speed / 1.68781 - 400.) / 300.).clamp(0., 1.) * 48f64.to_radians() * (1. - s.flaps)
+}
+// The quantized base mesh has wings at z=1 and a fuselage deck at z=2.
+// A fitted 1/16-unit clearance above that deck prevents swept-wing burial.
+const F14_WING_LIFT: f32 = 1.0625;
+fn f14_wing_pivot(side: f32) -> [f32; 3] {
+    [if side < 0. { -7. } else { 8. }, 4., 1.]
+}
+/// The same front-root sweep and height used by the wing mesh and vapor tips.
+pub(crate) fn f14_wing_point(point: [f32; 3], side: f32, angle: f64) -> [f32; 3] {
+    let pivot = f14_wing_pivot(side);
+    let offset = rotate(
+        std::array::from_fn(|i| point[i] - pivot[i]),
+        [0., 0., 1.],
+        -f64::from(side) * angle,
+    );
+    let mut point = std::array::from_fn(|i| pivot[i] + offset[i]);
+    point[2] += F14_WING_LIFT;
+    point
+}
+
+/// Reviewed wheel/steerable-strut skins. Retraction still moves the full gear
+/// group, but steering leaves its support braces and doors attached to the body.
+pub(crate) fn steerable_nose(id: AircraftId, address: usize) -> bool {
+    use AircraftId::*;
+    match id.source() {
+        F18 => matches!(address, 0x4f64 | 0x4f83 | 0x4fa2 | 0x4fc1),
+        Rafale => matches!(address, 0x3cbb | 0x3cda),
+        F14 => matches!(address, 0x57a1 | 0x57c0 | 0x57df | 0x57fe),
+        A4E => matches!(address, 0x564f | 0x566f),
+        X31 => matches!(address, 0x41ed | 0x420c),
+        Mig29 => matches!(address, 0x50e2 | 0x5101 | 0x5120 | 0x513f),
+        Su27 => matches!(address, 0x2c8f | 0x2caa),
+        Mig21 => matches!(address, 0x3275 | 0x3290),
+        Su25 => matches!(address, 0x5d60 | 0x5d7f | 0x5d9e | 0x5dbd),
+        Mig23 => matches!(address, 0x47c2 | 0x47e9 | 0x4810 | 0x4837),
+        Su35 => matches!(address, 0x56f3 | 0x5712 | 0x5731 | 0x5750),
+        F22 => matches!(address, 0x41fd | 0x421c),
+        F22n => matches!(address, 0x42f5 | 0x4314),
+        Faxx => unreachable!("source resolves the concept donor"),
+    }
 }
 pub(crate) fn turn(f: &mut Face, pivot: [f32; 3], axis: [f32; 3], angle: f64) {
     let length = axis.iter().map(|v| v * v).sum::<f32>().sqrt();
@@ -882,6 +925,78 @@ mod tests {
         state.exhaust = 0.;
         assert!(rig.animate(&source, &state).is_none());
     }
+    #[test]
+    fn nosewheel_steering_leaves_braces_and_doors_at_their_deployed_pose() {
+        use AircraftId::*;
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
+        state.enable_research(1).unwrap();
+        state.start_on_runway([0.; 3], 0.).unwrap();
+        for (id, wheel, fixed) in [
+            (F18, 0x4f64, 0x4ee1),
+            (F14, 0x57a1, 0x571e),
+            (A4E, 0x564f, 0x55cc),
+            (X31, 0x41ed, 0x4182),
+            (Su27, 0x2c8f, 0x2c2c),
+            (Su25, 0x5d60, 0x5ced),
+            (Mig23, 0x47c2, 0x474f),
+            (Su35, 0x56f3, 0x5680),
+            (F22, 0x41fd, 0x4192),
+            (F22n, 0x42f5, 0x428a),
+            (Faxx, 0x42f5, 0x428a),
+        ] {
+            let rig = Rig::synthetic(id, &[], &[], &[wheel, fixed], &[]);
+            for address in [wheel, fixed] {
+                let mut source = face(address);
+                source.positions = vec![[0., 60., -8.], [0., 60., -20.], [0., 55., -20.]];
+                let render = |s: &State| {
+                    if id == F18 {
+                        crate::aircraft_animation::animate(&source, s).unwrap()
+                    } else {
+                        rig.animate(&source, s).unwrap()
+                    }
+                };
+                state.rudder = 0.;
+                let straight = render(&state);
+                state.rudder = 1.;
+                let steered = render(&state);
+                assert_eq!(
+                    straight.positions != steered.positions,
+                    address == wheel,
+                    "{id:?} {address:x}"
+                );
+                assert_eq!(steered.uv, source.uv);
+                assert_eq!(steered.texture, source.texture);
+            }
+        }
+    }
+
+    #[test]
+    fn f14_sweep_keeps_the_front_root_fixed_and_vapor_on_the_lifted_wing() {
+        let rig = Rig::synthetic(AircraftId::F14, &[], &[], &[], &[]);
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
+        state.flaps = 0.;
+        for side in [-1., 1.] {
+            let root = f14_wing_pivot(side);
+            let tip = [if side < 0. { -23. } else { 24. }, -4., 1.];
+            let mut source = face(0x4dba);
+            source.positions = vec![root, tip, [root[0], -1., 1.]];
+            for knots in [400., 550., 700.] {
+                state.speed = knots * 1.68781;
+                let moved = rig.animate(&source, &state).unwrap();
+                assert_eq!(moved.positions[0], [root[0], root[1], 2.0625]);
+                assert_eq!(moved.positions[1], f14_wing_point(tip, side, sweep(&state)));
+                let distance =
+                    |a: [f32; 3], b: [f32; 3]| (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f32>();
+                assert!(
+                    (distance(moved.positions[0], moved.positions[1]) - distance(root, tip)).abs()
+                        < 1e-4
+                );
+                assert_eq!(moved.uv, source.uv);
+                assert_eq!(moved.normal, source.normal);
+            }
+        }
+    }
+
     #[test]
     fn sweep_respects_speed_and_flaps_and_rotations_preserve_shape() {
         let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();

@@ -5,10 +5,11 @@
 //! flat-world transform `T=Lon|Lat|Alt|Roll|Pitch|Yaw|U|V|Heading`: U and V
 //! are the game's own east and north coordinates in metres, and Lon/Lat are
 //! offsets from the anchor (Tacview adds `ReferenceLongitude` and
-//! `ReferenceLatitude`) on a local flat-earth approximation. Angles are
+//! `ReferenceLatitude`) with fitted geographic spacing. Angles are
 //! degrees. Roll uses Tacview's sign, positive when rolling to the right,
 //! which is the game's bank sign (right wing down positive); pitch is
-//! positive nose up and yaw clockwise from north in both. Unchanged
+//! positive nose up. Render yaw follows geographic spacing; Heading keeps the
+//! game north reference. Unchanged
 //! components and properties are omitted after an object's first line.
 
 use super::text::{Names, describe};
@@ -21,11 +22,9 @@ use crate::vocab::{channel, field, kind, node, outcome};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Write;
 
-/// A theater's real-world anchor. Provenance: `fitted`. The region comes
-/// from the retail theater names (recorded in docs/formats/quick-mission.md
-/// and docs/baselines/ukraine-viewer.md); where the map sits inside that
-/// region is an agent estimate (2026-09-26), and the game's maps are not
-/// claimed to match real terrain.
+/// A theater's fitted geographic center and spacing, calibrated from named
+/// airfields against public GPS references. See docs/spec/tacview-geography.md
+/// and docs/baselines/theater-georeference.md. Source maps remain approximate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TheaterAnchor {
     /// Base theater code.
@@ -39,6 +38,10 @@ pub struct TheaterAnchor {
     /// Terrain grid size in samples (east, north), 8,192 feet apart, used
     /// to find the map centre when the header has no map size.
     pub grid: [u32; 2],
+    /// Degrees per game foot: latitude/north, longitude/east.
+    pub degrees_per_ft: [f64; 2],
+    /// Measured fit error in km, not a claim about unseen landmarks.
+    pub rms_km: f64,
 }
 
 const fn anchor(
@@ -47,6 +50,8 @@ const fn anchor(
     latitude: f64,
     longitude: f64,
     grid: [u32; 2],
+    degrees_per_ft: [f64; 2],
+    rms_km: f64,
 ) -> TheaterAnchor {
     TheaterAnchor {
         code,
@@ -54,27 +59,157 @@ const fn anchor(
         latitude,
         longitude,
         grid,
+        degrees_per_ft,
+        rms_km,
     }
 }
 
 /// The 16 base theaters.
 pub const THEATER_ANCHORS: [TheaterAnchor; 16] = [
-    anchor("APA", "Panama", 9.0, -79.6, [256, 256]),
-    anchor("BAL", "The Baltics", 57.0, 24.0, [256, 256]),
-    anchor("CUB", "Cuba", 22.0, -79.5, [256, 256]),
-    anchor("EGY", "Egypt", 30.0, 32.5, [208, 200]),
-    anchor("FRA", "France", 46.5, 2.5, [208, 200]),
-    anchor("GRE", "Greece", 38.5, 23.5, [256, 256]),
-    anchor("IRA", "Iraq", 33.0, 44.0, [256, 256]),
-    anchor("KURILE", "Kuril Islands", 44.5, 146.5, [256, 256]),
-    anchor("LFA", "Falkland Islands", -51.7, -59.5, [256, 256]),
-    anchor("NSK", "North and South Korea", 38.0, 127.5, [256, 256]),
-    anchor("PGU", "Persian Gulf", 27.0, 51.5, [256, 256]),
-    anchor("SPA", "Pakistan", 30.0, 71.5, [256, 256]),
-    anchor("TVIET", "North Vietnam", 21.0, 105.8, [200, 200]),
-    anchor("UKR", "Ukraine", 45.3, 34.0, [208, 200]),
-    anchor("VLA", "Vladivostok", 43.1, 132.0, [208, 200]),
-    anchor("WTA", "Taiwan", 24.0, 120.5, [256, 256]),
+    anchor(
+        "APA",
+        "Panama",
+        8.700386142,
+        -80.220401595,
+        [256, 256],
+        [1.89097938317158e-06, 2.06000323139350e-06],
+        16.677249,
+    ),
+    anchor(
+        "BAL",
+        "The Baltics",
+        56.651141092,
+        26.254748366,
+        [256, 256],
+        [2.70227425654092e-06, 5.28976183545137e-06],
+        19.962174,
+    ),
+    anchor(
+        "CUB",
+        "Cuba",
+        22.374058491,
+        -82.489995111,
+        [256, 256],
+        [2.29438883850972e-06, 2.41781617168795e-06],
+        14.867443,
+    ),
+    anchor(
+        "EGY",
+        "Egypt",
+        30.637460793,
+        33.290146838,
+        [208, 200],
+        [3.54075672077461e-06, 2.89942233896294e-06],
+        13.407703,
+    ),
+    anchor(
+        "FRA",
+        "France",
+        49.173653866,
+        2.888273598,
+        [208, 200],
+        [2.96363997303913e-06, 6.38037649526057e-06],
+        67.408566,
+    ),
+    anchor(
+        "GRE",
+        "Greece",
+        37.679991408,
+        24.767675925,
+        [256, 256],
+        [2.87908694175284e-06, 3.56200910949521e-06],
+        18.395921,
+    ),
+    anchor(
+        "IRA",
+        "Iraq",
+        29.240607126,
+        47.371192658,
+        [256, 256],
+        [2.80867522014325e-06, 3.42561743406427e-06],
+        27.143882,
+    ),
+    anchor(
+        "KURILE",
+        "Kuril Islands",
+        47.414218920,
+        151.544075833,
+        [256, 256],
+        [3.27229816007523e-06, 5.63171995484897e-06],
+        0.000000,
+    ),
+    anchor(
+        "LFA",
+        "Falkland Islands",
+        -51.824438639,
+        -59.692008262,
+        [256, 256],
+        [2.43912095227251e-06, 3.43112997268167e-06],
+        0.000000,
+    ),
+    anchor(
+        "NSK",
+        "North and South Korea",
+        38.087466441,
+        127.084886326,
+        [256, 256],
+        [1.91207624279521e-06, 2.59200003305501e-06],
+        17.593757,
+    ),
+    anchor(
+        "PGU",
+        "Persian Gulf",
+        26.434667252,
+        55.928479980,
+        [256, 256],
+        [2.04966067614915e-06, 2.14441168059445e-06],
+        7.810800,
+    ),
+    anchor(
+        "SPA",
+        "Pakistan",
+        27.135967159,
+        69.982515727,
+        [256, 256],
+        [3.35747625133013e-06, 3.90889274379661e-06],
+        84.492305,
+    ),
+    anchor(
+        "TVIET",
+        "North Vietnam",
+        20.287868777,
+        106.548716115,
+        [200, 200],
+        [2.93199741834036e-06, 3.73528911345597e-06],
+        23.427898,
+    ),
+    anchor(
+        "UKR",
+        "Ukraine",
+        46.627962944,
+        31.470371181,
+        [208, 200],
+        [7.02366753235497e-06, 1.12737263885456e-05],
+        27.277916,
+    ),
+    anchor(
+        "VLA",
+        "Vladivostok",
+        42.106862357,
+        132.094745802,
+        [208, 200],
+        [3.90124195622735e-06, 2.92850510814078e-06],
+        44.297714,
+    ),
+    anchor(
+        "WTA",
+        "Taiwan",
+        23.992342648,
+        119.768320617,
+        [256, 256],
+        [2.30712157039930e-06, 2.22355787604672e-06],
+        18.694044,
+    ),
 ];
 
 /// Used for any theater code outside the table: open ocean at 0 N 0 E, so
@@ -232,17 +367,31 @@ struct Projection {
     centre: [f64; 2],
     lat_per_ft: f64,
     lon_per_ft: f64,
+    latitude: f64,
 }
 
 impl Projection {
-    fn new(centre: [f64; 2], latitude: f64) -> Self {
+    fn new(centre: [f64; 2], latitude: f64, calibration: Option<[f64; 2]>) -> Self {
         let lat_per_ft = (M_PER_FT / EARTH_RADIUS_M).to_degrees();
         let cos = latitude.to_radians().cos().abs().max(1e-6);
+        let [lat_per_ft, lon_per_ft] = calibration.unwrap_or([lat_per_ft, lat_per_ft / cos]);
         Self {
             centre,
             lat_per_ft,
-            lon_per_ft: lat_per_ft / cos,
+            lon_per_ft,
+            latitude,
         }
+    }
+
+    /// Render yaw follows the calibrated geographic axes. The ninth transform
+    /// component keeps the original flat-world heading for flight telemetry.
+    fn geographic_yaw(&self, p: [f64; 3], heading: f64) -> f64 {
+        let latitude = self.latitude + (p[2] - self.centre[1]) * self.lat_per_ft;
+        let (east, north) = heading.sin_cos();
+        (east * self.lon_per_ft * latitude.to_radians().cos())
+            .atan2(north * self.lat_per_ft)
+            .to_degrees()
+            .rem_euclid(360.)
     }
 
     /// Longitude, latitude and altitude components (offsets from the anchor).
@@ -264,7 +413,7 @@ impl Projection {
             alt,
             fixed(attitude[2].to_degrees(), 2),
             fixed(attitude[1].to_degrees(), 2),
-            fixed(yaw, 2),
+            fixed(self.geographic_yaw(p, attitude[0]), 2),
             fixed(p[0] * M_PER_FT, 2),
             fixed(p[2] * M_PER_FT, 2),
             fixed(yaw, 2),
@@ -478,7 +627,14 @@ pub fn write_acmi(
         ],
         _ => [0., 0.],
     };
-    let projection = Projection::new(centre, latitude);
+    if !latitude.is_finite()
+        || !longitude.is_finite()
+        || !(-90. ..=90.).contains(&latitude)
+        || !(-180. ..=180.).contains(&longitude)
+    {
+        return Err(invalid("invalid geographic anchor"));
+    }
+    let projection = Projection::new(centre, latitude, table.map(|a| a.degrees_per_ft));
     let mut acmi = Acmi {
         out,
         stats: AcmiStats::default(),
@@ -518,13 +674,17 @@ pub fn write_acmi(
     ))?;
     let where_from = match (options.anchor, table) {
         (Some(_), _) => "an anchor chosen for this export".to_owned(),
-        (None, Some(a)) => format!("a fitted anchor near {}", a.region),
+        (None, Some(a)) => format!("a calibrated center in {}", a.region),
         (None, None) => "an unknown theater, placed at 0 N 0 E".to_owned(),
     };
+    let spacing = table.map_or_else(
+        || "Physical flat-earth spacing; geographic location is unverified.".to_owned(),
+        |a| format!("Geographic spacing fitted to airport references (baseline RMS {:.1} km). Source map distortions remain.", a.rms_km),
+    );
     acmi.line(&format!(
         "0,Comments={}",
         text(&format!(
-            "Game map centred on {where_from}. Tacview draws real-world terrain, which will not match the game's maps."
+            "Game map centered on {where_from}. {spacing} Native coordinates retain game distances."
         ))
     ))?;
 
@@ -837,6 +997,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn calibrated_center_spacing_and_native_coordinates_are_separate() {
+        let p = Projection::new([1000., 2000.], 0., Some([0.00002, 0.00003]));
+        assert_eq!(p.place([1000., 100., 2000.]), ["0", "0", "30.48"]);
+        assert_eq!(p.place([1100., 100., 2200.]), ["0.003", "0.004", "30.48"]);
+        let transform = p.transform([1000., 100., 2000.], [45f64.to_radians(), 0., 0.]);
+        assert_eq!(&transform[6..], ["304.8", "609.6", "45"]);
+        assert_eq!(transform[5], "56.31");
+        let ukraine = theater_anchor("UKR").unwrap();
+        assert!((ukraine.latitude - 46.627963).abs() < 1e-6);
+        assert!((ukraine.longitude - 31.470371).abs() < 1e-6);
+        assert!(ukraine.degrees_per_ft[0] > 2.5 * (M_PER_FT / EARTH_RADIUS_M).to_degrees());
+    }
+
+    #[test]
     fn every_base_theater_has_an_anchor_and_variants_resolve() {
         let codes = [
             "APA", "BAL", "CUB", "EGY", "FRA", "GRE", "IRA", "KURILE", "LFA", "NSK", "PGU", "SPA",
@@ -846,6 +1020,11 @@ mod tests {
             let a = theater_anchor(code).unwrap();
             assert_eq!(a.code, code);
             assert!((-90. ..=90.).contains(&a.latitude) && (-180. ..=180.).contains(&a.longitude));
+            assert!(
+                a.degrees_per_ft
+                    .iter()
+                    .all(|v| v.is_finite() && *v > 0. && *v < 0.001)
+            );
         }
         assert_eq!(theater_anchor("~UKR3.MM").unwrap().code, "UKR");
         assert_eq!(theater_anchor("ukr").unwrap().code, "UKR");

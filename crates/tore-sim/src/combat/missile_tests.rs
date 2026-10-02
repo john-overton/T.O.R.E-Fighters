@@ -223,6 +223,49 @@ fn all_nine_activation_thresholds_and_no_false_pitbull() {
     }
 }
 #[test]
+fn a_passed_intercept_cannot_make_an_amraam_circle_but_reacquisition_still_works() {
+    let sensors = fixture(true).own().sensors.clone();
+    let mut w = weapon("AIM120.JT");
+    w.movement.remove_t = 528;
+    let mut p = shot(&w, LaunchMode::Cued, Some(1));
+    let f = p.guidance.as_mut().unwrap();
+    f.last_intercept = Some([150., 1000., -500.]);
+    f.enabled = true;
+    f.seeker.acquired = true;
+    let heading = p.direction;
+    for age in 0..720 {
+        p.age = age;
+        guide(&mut p, &w, &[], &sensors, &|_, _| false);
+        assert_eq!(p.direction, heading, "age={age}");
+        let delta = p
+            .motion
+            .as_mut()
+            .unwrap()
+            .step(&w.movement, age, p.direction);
+        p.position = std::array::from_fn(|i| p.position[i] + delta[i]);
+    }
+    assert_eq!(p.guidance.as_ref().unwrap().seeker.status, Status::Lost);
+    let mut wreck = target(
+        1,
+        [p.position[0] + 500., p.position[1], p.position[2] + 4000.],
+        100,
+        0x80,
+    );
+    wreck.hp = 0;
+    for age in 720..720 + u64::from(DWELL) + 12 {
+        p.age = age;
+        guide(&mut p, &w, &[wreck.clone()], &sensors, &|_, _| false);
+    }
+    assert_eq!(p.guidance.as_ref().unwrap().seeker.status, Status::Pitbull);
+    assert_ne!(p.direction, heading);
+    p.age = p.guidance_ticks.unwrap();
+    let heading = p.direction;
+    guide(&mut p, &w, &[wreck], &sensors, &|_, _| false);
+    assert_eq!(p.guidance.as_ref().unwrap().seeker.status, Status::Expired);
+    assert_eq!(p.direction, heading);
+}
+
+#[test]
 fn hidden_movement_never_updates_intercept_and_expiry_precedes_acquisition() {
     let sensors = fixture(true).own().sensors.clone();
     let w = weapon("AIM120.JT");
@@ -259,6 +302,7 @@ fn boresight_live_release_without_sensor_equipment_and_next_round_reset() {
         radar: true,
         jammer: false,
         alive: true,
+        body_present: true,
         controls: Default::default(),
     };
     s.own_mut().config.sensors.radar = None;
@@ -362,6 +406,7 @@ fn bay_safe_empty_and_failed_gates_survive_uncued_mode() {
         radar: false,
         jammer: false,
         alive: true,
+        body_present: true,
         bay_ready: false,
         controls: Default::default(),
     };
@@ -472,6 +517,7 @@ fn mounted_lock_is_not_boresight_release_permission() {
         radar: false,
         jammer: false,
         alive: true,
+        body_present: true,
         controls: Default::default(),
     };
     assert_eq!(s.own_view().readiness(l), Readiness::Ready);
@@ -498,6 +544,7 @@ fn render_cadence_and_pause_do_not_change_missile_state() {
             radar: false,
             jammer: false,
             alive: true,
+            body_present: true,
             controls: Default::default(),
         };
         s.range_target(0, l);
@@ -595,6 +642,7 @@ fn supported_update_freezes_on_radar_shutdown_and_cockpit_switch() {
         radar: true,
         jammer: false,
         alive: true,
+        body_present: true,
         controls: Default::default(),
     };
     s.range_target(0, l);
@@ -705,6 +753,7 @@ fn a_radar_missile_goes_quiet_inside_minimum_range() {
         radar: true,
         jammer: false,
         alive: true,
+        body_present: true,
         controls: Default::default(),
     };
     let tone_at = |distance: f64| {
@@ -742,6 +791,7 @@ fn automatic_bore_release_and_radar_search_start_without_designation() {
         radar: true,
         jammer: false,
         alive: true,
+        body_present: true,
         controls: Default::default(),
     };
     let mut s = fixture(true);
@@ -1014,6 +1064,7 @@ fn range_launcher() -> Launcher {
         radar: true,
         jammer: false,
         alive: true,
+        body_present: true,
         controls: Default::default(),
     }
 }

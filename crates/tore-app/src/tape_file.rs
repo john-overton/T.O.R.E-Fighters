@@ -20,7 +20,8 @@ use tore_sim::{
 /// Version 4 defines the spec missile rules and records world velocity and bay
 /// permission. Mode, heat and emitter changes are explicit commands. Versions
 /// 2/3 retain compatibility rules and their original control defaults.
-const VERSION: u32 = 6;
+/// Version 7 distinguishes a present falling wreck from a removed body.
+const VERSION: u32 = 7;
 
 pub struct Recorder {
     out: std::io::BufWriter<std::fs::File>,
@@ -87,7 +88,7 @@ impl Recorder {
             }
             writeln!(
                 self.out,
-                " {} {} {} {} {} {} {} {} {} {} {}",
+                " {} {} {} {} {} {} {} {} {} {} {} {}",
                 u8::from(l.radar),
                 u8::from(l.alive),
                 u8::from(l.jammer),
@@ -98,7 +99,8 @@ impl Recorder {
                 l.velocity[1],
                 l.velocity[2],
                 u8::from(l.bay_ready),
-                u8::from(l.radar_power)
+                u8::from(l.radar_power),
+                u8::from(l.body_present)
             )
         })();
         if let Err(e) = result {
@@ -128,8 +130,10 @@ fn fields_for(version: u32) -> usize {
         20
     } else if version < 5 {
         24
-    } else {
+    } else if version < 7 {
         25
+    } else {
+        26
     }
 }
 fn parse(line: &str, version: u32) -> AppResult<(&str, Launcher)> {
@@ -204,6 +208,11 @@ fn parse(line: &str, version: u32) -> AppResult<(&str, Launcher)> {
             radar: boolean(fields[14])?,
             jammer: boolean(fields[16])?,
             alive: boolean(fields[15])?,
+            body_present: if version >= 7 {
+                boolean(fields[25])?
+            } else {
+                boolean(fields[15])?
+            },
             controls,
         },
     ))
@@ -485,6 +494,7 @@ mod tests {
             radar: true,
             jammer: false,
             alive: true,
+            body_present: true,
             controls: Controls::default(),
         }
     }
@@ -518,6 +528,16 @@ mod tests {
             std::fs::read(dir.join("drained")).unwrap()
         );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn version_seven_distinguishes_falling_wreck_from_absent_body() {
+        let line = "tick 0 1000 0 1 0 0 0 1 0 0 0 1 600 0 0 0 0 1 0 40 60 600 1 0";
+        let wreck = parse(&format!("{line} 1"), 7).unwrap().1;
+        assert!(!wreck.alive && wreck.body_present);
+        assert!(!parse(&format!("{line} 0"), 7).unwrap().1.body_present);
+        assert!(parse(&format!("{line} 2"), 7).is_err());
+        assert!(!parse(line, 6).unwrap().1.body_present);
+        assert!(parse(line, 7).is_err());
     }
     #[test]
     fn version_five_preserves_power_separately_from_transmission() {

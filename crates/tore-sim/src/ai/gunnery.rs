@@ -207,6 +207,7 @@ mod tests {
             radar: false,
             radar_power: false,
             alive: true,
+            body_present: true,
             bay_ready: true,
             jammer: false,
             controls: crate::sensors::Controls::default(),

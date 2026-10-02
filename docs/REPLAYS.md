@@ -595,20 +595,22 @@ adjustable.
 A `.txt.acmi` file in Tacview's ACMI 2.2 text format, sampled 10 times a
 second by default (adjustable). Gun rounds are left out by default.
 
-The game world is flat and has no latitude or longitude, so each theater's
-map centre is pinned to a real place. Positions use Tacview's flat-world
-form `T=Lon|Lat|Alt|Roll|Pitch|Yaw|U|V|Heading`: **U and V are the game's own
-east and north coordinates in metres**, and longitude and latitude are
-offsets from the anchor on a local flat-earth approximation (a 6,371 km
-sphere). The map's north is treated as true north. Unchanged values are
-left out after an object's first line, as the format allows.
+Each theater has a fitted GPS center and separate geographic spacing along
+the map's east and north axes, calibrated from named airfields. Aircraft,
+weapons, decoys and pilots all use that same mapping. The native U/V components
+remain the game's original east/north coordinates in meters for flight-distance
+calculations. Render Yaw follows the geographic mapping; native Heading and HDG
+retain the game's heading. Unchanged values are omitted after the first line.
+
+The [geographic alignment spec](spec/tacview-geography.md) defines the conversion.
+This is an approximate map calibration, not surveyed GPS terrain.
 
 | Game | Tacview |
 | --- | --- |
 | Height above sea level (ft) | `Alt` (m) |
 | Bank, positive right wing down | `Roll`, the same sign: Tacview's roll is positive when rolling to the right, so a right turn shows a positive roll |
 | Pitch, positive nose up | `Pitch` |
-| Yaw, clockwise from north | `Yaw` and `Heading` in degrees, and `HDG` |
+| Yaw, clockwise from map north | Geographic `Yaw` for rendering, native `Heading` and `HDG` for game telemetry |
 | Airspeed | `TAS` (m/s) |
 | Telemetry tree lines Mach, AoA, Sideslip, AGL | `Mach`, `AOA`, `AOS`, `AGL` (m) |
 | Pilot throttle, afterburner or lit flame flag | `Throttle`, `Afterburner` |
@@ -635,46 +637,20 @@ entries with an outcome or reason, flight-model effects starting and
 stopping, and G-limit hits. Commas in text are escaped as Tacview requires;
 line breaks become spaces.
 
-**Reference time.** The recording's date at the mission's local time of
-day, shifted by the anchor's longitude at 15 degrees an hour, so Tacview's
-sun sits roughly where the game's does. For example, noon in Ukraine (34 E)
-becomes 09:44 UTC.
+**Reference time.** The recording's date at the mission's local time of day,
+shifted by the calibrated center longitude at 15 degrees an hour.
 
-**Theater anchors.** Provenance: **fitted**. The region of each theater
-comes from the retail theater names, as recorded in the
-[Quick Mission format](formats/quick-mission.md) and the
-[viewer baseline](baselines/ukraine-viewer.md). Where each map sits inside
-its region, and whether its north is true north, is not known; the points
-below are agent estimates (2026-09-26). Next research step: match map
-landmarks such as coasts, rivers and airfields to real geography. A theater
-code outside this table is placed at 0 N 0 E in open ocean, provenance
-**unknown**. An export can override the anchor.
+**Calibration.** All 16 base theaters have measured centers and geographic
+spacing. The [calibration baseline](baselines/theater-georeference.md) lists
+the public coordinate sources, airport matches, errors and reproducible tool.
+Variant layouts use their base theater's calibration. A center override moves
+the map without changing that theater's spacing. Unknown theaters use 0 N, 0 E
+and the physical flat-earth fallback.
 
-| Code | Region | Latitude | Longitude |
-| --- | --- | ---: | ---: |
-| APA | Panama | 9.0 | -79.6 |
-| BAL | The Baltics | 57.0 | 24.0 |
-| CUB | Cuba | 22.0 | -79.5 |
-| EGY | Egypt | 30.0 | 32.5 |
-| FRA | France | 46.5 | 2.5 |
-| GRE | Greece | 38.5 | 23.5 |
-| IRA | Iraq | 33.0 | 44.0 |
-| KURILE | Kuril Islands | 44.5 | 146.5 |
-| LFA | Falkland Islands | -51.7 | -59.5 |
-| NSK | North and South Korea | 38.0 | 127.5 |
-| PGU | Persian Gulf | 27.0 | 51.5 |
-| SPA | Pakistan | 30.0 | 71.5 |
-| TVIET | North Vietnam | 21.0 | 105.8 |
-| UKR | Ukraine | 45.3 | 34.0 |
-| VLA | Vladivostok | 43.1 | 132.0 |
-| WTA | Taiwan | 24.0 | 120.5 |
-
-The map centre comes from the map size in the recording's header, or else
-from the theater's terrain grid (8,192 ft between samples).
-
-**Known limit.** Tacview draws real-world terrain, which will not match the
-game's maps. Tacview itself has not opened these files in testing yet; that
-check is manual.
+**Known limit.** Original map distortions and some inconsistent named placements
+leave substantial landmark errors, particularly in France and Pakistan. The
+Kuril and Falkland fits have only two reference airports and no independent
+accuracy check. Tacview itself has not been used for a visual map-overlay check.
 
 ### Comparing two recordings
 
@@ -832,12 +808,24 @@ showed at the same moment.
 Along the bottom of the view: start, step back, reverse, pause, play, fast
 forward, step forward and end; the speed; the time and the recording's
 length; the camera, which a click steps through the flight views, the
-object view once something to look at is chosen, and the two drone modes; the selected aircraft, which a click moves to the next one;
+object view once something to look at is chosen, and the two drone modes.
+Right-click the camera button to choose a specific view directly, including
+follow/free drone. Right-clicking the scene still opens its object menu.
+The selected-aircraft button moves to the next aircraft;
 and Hide. Above the buttons is the timeline: click it to jump, drag along it
 to scrub. The lit button shows what playback is doing. The bar uses the
 Controls screen's colours, font and button style in the 640x480 interface
 layer; the layer's top half is pinned to the top of the view and its bottom
 half to the bottom, so the bar sits on the bottom edge of any window.
+
+Drone commands are configurable under **Controls > Replay drone**: mode cycling,
+direct follow/free selection, six movement directions, boost, mouse-look hold
+and movement-speed steps. Defaults below remain unchanged. Keyboard and mouse
+assignments are separate from flight controls. Assigned drone keys take precedence
+over built-in replay shortcuts. Buttons and directional controls
+on connected devices can also be assigned. Releases, focus loss, controller
+disconnect and opening the pause menu clear held movement. Other replay shortcuts
+remain built in.
 
 ### Keys and mouse
 

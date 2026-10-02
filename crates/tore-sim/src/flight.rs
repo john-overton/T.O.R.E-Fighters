@@ -789,10 +789,15 @@ impl State {
     /// Requested articulation schedule, expressed in radians from actual
     /// horizontal ground speed, not airspeed. Tire geometry is fitted.
     pub fn nosewheel_angle(&self) -> f64 {
+        self.rudder.clamp(-1., 1.) * std::f64::consts::FRAC_PI_2 * self.nosewheel_authority()
+    }
+    /// Available steering fraction, independent of pedal position. Shared by
+    /// the HUD and wheel animation; the steering law remains in the sim.
+    pub fn nosewheel_authority(&self) -> f64 {
         if self.gear < 0.99 || !self.weight_on_wheels() {
             return 0.;
         }
-        nosewheel_angle(self.rudder, self.velocity[0].hypot(self.velocity[2]))
+        nosewheel_authority(self.velocity[0].hypot(self.velocity[2]))
     }
     pub fn step(&mut self, input: &PilotInput, ground: impl Fn(f64, f64) -> f64) {
         self.step_surface(input, |x, z| {
@@ -1827,8 +1832,12 @@ impl State {
 
 /// Full articulation through 10 mph, linearly removed by 25 mph.
 fn nosewheel_angle(rudder: f64, ground_speed_fps: f64) -> f64 {
+    rudder.clamp(-1., 1.) * std::f64::consts::FRAC_PI_2 * nosewheel_authority(ground_speed_fps)
+}
+
+fn nosewheel_authority(ground_speed_fps: f64) -> f64 {
     let mph = ground_speed_fps.abs() * 3600. / 5280.;
-    rudder.clamp(-1., 1.) * std::f64::consts::FRAC_PI_2 * ((25. - mph) / 15.).clamp(0., 1.)
+    ((25. - mph) / 15.).clamp(0., 1.)
 }
 
 /// Fitted missile-blast jolt at strength 1, fading with [`JOLT_FADE_SECONDS`].
@@ -2112,6 +2121,25 @@ mod tests {
         }
         assert!(!s.crashed);
         assert!(s.overspeed_ratio().unwrap() > OVERSPEED_SHAKE_FULL);
+    }
+    #[test]
+    fn nosewheel_authority_is_available_with_centered_pedals_only_on_the_ground() {
+        let mut s = State::new(&profile(), [0., 5000., 0.]).unwrap();
+        s.gear = 1.;
+        assert_eq!(s.nosewheel_authority(), 0.);
+        s.enable_research(1).unwrap();
+        s.start_on_runway([0.; 3], 0.).unwrap();
+        for (mph, fraction) in [(0., 1.), (10., 1.), (17.5, 0.5), (25., 0.), (40., 0.)] {
+            s.velocity = [mph * 5280. / 3600., 0., 0.];
+            s.rudder = 0.;
+            assert!((s.nosewheel_authority() - fraction).abs() < 1e-12);
+            assert_eq!(s.nosewheel_angle(), 0.);
+            s.rudder = -1.;
+            assert!((s.nosewheel_angle().to_degrees() + 90. * fraction).abs() < 1e-10);
+        }
+        s.velocity = [0.; 3];
+        s.gear = 0.5;
+        assert_eq!(s.nosewheel_authority(), 0.);
     }
     #[test]
     fn nosewheel_schedule_uses_mph_and_has_no_stationary_rotation() {

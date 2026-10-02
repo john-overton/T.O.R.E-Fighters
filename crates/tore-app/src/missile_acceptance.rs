@@ -63,6 +63,7 @@ pub fn run(config: Configuration) -> AppResult<()> {
                                 radar: true,
                                 jammer: false,
                                 alive: true,
+                                body_present: true,
                                 controls: sensors::Controls::default(),
                             };
                             state.range_target(0, l);

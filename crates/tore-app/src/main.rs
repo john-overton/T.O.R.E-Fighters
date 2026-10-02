@@ -1744,6 +1744,11 @@ impl App {
                         Ok(()) => {
                             editor.message = "Controls saved and applied".into();
                             editor.saved();
+                            if let Some(replay) = &mut self.replay {
+                                replay
+                                    .viewer
+                                    .set_input_profile(&self.input.resolver.profile);
+                            }
                         }
                         Err(e) => editor.message = e,
                     }
@@ -4439,6 +4444,23 @@ impl ApplicationHandler for App {
             for warning in warnings {
                 log::warn!("Input: {warning}");
             }
+            if self.controls.is_none()
+                && let Some(replay) = &mut self.replay
+            {
+                if lost {
+                    replay.viewer.release();
+                }
+                replay
+                    .viewer
+                    .drone_devices(|id| self.input.devices.contains_key(id));
+                for event in &self.input.observed {
+                    if let Some(device) = self.input.devices.get(&event.device) {
+                        replay
+                            .viewer
+                            .drone_event(crate::input::normalize(device, event.clone()));
+                    }
+                }
+            }
             if lost && self.screen == Screen::Flight {
                 self.flight_ui.pause_for_focus();
                 self.flight_ui.message(if self.flight_ui.session {
@@ -4476,6 +4498,9 @@ impl ApplicationHandler for App {
                         continue;
                     }
                     let was_frozen = self.flight_ui.frozen();
+                    if self.replay.is_some() && self.controls.is_none() {
+                        continue;
+                    }
                     let result = self.input_action(action);
                     self.action(event_loop, result);
                     if was_frozen != self.flight_ui.frozen() {
@@ -8546,7 +8571,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-6 combat-service inputs, including the sensor controls; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched, --probe-ai-flight-model standard|all-hybrid and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-lose-player TICK crashes the player's aircraft at that tick; --probe-wing-route EAST_NM:NORTH_NM:ALT_FT (repeatable) gives the player's wing waypoints, flown by an AI that takes the lead from the lost player once its search finds nothing; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-7 combat-service inputs, including sensor controls and wreck body presence; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched, --probe-ai-flight-model standard|all-hybrid and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-lose-player TICK crashes the player's aircraft at that tick; --probe-wing-route EAST_NM:NORTH_NM:ALT_FT (repeatable) gives the player's wing waypoints, flown by an AI that takes the lead from the lost player once its search finds nothing; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Multiplayer: --connect HOST[:PORT] joins a dedicated server (docs/DEDICATED-SERVER.md); --callsign NAME (1 to 15 printable ASCII characters), --slot N (the plane to take) and --password TEXT go with it. --host MISSION_FILE hosts a game of that mission file (the dedicated server's format) and flies in it: other players join with --connect; --port N (default 26900), --name TEXT, --open-planes friendly|all|N,N and --password TEXT (the password joining players must give) set the game, and --callsign and --slot are the hosting player's own. --find-games SECONDS [--port N] looks for games on the local network for that long, prints each one found (address, build, name, mission, players, phase, King, password, full) and exits."
@@ -8850,7 +8875,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let ground_capture_probe = flight_probe_ticks.is_some()
             && capture_terrain.is_some()
             && initial_screen == Screen::Flight
-            && matches!(maneuver.as_str(), "level" | "takeoff");
+            && matches!(maneuver.as_str(), "level" | "takeoff" | "nosewheel");
         if !researched_flight || native_tables.is_some() {
             return Err("Ground start requires the researched flight model; choose Airborne for this adapter.".into());
         }
@@ -10995,7 +11020,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         );
     }
     diagnostics::stage_done();
-    let replay = match &watch_replay {
+    let mut replay = match &watch_replay {
         Some(path) => {
             diagnostics::stage("replay loading");
             let mut viewer =
@@ -11018,6 +11043,9 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         input::Input::new_automatic(input_profile.as_deref(), native_input)?
     };
     diagnostics::stage_done();
+    if let Some(replay) = &mut replay {
+        replay.viewer.set_input_profile(&input.resolver.profile);
+    }
     diagnostics::stage("application state construction");
     let mut airfield_radio = airfield_radio::AirfieldRadio::default();
     airfield_radio.reset(ground_start.and_then(|id| world.runway_view(id)));

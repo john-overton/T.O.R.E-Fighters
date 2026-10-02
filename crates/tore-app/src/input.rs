@@ -625,7 +625,7 @@ impl Input {
         }
     }
 }
-fn normalize(device: &Device, mut event: Event) -> Event {
+pub(crate) fn normalize(device: &Device, mut event: Event) -> Event {
     if let Some(control) = device.controls.iter().find(|c| c.id == event.control)
         && matches!(control.kind, Kind::Axis)
         && control.max > control.min

@@ -37,6 +37,11 @@ LOST searching; it never permanently disables reacquisition. Search can steer
 toward the frozen intercept, but cannot follow hidden movement. S still requires
 launcher support; IR and emitter weapons retain their own sensor types. This
 supersedes the draft permanent-loss rule and does not interpret `trackT`.
+John's 2026-10-02 loop report adds a fitted guard: once a missile passes the
+remembered intercept along its current velocity, stop steering toward that stale
+point. Continue searching for the same target until guidance expires. A fresh
+seeker observation or renewed launcher support permits steering again. This
+prevents orbiting a missed memory point without shortening the weapon's lifetime.
 Use current shared sensor support for S. A missile retains its own target ID;
 changing cockpit selection never redirects an existing shot. At most one target
 receives aircraft support at once. No aircraft combat AI is included.
@@ -510,6 +515,18 @@ This unresolved source discrepancy needs record/unit research. Keep the reviewed
 imported value; do not replace it with an invented real-world value.
 
 ## Range, motor and tracking lifetime
+
+### Hits on destroyed aircraft
+
+Requested by John on 2026-10-02: guns and missiles can hit a destroyed aircraft
+while its falling body is still present. Radar/visual selection and mounted
+seekers can retain that body. Impact consumes the projectile and produces its
+normal hit effect, including with friendly fire disabled, but applies no further
+damage, pilot injury, system fault or kill credit. Once impact or airburst removes
+the wreck, its old position is not a collision body. The simulation owns both
+presence and collision; the renderer does not decide what is hittable.
+
+### Independent lifetime rules
 
 Keep four independent concepts:
 

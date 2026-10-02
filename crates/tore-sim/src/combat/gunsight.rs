@@ -309,6 +309,7 @@ pub(crate) mod tests {
             radar: false,
             jammer: false,
             alive: true,
+            body_present: true,
             controls: sensors::Controls::default(),
         }
     }

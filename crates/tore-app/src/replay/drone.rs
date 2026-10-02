@@ -8,6 +8,181 @@
 use crate::camera::Camera;
 use std::collections::BTreeSet;
 
+/// Replay-only bindings reuse the input resolver's held/release and device
+/// rules. Desktop assignments are stored separately from flight assignments.
+pub struct Controls {
+    resolver: tore_input::Resolver,
+    claims: std::collections::BTreeMap<String, String>,
+    values: std::collections::BTreeMap<(String, String), f64>,
+    devices: BTreeSet<String>,
+}
+impl Controls {
+    pub fn new(saved: &tore_input::Profile) -> Self {
+        use crate::input_catalog::{ENTRIES, Kind};
+        use tore_input::{Action, Binding, Calibration, Mode, Profile, Resolver};
+        let mut profile = Profile {
+            bindings: vec![],
+            ..saved.clone()
+        };
+        for entry in ENTRIES.iter().filter(|entry| entry.replay_only()) {
+            for (device, controls) in [("keyboard", entry.keys), ("mouse", entry.mouse)] {
+                for control in controls {
+                    if !saved
+                        .disabled
+                        .contains(&(entry.device(device).into(), (*control).into()))
+                    {
+                        profile.bindings.push(Binding {
+                            device: device.into(),
+                            control: (*control).into(),
+                            action: entry.parsed().expect("catalog action"),
+                            mode: if entry.kind == Kind::Hold {
+                                Mode::HoldState
+                            } else {
+                                Mode::Press
+                            },
+                            calibration: Calibration {
+                                deadzone: 0.,
+                                ..Calibration::default()
+                            },
+                            priority: 10,
+                        });
+                    }
+                }
+            }
+        }
+        profile.bindings.extend(
+            saved
+                .bindings
+                .iter()
+                .filter(|b| matches!(&b.action, Action::Ui(name) if name.starts_with("drone-")))
+                .cloned()
+                .map(|mut b| {
+                    if matches!(b.device.as_str(), "replay-keyboard" | "replay-mouse") {
+                        b.device = b.device.trim_start_matches("replay-").into();
+                    }
+                    b
+                }),
+        );
+        Self {
+            resolver: Resolver::new(profile),
+            claims: Default::default(),
+            values: Default::default(),
+            devices: Default::default(),
+        }
+    }
+    fn desktop(&mut self, device: &str, control: &str, value: f64) {
+        let key = (device.to_owned(), control.to_owned());
+        if !self.values.contains_key(&key) {
+            self.resolver.event(tore_input::Event {
+                device: device.into(),
+                control: control.into(),
+                value: 0.,
+                baseline: true,
+            });
+        }
+        if self.values.insert(key, value) != Some(value) {
+            self.resolver.event(tore_input::Event {
+                device: device.into(),
+                control: control.into(),
+                value,
+                baseline: false,
+            });
+        }
+    }
+    pub fn key(&mut self, key: &str, pressed: bool, mods: winit::keyboard::ModifiersState) -> bool {
+        if !pressed {
+            if let Some(control) = self.claims.remove(key) {
+                self.desktop("keyboard", &control, 0.);
+                return true;
+            }
+            return false;
+        }
+        if self.claims.contains_key(key) {
+            return true;
+        }
+        let mut control = format!(
+            "{}{}{}{}{}",
+            if mods.control_key() && key != "Control" {
+                "Ctrl-"
+            } else {
+                ""
+            },
+            if mods.alt_key() && key != "Alt" {
+                "Alt-"
+            } else {
+                ""
+            },
+            if mods.shift_key() && key != "Shift" {
+                "Shift-"
+            } else {
+                ""
+            },
+            if mods.super_key() && key != "Super" {
+                "Super-"
+            } else {
+                ""
+            },
+            key
+        );
+        if !self.resolver.bound("keyboard", &control)
+            && !mods.control_key()
+            && !mods.alt_key()
+            && !mods.super_key()
+        {
+            // Shift boosts ordinary WASD without requiring six extra chords.
+            control = key.into();
+        }
+        if !self.resolver.bound("keyboard", &control) {
+            return false;
+        }
+        self.claims.insert(key.into(), control.clone());
+        self.desktop("keyboard", &control, 1.);
+        true
+    }
+    pub fn shift(&mut self, pressed: bool) {
+        self.desktop("keyboard", "Shift", f64::from(u8::from(pressed)));
+    }
+    pub fn mouse(&mut self, control: &str, pressed: bool) {
+        self.desktop("mouse", control, f64::from(u8::from(pressed)));
+    }
+    pub fn event(&mut self, event: tore_input::Event) {
+        self.devices.insert(event.device.clone());
+        self.resolver.event(event);
+    }
+    pub fn retain_devices(&mut self, present: impl Fn(&str) -> bool) {
+        self.devices.retain(|id| {
+            if present(id) {
+                true
+            } else {
+                self.resolver.disconnect(id);
+                false
+            }
+        });
+    }
+    pub fn held(&self, action: &str) -> bool {
+        self.resolver.held(action)
+    }
+    pub fn claimed(&self, key: &str) -> bool {
+        self.claims.contains_key(key)
+    }
+    pub fn commands(&mut self) -> Vec<String> {
+        self.resolver
+            .drain()
+            .into_iter()
+            .filter_map(|(_, action)| match action {
+                tore_input::Action::Ui(name) => Some(name),
+                _ => None,
+            })
+            .collect()
+    }
+    pub fn release(&mut self) {
+        self.resolver.context(false, false);
+        self.resolver.context(false, true);
+        self.claims.clear();
+        self.values.clear();
+    }
+}
+
 /// Slowest and fastest drone speed, feet per second: slow enough to creep
 /// around a parked aircraft, fast enough to keep up with a missile.
 pub const MIN_SPEED: f64 = 20.;
@@ -220,6 +395,44 @@ impl Drone {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn configured_controls_release_chords_buttons_and_focus_without_sticking() {
+        use tore_input::{Event, Profile};
+        use winit::keyboard::ModifiersState as M;
+        let p = Profile::parse("tore-input 1\ndisable replay-keyboard w\nbind replay-keyboard Ctrl-u drone-forward hold\nbind pad button:0 drone-up hold\nbind replay-mouse button:middle drone-cycle press\n").unwrap();
+        let mut c = Controls::new(&p);
+        assert!(!c.key("w", true, M::empty()));
+        assert!(c.key("u", true, M::CONTROL));
+        assert!(c.held("drone-forward"));
+        // Releasing Ctrl first must not leave the movement held.
+        assert!(c.key("u", false, M::empty()));
+        assert!(!c.held("drone-forward"));
+        for (value, baseline) in [(0., true), (1., false)] {
+            c.event(Event {
+                device: "pad".into(),
+                control: "button:0".into(),
+                value,
+                baseline,
+            });
+        }
+        assert!(c.held("drone-up"));
+        c.retain_devices(|_| false);
+        assert!(!c.held("drone-up"));
+        c.release();
+        assert!(!c.held("drone-up"));
+        c.mouse("button:middle", true);
+        c.mouse("button:middle", true);
+        assert_eq!(c.commands(), ["drone-cycle"]);
+        c.mouse("button:middle", false);
+        c.mouse("button:middle", true);
+        assert_eq!(c.commands(), ["drone-cycle"]);
+        c.shift(true);
+        assert!(c.held("drone-boost"));
+        assert!(c.key("a", true, M::SHIFT));
+        assert!(c.held("drone-left"));
+        c.release();
+        assert!(!c.held("drone-boost") && !c.held("drone-left"));
+    }
     use crate::attitude::Basis;
 
     fn keys(held: &[&str]) -> BTreeSet<String> {

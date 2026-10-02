@@ -12,16 +12,18 @@ pub enum Group {
     Weapons,
     Sensors,
     View,
+    Replay,
     Communication,
     Game,
 }
 impl Group {
-    pub const ALL: [Group; 7] = [
+    pub const ALL: [Group; 8] = [
         Group::Flight,
         Group::Systems,
         Group::Weapons,
         Group::Sensors,
         Group::View,
+        Group::Replay,
         Group::Communication,
         Group::Game,
     ];
@@ -32,6 +34,7 @@ impl Group {
             Group::Weapons => "Weapons",
             Group::Sensors => "Sensors and instruments",
             Group::View => "View",
+            Group::Replay => "Replay drone",
             Group::Communication => "Communication",
             Group::Game => "Game and menus",
         }
@@ -69,6 +72,18 @@ pub struct Entry {
     pub fixed: bool,
 }
 impl Entry {
+    pub fn replay_only(&self) -> bool {
+        self.group == Group::Replay
+    }
+    /// Replay assignments have their own desktop context. Removing W here
+    /// must not remove a flight action on W, or vice versa.
+    pub fn device<'a>(&self, device: &'a str) -> &'a str {
+        match (self.replay_only(), device) {
+            (true, "keyboard") => "replay-keyboard",
+            (true, "mouse") => "replay-mouse",
+            _ => device,
+        }
+    }
     pub fn parsed(&self) -> Option<Action> {
         Action::parse(self.action).ok()
     }
@@ -160,6 +175,57 @@ use Group::*;
 use Kind::{Axis, Direction, Head, Hold, Lever};
 
 pub const ENTRIES: &[Entry] = &[
+    cmd(
+        "drone-cycle",
+        "Drone: cycle flight/follow/free",
+        Replay,
+        &["`"],
+    ),
+    cmd("drone-follow", "Drone: follow aircraft", Replay, &[]),
+    cmd("drone-free", "Drone: free camera", Replay, &[]),
+    e("drone-forward", "Drone: move forward", Replay, Hold, &["w"]),
+    e(
+        "drone-backward",
+        "Drone: move backward",
+        Replay,
+        Hold,
+        &["s"],
+    ),
+    e("drone-left", "Drone: move left", Replay, Hold, &["a"]),
+    e("drone-right", "Drone: move right", Replay, Hold, &["d"]),
+    e("drone-up", "Drone: move up", Replay, Hold, &["e"]),
+    e("drone-down", "Drone: move down", Replay, Hold, &["q"]),
+    e(
+        "drone-boost",
+        "Drone: four times faster",
+        Replay,
+        Hold,
+        &["Shift"],
+    ),
+    Entry {
+        mouse: &["button:right"],
+        ..e(
+            "drone-look",
+            "Drone: hold to look with mouse",
+            Replay,
+            Hold,
+            &[],
+        )
+    },
+    mouse(
+        "drone-faster",
+        "Drone: increase movement speed",
+        Replay,
+        &[],
+        &["wheel:up"],
+    ),
+    mouse(
+        "drone-slower",
+        "Drone: decrease movement speed",
+        Replay,
+        &[],
+        &["wheel:down"],
+    ),
     e("pitch", "Pitch (nose up/down)", Flight, Axis, &[]),
     e(
         "pitch",
@@ -792,8 +858,8 @@ fn token_label(token: &str, gamepad: bool) -> String {
 /// the hat position a `position=N` binding reads.
 pub fn control_label(device: &str, control: &str, mode: Mode, gamepad: bool) -> String {
     match device {
-        "keyboard" => return key_label(control),
-        "mouse" => return mouse_label(control),
+        "keyboard" | "replay-keyboard" => return key_label(control),
+        "mouse" | "replay-mouse" => return mouse_label(control),
         _ => {}
     }
     let (mods, base) = tore_input::chord_parts(control);
@@ -824,7 +890,7 @@ mod tests {
         let mut seen = std::collections::BTreeMap::new();
         for entry in ENTRIES.iter().filter(|e| !menu_only(e)) {
             for key in entry.keys {
-                if let Some(other) = seen.insert(*key, entry.label) {
+                if let Some(other) = seen.insert((entry.replay_only(), *key), entry.label) {
                     // The menu key opens and backs out of the same menu.
                     assert_eq!(*key, "Escape", "{key}: {other} and {}", entry.label);
                 }

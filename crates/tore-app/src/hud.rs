@@ -68,12 +68,13 @@ impl Paint<'_> {
 }
 // Authored F-16-style bank scale requested by the user. The graduated arc
 // rotates past a fixed index, keeping full rolls readable through +/-180.
-// Right-hand status column. The time rate and BAY sit above GEAR so five labels
-// never reach the MSL caption at MSL_LABEL.
+// Right-hand status column. Leave one row below BRAKE for steering authority
+// and keep HOOK and the MSL caption clear of every status label.
 const STATUS_LABEL_X: i32 = 388;
 const TIME_LABEL_Y: i32 = 118;
 const BAY_LABEL_Y: i32 = 129;
-const MSL_LABEL: (i32, i32) = (402, 190);
+const NSW_LABEL_Y: i32 = 173;
+const MSL_LABEL: (i32, i32) = (402, 201);
 pub const HUD_CLIP: (i32, i32, i32, i32) = (174, 96, 292, 354);
 pub const AIM_BOTTOM: i32 = 390;
 const BANK_CENTER_Y: f64 = 135.;
@@ -334,7 +335,7 @@ pub fn draw(
         ("GEAR", 140, s.gear),
         ("FLAP", 151, s.flaps),
         ("BRAKE", 162, s.brake),
-        ("HOOK", 173, s.hook),
+        ("HOOK", 184, s.hook),
         // Manual p. 79: BAY shows while the weapons bay is open.
         (
             "BAY",
@@ -345,6 +346,14 @@ pub fn draw(
         if value > 0.01 {
             p.text(font, label, STATUS_LABEL_X, y);
         }
+    }
+    if s.gear >= 0.99 && s.weight_on_wheels() {
+        p.text(
+            font,
+            &format!("NSW {:.0}%", s.nosewheel_authority() * 100.),
+            STATUS_LABEL_X,
+            NSW_LABEL_Y,
+        );
     }
     // Manual p. 80: the time compression rate shows in the upper right corner.
     if (time_scale - 1.).abs() > 1e-9 {
@@ -466,7 +475,8 @@ mod tests {
             ("GEAR", 140),
             ("FLAP", 151),
             ("BRAKE", 162),
-            ("HOOK", 173),
+            ("NSW 100%", NSW_LABEL_Y),
+            ("HOOK", 184),
         ] {
             boxes.push((name, STATUS_LABEL_X, y, width(name)));
         }

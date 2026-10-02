@@ -684,6 +684,7 @@ fn launcher(position: [f64; 3], heading: f64, pitch: f64, speed: f64) -> Launche
         radar: true,
         jammer: false,
         alive: true,
+        body_present: true,
         controls: sensors::Controls::default(),
     }
 }

@@ -202,6 +202,13 @@ nothing in the simulation reads it and it takes no part in state equality
 
 ## Shared physical input
 
+Replay drone controls use an app-owned `tore-input::Resolver` with the drone
+catalog entries and the saved profile. Replay keyboard/mouse assignments have
+separate device names, so editing them cannot remove flight bindings. The host
+routes normalized device events to the viewer and clears holds on focus or
+device loss. These controls move only the presentation camera, not the sim.
+See [replay controls](INPUT.md#replay-viewer-shortcuts).
+
 `tore-input` is a dependency-free safe Rust crate for physical control bindings,
 calibration, per-source contribution/ownership, context release rules, typed pilot
 frames and bounded input tapes. `tore-sim` consumes those frames at 120 Hz and no

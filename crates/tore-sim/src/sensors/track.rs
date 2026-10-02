@@ -451,13 +451,13 @@ impl Sensors {
         self.acquisition = 0;
     }
     /// T and Shift-T: step through current radar contacts, nearest first,
-    /// skipping wrecks and any identity `skip` rejects (friendly aircraft).
+    /// including present wrecks, skipping identities `skip` rejects (friendlies).
     /// Search-only RWS contacts stay selectable, as John requested.
     pub fn cycle(&mut self, forward: bool, skip: impl Fn(u32) -> bool) -> bool {
         let mut ranked: Vec<(f64, u32)> = self
             .contacts
             .iter()
-            .filter(|c| c.channel == Channel::Radar && !c.destroyed && !skip(c.id))
+            .filter(|c| c.channel == Channel::Radar && !skip(c.id))
             .map(|c| (c.distance_ft, c.id))
             .collect();
         ranked.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
@@ -487,7 +487,7 @@ impl Sensors {
         let best = self
             .visual
             .iter()
-            .filter(|c| !c.destroyed && !skip(c.id) && self.contact(c.id).is_some())
+            .filter(|c| !skip(c.id) && self.contact(c.id).is_some())
             .filter_map(|c| {
                 let d = std::array::from_fn(|i| c.position[i] - position[i]);
                 let z = dot(d, basis.forward);

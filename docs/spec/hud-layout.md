@@ -92,6 +92,13 @@ The full HUD clip extends through y=450. The target cue and gun-pipper inset
 extends downward through y=380; off-HUD cues retain true three-dimensional
 bearing. Zoom, window aspect and head-look use the existing HUD transform.
 
+## Nosewheel authority
+
+Requested by John on 2026-10-02: show `NSW 100%` in the normal HUD font and
+color beneath BRAKE. The [steering spec](lateral-flight.md) defines when it
+shows and the percentage. Fitted layout: NSW at (388,173), HOOK at (388,184),
+and MSL at (402,201), leaving ten-pixel glyphs clear of each other.
+
 ## Cockpit glass and layer order
 
 Requested by John after the layout checkpoint was committed. When cockpit

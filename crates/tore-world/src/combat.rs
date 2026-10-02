@@ -218,6 +218,7 @@ pub fn launcher(s: &flight::State) -> Launcher {
         radar: s.radar && s.engine && s.sensors.channel == tore_sim::sensors::Channel::Radar,
         jammer: s.jammer && s.engine,
         alive: !s.crashed,
+        body_present: !s.wreck_gone(),
         controls: s.sensors,
     }
 }

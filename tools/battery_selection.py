@@ -68,6 +68,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         (
             "flight-fight-*", "flight-attack-*", "flight-livefire-*", "flight-combatevidence-*",
             "flight-combatsmoke-*", "flight-missileacceptance-*", "flight-jettison-*", "flight-bay-*",
+            "flight-wreckcontact-*",
             "flight-countermeasures-*", "replay-combat-smoke-*", "menus-combat-smoke-*",
         ),
     ),
@@ -451,6 +452,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/test_replay_checks.py", (), "replay check tests", unit_tests=("test_replay_checks",)),
     _r("tools/battery_scenarios/*", ALL_FAMILIES, "battery scenarios, unmapped file", unit_tests=("test_battery",)),
     _r("tools/agent-run.sh", ("windowed-menus",), "the windowed-run wrapper", windowed=True),
+    _r("tools/calibrate_theaters.py", ("replay-cli",), "Tacview geography calibration", unit_tests=("test_calibrate_theaters",)),
     _r("tools/test_*.py", (), "tool tests"),
     _r("tools/*", (), "tooling outside the battery"),
     _r(".githooks/*", (), "git hook"),

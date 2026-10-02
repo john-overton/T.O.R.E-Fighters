@@ -38,6 +38,12 @@ yaw rate is signed forward ground speed divided by wheelbase times the sine of
 wheel angle. This bounded tire model remains finite at 90 degrees and reverses
 steering when rolling backward. Tire friction turns the path with the body.
 
+The HUD shows `NSW 100%` directly below BRAKE while gear is fully down and
+the wheels carry the aircraft (John, 2026-10-02). This is available authority,
+not pedal deflection: centered pedals still show 100% at low speed. The display
+rounds to a whole percent and reaches 0% at 25 mph. It hides in flight and with
+gear retracted. Presentation choices are fitted; the sim supplies the fraction.
+
 Unknown: aircraft-specific lateral stability derivatives, wheelbases and original
 nosewheel geometry. Next research is bounded recovery of measured response if
 closer tuning is required. These constants are documented approximations.

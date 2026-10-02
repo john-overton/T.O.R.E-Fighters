@@ -69,6 +69,15 @@ by (1 - flap fraction). Rotate the wing panels, their flaps and wingtip vapor
 attachments together. This is an agent-authored visual schedule, not a new
 sweep-dependent flight law.
 
+## Nosewheel steering
+
+John requested on 2026-10-02 that steering turn only the wheel and steerable
+strut. Use the reviewed wheel/strut skins in each aircraft's own source model;
+leave separately modeled braces and doors fixed during steering. Retraction
+still moves the full gear group. Some source models combine wheel and strut in
+one textured panel, so those move together. Steering angle comes from
+[the sim's ground-speed rule](lateral-flight.md), not a renderer approximation.
+
 ## Double-sided panels
 
 Fix dated 2026-09-23, for John's report that the F/A-18 speed brake showed its

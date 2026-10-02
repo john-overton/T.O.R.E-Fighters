@@ -251,10 +251,12 @@ aircraft contact retain the complete box. This fitted point keeps a flat runway
 target above its own terrain occlusion without changing collision geometry.
 
 Airport commands and NAV/gear/support state are queued at fixed-tick boundaries
-and included in combat tape version 6. Versions 2 through 5 remain accepted.
+and included in combat tape version 7. Versions 2 through 6 remain accepted.
 Replay reconstructs selection, clearance, guidance gates and synchronized
 runway damage from the same imported scene. Version 6 distinguishes a scene reset
 from an explicit range-fixture reset; older tapes retain their range-only behavior.
+Version 7 also records physical wreck-body presence separately from launcher health,
+so guns and missiles reproduce impacts on a falling human aircraft.
 
 Aircraft-specific ILS speed brackets and target-relative camera imagery remain
 open. The [target window](target-window.md) shows the object camera, name, damage, bearing and range/speed.
