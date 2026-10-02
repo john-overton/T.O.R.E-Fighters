@@ -31,6 +31,13 @@ or captures are committed. This is host validation, not a retail parity claim.
   Supplemental replay tests cover overlapping missile and bomb lifetimes,
   spawn, expiry, wraparound, no-live-object fallback, backward seeking and
   a ground target present only in the recorded world.
+- Apple Silicon CI exposed 19 stale saved fingerprints for the deliberately
+  changed legacy/hybrid flight paths and two host mission scenarios that use
+  those paths. Updated values were measured by the
+  [macOS job](https://github.com/john-overton/T.O.R.E-Fighters/actions/runs/36956222636/job/110679640551).
+  Native-flight, pure decision and standalone controller fingerprints stayed
+  unchanged. All 1,004 other sim tests passed there. Linux checks repeatability
+  but does not compare against the Apple Silicon saved bit patterns.
 - Synthetic tests verify engine-off rudder motion, mirrored rudder input,
   nosewheel speed boundaries, overspeed roll times for 99 seeds in both
   adapters, timer reset, Invulnerable, and exact snapshot restore before a roll.

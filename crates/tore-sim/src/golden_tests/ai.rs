@@ -47,8 +47,8 @@ use crate::sensors::{self, Observable, Sensors};
 // changing any of these.
 const DECISION_FUNCTIONS: u64 = 0x6b7a_6611_f77f_f972;
 const CONTROLLERS: u64 = 0x60e4_6979_91de_258a;
-const MISSION_ENGAGEMENT: u64 = 0x64fc_fc1a_da83_6727;
-const AIRFIELD: u64 = 0x4b52_a887_0d87_c043;
+const MISSION_ENGAGEMENT: u64 = 0x2466_43fe_f455_b217;
+const AIRFIELD: u64 = 0x444f_ac62_10e9_966f;
 
 #[test]
 fn ai_decision_functions_match_recorded_fingerprint() {

@@ -21,25 +21,25 @@ use crate::turbulence::Disturbance;
 // Recorded on macOS aarch64. See the module comment in golden_tests.rs before
 // changing any of these.
 const LEGACY: [(&str, u64); 8] = [
-    ("cruise-roll-rudder", 0xdf13_3efa_e953_0ae7),
-    ("burner-loop", 0x919d_ddec_36c5_6529),
-    ("stall-and-spin", 0x0ab3_9175_f69d_6f73),
-    ("devices-and-switches", 0x525e_f6b0_d477_8e4b),
-    ("damage-and-disturbance", 0x6c94_a6dc_35eb_6eed),
-    ("cheats-and-ricochet", 0x5052_42ea_2853_4ffc),
-    ("ground-impact", 0x1426_67c2_df3b_e929),
-    ("airborne-destruction", 0x842c_0532_6413_4cd0),
+    ("cruise-roll-rudder", 0xbe1e_8a94_1d9f_cb8d),
+    ("burner-loop", 0xcb7a_1e22_e8c0_2813),
+    ("stall-and-spin", 0x0f2f_b35b_9b23_659f),
+    ("devices-and-switches", 0x3401_ff7d_6ec4_01cd),
+    ("damage-and-disturbance", 0x6141_488e_1bab_e357),
+    ("cheats-and-ricochet", 0xf715_6c24_9ecc_1d2e),
+    ("ground-impact", 0xf29c_5843_6ed7_24e9),
+    ("airborne-destruction", 0xe6a5_62b7_d005_a5f6),
 ];
 const HYBRID: [(&str, u64); 10] = [
-    ("cruise-roll-rudder", 0xed72_5583_9caf_7b1d),
-    ("burner-loop", 0xac58_9973_3290_9cc5),
-    ("stall-and-spin", 0x5f61_56c6_cd41_1ece),
-    ("devices-and-switches", 0x73e5_12ae_2311_b30d),
-    ("damage-and-disturbance", 0xd96f_c70d_6ecc_cd80),
-    ("cheats-and-ricochet", 0xe7d6_d8c7_8561_f38d),
-    ("ground-impact", 0x36c1_474e_a043_ed39),
-    ("airborne-destruction", 0x72f6_531b_7330_ca1b),
-    ("crosswind-takeoff", 0x9e96_52d3_1499_8983),
+    ("cruise-roll-rudder", 0x947c_cadc_63ab_b7b5),
+    ("burner-loop", 0x5bbe_f6a2_8af5_21eb),
+    ("stall-and-spin", 0x63b2_3672_ad14_39eb),
+    ("devices-and-switches", 0x27a6_7daa_cc8a_1e78),
+    ("damage-and-disturbance", 0xbbef_fa6c_2269_63c4),
+    ("cheats-and-ricochet", 0x7302_18fa_975e_7c90),
+    ("ground-impact", 0x4eb0_1069_03e3_7584),
+    ("airborne-destruction", 0x51af_456f_a86b_5813),
+    ("crosswind-takeoff", 0xca5d_2cb8_86ee_37f7),
     ("approach-and-landing", 0x4d3c_afe2_c0a3_3483),
 ];
 const NATIVE: [(&str, u64); 2] = [
