@@ -1,0 +1,21 @@
+[package]
+name = "tore-realtime-native"
+version = "0.1.3"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# objc2 and objc2-foundation with features tore-diagnostics-native already
+# enables: the lock gains no outside crate. NSProcessInfo is reached with
+# msg_send!, not objc2-foundation's NSProcessInfo feature.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5.2"
+objc2-foundation = { version = "0.2.2", default-features = false, features = ["std", "NSString"] }
+
+[dev-dependencies]
+tore-net = { path = "../tore-net" }
+
+# This small native boundary audits its OS calls; the rest of the workspace
+# forbids unsafe.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

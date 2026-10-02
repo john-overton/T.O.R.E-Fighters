@@ -344,6 +344,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-net/*", (), "network transport; no scenario yet"),
     _r("crates/tore-session/*", (), "network sessions; no scenario yet"),
     _r("crates/tore-server/*", (), "dedicated server; no scenario yet"),
+    _r("crates/tore-realtime-native/*", (), "host loop timing on macOS; no scenario hosts"),
     # tore-app: rendering (windowed).
     _r("crates/tore-app/src/*.wgsl", RENDER_FAMILIES, "shaders", windowed=True),
     _r("crates/tore-app/src/*renderer*.rs", RENDER_FAMILIES, "renderers", windowed=True),

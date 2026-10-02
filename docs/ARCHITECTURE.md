@@ -13,7 +13,7 @@ The M0 environment supports the M1a menu slice, the M1b renderer across all 16 t
 | Component | Choice | Purpose |
 | --- | --- | --- |
 | Language | Rust 2024, compiler 1.91.1 | Reproducible native builds |
-| Workspace | `crates/tore-app`, `tore-formats`, `tore-import`, `tore-extract`, `tore-sim`, `tore-input`, `tore-input-native`, `tore-diagnostics-native`, `tore-replay`, `tore-world`, `tore-codec`, `tore-net` | Desktop shell and entry point, plus the format, import, extraction, simulation, input, mission recording, mission core, network encoding and network transport (both standard library only) crates |
+| Workspace | `crates/tore-app`, `tore-formats`, `tore-import`, `tore-extract`, `tore-sim`, `tore-input`, `tore-input-native`, `tore-diagnostics-native`, `tore-realtime-native`, `tore-replay`, `tore-world`, `tore-codec`, `tore-net` | Desktop shell and entry point, plus the format, import, extraction, simulation, input, host loop timing, mission recording, mission core, network encoding and network transport (both standard library only) crates |
 | Window/input | `winit` 0.30 | Native window lifecycle and input |
 | Graphics | `wgpu` 27 | Metal on macOS; native backends for Windows/Linux |
 | Diagnostic facade | Existing `log` 0.4 and `tracing` 0.1 | Bounded app/backend logs without a logging framework |
@@ -59,6 +59,15 @@ writes Windows Application events. Linux notifications use an optional bounded
 The MSI registers the source against the executable's embedded message table.
 The existing platform bindings and `log`/`tracing` dependencies are reused;
 there is no additional GUI or logging framework.
+
+`tore-realtime-native` is a third (slice EF-M). On macOS it gives the calling
+thread a Mach time-constraint policy and holds an `NSProcessInfo` activity, so
+the game's host thread and the dedicated server's loop wake for each 120 Hz
+tick on time ([sleep and wait accuracy on each
+system](#sleep-and-wait-accuracy-on-each-system-ef-x)); on Linux and Windows
+both calls do nothing. It reuses the `objc2` and `objc2-foundation` versions
+and features `tore-diagnostics-native` already uses (no new outside crate), and
+not AppKit, so the headless server does not link it.
 
 File paths, retention, fallbacks and failure limits have one home in the
 [startup diagnostics contract](spec/startup-diagnostics.md). Release packages
@@ -1998,7 +2007,8 @@ committed) found:
 ### Crates
 
 Stage D adds five crates, all on the standard library only. No new external
-dependency.
+dependency. Slice EF-M adds a sixth, `tore-realtime-native`, the hosts'
+macOS timing.
 
 | Crate | Kind | Holds | Depends on |
 | --- | --- | --- | --- |
@@ -2007,6 +2017,7 @@ dependency.
 | `tore-import` | library | The data folder, the import pack's reader and writer, media detection and the import itself, moved out of `tore-app` so a server can import and load without the game. *Built (D3a).* | tore-formats |
 | `tore-session` | library | The game's side of networking: the wire messages, the host session (clock, inputs, snapshots, joins), the client session (prediction, interpolation, clock steering, readouts) and the headless bot client. *Wire built (D6)*: the module `wire` has every section and message, the cockpit readout's included, with each end's bookkeeping (acknowledged baselines, priorities, the event queue, the name table) and no clock or socket ([what it settled](formats/net-protocol.md#what-the-games-sections-settled)). *Host built (D7a)*: the module `host` ([the host session](#the-host-session)). *Client built (D8a)*: the modules `client` ([the client session](#the-client-session)) and `bot`, and the `tore-bot` program, which loads an import through `tore-import` | tore-world, tore-net, tore-codec, tore-import |
 | `tore-server` | binary | The dedicated server: configuration, import, logging and the console. **Built (D7b):** options, configuration file, `--import`, `--check`, start-up refusals, the real-time run loop, the console, status lines and the log, around `tore_session::Host`. The run loop drives the host through a small `Host` trait (`host.rs`) that `wiring.rs` implements with `tore_session::Host`, so the loop, console and log are tested against a scripted host on a fake clock (agent decision). Which build is a release is `app::is_release`, the stamped `TORE_BUILD_VERSION` tag, which the game's `--connect` (D8) must use too | tore-session, tore-import |
+| `tore-realtime-native` | library | Keeping a fixed-rate loop on time on macOS: a Mach time-constraint policy for the calling thread and an `NSProcessInfo` activity, latency-critical and user-initiated; no-ops elsewhere. **Built (EF-M)**: the game's host thread and `tore-server`'s loop use it ([sleep and wait accuracy on each system](#sleep-and-wait-accuracy-on-each-system-ef-x)). Its unsafe calls stay inside it, as in `tore-diagnostics-native` | objc2, objc2-foundation (macOS only) |
 
 `tore-sim` and `tore-world` gain `tore-codec` for the exact own-plane state and
 the readout coding. `tore-app` gains `tore-session` and `tore-import`. The plan's
