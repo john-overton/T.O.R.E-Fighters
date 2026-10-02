@@ -144,7 +144,10 @@ The short form is part of `cargo test --workspace` (about 12 seconds on a quiet
 machine); the full form takes about 2 minutes 15 seconds at four cells at a time and
 prints one line of figures per bot. The CI job `Network loopback`
 (`.github/workflows/network.yml`) runs a host and two real `tore-bot` processes over
-loopback UDP on Linux, Windows and macOS. The measurements with real data, which need an
+loopback UDP on Linux, Windows and macOS, and its `strict-real-time` job runs the strict
+forms of the game's real-time hosting tests on Linux, which the normal suite runs in forms a
+starved runner meets ([real-time tests on shared runners](../ARCHITECTURE.md#real-time-tests-on-shared-runners-ef-y)).
+The measurements with real data, which need an
 import, are the ignored `host_players` test; see [the baseline](../baselines/net-2026-09-30.md)
 for the commands and results.
 

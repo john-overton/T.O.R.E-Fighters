@@ -7,6 +7,13 @@ name: Network loopback
 # job fails on any refusal, fault, drop or bot that does not exit cleanly. The
 # network simulator matrix is part of the normal test suite (ci.yml); its full
 # five-minute form is an ignored test run by hand before a release.
+#
+# The strict-real-time job runs the strict forms of the game's real-time
+# hosting tests (slice EF-Y), ignored in the normal suite, one at a time on
+# Linux, whose sleeps are accurate: no correction or mismatch of the hosting
+# player's plane, a window stall's tick count and snapshot gaps to 150 ms.
+# The normal suite runs forms that a starved macOS or 32-bit Windows runner
+# meets (docs/ARCHITECTURE.md, "Real-time tests on shared runners").
 
 on:
   push:
@@ -32,3 +39,28 @@ jobs:
         env:
           TORE_LOOPBACK_SECONDS: '20'
         run: cargo test --locked -p tore-session --test loopback -- --nocapture
+
+  strict-real-time:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux windowing libraries
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxi-dev libxrandr-dev libasound2-dev pkg-config
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: rustup show
+      - name: Build the game's tests
+        run: cargo test --locked -p tore-app --bin tore-app --no-run
+      # --exact runs nothing for a misspelt name, so the count is checked.
+      - name: The strict real-time tests, one at a time
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked -p tore-app --bin tore-app -- \
+            --ignored --exact --test-threads=1 --nocapture \
+            net::hosting::tests::a_hosted_mission_flies_with_no_correction_at_all \
+            net::hosting::tests::a_two_second_window_stall_stalls_nobody_strictly \
+            net::hosting::tests::an_eight_second_window_stall_drops_nobody_and_the_king_still_reigns_strictly \
+            net::lookup::tests::a_name_the_system_cannot_resolve_fails \
+            2>&1 | tee strict.log
+          grep -q "test result: ok. 4 passed" strict.log

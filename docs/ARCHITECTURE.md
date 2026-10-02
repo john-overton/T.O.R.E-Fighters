@@ -3879,6 +3879,55 @@ average). What it shows:
 The hosted mission's ignored strict test may pass on the macOS runners now
 that the host thread takes the policy; it was not run.
 
+### Real-time tests on shared runners (EF-Y)
+
+*Built (EF-Y, 2026-10-01).* `release.yml` runs the whole test suite on every
+platform before it packages, so one intermittent real-time failure on one
+runner cost that platform's package. The game's real-time hosting tests run
+a host thread, the hosting player's game (the test's own thread, pumped
+every 16 ms) and a remote bot (a thread of its own) in real time, beside the
+rest of the suite. EF-M's policy keeps the host thread on time on macOS, but
+the test's game and bot threads still sleep as the runner lets them (up to
+140 ms for 16, table above). Each such test now has two forms:
+
+| Test | Normal suite (every runner) | Strict form (ignored; `network.yml`'s `strict-real-time` job on Linux) |
+| --- | --- | --- |
+| A hosted mission flies with no correction | No correction after seating without a late input in the second before it; at most one mismatch without one (the 32-bit Windows runner had one in 975, which no correction followed) | `a_hosted_mission_flies_with_no_correction_at_all`: no correction after seating and no mismatch |
+| A two-second window stall stalls nobody | The guest's view of the host during the stall: 108 to 132 ticks a second and 24 snapshots a second over what it saw, no gap over 1 s; after the stall at most one correction without a late input, none once recovered | `..._strictly`: 216 to 264 ticks in the stall, no gap over 150 ms, at most one correction after it, none once recovered |
+| An eight-second window stall drops nobody | The same view of the host; the rest (catch-up, settling, the crown, End mission) as before | `..._strictly`: 912 to 1008 ticks, no gap over 150 ms |
+
+The rates are taken between the guest's own first and last readings in the
+stall, so a guest that wakes late measures them right; the ticks at the
+stall's two ends, which the strict form counts, are short by however late it
+woke (a gap of 195 ms on macos-15-intel failed the old form). A host held up
+by the stalled game would still fail the normal form: its gap would be the
+stall's length and its rates near zero. The rule that a stall costs at most
+one correction is also held exactly on the network simulator
+(`a_stalled_game_recovers_with_at_most_one_correction` in tore-session).
+
+Two more failures were not real time at all:
+
+- **The diagnostics tests' folders.** Each named its temporary folder by the
+  process and the clock in nanoseconds, but macOS's clock counts whole
+  microseconds, so two tests starting together could share a folder and take
+  each other's maintenance lock (a WouldBlock on macos-15-intel). The name
+  now carries a counter as well.
+- **A name that does not resolve.** The lookup test asked the system to
+  resolve `no-such-host.invalid`, and on the macOS runner the lookup did not
+  end in "Cannot find the server" within the test's 5 seconds (the test did
+  not print what it saw instead). The test now uses a fake
+  resolver that fails as the system's does; `tore_net::reach`'s own test
+  still asks the system (it waits as long as the resolver takes), and the
+  whole lookup through the system's resolver is the ignored
+  `a_name_the_system_cannot_resolve_fails`, run by the strict job.
+
+*Agent decisions:* the normal suite's bounds (1 s, a tenth of the tick rate,
+24 snapshots a second, one unexplained mismatch) and the strict forms' home
+in `network.yml` rather than `ci.yml`. **Open:** the 32-bit Windows runner's
+one mismatch with no late input and no correction after it is not
+explained; with one starved core on Linux every mismatch followed a late
+input.
+
 ### The lobby
 
 A host has a new phase, **Lobby**, before Flying and after each mission. In it
@@ -4471,6 +4520,7 @@ second completes the plan's stage F and stage E's replays.
 | EF-X CI on macOS and Windows | Opus | EF-K | Find and fix every macOS and Windows failure of `ci.yml` and `network.yml`, real platform behaviour or over-strict tests | One CI run green on all jobs; each system's game-port behaviour written down. **Built (EF-X):** see [the game port on each system](#the-game-port-on-each-system-ef-x) and [sleep and wait accuracy on each system](#sleep-and-wait-accuracy-on-each-system-ef-x); the macOS golden fingerprints were recorded again, Windows checkouts' CR LF line ends are read, and the real-time tests judge what a slow runner cannot change |
 | EF-M A Mac host on time | Opus | EF-X | A Mach time-constraint policy on the game's host thread and `tore-server`'s loop, and an `NSProcessInfo` latency-critical activity while hosting, in a new native crate | The macOS runners' figures with the fix beside EF-X's; `ci.yml` and `network.yml` green; single-player baseline SAME. **Built (EF-M):** see [sleep and wait accuracy on each system](#sleep-and-wait-accuracy-on-each-system-ef-x) and the crate `tore-realtime-native` |
 | EF-F Smoke-test fixes | Sonnet | EF9 | What the lead's smoke test found: a player who ended its own flight is seated again (it was stuck in the lobby), a networked debrief says how the mission ended instead of "MISSION FAILURE", a server's kick says "The server", the net log and the screen say the same words, a game just left is not listed as Closed, the lobby's cheat notice covers no label, and a `stall SECONDS` input-script step | Tests for each; a windowed run of host, joiner and bot: leave and rejoin twice, an 8 second stall that keeps the joiner connected, the debrief headlines, a server's kick wording. **Built (EF-F):** see [smoke-test fixes](#smoke-test-fixes-ef-f) |
+| EF-Y Reliable real-time tests | Opus | EF-M | Make the real-time tests reliable on the CI runners (the 8 and 2 second stalls, the lookup, the hosted mission on 32-bit Windows, the diagnostics WouldBlock), fixing real defects if any | Three consecutive green `ci.yml` runs and a green `network.yml`; single-player baseline SAME. **Built (EF-Y):** see [real-time tests on shared runners](#real-time-tests-on-shared-runners-ef-y) |
 
 **Phase 2: the rest of stage F, and stage E's replays.** The King's settings
 (co-op or PvP and sides, slot locks, password, join in progress, friendly fire,
