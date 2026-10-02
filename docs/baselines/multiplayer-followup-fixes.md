@@ -10,7 +10,8 @@
 
 Implementation mode, 2026-10-02, Linux x86_64. This pass follows the
 [original flight/replay fixes](multiplayer-flight-replay-fixes.md) on
-`mp/flight-replay-fixes`. The worktree is retained for review, not merged.
+`mp/flight-replay-fixes`. John had it merged into `multiplayer` on 2026-10-02
+(fast-forward to `bbf3f613`).
 
 ## Findings and changes
 

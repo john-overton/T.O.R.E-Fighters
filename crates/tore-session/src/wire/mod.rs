@@ -70,7 +70,8 @@ use tore_codec::CodecError;
 /// test fails until it is raised and the committed copy refreshed
 /// (`TORE_UPDATE_WIRE_GOLDEN=1`). 2 since the readout's coding, 3 since the
 /// lobby (EF4), 4 since chat (EF6), 5 since the transport's Keepalive packet
-/// (EF-K).
+/// (EF-K), 6 since the exact flight state's overspeed countdown and failure
+/// random stream.
 pub const PROTOCOL_VERSION: u16 = 6;
 
 /// Section kinds after the transport's own Messages (kind 1).

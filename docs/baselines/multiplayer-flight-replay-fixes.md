@@ -82,6 +82,7 @@ This is an integration fix in `tore-session`, not autonomous-behavior work.
   `.local/flight-replay-fixes-battery/` and `.local/tmp-flight-replay-fixes/`.
   No window was launched on the user's workspace.
 
-Retail comparison remains unavailable. Cross-platform CI status is reported in
-the session, rather than asserted by these Linux results. No merge into
-multiplayer is authorized for this pass.
+Retail comparison remains unavailable. On the final tip `bbf3f613`, CI passed
+on all five platforms (Rust baseline run 37043356961, Network loopback run
+37043355534). John had the branch merged into `multiplayer` on 2026-10-02 as a
+fast-forward.
