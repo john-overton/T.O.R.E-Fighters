@@ -355,14 +355,43 @@ mod tests {
         );
     }
 
+    /// The resolver is a fake that fails as the system's does for a name
+    /// with no address: the macOS CI runner's own resolver could take longer
+    /// than the test waits even for an `.invalid` name (RFC 6761), which
+    /// failed the test there. That the system resolver refuses such a name
+    /// is `tore_net::reach`'s test, which waits as long as the resolver
+    /// takes; the real lookup end to end is the ignored test below.
     #[test]
     fn a_name_that_does_not_resolve_fails_and_a_host_of_another_version_is_refused() {
-        let mut lookup = Lookup::start("no-such-host.invalid:4000", V).unwrap();
+        let mut lookup = Lookup::spawn(
+            "no-such-host.invalid".into(),
+            || {
+                Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "nodename nor servname provided, or not known",
+                ))
+            },
+            V,
+            PROBE_TIMEOUT,
+        );
         let events = all(&mut lookup);
-        assert!(matches!(
-            events.last(),
-            Some(Progress::Failed(text)) if text.starts_with("Cannot find the server no-such-host.invalid")
-        ));
+        assert_eq!(
+            events,
+            vec![
+                Progress::LookingUp("no-such-host.invalid".into()),
+                Progress::Failed(
+                    "Cannot find the server no-such-host.invalid: nodename nor servname \
+                     provided, or not known"
+                        .into()
+                ),
+            ]
+        );
+        // A name that gives no address at all fails the same way.
+        let mut lookup = Lookup::spawn("empty".into(), || Ok(Vec::new()), V, PROBE_TIMEOUT);
+        assert_eq!(
+            all(&mut lookup).last(),
+            Some(&Progress::Failed("Cannot find the server empty.".into()))
+        );
         let (address, stop, thread) = host(V + 1);
         let mut lookup = Lookup::start(&address.to_string(), V).unwrap();
         let events = all(&mut lookup);
@@ -374,6 +403,38 @@ mod tests {
         assert_eq!(*from, address);
         assert!(text.contains("protocol version"));
         assert!(events.last().unwrap().to_string().starts_with("Refused: "));
+    }
+
+    /// The same failure through the system's resolver, as a player's typed
+    /// name takes it. Ignored: it waits on the machine's DNS, which a CI
+    /// runner may answer slowly. Run with `--ignored`.
+    #[test]
+    #[ignore = "looks at the system's resolver; run by hand"]
+    fn a_name_the_system_cannot_resolve_fails() {
+        let mut lookup = Lookup::start("no-such-host.invalid:4000", V).unwrap();
+        let started = Instant::now();
+        let mut events = Vec::new();
+        while started.elapsed() < Duration::from_secs(60) {
+            match lookup.poll() {
+                Some(event) => {
+                    let last = event.is_last();
+                    events.push(event);
+                    if last {
+                        break;
+                    }
+                }
+                None => std::thread::sleep(Duration::from_millis(5)),
+            }
+        }
+        assert!(
+            matches!(
+                events.last(),
+                Some(Progress::Failed(text))
+                    if text.starts_with("Cannot find the server no-such-host.invalid")
+            ),
+            "{events:?} after {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
