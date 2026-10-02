@@ -347,13 +347,8 @@ pub fn draw(
             p.text(font, label, STATUS_LABEL_X, y);
         }
     }
-    if s.gear >= 0.99 && s.weight_on_wheels() {
-        p.text(
-            font,
-            &format!("NSW {:.0}%", s.nosewheel_authority() * 100.),
-            STATUS_LABEL_X,
-            NSW_LABEL_Y,
-        );
+    if let Some(label) = nosewheel_label(s.nosewheel_authority()) {
+        p.text(font, &label, STATUS_LABEL_X, NSW_LABEL_Y);
     }
     // Manual p. 80: the time compression rate shows in the upper right corner.
     if (time_scale - 1.).abs() > 1e-9 {
@@ -432,6 +427,11 @@ pub fn draw(
         bank_scale(&mut p, font, gyro_bank);
     }
 }
+
+fn nosewheel_label(authority: f64) -> Option<String> {
+    let percent = (authority.clamp(0., 1.) * 100.).round() as u32;
+    (percent > 0).then(|| format!("NSW {percent}%"))
+}
 fn wind_label(wind: &tore_sim::runway_wind::Assessment) -> String {
     let tail = if wind.tailwind_knots >= 0.5 {
         format!(
@@ -461,6 +461,14 @@ fn wind_label(wind: &tore_sim::runway_wind::Assessment) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn inactive_nosewheel_authority_has_no_hud_label() {
+        assert_eq!(nosewheel_label(0.), None);
+        assert_eq!(nosewheel_label(0.004), None);
+        assert_eq!(nosewheel_label(0.006).as_deref(), Some("NSW 1%"));
+        assert_eq!(nosewheel_label(0.5).as_deref(), Some("NSW 50%"));
+        assert_eq!(nosewheel_label(1.).as_deref(), Some("NSW 100%"));
+    }
     #[test]
     fn no_status_label_overlaps_another_or_the_msl_caption() {
         // The labels sit at fixed rows, so every pair covers every combination

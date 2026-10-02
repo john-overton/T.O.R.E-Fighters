@@ -18,7 +18,7 @@ The F/A-18D cockpit now covers the full flight canvas. The world renders behind 
 Start with `cargo run --locked -p tore-app -- --free-flight`, or Choose Activity → Create Quick Mission → OK. Free flight skips loadout and starts with clean external stations. On a MacBook, use **Fn/Globe with the function keys** when macOS assigns those keys to system actions. Fn-Right and Fn-Down supply End and Page Down, and Fn-Delete supplies Delete; there is no Insert key, so bind chaff yourself in **Pref → Controls...**. The physical US key positions are used in flight, including shifted numbers and Option combinations.
 
 Rudder now turns the air-relative flight path through sideslip force and roll
-coupling. The HUD shows available NSW percent below BRAKE while on the wheels.
+coupling. The HUD shows available NSW percent below BRAKE while on the wheels and hides the readout when displayed authority reaches zero.
 Steering turns the nosewheel and steerable strut, leaving separate braces fixed.
 Nosewheel steering has 90-degree authority through 10 mph, fading
 linearly to zero at 25 mph ground speed. [Rules and fitted constants](spec/lateral-flight.md).

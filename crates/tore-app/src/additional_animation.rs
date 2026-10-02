@@ -363,6 +363,11 @@ impl Rig {
         let a = f.address;
         match self.id {
             AircraftId::F14 => {
+                if (0x4dba..=0x5434).contains(&a) {
+                    for point in &mut f.positions {
+                        *point = f14_wing_alignment(*point, side);
+                    }
+                }
                 if matches!(a, 0x540d | 0x5434 | 0x4fe9 | 0x5010) {
                     turn(
                         &mut f,
@@ -383,6 +388,15 @@ impl Rig {
                     }
                 }
                 if matches!(a, 0x4828 | 0x4888 | 0x49c5 | 0x4a22) {
+                    // The right forward root alone is one unit outboard of
+                    // its mirrored left partner and the nacelle attachment.
+                    if matches!(a, 0x49c5 | 0x4a22) {
+                        for point in &mut f.positions {
+                            if point[0] == 6. && point[1] == -6. {
+                                point[0] = 5.;
+                            }
+                        }
+                    }
                     turn(
                         &mut f,
                         [side * 6., -10., 0.],
@@ -491,14 +505,21 @@ fn vector_angles(s: &State) -> [f64; 2] {
 pub fn sweep(s: &State) -> f64 {
     ((s.speed / 1.68781 - 400.) / 300.).clamp(0., 1.) * 48f64.to_radians() * (1. - s.flaps)
 }
-// The quantized base mesh has wings at z=1 and a fuselage deck at z=2.
-// A fitted 1/16-unit clearance above that deck prevents swept-wing burial.
-const F14_WING_LIFT: f32 = 1.0625;
+// A fitted two-inch clearance above the outer root surface. The inner panel
+// tucks under the fixed fuselage glove instead of floating above its deck.
+const F14_WING_LIFT: f32 = 0.125;
 fn f14_wing_pivot(side: f32) -> [f32; 3] {
-    [if side < 0. { -7. } else { 8. }, 4., 1.]
+    [side * 8., 4., 1.]
+}
+fn f14_wing_alignment(mut point: [f32; 3], side: f32) -> [f32; 3] {
+    if side < 0. {
+        point[0] -= 1.;
+    }
+    point
 }
 /// The same front-root sweep and height used by the wing mesh and vapor tips.
 pub(crate) fn f14_wing_point(point: [f32; 3], side: f32, angle: f64) -> [f32; 3] {
+    let point = f14_wing_alignment(point, side);
     let pivot = f14_wing_pivot(side);
     let offset = rotate(
         std::array::from_fn(|i| point[i] - pivot[i]),
@@ -977,23 +998,66 @@ mod tests {
         state.flaps = 0.;
         for side in [-1., 1.] {
             let root = f14_wing_pivot(side);
+            let source_root = [if side < 0. { -7. } else { 8. }, 4., 1.];
             let tip = [if side < 0. { -23. } else { 24. }, -4., 1.];
             let mut source = face(0x4dba);
-            source.positions = vec![root, tip, [root[0], -1., 1.]];
+            source.positions = vec![source_root, tip, [source_root[0], -1., 1.]];
             for knots in [400., 550., 700.] {
                 state.speed = knots * 1.68781;
                 let moved = rig.animate(&source, &state).unwrap();
-                assert_eq!(moved.positions[0], [root[0], root[1], 2.0625]);
+                assert_eq!(moved.positions[0], [root[0], root[1], 1.125]);
                 assert_eq!(moved.positions[1], f14_wing_point(tip, side, sweep(&state)));
                 let distance =
                     |a: [f32; 3], b: [f32; 3]| (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f32>();
                 assert!(
-                    (distance(moved.positions[0], moved.positions[1]) - distance(root, tip)).abs()
+                    (distance(moved.positions[0], moved.positions[1]) - distance(source_root, tip))
+                        .abs()
                         < 1e-4
                 );
                 assert_eq!(moved.uv, source.uv);
                 assert_eq!(moved.normal, source.normal);
             }
+        }
+    }
+
+    #[test]
+    fn f14_wings_and_horizontal_tails_align_across_the_body_centerline() {
+        let rig = Rig::synthetic(AircraftId::F14, &[], &[], &[], &[]);
+        let mut state = State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
+        state.flaps = 0.;
+        let mirror = |p: [f32; 3]| [-p[0], p[1], p[2]];
+        // Synthetic panels using the measured root offsets, not retail meshes.
+        let mut left = face(0x51d8);
+        left.positions = vec![[-7., 4., 1.], [-15., 0., 1.], [-4., -1., 1.]];
+        let mut right = face(0x4dba);
+        right.positions = left
+            .positions
+            .iter()
+            .map(|p| [1. - p[0], p[1], p[2]])
+            .collect();
+        for knots in [400., 550., 700.] {
+            state.speed = knots * 1.68781;
+            let a = rig.animate(&left, &state).unwrap();
+            let b = rig.animate(&right, &state).unwrap();
+            assert_eq!(
+                a.positions.iter().copied().map(mirror).collect::<Vec<_>>(),
+                b.positions
+            );
+        }
+        left.address = 0x4828;
+        right.address = 0x49c5;
+        left.positions = vec![[-5., -6., 0.], [-9., -10., 0.], [-5., -12., 0.]];
+        right.positions = left.positions.iter().copied().map(mirror).collect();
+        right.positions[0][0] = 6.;
+        for elevator in [0., 0.5, -0.5] {
+            state.elevator = elevator;
+            let a = rig.animate(&left, &state).unwrap();
+            let b = rig.animate(&right, &state).unwrap();
+            assert_eq!(
+                a.positions.iter().copied().map(mirror).collect::<Vec<_>>(),
+                b.positions
+            );
+            assert_eq!(b.uv, right.uv);
         }
     }
 

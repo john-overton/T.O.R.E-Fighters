@@ -685,7 +685,7 @@ pub(crate) mod render_hash_tests {
     /// Batches per model, fixture targets with the ownship, combat geometry
     /// beside loaded models, camera poses and ejected pilots.
     const HASHES: [u64; 5] = [
-        0x9782_f80b_07f1_5223,
+        0x70a8_9dbd_8b33_c9ff,
         0xdd1a_67a0_c439_7ced,
         0x2f6c_0a1c_b3b7_f4e5,
         0x7ddb_79bb_1315_bf69,

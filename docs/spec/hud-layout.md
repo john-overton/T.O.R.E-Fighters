@@ -96,7 +96,7 @@ bearing. Zoom, window aspect and head-look use the existing HUD transform.
 
 Requested by John on 2026-10-02: show `NSW 100%` in the normal HUD font and
 color beneath BRAKE. The [steering spec](lateral-flight.md) defines when it
-shows and the percentage. Fitted layout: NSW at (388,173), HOOK at (388,184),
+shows and the percentage; inactive steering has no label. Fitted layout: NSW at (388,173), HOOK at (388,184),
 and MSL at (402,201), leaving ten-pixel glyphs clear of each other.
 
 ## Cockpit glass and layer order

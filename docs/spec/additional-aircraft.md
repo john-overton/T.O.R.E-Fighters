@@ -106,13 +106,18 @@ wingtip vapor origins. No extra aerodynamic effect is asserted. FA's F14 CE
 points do not coincide with its quantized base mesh; use the reviewed visible
 wing tips as fitted attachments. Do not describe these as decoded CE placement.
 
-The 2026-10-02 correction uses the front inner roots, left `(-7,4,1)` and right
-`(8,4,1)`, in source right/forward/up coordinates. The previous rear-root pivots
-made the swept panels pull away from the fuselage. John also requested raising
-the panels: the fitted lift is 1.0625 source units, or 17 inches at this model's
-scale. This places the wing above the source deck at up=2 with 1/16 source unit
-clearance. Wing faces, flaps and vapor tips share the sweep and height correction.
-The sweep schedule and flight dynamics stay unchanged.
+John's 2026-10-02 alignment review requires symmetric body attachments and wings
+close to the outer root surface. Translate the left wing one source unit left:
+its source root at `(-7,4,1)` then matches the body's `(-8,4,1)` attachment and
+mirrors the right root `(8,4,1)`. Sweep about those front inner roots. Correct only
+the right horizontal tail's forward root from `(6,-6,0)` to `(5,-6,0)`, matching
+the left tail; the other tail vertices already match. Vertical fins are already
+symmetric. Coordinates are source right/forward/up.
+
+The fitted wing lift is 0.125 source units, or two inches at this model's scale.
+This clears the outer root surface without raising the wing above the inner
+fuselage deck; swept panels tuck beneath the fixed glove. Wing faces, flaps and
+vapor tips share the alignment and sweep transform. The sweep schedule and flight dynamics stay unchanged.
 
 Flaps droop up to 0.4 rad. F-14 tailplanes mix -0.3 rad pitch and ±0.2 rad roll;
 A-4 elevators use -0.3 rad pitch and outboard ailerons ±0.2 rad roll.

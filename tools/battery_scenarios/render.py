@@ -1,4 +1,4 @@
-"""Lane: flight. Windowed captures that reproduce two drawing faults.
+"""Lane: flight. Windowed aircraft, runway and HUD regression captures.
 
 They live apart from flight.py because their names start with `render-`, not
 `flight-`. Each only checks that the frame is not blank; the picture needs a
@@ -9,9 +9,42 @@ from battery_scenarios.flight import frame_problems
 
 
 def scenarios() -> list[Scenario]:
-    """Windowed captures that reproduce two drawing faults, each checked for a
+    """Windowed regression captures, each checked for a
     blank frame. Whether the fault shows needs a human eye (docs/testing/lane-flight.md)."""
     return [
+        Scenario(
+            name="render-f14-roots-top",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "f14", "--maneuver", "overspeed", "--flight-probe-ticks", "1", "--flight-devices", "0,0,0,0,1", "--flight-view", "1", "--flight-look", "0,89", "--flight-zoom", "3", "--capture-flight", "{work}/f14-top.ppm", "--no-audio"],
+            window=True,
+            outputs=["f14-top.ppm"],
+            expect=["Scene capture:"],
+            check=frame_problems,
+            timeout=180,
+            notes="Fully swept F-14: both wing roots and horizontal tail roots should meet the body symmetrically. The one-tick speed probe only sets the pose.",
+        ),
+        Scenario(
+            name="render-f14-roots-side",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "f14", "--maneuver", "overspeed", "--flight-probe-ticks", "1", "--flight-devices", "0,0,0,0,1", "--flight-view", "1", "--flight-look", "90,0", "--flight-zoom", "3", "--capture-flight", "{work}/f14-side.ppm", "--no-audio"],
+            window=True,
+            outputs=["f14-side.ppm"],
+            expect=["Scene capture:"],
+            check=frame_problems,
+            timeout=180,
+            notes="Wing panels should sit close to the outer root and tuck under the fixed glove, not float above the fuselage deck.",
+        ),
+        Scenario(
+            name="render-nosewheel-hud-inactive",
+            lane="flight",
+            args=["--free-flight", "--aircraft", "f18", "--ground-start", "1", "--maneuver", "takeoff", "--flight-probe-ticks", "600", "--flight-view", "0", "--capture-flight", "{work}/nsw-inactive.ppm", "--no-audio"],
+            window=True,
+            outputs=["nsw-inactive.ppm"],
+            expect=["Scene capture:"],
+            check=frame_problems,
+            timeout=180,
+            notes="Rolling above the nosewheel steering cutoff, the NSW label should be absent even with the gear down.",
+        ),
         Scenario(
             name="render-mig21-upper-skin",
             lane="flight",

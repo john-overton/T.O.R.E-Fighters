@@ -16,11 +16,11 @@ Implementation mode, 2026-10-02, Linux x86_64. This pass follows the
 
 | Item | Root cause | Change and limits |
 | --- | --- | --- |
-| NSW HUD percentage | Steering had an angle query but no available-authority readout. | Sim supplies the fraction independently of pedals. HUD shows whole percent under BRAKE with wheels supporting the aircraft. HOOK and MSL move down to preserve spacing. |
+| NSW HUD percentage | Steering had an angle query but no available-authority readout. | Sim supplies the fraction independently of pedals. HUD shows nonzero whole percent under BRAKE with wheels supporting the aircraft and hides the inactive readout. HOOK and MSL move down to preserve spacing. |
 | Nose gear braces turning | Steering rotated every face in the nose-gear group. | Reviewed wheel/strut face lists restrict steering. Separate braces and doors retain their pose; full gear retraction still works. Single-panel source wheel/strut art moves together. |
 | Missiles circling destroyed aircraft | Seekers could retain a dead airborne body, while physical collision rejected zero health. Lost seekers also kept turning toward a passed intercept. | Guns and missiles hit present wrecks. No repeat kill, system damage or pilot injury. An unobserved passed intercept stops steering, with same-target reacquisition and finite lifetime retained. Dynamics remain in sim. |
 | Human wreck collision/replay | Launcher health also represented physical presence. | World derives presence from the flight wreck lifecycle. Combat tape v7 records presence separately; v2 through v6 remain readable. |
-| F-14 swept wings | Wing rig used rear inner roots; wing surfaces lay below the fuselage deck. Vapor attachment duplicated the old pivots. | Front-root pivots and a fitted 17-inch lift clear the deck. Mesh and vapor tips share the corrected placement. Sweep timing and flight behavior are unchanged. |
+| F-14 swept wings | Wing rig used rear inner roots. The left wing was one source unit inward, the right tail forward root was one unit outward, and the initial lift floated the wing above its outer attachment. Vapor attachment duplicated the old pivots. | Matching front-root pivots, corrected wing/tail offsets and a fitted two-inch outer-root clearance seat the wings beneath the fixed glove. Mesh and vapor tips share the corrected placement. Sweep timing and flight behavior are unchanged. |
 | Drone input configuration | Replay input bypassed the profile system and used literal keys. | Catalog entries, separate replay desktop assignments, device bindings and normal held/release handling. Playback pause still permits camera movement; Escape menu, focus loss and disconnect clear holds. Other replay shortcuts remain fixed. |
 | Replay view popup | Right-click always called object picking, including on the camera button. | The camera button opens explicit view choices. Scene clicks retain object menus. Camera choices are excluded from dynamic object-list refresh. |
 | Tacview geography | Guessed centers and a physical distance conversion ignored the source maps' geographic compression. | All 16 centers and axis scales are calibrated from explicit public airport references. Native coordinates retain game distances. [Measured errors and uncertainties](theater-georeference.md) remain significant and are not a claim of exact GPS terrain. |
@@ -43,25 +43,27 @@ rules. Updated only those saved values; the two-run determinism and required-eve
 assertions remain. The other 1,012 sim tests passed in that job.
 
 New synthetic checks cover steering authority at 0, 10, 17.5, 25 and 40 mph;
-HUD text spacing; stationary braces under steering; F-14 front-root invariance,
+HUD text spacing and inactive-label suppression; stationary braces under steering; F-14 front-root invariance and wing/tail symmetry,
 height, UVs and vapor attachment; guns/missiles against ownship and target wrecks;
 body removal, no duplicate kills and no stale-point orbit; fresh reacquisition;
 combat tape compatibility; drone profile persistence, chord releases, focus and
 controller loss; movement while paused; direct camera selection at 4:3, wide and
 tall aspect ratios; and GPS spacing independent of native distance coordinates.
 
-Nineteen targeted battery scenarios passed:
+Twenty-two targeted battery scenarios passed:
 
 - The new `flight-wreckcontact-f18`, including the imported gun and AIM-120.
 - Fourteen aircraft combat-evidence scenarios, each writing and replaying tapes.
 - Replay drone/object views, F/A-18D and F-14 model views, and replay menu pages.
+- Three new render scenarios for F-14 top/side attachment alignment and the inactive steering HUD.
 
 Private results are under `.local/flight-replay-followup/battery/`, runs
-`20261002-103111-followup` and `20261002-103359-views`. Logs, calibration inputs
+`20261002-103111-followup`, `20261002-103359-views`, and
+`20261002-114453-alignment`. Logs, calibration inputs
 and captures remain in `.local/flight-replay-followup/`; no retail art was committed.
 
 GPU smoke passed through `tools/agent-run.sh`. Reviewed captures show NSW beneath
-BRAKE, F/A-18 nosewheel steering with stationary braces, and F-14 extended, fully
+BRAKE, its absence during the takeoff roll above the steering cutoff, F/A-18 nosewheel steering with stationary braces, and F-14 extended, fully
 swept and side views. The F-14 full-sweep capture uses the existing overspeed pose
 probe for one tick; it does not test an overspeed crash. The ground capture guard
 now permits the existing nosewheel probe with a ground start.
