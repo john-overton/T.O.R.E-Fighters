@@ -68,7 +68,10 @@ being admitted as calibration references. No game placements were relocated.
 ## Reference identities
 
 Airport IDs link to the public coordinate source. Historical names may differ
-from today's airport names; uncertain matches were omitted.
+from today's airport names. These are geographic proxies for named game sites,
+not proof of which physical airfield the source author meant. Choosing a major
+airport for a city label, such as Boryspil for Kiev, is an agent decision and
+contributes uncertainty. Sites without a usable reference were omitted.
 
 - APA: Chitre = [MPCE](https://ourairports.com/airports/MPCE/), Tocumen = [MPTO](https://ourairports.com/airports/MPTO/), Rio Hato = [MPSM](https://ourairports.com/airports/MPSM/), Punta Cocos = [MP26](https://ourairports.com/airports/MP26/), Penonome = [MP18](https://ourairports.com/airports/MP18/).
 - BAL: Liepaja = [EVLA](https://ourairports.com/airports/EVLA/), Vilnius = [EYVI](https://ourairports.com/airports/EYVI/), Parnu = [EEPU](https://ourairports.com/airports/EEPU/), Pskov = [ULOO](https://ourairports.com/airports/ULOO/), Siauliai = [EYSA](https://ourairports.com/airports/EYSA/).

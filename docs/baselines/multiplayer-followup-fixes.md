@@ -34,6 +34,14 @@ catalog. The synthetic ACMI golden changed in geographic coordinates, geographic
 yaw, reference time and calibration comments; native U/V/Heading remain intact.
 The combat render hash changed only in modeled geometry, reflecting the F-14 rig.
 
+The [Apple Silicon job](https://github.com/john-overton/T.O.R.E-Fighters/actions/runs/37029327276/job/110911884281)
+measured three changed combat fingerprints: guns/damage `8ae03ea93fe341e8`,
+guided missiles `75637b24dee28693`, and player countermeasures `1bab4b4093d319c9`.
+These scenarios include destroyed bodies and missile loss/reacquisition. Their
+physical hit, observation, projectile and effect fields change under the requested
+rules. Updated only those saved values; the two-run determinism and required-event
+assertions remain. The other 1,012 sim tests passed in that job.
+
 New synthetic checks cover steering authority at 0, 10, 17.5, 25 and 40 mph;
 HUD text spacing; stationary braces under steering; F-14 front-root invariance,
 height, UVs and vapor attachment; guns/missiles against ownship and target wrecks;

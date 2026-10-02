@@ -29,9 +29,11 @@ use crate::sensors;
 // changing any of these.
 /// The ownship's aircraft in these scenarios.
 const OWN: u32 = 0;
-const GUNS_AND_DAMAGE: u64 = 0xd31d_73fa_cf04_2cc7;
-const GUIDED_MISSILES: u64 = 0xde4e_2cd5_e95b_6a96;
-const PLAYER_COUNTERMEASURES: u64 = 0x2329_5b36_8264_88b7;
+// Present wrecks now receive physical hits, remain observable/selectable, and
+// missiles stop orbiting passed memory points. Measured on Apple Silicon CI.
+const GUNS_AND_DAMAGE: u64 = 0x8ae0_3ea9_3fe3_41e8;
+const GUIDED_MISSILES: u64 = 0x7563_7b24_dee2_8693;
+const PLAYER_COUNTERMEASURES: u64 = 0x1bab_4b40_93d3_19c9;
 
 #[test]
 fn combat_guns_and_damage_match_recorded_fingerprint() {
