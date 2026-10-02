@@ -705,8 +705,10 @@ decision, 2026-09-28):
 | `land` | With `--ground-start N`: starts four miles out on a three degree slope with gear, flaps and hook down at a speed taken from the aircraft's own stall speed and landing limits, flares, closes the throttle, brakes to a stop. | `landing_start:`, `landing:` and `ils_probe:` (what the player's ILS read along the approach) |
 | `land-gear-up`, `land-hard`, `land-off-runway` | The same approach with the gear left up, no flare, or lined up 1,500 feet beside the runway's footprint, to check that unsafe touchdowns crash for the reason the aircraft's landing limits give. | `landing:` |
 | `climb` | Full afterburner climb holding a climb speed, then whatever the aircraft does at the top; reports the highest altitude against the 1 G envelope's ceiling. | `climb:` |
-| `dive` | A full afterburner dive from 40,000 feet at 60 degrees, nobody pulling out: ends on the ground, or in the overspeed loss for an aircraft that reaches 1.5 times its top speed first. | `extremes:` and `loss:` |
-| `overspeed` | Level at 20,000 feet at 1.6 times the top speed there: the aircraft must be lost on the first step. | `loss: cause=overspeed` |
+| `dive` | A full afterburner dive from 40,000 feet at 60 degrees, nobody pulling out: ends on the ground, or in the time-based overspeed loss. | `extremes:` and `loss:` |
+| `overspeed` | Starts at 20,000 feet and holds 1.1 times the current top speed to isolate the failure timer: one 25% roll at 6, 7, 8 and 9 seconds, guaranteed loss at 10. This is a timing fixture, not natural acceleration. | `overspeed_ticks=` and `loss: cause=overspeed` |
+| `rudder` | Engine-off flight with full right rudder, checking flight-path turning and roll coupling. | `lateral:` |
+| `nosewheel` | With `--ground-start N`: rolling at 10 mph, throttle closed, full right rudder, checking taxi steering and wheel articulation. | `lateral:` |
 | `takeoff-gear-early`, `takeoff-gear-airborne` | With `--ground-start N`: the `takeoff` roll with the gear key pressed at 80 knots with the wheels still down (the ground sensor refuses it), or once 50 feet above the runway (a normal retraction). | `gear_pulled=`, `ground_sensor_refusals=`, `gear=` |
 | `sprint` | Full afterburner in level flight at 5,000 feet, altitude held by the autopilot. | `extremes:` |
 | `autopilot` | Starts in a 25 degree bank with heading and altitude hold engaged. | `extremes:` |

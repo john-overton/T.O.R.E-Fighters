@@ -49,7 +49,7 @@ system faults, no pilot kill and no breakup. It also survives a midair
 collision (John, 2026-09-23). Hits still physically jolt the
 aircraft (see [missile hit jolt](#missile-hit-jolt)). Invulnerable does not
 prevent ground crashes; that is the separate No crashes cheat. It prevents the
-[overspeed](overspeed.md) loss at 1.5 times top speed (the shake and the `OVERSPEED`
+time-based [overspeed](overspeed.md) loss (the shake and the `OVERSPEED`
 message remain) but not the [out-of-bounds](world-edge.md) loss 105 nautical miles
 past the map (John, 2026-09-29).
 

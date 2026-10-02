@@ -56,6 +56,8 @@ or captures are committed. This is host validation, not a retail parity claim.
 - Twelve additional takeoff, landing, spin and spin-recovery scenarios passed
   for F/A-18D and Rafale C, checking the side-force and tire changes against
   existing flight behavior.
+- All 14 sustained full-power sprint scenarios passed with the new overspeed
+  timer, bringing the targeted battery total to 86 passing runs.
 - The GPU smoke test passed through `tools/agent-run.sh`. Local evidence is in
   `.local/flight-replay-fixes-battery/` and `.local/tmp-flight-replay-fixes/`.
   No window was launched on the user's workspace.
