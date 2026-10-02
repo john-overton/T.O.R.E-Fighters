@@ -13,7 +13,7 @@ flyable identities (`f18`, `rafale`, `f14`, `a4e`, `x31`, `mig29`, `su27`, `mig2
 `mig23`, `su35`, `f22`, `f22n`, `faxx`), and checks the weapons, countermeasures, systems and
 instruments that go with it. It was built in the 2026-09-28 overnight bug battery. The scenario
 file is [`tools/battery_scenarios/flight.py`](../../tools/battery_scenarios/flight.py); how the
-runner works is in the [testing overview](README.md). The two `render-*` capture scenarios live in
+runner works is in the [testing overview](README.md). The `render-*` capture scenarios live in
 [`tools/battery_scenarios/render.py`](../../tools/battery_scenarios/render.py).
 
 ## What it means for the game
@@ -423,12 +423,17 @@ target cycling with several targets in view are exercised only by the probe-atta
 
 ## Render captures
 
-`python3 tools/battery.py --scenario 'render-*'` runs two windowed captures
+`python3 tools/battery.py --scenario 'render-*' --windows 1` runs windowed captures
 (through the wrapper, one window at a time) that reproduce drawing faults. Each
 only checks that the frame is not blank, so look at the PPM it writes:
 
 | Scenario | What it shows | What to look for |
 | --- | --- | --- |
+| `render-f14-roots-top`, `render-f14-roots-side` | Fully swept F-14, top and side | Wing/tail attachments are symmetric, and the wing sits close to the outer root under the fixed glove. |
+| `render-f14-exhaust-top` | Top view with afterburners | Exhaust collars and plume roots have equal widths and engine centerlines. |
+| `render-f14-rear-belly` | Rear underside with afterburners | Aft belly and tail fairing seams are closed; no sky shows through. |
+| `render-f14-nose-belly`, `render-f14-devices-belly` | Forward underside with gear/brakes stowed and deployed | Nose side and under-cockpit seams are closed; intakes and device movement remain visible. |
+| `render-nosewheel-hud-inactive` | F/A-18 takeoff roll past the steering cutoff | NSW authority disappears from the HUD. |
 | `render-mig21-upper-skin` | The MiG-21 in free flight, flight view 2, look `0,-12`, `TORE_WEATHER_TIME=11:00` | The upper wing is plain camouflage: no grey underside shape shows through it. |
 | `render-runway-paint-calm` | The F/A-18 on a UKR ground start (airport 1), takeoff maneuver, 1,300 probe ticks, flight view 1, `TORE_WEATHER_TIME=07:15`, `TORE_WIND=0,0` | The runway paint and joints are whole, with no flicker or z-fighting. |
 

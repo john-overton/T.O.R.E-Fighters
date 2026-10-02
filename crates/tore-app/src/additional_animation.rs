@@ -172,6 +172,9 @@ impl Rig {
         {
             return Err("unreviewed FA aircraft texture".into());
         }
+        if id == AircraftId::F14 {
+            crate::f14_geometry::repair(&mut shape)?;
+        }
         if id == AircraftId::Faxx {
             concept_colors(&mut shape.faces);
         }

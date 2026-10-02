@@ -368,6 +368,11 @@ projection differences. Steering further selects each model's reviewed wheel/str
 skins, leaving separate support braces and doors fixed; the full group still
 retracts. [Steering presentation](../spec/aircraft-animation.md#nosewheel-steering).
 No old ATF offsets or SWPATCH shapes are substituted.
+After that validation, the app applies the F-14-only
+[exterior corrections](../spec/additional-aircraft.md#fitted-exterior-behavior).
+The format reader still returns the source mesh unchanged. Outlet mirroring
+retains the destination face identities for engine materials; seam patches use
+adjacent loaded positions and UVs, with outward normals and separate identities.
 
 Inspect user-owned data with `cargo run --locked -p tore-formats --example
 shape_inspect -- FILE.SH HEX_WORD=1`. Raw geometry output stays local.

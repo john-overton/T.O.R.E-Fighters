@@ -119,6 +119,20 @@ This clears the outer root surface without raising the wing above the inner
 fuselage deck; swept panels tuck beneath the fixed glove. Wing faces, flaps and
 vapor tips share the alignment and sweep transform. The sweep schedule and flight dynamics stay unchanged.
 
+The F-14 exterior also receives **opinionated** source-art repairs following
+John's 2026-10-02 review. He reports these defects in retail as well. The agent
+chooses the better formed right exhaust outlet and collar as the symmetry
+reference, mirroring it onto the left. Both horizontal afterburner sheets span
+their respective outlet widths and stay centered on the engines. Existing
+afterburner length and device animation remain unchanged.
+
+Close six small triangular seams using positions and texture coordinates from
+the adjacent source panels: one aft belly seam, two under-cockpit seams, one
+left nose-side seam and two tail fairing side seams. Preserve the intended
+intakes, cockpit and device openings. These are corrections to the loaded base
+model, not claims of retail parity or a replacement model. Source files stay
+intact. No aircraft dimensions or flight dynamics are changed.
+
 Flaps droop up to 0.4 rad. F-14 tailplanes mix -0.3 rad pitch and ±0.2 rad roll;
 A-4 elevators use -0.3 rad pitch and outboard ailerons ±0.2 rad roll.
 The A-4 elevator is the complete strip aft of fitted source y=-54, z=7 across

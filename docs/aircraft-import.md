@@ -28,6 +28,10 @@ Rafale C. The initial ports support extraction, headless/rendered flight,
 cockpits, fitted animation, source audio references and partial manual systems.
 See the [behavior spec](spec/additional-aircraft.md) and
 [acceptance record](baselines/aircraft-fa-expansion.md) for limits and checks.
+The F-14 base model receives scoped runtime repairs for wing/tail attachment,
+exhaust symmetry and six body seams. These are intentional visual corrections
+using the imported geometry and textures; source media and extracted files are
+unchanged. [Repair contract](spec/additional-aircraft.md#fitted-exterior-behavior).
 
 USNF-ATF supplies research guidance only. Its mixed-edition profiles and toolkit
 SWPATCH F-14 exterior are not used. Exact wing-sweep flight effects, X-31 thrust

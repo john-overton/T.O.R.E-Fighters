@@ -367,6 +367,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/*_art.rs", RENDER_FAMILIES, "art", windowed=True),
     _r("crates/tore-app/src/*animation.rs", RENDER_FAMILIES, "animation", windowed=True),
     _r("crates/tore-app/src/engine_material.rs", RENDER_FAMILIES, "materials", windowed=True),
+    _r("crates/tore-app/src/f14_geometry.rs", ("flight-views",), "F-14 source geometry repairs", windowed=True),
     _r("crates/tore-app/src/surface_lighting.rs", RENDER_FAMILIES, "lighting", windowed=True),
     _r("crates/tore-app/src/lens_flare.rs", RENDER_FAMILIES, "lens flare", windowed=True),
     _r("crates/tore-app/src/celestial.rs", RENDER_FAMILIES, "sun and moon", windowed=True),
