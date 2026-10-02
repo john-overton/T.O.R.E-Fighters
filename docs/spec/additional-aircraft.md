@@ -147,9 +147,16 @@ Gear rotates through a fitted quarter turn and disappears at full retraction.
 A-4/X-31 side brakes interpolate through 1.05 rad from their open meshes;
 F-14 brakes hinge continuously through a fitted 45 degrees to the source raised
 pose, around their forward edge; see the [animation contract](aircraft-animation.md). A-4's stowed hook rotates
-0.9 rad; F-14's projected hook uses a 0.6 rad travel, but its source triangles
-collapse through quantization. Give the coincident root vertices a fitted
-±0.125 source-unit width, preserving the center and tip, to make the hook visible.
+0.9 rad. The F-14 source hook has two untextured, collapsed triangles. John
+suggested the F-22N hook as a shape/texture reference on 2026-10-02. The agent
+chooses to replace the triangles with the loaded F-22N's textured,
+two-sided hook blade, retaining its original UVs and transparent outline. This
+is an **opinionated** visual substitution. The agent's **fitted** placement
+uniformly scales and rotates that blade so its root midpoint meets the F-14
+hinge `(0,-5,-2)` and its tip midpoint meets `(0,-12,-6)`, in F-14 source units.
+Keep the F-14's 0.6 rad retraction about that hinge and hide it at zero extension.
+No source art is bundled, no F-22N geometry is changed, and no carrier arrestment
+physics is added. The previous triangular widening is removed.
 F-14/X-31 flames follow the existing exhaust fraction. A-4 has no flame branch.
 
 Cockpit mirrors use three reviewed flat-fill regions for F-14D and A-4E;

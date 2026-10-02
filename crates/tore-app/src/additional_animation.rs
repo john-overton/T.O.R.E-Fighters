@@ -348,16 +348,8 @@ impl Rig {
                     if s.hook <= 0. {
                         return None;
                     }
-                    // Quantization collapses the two source root vertices.
-                    // A fitted 1/4-source-unit root width restores a visible
-                    // triangle while preserving its center and tip.
-                    let mut root = 0;
-                    for p in &mut f.positions {
-                        if p[1] == -5. && p[2] == -2. {
-                            p[0] += if root == 0 { -0.125 } else { 0.125 };
-                            root += 1;
-                        }
-                    }
+                    // The loaded F-22N blade has already been fitted to this
+                    // F-14 hinge and deployed endpoint, preserving its UVs.
                     turn(&mut f, [0., -5., -2.], [1., 0., 0.], -0.6 * (1. - s.hook));
                 }
             }

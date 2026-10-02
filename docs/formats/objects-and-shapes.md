@@ -373,6 +373,10 @@ After that validation, the app applies the F-14-only
 The format reader still returns the source mesh unchanged. Outlet mirroring
 retains the destination face identities for engine materials; seam patches use
 adjacent loaded positions and UVs, with outward normals and separate identities.
+The F-14 hook is an explicit visual substitution using the validated F-22N
+branch and its texture-only material. The renderer atlas includes textures
+referenced by intact poses as well as damage bodies, preserving each source
+image height and row offset for UV mapping.
 
 Inspect user-owned data with `cargo run --locked -p tore-formats --example
 shape_inspect -- FILE.SH HEX_WORD=1`. Raw geometry output stays local.

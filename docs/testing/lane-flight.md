@@ -433,6 +433,7 @@ only checks that the frame is not blank, so look at the PPM it writes:
 | `render-f14-exhaust-top` | Top view with afterburners | Exhaust collars and plume roots have equal widths and engine centerlines. |
 | `render-f14-rear-belly` | Rear underside with afterburners | Aft belly and tail fairing seams are closed; no sky shows through. |
 | `render-f14-nose-belly`, `render-f14-devices-belly` | Forward underside with gear/brakes stowed and deployed | Nose side and under-cockpit seams are closed; intakes and device movement remain visible. |
+| `render-f14-hook-*` | Deployed hook from both sides, half retracted and stowed | The F-22N striped shank and hooked end keep their cutout outline. Retraction stays attached and rigid; zero extension is hidden. |
 | `render-nosewheel-hud-inactive` | F/A-18 takeoff roll past the steering cutoff | NSW authority disappears from the HUD. |
 | `render-mig21-upper-skin` | The MiG-21 in free flight, flight view 2, look `0,-12`, `TORE_WEATHER_TIME=11:00` | The upper wing is plain camouflage: no grey underside shape shows through it. |
 | `render-runway-paint-calm` | The F/A-18 on a UKR ground start (airport 1), takeoff maneuver, 1,300 probe ticks, flight view 1, `TORE_WEATHER_TIME=07:15`, `TORE_WIND=0,0` | The runway paint and joints are whole, with no flicker or z-fighting. |

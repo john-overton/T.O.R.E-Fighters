@@ -191,7 +191,15 @@ impl Airframe {
             }
             crate::rafale_animation::validate(&poses)?;
         } else {
-            let (new_rig, pose) = crate::additional_animation::Rig::load(id, get(&profile.shape)?)?;
+            let (new_rig, mut pose) =
+                crate::additional_animation::Rig::load(id, get(&profile.shape)?)?;
+            if id == tore_formats::aircraft::AircraftId::F14 {
+                let (_, donor) = crate::additional_animation::Rig::load(
+                    tore_formats::aircraft::AircraftId::F22n,
+                    get("F22N.SH")?,
+                )?;
+                crate::f14_geometry::replace_hook(&mut pose, &donor)?;
+            }
             poses.push(pose);
             rig = Some(new_rig);
         }
@@ -236,7 +244,7 @@ impl Airframe {
                 return Err("unreviewed engine face projection".into());
             }
         }
-        let damage_art = crate::damage_art::DamageArt::load(id, data, &mut atlas)?;
+        let damage_art = crate::damage_art::DamageArt::load(id, data, &mut atlas, &poses)?;
         kind.contrail_offsets = contrail_offsets(id, &poses[0], rig.as_ref());
         Ok(Self {
             kind: Arc::new(kind),

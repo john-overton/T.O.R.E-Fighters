@@ -1,5 +1,5 @@
 //! Opinionated repairs to the reviewed base F14 mesh. Retail files stay intact.
-//! Geometry and UVs come from the loaded neighboring faces, never bundled art.
+//! Geometry and UVs come from loaded source faces, never bundled art.
 use tore_formats::shape::{Face, Shape};
 
 // Corresponding right and left outlet/collar faces. Mirroring the complete
@@ -171,6 +171,58 @@ pub(crate) fn repair(shape: &mut Shape) -> Result<(), String> {
     Ok(())
 }
 
+/// User-requested F-22N hook art, fitted to the F-14's existing root and tip.
+/// Both shapes must have passed their own rig layout validation first.
+pub(crate) fn replace_hook(shape: &mut Shape, donor: &Shape) -> Result<(), String> {
+    let old = face(&shape.faces, 0x5836)?;
+    let blade = face(&donor.faces, 0x40a1)?;
+    if old.positions.len() != 3
+        || old.positions[1] != old.positions[2]
+        || blade.positions.len() != 4
+    {
+        return Err("unreviewed F14/F22N hook attachment".into());
+    }
+    let root = old.positions[1];
+    let tip = old.positions[0];
+    let midpoint = |a: [f32; 3], b: [f32; 3]| std::array::from_fn(|i| (a[i] + b[i]) * 0.5);
+    let donor_root: [f32; 3] = midpoint(blade.positions[0], blade.positions[1]);
+    let donor_tip: [f32; 3] = midpoint(blade.positions[2], blade.positions[3]);
+    let vector = |a: [f32; 3], b: [f32; 3]| [b[1] - a[1], b[2] - a[2]];
+    let from = vector(donor_root, donor_tip);
+    let to = vector(root, tip);
+    let length = |v: [f32; 2]| v[0].hypot(v[1]);
+    if length(from) <= 1e-6 || length(to) <= 1e-6 {
+        return Err("degenerate hook span".into());
+    }
+    let scale = length(to) / length(from);
+    let angle = (to[1] as f64).atan2(to[0] as f64) - (from[1] as f64).atan2(from[0] as f64);
+    let mut copies = Vec::new();
+    for (source, address) in [(0x40a1, 0x5836), (0x40c0, 0x584b)] {
+        face(&shape.faces, address)?;
+        let mut f = face(&donor.faces, source)?.clone();
+        if f.positions.len() != 4 || f.uv.len() != 4 || f.subtype != 0x6c {
+            return Err("unreviewed textured F22N hook blade".into());
+        }
+        crate::additional_animation::turn(&mut f, donor_root, [1., 0., 0.], angle);
+        for p in &mut f.positions {
+            *p = std::array::from_fn(|i| root[i] + (p[i] - donor_root[i]) * scale);
+        }
+        // Keep the destination's switch/animation identity, and the donor's
+        // material, UVs, transparent silhouette and opposite face normals.
+        f.address = address;
+        copies.push(f);
+    }
+    for f in copies {
+        let address = f.address;
+        *shape
+            .faces
+            .iter_mut()
+            .find(|old| old.address == address)
+            .unwrap() = f;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,5 +288,111 @@ mod tests {
             vec![[3., -24., 0.], [5., -24., 0.], [5., -14., 0.]]
         );
         assert_eq!(f.uv, uv);
+    }
+    #[test]
+    fn donated_hook_keeps_its_art_and_fits_both_f14_endpoints() {
+        // Synthetic blade and collapsed recipient, no retail mesh or texture.
+        let mut blade = panel(0x40a1);
+        blade.positions = vec![[0., -1., 0.], [0., 1., 0.], [0., -4., -4.], [0., -6., -4.]];
+        blade.uv = vec![[1., 2.], [1., 4.], [8., 4.], [8., 2.]];
+        blade.colors = vec![1; 4];
+        blade.subtype = 0x6c;
+        blade.normal = Some([32767., 0., 0.]);
+        let back = mirrored(&blade, 0x40c0);
+        let donor = Shape {
+            faces: vec![blade.clone(), back],
+            lines: vec![],
+            state_words: Default::default(),
+        };
+        let root = [0., -5., -2.];
+        let tip = [0., -13., -5.];
+        let mut old = panel(0x5836);
+        old.positions = vec![tip, root, root];
+        let mut reverse = old.clone();
+        reverse.address = 0x584b;
+        let mut shape = Shape {
+            faces: vec![old, reverse],
+            lines: vec![],
+            state_words: Default::default(),
+        };
+        replace_hook(&mut shape, &donor).unwrap();
+        assert_eq!(shape.faces.len(), 2);
+        let fitted = &shape.faces[0];
+        assert_eq!(fitted.address, 0x5836);
+        assert_eq!(fitted.uv, blade.uv);
+        assert_eq!(fitted.texture, blade.texture);
+        assert_eq!(
+            fitted.subtype, 0x6c,
+            "keep the texture's transparent silhouette"
+        );
+        for (indices, expected) in [([0, 1], root), ([2, 3], tip)] {
+            for (axis, value) in expected.iter().enumerate() {
+                assert!(
+                    ((fitted.positions[indices[0]][axis] + fitted.positions[indices[1]][axis])
+                        * 0.5
+                        - value)
+                        .abs()
+                        < 1e-5
+                );
+            }
+        }
+        assert_eq!(
+            fitted.normal.unwrap()[0],
+            -shape.faces[1].normal.unwrap()[0]
+        );
+        assert_eq!(
+            fitted.positions.iter().rev().copied().collect::<Vec<_>>(),
+            shape.faces[1].positions
+        );
+        // A uniform fit preserves the donor's outline proportions.
+        let distance = |a: [f32; 3], b: [f32; 3]| {
+            a.iter()
+                .zip(b)
+                .map(|(a, b)| (a - b).powi(2))
+                .sum::<f32>()
+                .sqrt()
+        };
+        let scale = distance(root, tip) / 41f32.sqrt();
+        for i in 0..4 {
+            let j = (i + 1) % 4;
+            assert!(
+                (distance(fitted.positions[i], fitted.positions[j])
+                    - scale * distance(blade.positions[i], blade.positions[j]))
+                .abs()
+                    < 1e-5
+            );
+        }
+        let rig = crate::additional_animation::Rig::synthetic(
+            tore_formats::aircraft::AircraftId::F14,
+            &[],
+            &[],
+            &[],
+            &[0x5836, 0x584b],
+        );
+        let mut state =
+            crate::flight::State::new(&tore_world::test_support::profile(), [0.; 3]).unwrap();
+        state.hook = 0.;
+        assert!(shape.faces.iter().all(|f| rig.animate(f, &state).is_none()));
+        state.hook = 1.;
+        for (p, q) in rig
+            .animate(fitted, &state)
+            .unwrap()
+            .positions
+            .iter()
+            .zip(&fitted.positions)
+        {
+            assert!(distance(*p, *q) < 1e-5);
+        }
+        state.hook = 0.5;
+        let moving = rig.animate(fitted, &state).unwrap();
+        assert_eq!(moving.uv, fitted.uv);
+        assert_eq!(moving.texture, fitted.texture);
+        assert_eq!(moving.subtype, fitted.subtype);
+        // The production hinge is fixed; all donor vertices rotate rigidly
+        // about it, with no leftover per-vertex triangle widening.
+        let hinge = [0., -5., -2.];
+        for (p, q) in fitted.positions.iter().zip(&moving.positions) {
+            assert!((distance(*p, hinge) - distance(*q, hinge)).abs() < 1e-5);
+        }
     }
 }

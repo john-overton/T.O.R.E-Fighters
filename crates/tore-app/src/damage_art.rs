@@ -1,4 +1,4 @@
-//! Original alternate damage bodies with a shared, lossless texture atlas.
+//! Aircraft textures and original damage bodies in a shared, lossless atlas.
 use crate::AppResult;
 use std::collections::BTreeMap;
 use tore_formats::{
@@ -19,6 +19,7 @@ impl DamageArt {
         id: AircraftId,
         data: &BTreeMap<String, Vec<u8>>,
         atlas: &mut Pic,
+        intact_poses: &[Shape],
     ) -> AppResult<Self> {
         let get = |name: &str| {
             data.get(name)
@@ -67,9 +68,12 @@ impl DamageArt {
             [atlas.width, atlas.height, 0],
         )]);
         let mut textures = Vec::new();
-        for body in bodies.iter().chain(&fragments) {
+        // Include reviewed visual substitutions on the intact model, such as
+        // the F-22N hook artwork fitted to the F-14. Keep every source atlas's
+        // own height for its bottom-up UV mapping.
+        for body in intact_poses.iter().chain(&bodies).chain(&fragments) {
             if body.faces.is_empty() {
-                return Err("empty damaged aircraft body".into());
+                return Err("empty aircraft body".into());
             }
             for face in &body.faces {
                 if !face.texture.is_empty() && !regions.contains_key(&face.texture) {
