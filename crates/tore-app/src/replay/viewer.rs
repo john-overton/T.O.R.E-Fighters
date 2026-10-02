@@ -2113,7 +2113,10 @@ impl Viewer {
                     let body = Body::weapon(p, 1.);
                     let target = p
                         .target
-                        .and_then(|id| self.body_of(picture, tick, Target::Aircraft(id)))
+                        .and_then(|id| {
+                            self.body_of(picture, tick, Target::Aircraft(id))
+                                .or_else(|| self.body_of(picture, tick, Target::Ground(id)))
+                        })
                         .map_or_else(
                             || std::array::from_fn(|i| p.position[i] + p.direction[i] * 1000.),
                             |b| b.position(),
@@ -3767,6 +3770,28 @@ mod tests {
     fn far_site() -> [f64; 3] {
         let at = f::position(0, FAR_AT);
         [at[0] + 50. * NMI, at[1], at[2]]
+    }
+
+    #[test]
+    fn cycling_missile_view_keeps_a_ground_target_centered() {
+        let (_dir, mut v) = with_ground("viewer-missile-ground-target");
+        v.clock.seek(FAR_AT as f64);
+        press(&mut v, "F12");
+        let mut picture = v.playback.picture(FAR_AT, 1.);
+        let missile = picture
+            .projectiles
+            .iter_mut()
+            .find(|p| p.id == f::MISSILE)
+            .unwrap();
+        missile.target = Some(9_050);
+        // The target exists in the recorded world, not in aircraft snapshots.
+        assert!(picture.target(9_050).is_none());
+        let camera = v.frame_camera(&picture, FAR_AT, 0., false);
+        let [x, y] = camera
+            .project([960, 720], far_site())
+            .expect("ground target in view");
+        assert!((x - 480.).abs() < 0.01 && (y - 360.).abs() < 0.01);
+        assert_eq!(v.selected_missile, Some(f::MISSILE));
     }
 
     #[test]

@@ -29,7 +29,8 @@ or captures are committed. This is host validation, not a retail parity claim.
 
 - Workspace formatting, strict clippy, build and all Rust tests passed on Linux.
   Supplemental replay tests cover overlapping missile and bomb lifetimes,
-  spawn, expiry, wraparound, no-live-object fallback and backward seeking.
+  spawn, expiry, wraparound, no-live-object fallback, backward seeking and
+  a ground target present only in the recorded world.
 - Synthetic tests verify engine-off rudder motion, mirrored rudder input,
   nosewheel speed boundaries, overspeed roll times for 99 seeds in both
   adapters, timer reset, Invulnerable, and exact snapshot restore before a roll.

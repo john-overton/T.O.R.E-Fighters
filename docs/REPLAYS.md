@@ -924,7 +924,9 @@ are agent choices (2026-09-28).
   does; threat, wing, target and fly-by views work from it. Unmodified F12
   cycles every active missile in stable projectile-id order, retaining a living
   selection as others launch. An expired selection advances to the next live id
-  and wraps, falling back outside the aircraft when none remain. F6
+  and wraps, falling back outside the aircraft when none remain. Missile views
+  face their retained aircraft or standing ground target, otherwise their flight
+  direction. F6
   pressed again moves to the next wingman and names it ("Wingman view: Enemy
   1-2", the recorded label). Alt with a view key uses the aircraft's target
   as the reference and Ctrl its newest missile in flight (its shots at the
