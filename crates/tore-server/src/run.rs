@@ -13,6 +13,8 @@ use std::{sync::mpsc::Receiver, time::Duration};
 
 /// How often each player's figures are logged.
 pub const FIGURES_INTERVAL: Duration = Duration::from_secs(60);
+/// The host's tick, which the loop wakes for.
+const TICK: Duration = Duration::from_nanos(1_000_000_000 / tore_session::host::TICKS_PER_SECOND);
 
 /// Why the loop ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +53,9 @@ impl<'a> Loop<'a> {
 
     /// Runs until the console says `quit` or the host has finished.
     pub fn run(&mut self, host: &mut dyn Host) -> Ended {
+        if let Some(line) = self.timer.keep_on_time(TICK) {
+            self.log_line(&line);
+        }
         let mut next_status =
             (!self.status_interval.is_zero()).then(|| self.timer.now() + self.status_interval);
         let mut next_figures = self.timer.now() + FIGURES_INTERVAL;
@@ -242,6 +247,32 @@ mod tests {
         assert!(lines[2].ends_with("seat 1 Viper (plane 0) left: left"));
         assert!(lines[3].ends_with("The last mission has ended. Stopping."));
         assert!(lines[0].starts_with("2026-09-30 12:34:56"), "{}", lines[0]);
+    }
+
+    #[test]
+    fn what_keeps_the_loop_on_time_is_logged_once_as_it_starts() {
+        let mut rig = Rig::new("run-on-time");
+        rig.timer.on_time = Some("macOS real-time scheduling on".into());
+        let mut host = ScriptedHost {
+            flying: true,
+            finish_at: Some(Duration::from_millis(100)),
+            ..Default::default()
+        };
+        let (_keep, console) = channel();
+        let mut log = rig.logger();
+        Loop::new(&mut rig.timer, &mut log, &console, 0).run(&mut host);
+        assert_eq!(
+            rig.timer.on_time_tick,
+            Some(Duration::from_nanos(8_333_333))
+        );
+        let file = rig.file();
+        assert_eq!(file.matches("macOS real-time scheduling on").count(), 1);
+        assert!(
+            file.lines()
+                .next()
+                .unwrap()
+                .ends_with("macOS real-time scheduling on")
+        );
     }
 
     #[test]

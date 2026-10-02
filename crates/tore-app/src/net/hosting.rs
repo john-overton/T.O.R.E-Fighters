@@ -32,6 +32,13 @@
 //!   disconnect does not reach sees the client's own timeout message.
 //! - **The port** is closed before the thread reports its end, so a new host
 //!   on the same port binds at once.
+//! - **On time on macOS** (EF-M). The thread holds an `NSProcessInfo`
+//!   activity, latency-critical and user-initiated, from its start to its
+//!   end, so App Nap does not slow a hidden hosting game, and once the
+//!   mission is built it gives itself a Mach time-constraint policy for the
+//!   120 Hz tick (`tore_realtime_native`), whose timers macOS does not
+//!   coalesce. It logs once what took ("Host: macOS real-time scheduling
+//!   on", or why not). Both do nothing on Linux and Windows.
 use crate::net::{
     options::HostOptions,
     session::{Join, NetSession, Transport, build_id},
@@ -52,9 +59,10 @@ use tore_net::{
     LINK_ADDRESS, LinkEnd, Linked, Listen, MAX_NAP, RealClock, SPIN_MARGIN, ServerSocket,
     wait_until,
 };
+use tore_realtime_native::{Activity, real_time_thread, summary};
 use tore_session::{
     AfterEnd, Host, HostConfig, HostLog, LeaveReason, OpenPlanes, Phase, StartMode,
-    wire::messages::EndReason,
+    host::TICKS_PER_SECOND, wire::messages::EndReason,
 };
 use tore_world::mission::MissionSpec;
 
@@ -322,6 +330,8 @@ fn serve(
     reports: &Sender<Report>,
 ) -> End {
     let mut clock = RealClock::new();
+    // Held until the thread stops hosting, a panic included.
+    let activity = Activity::begin("Hosting a T.O.R.E-Fighters game");
     let host = match Host::new(spec, resources, config) {
         Ok(host) => host,
         Err(error) => return End::BuildFailed(error.to_string()),
@@ -336,6 +346,12 @@ fn serve(
         ));
     }
     let host = slot.insert(host);
+    // After the build: a real-time thread that runs long without blocking is
+    // demoted for a while.
+    let tick = Duration::from_nanos(1_000_000_000 / TICKS_PER_SECOND);
+    if let Some(line) = summary(&real_time_thread(tick), activity.outcome()) {
+        log::info!("Host: {line}");
+    }
     let capacity = host.status(clock.now()).capacity;
     let _ = reports.send(Report::Started {
         aircraft: planes as usize,

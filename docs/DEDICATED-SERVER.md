@@ -561,14 +561,25 @@ macOS's timer coalescing for a process it does not treat as in the
 foreground: the runners' processes run at utility QoS, and the kernel then
 lets a timer slip by up to 75 ms (`kern.timer_coalesce_tier3_ns_max`). Raising
 the thread's QoS did not change it; a real-time (time-constraint) thread did
-(16.04 ms). The same is likely, not measured, for a `tore-server` that launchd
-starts and for a hosting game that App Nap slows while its window is hidden or
-minimised. Players would then see the host's aircraft move unevenly. A fix
-(that real-time policy, or keeping App Nap off, for the host thread and this
-loop) is planned as its own slice. **Until then, on a Mac, keep a hosting
-game in the foreground, and run `tore-server` from Terminal.** On a real Mac
-a program run from Terminal or in the foreground is expected to wake on time
-(not measured: there is no Mac here, only the CI runners).
+(16.04 ms).
+
+**On a Mac the loop now wakes on time (EF-M, 2026-10-01).** On macOS the
+server runs its loop as a real-time thread (a Mach time-constraint policy:
+one 120 Hz tick of period, half a tick of computation; agent decision) and
+holds an App Nap exemption, latency-critical and user-initiated, for its
+whole life, which also keeps the Mac from idle sleep while it runs. After
+the start lines the log says what took: "macOS real-time scheduling on", or
+what was refused and why. On the macOS runners this
+brought a 120 Hz tick to under 0.3 ms late on average and at most 1.4 ms,
+and a 16 ms sleep to 16.0 to 16.6 ms on average
+([every figure](ARCHITECTURE.md#sleep-and-wait-accuracy-on-each-system-ef-x)).
+A game that hosts does the same on its host thread. Linux and Windows are
+unchanged. Started from Terminal, by launchd or in a hidden window, a Mac
+host is expected to keep its tick, but this is measured on the CI runners
+only, not on a real Mac. One known gap: just after the loop's thread has
+worked for a long time without a break (a mission rebuilt, between missions)
+macOS may briefly let it wake late again; the Intel runner showed late
+stretches of up to 0.1 s after half a second of such work.
 
 ## Ports and firewalls
 

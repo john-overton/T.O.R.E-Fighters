@@ -2016,7 +2016,7 @@ macOS timing.
 | `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator. **Built (D2).** The host and client are state machines that never read a clock or touch a socket: the caller passes the time in, feeds them datagrams and sends what they give, over a UDP socket or the simulator (agent decision). *Slice EF3 adds* the in-process link (`link`) a hosting game flies through, and takes from `tore-server` the dual-stack `ServerSocket` (EF-X: it refuses a port another socket holds for IPv4 on every system, [the game port on each system](#the-game-port-on-each-system-ef-x)) and the sleep-then-spin `wait_until`, which the dedicated server and the game's host thread now share ([the host inside the game](#the-host-inside-the-game-stage-e)). *EF4 adds* `Server::set_silence_exempt`, which a hosting game uses for its own player's connection ([the lobby](#the-lobby)). *EF-K adds* the Keepalive packet and the `Keepalive` thread a joined game runs while its loop is stalled ([a stalled game stays connected](#a-stalled-game-stays-connected-ef-k)) | tore-codec |
 | `tore-import` | library | The data folder, the import pack's reader and writer, media detection and the import itself, moved out of `tore-app` so a server can import and load without the game. *Built (D3a).* | tore-formats |
 | `tore-session` | library | The game's side of networking: the wire messages, the host session (clock, inputs, snapshots, joins), the client session (prediction, interpolation, clock steering, readouts) and the headless bot client. *Wire built (D6)*: the module `wire` has every section and message, the cockpit readout's included, with each end's bookkeeping (acknowledged baselines, priorities, the event queue, the name table) and no clock or socket ([what it settled](formats/net-protocol.md#what-the-games-sections-settled)). *Host built (D7a)*: the module `host` ([the host session](#the-host-session)). *Client built (D8a)*: the modules `client` ([the client session](#the-client-session)) and `bot`, and the `tore-bot` program, which loads an import through `tore-import` | tore-world, tore-net, tore-codec, tore-import |
-| `tore-server` | binary | The dedicated server: configuration, import, logging and the console. **Built (D7b):** options, configuration file, `--import`, `--check`, start-up refusals, the real-time run loop, the console, status lines and the log, around `tore_session::Host`. The run loop drives the host through a small `Host` trait (`host.rs`) that `wiring.rs` implements with `tore_session::Host`, so the loop, console and log are tested against a scripted host on a fake clock (agent decision). Which build is a release is `app::is_release`, the stamped `TORE_BUILD_VERSION` tag, which the game's `--connect` (D8) must use too | tore-session, tore-import |
+| `tore-server` | binary | The dedicated server: configuration, import, logging and the console. **Built (D7b):** options, configuration file, `--import`, `--check`, start-up refusals, the real-time run loop, the console, status lines and the log, around `tore_session::Host`. The run loop drives the host through a small `Host` trait (`host.rs`) that `wiring.rs` implements with `tore_session::Host`, so the loop, console and log are tested against a scripted host on a fake clock (agent decision). Which build is a release is `app::is_release`, the stamped `TORE_BUILD_VERSION` tag, which the game's `--connect` (D8) must use too. *EF-M:* on macOS its loop runs as a real-time thread and it holds App Nap off for its life (`clock.rs`) | tore-session, tore-import, tore-realtime-native |
 | `tore-realtime-native` | library | Keeping a fixed-rate loop on time on macOS: a Mach time-constraint policy for the calling thread and an `NSProcessInfo` activity, latency-critical and user-initiated; no-ops elsewhere. **Built (EF-M)**: the game's host thread and `tore-server`'s loop use it ([sleep and wait accuracy on each system](#sleep-and-wait-accuracy-on-each-system-ef-x)). Its unsafe calls stay inside it, as in `tore-diagnostics-native` | objc2, objc2-foundation (macOS only) |
 
 `tore-sim` and `tore-world` gain `tore-codec` for the exact own-plane state and
@@ -3813,14 +3813,71 @@ time-constraint thread policy made a 16 ms sleep last 16.04 ms (worst 17).
 So the hosted mission's acceptance test is judged against late inputs on
 macOS runners (every correction there followed one; making the sleeps that
 coarse on Linux gives the same picture), and its strict form is an ignored
-test. **Known risk:** a host thread or `tore-server` loop that macOS does not
-treat as foreground (App Nap on a hidden hosting game, a server started by
-launchd) is likely to wake that late too, which players would see as the
-host's aircraft moving unevenly. Not measured on a real Mac. The fix, a
-time-constraint policy or a latency-critical activity for the host thread
-and the server loop, is the lead's next slice; until then the
-[server guide](DEDICATED-SERVER.md) asks a Mac host to keep the game in the
-foreground and run `tore-server` from Terminal.
+test.
+
+*Built (EF-M, 2026-10-01).* The game's host thread and `tore-server`'s loop
+now keep their tick on macOS through `tore-realtime-native`:
+
+- **A Mach time-constraint policy** on the loop's thread, whose timers the
+  kernel does not coalesce: period one tick (8.33 ms), computation half a
+  tick, constraint one tick, preemptible. *Agent decision, fitted:* half a
+  tick covers the host's measured cost (1.3 ms a tick with 30 aircraft,
+  3.5 ms in the AI's opening fight, [the server guide](DEDICATED-SERVER.md#performance))
+  and the wait's 0.4 ms spin; the work must be done before the next tick.
+  The policy is set once the mission is built, since a real-time thread that
+  runs long without blocking is demoted by the kernel for a while.
+- **An `NSProcessInfo` activity**, `NSActivityUserInitiated |
+  NSActivityLatencyCritical`, so App Nap leaves a hidden hosting game alone;
+  user-initiated also keeps the Mac from idle sleep while it hosts. The
+  game's host thread holds it from its start (before the mission builds) to
+  its end, a panic included; `tore-server` holds it for its whole life (its
+  `RealTimer`).
+- **One log line** as the loop starts: "Host: macOS real-time scheduling
+  on" in the game's log, "macOS real-time scheduling on" in the server's,
+  or what was refused and why. Linux and Windows log nothing and change
+  nothing: both calls are no-ops there.
+
+Measured with the same method by EF-M's probe
+(`crates/tore-realtime-native/tests/wait_probe.rs`, an ignored test run on
+the CI runners through a temporary workflow, three runs each, workflow run
+36946197357), each phase on a fresh thread: nothing applied, the activity
+alone, the policy with the activity, and the policy after half a second of
+work without blocking (a mission rebuilt on the loop's thread):
+
+| Runner | Applied | 1 ms sleep, mean / worst | 16 ms sleep, mean / worst | 120 Hz tick, late mean / worst |
+| --- | --- | --- | --- | --- |
+| macos-14 | nothing | 4.6 to 8.3 / 13.5 ms | 51 to 73 / 144 ms | 6.0 to 9.3 / 28.5 ms |
+| macos-14 | activity | 4.7 to 8.4 / 25.1 ms | 46 to 71 / 144 ms | 6.0 to 10.3 / 28.4 ms |
+| macos-14 | **policy and activity** | 1.02 to 1.44 / 1.77 ms | 16.05 to 16.57 / 22.1 ms | 34 to 272 µs / 1.44 ms |
+| macos-14 | policy, after the burst | 1.02 to 1.39 / 1.54 ms | 16.03 to 17.00 / 23.9 ms | 90 to 342 µs / 1.78 ms |
+| macos-15-intel | nothing | 3.4 to 6.5 / 10.2 ms | 30 to 76 / 144 ms | 1.4 to 10.2 / 28.8 ms |
+| macos-15-intel | activity | 1.9 to 6.9 / 10.2 ms | 30 to 75 / 143 ms | 2.6 to 9.5 / 26.0 ms |
+| macos-15-intel | **policy and activity** | 1.08 to 1.11 / 1.28 ms | 16.18 to 16.29 / 30.7 ms | 0.7 to 1.3 µs / 0.40 ms |
+| macos-15-intel | policy, after the burst | 1.08 to 1.12 / 1.32 ms | 16.11 to 16.81 / 80.2 ms | 0.4 µs to 2.0 ms / 103 ms |
+
+On Linux and Windows every phase measured what nothing applied measures
+(16 ms sleeps 16.07 to 16.45 ms on average, ticks under 4 µs late on
+average). What it shows:
+
+- The policy fixes the runners: a 120 Hz tick is noticed under 0.3 ms late
+  on average and at most 1.4 ms, against 1.4 to 10 ms and up to 29 ms
+  without it. An earlier run with a quarter tick of computation and half a tick of
+  constraint (run 36945053889) measured the same (53 µs to 0.3 ms late on
+  average, worst 1.4 ms on macos-14; one 17.6 ms outlier on Intel).
+- The activity changes nothing on the runners, as expected: their timers
+  slip because of their QoS, not App Nap. That it took is shown by `pmset
+  -g assertions`, which lists the probe's `PreventUserIdleSystemSleep`
+  assertion under the activity's reason on every macOS run. Whether it keeps
+  a hidden game's loop on time on a real Mac is not measured.
+- After half a second of work without blocking, Apple silicon stayed on
+  time; on the Intel runner two of three runs had late stretches (worst 45
+  and 103 ms), which looks like the kernel's fail-safe demotion of a busy
+  real-time thread, which it lifts by itself. A rebuild happens in the lobby
+  or between missions, not in flight. **Remaining risk:** not measured on a
+  real Mac; the [server guide](DEDICATED-SERVER.md) says so.
+
+The hosted mission's ignored strict test may pass on the macOS runners now
+that the host thread takes the policy; it was not run.
 
 ### The lobby
 
@@ -4412,6 +4469,7 @@ second completes the plan's stage F and stage E's replays.
 | EF9 Acceptance | lead, then John | all | The lead's smoke test on this machine (a hosting game, a joining game, a bot); then John on three machines (macOS, Linux, Windows) | John flies with friends from the menus |
 | EF-K Keepalive | Opus | EF6 | A joined game whose loop is stalled is kept connected by a keepalive thread, under the connection's own identity, for at most a minute; protocol version 5 | A joined client stalled 15 seconds is not dropped and recovers; one stalled past the bound is dropped; a keepalive from elsewhere keeps nothing alive; the King is unaffected. **Built (EF-K):** see [a stalled game stays connected](#a-stalled-game-stays-connected-ef-k) |
 | EF-X CI on macOS and Windows | Opus | EF-K | Find and fix every macOS and Windows failure of `ci.yml` and `network.yml`, real platform behaviour or over-strict tests | One CI run green on all jobs; each system's game-port behaviour written down. **Built (EF-X):** see [the game port on each system](#the-game-port-on-each-system-ef-x) and [sleep and wait accuracy on each system](#sleep-and-wait-accuracy-on-each-system-ef-x); the macOS golden fingerprints were recorded again, Windows checkouts' CR LF line ends are read, and the real-time tests judge what a slow runner cannot change |
+| EF-M A Mac host on time | Opus | EF-X | A Mach time-constraint policy on the game's host thread and `tore-server`'s loop, and an `NSProcessInfo` latency-critical activity while hosting, in a new native crate | The macOS runners' figures with the fix beside EF-X's; `ci.yml` and `network.yml` green; single-player baseline SAME. **Built (EF-M):** see [sleep and wait accuracy on each system](#sleep-and-wait-accuracy-on-each-system-ef-x) and the crate `tore-realtime-native` |
 | EF-F Smoke-test fixes | Sonnet | EF9 | What the lead's smoke test found: a player who ended its own flight is seated again (it was stuck in the lobby), a networked debrief says how the mission ended instead of "MISSION FAILURE", a server's kick says "The server", the net log and the screen say the same words, a game just left is not listed as Closed, the lobby's cheat notice covers no label, and a `stall SECONDS` input-script step | Tests for each; a windowed run of host, joiner and bot: leave and rejoin twice, an 8 second stall that keeps the joiner connected, the debrief headlines, a server's kick wording. **Built (EF-F):** see [smoke-test fixes](#smoke-test-fixes-ef-f) |
 
 **Phase 2: the rest of stage F, and stage E's replays.** The King's settings

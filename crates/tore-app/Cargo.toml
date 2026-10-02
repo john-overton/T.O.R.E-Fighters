@@ -10,6 +10,7 @@ build = "build.rs"
 
 [dependencies]
 tore-diagnostics-native = { path = "../tore-diagnostics-native" }
+tore-realtime-native = { path = "../tore-realtime-native" }
 log = "0.4"
 # Forward winit's existing tracing events to the same small log sink.
 tracing = { version = "0.1", default-features = false, features = ["log"] }

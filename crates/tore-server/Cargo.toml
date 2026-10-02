@@ -10,6 +10,7 @@ build = "build.rs"
 [dependencies]
 tore-import = { path = "../tore-import" }
 tore-net = { path = "../tore-net" }
+tore-realtime-native = { path = "../tore-realtime-native" }
 tore-session = { path = "../tore-session" }
 tore-world = { path = "../tore-world" }
 

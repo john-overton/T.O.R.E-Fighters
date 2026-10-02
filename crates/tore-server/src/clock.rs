@@ -3,10 +3,13 @@
 //!
 //! The wait itself, sleeping until a little before the deadline and spinning
 //! for the rest, is `tore_net::wait_until`, shared with the game's host
-//! thread; this clock adds the wall clock for the log's dates.
+//! thread; this clock adds the wall clock for the log's dates, and on macOS
+//! keeps the loop on time (slice EF-M): an `NSProcessInfo` activity for the
+//! server's life and a real-time policy on the loop's thread.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tore_net::{RealClock, Sleep};
+use tore_realtime_native::{Activity, real_time_thread, summary};
 
 pub use tore_net::{MAX_NAP, SPIN_MARGIN, wait_until};
 
@@ -14,17 +17,28 @@ pub use tore_net::{MAX_NAP, SPIN_MARGIN, wait_until};
 pub trait Timer: Sleep {
     /// Seconds since 1970-01-01 UTC, for the log's dates.
     fn unix_seconds(&self) -> u64;
+    /// Called on the loop's thread as the loop starts, which wakes every
+    /// `tick`: asks the system to wake it on time. Returns the line to log
+    /// about what it did, if there is one.
+    fn keep_on_time(&mut self, tick: Duration) -> Option<String> {
+        let _ = tick;
+        None
+    }
 }
 
-/// The system's clock.
+/// The system's clock. On macOS it holds an `NSProcessInfo` activity,
+/// latency-critical and user-initiated, from its making to its end, so App
+/// Nap leaves a server that launchd started alone.
 pub struct RealTimer {
     clock: RealClock,
+    activity: Activity,
 }
 
 impl RealTimer {
     pub fn new() -> Self {
         Self {
             clock: RealClock::new(),
+            activity: Activity::begin("Serving a T.O.R.E-Fighters game"),
         }
     }
 }
@@ -44,6 +58,11 @@ impl Timer for RealTimer {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0)
+    }
+
+    /// A Mach time-constraint policy for the loop's thread, on macOS only.
+    fn keep_on_time(&mut self, tick: Duration) -> Option<String> {
+        summary(&real_time_thread(tick), self.activity.outcome())
     }
 }
 
@@ -97,6 +116,9 @@ pub mod fake {
         pub unix: u64,
         pub sleeps: Rc<std::cell::RefCell<Vec<Duration>>>,
         pub spins: Rc<Cell<u32>>,
+        /// What `keep_on_time` says, and the tick it was last asked for.
+        pub on_time: Option<String>,
+        pub on_time_tick: Option<Duration>,
     }
 
     impl Sleep for FakeTimer {
@@ -117,6 +139,10 @@ pub mod fake {
     impl Timer for FakeTimer {
         fn unix_seconds(&self) -> u64 {
             self.unix + self.now.get().as_secs()
+        }
+        fn keep_on_time(&mut self, tick: Duration) -> Option<String> {
+            self.on_time_tick = Some(tick);
+            self.on_time.clone()
         }
     }
 }
