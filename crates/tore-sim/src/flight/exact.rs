@@ -399,6 +399,8 @@ impl State {
             crashed,
             wreck,
             ticks,
+            overspeed_ticks,
+            failure_rng,
             cheats,
             jolt,
             // Write-only, outside equality; the next step rewrites it.
@@ -464,6 +466,8 @@ impl State {
             crashed,
             wreck,
             ticks,
+            overspeed_ticks,
+            failure_rng,
             cheats,
             jolt
         );
@@ -537,6 +541,8 @@ impl State {
             crashed: get!(crashed),
             wreck: get!(wreck),
             ticks: get!(ticks),
+            overspeed_ticks: get!(overspeed_ticks),
+            failure_rng: get!(failure_rng),
             cheats: get!(cheats),
             jolt: get!(jolt),
             trace: Default::default(),
@@ -677,6 +683,27 @@ mod tests {
         round_trip(&s, None);
         step(&mut s, 60, |_| PilotInput::default());
         round_trip(&s, None);
+    }
+
+    #[test]
+    fn overspeed_countdown_and_rng_survive_exact_snapshot_restore() {
+        for research in [false, true] {
+            let mut s = State::from_model(model(), [0., 10000., 0.]);
+            if research {
+                s.enable_research(19).unwrap();
+            }
+            s.speed = s.speed / s.overspeed_ratio().unwrap() * 1.1;
+            for _ in 0..719 {
+                s.check_overspeed();
+            }
+            let mut copy = decode(&encode(&s, None), None).unwrap();
+            for _ in 0..481 {
+                s.check_overspeed();
+                copy.check_overspeed();
+                assert_eq!(s, copy);
+            }
+            assert!(s.crashed);
+        }
     }
 
     #[test]

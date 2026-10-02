@@ -147,6 +147,23 @@ impl Art {
                 }
             }
             for face in &self.poses[pose].faces {
+                // Imported thin panels contain opposing skins with independent
+                // UVs. Like aircraft art, only the skin facing this camera draws.
+                if let Some([nx, ny, nz]) = face.normal {
+                    let normal = [nx * cos + nz * sin, ny, -nx * sin + nz * cos];
+                    let [x, z, y] = face.positions[0].map(|v| v / 3.);
+                    let point = [
+                        position[0] + f64::from(x * cos + z * sin),
+                        position[1] + f64::from(y),
+                        position[2] + f64::from(-x * sin + z * cos),
+                    ];
+                    let facing: f64 = (0..3)
+                        .map(|i| f64::from(normal[i]) * (camera[i] - point[i]))
+                        .sum();
+                    if facing <= 0. {
+                        continue;
+                    }
+                }
                 for i in 1..face.positions.len() - 1 {
                     for j in [0, i, i + 1] {
                         let [x, z, y] = face.positions[j].map(|v| v / 3.);
@@ -178,5 +195,63 @@ impl Art {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pilot_panels_draw_one_facing_skin_with_its_own_texture_rows() {
+        use tore_formats::shape::{Face, FogMode};
+        let front = Face {
+            positions: vec![[-3., 0., -3.], [3., 0., -3.], [3., 0., 3.], [-3., 0., 3.]],
+            colors: vec![7; 4],
+            fog: FogMode::Enabled,
+            uv: vec![[0., 0.], [3., 0.], [3., 3.], [0., 3.]],
+            texture: "FRONT".into(),
+            subtype: 0x4c,
+            normal: Some([0., 0., 1.]),
+            address: 0,
+        };
+        let mut back = front.clone();
+        back.positions.reverse();
+        back.uv.reverse();
+        back.normal = Some([0., 0., -1.]);
+        back.texture = "BACK".into();
+        let art = Art::synthetic(
+            (0..5)
+                .map(|_| Shape {
+                    faces: vec![front.clone(), back.clone()],
+                    lines: vec![],
+                    state_words: Default::default(),
+                })
+                .collect(),
+            &[("FRONT", 4, 4), ("BACK", 4, 4)],
+        );
+        let origin = [500000., 12000., -700000.];
+        for phase in [
+            Phase::Seat,
+            Phase::Freefall,
+            Phase::Inflating,
+            Phase::Parachute,
+        ] {
+            for (z, rows) in [(10., 0. ..0.5), (-10., 0.5..1.)] {
+                let camera = [origin[0], origin[1], origin[2] + z];
+                let vertices =
+                    art.vertices_for([(origin, 0., phase)], &[[255; 3]; 256], camera, origin);
+                assert_eq!(
+                    vertices.len(),
+                    6 * 10,
+                    "two opposing skins must not both draw"
+                );
+                for v in vertices.chunks_exact(10) {
+                    assert!(rows.contains(&v[4]), "wrong atlas region: {}", v[4]);
+                    assert!((0. ..1.).contains(&v[3]));
+                    assert_eq!(v[5], -2.);
+                }
+            }
+        }
     }
 }

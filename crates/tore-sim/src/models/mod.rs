@@ -23,6 +23,10 @@ pub struct Tuning {
     pub rudder_rate: f64,
     /// Fitted drag/weight per squared lateral airspeed fraction.
     pub sideslip_drag: f64,
+    /// Fitted lateral slip damping, per second.
+    pub sideslip_force: f64,
+    /// Fitted roll rate per lateral airspeed fraction.
+    pub sideslip_roll: f64,
     pub trim_degrees: f64,
     pub pull_aoa_degrees_per_g: f64,
     pub thrust_lapse_feet: f64,
@@ -42,6 +46,8 @@ impl Tuning {
             self.alignment_rate,
             self.rudder_rate,
             self.sideslip_drag,
+            self.sideslip_force,
+            self.sideslip_roll,
             self.trim_degrees,
             self.pull_aoa_degrees_per_g,
             self.tire_scrub_rate,

@@ -268,6 +268,8 @@ Rudder yaw now consumes the fitted filtered deflection, preserving a smooth
 release. Each aircraft's own tuning includes `sideslip_drag=0.5`: drag/weight is
 that coefficient times squared lateral airspeed fraction times low-speed authority.
 This symmetric continuous loss is authored, not the native display-slip drag law.
+[Lateral flight](spec/lateral-flight.md) adds fitted slip side force and roll coupling,
+and the requested 0 to 25 mph nosewheel schedule.
 Roll retains its single response filter and existing source/hybrid versus fitted/
 legacy cap. No new native rudder-to-roll law is asserted.
 
@@ -391,11 +393,13 @@ hybrid adapter turns them into the highest and lowest G it will deliver:
 - Outside every row at that speed (faster than the polygon's right edge) the limit
   stays at 1 G divided by the loading divisor: the aircraft cannot hold level
   flight. Overspeed is `opinionated` (requested by John,
-  2026-09-29; the numbers are agent decisions, [overspeed](spec/overspeed.md)). The manual says that below about
+  2026-10-01; timing and odds are requested values, [overspeed](spec/overspeed.md)). The manual says that below about
   36,000 ft, beyond the structural limit, "air resistance begins to weaken the airframe and the
   wings will eventually tear off" and gives no numbers. Here the view shakes from 95% of the top speed
-  at the aircraft's altitude, rising to a clear maximum at 100%, and at 1.5 times the top speed
-  the aircraft (player or AI) is lost through the ordinary destroyed path with the cause `overspeed`.
+  at the aircraft's altitude, rising to a clear maximum at 100%. Continuous time
+  above the limit is safe through 5 seconds, followed by 25 percent loss rolls
+  at 6, 7, 8 and 9 seconds and guaranteed destruction at 10 seconds. Returning
+  to the limit resets the timer. Loss uses the ordinary destroyed path with cause `overspeed`.
   Above the ceiling the envelope has no speed range and the rule does not apply.
 - The autopilot makes no promise outside the envelope ([autopilot](spec/autopilot.md)).
 

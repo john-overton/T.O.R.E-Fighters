@@ -10,66 +10,48 @@
 
 ## Requested behavior
 
-Implementation mode. John requested this on 2026-09-29. It is `opinionated`, not
-retail behaviour: the manual (p. 90) says only that below about 36,000 ft, beyond
-the structural limit, "air resistance begins to weaken the airframe and the wings
-will eventually tear off", and gives no numbers. Every number below is an agent
-decision.
+Implementation mode. John requested the time-based failure rule on 2026-10-01,
+replacing the immediate loss at 1.5 times top speed. This is `opinionated`, not
+retail behaviour. The manual (p. 90) says air resistance eventually tears off the
+wings beyond the structural limit, but supplies no timing or probabilities.
 
-The reference speed is the aircraft's **top speed at its current altitude**: the
-right edge of its 1 G envelope polygon, the same figure the envelope window and
-the flight probe use. The ratio is airspeed divided by that top speed. Above the
-envelope's ceiling there is no speed range, so there is no ratio and no rule.
+The limit is the aircraft's top speed at its current altitude: the right edge
+of its 1 G envelope, also used by the envelope window. Above the envelope's
+ceiling there is no speed range, so the timer resets. The native-table research
+adapter remains outside this rule.
 
-| Ratio | What happens | Scope |
-| --- | --- | --- |
-| Below 0.95 | Nothing. | |
-| 0.95 to 1.0 | The cockpit shakes, rising smoothly (a smoothstep) from nothing to the clear maximum. | The player, in the cockpit and every exterior view. |
-| 1.0 and above | Full shake, and the cockpit message `OVERSPEED` every four seconds. | The player. |
-| 1.5 and above | The aircraft is lost through the ordinary destroyed path. | Every aircraft, the player and the AI. |
-
-An **Invulnerable** player (the Damage cheat, [cheats](cheats.md#behaviour-of-each-cheat)) is not lost to overspeed
-(John, 2026-09-29) but keeps the shake and the `OVERSPEED` message. Only the loss is skipped; an AI aircraft has
-no cheats.
-
-The shake is a view offset only. It is a pure function of the ratio and the
-simulation time (two noise terms at 23 and 31 Hz, 60 percent and 40 percent), so
-it repeats exactly, does not depend on the simulation tick rate and never touches
-flight state. Full strength is 0.024 radians (about 1.4 degrees), two and a half
-times the G-effect shake. It is added to the look after the G-effect shake.
-
-At 1.5 times the top speed the airframe fails: the same structural failure a
-fatal hit produces, so the player gets the destroyed event, the wreck tumbles and
-explodes as in [destroyed aircraft](destroyed-aircraft.md), and the AI aircraft
-crashes and its wreck is handled by combat. The cause is recorded as `overspeed`.
-The debrief shows it (a `Cause` row and a `cause=overspeed` suffix in the summary
-line), the mission recording carries it as the `reason` field of the destroyed
-event, and the headless flight probe prints `loss: cause=overspeed`. No kill is
-credited, because nobody shot the aircraft down: an AI aircraft lost to overspeed is recorded
-lost without credit (`Ledger::lose_without_credit`, the same call as the map edge) even if a
-shooter had damaged it earlier, and the debrief counts it as a lost aircraft. A player lost to
-overspeed is never credited to the last aircraft that hit it either.
-
-## What must not fail
-
-Normal flight stays far from the rule: a full afterburner level flight settles at
-92 to 100 percent of the top speed, an F-22 supercruises inside its envelope and
-the AI sprint cases run to about the top speed. Tests: `an_aircraft_is_lost_at_one_and_a_half_times_its_top_speed`
-and `normal_flight_stays_under_the_overspeed_limits` in `flight.rs`, the shake
-test in `g_effects.rs`, and the `flight-overspeed-*` battery scenarios (every
-aircraft lost at 1.6 times its top speed, and a 60 degree afterburner dive from
-40,000 ft that never goes past 1.52 times).
-
-In the dive scenario only the Su-25 reaches 1.5 times its top speed; the others hit
-the ground first at 0.86 to 1.4 times.
-
-## Numbers (agent decisions, 2026-09-29)
-
-| Number | Value |
+| Condition | Behavior |
 | --- | --- |
-| Shake starts | 0.95 of top speed |
-| Full shake | 1.0 of top speed, 0.024 rad |
-| Loss | 1.5 of top speed |
-| Message repeat | 4 s |
+| Below 0.95 of the limit | No shake. |
+| 0.95 to 1.0 | Shake grows by smoothstep to full strength. |
+| At or above 1.0 | Full shake and the player message `OVERSPEED` every 4 seconds. |
+| Strictly above 1.0, through 5 continuous seconds | Timer runs, no loss risk. |
+| At 6, 7, 8 and 9 continuous seconds above 1.0 | One independent 25 percent destruction roll per second. |
+| At 10 continuous seconds above 1.0 | Guaranteed destruction if still alive. |
+| At or below 1.0 | Timer resets to zero. |
 
-Not done: a rumble or sound for the shake (John allowed it as optional).
+The first roll is at 6 seconds, confirmed by John on 2026-10-01. Time is counted
+in 120 Hz simulation ticks, so pause and render cadence cannot change it. Rolls
+use the aircraft's seeded simulation generator, the existing researched-adapter
+RNG or the legacy adapter's fixed-seed generator (seed 1, agent decision).
+The timer and complete RNG state travel in exact multiplayer state snapshots.
+Replay playback displays recorded outcomes; deterministic resimulation reproduces
+rolls from the same input and state. There is no app/server duplicate of this rule.
+
+An Invulnerable player retains the timer, shake and warning but is not destroyed
+and consumes no failure rolls. At or below the limit the timer still resets.
+An aircraft without that cheat uses the ordinary structural destruction path,
+with loss cause `overspeed`, wreck motion, debrief and recording events. No kill
+is credited to a previous attacker. Autonomous decisions are unchanged.
+
+Shake is a view offset only, evaluated from ratio and simulation time. The
+existing fitted constants remain 0.024 radians at full strength, with 23 and
+31 Hz terms weighted 60 and 40 percent. Shake begins at 0.95 of the limit and
+reaches full strength at 1.0. It does not affect the flight state.
+
+Tests exercise all roll boundaries, many seeds including ten-second survivors,
+reset, invulnerability and exact snapshot restore immediately before a roll.
+Headless `flight-overspeed-*` scenarios hold a documented overspeed fixture for
+up to ten seconds and check its cause and timing. The normal-flight tests retain
+level-flight and ceiling checks. Retail comparison and optional shake audio
+remain unavailable and unimplemented respectively.

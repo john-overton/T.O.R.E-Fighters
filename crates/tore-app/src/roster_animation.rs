@@ -336,7 +336,7 @@ pub fn animate(id: Id, f: &mut Face, s: &State) {
     }
 }
 /// Pivots are in each imported shape's coordinates, not borrowed from a different plane.
-pub fn gear(id: Id, f: &mut Face, fraction: f64) {
+pub fn gear(id: Id, f: &mut Face, fraction: f64, steering: f64) {
     let id = id.source();
     let sign = side(f);
     let forward = f.positions.iter().map(|p| p[1]).sum::<f32>() / f.positions.len() as f32;
@@ -358,6 +358,7 @@ pub fn gear(id: Id, f: &mut Face, fraction: f64) {
             [1., 0., 0.],
             -std::f64::consts::FRAC_PI_2 * (1. - fraction),
         );
+        turn(f, front, [0., 0., 1.], -steering);
     } else {
         turn(
             f,

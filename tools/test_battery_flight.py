@@ -185,11 +185,13 @@ class LossTests(unittest.TestCase):
         self.assertTrue(flight.check_edge_lost(out(106, crashed="false"), "UKR"))
 
     def test_overspeed_loss_and_dive(self):
-        self.assertEqual(flight.check_overspeed_loss(self.LOST + "loss: cause=overspeed\n"), [])
+        self.assertEqual(flight.check_overspeed_loss(self.LOST + "loss: cause=overspeed\noverspeed_ticks=840\n"), [])
         self.assertTrue(flight.check_overspeed_loss(self.LOST + "loss: cause=none\n"))
         self.assertEqual(flight.check_dive(self.LOST + EXTREMES + "loss: cause=none\n"), [])
         fast = EXTREMES.replace("speed_over_envelope_top=0.604", "speed_over_envelope_top=1.7")
-        self.assertTrue(flight.check_dive(self.LOST + fast + "loss: cause=overspeed\n"))
+        self.assertEqual(flight.check_dive(self.LOST + fast + "loss: cause=overspeed\n"), [])
+        for tick in (1, 600, 719, 721, 1201):
+            self.assertTrue(flight.check_overspeed_loss(self.LOST + f"loss: cause=overspeed\noverspeed_ticks={tick}\n"))
 
     def test_invulnerable_overspeed_is_not_a_loss(self):
         kept = "ticks=600 speed_kt=900.0 altitude_ft=20000.0 fuel_lb=1.0 crashed=false\nloss: cause=none\n"

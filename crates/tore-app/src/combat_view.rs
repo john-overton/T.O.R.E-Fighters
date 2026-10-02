@@ -388,12 +388,7 @@ impl CombatView {
                 crate::snapshot::set_devices(&mut pose, devices);
             }
             let vertices = model.vertices(&pose, &camera, world, scenery);
-            crate::target_preview::fit(
-                &mut camera,
-                vertices
-                    .chunks_exact(10)
-                    .map(|v| [f64::from(v[0]), f64::from(v[1]), f64::from(v[2])]),
-            );
+            crate::target_preview::fit_vertices(&mut camera, &vertices, scenery.origin);
         }
         Some(camera)
     }

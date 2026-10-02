@@ -112,6 +112,14 @@ pub fn animate(face: &Face, s: &State) -> Option<Face> {
             result.normal = Some([n[0], n[2], n[1]]);
         }
     }
+    if part == GearNose {
+        crate::additional_animation::turn(
+            &mut result,
+            [0., 55., -6.],
+            [0., 0., 1.],
+            -s.nosewheel_angle(),
+        );
+    }
     Some(result)
 }
 

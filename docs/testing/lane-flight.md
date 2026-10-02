@@ -48,8 +48,10 @@ each and the windowed ones five to eight seconds. See "Runtime" at the end for t
 | `land-*` | 676 | The scripted approach and landing (see below): the Hornet at every airport of every base theater, every other aircraft at the first airport of every base theater, the Hornet at the first airport of every variant, all 14 with gear up (must crash for the gear), off the runway (must crash for not landing on a runway) and with no flare, and all 14 in five different winds. On runways of 5,500 ft or more: touches down, stops, no crash, no unsafe touchdown, does not leave the runway surface. |
 | `level`, `pull`, `loop`, `roll`, `stall`, `spin`, `bank-left`, `bank-right` | 336 | Every manoeuvre in every aircraft on the default, `--legacy-flight` and `--researched-flight` adapters: no non-finite value, fuel never rises, no energy from nothing, load, speed, altitude and rates within limits, no veil without G. |
 | `spinrecover-*`, `stallrecover-*` | 28 | The manual's spin and stall recovery procedures recover every aircraft that can enter a spin or stall (X-31 and the F-22 family cannot spin: their data says so). |
-| `climb-*`, `sprint-*` | 28 | How far past its own envelope an aircraft goes (never past the 1.5 times overspeed loss line), and that full-afterburner level flight settles near the top speed. |
-| `overspeed-*` | 28 | Every aircraft is lost at 1.6 times its top speed with cause overspeed, and an afterburner dive from 40,000 ft never passes 1.52 times ([overspeed](../spec/overspeed.md)). |
+| `climb-*`, `sprint-*` | 28 | Climb ceiling behavior and full-afterburner level flight settling near the top speed. Time above the limit, rather than a peak-speed multiplier, determines overspeed failure. |
+| `overspeed-*` | 42 | Every aircraft is held above its limit and lost at a 6 to 10 second boundary with cause overspeed; Invulnerable survives; an unattended dive ends in a loss ([overspeed](../spec/overspeed.md)). |
+| `lateral-*` | 4 | Unpowered rudder turns the path and banks; low-speed nosewheel steering reaches 90 degrees for F/A-18D and Rafale C. |
+| `target-camera-*` | 6 | Close and long-range target window, F7 and F8 captures for visual inspection. |
 | `belly-*` | 28 | The gear key at 80 knots on the roll is refused by the ground sensor (one message, gear still down); the same key once airborne is a normal retraction ([gear on the ground](../spec/gear-on-the-ground.md)). The names keep "belly" from the slide they replaced. |
 | `fault*` | 73 | Every system fault 0..44 on three aircraft in a pull, all 45 at once, and one after another, in every aircraft. |
 | `combatsmoke-*`, `combatevidence-*`, `missileacceptance-*` | 40 | The headless combat smoke (default slots, five damage classes, jettison, radar power, incoming missiles, jammer), the same smoke with per-slot combat tapes written and replayed to the identical state, and the missile reach probes (the F-14 and Su-35 tables are left to the slow set, below). |
@@ -343,13 +345,11 @@ unaffected (the roll only lasts longer).
 
 None of these is defined in the specs, the manual text or the feature matrix, so none was changed.
 
-1. **Overspeed** (decided). John asked on 2026-09-29 for a shake from 95 percent of the top speed
-   and a loss at 1.5 times it, for every aircraft, with the cause recorded
-   ([overspeed](../spec/overspeed.md), `opinionated`, numbers are agent decisions). Before it
-   aircraft passed their own top speed in the dive after a full-power climb (F-22 1.7 times,
-   Su-25 1.9 times, F-14, MiG-29, Su-27 and X-31 1.5 to 1.6 times). Level full afterburner still
-   settles at 92 to 100 percent of the top speed, and the climb and dive scenarios now expect
-   nothing past 1.52 times.
+1. **Overspeed** (decided). John requested the current five-second safe period,
+   seeded 25 percent rolls at 6 to 9 seconds, and guaranteed loss at 10 seconds
+   on 2026-10-01. The fixture holds 1.1 times the current limit to isolate timing;
+   it is not a natural acceleration test. [Behavior](../spec/overspeed.md).
+
 2. **The autopilot's altitude hold outside the envelope.** Beyond the top speed the aircraft cannot
    hold 1 G and sinks; the autopilot spec says "no guaranteed hold outside the flight envelope
    is implied", so this is as written, and inside the envelope the hold now works (see "Bugs

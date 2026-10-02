@@ -171,7 +171,9 @@ exact offset from it. `object_vertex` and `shadow_object_vertex` place those
 vertices through the offset; terrain and airports stay in world coordinates
 and reach the camera through the origin, so only their own storage rounding
 remains. Smoke, vapor and countermeasures stay in world coordinates. An origin
-of zero reproduces world-coordinate vertices exactly.
+of zero reproduces world-coordinate vertices exactly. Target-window framing
+converts those relative mesh vertices back to world positions before fitting
+them against its world-space camera.
 
 Active simulation views request the next redraw without a post-render timer; AutoVsync and a requested maximum frame latency of one provide presentation backpressure. Idle menu behavior is unchanged. Failed/zero-size presentation does not continually schedule simulation redraws. `performance.rs` provides opt-in bounded CPU wall-time sampling via environment variables, with warmup exclusion and view cycling.
 

@@ -8326,6 +8326,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "climb",
                     "dive",
                     "overspeed",
+                    "rudder",
+                    "nosewheel",
                     "gcurve",
                     "sprint",
                     "devices",
@@ -9219,6 +9221,22 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             "roll" => {
                 keys.roll = 1.;
             }
+            "rudder" => {
+                state.yaw = 0.;
+                state.velocity = [0., 0., state.speed];
+                state.engine = false;
+                state.throttle = 0.;
+                keys.yaw = 1.;
+            }
+            "nosewheel" => {
+                state.brake_out = false;
+                state.throttle = 0.;
+                state.speed = 10. * 5280. / 3600.;
+                state.velocity = attitude::Basis::new(state.yaw, 0., 0.)
+                    .forward
+                    .map(|v| v * state.speed);
+                keys.yaw = 1.;
+            }
             "spin" => {
                 state.speed = 180.;
                 state.engine = false;
@@ -9254,7 +9272,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             }
             "dive" => {
                 // A full afterburner dive from 40,000 ft: it should end in the
-                // overspeed loss for aircraft that can reach 1.5 times their top speed.
+                // ground impact or time-based overspeed loss.
                 state.position[1] = 40_000.;
                 state.pitch = -60f64.to_radians();
                 state.throttle = 1.;
@@ -9264,11 +9282,11 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                     .map(|v| v * state.speed);
             }
             "overspeed" => {
-                // Level flight at 20,000 ft, but 1.6 times the top speed there:
-                // the aircraft must be lost to overspeed on the first step.
+                // Timer fixture at 20,000 ft, continuously held at 1.1 times
+                // the current limit below. Not a natural acceleration test.
                 state.position[1] = 20_000.;
                 if let Some(ratio) = state.overspeed_ratio().filter(|r| *r > 0.) {
-                    state.speed *= 1.6 / ratio;
+                    state.speed *= 1.1 / ratio;
                 }
                 state.throttle = 1.;
                 state.velocity = attitude::Basis::new(state.yaw, state.pitch, state.bank)
@@ -9567,6 +9585,14 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let mut rotation: Option<f64> = None;
         let mut liftoff: Option<(u64, f64, f64)> = None;
         for tick in 0..ticks {
+            if maneuver == "overspeed"
+                && !state.crashed
+                && let Some(ratio) = state.overspeed_ratio().filter(|r| *r > 0.)
+            {
+                let scale = 1.1 / ratio;
+                state.speed *= scale;
+                state.velocity = state.velocity.map(|v| v * scale);
+            }
             let scripted;
             let keys = if let Some(probe) = spin_recovery.as_mut() {
                 scripted = probe.keys(&state);
@@ -9757,6 +9783,17 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             state.position[2],
             state.yaw.to_degrees().rem_euclid(360.)
         );
+        println!("overspeed_ticks={}", state.overspeed_ticks);
+        if matches!(maneuver.as_str(), "rudder" | "nosewheel") {
+            println!(
+                "lateral: yaw_deg={:.3} bank_deg={:.3} velocity_x_fps={:.3} path_deg={:.3} wheel_deg={:.3}",
+                state.yaw.to_degrees(),
+                state.bank.to_degrees(),
+                state.velocity[0],
+                state.velocity[0].atan2(state.velocity[2]).to_degrees(),
+                state.nosewheel_angle().to_degrees()
+            );
+        }
         println!("{}", watch.report());
         println!(
             "loss: cause={}",

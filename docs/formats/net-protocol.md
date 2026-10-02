@@ -1107,7 +1107,8 @@ to a replay is stage E.
 - The **protocol version** is one number in `tore-session`
   (`wire::PROTOCOL_VERSION`, 2 since the readout's coding, 3 since the lobby,
   EF4, 4 since chat, EF6, 5 since the transport's [Keepalive](#keepalive),
-  EF-K). Any change to the bytes raises it. A test
+  EF-K, 6 since the exact flight state added the overspeed countdown and legacy
+  failure RNG). Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
   protocol 5 it holds one transport packet too, the Keepalive, sealed for the

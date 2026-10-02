@@ -145,10 +145,10 @@ the listener, camera cuts and view switching do not synthesize pass events.
 Passing recordings already contain a changing timbre; no extra Doppler shift
 is claimed in this first model.
 
-For other aircraft, a boom occurs when the listener crosses the trailing Mach
+For any aircraft passing an external camera, including its own F9 camera, a boom occurs when the listener crosses the trailing Mach
 cone: along-track separation equals lateral distance times `sqrt(Mach^2-1)`.
 This already represents shock arrival, so it receives no second travel delay.
-Only outside-to-inside crossing fires, with rearming outside the cone. A
+Mach 1 uses the limiting cone with zero trailing offset. Only outside-to-inside crossing fires, with rearming outside the cone. A
 constant-velocity local cone is a fitted approximation during turns and speed
 changes. The user's own aircraft also produces one boom on upward Mach 1
 crossing in either external view, rearmed below Mach 0.98. This external-camera

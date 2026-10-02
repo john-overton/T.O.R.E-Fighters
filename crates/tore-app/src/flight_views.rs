@@ -721,7 +721,7 @@ pub(crate) fn object_camera(from: Body, to: Vector, ground: impl Fn(f64, f64) ->
     }
     camera
 }
-fn relation(subject: Body, target: Vector) -> Camera {
+pub(crate) fn relation(subject: Body, target: Vector) -> Camera {
     let d = direction(subject.position, target, subject.basis.forward);
     let (back, up) = if subject.missile {
         (30., 10.)

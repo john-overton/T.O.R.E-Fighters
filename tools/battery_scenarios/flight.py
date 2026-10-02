@@ -1257,13 +1257,12 @@ def waypoint_scenarios() -> list[Scenario]:
 
 def check_climb(output: str) -> list[str]:
     """A full-power climb and the dive after it. Overspeed loses an aircraft at
-    1.5 times its own top speed (docs/spec/overspeed.md); the ceiling is
+    sustained time above its own top speed (docs/spec/overspeed.md); the ceiling is
     enforced by the density rule in docs/FLIGHT-MODEL.md, so a zoom climb carries them at most a fifth past it. These limits are today's
     behaviour with a margin, so a change for the worse is caught; the speed limit
     is not a specification."""
     problems = extremes_problems(output, engine_off_ok=True, beyond_envelope_ok=True)
     c = _numbers(output, "climb:")
-    e = _numbers(output, "extremes:")
     if not c:
         return problems + ["no climb: line"]
     try:
@@ -1273,10 +1272,6 @@ def check_climb(output: str) -> list[str]:
             problems.append(f"climbed to {c['max_altitude_ft']} ft, {c['over_ceiling']} of its {c['ceiling_ft']} ft ceiling")
         if float(c["max_altitude_ft"]) < 0.6 * float(c["ceiling_ft"]):
             problems.append(f"could only climb to {c['max_altitude_ft']} ft of a {c['ceiling_ft']} ft ceiling")
-        # Overspeed loses the aircraft at 1.5 times its top speed
-        # (docs/spec/overspeed.md), so nothing is seen past it.
-        if float(e["speed_over_envelope_top"]) > 1.52:
-            problems.append(f"reached {e['speed_over_envelope_top']} times the envelope's top speed")
     except (KeyError, ValueError):
         problems.append("no result line")
     return problems
@@ -1418,6 +1413,10 @@ def capture_scenarios() -> list[Scenario]:
             )
         )
 
+    for label, distance in (("close", 500), ("long", 60000)):
+        for view in (0, 8, 9):
+            add(f"target-camera-{label}-view{view}", ["--free-flight", "--flight-view", str(view),
+                "--hud-target-preview", f"0,0,{distance}"])
     for ac in AIRCRAFT:
         for fraction in ("0.5", "1"):
             add(f"damage-{ac}-{fraction}", ["--free-flight", "--aircraft", ac, "--flight-view", "1", "--damage-preview", fraction, "--damage-preview-section", "core"])
@@ -1532,18 +1531,21 @@ def edge_scenarios() -> list[Scenario]:
 
 
 def check_overspeed_loss(output: str) -> list[str]:
-    """1.6 times the top speed at 20,000 ft: lost on the first step, with the
+    """A continuous 1.1 times the top speed fixture: lost at 6 to 10 seconds, with the
     cause overspeed (docs/spec/overspeed.md)."""
     problems = []
     if _plain_numbers(output).get("crashed") != "true":
-        problems.append("the aircraft was not lost at 1.6 times its top speed")
+        problems.append("the aircraft survived ten continuous seconds above its top speed")
     if "loss: cause=overspeed" not in output:
         problems.append("the loss did not name overspeed as the cause")
+    timer = re.search(r"^overspeed_ticks=(\d+)$", output, re.M)
+    if timer is None or int(timer.group(1)) not in (720, 840, 960, 1080, 1200):
+        problems.append("loss was not on a 6 to 10 second overspeed boundary")
     return problems
 
 
 def check_overspeed_invulnerable(output: str) -> list[str]:
-    """The same 1.6 times the top speed with the Invulnerable cheat: not lost."""
+    """The same continuous overspeed fixture with the Invulnerable cheat: not lost."""
     problems = []
     if _plain_numbers(output).get("crashed") != "false":
         problems.append("an invulnerable player was lost to overspeed")
@@ -1554,20 +1556,48 @@ def check_overspeed_invulnerable(output: str) -> list[str]:
 
 def check_dive(output: str) -> list[str]:
     """A full afterburner dive from 40,000 ft with nobody pulling out ends on
-    the ground, or in the overspeed loss for the aircraft that reach 1.5 times
-    their top speed on the way. Never a faster one."""
+    the ground, or in the time-based overspeed loss. Peak speed alone is no
+    longer the failure trigger."""
     problems = extremes_problems(output, engine_off_ok=True, beyond_envelope_ok=True)
-    e = _numbers(output, "extremes:")
-    try:
-        if float(e["speed_over_envelope_top"]) > 1.52:
-            problems.append(f"dived to {e['speed_over_envelope_top']} times the top speed, past the 1.5 loss line")
-    except (KeyError, ValueError):
-        problems.append("no result line")
     if _plain_numbers(output).get("crashed") != "true":
         problems.append("an unattended 60 degree dive from 40,000 ft did not end in a loss")
     if "loss: cause=" not in output:
         problems.append("no loss line")
     return problems
+
+
+def check_rudder_path(output: str) -> list[str]:
+    values = _numbers(output, "lateral:")
+    problems = extremes_problems(output, engine_off_ok=True)
+    try:
+        if float(values["velocity_x_fps"]) <= 10 or float(values["bank_deg"]) <= 0.5:
+            problems.append("rudder did not turn the unpowered aircraft's path and bank it")
+    except (KeyError, ValueError):
+        problems.append("no lateral response report")
+    return problems
+
+
+def check_nosewheel(output: str) -> list[str]:
+    values = _numbers(output, "lateral:")
+    problems = extremes_problems(output, engine_off_ok=True)
+    try:
+        if abs(float(values["wheel_deg"]) - 90) > 0.01:
+            problems.append("low-speed nosewheel did not reach 90 degrees")
+        if _plain_numbers(output).get("crashed") != "false":
+            problems.append("taxi steering crashed the aircraft")
+    except (KeyError, ValueError):
+        problems.append("no nosewheel report")
+    return problems
+
+
+def lateral_scenarios() -> list[Scenario]:
+    return [Scenario(name=f"flight-lateral-{maneuver}-{ac}", lane="flight",
+                     args=["--headless-flight", "360", "--maneuver", maneuver,
+                           "--aircraft", ac, "--no-audio", *extra], check=check)
+            for ac in ("f18", "rafale")
+            for maneuver, extra, check in (
+                ("rudder", [], check_rudder_path),
+                ("nosewheel", ["--theater", "UKR", "--ground-start", "1"], check_nosewheel))]
 
 
 def overspeed_scenarios() -> list[Scenario]:
@@ -1577,7 +1607,7 @@ def overspeed_scenarios() -> list[Scenario]:
             Scenario(
                 name=f"flight-overspeed-loss-{ac}",
                 lane="flight",
-                args=["--headless-flight", "600", "--maneuver", "overspeed", "--aircraft", ac, "--no-audio"],
+                args=["--headless-flight", "1200", "--maneuver", "overspeed", "--aircraft", ac, "--no-audio"],
                 check=check_overspeed_loss,
             )
         )
@@ -1585,7 +1615,7 @@ def overspeed_scenarios() -> list[Scenario]:
             Scenario(
                 name=f"flight-overspeed-invulnerable-{ac}",
                 lane="flight",
-                args=["--headless-flight", "600", "--maneuver", "overspeed", "--flight-cheat", "invulnerable", "--aircraft", ac, "--no-audio"],
+                args=["--headless-flight", "1200", "--maneuver", "overspeed", "--flight-cheat", "invulnerable", "--aircraft", ac, "--no-audio"],
                 check=check_overspeed_invulnerable,
             )
         )
@@ -1964,6 +1994,7 @@ def scenarios() -> list[Scenario]:
         + device_scenarios()
         + edge_scenarios()
         + overspeed_scenarios()
+        + lateral_scenarios()
         + liftoff_scenarios()
         + combat_g_scenarios()
         + belly_scenarios()

@@ -71,7 +71,7 @@ use tore_codec::CodecError;
 /// (`TORE_UPDATE_WIRE_GOLDEN=1`). 2 since the readout's coding, 3 since the
 /// lobby (EF4), 4 since chat (EF6), 5 since the transport's Keepalive packet
 /// (EF-K).
-pub const PROTOCOL_VERSION: u16 = 5;
+pub const PROTOCOL_VERSION: u16 = 6;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

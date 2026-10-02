@@ -308,6 +308,9 @@ impl Rig {
                     [1., 0., 0.],
                     -std::f64::consts::FRAC_PI_2 * (1. - s.gear),
                 );
+                if pivot[0] == 0. {
+                    turn(&mut f, pivot, [0., 0., 1.], -s.nosewheel_angle());
+                }
             }
             Some(Part::Brake) => {
                 if s.brake <= 0. {
@@ -536,7 +539,7 @@ fn roster_device(
     let scaling = match part {
         Some(Part::Flame) if s.exhaust > 0. => Some((1, flame_root, s.exhaust as f32)),
         Some(Part::Gear) if s.gear > 0. => {
-            crate::roster_animation::gear(id, &mut f, s.gear);
+            crate::roster_animation::gear(id, &mut f, s.gear, s.nosewheel_angle());
             None
         }
         Some(Part::Brake) if s.brake > 0. => {

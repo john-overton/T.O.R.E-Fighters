@@ -69,6 +69,16 @@ pub fn fit(camera: &mut crate::camera::Camera, points: impl IntoIterator<Item = 
     }
 }
 
+/// Mesh vertices are relative to the render origin; framing measures world positions.
+pub fn fit_vertices(camera: &mut crate::camera::Camera, vertices: &[f32], origin: [f64; 3]) {
+    fit(
+        camera,
+        vertices
+            .chunks_exact(10)
+            .map(|v| std::array::from_fn(|i| origin[i] + f64::from(v[i]))),
+    );
+}
+
 /// Target camera readback alpha separates scenery (0) from aircraft and static
 /// objects (255). Restore opaque alpha after darkening scenery by ten percent.
 pub fn monochrome(pixels: &mut [u8]) {
@@ -84,6 +94,36 @@ pub fn monochrome(pixels: &mut [u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn target_framing_survives_render_origin_changes_at_close_and_long_range() {
+        for distance in [200., 60000.] {
+            let target = [500000., 12000., -700000.];
+            let eye = [target[0], target[1], target[2] - distance];
+            let points = [
+                [target[0] - 20., target[1] - 8., target[2] - 35.],
+                [target[0] + 20., target[1] + 8., target[2] + 35.],
+            ];
+            let mut expected = camera(eye, target);
+            fit(&mut expected, points);
+            for origin in [[0.; 3], [499712., 12288., -700416.], target] {
+                let vertices: Vec<f32> = points
+                    .iter()
+                    .flat_map(|p| {
+                        let mut vertex = [0.; 10];
+                        for i in 0..3 {
+                            vertex[i] = (p[i] - origin[i]) as f32;
+                        }
+                        vertex
+                    })
+                    .collect();
+                let mut actual = camera(eye, target);
+                fit_vertices(&mut actual, &vertices, origin);
+                assert_eq!(actual.zoom, expected.zoom);
+                assert_eq!(actual.near_clip, expected.near_clip);
+            }
+        }
+    }
+
     #[test]
     fn preview_requests_average_24_fps_without_catch_up_bursts() {
         use std::time::{Duration, Instant};

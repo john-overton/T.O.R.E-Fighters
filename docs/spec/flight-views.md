@@ -119,8 +119,9 @@ scene camera without a second cockpit overlay.
   also qualifies. This view does not grant sensor locks or weapon support.
 - The last player missile is the highest launched projectile identity observed
   during the flight, excluding guns and incoming fixtures. Its expiration does
-  not switch the view back to an older missile. The mission replay follows the
-  selected aircraft's missiles by the same rule; another aircraft's shots at
+  not switch the view back to an older missile. Alt/Ctrl references in mission replay follow the
+  selected aircraft's missiles by the same rule; unmodified replay F12 cycles
+  all active missiles by stable id, advancing when the selected one expires; another aircraft's shots at
   the player count. F12 uses its retained target,
   independent of the player's later designation. Without a retained target,
   it looks along the missile's flight direction.

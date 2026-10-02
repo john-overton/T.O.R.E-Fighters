@@ -82,7 +82,7 @@ pub struct Listener {
     pub external: bool,
     /// The aircraft the listener flies, whose source among the ones given to
     /// [`Passes::step`] is its own: its sonic boom is heard from an outside
-    /// view only, and it never passes itself. `None` for a listener that flies
+    /// view only. External fly-by cameras can be passed by it. `None` for a listener that flies
     /// nothing.
     pub own: Option<u32>,
 }
@@ -332,7 +332,11 @@ impl Passes {
                 } else {
                     self.own_armed = Some(mach < 1.);
                 }
-                continue;
+                // Outside cameras can be passed by their own aircraft too.
+                // The cockpit still excludes its own pass and trailing shock.
+                if !listener.external {
+                    continue;
+                }
             }
             let kind = match source.id {
                 SourceId::Aircraft(_) => Kind::AircraftPass,
@@ -341,7 +345,7 @@ impl Passes {
             let maximum = kind.parameters().1;
             let relative = sub(source.position, listener.position);
             let distance = length(relative);
-            let cone = if matches!(source.id, SourceId::Aircraft(_)) && mach > 1. {
+            let cone = if matches!(source.id, SourceId::Aircraft(_)) && mach >= 1. {
                 let along = dot(relative, source.velocity) / speed;
                 let lateral = (dot(relative, relative) - along * along).max(0.).sqrt();
                 Some(along - lateral * (mach * mach - 1.).sqrt())
@@ -624,6 +628,36 @@ mod tests {
         assert!(e[0].arrived);
         assert!(passes.step(l, &[s]).is_empty());
     }
+    #[test]
+    fn sonic_passes_include_mach_one_and_the_flyby_aircraft() {
+        for id in [0, 17] {
+            for mach in [1., 1.01, 2.] {
+                let mut passes = Passes::default();
+                let mut l = listener();
+                l.external = true;
+                l.view = 10;
+                let speed = speed_of_sound(0.) * mach;
+                let mut s = Source {
+                    id: SourceId::Aircraft(id),
+                    position: [-4000., 0., 300.],
+                    velocity: [speed, 0., 0.],
+                };
+                let mut events = Vec::new();
+                for _ in 0..1200 {
+                    events.extend(passes.step(l, &[s]));
+                    s.position[0] += speed * DT;
+                }
+                assert_eq!(events.len(), 1, "id={id}, mach={mach}");
+                assert_eq!(events[0].kind, Kind::SonicBoom);
+                assert!(events[0].arrived);
+                // Reselecting F9 ahead of the aircraft gives another actual pass.
+                l.view += 1;
+                s.position[0] = -4000.;
+                assert!(passes.step(l, &[s]).is_empty());
+            }
+        }
+    }
+
     #[test]
     fn own_boom_external_only_rearms_and_does_not_fire_on_view_switch() {
         let mut p = Passes::default();

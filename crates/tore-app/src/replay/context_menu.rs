@@ -268,6 +268,29 @@ pub struct Menu {
 }
 
 impl Menu {
+    /// Refresh a live object list without moving the focus to a different
+    /// surviving object. Cancel a pending click when its rows change.
+    pub fn replace_items(&mut self, items: Vec<Item>) {
+        if self.items == items {
+            return;
+        }
+        let action = self.items.get(self.focus).and_then(|i| i.action);
+        self.items = items;
+        self.rows = self.items.len().clamp(1, MAX_ROWS);
+        self.rect.3 = self.row * (self.rows as i32 + 1) + 2;
+        self.rect.1 = self
+            .rect
+            .1
+            .min((crate::replay::panels::HEIGHT - EDGE - self.rect.3).max(EDGE));
+        self.focus = action
+            .and_then(|a| self.items.iter().position(|i| i.action == Some(a)))
+            .or_else(|| self.next(0, 1, true))
+            .unwrap_or(0);
+        self.scroll = self.scroll.min(self.items.len().saturating_sub(self.rows));
+        self.pressed = None;
+        self.reveal();
+    }
+
     /// A menu opened by a click at layer point `at`, placed beside the
     /// point and kept inside the layer; a point outside the layer (in the
     /// bands beside or above it) is brought to its edge first.

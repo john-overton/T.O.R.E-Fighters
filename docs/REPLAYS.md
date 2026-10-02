@@ -921,7 +921,10 @@ are agent choices (2026-09-28).
   [view rules](spec/flight-views.md#mission-replay): front, up and track sit
   at the aircraft and hide it (there is no cockpit in a replay); back looks
   from its pilot's eye over its spine and tails, as the player's own F2
-  does; threat, wing, target, fly-by and missile views work from it. F6
+  does; threat, wing, target and fly-by views work from it. Unmodified F12
+  cycles every active missile in stable projectile-id order, retaining a living
+  selection as others launch. An expired selection advances to the next live id
+  and wraps, falling back outside the aircraft when none remain. F6
   pressed again moves to the next wingman and names it ("Wingman view: Enemy
   1-2", the recorded label). Alt with a view key uses the aircraft's target
   as the reference and Ctrl its newest missile in flight (its shots at the
@@ -943,6 +946,11 @@ are agent choices (2026-09-28).
   return to F1 as flight does); once the aircraft has left the recording (a
   wreck that exploded), the camera stays where it was. The viewer opens in
   the external view of the player.
+- **Active weapons in the object list.** Empty-space right-click lists aircraft
+  and active missiles, bombs and rockets. It refreshes during playback and seeking,
+  removes expired weapons, and preserves focus by object identity. Choosing a
+  weapon opens View from here. Guns are excluded. F12 cycles missiles only.
+  These replay choices were requested by John on 2026-10-01.
 - <a id="object-view"></a>**Object view.** A camera from any object to any
   other, at any range: aircraft, ground objects of the recorded world
   (buildings, runways and the like, until they are destroyed) and weapons in

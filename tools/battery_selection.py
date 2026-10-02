@@ -48,7 +48,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         (
             "flight-level-*", "flight-pull-*", "flight-loop-*", "flight-roll-*", "flight-bank-*",
             "flight-sprint-*", "flight-climb-*", "flight-overspeed-*", "flight-combatg-*",
-            "flight-autopilot-*", "flight-waypoint-*",
+            "flight-autopilot-*", "flight-waypoint-*", "flight-lateral-rudder-*",
         ),
     ),
     "flight-stall": (
@@ -59,7 +59,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "ground start, takeoff roll, gear contact, climb-out, loadouts at takeoff",
         (
             "flight-takeoff-*", "flight-groundstart-*", "flight-belly-*", "flight-climbout-*",
-            "flight-loadout-*", "replay-script-takeoff-*",
+            "flight-loadout-*", "replay-script-takeoff-*", "flight-lateral-nosewheel-*",
         ),
     ),
     "flight-landing": ("approach and landing", ("flight-land-*", "flight-approach-*")),
@@ -143,7 +143,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
     "windowed-menus": ("captured windows: launches, terrain, previews, sizes", ("menus-window-*",)),
-    "flight-views": ("camera views and their rendering", ("replay-view-*", "render-*")),
+    "flight-views": ("camera views and their rendering", ("replay-view-*", "render-*", "flight-target-camera-*")),
     # Replay lane.
     "replay-recording": (
         "recording, reading and corrupting replay files",

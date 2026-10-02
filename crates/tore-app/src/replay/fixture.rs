@@ -252,6 +252,11 @@ fn frame(tick: u64) -> Frame {
 
 /// Writes the synthetic recording into `dir` and opens it.
 pub fn recording(dir: &Path, name: &str) -> Recording {
+    recording_with_weapons(dir, name, false)
+}
+
+/// Extra overlapping missile and bomb lifetimes for replay object selection.
+pub fn recording_with_weapons(dir: &Path, name: &str, extra: bool) -> Recording {
     let path = dir.join(format!("{name}.tore-replay"));
     let mut writer = replay::Writer::create_with(
         &path,
@@ -294,11 +299,34 @@ pub fn recording(dir: &Path, name: &str) -> Recording {
     writer
         .register_weapon(&weapon(1, "AA10", WeaponClass::Missile))
         .unwrap();
+    if extra {
+        writer
+            .register_weapon(&weapon(2, "MK82", WeaponClass::Bomb))
+            .unwrap();
+    }
     for tick in FIRST..=LAST {
         if (GAP.0..=GAP.1).contains(&tick) {
             continue;
         }
-        writer.push(&frame(tick)).unwrap();
+        let mut frame = frame(tick);
+        if extra {
+            frame.projectiles.clear();
+            for (id, weapon, start, end) in [
+                (7, 1, 100, 300),
+                (9, 1, 100, 200),
+                (11, 1, 150, 400),
+                (13, 2, 120, 240),
+                (14, 0, 120, 240),
+            ] {
+                if (start..end).contains(&tick) {
+                    frame
+                        .projectiles
+                        .push(projectile(id, 1, weapon, tick, start));
+                }
+            }
+            frame.projectiles.sort_by_key(|p| p.id);
+        }
+        writer.push(&frame).unwrap();
     }
     let path = writer.finish(&replay::Footer::default()).unwrap();
     let recording = Recording::open(path).unwrap();

@@ -317,6 +317,16 @@ impl Label {
     }
 }
 
+/// Keep a live identity, advance past a missing one, and wrap in stable id order.
+fn active_successor(current: Option<u32>, ids: &[u32], advance: bool) -> Option<u32> {
+    if !advance && current.is_some_and(|id| ids.contains(&id)) {
+        return current;
+    }
+    current
+        .and_then(|id| ids.iter().copied().find(|next| *next > id))
+        .or_else(|| ids.first().copied())
+}
+
 /// Name labels over `poses` for a view of `size` through `camera`: each
 /// aircraft's label in its side's colour, `selected` in brackets. Aircraft
 /// over 100 nautical miles away, wrecks on the ground and the aircraft the
@@ -723,6 +733,8 @@ pub struct Viewer {
     anchor: Option<[f64; 3]>,
     rig: Rig,
     selected: u32,
+    /// Stable projectile identity, never an index into a changing list.
+    selected_missile: Option<u32>,
     /// Where the object view starts from when it is not the selected
     /// aircraft: a ground object or a weapon chosen with View from here.
     from: Option<Target>,
@@ -920,6 +932,7 @@ impl Viewer {
             anchor: None,
             rig,
             selected,
+            selected_missile: None,
             from: None,
             look_at: options.look_at,
             announce_wingman: false,
@@ -1064,6 +1077,13 @@ impl Viewer {
 
     /// F1 to F12: a flight view on the selected aircraft, leaving the drone.
     pub fn set_view(&mut self, view: u8) {
+        if view == flight_views::MISSILE {
+            let ids = self.active_missiles(self.clock.tick());
+            let advance = self.view == view
+                && self.drone.is_none()
+                && self.rig.reference == Reference::Aircraft(self.selected);
+            self.selected_missile = active_successor(self.selected_missile, &ids, advance);
+        }
         self.show_view(view, Reference::Aircraft(self.selected));
     }
 
@@ -1741,6 +1761,58 @@ impl Viewer {
             .map(|p| p.id)
     }
 
+    /// F12 uses every active missile in the same recording tick as the object list.
+    fn active_missiles(&mut self, tick: u64) -> Vec<u32> {
+        let Some((frames, at)) = self.playback.frame(tick) else {
+            return Vec::new();
+        };
+        let mut ids: Vec<_> = frames[at]
+            .projectiles
+            .iter()
+            .filter(|p| {
+                self.recording
+                    .weapon_info(p.weapon)
+                    .is_some_and(|w| w.class == WeaponClass::Missile)
+            })
+            .map(|p| p.id)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+
+    fn object_list_items(&mut self) -> Vec<context_menu::Item> {
+        let entries: Vec<_> = self
+            .present()
+            .into_iter()
+            .map(|id| self.menu_entry(id))
+            .collect();
+        let mut items = context_menu::jump_items(
+            &entries,
+            context_menu::Options {
+                live: false,
+                labels: self.ui.labels,
+                trails: self.ui.trails,
+            },
+        );
+        let picture = self.playback.picture(self.clock.tick(), self.clock.alpha());
+        let mut weapons: Vec<_> = picture.projectiles.iter().filter(|p| !p.gun).collect();
+        weapons.sort_by_key(|p| p.id);
+        if !weapons.is_empty() {
+            items.push(context_menu::Item {
+                label: "ACTIVE WEAPONS".into(),
+                detail: String::new(),
+                action: None,
+            });
+            items.extend(weapons.into_iter().map(|p| context_menu::Item {
+                label: format!("{} #{}", p.weapon.trim_end_matches(".JT"), p.id),
+                detail: self.label(p.owner),
+                action: Some(Action::ViewFrom(Target::Missile(p.id))),
+            }));
+        }
+        items
+    }
+
     /// An aircraft as the menus list it.
     fn menu_entry(&self, id: u32) -> context_menu::Aircraft {
         let info = self.info.get(&id);
@@ -1785,17 +1857,7 @@ impl Viewer {
                 self.object_name(target),
                 context_menu::ground_items(id, options),
             ),
-            Target::Nothing => {
-                let entries: Vec<_> = self
-                    .present()
-                    .into_iter()
-                    .map(|id| self.menu_entry(id))
-                    .collect();
-                (
-                    "Jump to an aircraft".to_owned(),
-                    context_menu::jump_items(&entries, options),
-                )
-            }
+            Target::Nothing => ("Jump to an object".to_owned(), self.object_list_items()),
         };
         Menu::new(target, title, items, at, &self.ownship.font)
     }
@@ -2040,10 +2102,32 @@ impl Viewer {
             return self.object_camera(picture, tick);
         }
         let scene = self.scene(picture, tick);
-        match self
-            .rig
-            .camera(self.view, &scene, Camera::new(), self.look, self.zoom)
+        let result = if self.view == flight_views::MISSILE
+            && self.rig.reference == Reference::Aircraft(self.selected)
         {
+            let ids = self.active_missiles(tick);
+            self.selected_missile = active_successor(self.selected_missile, &ids, false);
+            self.selected_missile
+                .and_then(|id| picture.projectiles.iter().find(|p| p.id == id))
+                .map(|p| {
+                    let body = Body::weapon(p, 1.);
+                    let target = p
+                        .target
+                        .and_then(|id| self.body_of(picture, tick, Target::Aircraft(id)))
+                        .map_or_else(
+                            || std::array::from_fn(|i| p.position[i] + p.direction[i] * 1000.),
+                            |b| b.position(),
+                        );
+                    let mut camera = flight_views::relation(body, target);
+                    camera.zoom = self.zoom;
+                    camera
+                })
+                .ok_or("No active missile for this view")
+        } else {
+            self.rig
+                .camera(self.view, &scene, Camera::new(), self.look, self.zoom)
+        };
+        match result {
             Ok(camera) => {
                 self.camera_error = None;
                 if std::mem::take(&mut self.announce_wingman)
@@ -2331,6 +2415,14 @@ impl Viewer {
         }
         let tick = self.clock.tick();
         let picture = self.playback.picture(tick, self.clock.alpha());
+        if self
+            .menu
+            .as_ref()
+            .is_some_and(|m| m.target == Target::Nothing)
+        {
+            let items = self.object_list_items();
+            self.menu.as_mut().unwrap().replace_items(items);
+        }
         self.weather
             .seek(&mut self.world, &mut self.scenery, &self.tracks, tick);
         let player = self.player_state(&picture, tick);
@@ -2629,6 +2721,100 @@ mod tests {
     use super::*;
 
     #[test]
+    fn f12_and_object_menu_follow_overlapping_recorded_weapon_lifetimes() {
+        let dir = TempDir::new("viewer-overlapping-weapons");
+        let recording = Arc::new(f::recording_with_weapons(dir.path(), "weapons", true));
+        let mut v = viewer_recording(recording, &Options::default());
+        v.clock.seek(140.);
+        let listed: Vec<_> = v
+            .object_list_items()
+            .iter()
+            .filter_map(|i| i.action)
+            .collect();
+        for id in [7, 9, 13] {
+            assert!(listed.contains(&Action::ViewFrom(Target::Missile(id))));
+        }
+        assert!(
+            !listed.contains(&Action::ViewFrom(Target::Missile(14))),
+            "gun in object menu"
+        );
+        press(&mut v, "F12");
+        assert_eq!(v.selected_missile, Some(7));
+        press(&mut v, "F12");
+        assert_eq!(v.selected_missile, Some(9));
+        frame_at(&mut v, 150); // New missile does not steal the view.
+        assert_eq!(v.selected_missile, Some(9));
+        frame_at(&mut v, 200); // Follow the next live identity when 9 expires.
+        assert_eq!(v.selected_missile, Some(11));
+        press(&mut v, "F12");
+        assert_eq!(v.selected_missile, Some(7));
+        frame_at(&mut v, 240);
+        assert!(
+            !v.object_list_items()
+                .iter()
+                .any(|i| i.action == Some(Action::ViewFrom(Target::Missile(13))))
+        );
+        frame_at(&mut v, 300);
+        assert_eq!(v.selected_missile, Some(11));
+        frame_at(&mut v, 460);
+        assert_eq!(v.selected_missile, None);
+        assert_eq!(v.camera_error, Some("No active missile for this view"));
+        frame_at(&mut v, 140); // Reverse seek rebuilds the active set.
+        assert_eq!(v.selected_missile, Some(7));
+        assert!(v.camera_error.is_none());
+    }
+
+    #[test]
+    fn missile_cycle_preserves_identity_when_shots_spawn_and_expire() {
+        let mut selected = active_successor(None, &[10, 20, 30], false);
+        assert_eq!(selected, Some(10));
+        selected = active_successor(selected, &[10, 20, 30], true);
+        assert_eq!(selected, Some(20));
+        assert_eq!(
+            active_successor(selected, &[10, 20, 30, 40], false),
+            Some(20)
+        );
+        assert_eq!(active_successor(selected, &[10, 30, 40], false), Some(30));
+        assert_eq!(active_successor(selected, &[10, 30, 40], true), Some(30));
+        assert_eq!(active_successor(Some(40), &[10, 30], false), Some(10));
+        assert_eq!(active_successor(Some(40), &[], false), None);
+        assert_eq!(active_successor(None, &[50], true), Some(50));
+    }
+
+    #[test]
+    fn replay_object_list_adds_and_retires_weapons_and_f12_tracks_a_live_id() {
+        let dir = TempDir::new("viewer-live-weapons");
+        let mut v = viewer(&dir, &Options::default());
+        let weapons = |items: Vec<context_menu::Item>| {
+            items
+                .into_iter()
+                .filter_map(|i| {
+                    if let Some(Action::ViewFrom(Target::Missile(id))) = i.action {
+                        Some(id)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        assert!(weapons(v.object_list_items()).is_empty());
+        v.clock.seek((f::LAUNCH + 1) as f64);
+        assert_eq!(weapons(v.object_list_items()), vec![f::MISSILE]);
+        press(&mut v, "F12");
+        assert_eq!(v.selected_missile, Some(f::MISSILE));
+        v.clock.seek(f::LAST as f64);
+        assert!(weapons(v.object_list_items()).is_empty());
+        let picture = v.playback.picture(v.clock.tick(), 1.);
+        v.frame_camera(&picture, v.clock.tick(), 0., false);
+        assert_eq!(v.selected_missile, None);
+        // Seeking backward restores only objects active at that recorded time.
+        v.clock.seek((f::LAUNCH + 1) as f64);
+        let picture = v.playback.picture(v.clock.tick(), 1.);
+        v.frame_camera(&picture, v.clock.tick(), 0., false);
+        assert_eq!(v.selected_missile, Some(f::MISSILE));
+    }
+
+    #[test]
     fn labels_over_close_aircraft_are_lifted_apart() {
         let label = |id: u32, x: f64, y: f64| Label {
             id,
@@ -2740,6 +2926,9 @@ mod tests {
         static MADE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let recording = Arc::new(f::recording(dir.path(), &format!("viewer-{n}")));
+        viewer_recording(recording, options)
+    }
+    fn viewer_recording(recording: Arc<Recording>, options: &Options) -> Viewer {
         let art = CombatArt::synthetic(BTreeMap::new());
         let mut ownship = crate::combat_view::render_hash_tests::hornet_airframe(true);
         // Menus measure their text, so the font needs its glyphs.
@@ -3129,7 +3318,7 @@ mod tests {
         camera(&mut v, f::LAUNCH + 20);
         assert_eq!(v.camera_error, None);
         camera(&mut v, f::IMPACT + 20);
-        assert_eq!(v.camera_error, Some("That aircraft has no live missile"));
+        assert_eq!(v.camera_error, Some("No active missile for this view"));
         // The front view sits in the aircraft and hides it.
         press(&mut v, "F1");
         let inside = camera(&mut v, 300);

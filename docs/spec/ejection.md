@@ -128,3 +128,8 @@ records provide the fitted suspension-cord interpretation; GPU ribbons are
 0.05 feet wide. Camera distance is 60 feet aft and 22 feet up, pitched down
 0.34 radians, all fitted presentation choices. Independent extra crew,
 post-separation weapon damage to pilots and rendered pilot shadows remain open.
+
+The pilot renderer selects the camera-facing skin of each imported panel, as
+aircraft rendering does. Opposing skins keep their own UV coordinates and atlas
+regions; they must not both draw at the same depth. This is a presentation fix,
+not a change to pilot survival or ejection decisions.

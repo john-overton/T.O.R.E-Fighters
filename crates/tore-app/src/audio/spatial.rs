@@ -377,6 +377,32 @@ mod tests {
         )])
     }
     #[test]
+    fn supersonic_pass_reaches_the_mixer_for_flyby_and_other_aircraft() {
+        let mut clips = clips();
+        clips.insert("&SNCBOOM.11K".into(), clips["&EXPL12.5K"].clone());
+        for own in [true, false] {
+            let mut scene = Scene::default();
+            let mut l = listener();
+            l.external = own;
+            l.view = if own { 10 } else { 0 };
+            let mut source = Source {
+                id: acoustics::SourceId::Aircraft(if own { 0 } else { 9 }),
+                position: [-4000., 0., 300.],
+                velocity: [2230., 0., 0.],
+            };
+            let mut audible = false;
+            for _ in 0..600 {
+                scene.tick(&clips, l, &[source], &[], true);
+                for _ in 0..67 {
+                    audible |= scene.sample(8000.).iter().any(|v| v.abs() > 0.001);
+                }
+                source.position[0] += 2230. / 120.;
+            }
+            assert!(audible, "own={own}: the boom never reached PCM output");
+        }
+    }
+
+    #[test]
     fn fires_loop_nearby_through_the_canopy_and_fade_out_when_gone() {
         let clips = BTreeMap::from([(
             "&FIRE.5K".to_string(),

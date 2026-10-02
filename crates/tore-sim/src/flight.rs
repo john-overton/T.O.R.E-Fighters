@@ -14,8 +14,8 @@ pub const GROUND_SENSOR_MESSAGE: &str = "Ground sensor preventing gear retractio
 /// asked for, 2026-09-29).
 pub const OVERSPEED_SHAKE_START: f64 = 0.95;
 pub const OVERSPEED_SHAKE_FULL: f64 = 1.0;
-/// Share of its top speed at which the airframe is lost.
-pub const OVERSPEED_DESTROY: f64 = 1.5;
+/// Continuous overspeed deadline at the fixed 120 Hz simulation rate.
+pub const OVERSPEED_DEADLINE_TICKS: u32 = 1200;
 // Weight-scaled stall speed (hybrid adapter): the imported envelope's left edges
 // are the aircraft's minimum speeds at its reference weight, and they grow with
 // the square root of the weight over it. The reference weight is the empty weight
@@ -155,6 +155,10 @@ pub struct State {
     pub crashed: bool,
     pub wreck: Option<crate::wreck::Wreck>,
     pub ticks: u64,
+    /// Continuous ticks strictly above the current altitude's speed limit.
+    pub overspeed_ticks: u32,
+    /// Seeded simulation generator for the legacy adapter's failure checks.
+    failure_rng: tore_formats::flight_model::clock_rng::NativeRng,
     /// Player-only session cheats. The native research path ignores them.
     pub cheats: crate::cheats::Cheats,
     /// Fading body [roll, pitch, yaw] rates from a missile blast, rad/s.
@@ -277,6 +281,8 @@ impl State {
             crashed: false,
             wreck: None,
             ticks: 0,
+            overspeed_ticks: 0,
+            failure_rng: tore_formats::flight_model::clock_rng::NativeRng::seeded(1).unwrap(),
             cheats: Default::default(),
             jolt: [0.; 3],
             trace: Default::default(),
@@ -751,24 +757,42 @@ impl State {
         let (_, top) = env.speeds(self.position[1])?;
         (top > 0.).then(|| self.speed / top)
     }
-    /// Overspeed loses the airframe at [`OVERSPEED_DESTROY`] times the top
-    /// speed, the same fatal path as combat destruction. `opinionated`
-    /// (requested by John, 2026-09-29; docs/spec/overspeed.md).
+    /// Time-based structural failure, docs/spec/overspeed.md. All state and
+    /// random draws live in sim and are included in exact network snapshots.
     fn check_overspeed(&mut self) {
         if self.crashed || self.systems.structure.failed {
             return;
         }
-        // An invulnerable player keeps the shake and the message but is not lost
-        // (John, 2026-09-29); the out-of-bounds loss stays fatal for everyone.
-        if !self.cheats.invulnerable()
-            && self
-                .overspeed_ratio()
-                .is_some_and(|ratio| ratio >= OVERSPEED_DESTROY)
-        {
+        if !self.overspeed_ratio().is_some_and(|ratio| ratio > 1.) {
+            self.overspeed_ticks = 0;
+            return;
+        }
+        self.overspeed_ticks = (self.overspeed_ticks + 1).min(OVERSPEED_DEADLINE_TICKS);
+        if self.cheats.invulnerable() {
+            return;
+        }
+        let due = self.overspeed_ticks > 600 && self.overspeed_ticks.is_multiple_of(120);
+        let lost = self.overspeed_ticks >= OVERSPEED_DEADLINE_TICKS
+            || (due
+                && self
+                    .research
+                    .as_mut()
+                    .map_or(&mut self.failure_rng, |r| &mut r.rng)
+                    .chance(25)
+                    .expect("bounded simulation generator"));
+        if lost {
             self.systems
                 .destroy(crate::aircraft_systems::LossCause::Overspeed);
             self.crashed = true;
         }
+    }
+    /// Requested articulation schedule, expressed in radians from actual
+    /// horizontal ground speed, not airspeed. Tire geometry is fitted.
+    pub fn nosewheel_angle(&self) -> f64 {
+        if self.gear < 0.99 || !self.weight_on_wheels() {
+            return 0.;
+        }
+        nosewheel_angle(self.rudder, self.velocity[0].hypot(self.velocity[2]))
     }
     pub fn step(&mut self, input: &PilotInput, ground: impl Fn(f64, f64) -> f64) {
         self.step_surface(input, |x, z| {
@@ -1561,9 +1585,14 @@ impl State {
             * control_scale[2]
             * tuning.rudder_rate
             * authority;
+        let slip_roll = if wheel_contact {
+            0.
+        } else {
+            -dot(basis.right, direction) * tuning.sideslip_roll * authority * control_scale[0]
+        };
         let mut rotation = std::array::from_fn(|i| {
             DT * (-basis.right[i] * (self.pitch_rate + self.auxiliary_rates[1])
-                - basis.forward[i] * (self.roll_rate + self.auxiliary_rates[0])
+                - basis.forward[i] * (self.roll_rate + self.auxiliary_rates[0] + slip_roll)
                 + basis.up[i] * (turn_yaw + rudder_yaw + self.auxiliary_rates[2])
                 + alignment[i] * tuning.alignment_rate * authority)
         });
@@ -1574,12 +1603,14 @@ impl State {
         t.rotation.rudder_yaw = rudder_yaw;
         t.rotation.auxiliary_yaw = self.auxiliary_rates[2];
         if let Some(r) = &self.research {
-            if r.on_ground {
+            if r.on_ground && self.gear >= 0.99 {
+                let angle = nosewheel_angle(self.rudder, horizontal_speed);
+                let ground_velocity = std::array::from_fn(|i| self.velocity[i] + air_wind[i]);
+                let yaw_rate = dot(ground_velocity, basis.forward) / 18. * angle.sin();
                 for (i, v) in rotation.iter_mut().enumerate() {
-                    *v += basis.up[i] * self.rudder * 0.3 * (self.speed / 40.).clamp(0., 1.) * DT;
+                    *v += basis.up[i] * yaw_rate * DT;
                 }
-                t.rotation.ground_steering_yaw =
-                    self.rudder * 0.3 * (self.speed / 40.).clamp(0., 1.);
+                t.rotation.ground_steering_yaw = yaw_rate;
             }
             for (i, v) in rotation.iter_mut().enumerate() {
                 *v += DT * basis.up[i] * r.spin_rate;
@@ -1724,8 +1755,14 @@ impl State {
             wheel_load: wheel_load_fraction,
             speed_capped_from_fps: None,
         };
+        let side_acceleration = if wheel_contact {
+            0.
+        } else {
+            -dot(self.velocity, basis.right) * tuning.sideslip_force * authority
+        };
         for i in 0..3 {
-            self.velocity[i] += (basis.forward[i] * thrust / weight * 32.174
+            self.velocity[i] += (basis.right[i] * side_acceleration
+                + basis.forward[i] * thrust / weight * 32.174
                 - direction[i] * drag / weight * 32.174
                 + lift[i] * self.lift_g * lift_scale * 32.174
                 - if i == 1 { 32.174 } else { 0. })
@@ -1786,6 +1823,12 @@ impl State {
             self.burner = false;
         }
     }
+}
+
+/// Full articulation through 10 mph, linearly removed by 25 mph.
+fn nosewheel_angle(rudder: f64, ground_speed_fps: f64) -> f64 {
+    let mph = ground_speed_fps.abs() * 3600. / 5280.;
+    rudder.clamp(-1., 1.) * std::f64::consts::FRAC_PI_2 * ((25. - mph) / 15.).clamp(0., 1.)
 }
 
 /// Fitted missile-blast jolt at strength 1, fading with [`JOLT_FADE_SECONDS`].
@@ -2001,34 +2044,139 @@ mod tests {
         assert_eq!(ceiling_lift_ratio(f64::NAN, 60_000.), 1.);
     }
     #[test]
-    fn an_aircraft_is_lost_at_one_and_a_half_times_its_top_speed() {
-        // The synthetic 1 G envelope's right edge is 1,700 ft/s at 10,000 ft.
+    fn overspeed_has_five_safe_seconds_seeded_rolls_and_a_ten_second_deadline() {
         for research in [false, true] {
-            let fly = |speed: f64| {
-                let mut s = State::new(&profile(), [0., 10_000., 0.]).unwrap();
+            let mut deadlines = 0;
+            let mut early = 0;
+            for seed in 1..100 {
+                let mut s = State::new(&profile(), [0., 10000., 0.]).unwrap();
+                if research {
+                    s.enable_research(seed).unwrap();
+                } else {
+                    s.failure_rng =
+                        tore_formats::flight_model::clock_rng::NativeRng::seeded(seed).unwrap();
+                }
+                let mut expected_rng = s
+                    .research
+                    .as_ref()
+                    .map_or(&s.failure_rng, |r| &r.rng)
+                    .clone();
+                s.speed = 1700. * 1.01;
+                let mut expected_loss = 1200;
+                for tick in [720, 840, 960, 1080] {
+                    if expected_rng.chance(25).unwrap() {
+                        expected_loss = tick;
+                        break;
+                    }
+                }
+                let mut copy = s.clone();
+                for tick in 1..=expected_loss {
+                    s.check_overspeed();
+                    copy.check_overspeed();
+                    assert_eq!(s, copy, "deterministic at {tick}");
+                    assert_eq!(s.crashed, tick == expected_loss, "seed={seed}, tick={tick}");
+                }
+                assert_eq!(
+                    s.systems.structure.cause,
+                    Some(crate::aircraft_systems::LossCause::Overspeed)
+                );
+                if expected_loss == 1200 {
+                    deadlines += 1;
+                } else {
+                    early += 1;
+                }
+            }
+            assert!(deadlines > 0 && early > 0);
+        }
+    }
+    #[test]
+    fn overspeed_resets_at_the_limit_and_invulnerability_keeps_the_warning() {
+        let mut s = State::new(&profile(), [0., 10000., 0.]).unwrap();
+        s.enable_research(1).unwrap();
+        s.speed = 1700. * 2.;
+        for _ in 0..719 {
+            s.check_overspeed();
+        }
+        assert!(!s.crashed);
+        s.speed = 1700.;
+        s.check_overspeed();
+        assert_eq!(s.overspeed_ticks, 0);
+        s.speed = 1700. * 2.;
+        for _ in 0..600 {
+            s.check_overspeed();
+        }
+        assert!(!s.crashed);
+        s.cheats.damage = crate::cheats::Damage::Invulnerable;
+        for _ in 0..1800 {
+            s.check_overspeed();
+        }
+        assert!(!s.crashed);
+        assert!(s.overspeed_ratio().unwrap() > OVERSPEED_SHAKE_FULL);
+    }
+    #[test]
+    fn nosewheel_schedule_uses_mph_and_has_no_stationary_rotation() {
+        for (mph, degrees) in [(0., 90.), (10., 90.), (17.5, 45.), (25., 0.), (100., 0.)] {
+            for sign in [-1., 1.] {
+                assert!(
+                    (nosewheel_angle(sign, mph * 5280. / 3600.).to_degrees() - sign * degrees)
+                        .abs()
+                        < 1e-10
+                );
+            }
+        }
+        for mph in [0., 5., 10., 17.5, 25., 40.] {
+            let mut s = State::new(&profile(), [0., 5000., 0.]).unwrap();
+            s.enable_research(1).unwrap();
+            s.start_on_runway([0.; 3], 0.).unwrap();
+            s.velocity = [0., 0., mph * 5280. / 3600.];
+            s.speed = s.velocity[2];
+            s.rudder = 1.;
+            s.step_surface(
+                &PilotInput {
+                    yaw: 1.,
+                    ..Default::default()
+                },
+                |_, _| crate::research::Surface::runway(0.),
+            );
+            let yaw = s
+                .trace()
+                .adapter
+                .as_ref()
+                .unwrap()
+                .rotation
+                .ground_steering_yaw;
+            assert_eq!(yaw > 0., mph > 0. && mph < 25., "{mph} mph: {yaw}");
+        }
+    }
+    #[test]
+    fn rudder_turns_the_flight_path_and_banks_without_engine_thrust() {
+        for research in [false, true] {
+            for sign in [-1., 1.] {
+                let mut s = State::new(&profile(), [0., 10000., 0.]).unwrap();
                 if research {
                     s.enable_research(1).unwrap();
                 }
-                s.speed = speed;
-                s.velocity = [0., 0., speed];
-                s.step(&PilotInput::default(), |_, _| 0.);
-                s
-            };
-            let fast = fly(1_700. * 1.4);
-            assert!(!fast.crashed && fast.systems.structure.cause.is_none());
-            assert!(fast.overspeed_ratio().unwrap() > 1.3);
-            let lost = fly(1_700. * 1.6);
-            assert!(lost.crashed && lost.systems.fatal());
-            assert_eq!(
-                lost.systems.structure.cause,
-                Some(crate::aircraft_systems::LossCause::Overspeed)
-            );
-            assert!(
-                lost.systems
-                    .messages
-                    .iter()
-                    .any(|m| m.contains("overspeed"))
-            );
+                s.yaw = 0.;
+                s.velocity = [0., 0., s.speed];
+                s.engine = false;
+                s.throttle = 0.;
+                for _ in 0..360 {
+                    s.step(
+                        &PilotInput {
+                            yaw: sign,
+                            ..Default::default()
+                        },
+                        |_, _| 0.,
+                    );
+                }
+                assert!(
+                    s.velocity[0] * sign > 10.,
+                    "path did not follow rudder: {:?}",
+                    s.velocity
+                );
+                assert!(s.bank * sign > 0.01, "no roll coupling: {}", s.bank);
+                assert!(!s.crashed);
+            }
         }
     }
     #[test]
@@ -3375,8 +3523,8 @@ pub(crate) mod integration_tests {
         moving.enable_research(1).unwrap();
         moving.start_on_runway([0., 1024., 0.], 0.).unwrap();
         moving.brake_out = false;
-        moving.velocity = [0., 0., 40.];
-        moving.speed = 40.;
+        moving.velocity = [0., 0., 20.];
+        moving.speed = 20.;
         for _ in 0..120 {
             moving.step_surface(
                 &PilotInput {
