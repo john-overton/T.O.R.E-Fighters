@@ -253,21 +253,11 @@ impl Viewer {
         }));
         sim.emitters(queue, devices, &glows);
         let destroyed = self.tracks.destroyed(tick);
-        if self
-            .airports
-            .as_ref()
-            .is_none_or(|(set, ..)| *set != destroyed)
-        {
-            self.airports = Some((
-                destroyed.clone(),
-                self.scenery.visible_static_vertices_where(&destroyed),
-                self.scenery.visible_static_lines_where(&destroyed),
-            ));
-        }
-        if let Some((_, vertices, lines)) = &self.airports {
-            sim.airports(device, queue, vertices);
-            sim.airport_lines(device, queue, lines);
-        }
+        sim.airports(
+            device,
+            queue,
+            self.scenery.static_geometry_where(&destroyed),
+        );
         if let Some(art) = &self.art.escape {
             sim.escapees(
                 device,

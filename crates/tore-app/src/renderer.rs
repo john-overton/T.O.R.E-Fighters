@@ -164,9 +164,8 @@ impl Renderer {
     pub fn escapees(&mut self, art: &crate::ejection_art::Art, vertices: &[f32]) {
         self.sim.escapees(&self.device, &self.queue, art, vertices);
     }
-    pub fn airports(&mut self, vertices: &[f32], lines: &[f32]) {
-        self.sim.airports(&self.device, &self.queue, vertices);
-        self.sim.airport_lines(&self.device, &self.queue, lines);
+    pub fn airports(&mut self, geometry: &Arc<crate::scenery::StaticGeometry>) {
+        self.sim.airports(&self.device, &self.queue, geometry);
     }
     /// Smoke puffs, flare smoke and the released chaff and flares.
     pub fn smoke(

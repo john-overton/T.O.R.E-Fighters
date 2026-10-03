@@ -14,7 +14,7 @@ use crate::{
     flight,
     scenery::Scenery,
     sim_renderer::{CombatGeometry, Contact},
-    snapshot::{AircraftPose, Draw, RenderSnapshot, set_devices, wreck_in},
+    snapshot::{AircraftPose, DebrisPose, Draw, RenderSnapshot, set_devices, wreck_in},
     terrain::Terrain,
 };
 use std::collections::BTreeMap;
@@ -133,6 +133,127 @@ fn ownship_pose(template: &flight::State, pose: &AircraftPose) -> flight::State 
 /// per `snapshot.models` entry found in `models`, with each airborne
 /// aircraft's vertex range for the spotting aid, then that model's debris.
 pub fn aircraft_batches<'a>(
+    snapshot: &RenderSnapshot,
+    models: &'a [Airframe],
+    camera: &Camera,
+    world: &Terrain,
+    scenery: &Scenery,
+) -> Vec<(&'a Airframe, Vec<f32>, Vec<Contact>)> {
+    aircraft_batches_with(
+        tore_workers::shared(),
+        snapshot,
+        models,
+        camera,
+        world,
+        scenery,
+    )
+}
+
+// Fitted dispatch threshold: preserve the inline path for small formations.
+// The synthetic wall-time probe and integrated frame runs measure its cost.
+const MIN_AIRCRAFT_JOBS: usize = 4;
+
+enum AircraftJob<'a> {
+    Target(&'a AircraftPose),
+    Debris(&'a DebrisPose),
+}
+
+fn aircraft_batches_with<'a>(
+    workers: &tore_workers::Executor,
+    snapshot: &RenderSnapshot,
+    models: &'a [Airframe],
+    camera: &Camera,
+    world: &Terrain,
+    scenery: &Scenery,
+) -> Vec<(&'a Airframe, Vec<f32>, Vec<Contact>)> {
+    let selected = || {
+        snapshot
+            .models
+            .iter()
+            .filter_map(|id| models.iter().find(|model| model.profile.id == *id))
+    };
+    let visible = |target: &&AircraftPose, draw| {
+        target.draw == draw && target.airborne && Some(target.id) != camera.hidden_target
+    };
+    let count = selected()
+        .map(|model| {
+            let draw = Draw::Model(model.profile.id);
+            snapshot.targets.iter().filter(|t| visible(t, draw)).count()
+                + snapshot.debris.iter().filter(|p| p.draw == draw).count()
+        })
+        .sum();
+    if !workers.should_dispatch(count, MIN_AIRCRAFT_JOBS) {
+        return aircraft_batches_serial(snapshot, models, camera, world, scenery);
+    }
+
+    let selected: Vec<_> = selected().collect();
+    let mut jobs = Vec::with_capacity(count);
+    for (batch, model) in selected.iter().enumerate() {
+        let draw = Draw::Model(model.profile.id);
+        jobs.extend(
+            snapshot
+                .targets
+                .iter()
+                .filter(|t| visible(t, draw))
+                .map(|target| (batch, AircraftJob::Target(target))),
+        );
+        jobs.extend(
+            snapshot
+                .debris
+                .iter()
+                .filter(|piece| piece.draw == draw)
+                .map(|piece| (batch, AircraftJob::Debris(piece))),
+        );
+    }
+    // Each job is one aircraft or detached piece, including formations in
+    // which every aircraft uses the same model. No GPU resource crosses here.
+    let geometry = workers.ordered_map(&jobs, MIN_AIRCRAFT_JOBS, |_, (batch, job)| {
+        let model = selected[*batch];
+        match job {
+            AircraftJob::Target(target) => {
+                let pose = model_pose(model.start(world), target);
+                model.vertices(&pose, camera, world, scenery)
+            }
+            AircraftJob::Debris(piece) => {
+                let mut pose = model.start(world);
+                pose.position = piece.position;
+                pose.damage_variant = piece.variant;
+                [pose.yaw, pose.pitch, pose.bank] = piece.attitude;
+                model.fragment_vertices(&pose, camera, world, scenery)
+            }
+        }
+    });
+    let mut sizes = vec![0; selected.len()];
+    for ((batch, _), vertices) in jobs.iter().zip(&geometry) {
+        sizes[*batch] += vertices.len();
+    }
+    let extents: Vec<_> = selected.iter().map(|model| model.visual_extent()).collect();
+    let mut batches: Vec<_> = selected
+        .into_iter()
+        .zip(sizes)
+        .map(|(model, size)| (model, Vec::with_capacity(size), Vec::new()))
+        .collect();
+    // Completion order never decides draw order. Contacts use the offset in
+    // the final model batch, and debris never gains a spotting-aid contact.
+    for ((batch, job), vertices) in jobs.into_iter().zip(geometry) {
+        let (_, merged, contacts) = &mut batches[batch];
+        let first = merged.len() / 10;
+        merged.extend(vertices);
+        if let AircraftJob::Target(target) = job {
+            contacts.extend(Contact::new(
+                first,
+                merged.len() / 10,
+                scenery.relative(target.position),
+                extents[batch],
+            ));
+        }
+    }
+    batches
+}
+
+/// Pre-threading ordered builder, retained for the inline path and as an independent
+/// reference for worker output. It constructs no parallel staging buffers.
+fn aircraft_batches_serial<'a>(
     snapshot: &RenderSnapshot,
     models: &'a [Airframe],
     camera: &Camera,
@@ -446,6 +567,210 @@ fn vertex(out: &mut Vec<f32>, pos: Vector, color: [f32; 3]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn formation(count: usize, mixed: bool) -> RenderSnapshot {
+        let mut snapshot = RenderSnapshot {
+            models: if mixed {
+                // Deliberately differ from asset order, retain an empty loaded
+                // model and a missing model, and repeat one batch identity.
+                vec![
+                    AircraftId::Rafale,
+                    AircraftId::F18,
+                    AircraftId::F14,
+                    AircraftId::Mig29,
+                    AircraftId::F18,
+                ]
+            } else {
+                vec![AircraftId::F18]
+            },
+            ..Default::default()
+        };
+        for i in 0..count {
+            let id = if mixed && i % 2 == 0 {
+                AircraftId::Rafale
+            } else {
+                AircraftId::F18
+            };
+            snapshot.targets.push(AircraftPose {
+                id: i as u32 + 1,
+                aircraft: Some(id),
+                draw: Draw::Model(id),
+                position: [50. * i as f64, 5000. + i as f64, 1000. + 31. * i as f64],
+                attitude: [0.07 * i as f64, -0.01 * i as f64, 0.1 * i as f64],
+                devices: (i % 3 != 0)
+                    .then_some([1., 0.6, 0.1, 0.4, 0.3, 0.6, 0.2, -0.3, 0.1, 670., 0.75]),
+                damage: crate::snapshot::Damage {
+                    hp: if i % 7 == 0 { 0 } else { 85 },
+                    initial_hp: 100,
+                    sections: [0, 0, 0, 15, 0, 0],
+                    structural: Some(live::DamageSection::LeftWing),
+                },
+                airborne: i % 11 != 0,
+                ..Default::default()
+            });
+        }
+        for (index, draw) in [Draw::Hidden, Draw::Ownship, Draw::Model(AircraftId::Mig29)]
+            .into_iter()
+            .enumerate()
+        {
+            snapshot.targets.push(AircraftPose {
+                id: 1000 + index as u32,
+                draw,
+                airborne: true,
+                ..Default::default()
+            });
+        }
+        for (index, draw) in [
+            Draw::Model(AircraftId::Rafale),
+            Draw::Model(AircraftId::F18),
+            Draw::Ownship,
+            Draw::Model(AircraftId::F18),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            snapshot.debris.push(DebrisPose {
+                owner: index as u32 + 1,
+                draw,
+                position: [-30. * index as f64, 4900., 1000.],
+                attitude: [0.25, 0.6, index as f64],
+                // Exercise an empty debris job as well as drawn fragments.
+                variant: (index != 3).then_some(live::DamageSection::LeftWing as usize),
+            });
+        }
+        snapshot
+    }
+
+    fn assert_batches_identical(
+        expected: &[(&Airframe, Vec<f32>, Vec<Contact>)],
+        actual: &[(&Airframe, Vec<f32>, Vec<Contact>)],
+    ) {
+        assert_eq!(actual.len(), expected.len());
+        for ((expected_model, expected_vertices, expected_contacts), (model, vertices, contacts)) in
+            expected.iter().zip(actual)
+        {
+            assert_eq!(model.profile.id, expected_model.profile.id);
+            assert_eq!(
+                vertices.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                expected_vertices
+                    .iter()
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>(),
+                "vertex bytes for {:?}",
+                model.profile.id,
+            );
+            assert_eq!(contacts.len(), expected_contacts.len());
+            for (actual, expected) in contacts.iter().zip(expected_contacts) {
+                assert_eq!(
+                    (actual.first, actual.count),
+                    (expected.first, expected.count)
+                );
+                assert_eq!(
+                    actual.center.map(f32::to_bits),
+                    expected.center.map(f32::to_bits)
+                );
+                assert_eq!(actual.extent.to_bits(), expected.extent.to_bits());
+            }
+        }
+    }
+
+    #[test]
+    fn aircraft_workers_preserve_original_vertices_contacts_and_order() {
+        let models = crate::combat_view::render_hash_tests::models();
+        let world = tore_world::test_support::terrain();
+        let mut scenery = crate::scenery::tests::scenery();
+        scenery.set_origin([20_000., 4500., -11_000.]);
+        let mut executors = vec![tore_workers::Executor::serial()];
+        executors
+            .extend([1, 2, 4, 8].map(|workers| tore_workers::Executor::parallel(workers).unwrap()));
+        executors.extend([1, 73, 991].map(tore_workers::Executor::shuffled));
+        for snapshot in [
+            formation(30, false),
+            formation(30, true),
+            RenderSnapshot::default(),
+        ] {
+            for smooth in [false, true] {
+                scenery.smooth_weather = smooth;
+                for camera in crate::combat_view::render_hash_tests::cameras() {
+                    let expected =
+                        aircraft_batches_serial(&snapshot, &models, &camera, &world, &scenery);
+                    for executor in &executors {
+                        let actual = aircraft_batches_with(
+                            executor, &snapshot, &models, &camera, &world, &scenery,
+                        );
+                        assert_batches_identical(&expected, &actual);
+                    }
+                    if smooth && !snapshot.models.is_empty() {
+                        let contacts: usize = expected.iter().map(|(_, _, c)| c.len()).sum();
+                        assert!(contacts >= 20, "the formation must actually draw contacts");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn aircraft_workers_keep_the_small_inline_fallback() {
+        let models = crate::combat_view::render_hash_tests::models();
+        let world = tore_world::test_support::terrain();
+        let scenery = crate::scenery::tests::scenery();
+        let camera = Camera::new();
+        let executor = tore_workers::Executor::parallel(2).unwrap();
+        for count in 0..MIN_AIRCRAFT_JOBS {
+            let mut snapshot = formation(count, false);
+            snapshot.debris.clear();
+            let expected = aircraft_batches_serial(&snapshot, &models, &camera, &world, &scenery);
+            let actual =
+                aircraft_batches_with(&executor, &snapshot, &models, &camera, &world, &scenery);
+            assert_batches_identical(&expected, &actual);
+        }
+    }
+
+    /// Portable CPU-only probe. Run separately on a quiet machine in release
+    /// mode; actual frame gains still need the imported scene and graphics host.
+    #[test]
+    #[ignore = "opt-in elapsed geometry timing; run in release mode on a quiet machine"]
+    fn aircraft_geometry_wall_time() {
+        use std::{hint::black_box, time::Instant};
+        let models = crate::combat_view::render_hash_tests::models();
+        let world = tore_world::test_support::terrain();
+        let scenery = crate::scenery::tests::scenery();
+        let camera = crate::combat_view::render_hash_tests::cameras().remove(0);
+        for count in [1, 4, 30] {
+            let mut snapshot = formation(count, false);
+            snapshot.debris.clear();
+            snapshot
+                .targets
+                .retain(|target| target.draw == Draw::Model(AircraftId::F18));
+            for target in &mut snapshot.targets {
+                target.airborne = true;
+            }
+            let expected = aircraft_batches_serial(&snapshot, &models, &camera, &world, &scenery);
+            for workers in [0, 1, 2, 4, 8] {
+                let executor = if workers == 0 {
+                    tore_workers::Executor::serial()
+                } else {
+                    tore_workers::Executor::parallel(workers).unwrap()
+                };
+                let build = || {
+                    aircraft_batches_with(&executor, &snapshot, &models, &camera, &world, &scenery)
+                };
+                assert_batches_identical(&expected, &build());
+                for _ in 0..20 {
+                    black_box(build());
+                }
+                let start = Instant::now();
+                let rounds = 500;
+                for _ in 0..rounds {
+                    black_box(build());
+                }
+                println!(
+                    "aircraft_geometry aircraft={count} workers={workers} rounds={rounds} elapsed_us={:.3}",
+                    start.elapsed().as_secs_f64() * 1e6 / f64::from(rounds),
+                );
+            }
+        }
+    }
 
     #[test]
     fn tracer_ribbon_is_finite_camera_facing_and_visible_end_on() {

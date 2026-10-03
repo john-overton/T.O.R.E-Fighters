@@ -1,5 +1,10 @@
 //! Extensible 3D pass. World data/camera are independent of wgpu; UI composites afterward.
-use crate::{camera::Camera, scenery::Scenery, terrain::Terrain};
+use crate::{
+    camera::Camera,
+    scenery::{Scenery, StaticGeometry},
+    terrain::Terrain,
+};
+use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 /// Material-local packing flag. World and weather art use sixteen independent
@@ -101,6 +106,9 @@ pub struct SimRenderer {
     battle_contacts: Vec<Contact>,
     airports: Option<(wgpu::Buffer, u32)>,
     airport_lines: Option<(wgpu::Buffer, u32)>,
+    /// The immutable batch currently in both static buffers. Fresh renderers
+    /// have no batch, even if their scenery already has cached geometry.
+    airport_geometry: Option<Arc<StaticGeometry>>,
     /// Per-model formation batches, with each aircraft's vertex range.
     dummies: Vec<(
         tore_formats::aircraft::AircraftId,
@@ -768,6 +776,7 @@ impl SimRenderer {
             battle_contacts: Vec::new(),
             airports: None,
             airport_lines: None,
+            airport_geometry: None,
             vapor: None,
             p: pipelines,
             shader,
@@ -874,7 +883,24 @@ impl SimRenderer {
             );
         }
     }
-    pub fn airports(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
+    pub fn airports(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        geometry: &Arc<StaticGeometry>,
+    ) {
+        if self
+            .airport_geometry
+            .as_ref()
+            .is_some_and(|previous| Arc::ptr_eq(previous, geometry))
+        {
+            return;
+        }
+        self.airport_vertices(device, queue, &geometry.vertices);
+        self.airport_lines(device, queue, &geometry.lines);
+        self.airport_geometry = Some(Arc::clone(geometry));
+    }
+    fn airport_vertices(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
         if self.airports.is_none() {
             self.airports = Some((
                 device.create_buffer(&wgpu::BufferDescriptor {
@@ -898,7 +924,7 @@ impl SimRenderer {
             *count = (length / 10) as u32;
         }
     }
-    pub fn airport_lines(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
+    fn airport_lines(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vertices: &[f32]) {
         let needed = (vertices.len() * 4).max(40) as u64;
         if self
             .airport_lines

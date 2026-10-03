@@ -4780,6 +4780,36 @@ keep their original skip behavior. Tests compare exact packet bytes and order
 through failures, seat changes and reconnects, as well as world state.
 
 
+### Frame preparation
+
+Aircraft vertices are built per aircraft or debris piece, then concatenated
+in the original model, target and debris order. Contact ranges use final batch
+offsets. Fewer than four visible jobs use the original serial builder. This
+also serves camera-panel views, including many aircraft sharing one model.
+
+Static airport triangles and lines share one immutable cached batch keyed by
+the standing placement set. Each renderer uploads only when the batch identity
+changes. Scenery rebuilds, renderer replacement, destruction, reset and replay
+seeking retain their normal lifecycle. Camera origin and palette changes do
+not invalidate these world-space source vertices. The redundant late-frame
+flight upload is removed; the pre-preview upload remains in place.
+
+Instrument work includes page rasterisation and dirty-page scaling. Each
+distinct page is one job; repeated occurrences of that page prepare in slot
+order within the job, preserving final cache state even when sizes differ.
+Immutable `Arc` cache entries avoid copying warm images. At least two distinct
+pages can use workers. Jobs join at the existing `FlightCanvas::begin` call
+point, after previews, readout, palette and hover state are fixed. Clearing,
+composition and cache publication remain on the caller in original slot order.
+Unshown cache entries remain available.
+
+Already-sized images with transparent corners have an exact integer-coordinate
+composition path. The original filter remains for scaling, fractional placement
+and clipping. Independent pixel tests cover every source/destination alpha pair.
+The tick presenter reuses an identical camera scene instead of rebuilding it
+between unchanged simulation inputs. GPU and window work never moves to workers.
+
+
 ### Integration status
 
 | Slice | Status |
@@ -4787,7 +4817,7 @@ through failures, seat changes and reconnects, as well as world state.
 | Shared workers | Built |
 | AI observations and exact sensor visibility reuse | Built |
 | Ownship sensing and host picture preparation | Built |
-| Aircraft, scenery and instrument frame preparation | Next in the sequence |
+| Aircraft, scenery and instrument frame preparation | Built |
 | Elapsed measurements, fixed captures and final evidence | Next in the sequence |
 
 The following slices retain serial publication, GPU/window ownership and the

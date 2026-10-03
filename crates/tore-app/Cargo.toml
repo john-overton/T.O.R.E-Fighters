@@ -18,6 +18,7 @@ tore-input = { path = "../tore-input" }
 tore-input-native = { path = "../tore-input-native" }
 tore-sim = { path = "../tore-sim" }
 tore-world = { path = "../tore-world" }
+tore-workers = { path = "../tore-workers" }
 tore-replay = { path = "../tore-replay" }
 tore-session = { path = "../tore-session" }
 tore-net = { path = "../tore-net" }
@@ -30,6 +31,7 @@ winit = "0.30.12"
 
 [dev-dependencies]
 tore-world = { path = "../tore-world", features = ["test-support"] }
+tore-workers = { path = "../tore-workers", features = ["test-support"] }
 
 [lints]
 workspace = true

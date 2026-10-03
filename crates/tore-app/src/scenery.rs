@@ -10,7 +10,10 @@ use crate::{
     camera::Camera,
     terrain::{Overrides, Placements, Stance, Terrain},
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 use tore_formats::{
     Pic,
     theater::{CELL_FEET, HEIGHT_FEET, TexturePlacement, Theater},
@@ -26,6 +29,18 @@ pub struct ViewWeather {
     pub visual_bands: Vec<tore_formats::weather::Layer>,
 }
 
+/// One immutable standing airport batch. Its shared identity lets each renderer
+/// upload it once, including after that renderer or the scenery is replaced.
+pub struct StaticGeometry {
+    pub vertices: Vec<f32>,
+    pub lines: Vec<f32>,
+}
+
+struct StandingGeometry {
+    hidden: BTreeSet<u32>,
+    geometry: Arc<StaticGeometry>,
+}
+
 pub struct Scenery {
     pub ocean_motion: crate::ocean::Motion,
     /// Source palette indices, one byte per texel. Retail terrain and sky art is
@@ -37,9 +52,10 @@ pub struct Scenery {
     pub deck_textures: BTreeMap<String, usize>,
     pub decks: [[f32; 4]; 2],
     pub vertices: Vec<f32>,
-    /// Per-placement geometry, rebuilt into the dynamic scene from combat HP.
-    pub static_vertices: BTreeMap<u32, Vec<f32>>,
-    pub static_lines: BTreeMap<u32, Vec<f32>>,
+    /// Immutable per-placement geometry, filtered from combat HP for drawing.
+    static_vertices: BTreeMap<u32, Vec<f32>>,
+    static_lines: BTreeMap<u32, Vec<f32>>,
+    standing_geometry: Option<StandingGeometry>,
     pub texture_indices: Vec<u8>,
     pub smooth_weather: bool,
     pub visual_bands: Vec<tore_formats::weather::Layer>,
@@ -257,6 +273,7 @@ impl Scenery {
             vertices: Vec::new(),
             static_vertices: BTreeMap::new(),
             static_lines: BTreeMap::new(),
+            standing_geometry: None,
             texture_indices,
             smooth_weather: match std::env::var("TORE_WEATHER_SMOOTH").as_deref() {
                 Err(std::env::VarError::NotPresent) | Ok("1") => true,
@@ -303,6 +320,7 @@ impl Scenery {
         terrain: &Terrain,
         code: &str,
     ) -> AppResult<()> {
+        self.standing_geometry = None;
         let sources = Placements::load(resources, code)?;
         for (main_shape, error) in &sources.unreadable {
             log::warn!("Airport scene: {main_shape} retained without visual geometry: {error}");
@@ -488,10 +506,16 @@ impl Scenery {
         self.vertices = runway_cutout::terrain(&self.vertices, &terrain.airport_scene.runways);
     }
 
+    /// Number of source triangle vertices, before destroyed placements hide.
+    pub fn static_vertex_count(&self) -> usize {
+        self.static_vertices.values().map(|v| v.len() / 10).sum()
+    }
+
     /// Placement geometry whose object still has a standing combat target.
     pub fn visible_static_vertices(&self, targets: &[tore_sim::combat::live::Target]) -> Vec<f32> {
         self.visible_static_vertices_where(&fallen(&self.static_vertices, targets))
     }
+    #[cfg(test)]
     pub fn visible_static_lines(&self, targets: &[tore_sim::combat::live::Target]) -> Vec<f32> {
         self.visible_static_lines_where(&fallen(&self.static_lines, targets))
     }
@@ -500,8 +524,49 @@ impl Scenery {
     pub fn visible_static_vertices_where(&self, destroyed: &BTreeSet<u32>) -> Vec<f32> {
         standing(&self.static_vertices, destroyed)
     }
+    #[cfg(test)]
     pub fn visible_static_lines_where(&self, destroyed: &BTreeSet<u32>) -> Vec<f32> {
         standing(&self.static_lines, destroyed)
+    }
+
+    /// Reuse one current batch while exactly the same placements stand. A
+    /// missing combat target hides its placement, as does one with no HP.
+    pub fn static_geometry(
+        &mut self,
+        targets: &[tore_sim::combat::live::Target],
+    ) -> &Arc<StaticGeometry> {
+        let alive: BTreeSet<_> = targets
+            .iter()
+            .filter(|target| target.hp > 0)
+            .map(|target| target.id)
+            .collect();
+        let hidden = self
+            .static_vertices
+            .keys()
+            .chain(self.static_lines.keys())
+            .filter(|id| !alive.contains(id))
+            .copied()
+            .collect();
+        self.static_geometry_where(&hidden)
+    }
+
+    /// Recorded destruction can move backwards when a replay seeks. Keep
+    /// only the current set's batch, so destruction history cannot grow it.
+    pub fn static_geometry_where(&mut self, hidden: &BTreeSet<u32>) -> &Arc<StaticGeometry> {
+        if self
+            .standing_geometry
+            .as_ref()
+            .is_none_or(|cached| cached.hidden != *hidden)
+        {
+            self.standing_geometry = Some(StandingGeometry {
+                hidden: hidden.clone(),
+                geometry: Arc::new(StaticGeometry {
+                    vertices: standing(&self.static_vertices, hidden),
+                    lines: standing(&self.static_lines, hidden),
+                }),
+            });
+        }
+        &self.standing_geometry.as_ref().unwrap().geometry
     }
 
     pub fn glare_enabled(&self) -> bool {
@@ -668,6 +733,7 @@ pub(crate) mod tests {
             vertices: vec![],
             static_vertices: BTreeMap::new(),
             static_lines: BTreeMap::new(),
+            standing_geometry: None,
             texture_indices: vec![],
             smooth_weather: true,
             visual_bands: Vec::new(),
@@ -738,6 +804,102 @@ pub(crate) mod tests {
             w.visible_static_lines_where(&destroyed),
             expected(&[1, 3], -1.)
         );
+    }
+
+    #[test]
+    fn static_cache_tracks_standing_objects_and_preserves_lines() {
+        let mut scene = scenery();
+        scene.static_vertices =
+            BTreeMap::from([(1, vec![1.; 30]), (2, vec![2.; 60]), (3, vec![3.; 30])]);
+        // Include line-only placement 4 and never-registered placement 3.
+        scene.static_lines =
+            BTreeMap::from([(1, vec![-1.; 20]), (2, vec![-2.; 40]), (4, vec![-4.; 20])]);
+        let mut targets = tore_world::test_support::spawned();
+        targets.truncate(2);
+        let mut line_only = targets[0].clone();
+        line_only.id = 4;
+        targets.push(line_only);
+        let full = Arc::clone(scene.static_geometry(&targets));
+        assert_eq!(full.vertices, scene.visible_static_vertices(&targets));
+        assert_eq!(full.lines, scene.visible_static_lines(&targets));
+        assert_eq!(full.vertices.len(), 90);
+        assert_eq!(full.lines.len(), 80);
+
+        targets[0].position = [1234., 5000., 8765.];
+        targets[1].hp = 1;
+        scene.set_origin([30_000., 1000., -20_000.]);
+        scene.palette = [[17; 3]; 256];
+        assert!(Arc::ptr_eq(&full, scene.static_geometry(&targets)));
+
+        targets[1].hp = 0;
+        targets[2].hp = 0;
+        let damaged = Arc::clone(scene.static_geometry(&targets));
+        assert!(!Arc::ptr_eq(&full, &damaged));
+        assert_eq!(damaged.vertices, scene.visible_static_vertices(&targets));
+        assert_eq!(damaged.lines, scene.visible_static_lines(&targets));
+        assert_eq!(damaged.vertices, vec![1.; 30]);
+        assert_eq!(damaged.lines, vec![-1.; 20]);
+        assert!(Arc::ptr_eq(&damaged, scene.static_geometry(&targets)));
+
+        let empty = Arc::clone(scene.static_geometry(&[]));
+        assert!(empty.vertices.is_empty() && empty.lines.is_empty());
+        // Restart revives targets without requiring a new renderer.
+        targets[1].hp = 100;
+        targets[2].hp = 100;
+        let restored = scene.static_geometry(&targets);
+        assert!(!Arc::ptr_eq(&empty, restored));
+        assert_eq!(restored.vertices, full.vertices);
+        assert_eq!(restored.lines, full.lines);
+    }
+
+    #[test]
+    fn static_cache_replay_seeks_replace_the_current_batch() {
+        let mut scene = scenery();
+        scene.static_vertices = BTreeMap::from([(1, vec![1.; 30]), (2, vec![2.; 30])]);
+        scene.static_lines = BTreeMap::from([(2, vec![-2.; 20]), (3, vec![-3.; 20])]);
+        let none = BTreeSet::new();
+        let full = Arc::downgrade(scene.static_geometry_where(&none));
+        let destroyed = BTreeSet::from([2, 3]);
+        let expected = (
+            scene.visible_static_vertices_where(&destroyed),
+            scene.visible_static_lines_where(&destroyed),
+        );
+        let damaged = scene.static_geometry_where(&destroyed);
+        assert_eq!(
+            (&damaged.vertices, &damaged.lines),
+            (&expected.0, &expected.1)
+        );
+        assert!(
+            full.upgrade().is_none(),
+            "only the current batch is retained"
+        );
+        let damaged = Arc::downgrade(damaged);
+        let expected = (
+            scene.visible_static_vertices_where(&none),
+            scene.visible_static_lines_where(&none),
+        );
+        let restored = scene.static_geometry_where(&none);
+        assert_eq!(
+            (&restored.vertices, &restored.lines),
+            (&expected.0, &expected.1)
+        );
+        assert!(damaged.upgrade().is_none());
+    }
+
+    #[test]
+    fn static_cache_scene_replacement_has_a_distinct_upload_identity() {
+        let mut first = scenery();
+        let mut next = scenery();
+        first.static_vertices.insert(1, vec![1.; 30]);
+        next.static_vertices.insert(1, vec![2.; 30]);
+        first.static_lines.insert(1, vec![3.; 20]);
+        next.static_lines.insert(1, vec![4.; 20]);
+        let none = BTreeSet::new();
+        let previous = first.static_geometry_where(&none);
+        let replacement = next.static_geometry_where(&none);
+        assert!(!Arc::ptr_eq(previous, replacement));
+        assert_ne!(previous.vertices, replacement.vertices);
+        assert_ne!(previous.lines, replacement.lines);
     }
     /// A world's identity survives a recording header, and rebuilding from it
     /// restores the launch settings exactly, whatever set the wind.

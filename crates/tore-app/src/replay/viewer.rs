@@ -765,7 +765,6 @@ pub struct Viewer {
     dragging: Option<[f64; 2]>,
     toast: Option<(String, Instant)>,
     layer: Vec<u8>,
-    airports: Option<(BTreeSet<u32>, Vec<f32>, Vec<f32>)>,
     /// The renderer holds this viewer's world and models.
     entered: bool,
     last_frame: Option<Instant>,
@@ -954,7 +953,6 @@ impl Viewer {
             dragging: None,
             toast: None,
             layer: vec![0; overlay::WIDTH * overlay::HEIGHT * 4],
-            airports: None,
             entered: false,
             last_frame: None,
         };
@@ -988,7 +986,6 @@ impl Viewer {
             renderer.set_scenery(&self.scenery);
             renderer.prepare_aircraft(&self.ownship);
             self.entered = true;
-            self.airports = None;
         }
     }
 
@@ -2639,18 +2636,7 @@ impl Viewer {
         }));
         renderer.emitters(devices, &glows);
         let destroyed = self.tracks.destroyed(tick);
-        if self
-            .airports
-            .as_ref()
-            .is_none_or(|(set, ..)| *set != destroyed)
-        {
-            let vertices = self.scenery.visible_static_vertices_where(&destroyed);
-            let lines = self.scenery.visible_static_lines_where(&destroyed);
-            self.airports = Some((destroyed, vertices, lines));
-        }
-        if let Some((_, vertices, lines)) = &self.airports {
-            renderer.airports(vertices, lines);
-        }
+        renderer.airports(self.scenery.static_geometry_where(&destroyed));
         if let Some(art) = &self.art.escape {
             renderer.escapees(
                 art,

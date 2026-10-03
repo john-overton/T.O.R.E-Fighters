@@ -1,6 +1,11 @@
 //! Aspect-responsive flight composition; menus keep their original 640x480 canvas.
 use crate::{aircraft::Airframe, flight::State, instruments::Instruments, menu::Sprite};
+use std::sync::Arc;
 use tore_formats::text::GlyphCodes;
+#[cfg(test)]
+mod benchmark;
+#[cfg(test)]
+mod worker_tests;
 // Fifteen percent smaller than the prior 0.85 layout. Angular cues retain world alignment.
 pub const HUD_SCALE: f64 = 0.85 * 0.85;
 struct PanelCache {
@@ -8,62 +13,145 @@ struct PanelCache {
     size: [u32; 2],
     image: Sprite,
 }
+struct PanelJob {
+    page: u8,
+    cached: Option<Arc<PanelCache>>,
+    slots: Vec<(usize, [u32; 2])>,
+}
+
+// A single page has no independent work to share. Both rasterisation and
+// dirty-page scaling belong to each job, while composition remains ordered.
+const MIN_PANEL_JOBS: usize = 2;
+
+fn prepare_panel(
+    cached: Option<&Arc<PanelCache>>,
+    page: u8,
+    size: [u32; 2],
+    h: &Airframe,
+    s: &State,
+    panels: &Instruments,
+) -> Arc<PanelCache> {
+    let raster = panels.page(page, h, s);
+    if let Some(cached) = cached
+        && cached.size == size
+        && cached.source == raster.pixels
+    {
+        return Arc::clone(cached);
+    }
+    let mut canvas = FlightCanvas {
+        size,
+        pixels: vec![0; size[0] as usize * size[1] as usize * 4],
+        ..Default::default()
+    };
+    let source = Sprite {
+        width: crate::instruments::WIDTH,
+        height: crate::instruments::HEIGHT,
+        rgba: raster.pixels,
+        glyphs: vec![],
+    };
+    canvas.blit(&source, (0., 0., size[0] as f64, size[1] as f64));
+    Arc::new(PanelCache {
+        source: source.rgba,
+        size,
+        image: Sprite {
+            width: size[0] as usize,
+            height: size[1] as usize,
+            rgba: canvas.pixels,
+            glyphs: vec![],
+        },
+    })
+}
+
 #[derive(Default)]
 pub struct FlightCanvas {
     pub pixels: Vec<u8>,
     pub size: [u32; 2],
-    panels: std::collections::BTreeMap<u8, PanelCache>,
+    panels: std::collections::BTreeMap<u8, Arc<PanelCache>>,
 }
 impl FlightCanvas {
     pub fn begin(&mut self, size: [u32; 2], h: &Airframe, s: &State, panels: &Instruments) {
+        self.begin_with(tore_workers::shared(), size, h, s, panels);
+    }
+
+    fn begin_with(
+        &mut self,
+        workers: &tore_workers::Executor,
+        size: [u32; 2],
+        h: &Airframe,
+        s: &State,
+        panels: &Instruments,
+    ) {
         self.size = size;
         self.pixels
             .resize(size[0] as usize * size[1] as usize * 4, 0);
         let (w, height) = (size[0] as f64, size[1] as f64);
         self.pixels.fill(0);
-        for (i, page) in panels.pages.iter().enumerate() {
-            let raster = panels.page(*page, h, s);
-            let rect = panels.screen_rect(i, [w, height]);
-            let size = [rect.2.round() as u32, rect.3.round() as u32];
-            let cached = self.panels.remove(page);
-            let cached = match cached {
-                Some(cached) if cached.size == size && cached.source == raster.pixels => cached,
-                _ => {
-                    let mut canvas = FlightCanvas {
-                        size,
-                        pixels: vec![0; size[0] as usize * size[1] as usize * 4],
-                        ..Default::default()
-                    };
-                    let source = Sprite {
-                        width: crate::instruments::WIDTH,
-                        height: crate::instruments::HEIGHT,
-                        rgba: raster.pixels,
-                        glyphs: vec![],
-                    };
-                    canvas.blit(&source, (0., 0., size[0] as f64, size[1] as f64));
-                    PanelCache {
-                        source: source.rgba,
-                        size,
-                        image: Sprite {
-                            width: size[0] as usize,
-                            height: size[1] as usize,
-                            rgba: canvas.pixels,
-                            glyphs: vec![],
-                        },
-                    }
-                }
-            };
-            self.blit(
-                &cached.image,
-                (
-                    rect.0.round(),
-                    rect.1.round(),
-                    size[0] as f64,
-                    size[1] as f64,
-                ),
-            );
-            self.panels.insert(*page, cached);
+        let distinct = panels
+            .pages
+            .iter()
+            .enumerate()
+            .filter(|(index, page)| !panels.pages[..*index].contains(page))
+            .count();
+        if !workers.should_dispatch(distinct, MIN_PANEL_JOBS) {
+            for (i, page) in panels.pages.iter().enumerate() {
+                let rect = panels.screen_rect(i, [w, height]);
+                let size = [rect.2.round() as u32, rect.3.round() as u32];
+                let cached = prepare_panel(self.panels.get(page), *page, size, h, s, panels);
+                self.compose_panel(*page, rect, cached);
+            }
+            return;
         }
+
+        // The call point follows this frame's preview, readout, palette and
+        // hover updates. All jobs borrow those same immutable inputs until
+        // preparation joins; nothing from the window or GPU crosses here.
+        let mut jobs: Vec<PanelJob> = Vec::with_capacity(distinct);
+        let mut rects = Vec::with_capacity(panels.pages.len());
+        for (index, &page) in panels.pages.iter().enumerate() {
+            let rect = panels.screen_rect(index, [w, height]);
+            rects.push(rect);
+            let slot = (index, [rect.2.round() as u32, rect.3.round() as u32]);
+            if let Some(job) = jobs.iter_mut().find(|job| job.page == page) {
+                job.slots.push(slot);
+            } else {
+                jobs.push(PanelJob {
+                    page,
+                    cached: self.panels.get(&page).cloned(),
+                    slots: vec![slot],
+                });
+            }
+        }
+        let prepared = workers.ordered_map(&jobs, MIN_PANEL_JOBS, |_, job| {
+            let mut cached = job.cached.clone();
+            job.slots
+                .iter()
+                .map(|&(index, size)| {
+                    let next = prepare_panel(cached.as_ref(), job.page, size, h, s, panels);
+                    cached = Some(Arc::clone(&next));
+                    (index, next)
+                })
+                .collect::<Vec<_>>()
+        });
+        let mut slots = vec![None; panels.pages.len()];
+        for (index, cached) in prepared.into_iter().flatten() {
+            slots[index] = Some(cached);
+        }
+        for ((&page, rect), cached) in panels.pages.iter().zip(rects).zip(slots) {
+            self.compose_panel(page, rect, cached.expect("every panel slot was prepared"));
+        }
+    }
+
+    fn compose_panel(&mut self, page: u8, rect: (f64, f64, f64, f64), cached: Arc<PanelCache>) {
+        self.blit(
+            &cached.image,
+            (
+                rect.0.round(),
+                rect.1.round(),
+                cached.size[0] as f64,
+                cached.size[1] as f64,
+            ),
+        );
+        self.panels.insert(page, cached);
     }
     /// Blend `color` at `alpha` over one screen pixel; outside the view is ignored.
     pub fn blend(&mut self, x: i32, y: i32, color: [u8; 3], alpha: f64) {
@@ -396,21 +484,55 @@ impl FlightCanvas {
     }
     fn blit(&mut self, s: &Sprite, (x, y, w, h): (f64, f64, f64, f64)) {
         let dw = self.size[0] as usize;
-        // Cached instrument rasters are opaque and already at their destination size.
-        if w == s.width as f64
+        let whole_pixels = w == s.width as f64
             && h == s.height as f64
             && x >= 0.
             && y >= 0.
             && x.fract() == 0.
             && y.fract() == 0.
             && x + w <= self.size[0] as f64
-            && y + h <= self.size[1] as f64
-            && s.rgba.chunks_exact(4).all(|p| p[3] == 255)
-        {
+            && y + h <= self.size[1] as f64;
+        // Retain the row-copy path for completely opaque cached panels.
+        if whole_pixels && s.rgba.chunks_exact(4).all(|p| p[3] == 255) {
             for row in 0..s.height {
                 let at = ((y as usize + row) * dw + x as usize) * 4;
                 self.pixels[at..at + s.width * 4]
                     .copy_from_slice(&s.rgba[row * s.width * 4..(row + 1) * s.width * 4]);
+            }
+            return;
+        }
+
+        // Transparent bezel corners must not make an already-sized panel run
+        // through the four-tap filter again. Below this coordinate bound its
+        // intermediate products are half-integers below 2^48, exactly stored
+        // in f64, so the old filter's weights are exactly [1, 0, 0, 0]. The
+        // bound also keeps its signed pixel-loop coordinates in range.
+        if whole_pixels && self.size.iter().all(|&dimension| dimension <= 1 << 24) {
+            for row in 0..s.height {
+                let at = ((y as usize + row) * dw + x as usize) * 4;
+                let source = &s.rgba[row * s.width * 4..(row + 1) * s.width * 4];
+                let destination = &mut self.pixels[at..at + s.width * 4];
+                for (source, destination) in
+                    source.chunks_exact(4).zip(destination.chunks_exact_mut(4))
+                {
+                    match source[3] {
+                        0 => continue,
+                        255 => destination.copy_from_slice(source),
+                        _ => {
+                            let source_alpha = f64::from(source[3]) / 255.;
+                            let old = f64::from(destination[3]) / 255.;
+                            let alpha = source_alpha + old * (1. - source_alpha);
+                            for c in 0..3 {
+                                let value = f64::from(source[c]) * source_alpha;
+                                destination[c] = ((value
+                                    + f64::from(destination[c]) * old * (1. - source_alpha))
+                                    / alpha)
+                                    .round() as u8;
+                            }
+                            destination[3] = (alpha * 255.).round() as u8;
+                        }
+                    }
+                }
             }
             return;
         }
@@ -461,6 +583,172 @@ impl FlightCanvas {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The pre-optimization filter, independent of blit's integer-size paths.
+    fn filtered_reference(
+        canvas: &mut FlightCanvas,
+        s: &Sprite,
+        (x, y, w, h): (f64, f64, f64, f64),
+    ) {
+        let dw = canvas.size[0] as usize;
+        for yy in (y.floor() as i32).max(0)..((y + h).ceil() as i32).min(canvas.size[1] as i32) {
+            for xx in (x.floor() as i32).max(0)..((x + w).ceil() as i32).min(canvas.size[0] as i32)
+            {
+                let u = ((xx as f64 + 0.5 - x) * s.width as f64 / w - 0.5)
+                    .clamp(0., (s.width - 1) as f64);
+                let v = ((yy as f64 + 0.5 - y) * s.height as f64 / h - 0.5)
+                    .clamp(0., (s.height - 1) as f64);
+                let (sx, sy) = (u.floor() as usize, v.floor() as usize);
+                let (fx, fy) = (u - sx as f64, v - sy as f64);
+                let mut rgba = [0.; 4];
+                for (px, py, weight) in [
+                    (sx, sy, (1. - fx) * (1. - fy)),
+                    ((sx + 1).min(s.width - 1), sy, fx * (1. - fy)),
+                    (sx, (sy + 1).min(s.height - 1), (1. - fx) * fy),
+                    (
+                        (sx + 1).min(s.width - 1),
+                        (sy + 1).min(s.height - 1),
+                        fx * fy,
+                    ),
+                ] {
+                    let at = (py * s.width + px) * 4;
+                    let alpha = s.rgba[at + 3] as f64 / 255.;
+                    for (c, sum) in rgba.iter_mut().enumerate().take(3) {
+                        *sum += s.rgba[at + c] as f64 * alpha * weight;
+                    }
+                    rgba[3] += alpha * weight;
+                }
+                if rgba[3] == 0. {
+                    continue;
+                }
+                let at = (yy as usize * dw + xx as usize) * 4;
+                let old = canvas.pixels[at + 3] as f64 / 255.;
+                let alpha = rgba[3] + old * (1. - rgba[3]);
+                for (c, value) in rgba.iter().enumerate().take(3) {
+                    canvas.pixels[at + c] =
+                        ((value + canvas.pixels[at + c] as f64 * old * (1. - rgba[3])) / alpha)
+                            .round() as u8;
+                }
+                canvas.pixels[at + 3] = (alpha * 255.).round() as u8;
+            }
+        }
+    }
+
+    #[test]
+    fn integer_blit_matches_filter_for_every_source_and_destination_alpha() {
+        for seed in [0u8, 1, 127, 255] {
+            let mut source = Sprite {
+                width: 256,
+                height: 256,
+                rgba: Vec::new(),
+                glyphs: Vec::new(),
+            };
+            let mut destination = Vec::new();
+            for source_alpha in 0..=255u8 {
+                for destination_alpha in 0..=255u8 {
+                    source.rgba.extend_from_slice(&[
+                        source_alpha.wrapping_mul(37) ^ destination_alpha ^ seed,
+                        destination_alpha.wrapping_add(31).wrapping_add(seed),
+                        source_alpha ^ destination_alpha.rotate_left(1),
+                        source_alpha,
+                    ]);
+                    destination.extend_from_slice(&[
+                        destination_alpha.wrapping_mul(11) ^ seed,
+                        255 - source_alpha,
+                        source_alpha
+                            .wrapping_add(destination_alpha)
+                            .wrapping_add(seed),
+                        destination_alpha,
+                    ]);
+                }
+            }
+            let mut actual = FlightCanvas {
+                size: [256, 256],
+                pixels: destination.clone(),
+                ..Default::default()
+            };
+            let mut expected = FlightCanvas {
+                size: [256, 256],
+                pixels: destination,
+                ..Default::default()
+            };
+            actual.blit(&source, (0., 0., 256., 256.));
+            filtered_reference(&mut expected, &source, (0., 0., 256., 256.));
+            assert_eq!(actual.pixels, expected.pixels, "RGB seed {seed}");
+        }
+    }
+
+    fn patterned_sprite(width: usize, height: usize) -> Sprite {
+        Sprite {
+            width,
+            height,
+            rgba: (0..width * height)
+                .flat_map(|index| {
+                    let value = index as u8;
+                    [
+                        value.wrapping_mul(37),
+                        value.wrapping_add(127),
+                        255 - value,
+                        value.wrapping_mul(17),
+                    ]
+                })
+                .collect(),
+            glyphs: Vec::new(),
+        }
+    }
+
+    fn compare_blit(source: &Sprite, size: [u32; 2], rect: (f64, f64, f64, f64)) {
+        let pixels = patterned_sprite(size[0] as usize, size[1] as usize).rgba;
+        let mut actual = FlightCanvas {
+            size,
+            pixels: pixels.clone(),
+            ..Default::default()
+        };
+        let mut expected = FlightCanvas {
+            size,
+            pixels,
+            ..Default::default()
+        };
+        actual.blit(source, rect);
+        filtered_reference(&mut expected, source, rect);
+        assert_eq!(
+            actual.pixels, expected.pixels,
+            "canvas {size:?}, rect {rect:?}"
+        );
+    }
+
+    #[test]
+    fn integer_blit_matches_panel_sizes_and_canvas_boundaries() {
+        // Large panels at 640, 1280 and 1920 window widths, plus a small
+        // 1920-wide panel. The rounded width may be odd while height is even.
+        for (width, height) in [(1, 1), (162, 160), (243, 240), (365, 360), (216, 214)] {
+            let source = patterned_sprite(width, height);
+            for (x, y) in [(0., 0.), (7., 0.), (0., 5.), (7., 5.)] {
+                compare_blit(
+                    &source,
+                    [width as u32 + 7, height as u32 + 5],
+                    (x, y, width as f64, height as f64),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn integer_blit_preserves_scaled_fractional_and_clipped_filters() {
+        let source = patterned_sprite(8, 5);
+        for rect in [
+            (-1., 0., 8., 5.),
+            (0., -1., 8., 5.),
+            (10., 10., 8., 5.),
+            (0.5, 1., 8., 5.),
+            (1., 0.5, 8., 5.),
+            (1., 1., 12., 8.),
+            (1., 1., 4., 3.),
+        ] {
+            compare_blit(&source, [17, 13], rect);
+        }
+    }
+
     #[test]
     fn target_square_scales_with_the_window_and_clips_at_its_edge() {
         let mut canvas = FlightCanvas {

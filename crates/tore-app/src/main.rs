@@ -775,13 +775,6 @@ impl TickPresenter<'_> {
             &self.hornet.panel_camera(flight, 2),
             speed,
         );
-        let scene = flight_views::Scene::new(
-            &frame,
-            flight,
-            &self.world.combat,
-            self.world.ai_wings.as_ref(),
-            None,
-        );
         self.view_rig.observe(&scene);
         if let Ok(camera) = self.view_rig.other_camera(
             &scene,
@@ -3769,12 +3762,8 @@ impl ApplicationHandler for App {
                             }
                         }
                         renderer.airports(
-                            &self
-                                .scenery
-                                .visible_static_vertices(&self.world.combat.state.targets),
-                            &self
-                                .scenery
-                                .visible_static_lines(&self.world.combat.state.targets),
+                            self.scenery
+                                .static_geometry(&self.world.combat.state.targets),
                         );
                         let target_due = self.target_refresh.due(now) || self.smoke_test;
                         let other_due = now.duration_since(self.instrument_time).as_millis() >= 100
@@ -4296,14 +4285,10 @@ impl ApplicationHandler for App {
                         audio.flight(None);
                     }
                 }
-                if matches!(self.screen, Screen::Viewer | Screen::Flight) {
+                if self.screen == Screen::Viewer {
                     renderer.airports(
-                        &self
-                            .scenery
-                            .visible_static_vertices(&self.world.combat.state.targets),
-                        &self
-                            .scenery
-                            .visible_static_lines(&self.world.combat.state.targets),
+                        self.scenery
+                            .static_geometry(&self.world.combat.state.targets),
                     );
                 }
                 let compose_ms = frame_start.elapsed().as_secs_f64() * 1000. - simulation_ms;
@@ -9128,11 +9113,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 world.static_manifest.len(),
                 world.airport_scene.objects.len(),
                 scenery.vertices.len() / 10,
-                scenery
-                    .static_vertices
-                    .values()
-                    .map(|v| v.len() / 10)
-                    .sum::<usize>(),
+                scenery.static_vertex_count(),
                 bytes
             );
         }

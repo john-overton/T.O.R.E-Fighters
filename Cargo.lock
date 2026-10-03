@@ -1990,6 +1990,7 @@ dependencies = [
  "tore-replay",
  "tore-session",
  "tore-sim",
+ "tore-workers",
  "tore-world",
  "tracing",
  "wgpu",
