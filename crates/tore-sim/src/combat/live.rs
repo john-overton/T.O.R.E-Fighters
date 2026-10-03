@@ -27,6 +27,11 @@ fn draw(state: &mut u32, bound: u16) -> u16 {
 }
 
 mod handoff;
+mod observation;
+#[cfg(test)]
+mod observation_reference;
+#[cfg(test)]
+mod worker_tests;
 pub use handoff::{AiHandback, AiPose, AiStores};
 pub mod rewind;
 
@@ -1742,59 +1747,12 @@ impl<'a> LauncherView<'a> {
 
     /// Current observation used by the display, separate from launch authority.
     fn compute_weapon_observation(&self) -> Option<seeker::Observation> {
-        let launcher = self.launcher;
-        if !self.view.own.armed
-            || (self.view.state.weapon_rules == Rules::Spec
-                && !self.view.own.guidance_available(launcher))
-        {
-            return None;
-        }
-        if self.view.own.launch_mode == LaunchMode::Boresight {
-            let w = &self.view.own.config.stations[self.view.own.selected].weapon;
-            let profile = missiles::Profile::for_weapon(w)?;
-            return self.view.own.bore_observation.filter(|o| {
-                profile.guidance != Guidance::Infrared
-                    || (missiles::geometry(
-                        &missiles::launch_geometry(w),
-                        launcher.position,
-                        launcher.basis,
-                        o.position,
-                        None,
-                    ) && missiles::intercept(
-                        &w.movement,
-                        Motion::launch(w, launcher.velocity, launcher.position[1]),
-                        launcher.position,
-                        launcher.basis.forward,
-                        o.position,
-                        o.velocity,
-                        0,
-                        profile.guidance_ticks,
-                    )
-                    .is_some())
-            });
-        }
-        self.view.own.mounted.observation.or_else(|| {
-            let id = self.view.own.designated()?;
-            let w = &self.view.own.config.stations[self.view.own.selected].weapon;
-            if self.view.state.weapon_rules == Rules::Spec
-                && missiles::Profile::for_weapon(w)
-                    .is_some_and(|p| self.view.contact(id).is_none_or(|t| !p.accepts(t)))
-            {
-                return None;
-            }
-            let contact = self.view.own.sensors.observation(id)?;
-            let delta = missiles::sub(contact.position, launcher.position);
-            Some(seeker::Observation {
-                id: contact.id,
-                position: contact.position,
-                velocity: contact.velocity,
-                quality: 1.,
-                range: missiles::length(delta),
-                off_axis: dot(unit(delta), launcher.basis.forward)
-                    .clamp(-1., 1.)
-                    .acos(),
-            })
-        })
+        weapon_observation(
+            self.view.own,
+            self.launcher,
+            self.view.state.weapon_rules,
+            |id| self.view.contact(id),
+        )
     }
 
     pub fn weapon_observation(&self) -> Option<seeker::Observation> {
@@ -1892,6 +1850,65 @@ impl<'a> LauncherView<'a> {
             (self.view.own.launch_mode == LaunchMode::Boresight).then(|| profile.search_cap()),
         )
     }
+}
+
+/// The observation's read-only inputs deliberately exclude projectiles and
+/// release readiness, so independent ownships can evaluate it on workers.
+fn weapon_observation<'a>(
+    own: &Ownship,
+    launcher: Launcher,
+    weapon_rules: Rules,
+    contact: impl Fn(u32) -> Option<&'a Target>,
+) -> Option<seeker::Observation> {
+    if !own.armed || (weapon_rules == Rules::Spec && !own.guidance_available(launcher)) {
+        return None;
+    }
+    if own.launch_mode == LaunchMode::Boresight {
+        let w = &own.config.stations[own.selected].weapon;
+        let profile = missiles::Profile::for_weapon(w)?;
+        return own.bore_observation.filter(|o| {
+            profile.guidance != Guidance::Infrared
+                || (missiles::geometry(
+                    &missiles::launch_geometry(w),
+                    launcher.position,
+                    launcher.basis,
+                    o.position,
+                    None,
+                ) && missiles::intercept(
+                    &w.movement,
+                    Motion::launch(w, launcher.velocity, launcher.position[1]),
+                    launcher.position,
+                    launcher.basis.forward,
+                    o.position,
+                    o.velocity,
+                    0,
+                    profile.guidance_ticks,
+                )
+                .is_some())
+        });
+    }
+    own.mounted.observation.or_else(|| {
+        let id = own.designated()?;
+        let w = &own.config.stations[own.selected].weapon;
+        if weapon_rules == Rules::Spec
+            && missiles::Profile::for_weapon(w)
+                .is_some_and(|p| contact(id).is_none_or(|t| !p.accepts(t)))
+        {
+            return None;
+        }
+        let contact = own.sensors.observation(id)?;
+        let delta = missiles::sub(contact.position, launcher.position);
+        Some(seeker::Observation {
+            id: contact.id,
+            position: contact.position,
+            velocity: contact.velocity,
+            quality: 1.,
+            range: missiles::length(delta),
+            off_axis: dot(unit(delta), launcher.basis.forward)
+                .clamp(-1., 1.)
+                .acos(),
+        })
+    })
 }
 
 impl Ownship {
@@ -3010,7 +3027,7 @@ impl State {
     pub fn step(
         &mut self,
         inputs: &[OwnshipInput],
-        ground: impl Fn(f64, f64) -> f64,
+        ground: impl Fn(f64, f64) -> f64 + Sync,
     ) -> Vec<Event> {
         self.step_surface(inputs, ground, |_, _| false)
     }
@@ -3019,7 +3036,7 @@ impl State {
     pub fn step_surface(
         &mut self,
         inputs: &[OwnshipInput],
-        ground: impl Fn(f64, f64) -> f64,
+        ground: impl Fn(f64, f64) -> f64 + Sync,
         water: impl Fn(f64, f64) -> bool,
     ) -> Vec<Event> {
         self.step_rewound(inputs, &[], ground, water)
@@ -3035,8 +3052,21 @@ impl State {
         &mut self,
         inputs: &[OwnshipInput],
         rewinds: &[(u32, u16)],
-        ground: impl Fn(f64, f64) -> f64,
+        ground: impl Fn(f64, f64) -> f64 + Sync,
         water: impl Fn(f64, f64) -> bool,
+    ) -> Vec<Event> {
+        self.step_rewound_with_executor(inputs, rewinds, ground, water, tore_workers::shared())
+    }
+
+    /// The same tick with an explicit executor, for serial references and
+    /// deterministic scheduling comparisons without environment overrides.
+    pub fn step_rewound_with_executor(
+        &mut self,
+        inputs: &[OwnshipInput],
+        rewinds: &[(u32, u16)],
+        ground: impl Fn(f64, f64) -> f64 + Sync,
+        water: impl Fn(f64, f64) -> bool,
+        executor: &tore_workers::Executor,
     ) -> Vec<Event> {
         let mut events = Vec::new();
         // The ownships are worked one at a time in aircraft id order; every
@@ -3118,212 +3148,44 @@ impl State {
             self.ownship_rows
                 .extend(rows.iter().map(|r| r.target.clone()));
         }
+        // These observations read fixed rows and change only their ownship.
+        // Readiness and every release remain below, in aircraft id order.
+        // Fitted: at least two active cockpits amortize a scoped dispatch.
+        let observations_prepared = executor.should_dispatch(active.len(), 2);
+        if observations_prepared {
+            let context = observation::Context {
+                targets: &self.targets,
+                rows: &rows,
+                weapon_rules: self.weapon_rules,
+                easy_targeting: self.cheats.easy_targeting,
+                tick: self.tick,
+                ground: &ground,
+            };
+            executor.for_each_mut(&mut ships, 2, |index, own| {
+                if let Some((_, input)) = active.iter().find(|(k, _)| *k == index) {
+                    observation::observe_ownship(own, index, input.launcher, &context);
+                }
+            });
+        }
         for &(k, input) in &active {
             let own = &mut ships[k];
             let (launcher, held) = (input.launcher, input.held);
-            // Shared observations are produced before this tick's firing decision,
-            // so the scope, the target view and weapon support all agree.
-            own.sensors.controls = launcher.controls;
-            let observables: Vec<Observable> = self
-                .targets
-                .iter()
-                .chain(peers(&rows, k))
-                .map(observable_of)
-                .collect();
-            let observer = Observer {
-                position: launcher.position,
-                basis: launcher.basis,
-                radar_powered: launcher.radar && launcher.alive,
-                radar_failed: own.radar_failed,
-                infrared_failed: own.infrared_failed || !launcher.alive,
-                visual_failed: own.visual_failed || !launcher.alive,
-            };
-            let height = |x: f64, z: f64| ground(x, z);
-            let environment = sensors::Environment {
-                ground: &height,
-                obscured: &obscured,
-            };
-            own.sensors.keep_selection = self.cheats.easy_targeting;
-            let in_view = own.designated().or(own.sight_hold);
-            own.sensors.step(&observer, &observables, &environment);
-            if let Some(id) = own.designated() {
-                own.hud_selection = Some(id);
-            } else if !self.cheats.easy_targeting {
-                // A dropped target is gone; nothing is remembered for later.
-                own.hud_selection = None;
+            if !observations_prepared {
+                observation::observe_ownship(
+                    own,
+                    k,
+                    launcher,
+                    &observation::Context {
+                        targets: &self.targets,
+                        rows: &rows,
+                        weapon_rules: self.weapon_rules,
+                        easy_targeting: self.cheats.easy_targeting,
+                        tick: self.tick,
+                        ground: &ground,
+                    },
+                );
             }
-            // The views keep a dropped target while it is within visual range, in
-            // any direction (John, 2026-09-28); beyond it the target is gone for good.
-            let visual_range = own
-                .sensors
-                .profiles
-                .visual
-                .as_ref()
-                .filter(|_| !observer.visual_failed)
-                .map_or(0., |visual| visual.search.maximum_ft);
-            own.sight_hold = own.designated().or(in_view.filter(|id| {
-                self.targets.iter().any(|t| {
-                    t.id == *id
-                        && t.body_present()
-                        && (0..3)
-                            .map(|i| (t.position[i] - launcher.position[i]).powi(2))
-                            .sum::<f64>()
-                            .sqrt()
-                            <= visual_range
-                })
-            }));
-            own.emitters = passive::emitters(
-                &observer,
-                &observables,
-                own.sensors.contacts(),
-                &environment,
-            );
-            own.bore_observation = None;
             let index = own.selected;
-            let w = &own.config.stations[index].weapon;
-            if let Some(profile) =
-                missiles::Profile::for_weapon(w).filter(|_| self.weapon_rules == Rules::Spec)
-            {
-                if !profile.guidance_available(launcher.radar_power)
-                    || !profile.supports_boresight()
-                {
-                    own.launch_mode = LaunchMode::Cued;
-                }
-                if profile.guidance_available(launcher.radar_power)
-                    && own.armed
-                    && own.designated().is_none()
-                    && profile.supports_boresight()
-                {
-                    own.launch_mode = LaunchMode::Boresight;
-                }
-                if profile.guidance == Guidance::Infrared && own.designated().is_some() {
-                    own.launch_mode = LaunchMode::Cued;
-                }
-                let assigned = if own.launch_mode == LaunchMode::Cued {
-                    own.designated()
-                } else {
-                    None
-                };
-                let key = (index, own.launch_mode, assigned);
-                if own.mounted_key != Some(key) {
-                    own.mounted = Seeker::new(assigned);
-                    own.mounted_key = Some(key);
-                }
-                if !profile.guidance_available(launcher.radar_power) {
-                    own.mounted = Seeker {
-                        status: Status::Unguided,
-                        ..Default::default()
-                    };
-                    own.mounted_key = None;
-                }
-                if own.armed
-                    && profile.guidance_available(launcher.radar_power)
-                    && launcher.alive
-                    && own.hp > 0
-                    && own.rounds(index) > 0
-                    && own.ammo[index] & 0x8000 == 0
-                {
-                    let bore = own.launch_mode == LaunchMode::Boresight;
-                    let cap = bore.then(|| profile.search_cap());
-                    // Mounted IR may choose a stronger return. Released missiles keep identity.
-                    if bore && profile.guidance == Guidance::Infrared {
-                        own.mounted.target = None;
-                        own.mounted.acquired = false;
-                        own.mounted.missing = 0;
-                    }
-                    let view = seeker::View {
-                        position: launcher.position,
-                        basis: launcher.basis,
-                        cap,
-                        obscured: &obscured,
-                    };
-                    let observations: Vec<_> = self
-                        .targets
-                        .iter()
-                        .chain(peers(&rows, k))
-                        .filter(|t| t.body_present())
-                        .filter(|t| bore || assigned == Some(t.id))
-                        .filter_map(|t| seeker::observe(w, profile, &view, t))
-                        .filter(|o| {
-                            !bore
-                                || profile.guidance != Guidance::Active
-                                || own.config.sensors.radar.as_ref().is_some_and(|r| {
-                                    o.range <= launcher.controls.range_nmi() * missiles::NMI
-                                        && o.range <= r.track.maximum_ft
-                                })
-                        })
-                        .collect();
-                    if bore {
-                        own.bore_observation = observations
-                            .iter()
-                            .min_by(|a, b| seeker::compare_returns(a, b, profile))
-                            .copied();
-                    }
-                    if bore && profile.guidance == Guidance::Active {
-                        // The HUD estimate never pre-locks or assigns an active-radar shot.
-                        own.mounted = Seeker::default();
-                    } else if own.launch_mode == LaunchMode::Cued
-                        && matches!(profile.guidance, Guidance::Active | Guidance::Supported)
-                    {
-                        let supported: Vec<_> = observations
-                            .into_iter()
-                            .filter(|o| own.sensors.supports(o.id))
-                            .collect();
-                        own.mounted.step(
-                            missiles::Profile {
-                                guidance: Guidance::Supported,
-                                ..profile
-                            },
-                            &supported,
-                        );
-                    } else {
-                        own.mounted.step(profile, &observations);
-                    }
-                } else {
-                    own.mounted = Seeker::new(assigned);
-                }
-            } else {
-                own.bore_observation = None;
-                own.mounted = Seeker::default();
-                own.mounted_key = None;
-            }
-            if let Some(o) = view(self, own).weapon_observation(launcher) {
-                if self.tick.is_multiple_of(60)
-                    || own.range_estimate.is_none_or(|e| {
-                        e.station != index || e.target != o.id || e.mode != own.launch_mode
-                    })
-                {
-                    own.range_estimate = missiles::Profile::for_weapon(w).map(|profile| {
-                        let maximum = missiles::maximum_range(
-                            w,
-                            launcher.position,
-                            launcher.basis.forward,
-                            launcher.velocity,
-                            o.position,
-                            o.velocity,
-                            profile.guidance_ticks,
-                        );
-                        RangeEstimate {
-                            station: index,
-                            target: o.id,
-                            mode: own.launch_mode,
-                            maximum,
-                            favorable: missiles::firing_band(
-                                w,
-                                launcher.position,
-                                launcher.basis,
-                                launcher.velocity,
-                                o,
-                                maximum,
-                                profile.guidance_ticks,
-                                own.launch_mode == LaunchMode::Boresight,
-                            ),
-                        }
-                    });
-                }
-            } else {
-                own.range_estimate = None;
-            }
             own.release_readiness = view(self, own).readiness(launcher);
             let bay_waits = own.bay_waits(launcher);
             // A pending bay release lapses if the shot is no longer wanted or the

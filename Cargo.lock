@@ -2087,6 +2087,7 @@ dependencies = [
  "tore-input",
  "tore-net",
  "tore-sim",
+ "tore-workers",
  "tore-world",
 ]
 

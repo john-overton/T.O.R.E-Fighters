@@ -4764,13 +4764,29 @@ recovery, shared airports, cancelled landings, ejection, late leaders, human
 handoff and error partial state.
 
 
+### Ownships and host pictures
+
+In combat, each active ownship's sensors, selection, emitters, mounted seeker,
+weapon observation and firing estimate read fixed target rows and modify only
+that ownship. Two or more active ownships can use workers. Inactive ownships
+are untouched. Readiness, projectile capacity, ammunition, firing, IDs, random
+streams and event publication retain the existing serial order.
+
+The host prepares immutable pictures and readouts for the connections whose
+snapshots are due. It preserves the staggered seat schedule and connection-ID
+iteration order. Name registration, packet budgets, staging, sends and
+sent/discard/acknowledgement bookkeeping remain serial. Missing planes/cockpits
+keep their original skip behavior. Tests compare exact packet bytes and order
+through failures, seat changes and reconnects, as well as world state.
+
+
 ### Integration status
 
 | Slice | Status |
 | --- | --- |
 | Shared workers | Built |
 | AI observations and exact sensor visibility reuse | Built |
-| Ownship sensing and host picture preparation | Next in the sequence |
+| Ownship sensing and host picture preparation | Built |
 | Aircraft, scenery and instrument frame preparation | Next in the sequence |
 | Elapsed measurements, fixed captures and final evidence | Next in the sequence |
 

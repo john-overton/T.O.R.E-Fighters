@@ -1434,3 +1434,6 @@ fn a_player_who_leaves_its_flight_stays_and_flies_again_as_a_new_flight() {
     rig.run(Duration::from_secs(1));
     assert!(!rig.closed(b));
 }
+
+#[path = "worker_tests.rs"]
+mod worker_tests;

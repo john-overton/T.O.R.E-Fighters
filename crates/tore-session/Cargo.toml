@@ -19,9 +19,11 @@ tore-input = { path = "../tore-input" }
 tore-net = { path = "../tore-net" }
 tore-sim = { path = "../tore-sim" }
 tore-world = { path = "../tore-world" }
+tore-workers = { path = "../tore-workers" }
 
 [dev-dependencies]
 tore-world = { path = "../tore-world", features = ["test-support"] }
+tore-workers = { path = "../tore-workers", features = ["test-support"] }
 
 [lints]
 workspace = true

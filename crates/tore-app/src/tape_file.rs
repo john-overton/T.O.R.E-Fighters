@@ -266,7 +266,7 @@ fn replay_reader(
     mut reader: impl BufRead,
     config: Configuration,
     header: &str,
-    ground: impl Fn(f64, f64) -> f64,
+    ground: impl Fn(f64, f64) -> f64 + Sync,
     airport_scene: Option<&tore_sim::airport::Scene>,
     wind: [f64; 3],
 ) -> AppResult<State> {

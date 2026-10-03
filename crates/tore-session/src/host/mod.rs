@@ -331,11 +331,11 @@ pub struct HostStatus {
     pub capacity: usize,
     /// Aircraft in the mission.
     pub aircraft: usize,
-    /// Mean and longest cost of a tick since the previous status.
+    /// Mean and longest elapsed time of a tick since the previous status.
     pub tick_cost_mean: Duration,
     pub tick_cost_max: Duration,
-    /// The mean tick cost as a fraction of one core at 120 ticks a second
-    /// (0.11 is 11 percent).
+    /// The mean elapsed tick cost, including worker waits, as a fraction of
+    /// the 120 Hz wall-time budget (0.11 is 11 percent).
     pub load: f64,
     /// Overloads since the host started.
     pub overloads: u64,
@@ -514,6 +514,32 @@ pub struct Host {
     /// (`chat::designated_aircraft`).
     #[cfg(test)]
     pub(crate) test_designations: BTreeMap<PlaneId, u32>,
+    /// Explicit snapshot execution in equivalence tests, never an environment
+    /// change or a second production pool.
+    #[cfg(test)]
+    snapshot_executor: Option<Arc<tore_workers::Executor>>,
+}
+
+/// Pure per-seat output prepared from the completed world before any name
+/// registration, packet budgeting, sending, or acknowledgement bookkeeping.
+struct PreparedSeat {
+    picture: tore_world::snapshot::RenderSnapshot,
+    readout: Option<tore_world::readout::CockpitReadout>,
+}
+
+fn prepare_seat(world: &World, plane: PlaneId) -> Option<PreparedSeat> {
+    let cockpit = world
+        .cockpits
+        .iter()
+        .find(|cockpit| cockpit.plane == plane)?;
+    let picture = from_world::seat_picture(world, plane)?;
+    let readout = world.combat.cockpit_readout(
+        plane.0,
+        tore_world::combat::launcher(&cockpit.flight),
+        world.ai_wings.as_ref(),
+        Some(cockpit),
+    );
+    Some(PreparedSeat { picture, readout })
 }
 
 /// Why a seat's game could not foresee its plane's state at a tick, for the
@@ -723,6 +749,8 @@ impl Host {
             unforeseen_log: Vec::new(),
             #[cfg(test)]
             test_designations: BTreeMap::new(),
+            #[cfg(test)]
+            snapshot_executor: None,
             out: TickOutput::default(),
             config,
         };
@@ -2723,6 +2751,20 @@ impl Host {
     /// interval ([`wire::snapshot_phase`]), so the cost spreads over the
     /// interval's ticks instead of landing on one.
     fn snapshots(&mut self, tick: u64, now: Duration, out: &TickOutput) {
+        #[cfg(test)]
+        if let Some(executor) = self.snapshot_executor.clone() {
+            return self.snapshots_with_executor(tick, now, out, &executor);
+        }
+        self.snapshots_with_executor(tick, now, out, tore_workers::shared());
+    }
+
+    fn snapshots_with_executor(
+        &mut self,
+        tick: u64,
+        now: Duration,
+        out: &TickOutput,
+        executor: &tore_workers::Executor,
+    ) {
         let tps = self.config.ticks_per_snapshot();
         let ids: Vec<ConnectionId> = self
             .peers
@@ -2750,9 +2792,31 @@ impl Host {
             set.extend(own.sensors.contacts().iter().map(|c| c.id));
             set.extend(own.sensors.visual().iter().map(|c| c.id));
         }
+        // Only immutable pictures and readouts cross the worker boundary.
+        // Preserve connection-ID order, snapshot phases, and all transport
+        // mutations below. Fitted: two due seats amortize the dispatch.
+        let mut prepared = executor.should_dispatch(ids.len(), 2).then(|| {
+            let planes: Vec<_> = ids.iter().map(|id| self.peers[id].plane).collect();
+            let world = &self.world;
+            executor.ordered_map(&planes, 2, |_, plane| {
+                plane.and_then(|plane| prepare_seat(world, plane))
+            })
+        });
         let mut failed = Vec::new();
-        for id in ids {
-            if self.snapshot(id, tick, now, out, &tracked).is_err() {
+        for (index, id) in ids.into_iter().enumerate() {
+            let picture = match prepared.as_mut() {
+                Some(pictures) => pictures[index].take(),
+                None => self.peers[&id]
+                    .plane
+                    .and_then(|plane| prepare_seat(&self.world, plane)),
+            };
+            let Some(picture) = picture else {
+                continue;
+            };
+            if self
+                .snapshot(id, tick, now, out, &tracked, picture)
+                .is_err()
+            {
                 failed.push(id);
             }
         }
@@ -2768,6 +2832,7 @@ impl Host {
         now: Duration,
         out: &TickOutput,
         tracked: &BTreeMap<bool, BTreeSet<u32>>,
+        prepared: PreparedSeat,
     ) -> Result<(), WireError> {
         let world = &self.world;
         let Some(peer) = self.peers.get_mut(&connection) else {
@@ -2779,9 +2844,7 @@ impl Host {
         let Some(cockpit) = world.cockpits.iter().find(|c| c.plane == plane) else {
             return Ok(());
         };
-        let Some(picture) = from_world::seat_picture(world, plane) else {
-            return Ok(());
-        };
+        let PreparedSeat { picture, readout } = prepared;
         let slot = world.roster.plane(plane).map(|p| p.slot);
         let flight: BTreeSet<u32> = world
             .roster
@@ -2837,13 +2900,6 @@ impl Host {
             .server
             .messages_due_bytes(connection, now)
             .min(FLIGHT_MESSAGE_BUDGET);
-        // The seat's cockpit readout, from the tick's flight.
-        let readout = world.combat.cockpit_readout(
-            plane.0,
-            tore_world::combat::launcher(&cockpit.flight),
-            world.ai_wings.as_ref(),
-            Some(cockpit),
-        );
         let packet =
             peer.wire
                 .snapshot_with_readout(&header, &entities, readout.as_ref(), messages)?;
