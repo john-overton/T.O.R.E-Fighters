@@ -4727,12 +4727,49 @@ points that cross threads require `Sync`; sensor environments are constructed
 within each job and need no shared lock.
 
 
+### AI observation and ordered decisions
+
+The implementation uses a narrower boundary than PF0's proposed full look
+phase. Workers receive an actor-local context and borrowed sensor/memory inputs,
+never `AiMission` or live peer actors. Each prepares owned observation state.
+The normal actor loop still performs leader/runway reads, damage, ejection,
+defense, decisions and flight in their original order. It applies the prepared
+state exactly where the old observation call stood. No published-peer table is
+needed.
+
+New damage recovery observes inline because its preamble clears selection.
+Dummy, destroyed and escaping actors are excluded. A later early return or
+error discards unapplied results, leaving later actors unchanged. Serial
+execution and fewer than four eligible actors retain the original in-place
+observation path without speculative clones.
+
+Prepared target visibility is a separate boolean vector, consumed at the
+original decision-frame target loop. The pre-flight position and terrain
+provider match those used by that loop; awareness memory keeps its original
+metadata. Nothing is shared across actors or ticks, and visual rejection
+reasons retain their original priority. Job-wide visibility caches were
+measured and rejected because their lookup cost regressed smaller worker
+configurations. The dispatch floor is a fitted performance choice, not a
+gameplay constant.
+
+Sensor channels share one actor-local visibility answer only when the ordered
+endpoint bits match. A query with different endpoints calls the terrain service
+again without replacing the first entry. This keeps repeated channel checks
+cheap without making future callers depend on an implicit endpoint assumption.
+
+A test-only copy of the unsplit observation code independently validates the
+serial extraction. Worker comparisons cover complete actor/mission state,
+flight bytes, outputs and bounded journal contents, including new damage
+recovery, shared airports, cancelled landings, ejection, late leaders, human
+handoff and error partial state.
+
+
 ### Integration status
 
 | Slice | Status |
 | --- | --- |
 | Shared workers | Built |
-| AI observations and exact sensor visibility reuse | Next in the sequence |
+| AI observations and exact sensor visibility reuse | Built |
 | Ownship sensing and host picture preparation | Next in the sequence |
 | Aircraft, scenery and instrument frame preparation | Next in the sequence |
 | Elapsed measurements, fixed captures and final evidence | Next in the sequence |

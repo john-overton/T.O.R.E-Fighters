@@ -32,7 +32,9 @@ use crate::models::FlightModel;
 use crate::research::Surface;
 use crate::sensors::{self, Observable, Observer, Sensors};
 
-use super::awareness::{self, Memory, Observation, ObservationSource};
+use super::awareness::{self, Memory};
+#[cfg(test)]
+use super::awareness::{Observation, ObservationSource};
 use super::controller::{
     Activity, ActorIdentity, BehaviorProfile, Controller, DecisionFrame, FrameEvent, IntentBatch,
     LeaderView, MotionIntent, OwnState, RouteView, SearchContact, StationView, TargetView,
@@ -52,6 +54,17 @@ use super::weapon_service::{
 };
 use super::wing::{Formation, WingControl};
 use super::{Result, ScalarSpeed, SpeedLimits};
+
+#[path = "mission_observation.rs"]
+mod observation;
+
+#[cfg(test)]
+#[path = "mission_observation_tests.rs"]
+mod observation_tests;
+
+/// Fitted dispatch floor: smaller missions keep their observation state in
+/// place. The worker-count comparison probe covers preparation and joining.
+const MIN_PARALLEL_OBSERVATIONS: usize = 4;
 
 /// One carried store on an AI aircraft.
 ///
@@ -276,6 +289,7 @@ pub struct EquipmentFaults {
 }
 
 /// One AI-flown aircraft and everything it owns.
+#[cfg_attr(test, derive(Clone, Debug))]
 pub struct AiActor {
     identity: ActorIdentity,
     controller: Controller,
@@ -1322,6 +1336,7 @@ impl AiActor {
 ///
 /// The player is not an actor here. It enters as a [`WorldObject`] like any
 /// other participant, so no player state can contaminate an AI decision.
+#[cfg_attr(test, derive(Clone, Debug))]
 pub struct AiMission {
     actors: Vec<AiActor>,
     tick: u64,
@@ -1974,7 +1989,7 @@ impl AiMission {
     pub fn step(
         &mut self,
         world: &[WorldObject],
-        ground: &dyn Fn(f64, f64) -> f64,
+        ground: &(dyn Fn(f64, f64) -> f64 + Sync),
         now: TimeOfDay,
     ) -> Result<MissionOutput> {
         self.step_with_surface(world, ground, &|x, z| Surface::terrain(ground(x, z)), now)
@@ -1987,9 +2002,20 @@ impl AiMission {
     pub fn step_with_surface(
         &mut self,
         world: &[WorldObject],
-        terrain: &dyn Fn(f64, f64) -> f64,
-        surface: &dyn Fn(f64, f64) -> Surface,
+        terrain: &(dyn Fn(f64, f64) -> f64 + Sync),
+        surface: &(dyn Fn(f64, f64) -> Surface + Sync),
         now: TimeOfDay,
+    ) -> Result<MissionOutput> {
+        self.step_using(world, terrain, surface, now, tore_workers::shared())
+    }
+
+    fn step_using(
+        &mut self,
+        world: &[WorldObject],
+        terrain: &(dyn Fn(f64, f64) -> f64 + Sync),
+        surface: &(dyn Fn(f64, f64) -> Surface + Sync),
+        now: TimeOfDay,
+        workers: &tore_workers::Executor,
     ) -> Result<MissionOutput> {
         let mut output = MissionOutput::default();
         self.return_when_done(world);
@@ -2050,7 +2076,16 @@ impl AiMission {
                     .map(|t| t.phase),
             })
             .collect();
+        let mut observations = self
+            .prepare_observations(world, terrain, surface, workers)
+            .into_iter()
+            .peekable();
         for index in 0..self.actors.len() {
+            let observed = if observations.peek().is_some_and(|(at, _)| *at == index) {
+                observations.next().map(|(_, observed)| observed)
+            } else {
+                None
+            };
             self.step_actor(
                 index,
                 world,
@@ -2059,6 +2094,7 @@ impl AiMission {
                 surface,
                 now,
                 tick,
+                observed,
                 &mut output,
             )?;
             self.journal_actor(index, tick);
@@ -2393,6 +2429,31 @@ impl AiMission {
         }
     }
 
+    fn prepare_observations(
+        &self,
+        world: &[WorldObject],
+        terrain: &(dyn Fn(f64, f64) -> f64 + Sync),
+        surface: &(dyn Fn(f64, f64) -> Surface + Sync),
+        workers: &tore_workers::Executor,
+    ) -> Vec<(usize, observation::Prepared)> {
+        if !workers.should_dispatch(self.actors.len(), MIN_PARALLEL_OBSERVATIONS) {
+            return Vec::new();
+        }
+        let inputs: Vec<_> = self
+            .actors
+            .iter()
+            .enumerate()
+            .filter_map(|(index, actor)| actor.observation_input(index))
+            .collect();
+        if !workers.should_dispatch(inputs.len(), MIN_PARALLEL_OBSERVATIONS) {
+            return Vec::new();
+        }
+        let tick = self.tick;
+        workers.ordered_map(&inputs, MIN_PARALLEL_OBSERVATIONS, |_, input| {
+            (input.index, input.prepare(tick, world, terrain, surface))
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn step_actor(
         &mut self,
@@ -2403,6 +2464,7 @@ impl AiMission {
         surface: &dyn Fn(f64, f64) -> Surface,
         now: TimeOfDay,
         tick: u64,
+        observed: Option<observation::Prepared>,
         output: &mut MissionOutput,
     ) -> Result<()> {
         // Researched aircraft stand on runways, so their ground is the full
@@ -2609,7 +2671,17 @@ impl AiMission {
         }
 
         // 1. The actor's own sensors, stepped with the actor as observer.
-        let mut targets = actor.observe(tick, world, ground);
+        let (mut targets, terrain_blocked) = if let Some(prepared) = observed {
+            actor.sensors = prepared.sensors;
+            actor.awareness = prepared.memory;
+            actor.trace.visual = prepared.visual;
+            (
+                actor.apply_observation(prepared.observed),
+                Some(prepared.terrain_blocked),
+            )
+        } else {
+            (actor.observe(tick, world, ground), None)
+        };
 
         // 2. Own state from the actor's own flight model.
         let own = actor.own_state(ground);
@@ -2630,14 +2702,21 @@ impl AiMission {
 
         // 3. The frame.
         let events = actor.drain_events(tick);
-        for target in &mut targets {
+        for (index, target) in targets.iter_mut().enumerate() {
             target.wing_attackers =
                 assignments.iter().filter(|id| **id == target.id).count() as u32;
-            target.terrain_blocked =
-                crate::combat::live::terrain_hit(own.position, target.position, &|x, z| {
-                    ground(x, z)
-                })
-                .is_some();
+            // OwnState copied the same pre-flight position as the worker's
+            // observer. The preamble paths that move it returned before here.
+            // Publish this only to the decision frame, never awareness memory.
+            target.terrain_blocked = terrain_blocked.as_ref().map_or_else(
+                || {
+                    crate::combat::live::terrain_hit(own.position, target.position, &|x, z| {
+                        ground(x, z)
+                    })
+                    .is_some()
+                },
+                |blocked| blocked[index],
+            );
         }
         let mut expired = Vec::new();
         actor.observed_attacks.retain(|attack| {
@@ -3529,172 +3608,83 @@ impl AiMission {
 }
 
 impl AiActor {
-    /// Collect fresh measurements, then update frozen aircraft memory. Only
-    /// the current observation set is allowed into combat target selection.
+    fn observation_input(&self, index: usize) -> Option<observation::Input<'_>> {
+        if !self.alive() || self.dummy || self.flight.escape.is_some() || self.sensors.is_none() {
+            return None;
+        }
+        // A first damage-return response clears the controller target and
+        // sensor selection before observing. Leave that tick inline. Later
+        // recovery ticks may be prepared because the preamble no longer
+        // changes observation inputs. A ground hold or an ejection returns
+        // before observation, so its speculative result is simply dropped.
+        if self.damage_return.is_none()
+            && super::damage::Response::assess(&self.flight.systems, self.flight.damage_fraction)
+                .reason
+                .is_some()
+        {
+            return None;
+        }
+        Some(observation::Input {
+            index,
+            context: self.observation_context(),
+            sensors: self.sensors.as_ref(),
+            memory: &self.awareness,
+            use_surface: self.flight.research.is_some(),
+        })
+    }
+
+    /// Capture only the actor-local values used by observation. No worker
+    /// receives an actor, controller, or live peer state.
+    fn observation_context(&self) -> observation::Context {
+        observation::Context {
+            actor: self.id(),
+            side: self.identity.side,
+            observer: Observer {
+                position: self.flight.position,
+                basis: crate::attitude::Basis::new(
+                    self.flight.yaw,
+                    self.flight.pitch,
+                    self.flight.bank,
+                ),
+                radar_powered: self.flight.radar,
+                radar_failed: self.equipment.radar,
+                infrared_failed: self.equipment.infrared,
+                visual_failed: self.equipment.visual,
+            },
+            selected: self.controller.target(),
+            experience: self.controller.experience().level,
+            receive_emitters: self.flight.systems.counts[32] <= 1,
+            seeker_eligible: self.seeker_eligible(true),
+        }
+    }
+
+    /// Collect fresh measurements, then update frozen aircraft memory. The
+    /// inline path borrows existing state directly, without speculative clones.
     fn observe(
         &mut self,
         tick: u64,
         world: &[WorldObject],
         ground: &dyn Fn(f64, f64) -> f64,
     ) -> Vec<TargetView> {
-        let live: Vec<u32> = world
-            .iter()
-            .filter(|o| o.alive && !o.destroyed)
-            .map(|o| o.id)
-            .collect();
-        self.awareness.prune_lifecycle(&live);
-        let observer = Observer {
-            position: self.flight.position,
-            basis: crate::attitude::Basis::new(
-                self.flight.yaw,
-                self.flight.pitch,
-                self.flight.bank,
-            ),
-            radar_powered: self.flight.radar,
-            radar_failed: self.equipment.radar,
-            infrared_failed: self.equipment.infrared,
-            visual_failed: self.equipment.visual,
-        };
-        let attention = self
-            .controller
-            .target()
-            .and_then(|id| {
-                self.awareness
-                    .current_observations()
-                    .find(|s| s.target.id == id)
-                    .or_else(|| self.awareness.snapshot(id))
-            })
-            .or_else(|| {
-                self.awareness
-                    .current_observations()
-                    .find(|s| s.target.side != self.identity.side)
-            })
-            .map(|s| s.target.position);
-        let lookout = awareness::Lookout::new(tick, observer.position, observer.basis, attention);
-        self.lookout = Some(lookout);
-        self.trace.lookout = Some(lookout);
-        let contacts = if let Some(sensors) = self.sensors.as_mut() {
-            let observables: Vec<Observable> = world
-                .iter()
-                .filter(|o| o.id != self.identity.actor.0)
-                .filter_map(|o| o.observable.clone())
-                .collect();
-            let obscured = |from, to| crate::combat::live::terrain_hit(from, to, &ground).is_some();
-            let environment = sensors::Environment {
-                ground,
-                obscured: &obscured,
-            };
-            sensors.step(&observer, &observables, &environment);
-            self.received_emitters = if self.flight.systems.counts[32] <= 1 {
-                sensors::passive::emitters(
-                    &observer,
-                    &observables,
-                    sensors.contacts(),
-                    &environment,
-                )
-            } else {
-                Vec::new()
-            };
-            Some(sensors.contacts().to_vec())
-        } else {
-            self.received_emitters.clear();
-            None
-        };
-        let mut observations = Vec::new();
-        // Aircraft on the ground are not air targets.
-        for object in world.iter().filter(|o| {
-            o.id != self.identity.actor.0
-                && o.alive
-                && !o.destroyed
-                && o.is_aircraft
-                && !o.on_ground
-        }) {
-            if let Some(contacts) = &contacts {
-                for contact in contacts
-                    .iter()
-                    .filter(|c| c.id == object.id && !c.destroyed)
-                {
-                    if contact.channel == sensors::Channel::Visual
-                        && lookout.check(
-                            self.controller.experience().level,
-                            contact.position,
-                            None,
-                            crate::combat::live::terrain_hit(
-                                observer.position,
-                                contact.position,
-                                &ground,
-                            )
-                            .is_none(),
-                        ) != awareness::VisualResult::Visible
-                    {
-                        continue;
-                    }
-                    observations.push(Observation {
-                        target: self.observed_target(object, contact.position),
-                        velocity: contact.velocity,
-                        source: match contact.channel {
-                            sensors::Channel::Radar => ObservationSource::Radar,
-                            sensors::Channel::Infrared => ObservationSource::Infrared,
-                            sensors::Channel::Visual => ObservationSource::Visual,
-                        },
-                    });
-                }
-                // Pilot attention has its own circular, skill-scaled cone.
-                // Imported visual equipment remains unchanged for player use.
-                // Cloud/night visibility is not supplied by this host yet;
-                // the explicit None limit is the fitted clear-air assumption.
-                if let Some(observable) = object.observable.as_ref()
-                    && !observable.destroyed
-                    && observable.airborne
-                {
-                    let result = lookout.check(
-                        self.controller.experience().level,
-                        observable.position,
-                        None,
-                        crate::combat::live::terrain_hit(
-                            observer.position,
-                            observable.position,
-                            &ground,
-                        )
-                        .is_none(),
-                    );
-                    if self.trace.visual.len() < 32 {
-                        self.trace.visual.push(awareness::VisualTrace {
-                            id: object.id,
-                            distance_ft: distance(observer.position, observable.position),
-                            result,
-                        });
-                    }
-                    if result == awareness::VisualResult::Visible {
-                        observations.push(Observation {
-                            target: self.observed_target(object, observable.position),
-                            velocity: observable.velocity,
-                            source: ObservationSource::Visual,
-                        });
-                    }
-                }
-            } else {
-                // Explicit sensorless synthetic/replay fixtures supply the
-                // whole permitted list. Production actor loading must never
-                // select this path as a fallback after a sensor import error.
-                observations.push(Observation {
-                    target: self.observed_target(object, object.position),
-                    velocity: object.velocity,
-                    source: ObservationSource::Fixture,
-                });
-            }
-        }
-        self.awareness.observe(tick, &observations);
-        self.trace.observation_sources = self
-            .awareness
-            .current_observations()
-            .take(32)
-            .map(|s| (s.target.id, s.source_ticks))
-            .collect();
-        self.awareness
-            .current_observations()
-            .map(|snapshot| snapshot.target)
-            .collect()
+        let context = self.observation_context();
+        let observed = observation::observe(
+            context,
+            &mut self.sensors,
+            &mut self.awareness,
+            &mut self.trace.visual,
+            tick,
+            world,
+            ground,
+        );
+        self.apply_observation(observed)
+    }
+
+    fn apply_observation(&mut self, observed: observation::Observed) -> Vec<TargetView> {
+        self.lookout = Some(observed.lookout);
+        self.trace.lookout = Some(observed.lookout);
+        self.received_emitters = observed.emitters;
+        self.trace.observation_sources = observed.sources;
+        observed.targets
     }
 
     /// Choose a stable, lost hostile observation for investigation. Current
@@ -4170,6 +4160,7 @@ impl AiActor {
     /// Capture permitted classification/attitude metadata at the time of an
     /// observation. The measured position comes from that observation, not a
     /// later lookup of a remembered object ID in the world.
+    #[cfg(test)]
     fn observed_target(&self, object: &WorldObject, position: [f64; 3]) -> TargetView {
         TargetView {
             id: object.id,

@@ -2110,7 +2110,7 @@ impl AiWings {
         &mut self,
         player: WorldObject,
         targets: &mut [live::Target],
-        ground: &dyn Fn(f64, f64) -> f64,
+        ground: &(dyn Fn(f64, f64) -> f64 + Sync),
     ) -> WorldResult<tore_sim::ai::mission::MissionOutput> {
         self.advance_on_surface(vec![player], targets, ground, &|x, z| {
             tore_sim::research::Surface::terrain(ground(x, z))
@@ -2127,8 +2127,8 @@ impl AiWings {
         &mut self,
         humans: Vec<WorldObject>,
         targets: &mut [live::Target],
-        terrain: &dyn Fn(f64, f64) -> f64,
-        surface: &dyn Fn(f64, f64) -> tore_sim::research::Surface,
+        terrain: &(dyn Fn(f64, f64) -> f64 + Sync),
+        surface: &(dyn Fn(f64, f64) -> tore_sim::research::Surface + Sync),
     ) -> WorldResult<tore_sim::ai::mission::MissionOutput> {
         self.mirror_damage_in(targets);
         let escaped: Vec<_> = self

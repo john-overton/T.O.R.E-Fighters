@@ -56,12 +56,12 @@ pub fn emitters(
         if !emitting || !target.airborne {
             continue;
         }
-        if (environment.obscured)(observer.position, target.position) {
-            continue;
-        }
         let sighting = Sighting::new(observer.position, &observer.basis, target.position);
         let distance = sighting.distance_nmi();
         if !distance.is_finite() || distance > RECEIVER_LIMIT_NMI {
+            continue;
+        }
+        if (environment.obscured)(observer.position, target.position) {
             continue;
         }
         // Range is plotted only for an emitter our own sensors also observe.

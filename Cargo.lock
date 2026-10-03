@@ -2097,6 +2097,7 @@ dependencies = [
  "tore-codec",
  "tore-formats",
  "tore-input",
+ "tore-workers",
 ]
 
 [[package]]

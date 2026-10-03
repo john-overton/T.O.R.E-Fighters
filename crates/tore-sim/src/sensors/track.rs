@@ -136,10 +136,27 @@ impl Observable {
 }
 
 /// Terrain services supplied by the host, so this component never samples a
-/// world of its own.
+/// world of its own. Queries are pure for the duration of a step: identical
+/// endpoints have identical visibility, independent of query count or order.
 pub struct Environment<'a> {
     pub ground: &'a dyn Fn(f64, f64) -> f64,
     pub obscured: &'a dyn Fn(Vector, Vector) -> bool,
+}
+
+/// Reuse one target's first sampled segment only for identical ordered endpoint
+/// bits. A different segment queries the terrain service without replacing that
+/// first result or allocating another cache entry.
+fn cached_obscured(query: &dyn Fn(Vector, Vector) -> bool) -> impl Fn(Vector, Vector) -> bool + '_ {
+    let first = std::cell::OnceCell::new();
+    move |from: Vector, to: Vector| {
+        let key = [from[0], from[1], from[2], to[0], to[1], to[2]].map(f64::to_bits);
+        let (cached_key, blocked) = first.get_or_init(|| (key, query(from, to)));
+        if *cached_key == key {
+            *blocked
+        } else {
+            query(from, to)
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -614,6 +631,14 @@ impl Sensors {
         self.map_contacts.clear();
         let visual = !observer.visual_failed;
         for target in &sorted {
+            // Channels share a result only for the same ordered endpoint bits.
+            // The local cache never crosses a tick, observer or worker.
+            let obscured = cached_obscured(environment.obscured);
+            let query = Environment {
+                ground: environment.ground,
+                obscured: &obscured,
+            };
+            let environment = &query;
             let sensed =
                 channel.and_then(|channel| self.observe(observer, target, channel, environment));
             let seen = visual
@@ -736,9 +761,7 @@ impl Sensors {
         environment: &Environment<'_>,
     ) -> Option<Contact> {
         let sighting = Sighting::new(observer.position, &observer.basis, target.position);
-        if !sighting.distance_ft.is_finite()
-            || (environment.obscured)(observer.position, target.position)
-        {
+        if !sighting.distance_ft.is_finite() {
             return None;
         }
         let (search, track) = match channel {
@@ -846,6 +869,11 @@ impl Sensors {
         if !(admits(search) || (retained && in_track)) {
             return None;
         }
+        // Terrain is a pure query. Reject targets outside both sensor envelopes
+        // before sampling the line of sight, without changing any contact.
+        if (environment.obscured)(observer.position, target.position) {
+            return None;
+        }
         Some(Contact {
             id: target.id,
             channel,
@@ -902,3 +930,6 @@ fn strobes(
     }
     strobes
 }
+
+#[cfg(test)]
+mod performance_tests;
