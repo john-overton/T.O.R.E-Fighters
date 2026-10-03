@@ -14,6 +14,13 @@ pub struct Performance {
     veil: bool,
     pub completed_previews: usize,
     paused_frames: usize,
+    /// Simulation ticks the current frame ran, and the time compression asked
+    /// for, noted by [`Performance::ticks`] before the frame is recorded.
+    pending_ticks: usize,
+    requested_scale: f64,
+    /// Ticks run in each recorded sample's frame and the time compression
+    /// asked for then, beside `samples`.
+    ticks_run: Vec<(usize, f64)>,
 }
 impl Performance {
     pub fn from_env() -> crate::AppResult<Self> {
@@ -43,6 +50,37 @@ impl Performance {
     pub fn veil_level(&self) -> Option<f64> {
         (self.limit > 0 && self.veil).then_some(if (self.frames / 30) % 2 == 1 { 0.6 } else { 0. })
     }
+    /// Notes how many 120 Hz ticks this frame ran, and the time compression
+    /// the player asked for, so the report can say what rate was reached.
+    pub fn ticks(&mut self, run: usize, requested_scale: f64) {
+        self.pending_ticks = run;
+        self.requested_scale = requested_scale;
+    }
+    /// What the recorded frames simulated: the ticks they ran, the wall time
+    /// they covered and the rate of mission time that reached, beside the one
+    /// asked for. It covers the frames since the asked-for rate last changed,
+    /// so a run that starts at 1x and steps up to 8x reports the 8x. A frame's
+    /// ticks cover the interval since the previous frame began, which is what
+    /// each sample's interval measures. `None` when no tick ran.
+    fn simulated_line(&self) -> Option<String> {
+        let asked = self.ticks_run.last()?.1;
+        let from = self
+            .ticks_run
+            .iter()
+            .rposition(|t| t.1 != asked)
+            .map_or(0, |i| i + 1);
+        let frames = &self.ticks_run[from..];
+        let wall: f64 = self.samples[from..].iter().map(|s| s[0]).sum::<f64>() / 1000.;
+        let ticks: usize = frames.iter().map(|t| t.0).sum();
+        (ticks > 0 && wall > 0.).then(|| {
+            format!(
+                "simulated: {ticks} ticks in {wall:.2} s, {:.2}x real time (asked for {asked}x); ticks per frame mean {:.1}, max {}",
+                ticks as f64 / 120. / wall,
+                ticks as f64 / frames.len() as f64,
+                frames.iter().map(|t| t.0).max().unwrap_or(0)
+            )
+        })
+    }
     pub fn record(
         &mut self,
         start: Instant,
@@ -64,7 +102,10 @@ impl Performance {
                 present,
             ]);
             self.veiled.push(self.veil_level().is_some_and(|l| l > 0.));
+            self.ticks_run
+                .push((self.pending_ticks, self.requested_scale));
         }
+        self.pending_ticks = 0;
         self.paused_frames += usize::from(paused);
         self.previous = Some(start);
         self.frames += 1;
@@ -79,6 +120,9 @@ impl Performance {
             "  paused frames: {}; completed camera readbacks: {}",
             self.paused_frames, self.completed_previews
         );
+        if let Some(line) = self.simulated_line() {
+            println!("  {line}");
+        }
         let groups: &[(&str, Option<bool>)] = if self.veil {
             &[("veil off", Some(false)), ("veil on", Some(true))]
         } else {
@@ -133,6 +177,7 @@ mod tests {
         let start = Instant::now();
         for frame in 0..60 {
             assert_eq!(perf.view(), Some(if frame < 30 { 0 } else { 3 }));
+            perf.ticks(2, 1.);
             assert_eq!(
                 perf.record(
                     start + std::time::Duration::from_millis(frame * 16),
@@ -145,7 +190,45 @@ mod tests {
             );
         }
         assert_eq!(perf.samples.len(), 30);
+        // The warm-up frames' ticks are left out with their samples.
+        assert_eq!(perf.ticks_run, vec![(2, 1.); 30]);
+        // 30 frames of 16 ms ran 60 ticks: 0.5 s of mission in 0.48 s.
+        assert_eq!(
+            perf.simulated_line().as_deref(),
+            Some(
+                "simulated: 60 ticks in 0.48 s, 1.04x real time (asked for 1x); ticks per frame mean 2.0, max 2"
+            )
+        );
         assert!(perf.samples.iter().all(|s| *s == [16., 1., 2., 3.]));
         assert_eq!(perf.paused_frames, 0);
+    }
+
+    #[test]
+    fn the_simulated_line_covers_the_frames_since_the_asked_for_rate_changed() {
+        let mut perf = Performance {
+            limit: 100,
+            ..Default::default()
+        };
+        let start = Instant::now();
+        for frame in 0..70 {
+            let (ticks, asked) = if frame < 50 { (2, 1.) } else { (16, 8.) };
+            perf.ticks(ticks, asked);
+            perf.record(
+                start + std::time::Duration::from_millis(frame * 16),
+                1.,
+                2.,
+                3.,
+                false,
+            );
+        }
+        // The last 20 recorded frames ran at 8x: 320 ticks, 2.67 s in 0.32 s.
+        assert_eq!(
+            perf.simulated_line().as_deref(),
+            Some(
+                "simulated: 320 ticks in 0.32 s, 8.33x real time (asked for 8x); ticks per frame mean 16.0, max 16"
+            )
+        );
+        // A run that ran no tick has nothing to report.
+        assert_eq!(Performance::default().simulated_line(), None);
     }
 }

@@ -2101,3 +2101,574 @@ fn cued_radar_release_uses_predicted_reach_not_nominal_launch_max() {
     );
     assert_eq!(s.own().ammo, ammo);
 }
+
+/// `missiles::maximum_range` as it was before fly-outs were skipped where the
+/// answer is already fixed: every sample flew its whole fly-out (the reference
+/// copy of `intercept`, which also stops for nothing).
+#[allow(clippy::too_many_arguments)]
+fn full_flight_maximum_range(
+    w: &Weapon,
+    position: Vector,
+    forward: Vector,
+    velocity: Vector,
+    target: Vector,
+    target_velocity: Vector,
+    lifetime: u64,
+) -> f64 {
+    use missiles::{Guidance, length, sub};
+    let minimum = f64::from(w.seeker.zones[1].minimum_range.max(0));
+    let motion = Motion::launch(w, velocity, position[1]);
+    let seconds = lifetime.min(u64::from(w.movement.remove_t) * 30) as f64 * missiles::DT;
+    let travel_bound = (length(velocity) + motion.budget + length(target_velocity)) * seconds + 25.;
+    let cap = if Profile::for_weapon(w).is_some_and(|p| p.guidance == Guidance::Active) {
+        travel_bound
+    } else {
+        travel_bound.min(f64::from(w.seeker.zones[0].maximum_range))
+    };
+    if cap <= minimum {
+        return 0.;
+    }
+    let bearing = crate::attitude::unit(sub(target, position));
+    let reaches = |range| {
+        reference_intercept(
+            &w.movement,
+            Motion::launch(w, velocity, position[1]),
+            position,
+            forward,
+            std::array::from_fn(|i| position[i] + bearing[i] * range),
+            target_velocity,
+            0,
+            lifetime,
+        )
+        .is_some()
+    };
+    if reaches(cap) {
+        return cap;
+    }
+    let step = (cap - minimum) / 16.;
+    for sample in (0..16).rev() {
+        let mut low = minimum + f64::from(sample) * step;
+        if !reaches(low) {
+            continue;
+        }
+        let mut high = low + step;
+        for _ in 0..10 {
+            let middle = (low + high) * 0.5;
+            if reaches(middle) {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        return low;
+    }
+    0.
+}
+
+/// `missiles::firing_band` as it was before the fly-outs were cut short once
+/// a later interception could no longer score 70.
+#[allow(clippy::too_many_arguments)]
+fn full_flight_firing_band(
+    w: &Weapon,
+    position: Vector,
+    basis: Basis,
+    velocity: Vector,
+    observation: seeker::Observation,
+    maximum: f64,
+    lifetime: u64,
+    bore: bool,
+) -> Option<missiles::FiringBand> {
+    use missiles::{FiringBand, geometry, launch_geometry, sub};
+    let minimum = f64::from(w.seeker.zones[1].minimum_range.max(0));
+    if maximum <= minimum {
+        return None;
+    }
+    let profile = Profile::for_weapon(w)?;
+    let lower = minimum + 0.1 * (maximum - minimum);
+    let step = (maximum - lower) / 16.;
+    let bearing = crate::attitude::unit(sub(observation.position, position));
+    let mut zone = w.seeker.zones[1];
+    zone.maximum_range = maximum.floor() as _;
+    let mut start = None;
+    let mut best: Option<FiringBand> = None;
+    for sample in 0..=16 {
+        let range = lower + f64::from(sample) * step;
+        let target = std::array::from_fn(|i| position[i] + bearing[i] * range);
+        let solution = if geometry(&launch_geometry(w), position, basis, target, None) {
+            reference_intercept(
+                &w.movement,
+                Motion::launch(w, velocity, position[1]),
+                position,
+                basis.forward,
+                target,
+                observation.velocity,
+                0,
+                lifetime,
+            )
+        } else {
+            None
+        };
+        let score = missiles::estimated_hit_percent(
+            seeker::Observation {
+                position: target,
+                range,
+                ..observation
+            },
+            solution,
+            &zone,
+            lifetime.min(u64::from(w.movement.remove_t) * 30) as f64 * missiles::DT,
+            bore.then(|| profile.search_cap()),
+        );
+        if score >= 70 {
+            let first = *start.get_or_insert(range);
+            if range > first && best.is_none_or(|b| range - first > b.maximum - b.minimum) {
+                best = Some(FiringBand {
+                    minimum: first,
+                    maximum: range,
+                });
+            }
+        } else {
+            start = None;
+        }
+    }
+    best
+}
+
+thread_local! {
+    /// Ticks the reference fly-outs have flown on this thread.
+    static REFERENCE_TICKS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+fn reference_ticks() -> u64 {
+    REFERENCE_TICKS.with(|n| n.get())
+}
+
+/// `missiles::intercept` as it was before a coasting fly-out stopped once the
+/// target was out of reach: a verbatim copy, kept here as the independent
+/// reference, that always flies to a hit or the end.
+#[allow(clippy::too_many_arguments)]
+fn reference_intercept(
+    m: &tore_formats::weapons::Movement,
+    mut motion: Motion,
+    mut position: Vector,
+    mut forward: Vector,
+    mut target: Vector,
+    velocity: Vector,
+    age: u64,
+    lifetime: u64,
+) -> Option<missiles::Solution> {
+    use missiles::{DT, Solution, commanded_heading, lead, length, steer, sub};
+    let end = lifetime.min(u64::from(m.remove_t) * 30);
+    let mut aim = target;
+    for tick in age..end {
+        REFERENCE_TICKS.with(|n| n.set(n.get() + 1));
+        if tick == age || tick.is_multiple_of(12) {
+            aim = lead(position, length(motion.velocity), target, velocity).point;
+        }
+        let previous = sub(target, position);
+        let desired = commanded_heading(
+            forward,
+            motion.velocity,
+            crate::attitude::unit(sub(motion.aim(position, aim), position)),
+        );
+        let next = steer(m, tick, forward, desired);
+        motion.turn(forward, next);
+        forward = next;
+        let delta = motion.step(m, tick, forward);
+        for i in 0..3 {
+            position[i] += delta[i];
+            target[i] += velocity[i] * DT;
+        }
+        let relative = sub(target, position);
+        let segment = sub(relative, previous);
+        let u = (-crate::attitude::dot(previous, segment)
+            / crate::attitude::dot(segment, segment).max(1e-12))
+        .clamp(0., 1.);
+        let closest = std::array::from_fn(|i| previous[i] + segment[i] * u);
+        if length(closest) <= 25. {
+            return Some(Solution {
+                point: target,
+                seconds: (tick - age + 1) as f64 * DT,
+            });
+        }
+    }
+    None
+}
+
+/// A random missile for the fly-out comparisons: motor times, speeds, turn
+/// rates, sag, ejection and the cruise profile all vary.
+fn random_flyer(case: usize, next: &mut impl FnMut() -> f64) -> Weapon {
+    let mut w = range_weapon();
+    w.movement.remove_t = [20, 30, 45, 90][case % 4];
+    w.movement.ignite_t = [0, 0, 2, 4][case % 4];
+    w.movement.fuel_t = w.movement.ignite_t + [2, 6, 12, 24][case % 4];
+    w.movement.initial_speed = [0, 300][case % 2];
+    w.movement.maximum_speed = (900. + 1200. * next()) as _;
+    w.movement.acceleration = (150. + 700. * next()) as _;
+    w.movement.deceleration = (10. + 120. * next()) as _;
+    w.movement.final_speed = (100. + 400. * next()) as _;
+    w.movement.powered_turn_rate = (2000. + 12000. * next()) as _;
+    w.movement.unpowered_turn_rate = (1000. + 8000. * next()) as _;
+    if case % 5 == 1 {
+        w.flags |= missiles::SAG_FLAG;
+    }
+    if case % 7 == 2 {
+        w.flags |= missiles::EJECT_FLAG;
+    }
+    if case % 6 == 3 {
+        w.flags |= missiles::CRUISE_FLAG;
+        w.movement.cruise = [4, 8, 2, 4];
+    }
+    w
+}
+
+/// A coasting missile stops flying once the target is out of reach, and that
+/// only ever saves time: over many random missiles, launch speeds, target
+/// distances, motions and ages the answer is the same, bit for bit, as the
+/// copy that always flies on. Cases that a coasting missile hits late, and
+/// cases it gives up on early, must both occur, or the comparison proves
+/// nothing.
+#[test]
+fn a_coasting_fly_out_that_gives_up_early_leaves_the_answer_unchanged() {
+    let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let (mut hit, mut late_hit, mut miss) = (0, 0, 0);
+    let (mut flown, mut full) = (0, 0);
+    for case in 0..1500 {
+        let w = random_flyer(case, &mut next);
+        let basis = Basis::new((next() - 0.5) * 0.6, (next() - 0.5) * 0.4, 0.);
+        let speed = 200. + 1000. * next();
+        let velocity: Vector = std::array::from_fn(|i| basis.forward[i] * speed);
+        let position = [0., 1000. + 20000. * next(), 0.];
+        // Mostly in the missile's reach, some well past it.
+        let distance = 1000. + 70000. * next() * next();
+        let bearing = Basis::new((next() - 0.5) * 0.8, (next() - 0.5) * 0.4, 0.).forward;
+        let target: Vector = std::array::from_fn(|i| position[i] + bearing[i] * distance);
+        let target_velocity: Vector = [
+            (next() - 0.5) * 900.,
+            (next() - 0.5) * 200.,
+            (next() - 0.5) * 900.,
+        ];
+        // Some fly-outs start with the missile already under way.
+        let age = [0, 0, 0, 7, 40, 300, 700][case % 7];
+        let lifetime = Profile::for_weapon(&w).unwrap().guidance_ticks;
+        let launch = Motion::launch(&w, velocity, position[1]);
+        let before = missiles::flown_ticks();
+        let got = missiles::intercept(
+            &w.movement,
+            launch,
+            position,
+            basis.forward,
+            target,
+            target_velocity,
+            age,
+            lifetime,
+        );
+        flown += missiles::flown_ticks() - before;
+        let reference = reference_intercept(
+            &w.movement,
+            launch,
+            position,
+            basis.forward,
+            target,
+            target_velocity,
+            age,
+            lifetime,
+        );
+        assert_eq!(got, reference, "case {case}");
+        let end = lifetime.min(u64::from(w.movement.remove_t) * 30);
+        full += match reference {
+            Some(s) => (s.seconds / missiles::DT).round() as u64,
+            None => end.saturating_sub(age),
+        };
+        match reference {
+            Some(s) => {
+                hit += 1;
+                late_hit += usize::from(
+                    age + (s.seconds / missiles::DT).round() as u64
+                        > u64::from(w.movement.fuel_t) * 30 + 16,
+                );
+            }
+            None => miss += 1,
+        }
+    }
+    assert!(
+        hit >= 200 && late_hit >= 40 && miss >= 200,
+        "hits {hit}, late hits {late_hit}, misses {miss}"
+    );
+    // Each early stop shows as fewer ticks flown than the whole fly-out.
+    assert!(flown * 10 < full * 9, "{flown} of {full} ticks flown");
+    eprintln!("hits {hit}, late hits {late_hit}, misses {miss}, flown {flown} of {full}");
+}
+
+/// A coasting missile that has stopped moving forward can still fall onto a
+/// target beneath it, by sag or by the ejection kick, so the check that ends a
+/// coasting fly-out has to count the fall as reach. The random comparison
+/// above moves too fast for the fall to matter, so this one is built for it.
+#[test]
+fn a_coasting_fly_out_counts_sag_and_ejection_as_reach() {
+    for (flag, label) in [
+        (missiles::SAG_FLAG, "sag"),
+        (missiles::EJECT_FLAG, "ejection"),
+    ] {
+        let mut w = range_weapon();
+        w.flags |= flag;
+        w.movement.ignite_t = 0;
+        w.movement.fuel_t = 0;
+        w.movement.remove_t = 60;
+        w.movement.initial_speed = 0;
+        w.movement.final_speed = 0;
+        w.movement.deceleration = 5000;
+        let life = Profile::for_weapon(&w).unwrap().guidance_ticks;
+        let position = [0., 5000., 0.];
+        let target = [0., 4800., 0.];
+        let launch = Motion::launch(&w, [0.; 3], position[1]);
+        let args = (position, [0., 0., 1.], target, [0.; 3], 0, life);
+        let reference = reference_intercept(
+            &w.movement,
+            launch,
+            args.0,
+            args.1,
+            args.2,
+            args.3,
+            args.4,
+            args.5,
+        );
+        let got = missiles::intercept(
+            &w.movement,
+            launch,
+            args.0,
+            args.1,
+            args.2,
+            args.3,
+            args.4,
+            args.5,
+        );
+        assert!(
+            reference.is_some(),
+            "{label}: the fall should reach the target"
+        );
+        assert_eq!(got, reference, "{label}");
+    }
+}
+
+/// The range estimate and the firing band are the same numbers as when every
+/// sample flew its whole fly-out, over a spread of weapons, launch speeds,
+/// target ranges and motions, aspects, sag, ejection and boresight launches.
+/// The skips (a target out of reach of any fly-out; a fly-out stopped once a
+/// later interception cannot score 70) are only allowed to save time.
+#[test]
+fn skipped_fly_outs_leave_the_range_estimate_and_band_unchanged() {
+    let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let (mut with_band, mut with_range, mut cut_short) = (0, 0, 0);
+    for case in 0..48 {
+        let mut w = range_weapon();
+        w.movement.remove_t = [20, 30, 45][case % 3];
+        w.movement.ignite_t = [0, 0, 2, 4][case % 4];
+        w.movement.fuel_t = w.movement.ignite_t + [6, 12, 24][case % 3];
+        w.movement.maximum_speed = (900. + 1200. * next()) as _;
+        w.movement.acceleration = (150. + 700. * next()) as _;
+        w.movement.deceleration = (10. + 120. * next()) as _;
+        w.movement.final_speed = (100. + 400. * next()) as _;
+        w.movement.powered_turn_rate = (2000. + 12000. * next()) as _;
+        w.movement.unpowered_turn_rate = (1000. + 8000. * next()) as _;
+        if case % 5 == 1 {
+            w.flags |= missiles::SAG_FLAG;
+        }
+        if case % 7 == 2 {
+            w.flags |= missiles::EJECT_FLAG;
+        }
+        w.seeker.zones[1].minimum_range = [0, 500, 1500][case % 3];
+        if case % 6 == 3 {
+            w.seeker.zones[1].heading = 12000;
+            w.seeker.zones[1].pitch = 9000;
+        }
+        let life = Profile::for_weapon(&w).unwrap().guidance_ticks;
+        let speed = 300. + 900. * next();
+        let yaw = (next() - 0.5) * 0.6;
+        let pitch = (next() - 0.5) * 0.4;
+        let basis = Basis::new(yaw, pitch, 0.);
+        let position = [0., 1000. + 20000. * next(), 0.];
+        let velocity: Vector = std::array::from_fn(|i| basis.forward[i] * speed);
+        let distance = 3000. + 90000. * next() * next();
+        let bearing =
+            Basis::new(yaw + (next() - 0.5) * 0.4, pitch + (next() - 0.5) * 0.2, 0.).forward;
+        let target: Vector = std::array::from_fn(|i| position[i] + bearing[i] * distance);
+        let target_velocity: Vector = [
+            (next() - 0.5) * 900.,
+            (next() - 0.5) * 200.,
+            (next() - 0.5) * 900.,
+        ];
+        let expected = full_flight_maximum_range(
+            &w,
+            position,
+            basis.forward,
+            velocity,
+            target,
+            target_velocity,
+            life,
+        );
+        let got = missiles::maximum_range(
+            &w,
+            position,
+            basis.forward,
+            velocity,
+            target,
+            target_velocity,
+            life,
+        );
+        assert_eq!(
+            got.to_bits(),
+            expected.to_bits(),
+            "maximum range, case {case}"
+        );
+        with_range += usize::from(expected > 0.);
+        let observation = seeker::Observation {
+            id: 7,
+            position: target,
+            velocity: target_velocity,
+            quality: [1., 0.9, 0.8, 0.6][case % 4],
+            off_axis: next() * 0.08,
+            range: distance,
+        };
+        let bore = case % 4 == 3;
+        for maximum in [expected, expected * 0.6, expected * 1.4] {
+            let reference = full_flight_firing_band(
+                &w,
+                position,
+                basis,
+                velocity,
+                observation,
+                maximum,
+                life,
+                bore,
+            );
+            let band = missiles::firing_band(
+                &w,
+                position,
+                basis,
+                velocity,
+                observation,
+                maximum,
+                life,
+                bore,
+            );
+            assert_eq!(
+                band, reference,
+                "firing band, case {case}, maximum {maximum}"
+            );
+            with_band += usize::from(reference.is_some());
+            cut_short += usize::from(reference.is_none() && maximum > 0.);
+        }
+    }
+    // The spread has to exercise both answers, or the comparison proves nothing.
+    assert!(
+        with_range >= 10 && with_band >= 6 && cut_short >= 6,
+        "{with_range} {with_band} {cut_short}"
+    );
+}
+
+/// The firing estimates run every 60 ticks while a missile is selected and a
+/// target is in view, so what one costs is paid again and again, and at eight
+/// times time compression sixteen times a second. Each interception flown is
+/// about a tenth of a microsecond a tick in a release build, so this counts
+/// the ticks flown, which no machine changes, for a fixed set of missiles and
+/// targets, and bounds them: the answers match the whole-flight copies, and the
+/// work stays well under what they spend. A change that flies every sample to
+/// the end again (it was about three times the ticks) fails here.
+#[test]
+fn a_range_estimate_flies_a_bounded_number_of_ticks() {
+    // A 10,200 tick (85 s) fly-out like the long-range radar missiles, the
+    // default test missile (30 s), and a short, quick one like a dogfight missile.
+    let mut long = range_weapon();
+    long.movement.remove_t = 340;
+    long.movement.fuel_t = 120;
+    let standard = range_weapon();
+    let mut short = range_weapon();
+    short.movement.remove_t = 30;
+    short.movement.fuel_t = 6;
+    short.movement.maximum_speed = 2200;
+    let l = range_launcher();
+    let (mut flown, mut whole) = (0, 0);
+    for (name, w) in [("long", &long), ("standard", &standard), ("short", &short)] {
+        let life = Profile::for_weapon(w).unwrap().guidance_ticks;
+        // Receding, closing, head-on fast, crossing, level and high.
+        for (offset, velocity) in [
+            ([0., 0., 20000.], [0., 0., 300.]),
+            ([0., 0., 20000.], [0., 0., -300.]),
+            ([0., 3000., 40000.], [0., 0., -900.]),
+            ([6000., 0., 30000.], [-500., 0., 0.]),
+            ([-4000., 8000., 15000.], [200., -50., 400.]),
+            ([0., -500., 90000.], [0., 0., 0.]),
+        ] {
+            let position: Vector = std::array::from_fn(|i| l.position[i] + offset[i]);
+            let range = missiles::length(offset);
+            let o = seeker::Observation {
+                id: 7,
+                position,
+                velocity,
+                quality: 1.,
+                off_axis: 0.,
+                range,
+            };
+            let before = missiles::flown_ticks();
+            let maximum = missiles::maximum_range(
+                w,
+                l.position,
+                l.basis.forward,
+                l.velocity,
+                o.position,
+                o.velocity,
+                life,
+            );
+            let band =
+                missiles::firing_band(w, l.position, l.basis, l.velocity, o, maximum, life, false);
+            let spent = missiles::flown_ticks() - before;
+            let before = reference_ticks();
+            let reference_maximum = full_flight_maximum_range(
+                w,
+                l.position,
+                l.basis.forward,
+                l.velocity,
+                o.position,
+                o.velocity,
+                life,
+            );
+            let reference_band = full_flight_firing_band(
+                w,
+                l.position,
+                l.basis,
+                l.velocity,
+                o,
+                reference_maximum,
+                life,
+                false,
+            );
+            let full = reference_ticks() - before;
+            eprintln!("{name} at {offset:?}: flown {spent} ticks, whole flights {full}");
+            assert_eq!(
+                (maximum, band),
+                (reference_maximum, reference_band),
+                "{name} at {offset:?}"
+            );
+            flown += spent;
+            whole += full;
+        }
+    }
+    eprintln!("total: flown {flown} ticks, whole flights {whole}");
+    // Measured: 1,231,686 ticks flown against 2,187,517 for the whole flights.
+    // The bound leaves room for last-digit differences between platforms'
+    // maths, and sits well under what flying every sample out would cost.
+    assert!(flown <= 1_500_000, "{flown} ticks flown, over the bound");
+    assert!(flown * 10 <= whole * 7, "{flown} of {whole} ticks flown");
+}

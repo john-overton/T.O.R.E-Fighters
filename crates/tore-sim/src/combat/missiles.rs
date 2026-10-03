@@ -472,6 +472,10 @@ pub fn steer(m: &Movement, age: u64, forward: Vector, desired: Vector) -> Vector
     }))
 }
 
+/// How often, in ticks, the coasting fly-out of [`intercept`] checks whether
+/// the target has fallen out of reach.
+const COAST_CHECK_TICKS: u64 = 16;
+
 /// Fitted 120 Hz flyout with observed constant-velocity target and shared physics.
 #[allow(clippy::too_many_arguments)]
 pub fn intercept(
@@ -491,6 +495,21 @@ pub fn intercept(
             aim = lead(position, length(motion.velocity), target, velocity).point;
         }
         let previous = sub(target, position);
+        // Once the motor is out the missile only slows, so the most the gap
+        // can still close is fixed by its speed now: a target farther off than
+        // that, plus the 25 feet that count as a hit, is never reached, and
+        // the rest of the fly-out could only say no. See `unreachable`.
+        if (tick - age).is_multiple_of(COAST_CHECK_TICKS)
+            && phase(m, tick) == EnginePhase::Coast
+            && unreachable(
+                length(previous),
+                coasting_reach(&motion, length(velocity), end - tick),
+            )
+        {
+            #[cfg(test)]
+            note_flown(tick - age);
+            return None;
+        }
         let desired = commanded_heading(
             forward,
             motion.velocity,
@@ -509,13 +528,47 @@ pub fn intercept(
         let u = (-dot(previous, segment) / dot(segment, segment).max(1e-12)).clamp(0., 1.);
         let closest = std::array::from_fn(|i| previous[i] + segment[i] * u);
         if length(closest) <= 25. {
+            #[cfg(test)]
+            note_flown(tick - age + 1);
             return Some(Solution {
                 point: target,
                 seconds: (tick - age + 1) as f64 * DT,
             });
         }
     }
+    #[cfg(test)]
+    note_flown(end.saturating_sub(age));
     None
+}
+
+/// The most a coasting missile and its target can still close the gap
+/// between them over `ticks` more ticks of fly-out (feet). The motor is out,
+/// so the missile's speed never rises (a turn only costs speed, the slowdown
+/// only takes it) and its sag never exceeds the largest the fly-out allows;
+/// the target keeps its speed.
+fn coasting_reach(motion: &Motion, target_speed: f64, ticks: u64) -> f64 {
+    let sink = if motion.sags {
+        motion.sink.max(SAG_MAX_FPS)
+    } else {
+        motion.sink
+    };
+    (length(motion.velocity) + sink + target_speed) * ticks as f64 * DT
+}
+
+#[cfg(test)]
+thread_local! {
+    static FLOWN_TICKS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+fn note_flown(ticks: u64) {
+    FLOWN_TICKS.with(|flown| flown.set(flown.get() + ticks));
+}
+/// The ticks of missile fly-out [`intercept`] has run on this thread so far:
+/// a count of the work the firing estimates cost, for tests to bound, since
+/// the time it takes varies with the machine. Compiled for tests only.
+#[cfg(test)]
+pub fn flown_ticks() -> u64 {
+    FLOWN_TICKS.with(|flown| flown.get())
 }
 
 /// Imported minimum/angle/altitude limits, without the obsolete fixed launch max.
@@ -524,6 +577,50 @@ pub fn launch_geometry(w: &Weapon) -> Zone {
         maximum_range: i32::MAX,
         ..w.seeker.zones[1]
     }
+}
+
+/// How many ticks a fly-out of `intercept` runs at most: the guidance time or
+/// the weapon's removal time, whichever is first.
+fn lifetime_ticks(m: &Movement, lifetime: u64) -> u64 {
+    lifetime.min(u64::from(m.remove_t) * 30)
+}
+
+/// The farthest a missile launched with `motion` can possibly fly in a whole
+/// fly-out of `intercept` (feet), however it steers. Each tick's speed is
+/// bounded by the speed the motor could have reached with every bit of thrust
+/// spent in the line (steering only loses speed), the coast slowdown applied
+/// as it is flown, and the largest downward sag or ejection speed on top.
+fn travel_ceiling(m: &Movement, motion: &Motion, lifetime: u64) -> f64 {
+    let sink = SAG_MAX_FPS.max(EJECT_FPS).max(motion.sink);
+    let mut speed = length(motion.velocity);
+    let mut gain = motion.gain;
+    let mut total = 0.;
+    for tick in 0..lifetime_ticks(m, lifetime) {
+        match phase(m, tick) {
+            EnginePhase::Powered => {
+                let step =
+                    (f64::from(m.acceleration.max(0)) * DT).min((motion.budget - gain).max(0.));
+                gain += step;
+                speed += step;
+            }
+            EnginePhase::Coast => {
+                speed = (speed - f64::from(m.deceleration.max(0)) * DT)
+                    .max(f64::from(m.final_speed.max(0)).min(speed));
+            }
+            EnginePhase::BeforeIgnition => {}
+        }
+        total += (speed + sink) * DT;
+    }
+    total
+}
+
+/// Whether a target `range` feet away is provably out of the reach of a
+/// fly-out that covers at most `travel` feet between the missile and the
+/// target together: `intercept` only succeeds once the closest approach is
+/// within 25 feet, and each tick closes the gap by no more than the two
+/// objects' own movement. The margin covers rounding in the fly-out.
+fn unreachable(range: f64, travel: f64) -> bool {
+    range > 25. + travel + 1e-6 * (range + travel) + 1e-3
 }
 
 /// Max useful launch distance bounded by available motion/time, not nominal max.
@@ -553,7 +650,19 @@ pub fn maximum_range(
         return 0.;
     }
     let bearing = unit(sub(target, position));
-    let reaches = |range| {
+    // A target the missile cannot cover in its whole flight needs no fly-out:
+    // `intercept` could only run to the end and say no. See `unreachable`.
+    let ceiling = travel_ceiling(
+        &w.movement,
+        &Motion::launch(w, velocity, position[1]),
+        lifetime,
+    );
+    let travel =
+        ceiling + length(target_velocity) * lifetime_ticks(&w.movement, lifetime) as f64 * DT;
+    let reaches = |range: f64| {
+        if unreachable(range, travel) {
+            return false;
+        }
         intercept(
             &w.movement,
             Motion::launch(w, velocity, position[1]),
@@ -618,34 +727,59 @@ pub fn firing_band(
     zone.maximum_range = maximum.floor() as _;
     let mut start = None;
     let mut best: Option<FiringBand> = None;
+    let bore_cap = bore.then(|| profile.search_cap());
+    let life = lifetime_ticks(&w.movement, lifetime);
+    let life_seconds = life as f64 * DT;
     for sample in 0..=16 {
         let range = lower + f64::from(sample) * step;
         let target = std::array::from_fn(|i| position[i] + bearing[i] * range);
-        let solution = if geometry(&launch_geometry(w), position, basis, target, None) {
-            intercept(
-                &w.movement,
-                Motion::launch(w, velocity, position[1]),
-                position,
-                basis.forward,
-                target,
-                observation.velocity,
-                0,
-                lifetime,
-            )
-        } else {
-            None
+        let observed = seeker::Observation {
+            position: target,
+            range,
+            ..observation
         };
-        let score = estimated_hit_percent(
-            seeker::Observation {
-                position: target,
-                range,
-                ..observation
-            },
-            solution,
-            &zone,
-            lifetime.min(u64::from(w.movement.remove_t) * 30) as f64 * DT,
-            bore.then(|| profile.search_cap()),
-        );
+        let score_of =
+            |solution| estimated_hit_percent(observed, solution, &zone, life_seconds, bore_cap);
+        // Only a score of 70 or more counts, and a later interception scores
+        // no higher than an earlier one. So the fly-out need only run as long
+        // as an interception can still score 70, which is exact: a shot that
+        // would hit later scores below 70 either way.
+        let late = |ticks: u64| {
+            score_of(Some(Solution {
+                point: target,
+                seconds: ticks as f64 * DT,
+            }))
+        };
+        let horizon = if life == 0 || late(1) < 70 {
+            0
+        } else {
+            let (mut good, mut bad) = (1, life + 1);
+            while bad - good > 1 {
+                let middle = good + (bad - good) / 2;
+                if late(middle) >= 70 {
+                    good = middle;
+                } else {
+                    bad = middle;
+                }
+            }
+            good
+        };
+        let solution =
+            if horizon > 0 && geometry(&launch_geometry(w), position, basis, target, None) {
+                intercept(
+                    &w.movement,
+                    Motion::launch(w, velocity, position[1]),
+                    position,
+                    basis.forward,
+                    target,
+                    observation.velocity,
+                    0,
+                    horizon,
+                )
+            } else {
+                None
+            };
+        let score = score_of(solution);
         if score >= 70 {
             let first = *start.get_or_insert(range);
             if range > first && best.is_none_or(|b| range - first > b.maximum - b.minimum) {

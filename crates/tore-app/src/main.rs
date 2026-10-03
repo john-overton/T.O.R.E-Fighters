@@ -3581,6 +3581,7 @@ impl ApplicationHandler for App {
                                 break;
                             }
                         }
+                        self.performance.ticks(steps, self.flight_ui.time_scale);
                         self.input.feedback_flush();
                         if !self.flight_ui.frozen() {
                             let analog_look = self.input.resolver.look();
@@ -8662,7 +8663,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         return Err("--ai-probe-ticks is a headless probe and cannot capture or snapshot".into());
     }
     if (probe_script.enemy_aircraft.is_some()
-        || probe_script.fight.is_some()
+        || (probe_script.fight.is_some() && !launch_creator)
         || probe_script.friendly_aircraft.is_some()
         || probe_script.enemy_skill.is_some()
         || probe_script.geometry != ProbeGeometry::Head
@@ -10269,6 +10270,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     if let Some(size) = probe_script.wing_size {
         quick.draft.values[4] = size;
+    }
+    if launch_creator && let Some((friendly, enemy)) = probe_script.fight {
+        for (fields, total) in [([4, 7, 10], friendly), ([21, 24, 27], enemy)] {
+            for (n, field) in fields.into_iter().enumerate() {
+                quick.draft.values[field] = total.saturating_sub(n * 5).min(5);
+            }
+        }
     }
     if probe_script.wing_only {
         for field in [7, 10, 21, 24, 27] {
