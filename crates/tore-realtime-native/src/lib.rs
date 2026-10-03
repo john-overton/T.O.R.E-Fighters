@@ -5,11 +5,13 @@
 //! macOS coalesces the timers of a process it does not treat as in the
 //! foreground, so their sleeps can last tens of milliseconds longer than they
 //! ask: the CI runners (utility QoS), a hosting game that App Nap slows while
-//! its window is hidden, a server that launchd starts. Two calls answer it,
-//! both no-ops elsewhere:
+//! its window is hidden, a server that launchd starts. Three calls answer it,
+//! all no-ops elsewhere:
 //!
 //! - [`real_time_thread`] gives the calling thread a Mach time-constraint
 //!   policy, whose timers the kernel does not coalesce;
+//! - [`interactive_thread`] requests interactive QoS for CPU workers without
+//!   promoting them to the host loop's real-time policy;
 //! - [`Activity::begin`] holds an `NSProcessInfo` activity, latency-critical
 //!   and user-initiated, so App Nap leaves the process alone while it lasts.
 //!
@@ -75,6 +77,19 @@ pub fn real_time_thread(period: Duration) -> Outcome {
         let _ = period;
         Outcome::NotNeeded
     }
+}
+
+/// Requests user-interactive QoS for the calling thread, without any
+/// time-constraint policy. Worker threads call this once at startup. The
+/// request is best effort: it neither pins a core nor guarantees a deadline.
+pub fn interactive_thread() -> Outcome {
+    #[cfg(target_os = "macos")]
+    return match macos::set_interactive_qos() {
+        Ok(()) => Outcome::On,
+        Err(why) => Outcome::Failed(why),
+    };
+    #[cfg(not(target_os = "macos"))]
+    Outcome::NotNeeded
 }
 
 /// An `NSProcessInfo` activity, latency-critical and user-initiated, held
@@ -186,5 +201,20 @@ mod tests {
             Outcome::NotNeeded
         };
         assert_eq!((thread, activity), (expected.clone(), expected));
+    }
+
+    #[test]
+    fn worker_qos_takes_on_macos_without_real_time_promotion() {
+        // Use a fresh thread, separate from tests that apply a Mach policy.
+        // A time-constraint thread cannot subsequently opt into QoS.
+        let outcome = std::thread::spawn(interactive_thread).join().unwrap();
+        assert_eq!(
+            outcome,
+            if cfg!(target_os = "macos") {
+                Outcome::On
+            } else {
+                Outcome::NotNeeded
+            }
+        );
     }
 }

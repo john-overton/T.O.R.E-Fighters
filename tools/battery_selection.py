@@ -243,6 +243,8 @@ RULES: tuple[Rule, ...] = (
     _r("rust-toolchain.toml", ALL_FAMILIES, "compiler version"),
     _r("crates/*/Cargo.toml", ALL_FAMILIES, "crate manifest"),
     _r("crates/*/build.rs", ALL_FAMILIES, "build script"),
+    # A shared executor serves both the world and CPU render preparation.
+    _r("crates/tore-workers/*", ALL_FAMILIES, "shared scoped worker execution", windowed=True),
     # tore-sim: flight model.
     _r("crates/tore-sim/src/models/*", FLIGHT_CORE + ("flight-damage",), "per-aircraft flight tables"),
     _r("crates/tore-sim/src/flight.rs", FLIGHT_CORE, "flight model"),
@@ -345,7 +347,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-net/*", (), "network transport; no scenario yet"),
     _r("crates/tore-session/*", (), "network sessions; no scenario yet"),
     _r("crates/tore-server/*", (), "dedicated server; no scenario yet"),
-    _r("crates/tore-realtime-native/*", (), "host loop timing on macOS; no scenario hosts"),
+    _r("crates/tore-realtime-native/*", ALL_FAMILIES, "host and shared-worker scheduling on macOS", windowed=True),
     # tore-app: rendering (windowed).
     _r("crates/tore-app/src/*.wgsl", RENDER_FAMILIES, "shaders", windowed=True),
     _r("crates/tore-app/src/*renderer*.rs", RENDER_FAMILIES, "renderers", windowed=True),

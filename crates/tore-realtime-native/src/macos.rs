@@ -37,6 +37,25 @@ unsafe extern "C" {
     fn pthread_mach_thread_np(thread: *mut c_void) -> u32;
     fn mach_timebase_info(info: *mut MachTimebaseInfo) -> i32;
     fn thread_policy_set(thread: u32, flavor: u32, policy: *mut i32, count: u32) -> i32;
+    fn pthread_set_qos_class_self_np(class: u32, relative_priority: i32) -> i32;
+}
+
+/// `QOS_CLASS_USER_INTERACTIVE` from `<sys/qos.h>`. `qos_class_t` has the
+/// unsigned 32-bit C enum representation on both supported architectures.
+const QOS_CLASS_USER_INTERACTIVE: u32 = 0x21;
+
+pub fn set_interactive_qos() -> Result<(), String> {
+    // SAFETY: this changes only the calling thread. The class and relative
+    // priority (zero, the class default) are valid constants from Apple's
+    // pthread QoS API; it accepts no pointers and returns an errno value.
+    let status = unsafe { pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0) };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "pthread_set_qos_class_self_np refused it ({status})"
+        ))
+    }
 }
 
 /// Mach absolute time units in `duration`, given the timebase (nanoseconds

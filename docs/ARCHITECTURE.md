@@ -4673,220 +4673,71 @@ they run one after the other.
 
 ## Performance and threads
 
-*Design, 2026-10-02 (the multiplayer lead), from slice PF0's profile and
-PF1's fixes; built on the `performance` branch, which merges into
-`multiplayer` when John is happy with it. A slice row says "Built" once it
-is. Every number is from a Ryzen 9 7900X (12 cores, 24 threads), 64 GB, RTX
-4070, release builds, unless it says otherwise.*
-
-John, 2026-10-02: "we would want to offload as much from the sim as much as
-possible, so AI, building of objects/scenery, etc.. splitting frame drawing
-... from a performance perspective we might want to look at [it] sooner
-rather than later." Single player and multiplayer run the same world step
-(`World::step_with`), and a player's own game runs the same frame loop in
-both, so everything below serves both. The host's per-seat work serves
-multiplayer only.
+Implementation mode, on `performance`. John authorized plan revisions and
+implementation with subagents on 2026-10-03. The lead reviewed their changes.
+The commit sequence introduces independently buildable slices. Scheduling
+and API choices are agent decisions; gameplay and flight adapters stay fixed.
 
 ### What stays fixed
 
-- **Results, bit for bit.** Threads change where work runs, never what it
-  computes. The single-player baseline compares SAME, every golden and
-  fingerprint test passes unchanged, replays and combat tapes play back as
-  before, and a multiplayer host and its clients stay in step as today. A
-  change that would alter any result is a behaviour change, and that needs
-  John.
-- **The AI keeps today's behaviour exactly** (John, 2026-10-02). Actors step
-  in id order, and a later actor sees an earlier one's decisions of the same
-  tick. Only work that reads nothing of other actors' same-tick state moves
-  to workers.
-- **The frame loop under load** stays as described in
-  [The frame loop under load](#the-frame-loop-under-load): no cap on the
-  ticks a frame runs (John, 2026-10-02).
-- **One new dependency is approved: `rayon`** (John, 2026-10-02), used only
-  behind the project's own `tore-workers` interface. Any other crate needs
-  John. The workspace keeps `unsafe_code = "forbid"`: rayon's scoped
-  borrowing is what lets workers read the world without unsafe code of our
-  own.
-- **Pixels.** Frame-side work keeps every capture identical. Work that
-  changes pixels (moving the aircraft transform to the GPU, terrain culling,
-  fewer shadow passes) is a rendering change for John to decide, outside
-  these slices.
+- Results remain bit for bit identical for the same inputs on the same platform.
+  Goldens, recordings, combat tapes and the canonical single-player baseline
+  remain unchanged. Render captures compare on the same GPU backend and settings.
+- The AI retains its current actor iteration and same-tick decision visibility
+  (John, 2026-10-02). Workers never make decisions from live peer state.
+- The [frame loop under load](#the-frame-loop-under-load) keeps every tick a
+  frame owes. There is no new tick cap (John, 2026-10-02), and simulation remains
+  fixed at 120 Hz independently of rendering.
+- All flight adapters retain their existing defaults and compatibility paths.
+- Rayon is the approved new external dependency (John, 2026-10-02). Only the
+  internal `tore-workers` crate names it. Project code retains its existing
+  unsafe-code boundary; the native scheduling call stays in `tore-realtime-native`.
+- GPU transforms, different culling, fewer shadow passes and other changes to
+  pixels remain outside this work. No original executable is used.
 
-### Where the time goes
 
-Measured by PF0 with temporary timing markers (three runs each; the report,
-its raw data and the instrumentation patch are in `.local/mp-notes/perf/`).
+### Shared scoped workers
 
-**The tick.** A 15 against 15 Quick Mission, headless: 29 AI aircraft and
-the player, 286 targets counting the airport's objects.
+One `tore-workers::Executor` is shared by the process, including a hosting game
+and its frame loop. The fitted automatic size is available logical CPUs minus
+three, capped at eight. If that leaves fewer than two workers, automatic
+execution is serial. This leaves scheduling headroom, not reserved cores.
+`TORE_WORKERS=0` runs inline; explicit sizes, including one, are capped at eight.
+Invalid settings or thread-creation failure produce a diagnostic and retain
+serial execution. Successful initialization is silent.
 
-| Stretch of the mission | Mean tick | AI | Combat |
-| --- | --- | --- | --- |
-| First 5 s | 1.54 ms | 1.32 ms | 0.17 ms |
-| 10 to 30 s | 1.25 ms | 0.85 ms | 0.34 ms |
-| 30 to 60 s | 0.60 ms | 0.44 ms | 0.11 ms |
-| 1 to 3 min | 0.32 to 0.41 ms | 0.17 to 0.26 ms | 0.11 ms |
+The interface provides ordered borrowed maps and disjoint mutable visits.
+The unused mutable-map and join APIs were removed after review. Instrument
+pages run as independent collection items; they do not overlap scene building.
+No Rayon types cross the interface. Every scoped job finishes before its inputs
+can change or a panic propagates. CPU jobs must not block waiting on each other.
+Window operations and ordered GPU submission remain on the calling thread.
 
-Over the three minutes the AI is 66 percent of the tick, and its sensors and
-lookout (`observe`, inside each actor's step) alone are 44 percent. Combat
-is 27 percent, of which the projectiles are 12. The tick's picture, the
-player's flight, radio and events are under 10 percent together.
+Tests construct explicit serial, parallel or repeatably shuffled executors;
+they never mutate process environment to switch modes. Ordered results are
+published by input index, not completion order. Tests exercise borrowed outputs,
+mutable disjoint work, simultaneous callers, panic completion and nested work
+with one worker. Thresholds are measured on this implementation, not inferred
+from PF0's different `std` pool.
 
-**The frame.** A light mission is GPU-bound on this machine: at 1920x1080 the
-main thread works 3.4 ms of a 9.1 ms frame and waits 5.7 ms for the GPU,
-which is 95 percent busy, so CPU threads cannot raise its frame rate. A heavy
-mission is CPU-bound:
+macOS workers request user-interactive QoS at startup through the existing
+native boundary. This does not pin a core, guarantee a deadline or give workers
+the host's real-time policy. Failures remain diagnostic. Terrain query entry
+points that cross threads require `Sync`; sensor environments are constructed
+within each job and need no shared lock.
 
-| Part of a heavy 1x frame (11.4 ms) | Time | Share |
-| --- | --- | --- |
-| The other aircraft's vertices, built on the CPU (`render_snapshot::aircraft_batches`, `Airframe::vertices`) and uploaded | 3.6 ms | 31 % |
-| The instrument pages (`FlightCanvas::begin`) | 2.85 ms | 25 % |
-| The ticks (input, the step, the combat tape, `TickPresenter`) | 2.26 ms | 20 % |
-| Drawing, presenting and waiting for the GPU | 1.6 ms | 14 % |
-| The airport's static geometry, built and uploaded twice | 0.33 ms | 3 % |
 
-**A host.** On the host thread with a 30-aircraft mission
-(`tore-session/tests/host_players.rs`), a tick costs 1.9 ms with 30 AI
-aircraft (3.2 ms in the first minute; the AI's sensors are 79 percent),
-3.9 ms with 15 humans, and 6.3 ms with 30 humans. Of the 30-human tick, the
-humans' own sensors are 4.07 ms (136 us each) and the per-seat snapshots
-1.08 ms.
+### Integration status
 
-**Loading.** A whole Quick Mission start takes 62 to 92 ms on the six
-theaters measured, and nothing is built while flying (there is no terrain
-streaming), so building scenery on a thread is not worth it now.
+| Slice | Status |
+| --- | --- |
+| Shared workers | Built |
+| AI observations and exact sensor visibility reuse | Next in the sequence |
+| Ownship sensing and host picture preparation | Next in the sequence |
+| Aircraft, scenery and instrument frame preparation | Next in the sequence |
+| Elapsed measurements, fixed captures and final evidence | Next in the sequence |
 
-### The design
-
-**The worker pool, `tore-workers` (a new crate).** One pool for the whole
-process, on `rayon`:
-
-- **Size:** logical CPUs minus 3, from 1 to 8 (PF0's suggestion, so the main
-  thread, the GPU driver's threads and the audio callback keep their cores).
-  A hosting game's host thread and its main thread share the one pool.
-  `TORE_WORKERS=N` overrides the size, and `0` runs everything on the
-  calling thread.
-- **A small interface**, so no caller names rayon: an ordered map (the
-  results in item order), a mutable for-each over disjoint items, and a join
-  of two independent jobs. Each call takes a minimum item count below which
-  it runs on the caller. Waking the workers costs about 20 us typically and
-  up to 0.45 ms at p99 (PF0's benchmark on `std` threads), so a region worth
-  less than about 100 us stays serial.
-- **Three modes:** parallel; serial, on the calling thread in item order,
-  which is the reference every test compares with; and, in test builds,
-  shuffled, which runs the items in a random order to prove nothing depends
-  on which finishes first. Results are kept per item and used in item order,
-  never in the order they finish.
-- **macOS:** each worker asks for the user-interactive QoS class as it
-  starts (rayon's start handler, through a new call in
-  `tore-realtime-native`), so the kernel neither coalesces its timers nor
-  parks it on an efficiency core. Whether workers serving a host also need
-  EF-M's time-constraint policy is measured on the macOS runners.
-- **`Sync` terrain queries:** the world's terrain queries, passed today as
-  `&dyn Fn(f64, f64) -> f64` and `impl Fn`, gain `+ Sync` so workers can
-  share them. `Terrain` is plain owned data without caches, so the change is
-  mechanical.
-
-**The AI: look in parallel, decide in order.** `AiMission::step_with_surface`
-steps every actor in id order (`step_actor`). That step splits in two:
-
-1. **Look**, on the pool, every actor at once: the trace reset, the escape
-   and ejection checks, the damage response, the sensors and lookout
-   (`observe`), missile defence (`update_defense`) and the terrain line of
-   sight to each target. These read only the actor itself and the
-   start-of-tick snapshot.
-2. **Decide and fly**, on the calling thread in id order as today: the reads
-   of other actors (`leader_view`, `airfield_clearance`, `join_landing`, the
-   wing's target assignments), `airfield_tick`, the controller, weapons,
-   devices, traffic avoidance and the flight step.
-
-A few fields that the look can change are read by a later actor's decide
-(the position for the damage hold, the activity, the landing order, alive
-after an ejection; PF0's AI survey lists them). Those are read from a small
-published table that holds each actor's start-of-tick values until that
-actor's own decide has run, so every actor sees exactly what it sees today.
-Outputs and journal lines are kept per actor and appended in id order. The
-look is 75 to 85 percent of the per-actor time; the decide is 3 to 5
-percent of a tick.
-
-**Combat and the host: per ownship and per seat.** In combat's per-ownship
-loop (`live::State::step_rewound`), each ownship's sensor step, selection,
-emitters, mounted seeker, weapon observation and firing estimate read that
-ownship, the targets and the terrain, and write only that ownship. They run
-on the pool, one ownship per item. Readiness and firing share the projectile
-list, its counters and one random stream, so they stay serial in id order.
-The host's per-seat snapshots (`Host::snapshots`) read the finished world
-and write only their own peer's state, so they are built on the pool and
-sent in seat order. Single player has one ownship, so this part serves
-hosts and the dedicated server.
-
-**The frame.** The other aircraft's vertices are built per aircraft on the
-pool and appended in today's order, which gives the same bytes; the camera
-panels' builds do the same. The instrument pages are rasterised on a worker
-while the main thread builds the scene, and joined before the canvas is
-composed.
-
-**Not now** (revisited with PF7's numbers):
-
-- a separate render thread: 2,500 to 4,000 lines and a frame of added
-  latency, while encoding and submitting take 0.2 to 0.5 ms a frame;
-- encoding on several threads, for the same reason;
-- a mission-load worker: loads take under 0.1 s;
-- threading the projectiles, smoke or the human planes' flight: they cost
-  microseconds, or share one random stream.
-
-### How a slice proves its results unchanged
-
-1. **Serial against parallel in one process.** A test runs the same world
-   with the pool serial and parallel and compares a fingerprint of every
-   tick: the world's state, the whole `TickOutput` in order and the AI
-   journal. It needs no recorded value, so it runs on every platform. The
-   scenarios: the 15 against 15 probe fight; a ground start with two wings
-   at one airfield (the AI's cross reads); a re-form where a later member
-   leads; missiles and countermeasures (the shared random streams); and the
-   multiplayer crowd fixture with several human seats.
-2. **Shuffled order** in test builds, as above.
-3. **The AI split's cross-read check.** In test builds every read of
-   another actor's state is recorded and asserted to happen in the decide.
-4. **The existing guards:** the tick fingerprint
-   (`tore-world/src/world/tick_tests.rs`); tore-sim's goldens (compared only
-   on Apple silicon, so on Linux print them before and after with
-   `TORE_GOLDEN_VERBOSE=1` and compare); the AI probe's output and
-   recordings; the single-player baseline compared SAME; replays and combat
-   tapes.
-5. **Frame side:** each vertex list built both ways and compared byte for
-   byte, and GPU captures compared by hash with the current reference sets.
-
-### Slices
-
-| Slice | Model | Needs | What | Expected gain | Acceptance |
-| --- | --- | --- | --- | --- | --- |
-| PF0 Profile | Opus | | Done 2026-10-02: the profile and feasibility above | | Report in `.local/mp-notes/perf/` |
-| PF1 Firing estimate | Sonnet | | Built 2026-10-02 (`44f40971`, `67aa2b18`): [the exact shortcuts](#the-firing-estimate-and-its-exact-shortcuts) and the "simulated:" line | The 37 to 100 ms tick while locked, about halved | Done |
-| PF2 Single-thread fixes and finer profiles | Sonnet | | Draw the airport's static geometry once a frame and keep it until a placement changes. AI lookups by id (`AiMission::actor`, `AiWings::slot`) and no per-actor copy of the traffic list (`traffic.to_vec()`). Profile by function (samply) `observe`, `FlightCanvas::begin`, `Airframe::vertices` and `TickPresenter`, and make the exact fixes they show (cheap rejects before the terrain line of sight; one line-of-sight answer per observer and target). Measure the heavy mission at 8x with audio on and off, and fix the audio's cost per tick if it is the gap | 0.2 to 0.3 ms a frame for certain; 5 to 15 percent of a heavy tick (guess) | Baseline SAME; goldens; capture hashes; before and after table |
-| PF3 Worker pool and the other aircraft | Opus | | `tore-workers` on rayon as above, with the `Sync` terrain queries and the macOS QoS. `aircraft_batches` per aircraft on the pool. The pool's wake-up cost and the heavy frame measured on the macOS and Windows runners (a temporary workflow step, removed before finishing) | Heavy frame from 11.4 to about 8.5 ms (guess) | Vertex lists equal both ways; capture hashes; shuffled mode; CI green on every platform |
-| PF4 AI look on the pool | Opus | PF2, PF3 | The look and decide split | Opening-fight tick from 1.5 to 2.2 ms to about 0.8 to 1.2 ms; a host's first minute from 3.2 to about 1.5 ms (guess) | Serial against parallel on the five scenarios; shuffled mode; the cross-read check; goldens; AI probe output; baseline SAME |
-| PF5 Host per ownship and per seat | Opus | PF3 | Combat's per-ownship work on the pool; the host's snapshots per seat, sent in seat order | 30 humans from 6.3 to about 2 ms a tick; 15 humans from about 4 to 2.5 ms (guess) | Many-ownship fingerprint serial against parallel; the network matrix and loopback tests unchanged; `host_players` before and after |
-| PF6 Instrument pages on a worker | Sonnet | PF2, PF3 | The pages rasterised on a worker beside the scene build | Up to 2.85 ms of a heavy frame hidden (guess) | Page rasters equal both ways; capture hashes |
-| PF7 Acceptance | lead, then John | all | The before and after table on this machine (light and heavy, 1x and 8x, locked; a host with 0, 15 and 30 humans), the macOS and Windows runners' numbers, a windowed flight; John flies it; then the merge into `multiplayer` | | John's OK |
-
-GPU-side work for light missions (GPU timestamps first, which change
-nothing, then options that would change pixels) is a separate decision for
-John, outside these slices.
-
-```mermaid
-flowchart TD
-  PF2["PF2 Single-thread fixes and profiles"] --> PF4["PF4 AI look on the pool"]
-  PF3["PF3 Worker pool and other aircraft"] --> PF4
-  PF3 --> PF5["PF5 Host per ownship and per seat"]
-  PF2 --> PF6["PF6 Instrument pages on a worker"]
-  PF3 --> PF6
-  PF4 --> PF7["PF7 Acceptance"]
-  PF5 --> PF7
-  PF6 --> PF7
-```
-
-PF2 and PF3 start together. PF4, PF5 and PF6 can then run side by side:
-PF4 edits the AI, PF5 combat and the host, PF6 the instruments. PF2 and PF3
-both touch `main.rs` lightly (the airport draw, and the aircraft batches'
-call site).
+The following slices retain serial publication, GPU/window ownership and the
+120 Hz simulation clock. Per-component reference tests accompany their code.
+Final repeated timing tables and the matched baseline report are integrated
+with the measurement tools. A merge into `multiplayer` remains a separate review.
