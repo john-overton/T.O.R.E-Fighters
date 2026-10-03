@@ -1,19 +1,19 @@
 //! What each human costs the host, on a 15 against 15 mission with real data:
-//! the host's processor time per tick and per human, and the bytes each way
+//! the host's elapsed time per tick and per human, and the bytes each way
 //! per player and in total, with 0, 2, 8, 15 or 30 bots flying (slice D10,
 //! docs/baselines/net-2026-09-30.md).
 //!
 //! The host and the bots run in one process on the network simulator with a
-//! perfect link, stepped a millisecond at a time with no waiting, so the
-//! figures do not depend on the machine's other work: the host's time is its
-//! own thread's processor time (Linux, from `/proc/thread-self/schedstat`;
-//! other systems fall back to wall time, which a busy machine inflates), read
-//! around each call into the host. The bots' work is left out of it. Run it
+//! perfect link, stepped a millisecond at a time with no waiting. Elapsed time
+//! includes worker completion and scheduler delays: measure on a quiet machine.
+//! Linux also reports the host thread's CPU time, which excludes worker CPU
+//! and must not be used as the threading speed-up. The bots' work is outside
+//! the measured calls. Run it
 //! in a release build, one count at a time:
 //!
 //! ```sh
 //! TORE_DATA_DIR=$PWD/.local/mpb-data-matrix TORE_MEASURE_BOTS=15 \
-//!     cargo test --release -p tore-session --test host_players -- --ignored --nocapture
+//!     cargo test --release --locked -p tore-session --test host_players -- --ignored --nocapture
 //! ```
 //!
 //! `TORE_MEASURE_BOTS` is the number of bots (default 2), `TORE_MEASURE_OPEN`
@@ -166,6 +166,7 @@ fn host_cost_and_bandwidth_with_bots_on_a_15_against_15_mission() {
     let mut calls: Vec<u64> = Vec::new();
     let mut tick_calls: Vec<u64> = Vec::new();
     let mut host_ns: u64 = 0;
+    let mut host_cpu_ns: u64 = 0;
     let mut seated_at: Option<Duration> = None;
     let mut ticks_before = 0u64;
     let mut per_minute: Vec<(u64, u64)> = Vec::new();
@@ -182,10 +183,12 @@ fn host_cost_and_bandwidth_with_bots_on_a_15_against_15_mission() {
         let now = net.now();
         let before = host.world().tick();
         let t0 = cpu.now();
+        let elapsed_start = Instant::now();
         host.receive_from(now, &mut host_socket).unwrap();
         host.update(now);
         host.transmit(&mut host_socket).unwrap();
-        let spent = cpu.now().saturating_sub(t0);
+        let spent = elapsed_start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+        let cpu_spent = cpu.now().saturating_sub(t0);
         let ticked = host.world().tick() - before;
         for (socket, bot) in &mut players {
             bot.client.receive_from(now, socket).unwrap();
@@ -216,6 +219,7 @@ fn host_cost_and_bandwidth_with_bots_on_a_15_against_15_mission() {
         }
         let flying = now - seated_at.unwrap();
         host_ns += spent;
+        host_cpu_ns += cpu_spent;
         calls.push(spent);
         if ticked > 0 {
             tick_calls.push(spent);
@@ -255,30 +259,32 @@ fn host_cost_and_bandwidth_with_bots_on_a_15_against_15_mission() {
     tick_calls.sort_unstable();
     let ms_per_tick = host_ns as f64 / ticks.max(1) as f64 / 1e6;
     println!(
-        "{planes} planes, {bots} bots ({}), {seconds} s flown, {ticks} ticks, {} clock, \
+        "{planes} planes, {bots} bots ({}), {seconds} s flown, {ticks} ticks, elapsed clock, \
          wall {:.0} s",
         if matches!(open, OpenPlanes::All) {
             "all planes open"
         } else {
             "friendly planes open"
         },
-        if cpu.is_cpu() {
-            "thread processor time"
-        } else {
-            "WALL time"
-        },
         wall.elapsed().as_secs_f64()
     );
     println!(
-        "host cost: {:.3} ms a tick on average ({:.1}% of one core at 120 ticks a second); \
-         ticking calls p50 {:.3} ms, p99 {:.3} ms, p99.9 {:.3} ms, longest {:.3} ms",
+        "host elapsed: {:.3} ms a tick on average ({:.1}% of the 120 Hz wall-time budget); \
+         ticking calls p50 {:.3} ms, p95 {:.3} ms, p99 {:.3} ms, p99.9 {:.3} ms, longest {:.3} ms",
         ms_per_tick,
         ms_per_tick * 120. / 10.,
         percentile(&tick_calls, 0.5),
+        percentile(&tick_calls, 0.95),
         percentile(&tick_calls, 0.99),
         percentile(&tick_calls, 0.999),
         tick_calls.last().copied().unwrap_or(0) as f64 / 1e6
     );
+    if cpu.is_cpu() {
+        println!(
+            "host thread CPU (excludes workers): {:.3} ms a tick",
+            host_cpu_ns as f64 / ticks.max(1) as f64 / 1e6
+        );
+    }
     for (index, (ns, t)) in per_minute.iter().enumerate() {
         println!(
             "  minute {}: {:.3} ms a tick",

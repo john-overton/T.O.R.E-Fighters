@@ -359,6 +359,8 @@ fn serve(
     });
     let mut phase = None;
     let mut stop_by: Option<Duration> = None;
+    let measure = std::env::var_os("TORE_PERF_HOST").is_some();
+    let mut report_at = clock.now() + Duration::from_secs(1);
     loop {
         let now = clock.now();
         if let Err(error) = host.receive_from(now, transport) {
@@ -369,6 +371,18 @@ fn serve(
             let _ = reports.send(Report::Note(format!("send failed: {error}")));
         }
         forward(host, reports, &mut phase);
+        if measure && now >= report_at {
+            let status = host.status(now);
+            println!(
+                "Host performance: tick={} players={} mean_ms={:.3} max_ms={:.3} overloads={}",
+                status.tick,
+                status.players,
+                status.tick_cost_mean.as_secs_f64() * 1000.,
+                status.tick_cost_max.as_secs_f64() * 1000.,
+                status.overloads,
+            );
+            report_at = now + Duration::from_secs(1);
+        }
         if host.phase() == Phase::Stopped {
             return if stop_by.is_some() {
                 End::Stopped

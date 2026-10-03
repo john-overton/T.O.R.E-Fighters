@@ -511,6 +511,11 @@ Instrument window numbers: 0 radar cross section, 1 envelope, 2 front view, 3 ot
 
 The full-height cockpit and live HUD can be captured with `--capture-flight .local/cockpit.ppm`. Add `--flight-menu` to capture the paused Escape menu. `--flight-view 0|1|2|3|4` selects front/chase/oblique/back/up for inspection. These flags require a display for GPU capture. See [cockpit/control validation](baselines/cockpit-controls.md).
 
+Scene captures hold the prepared flight and weather state while the window and
+GPU initialize. Startup time does not advance the captured simulation. Use
+`--flight-probe-ticks` to capture an explicitly stepped state; a plain capture
+uses the launch state. This also applies to `--capture-terrain`.
+
 
 Flight UI now adapts to drawable aspect ratio independently of menu letterboxing. Use `--window-size 1280x720` (or resize normally) to inspect widescreen behavior. `--capture-flight` preserves the current aspect and writes at the flight overlay resolution, capped proportionally at 1920×1080. The original `--capture-terrain` remains 960×720. Small instruments resample directly from their native rasters; HUD readouts have transparent backgrounds. See [responsive-flight checks](baselines/responsive-flight-ui.md).
 
@@ -639,6 +644,9 @@ same Cargo commands. Remove the environment override after the session with
 Pref → Graphics... sets anti-aliasing, render scale, the spotting aid and terrain filtering; see [graphics options](spec/graphics-options.md). For one run, without saving, use `--anti-aliasing off|2x|4x|8x`, `--render-scale 75|100|125|150|200`, `--spotting-aid off|subtle|strong` and `--terrain-filtering on|off`; `--original-graphics` turns every addition off at 100%. Flags apply in order. Captures and smoke tests ignore the saved `graphics-v1.conf` and use the defaults plus any flags, so compare `--original-graphics` against no flag for matched before/after images.
 
 ## Flight performance
+
+For the fixed-work before/after threading battery, see
+[performance validation](testing/performance.md).
 
 Normal `cargo run --locked -p tore-app -- --free-flight` now optimizes the app crate at level 2, retaining debug symbols/assertions. Dependencies keep their existing debug settings; Cargo may still label the overall dev profile “unoptimized.” No release build is required to benefit. Simulation remains fixed at 120 Hz; presentation interpolates its last two poses and requests uncapped Immediate presentation, then Mailbox, with FIFO only as a supported-mode fallback and one requested queued frame. There is no additional 16 ms sleep in flight/viewer mode. The display/compositor can still limit presentation frequency.
 

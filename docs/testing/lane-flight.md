@@ -424,8 +424,11 @@ target cycling with several targets in view are exercised only by the probe-atta
 ## Render captures
 
 `python3 tools/battery.py --scenario 'render-*' --windows 1` runs windowed captures
-(through the wrapper, one window at a time) that reproduce drawing faults. Each
-only checks that the frame is not blank, so look at the PPM it writes:
+(through the wrapper, one window at a time) that reproduce drawing faults.
+The two `render-capture-*-deterministic` cases repeat a bare flight or terrain
+capture three times and compare complete PPM bytes. They fix launch time,
+disable controllers and keep focus-related pause presentation stable.
+The art inspection cases below check for blank frames; look at their PPMs:
 
 | Scenario | What it shows | What to look for |
 | --- | --- | --- |

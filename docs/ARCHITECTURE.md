@@ -4675,8 +4675,16 @@ they run one after the other.
 
 Implementation mode, on `performance`. John authorized plan revisions and
 implementation with subagents on 2026-10-03. The lead reviewed their changes.
-The commit sequence introduces independently buildable slices. Scheduling
-and API choices are agent decisions; gameplay and flight adapters stay fixed.
+Implementation choices below are agent decisions. The [feature baseline](baselines/performance-threads.md)
+records measurements and validation status; the [testing guide](testing/performance.md)
+explains how to repeat them. Linux validation is complete. Platform and manual
+review limits are recorded in the baseline.
+
+The starting gameplay revision is `c1d1e736`, which includes PF1's exact firing
+estimate shortcuts. PF0's earlier profile and code surveys are retained under
+`.local/mp-notes/perf/`. They identified expensive observation, CPU aircraft
+geometry, instrument preparation and per-seat host work. They are historical
+candidate measurements, not the before reference for this implementation.
 
 ### What stays fixed
 
@@ -4694,7 +4702,6 @@ and API choices are agent decisions; gameplay and flight adapters stay fixed.
   unsafe-code boundary; the native scheduling call stays in `tore-realtime-native`.
 - GPU transforms, different culling, fewer shadow passes and other changes to
   pixels remain outside this work. No original executable is used.
-
 
 ### Shared scoped workers
 
@@ -4725,7 +4732,6 @@ native boundary. This does not pin a core, guarantee a deadline or give workers
 the host's real-time policy. Failures remain diagnostic. Terrain query entry
 points that cross threads require `Sync`; sensor environments are constructed
 within each job and need no shared lock.
-
 
 ### AI observation and ordered decisions
 
@@ -4763,7 +4769,6 @@ flight bytes, outputs and bounded journal contents, including new damage
 recovery, shared airports, cancelled landings, ejection, late leaders, human
 handoff and error partial state.
 
-
 ### Ownships and host pictures
 
 In combat, each active ownship's sensors, selection, emitters, mounted seeker,
@@ -4778,7 +4783,6 @@ iteration order. Name registration, packet budgets, staging, sends and
 sent/discard/acknowledgement bookkeeping remain serial. Missing planes/cockpits
 keep their original skip behavior. Tests compare exact packet bytes and order
 through failures, seat changes and reconnects, as well as world state.
-
 
 ### Frame preparation
 
@@ -4809,18 +4813,83 @@ and clipping. Independent pixel tests cover every source/destination alpha pair.
 The tick presenter reuses an identical camera scene instead of rebuilding it
 between unchanged simulation inputs. GPU and window work never moves to workers.
 
+### Measurement rules
 
-### Integration status
+Before and after use the same release compiler, profile content, workload,
+resolution and rendering settings. Raw output stays in `.local/`; measured
+results have one home in the [feature baseline](baselines/performance-threads.md).
+Do not time concurrent builds or another game. Retain repeated spreads and
+outliers. Shader/GPU timings are not inferred from CPU samples.
 
-| Slice | Status |
-| --- | --- |
-| Shared workers | Built |
-| AI observations and exact sensor visibility reuse | Built |
-| Ownship sensing and host picture preparation | Built |
-| Aircraft, scenery and instrument frame preparation | Built |
-| Elapsed measurements, fixed captures and final evidence | Next in the sequence |
+Flight and terrain captures hold the explicitly prepared state during window
+and GPU initialization. Startup wall time previously advanced their simulation
+or weather, even between runs of one unchanged binary. Both comparison builds
+use the same capture-only hold, and repeated-capture battery cases guard it.
 
-The following slices retain serial publication, GPU/window ownership and the
-120 Hz simulation clock. Per-component reference tests accompany their code.
-Final repeated timing tables and the matched baseline report are integrated
-with the measurement tools. A merge into `multiplayer` remains a separate review.
+- Light and heavy flights run at 1x, 2x, 4x and 8x, audio on/off. Lock cases
+  must show AIM120.JT designation and an estimate at the requested speed.
+  Fixed simulation-tick workloads record final-frame overshoot. Include a
+  sustained accelerated-flight pass, not just the expensive opening fight.
+- Host cases use 0, 15 and 30 humans. Measure complete elapsed operations,
+  including worker completion. Linux host-thread CPU time excludes workers
+  and is a separate diagnostic, never the threading speed-up.
+- Test worker counts 0, 1, 2, 4 and 8, idle/busy dispatch, small work and
+  simultaneous callers. A real hosting game with rendering, camera panels
+  and audio additionally checks shared-pool contention and overloads.
+- Record achieved simulation rate, frame p50/p95/p99/max and host elapsed
+  costs. Eight-times speed needs 960 ticks per wall second, leaving less
+  than 1.042 ms per tick before drawing. Faster CPU work does not guarantee
+  that every heavy opening fight reaches 8x.
+- CPU-only synthetic probes are portable and require no retail media.
+  Actual frames require a graphics host and imported media. Report unrun
+  platforms explicitly; do not claim CI validation from a local Linux pass.
+
+Audio on/off measurements and user-space sampling did not reproduce PF1's
+severe audio-dependent slowdown. Audio behavior is unchanged. Sampling cannot
+establish callback dropout counts or rule out a rare lock stall. If a
+reproducible gap remains, measure lock waiting/holding and callback silence
+before choosing a fix, preserving tick events and deterministic offline output.
+
+### Preservation and acceptance
+
+The independent before reference is recorded before simulation edits. Serial
+extraction is validated before becoming the worker reference. Never update a
+golden to make a threading change pass. Explicit 0/1/2/4/8-worker and shuffled
+comparisons include floating-point bits, ordered output, full journal contents,
+all ownships and affected actor state. The older whole-tick fingerprint covers
+selected fields and journal counts; it is not the sole proof.
+
+The canonical single-player harness, AI probe recordings, replays, combat tapes,
+network matrix and existing goldens remain guards. Fixed-tick capture hashes,
+vertex/contact lists and canvas/cache comparisons validate presentation. New
+cache tests cover destruction/reset, replay seeking, duplicates and resize.
+Full repository checks and the same before/after workloads finish the pass.
+John reviews the resulting flight before a merge into `multiplayer`.
+
+### Slices
+
+| Slice | Status | Needs | Scope | Acceptance |
+| --- | --- | --- | --- | --- |
+| PF0 Profile | Historical | | Historical profile and feasibility, done 2026-10-02 | Evidence in `.local/mp-notes/perf/` |
+| PF1 Firing estimate | Built | | Built 2026-10-02 (`44f40971`, `67aa2b18`) | Existing exact-shortcut tests |
+| PF2a Baseline and measurement | Measured | | Correct host elapsed timing; freeze behavior, captures and release cases | Reproducible before reference and successful workload assertions |
+| PF2b Bounded serial fixes | Built | PF2a | Static geometry cache, exact visibility shortcuts, alpha composition and duplicate scene reuse | Original references, cache lifecycle tests, capture equality and measured gains |
+| PF2c Audio investigation | Measured | PF2a | Compare audio on/off and sample remaining costs | No unapproved audio behavior change; limits and unreproduced cases reported |
+| PF3a Worker pool | Built | PF2a | Shared collection executor, explicit test modes and macOS QoS | Ordered output, shuffled schedules, one-worker nesting and dispatch probe |
+| PF3b Aircraft geometry | Built | PF3a | Per-aircraft CPU work and ordered contact offsets | Vertex/contact equality, capture hashes and frame timings |
+| PF4a AI serial extraction | Built | PF2b | Restricted observation context with original publication point | Unsplit reference and full state/output checks |
+| PF4b AI workers | Built | PF4a, PF3a | Observations and target visibility; ordered decisions unchanged | Scenario guards, canonical baseline and tick gains |
+| PF5a Ownship workers | Built | PF3a | Observations and estimates; ordered readiness/firing | Many-ownship reference, capacity/counter and inactive-input tests |
+| PF5b Host picture workers | Built | PF3a | Due-seat preparation with serial connection-ordered transport | Packet/order/bookkeeping comparisons and host elapsed timings |
+| PF6 Instrument work | Built | PF2b, PF3b | Independent page preparation, including dirty scaling | Frozen canvas/cache reference and integrated frame gains |
+| PF7 Acceptance | Linux validated | all applicable slices | Repeated frozen tests and measurements; hosted-flight contention; full diff review | Required Linux checks, unchanged behavior, measured gains and documented platform/manual review limits |
+
+PF2a was recorded first. Independent files were delegated with one owner for
+manifests and one for shared frame-loop edits. The lead reviewed full diffs and
+reran acceptance checks. Measurements use frozen binaries/checkouts so later
+edits cannot change a reference run. Integration follows [AGENTS.md](../AGENTS.md)
+and stays on `performance` for John's review before a merge.
+
+A separate render thread, parallel GPU encoding, mission-load workers and
+threaded projectiles are outside this pass. GPU-side work remains a separate
+decision; no pixel-changing shortcut is implied by a CPU speed-up.

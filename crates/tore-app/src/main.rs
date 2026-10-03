@@ -3454,7 +3454,13 @@ impl ApplicationHandler for App {
                     Screen::Flight => {
                         self.scenery.no_sun_whiteout = self.flight_ui.cheats.no_sun_whiteout;
                         let now = Instant::now();
-                        let elapsed = (now - self.frame_time).as_secs_f64().min(0.25);
+                        // Captures draw the explicitly prepared state. Startup
+                        // and GPU initialization time must not advance it.
+                        let elapsed = if self.capture_terrain.is_some() {
+                            0.
+                        } else {
+                            (now - self.frame_time).as_secs_f64().min(0.25)
+                        };
                         // A networked flight's ticks are the client session's.
                         let session = self.net_flight.is_some();
                         let steps = if session {
@@ -3637,6 +3643,18 @@ impl ApplicationHandler for App {
                                 .expect("the presented seat flies a plane"),
                         };
                         let presented = frame.presented();
+                        if self.performance.measuring() {
+                            if let Some(client) = net_frame {
+                                self.performance.network_tick(client.tick);
+                            }
+                            let readout = &*frame.readout;
+                            let weapon = &frame.config.stations[readout.stores.selected()].weapon;
+                            self.performance.weapon(
+                                &weapon.source,
+                                readout.targets.designated.is_some(),
+                                readout.estimates.max_range.is_some(),
+                            );
+                        }
                         if presented.escape.is_some() {
                             self.flight_view = 1;
                             self.view_rig.select(flight_views::Reference::Player);
@@ -4244,7 +4262,13 @@ impl ApplicationHandler for App {
                     }
                     Screen::Viewer => {
                         let now = Instant::now();
-                        let elapsed = (now - self.frame_time).as_secs_f64().min(0.25);
+                        // Captures draw the explicitly prepared state. Startup
+                        // and GPU initialization time must not advance it.
+                        let elapsed = if self.capture_terrain.is_some() {
+                            0.
+                        } else {
+                            (now - self.frame_time).as_secs_f64().min(0.25)
+                        };
                         self.camera.step(
                             elapsed as f32,
                             self.modifiers.shift_key(),
@@ -10958,7 +10982,8 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     let preferences_enabled = !smoke_test
         && capture_terrain.is_none()
         && !animation_capture
-        && std::env::var_os("TORE_PERF_FRAMES").is_none();
+        && std::env::var_os("TORE_PERF_FRAMES").is_none()
+        && std::env::var_os("TORE_PERF_TICKS").is_none();
     // Diagnostics ignore saved choices, like the other display preferences.
     let graphics_path = if preferences_enabled {
         Some(assets::data_directory()?.join("graphics-v1.conf"))

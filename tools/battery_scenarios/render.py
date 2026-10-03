@@ -1,17 +1,43 @@
 """Lane: flight. Windowed aircraft, runway and HUD regression captures.
 
 They live apart from flight.py because their names start with `render-`, not
-`flight-`. Each only checks that the frame is not blank; the picture needs a
-human eye. See docs/testing/lane-flight.md#render-captures.
+`flight-`. Art checks reject blank frames; capture determinism checks also
+compare repeated images byte for byte. See docs/testing/lane-flight.md#render-captures.
 """
-from battery import Scenario
+from pathlib import Path
+
+from battery import Scenario, Step
 from battery_scenarios.flight import frame_problems
 
 
+def repeated_capture_problems(work: Path, _output: str) -> list[str]:
+    paths = [work / f"capture-{repeat}.ppm" for repeat in range(3)]
+    # The runner reports missing files separately.
+    if not all(path.is_file() for path in paths):
+        return []
+    first = paths[0].read_bytes()
+    return [f"prepared capture changed on repeat {repeat}"
+            for repeat, path in enumerate(paths[1:], 1) if path.read_bytes() != first]
+
+
 def scenarios() -> list[Scenario]:
-    """Windowed regression captures, each checked for a
-    blank frame. Whether the fault shows needs a human eye (docs/testing/lane-flight.md)."""
-    return [
+    """Windowed art inspections and exact repeated-capture checks."""
+    stable = []
+    for view in ("flight", "terrain"):
+        def args(repeat):
+            return [f"--capture-{view}", f"{{work}}/capture-{repeat}.ppm",
+                    "--window-size", "1280x720", "--no-audio", "--no-controllers"]
+        stable.append(Scenario(
+            name=f"render-capture-{view}-deterministic", lane="flight",
+            args=args(0), window=True, timeout=180,
+            env={"TORE_WEATHER_TIME": "11:00", "TORE_PERF_FRAMES": "60", "TORE_PERF_ACTIVE": "1"},
+            then=[Step(args(repeat), window=True, timeout=180) for repeat in (1, 2)],
+            outputs=[f"capture-{repeat}.ppm" for repeat in range(3)],
+            expect=["Scene capture:"], check=frame_problems,
+            check_work=repeated_capture_problems,
+            notes="Bare captures hold the prepared state, independent of startup and GPU initialization time.",
+        ))
+    return stable + [
         Scenario(
             name="render-f14-hook-deployed",
             lane="flight",

@@ -98,7 +98,7 @@ fn a_15_against_15_mission_with_nobody_connected_fits_the_budget() {
         .max()
         .unwrap_or_default();
     println!(
-        "whole run: {ticks} ticks in {:.1} s, {:.3} ms a tick, load {:.1}% of one core, \
+        "whole run: {ticks} ticks in {:.1} s, {:.3} ms a tick, load {:.1}% of the tick budget, \
          longest tick {:.3} ms",
         wall.as_secs_f64(),
         mean * 1e3,
