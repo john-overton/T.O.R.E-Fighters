@@ -181,6 +181,107 @@ The GPU cockpit texture survives view and size changes; projection uniforms trac
 
 `look.rs` owns authored held-key classification, look limits and exterior spherical orbit. Shift arrows are isolated from flight input and retain their look classification until physical release, including after modifier changes; Ctrl arrows, FA's thrust vectoring, do nothing yet. Camera motion uses elapsed presentation time while unpaused. Internal elevation is limited to the forward eye line through overhead; exterior orbit keeps a fixed radius and aims at the same interpolated aircraft pose. It does not alter simulation state or synchronously capture the GPU.
 
+### The frame loop under load
+
+Every rendered flight frame turns the wall time since the last frame into
+simulation ticks: `flight::Clock::steps_scaled` clamps the elapsed time to
+0.25 s, multiplies it by the time compression (0.5x to 8x; the `C` key steps
+1x, 2x, 4x, 8x), and cuts it into 120 Hz ticks, carrying the remainder. The
+frame then runs **every one of those ticks, stepping the mission and
+presenting each, before it draws anything**. There is no cap on the ticks a
+frame may run. John decided on 2026-10-02 to keep it that way: a cap would
+keep the picture moving at a minimum rate, but the rate reached would fall
+short of the one chosen, which a player would see as time running slow.
+
+What that means under load, by the loop's arithmetic:
+
+- A tick that costs `c` seconds of wall time keeps up at time compression `K`
+  while `120 * K * c`, plus the drawing, stays under one second per second.
+  At 8x that is under about 1 ms a tick.
+- Past that the frames grow, until the 0.25 s clamp holds them. A frame then
+  runs at most 240 ticks at 8x (120 at 4x, 60 at 2x, 30 at 1x), takes
+  `240 * c` plus the drawing, and the rate reached is the 2 s of mission time
+  it buys divided by its wall time: `2 / (240 * c + draw)` at 8x. An average
+  tick of 4 ms holds 8x down to about 2x.
+- A single slow tick is a hitch in one frame, and at 8x the same slow tick
+  comes eight times as often in wall time. That is how the firing estimate
+  below showed worst at 8x.
+
+Measured on 2026-10-02 (agent PF1b; Ryzen 9 7900X, 64 GB, RTX 4070, release
+build, one window, no audio; the Hornet with the AIM-120 selected and the
+nearest target designated; three runs of each, before and after taken
+alternately; `TORE_PERF_FRAMES` with [its "simulated:"
+line](DEVELOPMENT.md#flight-performance)). The default Quick Mission is two
+AI aircraft; the heavy one is `--launch-quick-mission --probe-fight 15:15`
+(29 AI aircraft). "Sim+cam" is the report's simulation-and-cameras time per
+frame, the ticks plus the camera panels, in milliseconds.
+
+| Mission, asked for | Build | Rate reached | Frames a second | Sim+cam mean | Sim+cam worst frame |
+| --- | --- | --- | --- | --- | --- |
+| Default, 1x | before | 1.00x | 66.7 (66.5 to 66.9) | 1.87 | 41 (40 to 41) |
+| Default, 1x | after | 1.00x | 67.3 (65.5 to 68.3) | 1.68 | 26 (21 to 35) |
+| Default, 8x | before | 8.00x | 61.7 (61.7 to 61.9) | 2.67 | 115 (112 to 116) |
+| Default, 8x | after | 8.00x | 62.7 (62.2 to 63.2) | 2.51 | 34 (33 to 34) |
+| Heavy, 1x | before | 1.00x | 54.5 (53.9 to 54.8) | 7.52 | 52 (52 to 52) |
+| Heavy, 1x | after | 1.00x | 55.8 (55.5 to 56.1) | 7.37 | 34 (33 to 35) |
+| Heavy, 8x | before | 7.72x | 55.3 (55.1 to 55.4) | 11.45 | 623 (623 to 623) |
+| Heavy, 8x | after | 7.79x | 55.2 (54.2 to 55.8) | 11.40 | 553 (551 to 554) |
+
+The heavy 8x runs are the long ones (about 38 s of wall time, about five
+minutes of mission); a shorter set over the first minute or so reached 6.92x
+before and 7.14x after. The 550 to 640 ms frame in every heavy 8x run, before
+and after, fits a clamp frame (240 ticks at about 2.3 ms); the range estimate
+does not cause it.
+
+Neither mission reached the 0.25 s clamp for long, and the rate at 8x was
+never lower than at 2x or 4x. PF1's earlier report was a heavy mission at 8x
+reaching only about 3.5x at about 4 frames a second after its first minute,
+and 8x slower than 2x was not reproduced in its 72 runs. These runs did not
+reproduce the 3.5x either, on the same mission and the same code before the
+change; they differ by running without audio, so the cause of a rate below
+2x, if one exists, is still unexplained. It would take a tick costing more
+than 4 ms on average.
+
+#### The firing estimate and its exact shortcuts
+
+While a missile is selected and a target is designated, each ownship works out
+the weapon's maximum range and favourable firing band every 60 ticks
+(`maximum_range` and `firing_band` in `tore-sim/src/combat/missiles.rs`,
+called from the combat step). Both fly trial missiles through `intercept`, the
+same 120 Hz fly-out the guidance uses, about twenty trials in all, each up to
+the weapon's whole flight (an AIM-120 about 3,600 ticks, an AIM-54 about
+10,200). PF1 measured that at 37 ms for one tick (AIM-120, default mission) to
+100 ms (AIM-54): a hitch every half second of mission time, every 62 ms of wall
+time at 8x.
+
+Three shortcuts skip only trials whose answer is already fixed, so every
+number the player sees is the same, bit for bit:
+
+| Shortcut | Why the answer cannot change |
+| --- | --- |
+| `maximum_range` does not fly a distance that the missile and the target cannot close within the weapon's whole flight (`travel_ceiling`: the speed the motor could reach with all its thrust spent in a line, the coast slowdown, the largest sag or ejection speed, and the target's own speed) | `intercept` succeeds only once the closest approach is within 25 ft, and a tick closes the gap by no more than the two objects move; the old code flew the whole trial to answer no |
+| `firing_band` stops a trial once a hit could no longer score 70 (a binary search for the latest hit time that still scores 70) | the band uses only `score >= 70`, and a later hit never scores higher than an earlier one |
+| `intercept` checks every 16 ticks while the missile coasts whether the gap is more than missile and target can still close, and stops with the answer it would have reached, no hit | out of fuel the missile only slows (a turn costs speed, the coast slowdown takes it), its sag is capped, and the target keeps its speed (`coasting_reach`) |
+
+Each bound carries a small rounding margin (`unreachable`). The tests in
+`missile_tests.rs` hold every shortcut to the old code: whole copies of the
+old `maximum_range`, `firing_band` and `intercept` run beside the new ones on
+random missiles, speeds, distances, motions, ages, sag, ejection and cruise
+profiles, and must agree to the last bit. The cases include late hits the
+bounds must not cut off, and a built case where only the fall of a coasting
+missile reaches the target. A bound made 10% too small, or one that forgets
+the sag, fails them. The work is bounded without timing:
+`a_range_estimate_flies_a_bounded_number_of_ticks` counts the ticks
+`intercept` flew (a counter compiled only into test builds) for a fixed set of
+three missiles and six targets, and fails above 1,500,000 ticks. It flies
+1,231,686; the old code flew 2,187,517, so a change that brings the cost back
+goes over the bound. The shortcuts cut the ticks flown by about 44 percent.
+
+The worst frame in the table is the estimate's cost: 41 to 26 ms and 115 to
+34 ms in the default mission at 1x and 8x, and 52 to 34 ms in the heavy one at
+1x. The mean frame improved by 0.1 to 0.2 ms and the rate reached did not
+change within the spread, because the estimate is one tick in sixty.
+
 ### Continuous attitude and momentum
 
 `attitude.rs` supplies body bases, Rodrigues rotation, orthonormalization, and render interpolation. `flight::State` retains separate world velocity and pitch/roll response rates. The old pitch clamp and nose-derived position update are removed. Force integration and attitude response remain deterministic at 120 Hz; render interpolation does not feed back. `look` uses the same body basis for head rotation, while exterior orbit retains aircraft-centered inspection behavior. The HUD flight-path marker projects actual velocity bearing/elevation.
