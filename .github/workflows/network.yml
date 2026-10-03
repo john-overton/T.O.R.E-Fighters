@@ -38,6 +38,7 @@ jobs:
         shell: bash
         env:
           TORE_LOOPBACK_SECONDS: '20'
+          TORE_WORKERS: '2'
         run: cargo test --locked -p tore-session --test loopback -- --nocapture
 
   strict-real-time:
@@ -54,6 +55,8 @@ jobs:
       # --exact runs nothing for a misspelt name, so the count is checked.
       - name: The strict real-time tests, one at a time
         shell: bash
+        env:
+          TORE_WORKERS: '2'
         run: |
           set -o pipefail
           cargo test --locked -p tore-app --bin tore-app -- \

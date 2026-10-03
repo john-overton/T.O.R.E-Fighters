@@ -70,6 +70,13 @@ cargo test --release --locked -p tore-app instrument_canvas_workers_wall_time --
 
 ## Host elapsed time
 
+Platform CI sets `TORE_WORKERS=2` for the workspace tests, real UDP loopback
+and strict Linux host tests. Small hosted runners would otherwise select the
+automatic serial fallback. This exercises the production pool during the
+Apple Silicon golden comparisons and Windows 32-bit tests, alongside explicit
+0/1/2/4/8-worker and shuffled equivalence tests. It does not substitute for
+interactive flight and shared host/render performance checks on real machines.
+
 Build the ignored host benchmark with `cargo test --release --locked -p
 tore-session --test host_players --no-run`. Pass its executable under
 `target/release/deps/` as `--host-benchmark` with `--suite host`; the harness

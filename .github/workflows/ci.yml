@@ -53,6 +53,10 @@ jobs:
       - name: Lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test
+        # Small hosted runners otherwise select the serial fallback. Exercise
+        # the production pool as well as explicit executor equivalence tests.
+        env:
+          TORE_WORKERS: '2'
         run: cargo test --workspace --locked
       - name: Build
         run: cargo build --workspace --locked
