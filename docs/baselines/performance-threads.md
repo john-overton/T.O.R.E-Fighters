@@ -310,10 +310,16 @@ endpoint-keyed visibility reuse and removes unused pool operations. The timing
 tables above retain their measured build identities. Heavy opening fights still miss 8x,
 and frame and host tick tails remain visible in the measurements.
 
-Windows and macOS runtime/performance checks and remote CI were not run in
-this Linux pass. The macOS scheduling boundary was reviewed, not measured on
-this machine. Retail comparison remains unavailable. John has not yet flown
-or approved a merge of this result.
+Windows and macOS runtime/performance checks were not run in this Linux
+pass. The macOS scheduling boundary was reviewed, not measured on this
+machine. Remote CI then passed on the final tip `919d4293` on all five
+platforms, with the production pool exercised through `TORE_WORKERS=2`
+(Rust baseline run 37137832973, Network loopback run 37137833018). Retail
+comparison remains unavailable. John approved the merge into `multiplayer` on
+2026-10-03 after the multiplayer lead's review; his flight on macOS, Windows
+and Linux in the three-machine test is the first runtime check off Linux,
+including a Mac hosting while it flies, where the host's real-time thread
+waits on workers that run at user-interactive QoS.
 
 ## Evidence locations
 
