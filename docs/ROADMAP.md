@@ -1148,6 +1148,11 @@ separate clients. Importer coverage table shows no red cells for gameplay-critic
 
 ## Milestone 4: Tools
 
+The [asset pack review draft](spec/asset-packs.md) records John's 2026-10-03
+requirements for a shared asset root, typed per-object packs, authoring tools,
+stock hashes, and safe loading. It is proposed work awaiting review, not an
+implementation commitment or a change to the current gameplay sequence.
+
 Work:
 - Aircraft and asset tools: import, inspect, validate, and export flight profiles, shapes, and textures.
 - Mission editor as the successor to Pro Mission Creator, reading and writing its format.
@@ -1155,6 +1160,44 @@ Work:
 - Mod loader with manifests, load order, and a "classic" profile that disables everything.
 
 Deliverable: a user can build and share a mission and a sound profile without touching code.
+
+### Asset pack implementation stages
+
+Research mode: proposed implementation sequence. The
+[review draft](spec/asset-packs.md) owns the behavior, trust rules, and unresolved
+decisions. These stage boundaries are agent proposals, not completed work.
+
+1. **Contract and baselines.** Resolve the review decisions, specify aircraft
+   and theater schemas plus the common container, define measured budgets, and
+   establish trusted stock baselines. Document format details under
+   `docs/formats/` when selected. Exit: the first slice has an implementable
+   contract and synthetic fixtures, with unknown source sets labeled honestly.
+2. **One root and one aircraft pack.** Produce `Cache/Aircraft/FA-18D.pack` and
+   temporary `Cache/Shared/FA-Base.pack`. Preserve existing import/cache access,
+   explicit override compatibility, app/server/headless consumers, and flight
+   adapters. Include stock checks, bounded validation, and safe activation from
+   the start. Exit: resolved resource bytes and existing mission manifests match
+   the current import; migration and failed imports preserve the usable set.
+3. **Typed packages and authoring tools.** Split remaining aircraft and theaters,
+   then other logical assets as their contracts are ready. Add validate/build/
+   inspect operations, deterministic output, shared ownership, dependencies, and
+   explicit mod activation. Exit: a small replacement mod can be enabled and
+   disabled without rewriting stock; errors identify invalid/conflicting packs.
+4. **New definitions and multiplayer policies.** Move supported catalog and
+   configuration choices out of fixed lists incrementally. Include those
+   definitions in cryptographic content checks and recording metadata with
+   explicit compatibility handling. Exit: each newly supported content type has
+   its own acceptance evidence; gameplay mismatches are refused and declared
+   cosmetic exceptions are tested. Packaging does not imply new gameplay support.
+
+Every implementation slice runs the repository checks and relevant battery
+scenarios using synthetic committed fixtures. Add malformed-input, duplicate ID,
+path escape, missing/cyclic dependency, resource-budget, modified-stock, and
+interrupted-activation cases. Check pack bytes are reproducible across supported
+platforms. Use local owned media for before/after resource and mission comparisons;
+record evidence without committing payloads. Rendering changes also need the
+wrapped display smoke test. Broader adversarial testing includes fuzzing and a
+security review; neither is satisfied by ordinary unit tests alone.
 
 ---
 

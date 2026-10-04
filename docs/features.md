@@ -19,6 +19,13 @@ of everything in the game or its code.
   Completed, Partially implemented with remaining work, or Planned. Completed
   does not mean tested against a running retail copy.
 
+## Content packages
+
+| Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
+| --- | :---: | :---: | --- | --- |
+| Shared asset root and typed packs | ☐ | ☑ | Planned, review draft only. One pack per logical aircraft/theater/object, shared dependencies, authoring tools, and explicit mods. Existing import and gameplay remain unchanged; schemas, migration, and implementation are pending. | [Review draft](spec/asset-packs.md), [stages](ROADMAP.md#asset-pack-implementation-stages) |
+| Stock content integrity and safe pack loading | ☐ | ☑ | Planned, review draft only. Trusted stock hashes, modification reporting, and bounded typed validation. Existing pack bounds remain in place; the proposed trust catalog, policies, and adversarial validation are not implemented. | [Integrity](spec/asset-packs.md#stock-catalog-and-modification-reporting), [safe loading](spec/asset-packs.md#safe-loading) |
+
 ## Menus
 
 | Feature | Retail manual | Opinionated addition | Status and remaining work | Details |
