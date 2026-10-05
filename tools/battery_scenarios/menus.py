@@ -199,6 +199,15 @@ def scenarios() -> list[Scenario]:
     out: list[Scenario] = []
     out.append(
         Scenario(
+            name="menus-ordnance-availability",
+            lane="menus",
+            args=["--validate-ordnance", "--no-audio"],
+            expect=[r"ordnance audit: 36 aircraft, 9 recovered weapon stations, [0-9]+ weapon placements, [0-9]+ tank placements; passed"],
+            notes="All reviewed source stations, compatible supported weapons/tanks, empty defaults and accepted-load restoration.",
+        )
+    )
+    out.append(
+        Scenario(
             name="menus-tanks-f14",
             lane="menus",
             args=["--validate-tanks", "--aircraft", "f14", "--no-audio"],

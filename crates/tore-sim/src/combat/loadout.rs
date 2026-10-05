@@ -6,6 +6,14 @@ use tore_formats::{
     aircraft::{Aircraft, AircraftId, Hardpoint},
     weapons::Weapon,
 };
+/// One editable aggregate source row, independent of catalog category.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EditableStation {
+    pub hardpoint: usize,
+    pub location: u8,
+    pub weapon: Option<usize>,
+    pub tank: Option<usize>,
+}
 #[derive(Clone, Debug)]
 pub struct Loadout {
     pub aircraft: AircraftId,
@@ -22,6 +30,97 @@ pub struct Loadout {
     pub cheat: bool,
 }
 impl Loadout {
+    pub fn editable_stations(&self) -> Vec<EditableStation> {
+        let mut rows = std::collections::BTreeMap::new();
+        for (hardpoint, slot) in self.configuration.hardpoint_slots.iter().enumerate() {
+            if let Some(slot) = slot {
+                rows.insert(
+                    hardpoint,
+                    EditableStation {
+                        hardpoint,
+                        location: self.hardpoints[*slot].location,
+                        weapon: Some(*slot),
+                        tank: None,
+                    },
+                );
+            }
+        }
+        for (slot, tank) in self.configuration.tanks.iter().enumerate() {
+            rows.entry(tank.hardpoint)
+                .or_insert(EditableStation {
+                    hardpoint: tank.hardpoint,
+                    location: self.tank_hardpoints[slot].location,
+                    weapon: None,
+                    tank: None,
+                })
+                .tank = Some(slot);
+        }
+        rows.into_values().collect()
+    }
+    pub fn unload_tank(&mut self, slot: usize) -> Result<()> {
+        let mut draft = self.clone();
+        let tank = draft
+            .configuration
+            .tanks
+            .get_mut(slot)
+            .ok_or_else(|| super::invalid("Invalid tank station."))?;
+        tank.quantity = 0;
+        draft.refresh_equipment()?;
+        *self = draft;
+        Ok(())
+    }
+    /// Move one installed tank, leaving both loads unchanged if rejected.
+    pub fn transfer_tank(&mut self, source: usize, target: usize) -> Result<()> {
+        if source == target {
+            return Ok(());
+        }
+        let from = self
+            .configuration
+            .tanks
+            .get(source)
+            .ok_or_else(|| super::invalid("Invalid source tank station."))?;
+        if from.quantity == 0 {
+            return Ok(());
+        }
+        let store = from
+            .store
+            .clone()
+            .ok_or_else(|| super::invalid("Installed tank has no source type."))?;
+        let to = self
+            .configuration
+            .tanks
+            .get(target)
+            .ok_or_else(|| super::invalid("Invalid destination tank station."))?;
+        let capacity = self.tank_capacity(target, &store);
+        if capacity <= 0 {
+            return Err(super::invalid(
+                "This tank cannot be loaded at this station.",
+            ));
+        }
+        let existing = if to
+            .store
+            .as_ref()
+            .is_some_and(|tank| tank.source == store.source)
+        {
+            to.quantity
+        } else {
+            0
+        };
+        if i32::from(existing) >= capacity {
+            return Ok(());
+        }
+        let mut draft = self.clone();
+        draft.configuration.tanks[target].store = Some(store);
+        draft.configuration.tanks[target].quantity = existing + 1;
+        draft.configuration.tanks[source].quantity -= 1;
+        let hardpoint = draft.configuration.tanks[target].hardpoint;
+        if let Some(Some(slot)) = draft.configuration.hardpoint_slots.get(hardpoint) {
+            draft.quantities[*slot] = 0;
+        }
+        draft.refresh_equipment()?;
+        *self = draft;
+        Ok(())
+    }
     pub fn ammunition(&self) -> Result<Vec<u16>> {
         self.configuration.ammunition(&self.quantities)
     }
@@ -37,6 +136,16 @@ impl Loadout {
     }
     pub fn new(a: &Aircraft, read: impl FnMut(&str) -> Result<Vec<u8>>) -> Result<Self> {
         let configuration = live::Configuration::from_source(a, read)?;
+        let hardpoints = a
+            .hardpoints
+            .iter()
+            .enumerate()
+            .filter_map(|(index, h)| {
+                configuration.hardpoint_slots[index].map(|slot| (slot, h.clone()))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+            .into_values()
+            .collect();
         Ok(Self {
             aircraft: a.id,
             quantities: configuration.stations.iter().map(|s| s.count).collect(),
@@ -50,12 +159,7 @@ impl Loadout {
             internal_capacity_lbs: a.fields["internalFuel"].number()? as f64,
             empty_lbs: a.object["weight"].number()? as f64,
             maximum_lbs: a.fields["maxTakeoffWeight"].number()? as f64,
-            hardpoints: a
-                .hardpoints
-                .iter()
-                .filter(|h| h.store.as_deref().is_some_and(|n| n.ends_with(".JT")))
-                .cloned()
-                .collect(),
+            hardpoints,
             cheat: false,
         })
     }
@@ -197,6 +301,9 @@ impl Loadout {
             let step = quantity_step(cap);
             self.quantities[slot] =
                 (i32::from(self.quantities[slot]) + direction.signum() * step).clamp(0, cap) as u16;
+            if self.quantities[slot] > 0 && self.configuration.stations[slot].count == 0 {
+                self.configuration.stations[slot].count = cap as u16;
+            }
             if self.quantities[slot] > 0 {
                 let _ = self.clear_tank_on_weapon_slot(slot);
             } else {

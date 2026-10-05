@@ -28,7 +28,10 @@ The runtime now keeps installed tank equipment separate from weapon ammunition:
 - `combat::loadout::Loadout` exposes tank selection/count changes independently
   from weapon quantities. Shell mass and full starting external fuel derive from
   the selected GAS records and counts. Fixed external equipment excludes tanks.
-- Load Ordnance's Tanks button selects the tank catalog and station rows. Its
+- Load Ordnance lists compatible tanks first in the air-to-surface catalog,
+  following John's retail reference. Source-numbered station rows remain visible
+  in both categories and show their actual weapon or tank. No separate Tanks
+  button or external-fuel/tank-shell banner is shown. Its
   fuel rocker continues to edit internal fuel only, in 500 lb steps.
 - `aircraft_systems::fuel::Fuel` already stores external fuel separately and
   consumes it before internal fuel. Separation of fuel quantities exists;
@@ -70,11 +73,12 @@ For an exact source-default GAS type, the station's source `maxItems` is its
 allowed installed quantity. This is a **fitted default-capacity rule**, chosen by
 the agent to preserve reviewed default loads. A4E supplies four F150 tanks and
 F104 supplies two F250 tanks on one row, while the shared full-tank weight cap
-would permit only two and one respectively. Original paired/weight-class
-consumer semantics remain unknown. Alternative tank types keep the shared
-compatibility and weight caps, and aircraft maximum takeoff weight always
-applies. Next research step: review HARDStoreWeight and the paired loading
-consumer before changing this documented default rule.
+would permit only two and one respectively. The [weight follow-up](../formats/aircraft-ordnance.md#quantity-weight-and-pod-follow-up)
+confirms full tank weight and no pair multiplier in the reviewed capacity
+branch. Original default-load normalization remains unknown. Alternative tank
+types keep the shared compatibility and weight caps, and aircraft maximum
+takeoff weight always applies. Review the initial/default loader before
+changing this documented default rule.
 
 Selecting a tank loads the station's allowed quantity, initially full. Minus or
 right-click removes one tank, plus or clicking a loaded row adds one up to its
@@ -91,6 +95,10 @@ The mission text writes `loadout tanks explicit` and one
 in an older saved mission preserves source-default tanks. Network protocol 7
 carries the same optional list and exact quantities. Restart restores the
 accepted load, while runtime fuel consumption leaves empty installed shells.
+
+John limited the 2026-10-05 follow-up to the ordnance page and weapon
+availability. Existing tank shape candidates may be recorded for later jettison
+work; no aircraft rendering is added.
 
 GAS supplies mass, capacity and compatibility flags but no shape pointer. This
 pass adds no separate tank mesh or tank drag rule. Exact source tank geometry
@@ -119,9 +127,9 @@ non-gun weapons while retaining the selected tank equipment.
 | Scenario | Required evidence |
 | --- | --- |
 | F-14 with tanks removed | 0 lb external fuel at launch; correct internal fuel and mass; no residual tank store; same accepted configuration after restart |
-| F-14 with source tanks | Reviewed quantity and capacity, correct loaded mass and visible attachment; internal/external readouts agree with state |
-| Empty installed tank | 0 lb remaining tank fuel while shell mass and installed geometry remain |
-| Burn, damage and jettison | Fuel never becomes negative or exceeds installed capacity; mass and visuals follow the specified equipment outcome |
+| F-14 with source tanks | Reviewed quantity and capacity, correct loaded mass and visible source station in the editor; internal/external readouts agree with state |
+| Empty installed tank | 0 lb remaining tank fuel while shell mass remains; aircraft rendering is unchanged |
+| Burn, damage and jettison | Fuel never becomes negative or exceeds installed capacity; mass follows the specified equipment outcome; in-flight tank jettison remains deferred |
 | Invalid loads | Compatibility and maximum takeoff weight enforced without changing the previously accepted load |
 | Multiplayer and replay | Host/client configuration agrees; restart restores starting selections and handoff retains current state |
 | Aircraft switching | No F-14 tank or fuel state leaks into another type; repeat on the F-4 family and an aircraft with no default tank |

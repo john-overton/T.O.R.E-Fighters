@@ -130,7 +130,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "replay-snapshot-*")),
     "menus-creator": (
         "the Quick Mission creator, start-up runs and loadout pages",
-        ("menus-start-*", "menus-loadout-*", "menus-tanks-*", "menus-validate-creator", "menus-snap-quick-*"),
+        ("menus-start-*", "menus-loadout-*", "menus-tanks-*", "menus-ordnance-*", "menus-validate-creator", "menus-snap-quick-*"),
     ),
     "menus-validate": (
         "text, maps, weather, creator and ILS validators",
@@ -386,6 +386,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/locate.rs", ("menus-screens", "replay-settings"), "locate screen", windowed=True),
     _r("crates/tore-app/src/quick_mission.rs", MENU_FAMILIES + ("airports",), "Quick Mission creator", windowed=True),
     _r("crates/tore-app/src/quick_mission/*", MENU_FAMILIES + ("airports",), "Quick Mission creator", windowed=True),
+    _r("crates/tore-app/src/ordnance_audit.rs", ("menus-creator",), "ordnance availability probe"),
     _r("crates/tore-app/src/ordnance.rs", ("menus-creator", "flight-combat"), "ordnance page", windowed=True),
     _r("crates/tore-app/src/controls_editor.rs", ("menus-screens", "replay-input"), "controls screen", windowed=True),
     _r("crates/tore-app/src/sound_screen.rs", ("menus-screens", "replay-settings"), "sound screen", windowed=True),

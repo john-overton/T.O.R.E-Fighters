@@ -265,7 +265,14 @@ impl LoadoutSpec {
         resources: &dyn ResourceSource,
         label: Option<&dyn Fn(&mut Weapon)>,
     ) -> crate::WorldResult<Loadout> {
-        if self.stations.len() != base.configuration.stations.len() {
+        let old_prefix = base
+            .hardpoints
+            .iter()
+            .filter(|h| h.store.as_deref().is_some_and(|name| name.ends_with(".JT")))
+            .count();
+        if self.stations.len() != base.configuration.stations.len()
+            && self.stations.len() != old_prefix
+        {
             return Err(format!(
                 "the loadout has {} stations but {} has {}",
                 self.stations.len(),
@@ -356,7 +363,10 @@ impl LoadoutSpec {
         let load = self.apply(standard.clone(), resources, None)?;
         for (index, station) in load.configuration.stations.iter().enumerate() {
             let default = &standard.configuration.stations[index];
-            let expected = if station.weapon.source == default.weapon.source {
+            if default.count == 0 && station.count == 0 && load.quantities[index] == 0 {
+                continue;
+            }
+            let expected = if default.count > 0 && station.weapon.source == default.weapon.source {
                 i32::from(default.count)
             } else {
                 load.capacity(index, &station.weapon)

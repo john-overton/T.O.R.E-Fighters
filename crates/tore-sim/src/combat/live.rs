@@ -439,8 +439,7 @@ impl Configuration {
                 profile.validate()?;
             }
             let m = &s.weapon.movement;
-            if s.count == 0
-                || s.count >= 32767
+            if s.count >= 32767
                 || s.mount.iter().any(|v| !v.is_finite())
                 || m.minimum_speed < 0
                 || m.maximum_speed < m.minimum_speed
@@ -501,7 +500,14 @@ impl Configuration {
         let mut tanks = Vec::new();
         for (index, h) in a.hardpoints.iter().enumerate().take(9) {
             let default = h.store.as_deref().filter(|name| name.ends_with(".GAS"));
-            if h.flags & 8 == 0 && (h.flags & 0x200 != 0 || default.is_some()) {
+            let retained_equipment = h
+                .store
+                .as_deref()
+                .is_some_and(|name| name.ends_with(".SEE") || name.ends_with(".ECM"));
+            if h.flags & 8 == 0
+                && !retained_equipment
+                && (h.flags & 0x200 != 0 || default.is_some())
+            {
                 tanks.push(TankStation {
                     hardpoint: index,
                     mount: h.position.map(|v| f64::from(v) / 3.),
@@ -615,6 +621,58 @@ impl Configuration {
                 internal: h.flags & 8 != 0 && name != "SUU16.JT",
             });
         }
+        // Preserve every existing default-JT index. Additional source rows
+        // retain a real compatible selection at zero quantity, never a fake store.
+        let mut hardpoint_slots = vec![None; a.hardpoints.len()];
+        let mut slot = 0;
+        for (hardpoint, h) in a.hardpoints.iter().enumerate() {
+            if h.store.as_deref().is_some_and(|name| name.ends_with(".JT")) {
+                hardpoint_slots[hardpoint] = Some(slot);
+                slot += 1;
+            }
+        }
+        let default_weapons: Vec<_> = stations
+            .iter()
+            .map(|station| station.weapon.clone())
+            .collect();
+        for (hardpoint, h) in a.hardpoints.iter().enumerate() {
+            if hardpoint_slots[hardpoint].is_some() || h.flags & 8 != 0 {
+                continue;
+            }
+            let source_station = super::loading::Station::from_source(h)?;
+            let compatible = |weapon: &Weapon| {
+                weapon.source != "SUU16.JT"
+                    && (1..32767).contains(
+                        &source_station.allowed_count(super::loading::Store::weapon(weapon), false),
+                    )
+            };
+            let mut selected = default_weapons
+                .iter()
+                .find(|weapon| compatible(weapon))
+                .cloned();
+            if selected.is_none() {
+                let fallback = match (a.id, hardpoint) {
+                    (AircraftId::Mig23, 5) => Some("AIM9M.JT"),
+                    (AircraftId::Mig17, 3) => Some("MK82.JT"),
+                    _ => None,
+                };
+                if let Some(name) = fallback {
+                    let weapon = Weapon::parse(name, &read(name)?)?;
+                    if compatible(&weapon) {
+                        selected = Some(weapon);
+                    }
+                }
+            }
+            if let Some(weapon) = selected {
+                hardpoint_slots[hardpoint] = Some(stations.len());
+                stations.push(Station {
+                    weapon,
+                    mount: h.position.map(|v| f64::from(v) / 3.),
+                    count: 0,
+                    internal: false,
+                });
+            }
+        }
         let hit_points = a
             .object
             .get("hitPoints")
@@ -672,20 +730,6 @@ impl Configuration {
                 .ok_or_else(|| super::invalid("missing system damage"))?
                 .number()? as u8;
         }
-        let mut slot = 0;
-        let hardpoint_slots = a
-            .hardpoints
-            .iter()
-            .map(|h| {
-                if h.store.as_deref().is_some_and(|n| n.ends_with(".JT")) {
-                    let i = slot;
-                    slot += 1;
-                    Some(i)
-                } else {
-                    None
-                }
-            })
-            .collect();
         let damage_capacity = hit_points
             .checked_mul(2)
             .filter(|v| *v <= i32::from(i16::MAX))
@@ -5069,6 +5113,126 @@ mod tests {
         assert_eq!(state.own().payload_lbs(), 1702.);
         state.command(0, Command::Jettison, launcher());
         assert_eq!(state.own().payload_lbs(), 0.);
+    }
+
+    #[test]
+    fn dormant_source_station_starts_empty_and_plus_restores_capacity() {
+        use crate::combat::loadout::{EditableStation, Loadout};
+        use tore_formats::aircraft::Hardpoint;
+        let mut config = fixture(false).own().configuration().clone();
+        config.stations[0].weapon.source = "MK82.JT".into();
+        config.stations[0].weapon.flags |= 2;
+        config.stations[0].internal = false;
+        config.stations[0].count = 0;
+        config.hardpoint_slots = vec![None, None, Some(0)];
+        let state = State::new(config.clone(), true).unwrap();
+        assert_eq!(state.own().ammo, [0]);
+        assert_eq!(state.own().payload_lbs(), 0.);
+        let mut load = Loadout {
+            aircraft: AircraftId::F18,
+            configuration: config,
+            quantities: vec![0],
+            fuel_lbs: 0.,
+            internal_capacity_lbs: 1000.,
+            empty_lbs: 100.,
+            maximum_lbs: 1000.,
+            hardpoints: vec![Hardpoint {
+                location: 4,
+                flags: 0x100,
+                position: [0; 3],
+                store: None,
+                count: 4,
+                weight_class: 0,
+            }],
+            tank_hardpoints: vec![],
+            cheat: false,
+        };
+        assert_eq!(
+            load.editable_stations(),
+            [EditableStation {
+                hardpoint: 2,
+                location: 4,
+                weapon: Some(0),
+                tank: None
+            }]
+        );
+        load.change(0, 1);
+        assert_eq!(load.quantities, [1]);
+        assert_eq!(load.configuration.stations[0].count, 4);
+        load.validate().unwrap();
+    }
+
+    #[test]
+    fn tank_transfer_is_one_unit_atomic_and_unloading_overweight_drafts_is_allowed() {
+        use crate::combat::loadout::Loadout;
+        use tore_formats::aircraft::Hardpoint;
+        let store = TankStore {
+            source: "SYNTHETIC.GAS".into(),
+            name: "Synthetic tank".into(),
+            tank: tore_formats::weapons::Tank {
+                empty_weight: 100,
+                fuel_weight: 200,
+                flags: 1,
+            },
+        };
+        let h = Hardpoint {
+            location: 4,
+            flags: 0x200,
+            position: [0; 3],
+            store: Some(store.source.clone()),
+            count: 2,
+            weight_class: 0,
+        };
+        let mut config = fixture(false).own().configuration().clone();
+        config.stations.clear();
+        config.hardpoint_slots = vec![None; 3];
+        config.tanks = vec![
+            TankStation {
+                hardpoint: 1,
+                mount: [0.; 3],
+                store: Some(store.clone()),
+                quantity: 2,
+            },
+            TankStation {
+                hardpoint: 2,
+                mount: [0.; 3],
+                store: None,
+                quantity: 0,
+            },
+        ];
+        config.refresh_tanks().unwrap();
+        let mut load = Loadout {
+            aircraft: AircraftId::F14,
+            configuration: config,
+            quantities: vec![],
+            fuel_lbs: 0.,
+            internal_capacity_lbs: 1000.,
+            empty_lbs: 100.,
+            maximum_lbs: 200.,
+            hardpoints: vec![],
+            tank_hardpoints: vec![h.clone(), h],
+            cheat: false,
+        };
+        assert!(load.validate().is_err());
+        load.transfer_tank(0, 1).unwrap();
+        assert_eq!(
+            load.configuration
+                .tanks
+                .iter()
+                .map(|s| s.quantity)
+                .collect::<Vec<_>>(),
+            [1, 1]
+        );
+        load.unload_tank(0).unwrap();
+        assert_eq!(load.configuration.tanks[0].quantity, 0);
+        assert!(load.validate().is_err());
+        load.tank_hardpoints[0].flags = 0;
+        load.tank_hardpoints[0].store = None;
+        let mass = load.total_lbs();
+        assert!(load.transfer_tank(1, 0).is_err());
+        assert_eq!(load.configuration.tanks[1].quantity, 1);
+        assert_eq!(load.configuration.tanks[0].quantity, 0);
+        assert_eq!(load.total_lbs(), mass);
     }
 
     #[test]

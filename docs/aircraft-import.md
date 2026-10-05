@@ -295,13 +295,43 @@ For an aircraft with selectable external tanks, review its exact GAS record and
 the original hardpoint's compatibility/count fields. The shared loadout keeps
 tank identity and installed quantity separate from weapon ammunition. Review
 internal fuel, external fuel, empty shell mass and total mass independently.
-Use the Tanks page to remove or reload a tank. New accepted loads record an
+Use the tank cards at the top of the air-to-surface catalog to remove or reload
+a tank. Both catalogs share the same
+source-numbered station rows, so a weapon and tank on a shared mount cannot
+appear as separate available positions. New accepted loads record an
 explicit empty tank list when all tanks are removed; missing tank lists in older
 saved missions preserve source defaults. `cargo run --locked -p tore-app --
 --validate-tanks --aircraft f14 --no-audio` is a headless worked regression for
 zero, one and two F250 tanks and accepted-load restoration. See the
 [tank contract](spec/external-fuel-tanks.md) and
 [validation](baselines/external-fuel-tanks.md) for source values and limits.
+
+Selective aircraft/combat extraction includes the original `$<GAS stem>.PIC`
+thumbnail when it exists in any supplied archive and records a
+`generated-tank-thumbnail` edge. An absent optional icon remains an explicit
+unavailable edge. Broad runtime menu imports can already carry these icons;
+this dependency rule fills the selective CLI closure and does not infer tank
+SH resources or physical aircraft attachments.
+
+Audit every source hardpoint, including empty and default-GAS slots, against
+implemented weapons. A default `.JT` is not the criterion for an editable weapon
+mount. The [ordnance source matrix](formats/aircraft-ordnance.md) distinguishes
+logical station groups, installed quantities and unsupported stores. Keep new
+optional rows empty by default and preserve old accepted station indices.
+
+Aircraft-only profiles also include two explicit host retained-selection seeds:
+`MIG17F.PT` hardpoint 3 needs `MK82.JT`, and `MIG23.PT` hardpoint 5 needs
+`AIM9M.JT`. These zero-based rows retain a compatible selection at zero initial
+quantity; the seeds add no default ammunition or mass. The report labels them
+`host-retained-station-seed`, distinguishing this host requirement from a source
+PT pointer. Missing required seed definitions fail the import with a reason.
+
+With the imported development profile, run `cargo run --locked -p tore-app --
+--validate-ordnance --no-audio` for all 36 reviewed retail aircraft. It checks
+source compatibility coverage, default and older-load preservation, weapon/tank
+replacement, accepted-load restoration and lightweight multiplayer validation.
+The battery scenario is `menus-ordnance-availability`. This validates current
+source data and host rules, not a live comparison with the retail game.
 
 Supported extraction/flight validation commands:
 

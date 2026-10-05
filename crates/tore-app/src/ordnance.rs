@@ -10,7 +10,7 @@ use std::time::Instant;
 use tore_formats::{Pic, weapons::Weapon};
 use tore_sim::{
     combat::live::OwnshipInput,
-    combat::loadout::{Loadout, supported},
+    combat::loadout::{EditableStation, Loadout, supported},
     models::FlightModel,
 };
 type Rect = (i32, i32, i32, i32);
@@ -18,10 +18,23 @@ const CATALOG: Rect = (64, 103, 235, 272);
 const CATALOG_AREA: usize = 15;
 const CARD_WIDTH: i32 = 109;
 const CARD_HEIGHT: i32 = 23;
+const STATIONS_PER_PAGE: usize = 6;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CatalogEntry {
+    Weapon(usize),
+    Tank(usize),
+}
+#[derive(Clone, Copy)]
+enum RetainedKind {
+    Weapon,
+    Tank,
+}
 #[derive(Clone, Copy)]
 enum DragSource {
     Catalog(usize),
     Station(usize),
+    TankCatalog(usize),
+    TankStation(usize),
 }
 struct Drag {
     source: DragSource,
@@ -62,9 +75,11 @@ pub struct Ordnance {
     tank_catalog: Vec<tore_sim::combat::live::TankStore>,
     sprites: BTreeMap<String, Sprite>,
     category: usize,
-    pages: [usize; 3],
-    selected: Option<usize>,
+    pages: [usize; 2],
+    selected: Option<CatalogEntry>,
     station: usize,
+    station_page: usize,
+    retained_kind: BTreeMap<usize, RetainedKind>,
     hover: Option<usize>,
     pressed: Option<usize>,
     right_pressed: Option<usize>,
@@ -163,9 +178,11 @@ impl Ordnance {
             tank_catalog: vec![],
             sprites,
             category: 0,
-            pages: [0; 3],
+            pages: [0; 2],
             selected: None,
             station: 0,
+            station_page: 0,
+            retained_kind: BTreeMap::new(),
             hover: None,
             pressed: None,
             right_pressed: None,
@@ -177,6 +194,7 @@ impl Ordnance {
             menu: false,
             lobby: false,
         };
+        ordnance.remember_occupants();
         ordnance.rebuild_catalog();
         Ok(ordnance)
     }
@@ -201,19 +219,213 @@ impl Ordnance {
             })
             .cloned()
             .collect();
-        self.pages = [0; 3];
+        self.pages = [0; 2];
         self.selected = None;
     }
-    fn page_entries(&self) -> Vec<usize> {
-        if self.category == 2 {
-            return (0..self.tank_catalog.len()).collect();
+    fn remember_occupants(&mut self) {
+        for row in self.loadout.editable_stations() {
+            if self.loaded_tank(&row).is_some() {
+                self.retained_kind.insert(row.hardpoint, RetainedKind::Tank);
+            } else if self.loaded_weapon(&row).is_some() {
+                self.retained_kind
+                    .insert(row.hardpoint, RetainedKind::Weapon);
+            }
         }
-        self.catalog
+    }
+    fn empty_kind(&self, row: &EditableStation) -> RetainedKind {
+        if let Some(selected) = self.selected {
+            match selected {
+                CatalogEntry::Tank(index)
+                    if row.tank.is_some_and(|slot| {
+                        self.loadout.tank_capacity(slot, &self.tank_catalog[index]) > 0
+                    }) =>
+                {
+                    return RetainedKind::Tank;
+                }
+                CatalogEntry::Weapon(index)
+                    if row.weapon.is_some_and(|slot| {
+                        self.loadout.capacity(slot, &self.catalog[index]) > 0
+                    }) =>
+                {
+                    return RetainedKind::Weapon;
+                }
+                _ => {}
+            }
+        }
+        self.retained_kind
+            .get(&row.hardpoint)
+            .copied()
+            .unwrap_or(if row.weapon.is_none() {
+                RetainedKind::Tank
+            } else {
+                RetainedKind::Weapon
+            })
+    }
+    fn station_row(&self, index: usize) -> Option<EditableStation> {
+        self.loadout.editable_stations().into_iter().nth(index)
+    }
+    fn loaded_weapon(&self, row: &EditableStation) -> Option<usize> {
+        row.weapon.filter(|slot| {
+            self.loadout
+                .quantities
+                .get(*slot)
+                .is_some_and(|quantity| *quantity > 0)
+        })
+    }
+    fn loaded_tank(&self, row: &EditableStation) -> Option<usize> {
+        row.tank.filter(|slot| {
+            self.loadout
+                .configuration
+                .tanks
+                .get(*slot)
+                .is_some_and(|tank| tank.quantity > 0)
+        })
+    }
+    fn reveal_station(&mut self) {
+        self.station_page = self.station / STATIONS_PER_PAGE;
+    }
+    fn cannot_load(&mut self) -> Action {
+        self.message = Some("This store cannot be loaded at this station.".into());
+        Action::None
+    }
+    fn change_station(&mut self, index: usize, direction: i32, one: bool) -> Action {
+        let Some(row) = self.station_row(index) else {
+            return Action::None;
+        };
+        if let Some(slot) = self.loaded_tank(&row) {
+            return self.edit_loadout(|load| load.change_tank(slot, direction));
+        }
+        let weapon = self.loaded_weapon(&row).or_else(|| {
+            matches!(self.empty_kind(&row), RetainedKind::Weapon)
+                .then_some(row.weapon)
+                .flatten()
+        });
+        if let Some(slot) = weapon {
+            return self.edit_loadout(|load| {
+                if one {
+                    let capacity = load.capacity(slot, &load.configuration.stations[slot].weapon);
+                    if direction > 0 && i32::from(load.quantities[slot]) < capacity {
+                        load.quantities[slot] += 1;
+                    }
+                    load.refresh_equipment()
+                } else {
+                    load.change(slot, direction);
+                    Ok(())
+                }
+            });
+        }
+        if matches!(self.empty_kind(&row), RetainedKind::Tank)
+            && let Some(slot) = row.tank
+        {
+            return self.edit_loadout(|load| load.change_tank(slot, direction));
+        }
+        Action::None
+    }
+    fn load_selected(&mut self, index: usize) -> Action {
+        let Some(row) = self.station_row(index) else {
+            return Action::None;
+        };
+        let Some(selected) = self.selected else {
+            return Action::None;
+        };
+        match selected {
+            CatalogEntry::Tank(index) => {
+                let Some(slot) = row.tank else {
+                    return self.cannot_load();
+                };
+                let tank = self.tank_catalog[index].clone();
+                self.edit_loadout(|load| load.select_tank(slot, tank))
+            }
+            CatalogEntry::Weapon(index) => {
+                let Some(slot) = row.weapon else {
+                    return self.cannot_load();
+                };
+                let weapon = self.catalog[index].clone();
+                self.edit_loadout(|load| load.select(slot, weapon))
+            }
+        }
+    }
+
+    fn drop_store(&mut self, source: DragSource, target: usize) -> Action {
+        let Some(row) = self.station_row(target) else {
+            return Action::None;
+        };
+        match source {
+            DragSource::Catalog(index) => {
+                let Some(slot) = row.weapon else {
+                    return self.cannot_load();
+                };
+                self.selected = Some(CatalogEntry::Weapon(index));
+                let weapon = self.catalog[index].clone();
+                self.edit_loadout(|load| load.select(slot, weapon))
+            }
+            DragSource::TankCatalog(index) => {
+                let Some(slot) = row.tank else {
+                    return self.cannot_load();
+                };
+                self.selected = Some(CatalogEntry::Tank(index));
+                let tank = self.tank_catalog[index].clone();
+                self.edit_loadout(|load| load.select_tank(slot, tank))
+            }
+            DragSource::Station(index) => {
+                let Some(source) = self.station_row(index).and_then(|row| row.weapon) else {
+                    return Action::None;
+                };
+                let Some(target) = row.weapon else {
+                    return self.cannot_load();
+                };
+                self.selected = None;
+                self.edit_loadout(|load| load.transfer(source, target))
+            }
+            DragSource::TankStation(index) => {
+                let Some(source) = self.station_row(index).and_then(|row| row.tank) else {
+                    return Action::None;
+                };
+                let Some(target) = row.tank else {
+                    return self.cannot_load();
+                };
+                self.selected = None;
+                self.edit_loadout(|load| load.transfer_tank(source, target))
+            }
+        }
+    }
+    fn drag_thumbnail(&self, source: DragSource) -> Option<&Sprite> {
+        match source {
+            DragSource::Catalog(index) => thumbnail(&self.sprites, &self.catalog[index]),
+            DragSource::TankCatalog(index) => {
+                tank_thumbnail(&self.sprites, &self.tank_catalog[index])
+            }
+            DragSource::Station(index) => self
+                .station_row(index)
+                .and_then(|row| row.weapon)
+                .and_then(|slot| {
+                    thumbnail(
+                        &self.sprites,
+                        &self.loadout.configuration.stations[slot].weapon,
+                    )
+                }),
+            DragSource::TankStation(index) => self
+                .station_row(index)
+                .and_then(|row| row.tank)
+                .and_then(|slot| self.loadout.configuration.tanks[slot].store.as_ref())
+                .and_then(|tank| tank_thumbnail(&self.sprites, tank)),
+        }
+    }
+    fn page_entries(&self) -> Vec<CatalogEntry> {
+        let weapons = self
+            .catalog
             .iter()
             .enumerate()
             .filter(|(_, w)| usize::from(w.flags & 0x10000 == 0) == self.category)
-            .map(|(i, _)| i)
-            .collect()
+            .map(|(index, _)| CatalogEntry::Weapon(index));
+        if self.category == 1 {
+            (0..self.tank_catalog.len())
+                .map(CatalogEntry::Tank)
+                .chain(weapons)
+                .collect()
+        } else {
+            weapons.collect()
+        }
     }
     pub fn pointer(&mut self, p: Option<(f64, f64)>) {
         self.pointer = p;
@@ -249,14 +461,19 @@ impl Ordnance {
         if let Some(id @ (1 | 2 | 5 | 6)) = self.hover.filter(|_| !self.menu) {
             return self.rock(id, true);
         }
-        if self.category == 2 {
-            return Action::None;
-        }
         let source = match self.hover {
-            Some(id @ 100..=107) => self.card_index(id).map(DragSource::Catalog),
-            Some(id @ 200..=231) if self.loadout.quantities[id - 200] > 0 => {
-                Some(DragSource::Station(id - 200))
-            }
+            Some(id @ 100..=107) => self.card_index(id).map(|entry| match entry {
+                CatalogEntry::Weapon(index) => DragSource::Catalog(index),
+                CatalogEntry::Tank(index) => DragSource::TankCatalog(index),
+            }),
+            Some(id @ 200..=231) => self.station_row(id - 200).and_then(|row| {
+                if self.loaded_tank(&row).is_some() {
+                    Some(DragSource::TankStation(id - 200))
+                } else {
+                    self.loaded_weapon(&row)
+                        .map(|_| DragSource::Station(id - 200))
+                }
+            }),
             _ => None,
         };
         self.drag = source.zip(self.pointer).map(|(source, origin)| Drag {
@@ -302,29 +519,34 @@ impl Ordnance {
             if let Some(target) = self.hover.filter(|id| (200..232).contains(id)) {
                 self.station = target - 200;
                 let station = self.station;
-                return match drag.source {
-                    DragSource::Catalog(index) => {
-                        self.selected = Some(index);
-                        let weapon = self.catalog[index].clone();
-                        self.edit_loadout(|load| load.select(station, weapon))
-                    }
-                    DragSource::Station(source) => {
-                        self.selected = None;
-                        self.edit_loadout(|load| load.transfer(source, station))
-                    }
-                };
+                return self.drop_store(drag.source, station);
             }
-            if let DragSource::Station(source) = drag.source
-                && self
-                    .hover
-                    .is_some_and(|id| id == CATALOG_AREA || (100..108).contains(&id))
+            if self
+                .hover
+                .is_some_and(|id| id == CATALOG_AREA || (100..108).contains(&id))
             {
-                self.selected = None;
-                self.station = source;
-                return self.edit_loadout(|load| {
-                    load.quantities[source] = 0;
-                    Ok(())
-                });
+                match drag.source {
+                    DragSource::Station(source) => {
+                        let Some(slot) = self.station_row(source).and_then(|row| row.weapon) else {
+                            return Action::None;
+                        };
+                        self.selected = None;
+                        self.station = source;
+                        return self.edit_loadout(|load| {
+                            load.quantities[slot] = 0;
+                            load.refresh_equipment()
+                        });
+                    }
+                    DragSource::TankStation(source) => {
+                        let Some(slot) = self.station_row(source).and_then(|row| row.tank) else {
+                            return Action::None;
+                        };
+                        self.selected = None;
+                        self.station = source;
+                        return self.edit_loadout(|load| load.unload_tank(slot));
+                    }
+                    _ => {}
+                }
             }
             return Action::None;
         }
@@ -342,7 +564,7 @@ impl Ordnance {
     fn select_card(&mut self, id: usize) {
         self.selected = self.card_index(id);
     }
-    fn card_index(&self, id: usize) -> Option<usize> {
+    fn card_index(&self, id: usize) -> Option<CatalogEntry> {
         self.page_entries()
             .get(self.pages[self.category] * 8 + id - 100)
             .copied()
@@ -360,14 +582,7 @@ impl Ordnance {
             .filter(|i| Some(*i) == pressed && (200..232).contains(i))
         {
             self.station = id - 200;
-            let station = self.station;
-            if self.category == 2 {
-                return self.edit_loadout(|load| load.change_tank(station, -1));
-            }
-            self.edit_loadout(|load| {
-                load.change(station, -1);
-                Ok(())
-            })
+            self.change_station(self.station, -1, false)
         } else {
             Action::None
         }
@@ -377,6 +592,7 @@ impl Ordnance {
         &mut self,
         edit: impl FnOnce(&mut Loadout) -> tore_formats::Result<()>,
     ) -> Action {
+        self.remember_occupants();
         let before: Vec<_> = self
             .loadout
             .configuration
@@ -399,6 +615,27 @@ impl Ordnance {
             self.loadout = rollback;
             self.message = Some(error.to_string());
             return Action::None;
+        }
+        self.remember_occupants();
+        let tank_after: Vec<_> = self
+            .loadout
+            .configuration
+            .tanks
+            .iter()
+            .map(|s| (s.store.as_ref().map(|t| t.source.clone()), s.quantity))
+            .collect();
+        let weapon_added = self
+            .loadout
+            .configuration
+            .stations
+            .iter()
+            .zip(&self.loadout.quantities)
+            .zip(&before)
+            .any(|((station, count), (source, _, old_count))| {
+                *count > *old_count || (*count > 0 && station.weapon.source != *source)
+            });
+        if tank_before != tank_after && !weapon_added {
+            return Action::OrdnanceFuel;
         }
         for ((station, count), (source, old_flags, old_count)) in self
             .loadout
@@ -447,12 +684,11 @@ impl Ordnance {
             }
             3 | 4 => {
                 self.category = id - 3;
-                self.station = 0;
                 self.selected = None;
             }
             16 => {
-                self.category = 2;
-                self.station = 0;
+                // Compatibility for old headless snapshot fixtures, no visible button.
+                self.category = 1;
                 self.selected = None;
             }
             5 | 6 => {
@@ -473,19 +709,26 @@ impl Ordnance {
                 self.cancel();
             }
             9 | 10 => {
-                let station = self.station;
-                if self.category == 2 {
-                    return self.edit_loadout(|load| {
-                        load.change_tank(station, if id == 9 { 1 } else { -1 })
-                    });
-                }
-                return self.edit_loadout(|load| {
-                    load.change(station, if id == 9 { 1 } else { -1 });
-                    Ok(())
-                });
+                return self.change_station(self.station, if id == 9 { 1 } else { -1 }, false);
+            }
+            17 | 18 => {
+                let pages = self
+                    .loadout
+                    .editable_stations()
+                    .len()
+                    .div_ceil(STATIONS_PER_PAGE)
+                    .max(1);
+                self.station_page = if id == 17 {
+                    self.station_page.saturating_sub(1)
+                } else {
+                    (self.station_page + 1).min(pages - 1)
+                };
+                self.station = self.station_page * STATIONS_PER_PAGE;
+                self.selected = None;
             }
             11 => self.menu = !self.menu,
             12 => {
+                self.remember_occupants();
                 self.loadout.quantities.fill(0);
                 let _ = self.loadout.clear_tanks();
                 self.menu = false;
@@ -496,6 +739,7 @@ impl Ordnance {
             }
             13 => {
                 // Toggling unloads every station, then rebuilds the catalog.
+                self.remember_occupants();
                 self.loadout.quantities.fill(0);
                 let _ = self.loadout.clear_tanks();
                 self.loadout.cheat = !self.loadout.cheat;
@@ -517,35 +761,14 @@ impl Ordnance {
             100..=107 => self.select_card(id),
             200..=231 => {
                 self.station = id - 200;
-                let station = self.station;
-                if self.category == 2 {
-                    let Some(tank) = self.loadout.configuration.tanks.get(station) else {
-                        return Action::None;
-                    };
-                    if tank.quantity > 0 {
-                        return self.edit_loadout(|load| load.change_tank(station, 1));
-                    }
-                    if let Some(selected) = self.selected {
-                        let tank = self.tank_catalog[selected].clone();
-                        return self.edit_loadout(|load| load.select_tank(station, tank));
-                    }
+                let Some(row) = self.station_row(self.station) else {
                     return Action::None;
-                }
-                if self.loadout.quantities[station] > 0 {
+                };
+                if self.loaded_weapon(&row).is_some() || self.loaded_tank(&row).is_some() {
                     self.selected = None;
-                    return self.edit_loadout(|load| {
-                        let capacity =
-                            load.capacity(station, &load.configuration.stations[station].weapon);
-                        if i32::from(load.quantities[station]) < capacity {
-                            load.quantities[station] += 1;
-                        }
-                        Ok(())
-                    });
-                } else if let Some(w) = self.selected {
-                    let weapon = self.catalog[w].clone();
-                    return self.edit_loadout(|load| load.select(station, weapon));
+                    return self.change_station(self.station, 1, true);
                 }
-                return Action::None;
+                return self.load_selected(self.station);
             }
             _ => return Action::None,
         }
@@ -576,13 +799,10 @@ impl Ordnance {
             "a" | "A" => self.activate(3),
             "s" | "S" => self.activate(4),
             "Tab" => {
-                let count = if self.category == 2 {
-                    self.loadout.configuration.tanks.len()
-                } else {
-                    self.loadout.quantities.len()
-                };
+                let count = self.loadout.editable_stations().len();
                 if count > 0 {
                     self.station = (self.station + 1) % count;
+                    self.reveal_station();
                 }
                 self.selected = None;
                 Action::None
@@ -635,25 +855,6 @@ impl Ordnance {
         }
         self.controls
             .extend([(11, (103, 35, 75, 24)), (14, (178, 35, 90, 24))]);
-        let tanks_button = c.action_button(
-            &self.sprites,
-            "Tanks",
-            (278, 35, 60),
-            self.category == 2,
-            self.pressed == Some(16),
-        );
-        self.controls.push((16, tanks_button));
-        c.text(
-            font,
-            &format!(
-                "External fuel {} lb   Tank shells {} lb",
-                grouped(self.loadout.external_fuel_lbs()),
-                grouped(self.loadout.tank_shell_lbs())
-            ),
-            343,
-            69,
-            None,
-        );
         let title = self.loadout.aircraft.label();
         c.text(
             &self.sprites["ARMFONT.PIC"],
@@ -669,50 +870,86 @@ impl Ordnance {
             let x = 68 + (row % 2) as i32 * 119;
             let y = 108 + (row / 2) as i32 * 68;
             self.controls.push((100 + row, (x - 4, y - 5, 115, 68)));
-            if self.category == 2 {
-                tank_card(
+            match *index {
+                CatalogEntry::Tank(index) => tank_card(
                     &mut c,
                     &self.sprites,
-                    &self.tank_catalog[*index],
+                    &self.tank_catalog[index],
                     x,
                     y,
-                    self.selected == Some(*index),
+                    self.selected == Some(CatalogEntry::Tank(index)),
                     true,
-                );
-            } else {
-                card(
+                ),
+                CatalogEntry::Weapon(index) => card(
                     &mut c,
                     &self.sprites,
-                    &self.catalog[*index],
+                    &self.catalog[index],
                     x,
                     y,
-                    self.selected == Some(*index),
+                    self.selected == Some(CatalogEntry::Weapon(index)),
                     true,
-                );
+                ),
             }
         }
-        if self.category == 2 {
-            for (i, tank) in self.loadout.configuration.tanks.iter().enumerate() {
-                let x = 350 + (i % 2) as i32 * 119;
-                let y = 121 + (i / 2) as i32 * 71;
-                self.controls.push((200 + i, (x - 1, y - 6, 115, 71)));
-                c.text(
-                    font,
-                    &format!("Tank station {}", tank.hardpoint + 1),
-                    x + 1,
-                    y,
-                    None,
+
+        let stations = self.loadout.editable_stations();
+        let station_pages = stations.len().div_ceil(STATIONS_PER_PAGE).max(1);
+        self.station_page = self.station_page.min(station_pages - 1);
+        if station_pages > 1 {
+            c.centered_text(
+                font,
+                &format!("Stations {} of {}", self.station_page + 1, station_pages),
+                (350, 38, 147, 20),
+            );
+            for (id, label, x) in [(17, "Prev", 501), (18, "Next", 551)] {
+                let hit = c.action_button(
+                    &self.sprites,
+                    label,
+                    (x, 35, 47),
+                    false,
+                    self.pressed == Some(id),
                 );
-                if tank.quantity > 0
-                    && let Some(store) = &tank.store
-                {
+                self.controls.push((id, hit));
+            }
+        }
+        for (visible, (index, row)) in stations
+            .iter()
+            .enumerate()
+            .skip(self.station_page * STATIONS_PER_PAGE)
+            .take(STATIONS_PER_PAGE)
+            .enumerate()
+        {
+            let x = 350 + (visible % 2) as i32 * 119;
+            let y = 121 + (visible / 2) as i32 * 71;
+            self.controls.push((200 + index, (x - 1, y - 6, 115, 71)));
+            let location = [
+                "Centerline",
+                "Fuselage",
+                "Internal Gun",
+                "Internal Bay",
+                "Wing",
+                "Wingtip",
+            ]
+            .get(usize::from(row.location))
+            .copied()
+            .unwrap_or("Station");
+            c.text(
+                font,
+                &fit(font, &format!("{} {location}", row.hardpoint + 1), 111),
+                x + 1,
+                y,
+                None,
+            );
+            if let Some(slot) = self.loaded_tank(row) {
+                let tank = &self.loadout.configuration.tanks[slot];
+                if let Some(store) = &tank.store {
                     tank_card(
                         &mut c,
                         &self.sprites,
                         store,
                         x + 3,
                         y + 14,
-                        self.station == i,
+                        self.station == index,
                         false,
                     );
                     c.text(
@@ -720,61 +957,39 @@ impl Ordnance {
                         &format!(
                             "{} loaded (max {})",
                             tank.quantity,
-                            self.loadout.tank_capacity(i, store)
+                            self.loadout.tank_capacity(slot, store)
                         ),
                         x + 3,
                         y + 52,
                         None,
                     );
-                } else {
-                    card_outline(&mut c, x + 3, y + 14, false);
                 }
-            }
-        } else {
-            for (i, (s, n)) in self
-                .loadout
-                .configuration
-                .stations
-                .iter()
-                .zip(&self.loadout.quantities)
-                .enumerate()
-            {
-                let x = 350 + (i % 2) as i32 * 119;
-                let y = 121 + (i / 2) as i32 * 71;
-                self.controls.push((200 + i, (x - 1, y - 6, 115, 71)));
-                let location = [
-                    "Centerline",
-                    "Fuselage",
-                    "Internal Gun",
-                    "Internal Bay",
-                    "Wing",
-                    "Wingtip",
-                ]
-                .get(self.loadout.hardpoints[i].location as usize)
-                .copied()
-                .unwrap_or("Station");
-                c.text(font, location, x + 1, y, None);
-                if *n > 0 {
-                    card(
-                        &mut c,
-                        &self.sprites,
-                        &s.weapon,
-                        x + 3,
-                        y + 14,
-                        self.station == i,
-                        false,
-                    );
-                    let amount = if s.internal {
-                        format!("{n} (max {})", self.loadout.capacity(i, &s.weapon))
-                    } else {
-                        format!("{n} loaded (max {})", self.loadout.capacity(i, &s.weapon))
-                    };
-                    c.text(font, &amount, x + 3, y + 52, None);
+            } else if let Some(slot) = self.loaded_weapon(row) {
+                let station = &self.loadout.configuration.stations[slot];
+                let quantity = self.loadout.quantities[slot];
+                card(
+                    &mut c,
+                    &self.sprites,
+                    &station.weapon,
+                    x + 3,
+                    y + 14,
+                    self.station == index,
+                    false,
+                );
+                let amount = if station.internal {
+                    format!(
+                        "{quantity} (max {})",
+                        self.loadout.capacity(slot, &station.weapon)
+                    )
                 } else {
-                    // Imported black wells start at x+1; keep two black pixels
-                    // on each side of the 109-pixel outline, even when empty.
-                    card_outline(&mut c, x + 3, y + 14, false);
-                }
+                    format!(
+                        "{quantity} loaded (max {})",
+                        self.loadout.capacity(slot, &station.weapon)
+                    )
+                };
+                c.text(font, &amount, x + 3, y + 52, None);
+            } else {
+                card_outline(&mut c, x + 3, y + 14, false);
             }
         }
         let total = self.loadout.total_lbs();
@@ -888,23 +1103,18 @@ impl Ordnance {
         }
         if let Some(drag) = self.drag.as_ref().filter(|drag| drag.moved)
             && let Some((x, y)) = self.pointer
+            && let Some(sprite) = self.drag_thumbnail(drag.source)
         {
-            let weapon = match drag.source {
-                DragSource::Catalog(index) => &self.catalog[index],
-                DragSource::Station(index) => &self.loadout.configuration.stations[index].weapon,
-            };
-            if let Some(sprite) = thumbnail(&self.sprites, weapon) {
-                c.blit(
-                    sprite,
-                    (
-                        x as i32 - sprite.width as i32 / 2,
-                        y as i32 - sprite.height as i32 / 2,
-                    ),
-                    0,
-                    sprite.width,
-                    1.,
-                );
-            }
+            c.blit(
+                sprite,
+                (
+                    x as i32 - sprite.width as i32 / 2,
+                    y as i32 - sprite.height as i32 / 2,
+                ),
+                0,
+                sprite.width,
+                1.,
+            );
         }
         animating
     }
@@ -1006,7 +1216,7 @@ fn tank_card(
     catalog: bool,
 ) {
     card_outline(c, x, y, selected);
-    if let Some(icon) = sprites.get(&format!("${}.PIC", tank.source.trim_end_matches(".GAS"))) {
+    if let Some(icon) = tank_thumbnail(sprites, tank) {
         c.blit(
             icon,
             (
@@ -1027,12 +1237,18 @@ fn tank_card(
     if catalog {
         c.text(
             &sprites["WPNBLUE"],
-            &format!("{:.0} lb full", tank.full_mass_lbs()),
+            &format!("{:.0} lbs", tank.full_mass_lbs()),
             x,
             y + 37,
             None,
         );
     }
+}
+fn tank_thumbnail<'a>(
+    sprites: &'a BTreeMap<String, Sprite>,
+    tank: &tore_sim::combat::live::TankStore,
+) -> Option<&'a Sprite> {
+    sprites.get(&format!("${}.PIC", tank.source.trim_end_matches(".GAS")))
 }
 fn thumbnail<'a>(sprites: &'a BTreeMap<String, Sprite>, weapon: &Weapon) -> Option<&'a Sprite> {
     sprites.get(&format!("${}.PIC", weapon.source.trim_end_matches(".JT")))
@@ -1455,10 +1671,61 @@ pub fn validate_sources(
     Ok(())
 }
 
+fn source_station_point(
+    ui: &mut Ordnance,
+    slot: usize,
+    pixels: &mut [u8],
+) -> AppResult<(f64, f64)> {
+    let row = ui
+        .loadout
+        .editable_stations()
+        .iter()
+        .position(|row| row.weapon == Some(slot))
+        .ok_or("weapon station has no editable source row")?;
+    ui.station = row;
+    ui.reveal_station();
+    ui.render(pixels);
+    let visible = row % STATIONS_PER_PAGE;
+    Ok((
+        360. + (visible % 2) as f64 * 119.,
+        145. + (visible / 2) as f64 * 71.,
+    ))
+}
+fn source_catalog_drag(
+    ui: &mut Ordnance,
+    slot: usize,
+    weapon: &Weapon,
+    pixels: &mut [u8],
+) -> AppResult<()> {
+    let index = ui
+        .catalog
+        .iter()
+        .position(|candidate| candidate.source == weapon.source)
+        .ok_or("imported station weapon missing from catalog")?;
+    ui.category = usize::from(weapon.flags & 0x10000 == 0);
+    let entry = ui
+        .page_entries()
+        .iter()
+        .position(|i| *i == CatalogEntry::Weapon(index))
+        .unwrap();
+    ui.pages[ui.category] = entry / 8;
+    let destination = source_station_point(ui, slot, pixels)?;
+    let row = entry % 8;
+    ui.pointer(Some((
+        80. + (row % 2) as f64 * 120.,
+        120. + (row / 2) as f64 * 68.,
+    )));
+    ui.down();
+    ui.pointer(Some(destination));
+    ui.up();
+    if i32::from(ui.loadout.quantities[slot]) != ui.loadout.capacity(slot, weapon) {
+        return Err("catalog drag did not refill the imported station".into());
+    }
+    Ok(())
+}
 fn validate_dragging(load: &Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppResult<()> {
     let mut ui = Ordnance::new(load.clone(), data)?;
     let mut pixels = vec![0; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
-    ui.render(&mut pixels);
     let Some(source) = load
         .configuration
         .stations
@@ -1471,10 +1738,13 @@ fn validate_dragging(load: &Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppRes
         );
         return Ok(());
     };
-    let from = (
-        360. + (source % 2) as f64 * 119.,
-        145. + (source / 2) as f64 * 71.,
-    );
+    let weapon = &load.configuration.stations[source].weapon;
+    // Newly exposed mounts are genuinely empty. Load one through the actual
+    // catalog gesture before exercising removal, rather than pretending it was installed.
+    if ui.loadout.quantities[source] == 0 {
+        source_catalog_drag(&mut ui, source, weapon, &mut pixels)?;
+    }
+    let from = source_station_point(&mut ui, source, &mut pixels)?;
     ui.pointer(Some(from));
     ui.down();
     ui.pointer(Some((290., 370.)));
@@ -1482,38 +1752,21 @@ fn validate_dragging(load: &Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppRes
     if ui.loadout.quantities[source] != 0 {
         return Err("catalog drop did not empty the imported station".into());
     }
-    let weapon = &load.configuration.stations[source].weapon;
-    let index = ui
-        .catalog
-        .iter()
-        .position(|candidate| candidate.source == weapon.source)
-        .ok_or("imported station weapon missing from catalog")?;
-    ui.category = usize::from(weapon.flags & 0x10000 == 0);
-    let entry = ui.page_entries().iter().position(|i| *i == index).unwrap();
-    ui.pages[ui.category] = entry / 8;
-    ui.render(&mut pixels);
-    let row = entry % 8;
-    ui.pointer(Some((
-        80. + (row % 2) as f64 * 120.,
-        120. + (row / 2) as f64 * 68.,
-    )));
-    ui.down();
-    ui.pointer(Some(from));
-    ui.up();
-    if i32::from(ui.loadout.quantities[source]) != load.capacity(source, weapon) {
-        return Err("catalog drag did not refill the imported station".into());
-    }
+    source_catalog_drag(&mut ui, source, weapon, &mut pixels)?;
     if let Some(target) =
         (0..load.quantities.len()).find(|i| *i != source && load.capacity(*i, weapon) > 0)
     {
         ui.loadout.quantities[target] = 0;
         let before = ui.loadout.quantities[source];
+        let from = source_station_point(&mut ui, source, &mut pixels)?;
+        let source_page = ui.station_page;
+        let to = source_station_point(&mut ui, target, &mut pixels)?;
+        if ui.station_page != source_page {
+            return Err("source-backed drag validation requires both source rows on the reviewed six-card page".into());
+        }
         ui.pointer(Some(from));
         ui.down();
-        ui.pointer(Some((
-            360. + (target % 2) as f64 * 119.,
-            145. + (target / 2) as f64 * 71.,
-        )));
+        ui.pointer(Some(to));
         ui.up();
         if ui.loadout.quantities[target] == 0
             || ui.loadout.quantities[source] + ui.loadout.quantities[target] != before
@@ -1524,9 +1777,6 @@ fn validate_dragging(load: &Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppRes
     Ok(())
 }
 
-/// What the aircraft carries in flight must be exactly what the page holds: a
-/// store taken off stays off (never turned back into the default load) at
-/// launch and restart, every station one at a time and all of them at once.
 fn validate_removed_stores(
     load: &Loadout,
     airframe: &crate::aircraft::Airframe,
@@ -1726,6 +1976,7 @@ mod tests {
         gun.count = 500;
         config.stations.push(config.stations[0].clone());
         config.stations.push(gun);
+        config.hardpoint_slots = vec![Some(0), Some(1), Some(2)];
         let catalog = vec![config.stations[0].weapon.clone()];
         let loadout = Loadout {
             aircraft: config.aircraft,
@@ -1816,9 +2067,11 @@ mod tests {
             tank_catalog: vec![],
             sprites,
             category: 0,
-            pages: [0; 3],
+            pages: [0; 2],
             selected: None,
             station: 0,
+            station_page: 0,
+            retained_kind: BTreeMap::new(),
             hover: None,
             pressed: None,
             right_pressed: None,
@@ -1872,14 +2125,21 @@ mod tests {
         ui.rebuild_catalog();
         let weapons = ui.loadout.quantities.clone();
         ui.activate(16);
-        assert_eq!(ui.category, 2);
+        ui.station = ui
+            .loadout
+            .editable_stations()
+            .iter()
+            .position(|row| row.hardpoint == 5)
+            .unwrap();
+        let row_id = 200 + ui.station;
+        assert_eq!(ui.category, 1);
         ui.activate(10);
         ui.activate(10);
         assert_eq!(ui.loadout.external_fuel_lbs(), 0.);
         assert_eq!(ui.loadout.tank_shell_lbs(), 0.);
         assert_eq!(ui.loadout.quantities, weapons);
         ui.activate(100);
-        ui.activate(200);
+        ui.activate(row_id);
         assert_eq!(ui.loadout.external_fuel_lbs(), 3300.);
         assert_eq!(ui.loadout.tank_shell_lbs(), 396.);
         ui.activate(12);
@@ -1888,6 +2148,277 @@ mod tests {
         assert!(ui.loadout.quantities.iter().all(|n| *n == 0));
     }
 
+    fn mixed_fixture() -> Ordnance {
+        use tore_sim::combat::live::{TankStation, TankStore};
+        let mut ui = fixture();
+        let tank = TankStore {
+            source: "SYNTHETIC.GAS".into(),
+            name: "Synthetic tank".into(),
+            tank: tore_formats::weapons::Tank {
+                empty_weight: 198,
+                fuel_weight: 1650,
+                flags: 1,
+            },
+        };
+        for hardpoint in [0, 1, 5] {
+            let source = if hardpoint < 2 {
+                ui.loadout.hardpoints[hardpoint].flags |= 0x200;
+                ui.loadout.hardpoints[hardpoint].clone()
+            } else {
+                Hardpoint {
+                    location: 1,
+                    flags: 0x200,
+                    position: [0; 3],
+                    store: Some(tank.source.clone()),
+                    count: 2,
+                    weight_class: 0,
+                }
+            };
+            ui.loadout.tank_hardpoints.push(source);
+            ui.loadout.configuration.tanks.push(TankStation {
+                hardpoint,
+                mount: [0.; 3],
+                store: Some(tank.clone()),
+                quantity: 0,
+            });
+        }
+        ui.loadout.configuration.hardpoint_slots.resize(6, None);
+        ui.loadout.configuration.refresh_tanks().unwrap();
+        ui.tanks = vec![tank];
+        let icon = &ui.sprites["$AIM9M.PIC"];
+        let icon = Sprite {
+            width: icon.width,
+            height: icon.height,
+            rgba: icon.rgba.clone(),
+            glyphs: icon.glyphs.clone(),
+        };
+        ui.sprites.insert("$SYNTHETIC.PIC".into(), icon);
+        ui.rebuild_catalog();
+        ui
+    }
+    #[test]
+    fn air_surface_catalog_puts_tanks_first_and_keeps_mixed_page_indices_distinct() {
+        let mut ui = mixed_fixture();
+        let mut surface = ui.weapons[0].clone();
+        surface.source = "MK82.JT".into();
+        surface.flags &= !0x10000;
+        ui.weapons.push(surface);
+        ui.loadout.cheat = true;
+        let tank = ui.tanks[0].clone();
+        ui.tanks = (0..10)
+            .map(|index| {
+                let mut tank = tank.clone();
+                tank.source = format!("SYNTH{index}.GAS");
+                tank
+            })
+            .collect();
+        ui.rebuild_catalog();
+        ui.activate(4);
+        let entries = ui.page_entries();
+        assert_eq!(
+            &entries[..10],
+            &(0..10).map(CatalogEntry::Tank).collect::<Vec<_>>()
+        );
+        assert_eq!(entries[10], CatalogEntry::Weapon(1));
+        ui.pages[1] = 1;
+        assert_eq!(ui.card_index(100), Some(CatalogEntry::Tank(8)));
+        assert_eq!(ui.card_index(102), Some(CatalogEntry::Weapon(1)));
+        ui.activate(100);
+        assert_eq!(ui.selected, Some(CatalogEntry::Tank(8)));
+        ui.activate(3);
+        assert!(
+            ui.page_entries()
+                .iter()
+                .all(|entry| matches!(entry, CatalogEntry::Weapon(_)))
+        );
+        ui.render(&mut vec![0; WIDTH * HEIGHT * 4]);
+        assert!(!ui.controls.iter().any(|(id, _)| *id == 16));
+    }
+    #[test]
+    fn empty_quantity_restore_keeps_last_actual_tank_kind_after_catalog_switch() {
+        let mut ui = mixed_fixture();
+        ui.activate(4);
+        ui.drop_store(DragSource::TankCatalog(0), 0);
+        ui.selected = None;
+        ui.station = 0;
+        while ui.loadout.configuration.tanks[0].quantity > 0 {
+            ui.activate(10);
+        }
+        ui.activate(3);
+        ui.activate(9);
+        assert_eq!(ui.loadout.configuration.tanks[0].quantity, 1);
+        assert_eq!(ui.loadout.quantities[0], 0);
+    }
+    #[test]
+    fn both_catalogs_leave_the_removed_tank_button_and_banner_as_original_background() {
+        let mut ui = mixed_fixture();
+        for category in [3, 4] {
+            ui.activate(category);
+            let mut pixels = vec![0; WIDTH * HEIGHT * 4];
+            ui.render(&mut pixels);
+            let background = &ui.sprites["ORD_AIR3.PIC"].rgba;
+            for (x, y, width, height) in [(278, 35, 60, 24), (343, 69, 295, 20)] {
+                for row in y..y + height {
+                    let start = (row * WIDTH + x) * 4;
+                    let end = start + width * 4;
+                    assert_eq!(&pixels[start..end], &background[start..end]);
+                }
+            }
+            assert!(!ui.controls.iter().any(|(id, _)| *id == 16));
+        }
+    }
+    #[test]
+    fn unified_source_rows_deduplicate_shared_mounts_and_keep_occupants_across_catalogs() {
+        let mut ui = mixed_fixture();
+        let rows = ui.loadout.editable_stations();
+        assert_eq!(
+            rows.iter().map(|row| row.hardpoint).collect::<Vec<_>>(),
+            vec![0, 1, 2, 5]
+        );
+        assert_eq!(rows[0].weapon, Some(0));
+        assert_eq!(rows[0].tank, Some(0));
+        assert_eq!(rows[3].weapon, None);
+        assert_eq!(rows[3].tank, Some(2));
+        ui.loadout
+            .select_tank(0, ui.tank_catalog[0].clone())
+            .unwrap();
+        let mut a = vec![0; WIDTH * HEIGHT * 4];
+        let mut b = a.clone();
+        ui.render(&mut a);
+        let first: Vec<_> = ui
+            .controls
+            .iter()
+            .filter(|(id, _)| (200..232).contains(id))
+            .copied()
+            .collect();
+        ui.activate(16);
+        ui.render(&mut b);
+        assert_eq!(
+            first,
+            ui.controls
+                .iter()
+                .filter(|(id, _)| (200..232).contains(id))
+                .copied()
+                .collect::<Vec<_>>()
+        );
+        for y in 115..328 {
+            assert_eq!(
+                &a[(y * WIDTH + 349) * 4..(y * WIDTH + 584) * 4],
+                &b[(y * WIDTH + 349) * 4..(y * WIDTH + 584) * 4]
+            );
+        }
+        // Loaded tank changes as equipment even while the weapon catalog is open.
+        ui.activate(3);
+        ui.station = 0;
+        let before = ui.loadout.configuration.tanks[0].quantity;
+        ui.activate(10);
+        assert_eq!(ui.loadout.configuration.tanks[0].quantity, before - 1);
+        // A loaded weapon increments as a weapon while a tank catalog card is selected.
+        ui.activate(16);
+        ui.selected = Some(CatalogEntry::Tank(0));
+        let gun = ui.loadout.quantities[2];
+        ui.loadout.quantities[2] = gun - 1;
+        ui.activate(202);
+        assert_eq!(ui.loadout.quantities[2], gun);
+    }
+    #[test]
+    fn tank_drag_replaces_weapon_transfers_one_unloads_and_rejects_wrong_station_type() {
+        let mut ui = mixed_fixture();
+        ui.activate(16);
+        assert_eq!(
+            ui.drop_store(DragSource::TankCatalog(0), 0),
+            Action::OrdnanceFuel
+        );
+        assert_eq!(ui.loadout.quantities[0], 0);
+        let loaded = ui.loadout.configuration.tanks[0].quantity;
+        assert!(loaded > 0);
+        assert_eq!(
+            ui.drop_store(DragSource::TankStation(0), 1),
+            Action::OrdnanceFuel
+        );
+        assert_eq!(ui.loadout.configuration.tanks[0].quantity, loaded - 1);
+        assert_eq!(ui.loadout.configuration.tanks[1].quantity, 1);
+        let quantities = ui.loadout.quantities.clone();
+        let tank_count: Vec<_> = ui
+            .loadout
+            .configuration
+            .tanks
+            .iter()
+            .map(|tank| tank.quantity)
+            .collect();
+        assert_eq!(ui.drop_store(DragSource::TankCatalog(0), 2), Action::None);
+        assert_eq!(ui.loadout.quantities, quantities);
+        assert_eq!(
+            ui.loadout
+                .configuration
+                .tanks
+                .iter()
+                .map(|tank| tank.quantity)
+                .collect::<Vec<_>>(),
+            tank_count
+        );
+        assert_eq!(ui.drop_store(DragSource::Catalog(0), 3), Action::None);
+        assert_eq!(ui.loadout.quantities, quantities);
+        ui.activate(3);
+        assert_eq!(
+            ui.drop_store(DragSource::Catalog(0), 0),
+            Action::OrdnanceWeapon
+        );
+        assert_eq!(ui.loadout.configuration.tanks[0].quantity, 0);
+        assert!(ui.loadout.quantities[0] > 0);
+        // Actual mouse dragging works from a tank shown in a weapon catalog.
+        ui.render(&mut vec![0; WIDTH * HEIGHT * 4]);
+        assert_eq!(
+            drag(&mut ui, (500., 145.), (75., 360.)),
+            Action::OrdnanceFuel
+        );
+        assert_eq!(ui.loadout.configuration.tanks[1].quantity, 0);
+        assert!(ui.loadout.quantities[0] > 0);
+    }
+    #[test]
+    fn station_pages_never_overlap_weight_fields_and_tab_reveals_all_source_rows() {
+        let mut ui = fixture();
+        let station = ui.loadout.configuration.stations[0].clone();
+        let hardpoint = ui.loadout.hardpoints[0].clone();
+        ui.loadout.configuration.stations = vec![station; 9];
+        ui.loadout.configuration.hardpoint_slots = (0..9).map(Some).collect();
+        ui.loadout.hardpoints = vec![hardpoint; 9];
+        ui.loadout.quantities = vec![0; 9];
+        ui.render(&mut vec![0; WIDTH * HEIGHT * 4]);
+        let cards: Vec<_> = ui
+            .controls
+            .iter()
+            .filter(|(id, _)| (200..232).contains(id))
+            .copied()
+            .collect();
+        assert_eq!(cards.len(), 6);
+        assert!(
+            cards
+                .iter()
+                .all(|(_, rect)| rect.1 >= 115 && rect.1 + rect.3 <= 328)
+        );
+        assert!(ui.controls.iter().any(|(id, _)| *id == 18));
+        ui.activate(18);
+        ui.render(&mut vec![0; WIDTH * HEIGHT * 4]);
+        assert_eq!(
+            ui.controls
+                .iter()
+                .filter(|(id, _)| (200..232).contains(id))
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            vec![206, 207, 208]
+        );
+        ui.station = 5;
+        ui.key("Tab");
+        assert_eq!(ui.station, 6);
+        assert_eq!(ui.station_page, 1);
+        ui.station = 8;
+        ui.key("Tab");
+        assert_eq!(ui.station, 0);
+        assert_eq!(ui.station_page, 0);
+        ui.activate(16);
+        assert_eq!(ui.station, 0);
+    }
     #[test]
     fn catalog_drag_draws_only_transparent_thumbnail_and_loads_station() {
         let mut ui = fixture();
@@ -2059,12 +2590,12 @@ mod tests {
         );
         assert_eq!(ui.loadout.quantities, [4, 0, 0]);
         assert_eq!(ui.activate(7), Action::MissionFly);
-        ui.pages = [1, 2, 0];
+        ui.pages = [1, 2];
         ui.activate(13);
         assert!(!ui.loadout.cheat);
         assert_eq!(ui.loadout.quantities, [0, 0, 0]);
         assert_eq!(names(&ui), ["AIM9M.JT"]);
-        assert_eq!(ui.pages, [0; 3]);
+        assert_eq!(ui.pages, [0; 2]);
         assert!(ui.selected.is_none());
     }
     #[test]
@@ -2079,7 +2610,7 @@ mod tests {
                 ui.activate(category);
                 ui.activate(2);
                 ui.activate(100);
-                assert_eq!(ui.pages, [0; 3]);
+                assert_eq!(ui.pages, [0; 2]);
                 assert!(ui.selected.is_none());
                 let mut pixels = vec![0; WIDTH * HEIGHT * 4];
                 ui.render(&mut pixels);
@@ -2140,7 +2671,7 @@ mod tests {
     fn click_loading_and_right_click_decrement_still_work() {
         let mut ui = fixture();
         drag(&mut ui, (100., 120.), (101., 120.));
-        assert_eq!(ui.selected, Some(0));
+        assert_eq!(ui.selected, Some(CatalogEntry::Weapon(0)));
         drag(&mut ui, (500., 145.), (500., 145.));
         assert_eq!(ui.loadout.quantities, [2, 4, 500]);
         ui.right(true);
@@ -2189,7 +2720,7 @@ mod tests {
         let mut other = ui.catalog[0].clone();
         other.source = "AIM120.JT".into();
         ui.catalog.push(other);
-        ui.selected = Some(1);
+        ui.selected = Some(CatalogEntry::Weapon(1));
         drag(&mut ui, (400., 145.), (401., 145.));
         assert_eq!(ui.loadout.quantities, [3, 0, 500]);
         assert_eq!(
@@ -2277,6 +2808,6 @@ mod tests {
         assert_eq!(ui.down(), Action::RockerDown);
         ui.pointer(Some((300., 300.)));
         assert_eq!(ui.up(), Action::RockerUp);
-        assert_eq!(ui.pages, [0, 0, 0]);
+        assert_eq!(ui.pages, [0, 0]);
     }
 }

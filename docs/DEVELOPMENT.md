@@ -562,10 +562,14 @@ cargo run --locked -p tore-app -- --quick-mission --snapshot-state ordnance --sn
 
 The snapshot command also exits without a display or audio device. Other menu
 states, including `ordnance-empty` and `ordnance-drag`, use the same command.
-`ordnance-tanks` previews the compatible tank catalog and tank station view.
+`ordnance-tanks` previews air-to-surface with compatible tanks first, using the
+same source station rows as air-to-air. The name is retained as a snapshot alias.
 For a source-backed F-14 tank selection, mass and accepted-restart check without
 a display, run `cargo run --locked -p tore-app -- --validate-tanks --aircraft f14
 --no-audio` with an imported development profile.
+For all 36 retail aircraft, `--validate-ordnance --no-audio` checks supported
+weapon and tank compatibility, source station coverage, old loadouts and
+accepted-load restoration. The battery scenario is `menus-ordnance-availability`.
 Keep captures, logs and imported media under ignored directories. When using
 `target/debug/tore-app` directly, first rebuild with
 `cargo build --locked -p tore-app` so the binary matches the source.

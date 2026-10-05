@@ -33,6 +33,12 @@ resource. [Airport evidence and remaining scope](baselines/ukraine-airports.md).
 | Explore/extract any supported archives | `python3 tools/extract_assets.py` | All resources under ignored `.local/extracted/` |
 | Inspect archive metadata only | `python3 tools/explore_assets.py` | Inventory under ignored `.local/exploration/` |
 
+Selective aircraft/combat extraction includes cataloged original tank thumbnails
+through explicit generated dependency edges. Broad runtime menu profiles can
+already carry those icons independently; the selective dependency report now
+records why each tank icon is included. See the
+[tank import rule](aircraft-import.md#commands-and-implementation-entry-points).
+
 The app does not need a full extraction. It reads the original archives directly through the same format library and imports its menu and all defined theater profiles. Full extraction is for research and future format development.
 
 ## Common commands

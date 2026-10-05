@@ -117,7 +117,10 @@ internal fuel, external fuel, shell mass and remaining fuel mass must stay
 distinct. The linked draft holds the code review, open decisions and acceptance
 matrix. Status: selection, separate shell/fuel accounting and accepted-load restoration
 are implemented; the F-14 source probe checks zero, one and two tanks.
-Separate tank geometry and in-flight tank jettison remain open.
+The follow-up [ordnance matrix](../formats/aircraft-ordnance.md) covers all
+reviewed aircraft, omitted weapon stations and shared tank/weapon rows. John
+limited that pass to the editor and weapon availability, with aircraft rendering
+unchanged. Separate tank geometry and in-flight tank jettison remain open.
 This is shared import/loadout work, not another aircraft in the 23-aircraft count.
 
 ## F-4 family contract

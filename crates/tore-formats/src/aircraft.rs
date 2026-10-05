@@ -1121,6 +1121,31 @@ pub fn dependency_report(
         }
     }
     let mut edges = BTreeSet::new();
+    // These reviewed editable rows lack an appropriate default-JT reference.
+    // The host retains a real compatible selection at zero count; it must be
+    // readable even in aircraft-only profiles. This is not a retail PT pointer.
+    for &id in aircraft {
+        let seed = match id {
+            AircraftId::Mig17 => Some((3, "MK82.JT")),
+            AircraftId::Mig23 => Some((5, "AIM9M.JT")),
+            _ => None,
+        };
+        if let Some((hardpoint, name)) = seed {
+            if !catalog.contains(name) {
+                return Err(invalid(&format!(
+                    "{} -> host retained selection at hardpoint {hardpoint} -> missing dependency {name}",
+                    id.pt()
+                )));
+            }
+            selected.insert(name.into());
+            edges.insert(DependencyEdge {
+                source: id.pt().into(),
+                target: name.into(),
+                kind: "host-retained-station-seed",
+                available: true,
+            });
+        }
+    }
     for name in &selected {
         edges.insert(DependencyEdge {
             source: if COMBAT_RESOURCES.contains(&name.as_str()) {
@@ -1148,6 +1173,21 @@ pub fn dependency_report(
             .find(|a| a.entries.contains_key(&name))
             .ok_or_else(|| invalid("missing dependency"))?;
         let bytes = a.read(&name)?;
+        // Reviewed GAS records carry names and mass, not an icon pointer.
+        // Their original menu art uses the same generated filename as the UI.
+        if let Some(stem) = name.strip_suffix(".GAS") {
+            let icon = format!("${stem}.PIC");
+            let available = catalog.contains(&icon);
+            edges.insert(DependencyEdge {
+                source: name.clone(),
+                target: icon.clone(),
+                kind: "generated-tank-thumbnail",
+                available,
+            });
+            if available && selected.insert(icon.clone()) {
+                pending.push(icon);
+            }
+        }
         let refs = references(&bytes);
         // BRF strings and symbols are typed edges. Never execute a symbol.
         if bytes.starts_with(b"[brent's_relocatable_format]") {
@@ -1578,6 +1618,9 @@ mod dependency_tests {
         for &name in COMBAT_RESOURCES {
             resources.insert(name.into(), vec![0]);
         }
+        for name in ["AIM9M.JT", "MK82.JT"] {
+            resources.insert(name.into(), vec![0]);
+        }
         for name in ["PALETTE.PAL", "WIN11.FNT", "HUD11.FNT", "FMENUD.MNU"] {
             resources.insert(name.into(), vec![0]);
         }
@@ -1699,6 +1742,76 @@ mod dependency_tests {
                 .any(|e| e.kind == "native-symbol-unimplemented" && !e.available)
         );
     }
+    #[test]
+    fn optional_station_seeds_are_explicit_required_host_edges() {
+        for (id, seed) in [
+            (AircraftId::Mig17, "MK82.JT"),
+            (AircraftId::Mig23, "AIM9M.JT"),
+        ] {
+            let archive_with = archive(resources(), None);
+            let report = dependency_report(&[&archive_with], &[id], false).unwrap();
+            assert!(report.resources.contains(seed));
+            assert!(report.edges.iter().any(|edge| edge.source == id.pt()
+                && edge.target == seed
+                && edge.kind == "host-retained-station-seed"
+                && edge.available));
+            let without = archive(resources(), Some(seed));
+            let error = dependency_report(&[&without], &[id], false)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("host retained selection") && error.contains(seed));
+            let unrelated = dependency_report(&[&archive_with], &[AircraftId::F18], false).unwrap();
+            assert!(!unrelated.resources.contains(seed));
+            assert!(dependency_report(&[&without], &[AircraftId::F18], false).is_ok());
+        }
+    }
+
+    #[test]
+    fn tank_thumbnails_follow_selected_gas_across_archives_without_guessing_shapes() {
+        let mut data = resources();
+        data.insert(
+            "F18.PT".into(),
+            b"[brent's_relocatable_format]\nstring \"TEST.GAS\"\nend\n".to_vec(),
+        );
+        data.insert("TEST.GAS".into(), b"[brent's_relocatable_format]\nbyte 8\nptr names\nword 100\nbyte 1\ndword 500\n:names\nstring \"Test\"\nstring \"Test tank\"\nstring \"TEST.GAS\"\nend\n".to_vec());
+        data.insert("OTHER.GAS".into(), b"[brent's_relocatable_format]\nbyte 8\nptr names\nword 200\nbyte 1\ndword 600\n:names\nstring \"Other\"\nstring \"Other tank\"\nstring \"OTHER.GAS\"\nend\n".to_vec());
+        data.insert("TEST.SH".into(), vec![0]);
+        let definitions = archive(data, None);
+        let pictures = archive(
+            BTreeMap::from([
+                ("$TEST.PIC".into(), vec![1]),
+                ("$OTHER.PIC".into(), vec![2]),
+            ]),
+            None,
+        );
+        let report =
+            dependency_report(&[&pictures, &definitions], &[AircraftId::F18], false).unwrap();
+        assert!(report.resources.contains("TEST.GAS"));
+        assert!(report.resources.contains("$TEST.PIC"));
+        assert_eq!(report.providers["$TEST.PIC"], vec![0]);
+        assert!(report.edges.iter().any(|edge| edge.source == "TEST.GAS"
+            && edge.target == "$TEST.PIC"
+            && edge.kind == "generated-tank-thumbnail"
+            && edge.available));
+        assert!(!report.resources.contains("$OTHER.PIC"));
+        assert!(!report.resources.contains("TEST.SH"));
+        let all = dependency_report(&[&pictures, &definitions], &[], true).unwrap();
+        assert!(all.resources.contains("$TEST.PIC") && all.resources.contains("$OTHER.PIC"));
+    }
+    #[test]
+    fn absent_tank_thumbnails_are_explicit_optional_edges() {
+        let mut data = resources();
+        data.insert("TEST.GAS".into(), b"[brent's_relocatable_format]\nbyte 8\nptr names\nword 100\nbyte 1\ndword 500\n:names\nstring \"Test\"\nstring \"Test tank\"\nstring \"TEST.GAS\"\nend\n".to_vec());
+        let definitions = archive(data, None);
+        let report = dependency_report(&[&definitions], &[], true).unwrap();
+        assert!(report.resources.contains("TEST.GAS"));
+        assert!(!report.resources.contains("$TEST.PIC"));
+        assert!(report.edges.iter().any(|edge| edge.source == "TEST.GAS"
+            && edge.target == "$TEST.PIC"
+            && edge.kind == "generated-tank-thumbnail"
+            && !edge.available));
+    }
+
     #[test]
     fn compiled_pts_candidates_remain_explicit_without_inventing_missing_icons() {
         let mut r = resources();
