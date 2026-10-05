@@ -51,11 +51,11 @@ mod observe_tests;
 #[cfg(test)]
 mod phase2_seams_tests;
 pub mod prediction;
+#[cfg(test)]
+mod relay_tests;
 pub mod revival;
 #[cfg(test)]
 mod revival_tests;
-#[cfg(test)]
-mod relay_tests;
 pub mod scores;
 #[cfg(test)]
 mod stall_tests;
