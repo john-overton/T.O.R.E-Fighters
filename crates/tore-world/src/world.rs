@@ -727,7 +727,8 @@ impl World {
                 &mut cockpit.flight,
                 &input.pilot,
                 &self.terrain,
-                self.combat
+                &mut self
+                    .combat
                     .state
                     .targets
                     .iter()

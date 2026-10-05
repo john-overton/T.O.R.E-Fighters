@@ -96,12 +96,22 @@ impl OwnshipTerms {
 /// flight steps over the terrain's surface, and it crashes into, or with no
 /// crashes rebounds from, any of the `standing` ground objects it passed
 /// through. The native research adapter has no building contact.
+///
+/// Not generic and never inlined, so the flight step is compiled once, here,
+/// for the host's world step and the client's prediction alike. Generic, it
+/// was compiled again inside every crate that instantiated
+/// [`World::step_with`](super::World::step_with) (the session's host, at that
+/// crate's optimisation level), and on Apple silicon the two copies' sine and
+/// cosine calls could round a pitch a few units in the last place apart: a
+/// correction with nothing to explain it (CI-fix, docs/ARCHITECTURE.md
+/// "Real-time tests on shared runners").
+#[inline(never)]
 pub fn fly(
     previous: &mut flight::State,
     flight: &mut flight::State,
     pilot: &tore_input::PilotInput,
     terrain: &Terrain,
-    standing: impl IntoIterator<Item = u32>,
+    standing: &mut dyn Iterator<Item = u32>,
 ) {
     previous.clone_from(flight);
     flight.step_surface(pilot, |x, z| terrain.surface(x, z));
@@ -403,7 +413,7 @@ impl OwnPlane {
             &mut self.flight,
             tick.pilot,
             terrain,
-            tick.standing.iter().copied(),
+            &mut tick.standing.iter().copied(),
         );
         let warnings = after_weather(
             &mut self.flight,
