@@ -98,6 +98,28 @@ Shift-1 Envelope; Shift-2 Forward View; Shift-3 Other View; Shift-4 Radar/Visual
 The scope, the exposure page and the weapons all read one shared sensor
 component. [What it models, what is authored tuning and what is deferred](radar.md).
 
+## Friend or foe
+
+Slice F2-C of [multiplayer phase 2](ARCHITECTURE.md#friend-or-foe). All three
+work in single player and in a network flight, from the flight's own copy of the
+mission.
+
+- **The lock box's X** is drawn when the displayed target is on the side of the
+  plane the screen presents: a player flying for the enemy side sees it on the
+  enemy's aircraft. Single player always flies the friendly side.
+- **U** squawks IFF on the displayed target: "IFF: Friendly" for an aircraft on
+  the player's side, "IFF: no reply" for any other (agent decision: the retail
+  manual names only the Friendly answer), "IFF: no target" with nothing
+  designated.
+- **Show Target Info** (Pref menu row, or Ctrl+T; off by default) prints each
+  visible aircraft's and object's identity below it, in the HUD's font and
+  size. The displayed target also shows its manoeuvre (the target window's
+  activity). The text is orange, and red for a target that aims at the player.
+  In a network game a human's callsign is the line beneath. Agent decisions: a
+  label reaches 10 nautical miles, at most 24 show at once (aircraft first, then
+  the nearest objects), and the manoeuvre and the red are known only for the
+  displayed target, the only one a client's copy of the mission knows.
+
 ## In-flight messages
 
 Cockpit, radio and system messages print in the HUD's color, with no
@@ -118,14 +140,12 @@ All shortcut labels present in the supplied `FMENUD.MNU` are recognized, and the
 
 | Key | Original action / remaining work |
 | --- | --- |
-| U | IFF interrogation |
 | Shift-R | Air-to-ground radar |
 | Shift-A / Shift-G | AWACS / air-to-ground radar link |
 | Shift-F / Shift-D | Target damage / message history |
 | Shift-I | Airbase aircraft inventory |
 | Shift-J | Jettison external fuel |
 | Alt-F | Wingmen engage the IR/laser-designated target |
-| Ctrl-T | Target information (menu row) |
 
 Tab (gun), M's HARM seeker, Z/X wing sweep, Ctrl + arrows thrust vectoring and / and \ laser designation have no T.O.R.E binding yet ([key placement](INPUT.md#key-placement)).
 

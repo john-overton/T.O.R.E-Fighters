@@ -374,7 +374,7 @@ answers Friendly for a same-side aircraft, both as in retail. *Retail gap-fill
 (agent):* with Show Target Info on, a human's callsign appears beneath the
 aircraft's label.
 
-*Designed (phase 2):* the X follows the player's own side, so a player flying
+*Built (phase 2, slice F2-C; John took it as designed, 2026-10-05):* the X follows the player's own side, so a player flying
 for the enemy sees it on the enemy's aircraft; U answers "IFF: Friendly" for
 the player's side and "IFF: no reply" otherwise (fitted); Show Target Info
 (the Pref row, Ctrl+T) labels every visible aircraft and object with its
@@ -1023,4 +1023,5 @@ Raised while planning (2026-09-28):
   are new actions, so the [controls list](CONTROLS.md) changes with them.
   *Proposed in phase 2, awaiting John:* Alt+Shift+E Engaging, Alt+Shift+W
   Winchester, Alt+Shift+B Bingo fuel, Alt+Shift+H Need help
-  ([proposed keys](CONTROLS.md#proposed-for-multiplayer-phase-2)).
+  ([keys](CONTROLS.md#multiplayer-phase-2)). John answered
+  on 2026-10-05 (all as recommended); the keys exist since slice F2-C.

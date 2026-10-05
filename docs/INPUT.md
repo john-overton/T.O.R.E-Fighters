@@ -270,10 +270,12 @@ Default keys follow Fighters Anthology wherever the original has the command
   incoming-missile range fixture), or moved to a free neighbour (next airport,
   to Shift+N).
 - An FA key whose feature T.O.R.E lacks stays unassigned. Pressing it says "not
-  implemented yet": U (IFF), Shift+R (air-to-ground radar), Shift+A and Shift+G
+  implemented yet": Shift+R (air-to-ground radar), Shift+A and Shift+G
   (AWACS and air-to-ground radar links), Shift+F (target damage), Shift+I
   (airbase inventory), Shift+J (drop tanks), Shift+D (message history) and
-  Alt+F (engage the laser-designated target).
+  Alt+F (engage the laser-designated target). U (IFF) and Ctrl+T (Show Target
+  Info) work now, and the multiplayer keys K and Alt+Shift+E, W, B and H sit on
+  keys FA leaves free ([controls](CONTROLS.md)).
 - The keypad follows FA whatever NumLock says: 0 and period release chaff and
   flares, 1 and 3 are the rudder, 8, 2, 4 and 6 are the stick, 5 centers the
   view, and plus and minus zoom. In the controls screen a keypad key is

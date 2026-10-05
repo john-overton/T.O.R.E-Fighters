@@ -204,7 +204,8 @@ prints every in-flight menu item with what it does), a unit test, or the code pa
 | Control menu: Keyboard | 332 | OK | opens the controls screen |
 | Control menu: joystick types, rudder pedals, throttle stick, HAT | 332 | NOT IMPLEMENTED | probe; the controls screen binds any device instead |
 | Pref: Graphics, Sound, Time (Paused, Slow-motion, 1x to 8x), HUD pitch ladder, Dim and Brighten HUD, Show cockpit, Large windows | 332 | OK | probe: each opens its screen or toggles |
-| Pref: Accelerated time, Rear-view mirrors, Authentic radar CRT, Show target info, IR/Laser targeting, Radio silence | 332, 333 | NOT IMPLEMENTED | probe prints "not implemented yet" (the mirrors are always on) |
+| Pref: Accelerated time, Rear-view mirrors, Authentic radar CRT, IR/Laser targeting, Radio silence | 332, 333 | NOT IMPLEMENTED | probe prints "not implemented yet" (the mirrors are always on) |
+| Pref: Show target info (Ctrl+T) | 12, 333 | OK | probe: the row toggles and says "Show target info: on"; `show_target_info_is_off_by_default_and_toggles_from_ctrl_t_and_the_pref_row`, `target_info` render test, `replay-script-friend-or-foe` (F2-C, 2026-10-05) |
 | View menu: 11 views with F1 to F12 shortcuts | 333, 103 | OK | probe, `menus-window-view-*` |
 | View menu: Ctrl and Alt use missile or target, View transitions | 333 | NOT IMPLEMENTED | probe (the Ctrl and Alt keys themselves work, see CONTROLS) |
 | Window menu: envelope (Current), the nine windows, RCS | 333 | OK | probe, `menus-panel-*` |
