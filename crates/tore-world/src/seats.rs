@@ -60,8 +60,7 @@ pub enum Pilot {
     /// ejected) and abandoned to the mission
     /// ([`crate::world::MissionCommand::Abandon`], stage F phase 2). Its
     /// cockpit steps on with neutral controls (the wreck falling, the
-    /// escape), and nobody can take it. Nothing makes a plane lost until
-    /// slice F2-V.
+    /// escape), and nobody can take it.
     Lost,
 }
 
@@ -271,6 +270,36 @@ impl Roster {
             entry.pilot = Pilot::Ai;
         }
         Some(plane)
+    }
+
+    /// Stage F phase 2's revival (slice F2-V): the seat leaves its lost
+    /// plane, which nobody flies from now on ([`Pilot::Lost`]). The seat
+    /// stays, waiting. Returns the plane, or `None` when the seat flies none.
+    pub(crate) fn abandon_plane(&mut self, seat: SeatId) -> Option<PlaneId> {
+        let seat = self.seats.iter_mut().find(|s| s.id == seat)?;
+        let plane = seat.plane.take()?;
+        seat.wing_recipient = None;
+        if let Some(entry) = self.planes.iter_mut().find(|p| p.id == plane) {
+            entry.pilot = Pilot::Lost;
+        }
+        Some(plane)
+    }
+
+    /// A plane the mission did not start with (a revival's), in id order.
+    pub(crate) fn add_plane(&mut self, plane: Plane) -> Result<(), String> {
+        match self.planes.binary_search_by_key(&plane.id, |p| p.id) {
+            Ok(_) => Err(format!("plane {} is in the mission already", plane.id.0)),
+            Err(at) => {
+                self.planes.insert(at, plane);
+                Ok(())
+            }
+        }
+    }
+
+    /// Takes a plane nobody flies out of the roster (a retired wreck).
+    pub(crate) fn remove_plane(&mut self, plane: PlaneId) -> Option<Plane> {
+        let at = self.planes.binary_search_by_key(&plane, |p| p.id).ok()?;
+        (self.planes[at].pilot == Pilot::Lost).then(|| self.planes.remove(at))
     }
 
     /// The seat flying `plane`, if a human flies it.

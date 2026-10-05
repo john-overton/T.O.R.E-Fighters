@@ -422,6 +422,10 @@ impl World {
             // Stage F phase 2's score recorder (F2-S), the score section
             // (H10): present only while the host has scoring on.
             score,
+            // Stage F phase 2's revival bookkeeping (F2-V): the abandoned
+            // planes with when each wreck came to rest, and the retired
+            // ones. Mutable state not coded yet; stage H adds its section.
+            revival: _,
         } = self;
         match section {
             Section::Roster => roster.save(s, None),

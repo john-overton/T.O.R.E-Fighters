@@ -284,6 +284,7 @@ pub(super) fn mission() -> World {
         wing_status: Default::default(),
         datalink: Default::default(),
         score: None,
+        revival: Default::default(),
         radio: Default::default(),
         phrases,
         // The step never reads the setup.

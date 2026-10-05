@@ -561,6 +561,41 @@ pub(crate) fn station_specs_loaded(
     stores
 }
 
+/// What an AI aircraft built from `config` carries: its external equipment
+/// and every round of `stores` hung outside it, pounds.
+fn payload_lbs(config: &live::Configuration, stores: &[tore_sim::ai::mission::StationSpec]) -> f64 {
+    f64::from(config.external_equipment_lbs)
+        + stores
+            .iter()
+            .map(|s| match s.rounds() {
+                tore_sim::ai::weapon_service::Rounds::Finite(n) => {
+                    f64::from(n) * s.external_round_lbs
+                }
+                tore_sim::ai::weapon_service::Rounds::Unlimited => 0.0,
+            })
+            .sum::<f64>()
+}
+
+/// A new aircraft for the AI, one the mission did not start with: a
+/// revival's (stage F phase 2, slice F2-V), built as the mission builds an AI
+/// aircraft with a lobby loadout.
+pub(crate) struct NewAircraft {
+    pub id: u32,
+    pub side: launch::Side,
+    pub wing: u8,
+    /// Its member number in the wing, from 0.
+    pub member: u8,
+    /// Its combat configuration, with the loadout's weapons on its stations.
+    pub config: live::Configuration,
+    /// What each station carries.
+    pub quantities: Vec<u16>,
+    pub fuel_lbs: f64,
+    /// Its flight state, placed and moving.
+    pub flight: flight::State,
+    /// The creator's Guns only: every station but the gun starts empty.
+    pub guns_only: bool,
+}
+
 /// The live AI bridge for one mission.
 pub struct AiWings {
     mission: AiMission,
@@ -909,17 +944,9 @@ impl AiWings {
                     .weapons
                     .insert((actor.id(), index as u8), station.weapon.clone());
             }
-            let payload = f64::from(config.external_equipment_lbs)
-                + stores
-                    .iter()
-                    .map(|s| match s.rounds() {
-                        tore_sim::ai::weapon_service::Rounds::Finite(n) => {
-                            f64::from(n) * s.external_round_lbs
-                        }
-                        tore_sim::ai::weapon_service::Rounds::Unlimited => 0.0,
-                    })
-                    .sum::<f64>();
-            actor.flight_mut().set_payload(payload)?;
+            actor
+                .flight_mut()
+                .set_payload(payload_lbs(&config, &stores))?;
             actor.set_stations(stores);
             actor.set_guns(
                 config
@@ -1367,6 +1394,91 @@ impl AiWings {
                 aircraft: insert.aircraft,
             },
         );
+        Ok(())
+    }
+
+    /// Puts a new aircraft into the AI ([`NewAircraft`]): its stores, fuel
+    /// and payload as the mission's build gives an aircraft with a lobby
+    /// loadout, fresh sensors and missile warnings, the dispensers its
+    /// configuration fills, and a wingmate's skill (Average when the side
+    /// has no AI aircraft left: agent decision, F2-V). Then as
+    /// [`Self::insert_actor`].
+    pub(crate) fn insert_new(&mut self, new: NewAircraft) -> WorldResult<()> {
+        let NewAircraft {
+            id,
+            side,
+            wing,
+            member,
+            config,
+            quantities,
+            fuel_lbs,
+            mut flight,
+            guns_only,
+        } = new;
+        let stations = station_specs_loaded(&config, &quantities, guns_only);
+        flight.fuel = fuel_lbs;
+        flight.set_payload(payload_lbs(&config, &stations))?;
+        let experience = self.experience_for(id, side, wing).unwrap_or(
+            tore_sim::ai::experience::ResolvedExperience {
+                level: tore_sim::ai::Experience::Average,
+                origin: tore_sim::ai::experience::ExperienceOrigin::ExplicitPerObject,
+            },
+        );
+        self.insert_actor(ActorInsert {
+            id,
+            side,
+            wing,
+            member,
+            aircraft: config.aircraft,
+            experience,
+            flight,
+            sensors: Some(Sensors::new(config.sensors.clone())),
+            stations,
+            dispensers: vec![
+                tore_sim::ai::threat::DispenserStore {
+                    class: SeekerClass::Infrared,
+                    count: u32::from(config.ecm.flare[0]),
+                },
+                tore_sim::ai::threat::DispenserStore {
+                    class: SeekerClass::Radar,
+                    count: u32::from(config.ecm.chaff[0]),
+                },
+            ],
+            warnings: None,
+            equipment: EquipmentFaults::default(),
+            config: Some(config),
+        })
+    }
+
+    /// Cuts what each station of AI aircraft `id` carries to what `keep`
+    /// leaves of its rounds, for its station's weapon (a revival's weapons
+    /// rule, slice F2-V). Unlimited rounds stay unlimited unless `keep`
+    /// leaves none of one round.
+    pub(crate) fn cut_stores(
+        &mut self,
+        id: u32,
+        keep: impl Fn(&tore_formats::weapons::Weapon, u32) -> u32,
+    ) -> WorldResult<()> {
+        let config = self
+            .configs
+            .get(&id)
+            .ok_or_else(|| format!("the AI has no configuration for plane {id}"))?;
+        let actor = self
+            .mission
+            .actor_mut(id)
+            .ok_or_else(|| format!("the AI does not fly plane {id}"))?;
+        for spec in actor.stations_mut() {
+            let Some(station) = config.stations.get(usize::from(spec.station.0)) else {
+                continue;
+            };
+            spec.store.rounds = match spec.store.rounds {
+                tore_sim::ai::weapon_service::Rounds::Finite(rounds) => {
+                    tore_sim::ai::weapon_service::Rounds::Finite(keep(&station.weapon, rounds))
+                }
+                unlimited if keep(&station.weapon, 1) > 0 => unlimited,
+                _ => tore_sim::ai::weapon_service::Rounds::Finite(0),
+            };
+        }
         Ok(())
     }
 

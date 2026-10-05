@@ -113,6 +113,10 @@ pub struct World {
     /// on ([`Self::set_scoring`]); `None`, as in single player, records
     /// nothing.
     pub score: Option<crate::score::Recorder>,
+    /// Stage F phase 2's revival bookkeeping (slice F2-V): the planes
+    /// abandoned to the mission and the wrecks retired. Empty in single
+    /// player, which never abandons a plane.
+    pub revival: revive::Book,
 }
 
 /// A human-flown plane's state outside combat: its flight, where the tick
@@ -309,6 +313,7 @@ impl World {
         self.wing_status.reset();
         self.radio = Default::default();
         self.datalink = Default::default();
+        self.revival = Default::default();
         if open {
             self.cockpits.clear();
         } else {
@@ -571,7 +576,9 @@ impl World {
         for command in mission {
             match *command {
                 MissionCommand::Take { seat, .. } if !flying.contains(&seat) => flying.push(seat),
-                MissionCommand::GiveBack { seat } => flying.retain(|s| *s != seat),
+                MissionCommand::GiveBack { seat } | MissionCommand::Abandon { seat } => {
+                    flying.retain(|s| *s != seat)
+                }
                 _ => {}
             }
         }
@@ -606,8 +613,13 @@ impl World {
 
     /// Each cockpit's input for this tick, in cockpit order: every seat that
     /// flies a plane sends exactly one, for [`Self::tick`], and no other seat
-    /// sends any.
-    fn cockpit_inputs<'a>(&self, inputs: &'a [SeatInput]) -> WorldResult<Vec<&'a SeatInput>> {
+    /// sends any. A lost plane nobody flies ([`crate::seats::Pilot::Lost`])
+    /// steps on with `neutral`.
+    fn cockpit_inputs<'a>(
+        &self,
+        inputs: &'a [SeatInput],
+        neutral: &'a SeatInput,
+    ) -> WorldResult<Vec<&'a SeatInput>> {
         let tick = self.tick();
         for input in inputs {
             if input.tick != tick {
@@ -632,6 +644,11 @@ impl World {
         self.cockpits
             .iter()
             .map(|cockpit| {
+                if self.roster.plane(cockpit.plane).map(|p| p.pilot)
+                    == Some(crate::seats::Pilot::Lost)
+                {
+                    return Ok(neutral);
+                }
                 let seat = self.roster.seat_of(cockpit.plane).ok_or_else(|| {
                     format!("plane {} has a cockpit but no human pilot", cockpit.plane.0)
                 })?;
@@ -685,7 +702,12 @@ impl World {
             self.apply_mission_command(command)?;
         }
         // An open mission steps with no human at all: the AI flies on.
-        let inputs = self.cockpit_inputs(inputs)?;
+        let neutral = SeatInput {
+            seat: revive::NOBODY,
+            tick: stepped,
+            ..SeatInput::default()
+        };
+        let inputs = self.cockpit_inputs(inputs, &neutral)?;
         let mut by_seat: Vec<(usize, &SeatInput)> = inputs.iter().copied().enumerate().collect();
         by_seat.sort_by_key(|(_, input)| input.seat);
         for (cockpit, input) in by_seat {
@@ -1022,18 +1044,21 @@ impl World {
             score.record(self, stepped, self.combat.state.strikes());
             self.score = Some(score);
         }
+        // Stage F phase 2: when each abandoned wreck came to rest.
+        self.track_wrecks();
         self.step_radio(out, &events);
         out.emissions = self.combat.state.take_sound_events();
         out.events = events;
         Ok(())
     }
 
-    /// The seat that flies the plane of `cockpit`. Every cockpit has one, as
-    /// a cockpit exists only while a human flies its plane.
+    /// The seat that flies the plane of `cockpit`: a cockpit exists while a
+    /// human flies its plane, and a lost plane nobody flies any more has
+    /// [`revive::NOBODY`], so what it does reaches no seat.
     fn seat_of_cockpit(&self, cockpit: usize) -> SeatId {
         self.roster
             .seat_of(self.cockpits[cockpit].plane)
-            .unwrap_or_default()
+            .unwrap_or(revive::NOBODY)
     }
 
     /// Whether the plane of `cockpit` flies in Friendly Wing 1, the wing the
@@ -1090,6 +1115,10 @@ impl World {
         // wingmen report, decided once and queued by every seat in the wing.
         let mut flying = vec![false; self.cockpits.len()];
         for (index, cockpit) in self.cockpits.iter_mut().enumerate() {
+            // A lost plane nobody flies talks to nobody.
+            if self.roster.seat_of(cockpit.plane).is_none() {
+                continue;
+            }
             flying[index] = cockpit.airfield_radio.step_player(
                 now,
                 &self.phrases,
@@ -1133,6 +1162,9 @@ impl World {
             cockpit.airfield_radio.deliver(now, &mut self.comms);
         }
         for cockpit in &mut self.cockpits {
+            if self.roster.seat_of(cockpit.plane).is_none() {
+                continue;
+            }
             let slot = self
                 .roster
                 .plane(cockpit.plane)

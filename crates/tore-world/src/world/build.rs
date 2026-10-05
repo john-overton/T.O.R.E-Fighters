@@ -301,6 +301,7 @@ impl World {
             wing_status: Default::default(),
             datalink: Default::default(),
             score: None,
+            revival: Default::default(),
             radio: Default::default(),
             phrases: comms::phrases(resources),
         };

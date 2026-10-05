@@ -26,12 +26,12 @@ pub enum MissionCommand {
     GiveBack { seat: SeatId },
     /// Stage F phase 2: frees `seat` from its lost plane, whose pilot
     /// becomes [`crate::seats::Pilot::Lost`] (docs/ARCHITECTURE.md, "Death,
-    /// revival and lives"). The seat sends no input for this tick. Refused by
-    /// the step until slice F2-V builds it.
+    /// revival and lives"; [`World::abandon_plane`]). The seat sends no input
+    /// for this tick.
     Abandon { seat: SeatId },
     /// Stage F phase 2: abandons `seat`'s lost plane and seats it in a new
-    /// plane of the same aircraft at `spawn`. The seat sends input for this
-    /// tick. Refused by the step until slice F2-V builds it.
+    /// plane of the same aircraft at `spawn` ([`World::revive_plane`]). The
+    /// seat sends input for this tick.
     Revive {
         seat: SeatId,
         spawn: Box<super::revive::Spawn>,
@@ -88,13 +88,12 @@ impl World {
             }
             MissionCommand::Take { seat, plane } => self.take_plane(*seat, *plane)?,
             MissionCommand::GiveBack { seat } => self.give_back_plane(*seat)?,
-            // Slice F2-V builds these; no host sends them before it.
-            MissionCommand::Abandon { seat } | MissionCommand::Revive { seat, .. } => {
-                return Err(format!(
-                    "seat {}: abandoning and reviving a plane are not built yet",
-                    seat.0
-                )
-                .into());
+            // Stage F phase 2's revival (slice F2-V; world/revive.rs).
+            MissionCommand::Abandon { seat } => {
+                self.abandon_plane(*seat)?;
+            }
+            MissionCommand::Revive { seat, spawn } => {
+                self.revive_plane(*seat, spawn)?;
             }
         }
         Ok(())

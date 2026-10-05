@@ -29,8 +29,10 @@ fn a_wing_reply_does_nothing_until_its_slice_lands() {
     assert_eq!(world.tick(), 1);
 }
 
+/// Slice F2-V built both commands (world/revive_tests.rs); a plane that is
+/// not lost is refused either, and the refused tick does not run.
 #[test]
-fn abandon_and_revive_are_refused_until_their_slice_lands() {
+fn abandon_and_revive_refuse_a_plane_that_is_not_lost() {
     let mut world = mission();
     let mut out = TickOutput::default();
     let spawn = Spawn {
