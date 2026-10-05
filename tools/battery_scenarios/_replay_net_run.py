@@ -6,9 +6,9 @@
 
 `capture` starts `tore-server` on a free UDP port with a small mission (two
 Hornets against two Fulcrums, airborne), joins it with `tore-bot --capture`,
-and stops the server it started. It needs the binaries built beside
-`tore-app` (`cargo build --locked -p tore-app -p tore-server -p tore-session`)
-and the imported data folder in `TORE_DATA_DIR`, as every scenario has.
+and stops the server it started. It builds the binaries beside
+`tore-app` first (a build must match to join) and needs the imported data
+folder in `TORE_DATA_DIR`, as every scenario has.
 """
 from __future__ import annotations
 
@@ -44,6 +44,15 @@ def free_port() -> int:
 
 def capture(work: Path) -> int:
     data = os.environ["TORE_DATA_DIR"]
+    # A build must match to join, so the server and the bot are built at the
+    # commit the game under test was (a no-op when they already are).
+    built = subprocess.run(
+        ["cargo", "build", "--locked", "-p", "tore-app", "-p", "tore-server", "-p", "tore-session"],
+        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=900,
+    )
+    if built.returncode != 0:
+        print("cargo build failed:\n" + built.stdout[-2000:])
+        return 1
     for name in ("tore-server", "tore-bot"):
         if not (BIN / name).exists():
             print(f"{BIN / name} is missing: cargo build --locked -p tore-app -p tore-server -p tore-session")
