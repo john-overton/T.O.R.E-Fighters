@@ -271,8 +271,10 @@ const LENIENT_GAP: Duration = Duration::from_secs(1);
 /// Strict (a machine whose sleeps are accurate): `ticks` in the stall by
 /// the guest's newest snapshot at each end, and no gap over 150 ms. Lenient
 /// (any runner): rates over what the guest saw, which its own late wakes do
-/// not bias, a 120 Hz clock within a tenth and 24 of the 30 snapshots a
-/// second, and no gap over [`LENIENT_GAP`].
+/// not bias, a 120 Hz clock within a fifth and 24 of the 30 snapshots a
+/// second, and no gap over [`LENIENT_GAP`]. (A tenth failed once on
+/// macos-15-intel: 107.6 ticks a second over an 8-second stall. A host held
+/// up by the stalled game would show next to none.)
 fn assert_host_flew_on(
     guest: &Remote,
     stall: Instant,
@@ -299,7 +301,7 @@ fn assert_host_flew_on(
         "snapshots seen over {span:?} of the {stall_seconds} s stall"
     );
     let rate = span_ticks as f64 / seconds;
-    assert!((108. ..=132.).contains(&rate), "{rate} ticks a second");
+    assert!((96. ..=144.).contains(&rate), "{rate} ticks a second");
     let rate = snapshots as f64 / seconds;
     assert!(rate >= 24., "{rate} snapshots a second");
     assert!(gap <= LENIENT_GAP, "a gap of {gap:?}");

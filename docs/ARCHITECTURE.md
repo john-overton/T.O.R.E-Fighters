@@ -4860,8 +4860,9 @@ the test's game and bot threads still sleep as the runner lets them (up to
 | Test | Normal suite (every runner) | Strict form (ignored; `network.yml`'s `strict-real-time` job on Linux) |
 | --- | --- | --- |
 | A hosted mission flies with no correction | No correction after seating without a late input in the second before it; at most one mismatch without one (the 32-bit Windows runner had one in 975, which no correction followed) | `a_hosted_mission_flies_with_no_correction_at_all`: no correction after seating and no mismatch |
-| A two-second window stall stalls nobody | The guest's view of the host during the stall: 108 to 132 ticks a second and 24 snapshots a second over what it saw, no gap over 1 s; after the stall at most one correction without a late input, none once recovered | `..._strictly`: 216 to 264 ticks in the stall, no gap over 150 ms, at most one correction after it, none once recovered |
+| A two-second window stall stalls nobody | The guest's view of the host during the stall: 96 to 144 ticks a second (108 to 132 until CI-fix) and 24 snapshots a second over what it saw, no gap over 1 s; after the stall at most one correction without a late input, none once recovered | `..._strictly`: 216 to 264 ticks in the stall, no gap over 150 ms, at most one correction after it, none once recovered |
 | An eight-second window stall drops nobody | The same view of the host; the rest (catch-up, settling, the crown, End mission) as before | `..._strictly`: 912 to 1008 ticks, no gap over 150 ms |
+| A joined game stalled for 15 seconds is kept and recovers (EF-K, CI-fix) | After it resumes, two seconds with no correction that a late input in the second before does not explain | `..._strictly`: two seconds with no correction at all |
 
 The rates are taken between the guest's own first and last readings in the
 stall, so a guest that wakes late measures them right; the ticks at the

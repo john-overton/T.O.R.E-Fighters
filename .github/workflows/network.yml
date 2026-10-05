@@ -65,5 +65,6 @@ jobs:
             net::hosting::tests::a_two_second_window_stall_stalls_nobody_strictly \
             net::hosting::tests::an_eight_second_window_stall_drops_nobody_and_the_king_still_reigns_strictly \
             net::lookup::tests::a_name_the_system_cannot_resolve_fails \
+            net::session::keepalive_tests::a_joined_game_stalled_for_fifteen_seconds_is_kept_and_recovers_strictly \
             2>&1 | tee strict.log
-          grep -q "test result: ok. 4 passed" strict.log
+          grep -q "test result: ok. 5 passed" strict.log
