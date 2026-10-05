@@ -172,7 +172,7 @@ prints every in-flight menu item with what it does), a unit test, or the code pa
 | Replay Last Mission, Continue Old Campaign greyed; Play Single Mission and the campaign entries say "coming soon" | 11 | NOT IMPLEMENTED | `menus-snap-notice`, features row |
 | ? menu with Exit to Desktop | 12 | OK | `menus-snap-help` |
 | Pref menu: Graphics, Sound (Screen Resolution absent, Controls and Re-import media added) | 12, 326 | DIFFERS | `menus-snap-pref`; the game has one window size setting via `--window-size` and Alt-Enter |
-| Multi menu (retail: serial, modem, IPX, TCP) | 12 | DIFFERS | `menus-snap-multi`: Direct Connection and Internet Lobby (a stub) for the new multiplayer, not the retail transports; the Direct Connection screen's five states are `menus-snap-direct*` |
+| Multi menu (retail: serial, modem, IPX, TCP) | 12 | DIFFERS | `menus-snap-multi`: Direct Connection and Internet Lobby for the new multiplayer, not the retail transports; the Direct Connection screen's five states are `menus-snap-direct*` and the Internet Lobby's are `menus-snap-internet*` (`internet`, `internet-games`, `internet-joining`, `internet-options`, `internet-unreachable`) |
 | OK is Enter and Cancel is Escape on every screen | 12 | DIFFERS | Load Ordnance and debrief: Enter is OK, Escape backs out. Creator: Escape is Cancel, but Enter activates the focused field and OK is reached by Tab ([keyboard traversal spec](../spec/quick-mission-menu.md)) |
 | Text buttons: left click cycles forward, right backward, Shift-click opens the list | 13 | OK | `quick_mission` right-click tests, creator fuzz |
 | Aircraft menu: Fly All, Era | 14, 18, 326 | NOT IMPLEMENTED | the menu says "Aircraft era filters are not available yet" |

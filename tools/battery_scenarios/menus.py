@@ -17,6 +17,7 @@ NORMAL_STATES = [
     "controls-mouse", "controls-head", "controls-search", "controls-search-keys", "graphics", "sound",
     "replays", "replays-settings", "replays-delete", "locate", "locate-importing", "locate-done",
     "direct", "direct-games", "direct-trying", "direct-refused", "direct-options",
+    "internet", "internet-games", "internet-joining", "internet-options", "internet-unreachable",
     "lobby-king", "lobby-joiner", "lobby-unable", "lobby-flying", "lobby-server", "lobby-kick",
     "lobby-leave", "lobby-ready",
 ]

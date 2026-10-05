@@ -564,9 +564,12 @@ does, and the game's log says where the listing stands ("Listed on the
 Internet Lobby, seen at ADDRESS." or "The Internet Lobby does not answer, so
 the game is not listed. Players can still join by address."); leaving the
 game takes it off the list at once. A game hosted without `--list`, and
-every game hosted from Direct Connection, never talks to the master. *Agent
-decision:* `--list` sends no anonymous statistics and no install id until
-the Internet Lobby's one-time notice and its switch exist (slice I4).
+every game hosted from Direct Connection, never talks to the master. *Built
+(I4, 2026-10-05):* `--list` follows the Internet Lobby's statistics switch
+(on by default, in `network-v1.conf`): it sends the install id and the
+hosting game's Report at the end of the session, and the first time it says the
+one-time notice on the console and in the log (*agent decision*, a command line
+has no screen). Turn them off in the Internet Lobby's Options.
 
 *Since F2-1* the King's Visibility setting lists a hosted game as well:
 `public` lists it on the Internet Lobby (a game hosted without `--list` then
@@ -596,6 +599,14 @@ machine with a host or a server up on the first: it is the way to check
 [discovery](#discovery-and-the-firewall) between machines. `--port` is the
 game port the hosts use. Any other session option (`--connect`, `--host`, ...)
 is refused with it.
+
+*Built (I4).* `tore-app --browse SECONDS [--master HOST[:PORT]]` does the same for
+the Internet Lobby: it asks the master (the one in the Internet Lobby's Options,
+else `master.jroverton.com:26901`) for that many seconds and prints one line per
+listed game on stdout (name, players, phase, password, full, build, whether it
+is a dedicated server, the relay mark, then its mission, King and players),
+`N games listed.` or `No games listed.`. A master that cannot be found or does
+not answer exits 1 with the reason on stderr. Only `--master` goes with it.
 
 ## Broadcasting on the Internet Lobby
 

@@ -578,7 +578,10 @@ the [master's wire](formats/master-protocol.md) and
   **New** hosts a game that is listed, **Refresh** asks again, **Options**
   holds the port, password and game name (shared with Direct Connection),
   the master's address, "Forward the game port on my router" and "Send
-  anonymous statistics".
+  anonymous statistics". *Built (slice I4, 2026-10-05):* the screen is in the
+  game; Join asks the master to introduce the player, which a master does
+  from stage J2 on, so until then Join says the Internet Lobby did not
+  introduce you ([the build's notes](ARCHITECTURE.md#the-internet-lobby-screen)).
 - **What is listed.** A game hosted from the Internet Lobby is listed; one
   hosted from Direct Connection is not. Once the King's Visibility setting
   exists (stage F phase 2), *public* lists, *private* does not and

@@ -650,8 +650,9 @@ def wait_count(d: Drive, proc: Proc, pattern: str, count: int, seconds: float) -
 def drive_master_listing(d: Drive) -> None:
     """A `tore-server` with `broadcast on` lists itself on a `tore-master` on this machine (slice I3), judged from
     the master's own output: the listing appears from the server's game port, the console's `broadcast off` and
-    `broadcast on` take it off and back, and `quit` takes it off before the server stops. Slice I4 extends this
-    with `tore-app --browse 5`, which lists the game the way a player's Internet Lobby does."""
+    `broadcast on` take it off and back, and `quit` takes it off before the server stops. Slice I4 extends this with
+    `tore-app --browse`, which lists the game the way a player's Internet Lobby does (and says when the list is
+    empty or the master silent), always against this scenario's own loopback master."""
     master, mport = start_master(d)
     port = d.port()
     server = start_server(d, port, broadcast="on", master=f"{LOCALHOST}:{mport}")
@@ -667,9 +668,21 @@ def drive_master_listing(d: Drive) -> None:
     server.send("status")
     if not server.wait_for(rf"broadcast: listed, seen at 127\.0\.0\.1:{port}$", 5):
         d.problem("the status line does not show the listing")
+    # The Internet Lobby's own listing (slice I4): `tore-app --browse` lists the server with its details.
+    browsed = d.run("browse", [d.app, "--browse", "4", "--master", f"{LOCALHOST}:{mport}"], timeout=60)
+    browsed.expect(
+        r'^"T\.O\.R\.E server"  0/6 players, lobby, open, not full, this build, dedicated server; '
+        r'mission "UKR, [^"]*"; king -; players -$',
+        "the server's line in the Internet Lobby",
+    )
+    browsed.expect(r"^1 game listed\.$", "the count")
     server.send("broadcast off")
     if not wait_count(d, master, unlisted, 1, 5):
         d.problem("`broadcast off` did not take the server off the master's list")
+    empty = d.run("browse-empty", [d.app, "--browse", "2", "--master", f"{LOCALHOST}:{mport}"], timeout=60)
+    empty.expect(r"^No games listed\.$", "the empty list once the server is off it")
+    silent = d.run("browse-silent", [d.app, "--browse", "4", "--master", f"{LOCALHOST}:{d.port()}"], timeout=60, expect_exit=1)
+    silent.expect(r"does not answer", "the silent master's verdict")
     server.send("broadcast on")
     if not wait_count(d, master, listed, 2, 10):
         d.problem("`broadcast on` did not list the server again")
@@ -722,6 +735,99 @@ def drive_master_introduce(d: Drive) -> None:
     master.expect(r"^status listings=\d+ sources=\d+ browse/s=[\d.]+ introductions/min=[1-9]\d* ", "an introduction counted")
     master.expect(r"^Stopped$", "the stop line")
     log_must(d, server_log(d), r"joined as Bot", r"Bot( \(plane \d+\))? left: left", forbid=NET_BAD)
+
+
+# The Internet Lobby driven by a script (a pointer needs a moment over a target before a click lands): the Multi menu's second row, the list, a game selected, Join (which the
+# master answers only once slice J2 builds introductions), then New. Menu coordinates are the 640 by 480 layer's.
+INTERNET_SCRIPT = """wait 10
+movemenu 150 48
+wait 0.6
+click
+wait 0.5
+movemenu 150 90
+wait 0.6
+click
+wait 5
+snapshot SHOTS/internet-list.ppm
+movemenu 100 194
+wait 0.6
+click
+wait 2
+snapshot SHOTS/internet-selected.ppm
+movemenu 200 432
+wait 0.6
+click
+wait 5
+snapshot SHOTS/internet-join.ppm
+movemenu 80 432
+wait 0.6
+click
+wait 30
+snapshot SHOTS/internet-lobby.ppm
+key Escape
+wait 2
+key Escape
+wait 1
+exit
+"""
+
+
+def drive_internet(d: Drive) -> None:
+    """The game's Internet Lobby screen against a master on this machine (slice I4): it lists a `tore-server` that
+    is listed there, Join asks the master for an introduction, and New lists a game of its own that a second
+    `tore-app --browse` sees. (Joining and flying 30 seconds waits for slice J2: the master drops introductions.)"""
+    master, mport = start_master(d)
+    port = d.port()
+    server = start_server(d, port, broadcast="on", master=f"{LOCALHOST}:{mport}")
+    if not wait_count(d, master, rf'^listed id=[0-9a-f]{{16}} from=127\.0\.0\.1:{port} name="T\.O\.R\.E server"', 1, 10):
+        d.problem("the master never listed the server")
+    # The player's own settings: a callsign, this master, the notice not yet shown.
+    (d.data / "network-v1.conf").write_text(
+        f"tore-network 1\ncallsign Viper\nport {d.port()}\nmaster {LOCALHOST}:{mport}\n"
+    )
+    shots = d.work / "shots"
+    shots.mkdir(exist_ok=True)
+    hosted = rf'^listed id=[0-9a-f]{{16}} from=127\.0\.0\.1:\d+ name="Viper\'s game"'
+    opened = r"Internet Lobby: Asking the Internet Lobby at"
+    # A scripted click on a window that is slow to come up (the machine is shared with a person) can land before
+    # the menu answers; one more try, starting later, tells that from a real failure.
+    for attempt, start_wait in enumerate((10, 25), start=1):
+        for old in (d.data / "logs").glob("tore-*.log"):
+            old.unlink()
+        script = d.work / f"internet{attempt}.txt"
+        script.write_text(INTERNET_SCRIPT.replace("SHOTS", str(shots)).replace("wait 10\n", f"wait {start_wait}\n", 1))
+        game = d.start(f"game{attempt}", [d.app, *GAME_FLAGS, "--input-script", script], window=True)
+        if wait_count(d, master, hosted, 1, 90 + start_wait):
+            seen = d.run("browse", [d.app, "--browse", "4", "--master", f"{LOCALHOST}:{mport}"], timeout=60)
+            seen.expect(r'^"Viper\'s game"  \d/\d players, lobby, open, not full, this build', "the hosted game in a second browse")
+            seen.expect(r'^"T\.O\.R\.E server"  0/6 players, ', "the server in the same browse")
+        game.finish(150, 0)
+        log = "\n".join(p.read_text(errors="replace") for p in sorted((d.data / "logs").glob("tore-*.log")))
+        if opened in log:
+            break
+        d.log(f"attempt {attempt}: the scripted clicks did not open the screen")
+    # The screen's own lines are in the game's log (its text is drawn over the picture, not in the snapshots).
+    for pattern, what in (
+        (r"Internet Lobby: This game sends anonymous statistics to the Internet Lobby\. Turn them off in Options\.", "the one-time notice"),
+        (rf"Internet Lobby: Asking the Internet Lobby at {re.escape(LOCALHOST)}:{mport} for games\.\.\.", "the browse starting"),
+        (r"Internet Lobby: 1 game is listed on the Internet Lobby\.", "the count"),
+        (r"Internet Lobby: Asking the Internet Lobby to introduce you to 'T\.O\.R\.E server'\.\.\.", "Join asking"),
+        # Until slice J2 the master drops the request; afterwards the join goes on.
+        (r"Internet Lobby: (The Internet Lobby did not introduce you to that game|Attempting connection to 'T\.O\.R\.E server' at )", "Join's answer"),
+        (r"Internet Lobby: Hosting Viper's game on UDP port \d+\.\.\. Listing it on the Internet Lobby\.", "New listing the game"),
+        (r"Host: Listed on the Internet Lobby, seen at 127\.0\.0\.1:\d+\.", "the host's listing"),
+    ):
+        if not re.search(pattern, log):
+            d.problem(f"the game's log lacks {what}: /{pattern}/")
+    if re.search(r"master\.jroverton\.com|master\.invalid", log):
+        d.problem("the game talked about a master other than the scenario's own")
+    for name in ("internet-list", "internet-selected", "internet-join", "internet-lobby"):
+        if not (shots / f"{name}.ppm").exists():
+            d.problem(f"the script's {name}.ppm was not written")
+    game.forbid(NET_BAD, "a network problem")
+    stop_server(d, server)
+    master.send("quit")
+    master.finish(20, 0)
 
 
 def scenarios() -> list[Scenario]:
@@ -779,9 +885,14 @@ def scenarios() -> list[Scenario]:
             notes="tore-master and its flood tool for 10 s: the limits hold and a browse during the flood is answered",
         ),
         Scenario(
+            name="net-window-internet", lane="net", args=[], driver=drive_internet, uses=("server",), window=True, timeout=300,
+            notes="the Internet Lobby screen against a master and a listed server on this machine: the list, a game "
+            "selected, Join, New; a second `--browse` sees the game New listed",
+        ),
+        Scenario(
             name="net-master-listing", lane="net", args=[], driver=drive_master_listing, uses=("server",), timeout=120,
-            notes="a tore-server with `broadcast on` lists itself on a tore-master on this machine; `broadcast off`, "
-            "`broadcast on` and `quit` take it off and back",
+            notes="a tore-server with `broadcast on` lists itself on a tore-master on this machine; `tore-app --browse` "
+            "lists it; `broadcast off`, `broadcast on` and `quit` take it off and back",
         ),
         Scenario(
             name="net-master-introduce", lane="net", args=[], driver=drive_master_introduce, uses=("server", "bot"),

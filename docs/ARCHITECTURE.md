@@ -6261,14 +6261,14 @@ lettering is, or the player's own `InternetLobby.png` in the data folder).
 | Element | What it does |
 | --- | --- |
 | Callsign | Shared with Direct Connection |
-| Games | The listings, paged with PREV/NEXT and "PAGE n of m": the lock, the name, players over capacity, *Lobby*, *Flying* or *Closed*, and a small relay mark when the master expects the relay; another build dimmed with its version, not joinable |
+| Games | The listings, paged with PREV/NEXT and "PAGE n of m": the lock, the name, players over capacity, *Lobby*, *Flying* or *Closed*, and a small relay mark ("R") when the master expects the relay; another build dimmed with its version, not joinable |
 | Players | The selected game's players, with the King's crown, from its details |
 | Mission line | The selected game's mission summary |
 | Show full games, Show other versions | Check boxes; the first is shared with Direct Connection |
 | Messages | What the screen is doing: asking, how many games, the join's steps, refusals |
 | New | Host a listed game from the Quick Mission creator's mission, as Direct Connection's New does, and open the lobby |
 | Join | Join the selected game ([joining through the master](#joining-through-the-master)) |
-| Refresh | Ask for the list again now |
+| Refresh | Ask for the list again now (F5 does too) |
 | Options | Port, password, game name (shared with Direct Connection), the master's address, "Forward the game port on my router" and "Send anonymous statistics" |
 | Cancel | Back to Choose Activity |
 
@@ -6279,7 +6279,8 @@ lettering is, or the player's own `InternetLobby.png` in the data folder).
   events for added, changed and dropped games. It never blocks a frame.
 - The first time the screen opens it writes one line about telemetry in
   Messages: "This game sends anonymous statistics to the Internet Lobby. Turn
-  them off in Options." (if John keeps telemetry on by default).
+  them off in Options." (John: on by default, with a switch and a one-time
+  notice).
 - When the master cannot be reached the list stays empty and Messages says
   so; Direct Connection still works.
 - `tore-app --browse SECONDS [--master ADDRESS]` lists the games headlessly,
@@ -6287,9 +6288,71 @@ lettering is, or the player's own `InternetLobby.png` in the data folder).
 - Snapshot states for the menus lane: `internet`, `internet-games`,
   `internet-joining`, `internet-options`, `internet-unreachable`.
 
-In stage I, Join goes straight to the address the master saw for the host
-(a game whose host has an open or mapped port works); stage J's slice J5
-replaces it with the introduction.
+In stage I, Join asks the master to introduce the player and joins the
+address it gives for the host (the one the master saw: a game whose host has an
+open or mapped port works); stage J's slice J5 replaces it with the race.
+
+**Built (I4, 2026-10-05):** `internet_screen/` (`mod.rs` the screen and its
+rules, `options.rs` the panel, `app.rs` the game's side, `preview.rs` the
+headless states), `net/browse.rs` (the browse loop, the introduction request
+and `--browse`), `net/telemetry.rs` (the install id, the notice, a player's
+Report), the Internet Lobby's keys in `net/settings.rs`
+(`network-v1.conf`: `master`, `show-other`, `port-forward`, `telemetry`,
+`telemetry-notice`), and the title lettering in `widgets/header.rs`. Agent
+decisions:
+
+- **Join needs the master's Introduction.** A Page and a game's Details carry
+  no address, so "straight to the address the master saw" cannot be read from
+  the list. Join sends the master an Introduce (kind 16, the Challenge
+  exchange, mapping type unknown, no candidates) and joins the first host
+  candidate in the Introduction, the Seen one when there is one. The master
+  drops Introduce until slice J2, so against today's master Join ends after
+  three tries with "The Internet Lobby did not introduce you to that game";
+  it is tested against a scripted master that answers, and J2 makes it work
+  end to end. J5 replaces the one-address join with the race.
+- **The list**: the master's order with the games that cannot be joined
+  (another version, full, closing) after those that can, each group in the
+  master's order; the check boxes also filter on the screen so a game
+  appears or goes at once, and ask the master again with the new filters.
+- **Refresh and F5**, a **Refresh** button between Join and Options (five
+  buttons in a row at x 45, 161, 277, 393 and 509).
+- **Messages**: a count is said when it changes (not each game found), a
+  silent master or a name that does not resolve once until it answers
+  again.
+- **Statistics.** The install id is `install-id` in the data folder, drawn
+  the first time it is wanted while statistics are on and deleted when they
+  are turned off. A game listed from here (New) and one listed from the
+  command line (`--host FILE --list`) carry it, so a listed game's hosting
+  thread sends its Report; a game started from the command line says the
+  notice on the console and the log the first time instead of a screen. A
+  player who joins through the screen sends one Report when the session ends
+  if it reached its lobby, from a thread of its own, once, with the path
+  told from the host's address (local network or by address) until stage J
+  reports the path really taken, and the time from pressing Join to the
+  master's answer. Turning statistics off in Options deletes the id; turning
+  them on again draws a new one.
+- **Options** keeps the master's address (empty is the built-in one,
+  `master.jroverton.com:26901`), the port-forward switch (kept for J4b, which
+  reads it; nothing maps a port yet) and the statistics switch in
+  `network-v1.conf`, which Direct Connection shares; the password is never
+  kept.
+- **Shared pieces**: the kit is Direct Connection's (the Internet Lobby
+  builds it when it is first, and Direct Connection and the lobby screen
+  find it in `direct_screen::app::Direct`), the lobby screen opens over
+  either, and `Action::Internet` and `Action::InternetClose` open and close
+  it.
+- **Outside the row's file list** (small hunks the build needed):
+  `direct_screen/app.rs` (`Direct::keep_kit`), `direct_screen/tests.rs` (the
+  Multi menu test's second row), `net/play.rs` (a message and the Connected
+  line reach this screen), `widgets/{kit,panel}.rs` (a title per screen),
+  `tools/battery_scenarios/{net,menus}.py`, `tools/battery_selection.py`,
+  and `tore-master` as a dev-dependency of `tore-app` for the tests.
+- Tests: the screen's rules on the synthetic kit, the browse loop against the
+  real master on 127.0.0.1 and a scripted one, `net-master-listing` (extended
+  with `tore-app --browse`) and `net-window-internet` (the screen driven in a
+  window against a listed server: the list, a game selected, Join, New, and a
+  second `--browse` that sees the game New listed). The windowed join and 30
+  seconds of flight wait for J2.
 
 ### Joining through the master
 
@@ -6641,7 +6704,7 @@ change in these stages.
 | J4 Port mapping library | Opus | | `tore-net/src/portmap/{mod,ssdp,http,xml,igd,natpmp,pcp,gateway}.rs`, one `pub mod portmap;` line in `tore-net/src/lib.rs` | [Port mapping](#port-mapping): the three protocols at once, the gateway, renewing, removing, the second-router check | Against fakes on loopback: SSDP and the device description (both IGD versions, chunked bodies), `AddPortMapping`, the conflict code and the next port, a device that takes only a lease of 0, `DeletePortMapping`; NAT-PMP and PCP answers, PCP's version refusal falling back to NAT-PMP, nonces checked; a private outside address reported as a second router; every call ends within its time with a silent fake; the HTTP, XML and packet parsers fuzzed. **Built (J4, 2026-10-05):** 52 tests in `portmap`, about 6 seconds: every acceptance item, plus a `WANPPPConnection`, a device that needs equal ports after a conflict, refusals by each protocol, both gateways at once leaving one mapping, a failed renewal mapping again, a search answer naming another host not followed, and PCP for IPv6 on `::1`; the silent fakes end at 5.0 s for `map`, inside the budget for `renew` and `remove`. The fakes are public (`portmap::fake`) for J4b. The gateway is the system's default route first ([corrected](#port-mapping)) |
 | I2 Master server | Opus | I1 | The new crate `crates/tore-master/` (every file), `tore-net/src/master/browse.rs`, the workspace `Cargo.toml` member and `Cargo.lock`, a `crates/tore-master/*` rule in `tools/battery_selection.py`, `docs/MASTER-SERVER.md` | [The master](#the-master): proving addresses, listings, heartbeats, keeps, expiry, Unknown listing, unregister, browse pages and details, probes on both ports, reports into daily counts, limits, the status line and daily table, the configuration and `--check-config`, the `flood` tool; the browse client. `introduce.rs` and `relay.rs` exist with their dispatch and drop their packets, counted, until J2 and J3 | On the simulator with a scripted host and browser: no listing without a cookie, and a forged source gets nothing but a 23-byte Challenge; a listing appears in the next Browse; a missing heartbeat drops it at 90 seconds (virtual clock), an Unregister at once; pages list every match once, filtered by build and fullness, in order; under a seeded flood from 1,000 sources the bytes answered to every unproven source are at most the bytes it sent, every limit holds, and a proper browser is still answered; IPv6 sources count by /64. Real sockets on 127.0.0.1: register and browse. Battery: `net-master-flood` (the master and its flood tool for 10 s; the status line shows the limits held and a browse during the flood answered). **Built (I2, 2026-10-05):** the crate as [the master](#the-master) describes, with the decisions listed there; 15 tests on the simulator in `master_tests.rs` (among them the forged Register, the exact 90-second expiry, pages under four filter sets, IPv6 by /64, probes behind an open and a symmetric router, and 1,000 flooding sources with the answer rate set to 1,000 so the total cap binds too), unit tests in each module, a real-socket test in `tests/loopback.rs`, the `Browser` client with its own tests, and `net-master-flood` in the net lane. The master logs `listed`, `moved` and `unlisted` lines ([formats](MASTER-SERVER.md#logs-and-statistics)) |
 | I3 Listing from hosts | Opus | I1; its end-to-end commit after I2 | `tore-net/src/master/{rendezvous,routed,local}.rs`, `meet.rs` and `relay.rs` as dispatch stubs, `crates/tore-server/src/{config,wiring,run,console,options}.rs` and its tests, `docs/DEDICATED-SERVER.md`, `crates/tore-app/src/net/{hosting,hosting_tests,options}.rs` | The host's `Rendezvous` and `Routed` ([one socket](#one-socket-two-protocols), [listing](#listing-a-game)): lookup, mapping test, register, heartbeats with the summary, change heartbeats, keeps, register again, back-off, unregister; the install id in Register; the host's or server's Report at the session's end. `tore-server`: `broadcast` (off by default; John named it, the design said `list`), `master`, `telemetry`, the console's `broadcast on` and `broadcast off`, the start and status lines. The game: `HostSetup.listing`, `Command::SetListed`, `Report::Listing`, `--host FILE --list [--master ADDRESS]` | On the simulator against `tore_master::Master` (a dev-dependency): a host is browsable within its first exchange and its summary's changes within 5 seconds; a vanished host is gone within 90 seconds; a master restart is healed within one heartbeat; a silent master is asked with back-off, never more than once a second; game datagrams pass `Routed` unchanged and no master datagram reaches the transport; a claim of `100::/64` from the socket is dropped. A hosting thread with `listing` registers to an in-test master and unregisters on stop. Battery: `net-master-listing` (a master, a `tore-server` with `broadcast on`, `tore-app --browse 5` lists it; quitting the server removes it). **Built (I3, 2026-10-05):** `tore_net::master::{rendezvous,routed,local}` with `HostListing` tying the state machine to the master's lookup on a thread (again every 10 minutes and after a silence) and the host's own addresses; `tore-server`'s `broadcast`, `master`, `telemetry`, the console's `broadcast on` and `broadcast off`, a `Broadcast:` start line and the listing at the end of the status line; the game's `HostThread::start_listed` with a `Listing` beside the `HostSetup` (so the tests' hosts stay unchanged), `Command::SetListed`, `Report::Listing(ListingState)` and `--host FILE --list [--master ADDRESS]`. Agent decisions: the probes and the Register go out together (the listing does not wait for the mapping test); an unanswered request is repeated every 3 seconds until the master is silent, then after 2 to 60 seconds, the master's next address each time; no two Heartbeats or Keeps closer than 2 seconds, and no Keep when a Heartbeat is due within that; a change Heartbeat goes when the summary changes, at most one every 5 seconds, the summary looked at once a second; three Unregisters at once; the master's second port is the main port plus one; a stage I host counts its players' paths as local network or by address from their addresses; a server keeps its install id in `server-install-id` in its data folder, drawn at start while telemetry is on; `--host --list` sends no install id and no Report until I4's notice and switch. Tested on the simulator against a scripted master in `tore-net`, and end to end against the real `tore_master::Master` (a dev-dependency of `tore-server`, `listing_test.rs`: on the simulator with the Internet Lobby's own `Browser`, and a real server on 127.0.0.1); the hosting thread's test uses a small loopback master. `net-master-listing` judges the listing from `tore-master`'s own output until I4 adds `tore-app --browse 5` to it (the lead's call) |
-| I4 Internet Lobby screen | Sonnet | I2; New after I3 | `crates/tore-app/src/internet_screen/*`, `net/{browse,telemetry,settings}.rs`, `menu.rs`, `main.rs` (routing, `--browse`, snapshot states), `widgets/header.rs`, `assets/internet-lobby-title.png`, the `internet_screen/*` rule in `tools/battery_selection.py`, the menus lane's `menus-snap-internet*` scenarios, `README.md`'s telemetry section | [The screen](#the-internet-lobby-screen); Join straight to the seen address; New hosting a listed game; Options (the master's address, port forwarding and statistics switches, kept in `network-v1.conf`); the install id; the player's Report | Screen tests (paging, filters, sorting, selection, keys, the shared callsign and port); headless renders of the five snapshot states; `--browse` against a scripted master; a windowed run through `tools/agent-run.sh`: open the Internet Lobby with a loopback master and a listed `tore-server`, join, fly 30 seconds, leave, and New lists a hosted game that a second `--browse` sees |
+| I4 Internet Lobby screen | Sonnet | I2; New after I3 | `crates/tore-app/src/internet_screen/*`, `net/{browse,telemetry,settings}.rs`, `menu.rs`, `main.rs` (routing, `--browse`, snapshot states), `widgets/header.rs`, `assets/internet-lobby-title.png`, the `internet_screen/*` rule in `tools/battery_selection.py`, the menus lane's `menus-snap-internet*` scenarios, `README.md`'s telemetry section | [The screen](#the-internet-lobby-screen); Join straight to the seen address; New hosting a listed game; Options (the master's address, port forwarding and statistics switches, kept in `network-v1.conf`); the install id; the player's Report | Screen tests (paging, filters, sorting, selection, keys, the shared callsign and port); headless renders of the five snapshot states; `--browse` against a scripted master; a windowed run through `tools/agent-run.sh`: open the Internet Lobby with a loopback master and a listed `tore-server`, join, fly 30 seconds, leave, and New lists a hosted game that a second `--browse` sees **Built (I4, 2026-10-05):** as [the screen](#the-internet-lobby-screen) describes, with its decisions; Join works through the master's introduction; `net-window-internet` runs the windowed part |
 | J2 Introductions and punching | Opus | I2, I3, J1 | `crates/tore-master/src/introduce.rs`, `tore-net/src/master/{meet,join}.rs`, `tore-net/src/{client,server,packet}.rs`, `tore-session/src/client/` (joining through candidates), `tore-session/src/{bot.rs,bin/tore-bot.rs}`, the protocol version and `wire-golden.txt` | [Joining through the master](#joining-through-the-master) up to the race, and [hole punching](#hole-punching): Introduce with its cookie, Introduction and Meet with retries and hints on the master; Meet, punches and the ack on the host; the player's rendezvous; `Client::connect_any` with candidates learned from punches; the path byte in the Challenge answer and `ConnectDetails::path`; `tore-bot --master --listing --path`. The next protocol version | On the simulator, every row of the [punching table](#hole-punching) gives its expected path, at a 100 ms round trip within 1.5 seconds where it punches; a forged Introduce gets only a Challenge; a host sends at most five punches per address per Meet and acts on at most 10 Meets a second; a Punch with another id is only counted; the wire golden file. Battery: `net-master-introduce` (a master, a listed `tore-server`, `tore-bot --listing` joins through an introduction and flies 30 seconds). **Built (J2, 2026-10-05):** protocol 9 (the Punch, kind 11, and the path byte after the platform byte; `ConnectDetails::path`, the relay for a relayed address); `Client::connect_any` with `Target`s and up to four addresses learned from punches; the master's introductions ([as built](formats/master-protocol.md#introductions-as-built)); a host's `meet.rs`, which its rendezvous drives, sending the punches and the Meet ack itself (a hook in `rendezvous.rs`, outside the row's files, the lead's stub for it); a player's `join.rs` (`Joiner`, its own socket router); the session client's `ClientConfig::race` and the capture's Race record; `tore-bot --master --listing --path auto\|direct`, `--path relay` refused until J3. Tests: the punching table in `crates/tore-master/tests/punch.rs` (12 tests, every row, 320 to 550 ms where it punches), `introduce_tests.rs` in `tore-master` (the forged Introduce, results, retries, the hint, limits), `meet.rs`'s and `join_tests.rs`'s unit tests, the transport client's race and the server's path, a raced session join whose capture replays, and `net-master-introduce` in the net lane. A seen address that is the host's own Mapped or Global IPv6 candidate reads as that path (agent decision). The master's `I2` stub test and flood allowance now expect the Introduce's 23-byte Challenge |
 | J3 Relay | Opus | J2 | `crates/tore-master/src/relay.rs`, `tore-net/src/master/relay.rs`, `tore-net/src/master/routed.rs` (relayed addresses), `tore-net/src/socket.rs` (`try_clone`), the bot's `--path relay` | [The relay](#the-relay): channels, keys, the host's ack, rates, idle, the allowance and its file, closing; relayed addresses; the framing wrapper for the keepalive thread | On the simulator: the two relay rows of the punching table connect through the relay; a host with two relayed bots and one direct flies 60 seconds with the stage D matrix's limits for the direct and relayed bots alike (the relay adds only its delay); a frame from a third address or with a wrong key is dropped; a channel flooded at 200 KB/s passes 64 KB/s; idle channels close at 30 seconds; a spent allowance refuses new channels with its text and survives a master restart; a relayed bot stalled 15 seconds stays connected through its framed keepalives. Battery: `net-master-relay` (`tore-bot --path relay` against a listed `tore-server` through a loopback master, 30 seconds, no drop, the master's status counts the bytes) |
 | J4b Port mapping in hosts | Sonnet | J4, I3, I4 | `crates/tore-app/src/net/{hosting,options}.rs`, `direct_screen/options.rs`, `internet_screen/options.rs`, `crates/tore-server/src/{config,wiring}.rs`, `docs/DEDICATED-SERVER.md` | A hosting game's mapper thread, its messages and the Mapped candidate; the switch in both Options panels; `tore-server`'s `port-mapping`; `tore-app --map-port` | Against the loopback fakes: hosting maps the port, shows the address, gives the rendezvous the Mapped candidate and removes the mapping when hosting stops; the switch off maps nothing; a second router is reported. No battery scenario (a real one would change John's router); the manual test is in IJ7 |

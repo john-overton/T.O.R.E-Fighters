@@ -197,6 +197,45 @@ original's Replay Last Mission (flying it again). Multiplayer is
 [design](docs/MULTIPLAYER.md) and [delivery plan](docs/multiplayer-plan.md) say
 what is built.
 
+## Online play and anonymous statistics
+
+T.O.R.E has two ways to find an online game. **Direct Connection** (Multi menu)
+searches your local network and joins an address you type, and talks to no
+server of ours. **Internet Lobby** (Multi menu) lists games on a public list
+server, the *master*, at `master.jroverton.com` (UDP ports 26901 and 26902).
+You can point it at another master in **Options**.
+
+Listing a game on the master tells it the game's name, its mission, the
+callsigns in it and the address the game answers at, which is what anyone
+browsing the list sees. Browsing and joining tell it your address, as any server
+sees the address you connect from.
+
+**The game sends anonymous statistics when you use the Internet Lobby**: when
+you list a game, join one through the list, or run a dedicated server that
+broadcasts. They are on by default. The first time you open the Internet Lobby a
+line in **Messages** says so, and **Options > Send anonymous statistics** turns
+them off. When a session ends the game sends one small report:
+
+- a random install id, drawn the first time and kept in `install-id` in the
+  data folder (turning the statistics off deletes it, and turning them on again
+  draws a new one that cannot be linked to the old);
+- whether you joined, hosted or served, the game version and your system
+  (Windows, macOS or Linux);
+- how long the session lasted and the most players in it;
+- how you connected (local network, typed address, forwarded port, IPv6,
+  punched through, or the relay) and how long that took;
+- what kind of router the game's port sits behind, and what the port forwarding
+  did;
+- how much traffic went through the relay, and (for a host) how many players
+  connected each way.
+
+It does not send callsigns, game names, chat, passwords, addresses or anything
+about your computer beyond the system name. The master adds the report to
+counts for the day and keeps no address with them (an address can appear in its
+operating journal when it enforces a limit). A dedicated server has its
+own `telemetry` setting ([operations](docs/MASTER-SERVER.md#what-the-master-keeps)).
+Direct Connection and single player send nothing.
+
 ## Build from source
 
 Rust 1.91.1 is pinned through rustup. From the repository root:
