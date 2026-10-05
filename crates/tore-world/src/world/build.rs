@@ -82,6 +82,13 @@ impl World {
             check_open(spec)?;
         } else if !spec.plane_loadouts.is_empty() {
             return Err("Plane loadouts are a multiplayer mission's: single player loads plane 0 with `loadout`.".into());
+        } else if !spec.friendly_fire || spec.cheat_loadouts {
+            // Stage F phase 2's settings: single player's spec never carries
+            // them, so its build is unchanged.
+            return Err(
+                "`friendly-fire off` and `loadouts any` are a multiplayer mission's settings."
+                    .into(),
+            );
         }
         let terrain = crate::terrain::Terrain::for_mission(
             resources,
@@ -192,6 +199,11 @@ impl World {
             Combat::with_loadout(&player, &load)?
         };
         combat.add_airport_targets(&terrain.airport_scene)?;
+        // The King's friendly fire (stage F phase 2): kept across every
+        // restart of combat.
+        if !spec.friendly_fire {
+            combat.state.friendly_fire = tore_sim::combat::live::FriendlyFire::Off;
+        }
         let mut default_load = |id| load_type(resources, id);
         let loader: &mut dyn FnMut(AircraftId) -> WorldResult<Arc<AircraftType>> =
             match hooks.load.as_deref_mut() {
@@ -210,7 +222,8 @@ impl World {
             combat.mission_aircraft(&wings, &layout, resources, loader)?;
         }
         // The players' loadouts of an open mission, checked against the
-        // aircraft each plane flies (the types are loaded by now).
+        // aircraft each plane flies (the types are loaded by now), under the
+        // mission's loadout rule.
         let mut loadouts = std::collections::BTreeMap::new();
         for (plane, load) in &spec.plane_loadouts {
             let aircraft = spec
@@ -225,7 +238,7 @@ impl World {
                 .find(|kind| kind.profile.id == aircraft)
                 .ok_or_else(|| format!("The mission holds no aircraft type for plane {plane}."))?;
             let checked = load
-                .check_for_plane(&kind.profile, resources, spec.guns_only)
+                .check_in(&kind.profile, resources, spec)
                 .map_err(|error| format!("Plane {plane}'s loadout: {error}"))?;
             loadouts.insert(*plane, checked);
         }

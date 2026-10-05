@@ -289,16 +289,45 @@ impl LoadoutSpec {
     /// - with the creator's Guns only, nothing loaded but the gun (the
     ///   single-player build's own refusal, in its words).
     ///
-    /// Cheat loading (any store on any station) is refused: the phase 2
-    /// lobby gives the King a setting for it (John, 2026-10-01), and until
-    /// then a multiplayer aircraft carries what it really carries.
+    /// Cheat loading (any store on any station) is refused: a multiplayer
+    /// aircraft carries what it really carries unless the King's `loadouts`
+    /// setting says `any` ([`LoadoutSpec::check_in`]).
     pub fn check_for_plane(
         &self,
         aircraft: &tore_formats::aircraft::Aircraft,
         resources: &dyn ResourceSource,
         guns_only: bool,
     ) -> crate::WorldResult<Loadout> {
-        if self.cheat {
+        self.check_under(aircraft, resources, guns_only, false)
+    }
+
+    /// [`LoadoutSpec::check_for_plane`] under the loadout rule of `mission`
+    /// (stage F phase 2, slice F2-1): its Guns only, and its
+    /// [`MissionSpec::cheat_loadouts`], under which a Cheat loading is
+    /// allowed and checked by the Load Ordnance page's own cheat rules (each
+    /// station's cheat capacity), as single player's page checks it.
+    pub fn check_in(
+        &self,
+        aircraft: &tore_formats::aircraft::Aircraft,
+        resources: &dyn ResourceSource,
+        mission: &MissionSpec,
+    ) -> crate::WorldResult<Loadout> {
+        self.check_under(
+            aircraft,
+            resources,
+            mission.guns_only,
+            mission.cheat_loadouts,
+        )
+    }
+
+    fn check_under(
+        &self,
+        aircraft: &tore_formats::aircraft::Aircraft,
+        resources: &dyn ResourceSource,
+        guns_only: bool,
+        cheat_allowed: bool,
+    ) -> crate::WorldResult<Loadout> {
+        if self.cheat && !cheat_allowed {
             return Err("Cheat loading is not allowed in a multiplayer game.".into());
         }
         let standard = Loadout::new(aircraft, |name| {
@@ -397,6 +426,16 @@ pub struct MissionSpec {
     /// with none carries its aircraft's standard load. Single player has
     /// none: it keeps [`Self::loadout`] for plane 0.
     pub plane_loadouts: BTreeMap<u32, LoadoutSpec>,
+    /// Friendly fire (stage F phase 2, the King's `friendly-fire`): when
+    /// `false` no round damages an aircraft of its shooter's side. Text form
+    /// `friendly-fire off`, on when absent; a networked mission's setting,
+    /// which single player's build refuses off.
+    pub friendly_fire: bool,
+    /// The King's `loadouts any` (stage F phase 2): a plane's loadout may be a
+    /// Cheat loading, any store on any station. Text form `loadouts any`,
+    /// `own` when absent; a networked mission's setting, which single
+    /// player's build refuses.
+    pub cheat_loadouts: bool,
 }
 
 impl MissionSpec {
@@ -436,6 +475,8 @@ impl MissionSpec {
             fixture_wings: false,
             loadout: None,
             plane_loadouts: BTreeMap::new(),
+            friendly_fire: true,
+            cheat_loadouts: false,
         }
     }
 
@@ -742,6 +783,14 @@ impl MissionSpec {
             }
         }
         line(format!("cheats {}", cheats_words(&self.cheats)));
+        // A networked mission's settings, written only when they differ
+        // from the default, so a single-player spec's text is unchanged.
+        if !self.friendly_fire {
+            line("friendly-fire off".to_owned());
+        }
+        if self.cheat_loadouts {
+            line("loadouts any".to_owned());
+        }
         line(format!(
             "flight-model human {}",
             if self.researched_flight {
@@ -1064,6 +1113,8 @@ struct Parser {
     fixture_wings: Option<bool>,
     load: LoadParts,
     plane_loads: BTreeMap<u32, LoadParts>,
+    friendly_fire: Option<bool>,
+    cheat_loadouts: Option<bool>,
 }
 
 /// One loadout's lines as the parser has read them.
@@ -1322,6 +1373,32 @@ impl Parser {
             }
             "loadout" => self.loadout(words),
             "plane-loadout" => self.plane_loadout(words),
+            "friendly-fire" => {
+                let [value] = arguments(words, 1, "friendly-fire on/off")? else {
+                    unreachable!("one argument")
+                };
+                let on = match *value {
+                    "on" => true,
+                    "off" => false,
+                    other => {
+                        return refuse(format!("`friendly-fire` is `on` or `off`, not `{other}`"));
+                    }
+                };
+                once(&mut self.friendly_fire, "`friendly-fire`", on)
+            }
+            "loadouts" => {
+                let [value] = arguments(words, 1, "loadouts own/any")? else {
+                    unreachable!("one argument")
+                };
+                let any = match *value {
+                    "own" => false,
+                    "any" => true,
+                    other => {
+                        return refuse(format!("`loadouts` is `own` or `any`, not `{other}`"));
+                    }
+                };
+                once(&mut self.cheat_loadouts, "`loadouts`", any)
+            }
             _ => refuse(format!("unknown setting `{key}`")),
         }
     }
@@ -1598,6 +1675,8 @@ impl Parser {
         spec.ai_flight_model = self.ai_model.unwrap_or(AiFlightModel::AllHybrid);
         spec.enemy_skill = self.enemy_skill.unwrap_or(None);
         spec.fixture_wings = self.fixture_wings.unwrap_or(false);
+        spec.friendly_fire = self.friendly_fire.unwrap_or(true);
+        spec.cheat_loadouts = self.cheat_loadouts.unwrap_or(false);
         if !self.load.is_empty() {
             spec.loadout = Some(self.load.finish("loadout")?);
         }
@@ -1757,6 +1836,8 @@ mod tests {
         spec.ai_flight_model = AiFlightModel::Standard;
         spec.enemy_skill = Some(EnemySkillOverride::AllNovice);
         spec.fixture_wings = true;
+        spec.friendly_fire = false;
+        spec.cheat_loadouts = true;
         spec.loadout = Some(LoadoutSpec {
             fuel_lbs: 4_500.5,
             cheat: true,
@@ -2154,5 +2235,101 @@ mod tests {
         assert_eq!(counts, [3, 0, 0, 2, 0, 0]);
         assert_eq!(spec.player_wing_size(), 4);
         assert_eq!(spec.player(), AircraftId::F18);
+    }
+
+    #[test]
+    fn friendly_fire_and_the_loadout_rule_are_lines_only_when_not_the_default() {
+        // Slice F2-1: a single-player spec's text does not change.
+        let spec = MissionSpec::new("UKR", AircraftId::F18);
+        let text = spec.to_text();
+        assert!(!text.contains("friendly-fire") && !text.contains("loadouts"));
+        assert!(spec.friendly_fire && !spec.cheat_loadouts);
+        let mut networked = spec.clone();
+        networked.friendly_fire = false;
+        networked.cheat_loadouts = true;
+        let text = networked.to_text();
+        assert!(text.contains("\nfriendly-fire off\n") && text.contains("\nloadouts any\n"));
+        assert_eq!(MissionSpec::from_text(&text).unwrap(), networked);
+        let on =
+            MissionSpec::from_text(&format!("{BASE}friendly-fire on\nloadouts own\n")).unwrap();
+        assert!(on.friendly_fire && !on.cheat_loadouts);
+        assert_eq!(
+            refused(&format!("{BASE}friendly-fire maybe\n")),
+            "line 4: `friendly-fire` is `on` or `off`, not `maybe`"
+        );
+        assert_eq!(
+            refused(&format!("{BASE}loadouts cheat\n")),
+            "line 4: `loadouts` is `own` or `any`, not `cheat`"
+        );
+        assert_eq!(
+            refused(&format!("{BASE}loadouts any\nloadouts own\n")),
+            "line 5: `loadouts` appears twice"
+        );
+    }
+
+    #[test]
+    fn a_cheat_loading_passes_only_under_the_any_rule_and_its_own_capacities() {
+        let map = crate::test_support::resources::resources();
+        let player = crate::aircraft_type::AircraftType::load(&map, AircraftId::F18).unwrap();
+        let standard = LoadoutSpec::of(
+            &Loadout::new(&player.profile, |name| {
+                map.get(name)
+                    .cloned()
+                    .ok_or_else(|| std::io::Error::other(format!("missing {name}")))
+            })
+            .unwrap(),
+        );
+        let mut cheat = standard.clone();
+        cheat.cheat = true;
+        let mut mission = MissionSpec::new("UKR", AircraftId::F18);
+        let check = |load: &LoadoutSpec, mission: &MissionSpec| {
+            load.check_in(&player.profile, &map, mission)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        };
+        assert_eq!(
+            check(&cheat, &mission),
+            Err("Cheat loading is not allowed in a multiplayer game.".into())
+        );
+        assert_eq!(check(&standard, &mission), Ok(()));
+        mission.cheat_loadouts = true;
+        assert_eq!(check(&cheat, &mission), Ok(()));
+        assert_eq!(check(&standard, &mission), Ok(()));
+        // The page's cheat capacities still bind.
+        let mut over = cheat.clone();
+        over.stations[1].quantity = u16::MAX;
+        assert!(check(&over, &mission).is_err());
+        // Guns only comes from the mission too.
+        mission.guns_only = true;
+        assert!(check(&cheat, &mission).unwrap_err().contains("Guns only"));
+        // The single-player call keeps its rule.
+        assert!(cheat.check_for_plane(&player.profile, &map, false).is_err());
+    }
+
+    #[test]
+    fn friendly_fire_off_builds_into_an_open_missions_combat_and_single_player_refuses_it() {
+        use crate::resources::ResourceReads;
+        use crate::world::{Seating, World};
+        use tore_sim::combat::live::FriendlyFire;
+        let map = crate::test_support::resources::resources();
+        let mut spec = MissionSpec::new(crate::test_support::resources::THEATER, AircraftId::F18);
+        spec.wings[3].count = 1;
+        let reads = ResourceReads::new(&map);
+        let world = World::new(&spec, &reads, Seating::Open).unwrap();
+        assert_eq!(world.combat.state.friendly_fire, FriendlyFire::On);
+        spec.friendly_fire = false;
+        let world = World::new(&spec, &reads, Seating::Open).unwrap();
+        assert_eq!(world.combat.state.friendly_fire, FriendlyFire::Off);
+        let refused = World::new(&spec, &reads, Seating::SinglePlayer)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            refused.contains("multiplayer mission's settings"),
+            "{refused}"
+        );
+        spec.friendly_fire = true;
+        spec.cheat_loadouts = true;
+        assert!(World::new(&spec, &reads, Seating::SinglePlayer).is_err());
     }
 }
