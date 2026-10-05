@@ -132,6 +132,26 @@ The checkpoint supplies everything else, including the structure:
   switches, identity, CRC-32) before any field is touched, so a damaged or
   foreign checkpoint fails before the world changes.
 
+**For stage K** (host migration), what a standby must know about a restore:
+
+- **The score switch comes from the bytes.** A restore sets `World::score`
+  exactly as the checkpoint had it, the scoring switch included (slice
+  H10). A standby that applies the session's scoring setting must call
+  `World::set_scoring` after the restore, not before: a call before it is
+  overwritten. The score facts waiting in the recorder are restored too, so
+  the host should take its checkpoint after it drains them, or a new host
+  would report them again.
+- **An AI actor's last controls are restored.** Slice H4 skipped
+  `AiActor::last_input` as scratch, so a restored actor reported neutral
+  controls until its next step; slice H9 found that a destroyed actor never
+  steps again and codes it, so a standby's replay recorder shows the same
+  controls as the old host's.
+- **Build the fresh world the same way.** The restore keeps the fresh
+  world's setup (terrain, aircraft types, phrases, layout), so the standby
+  builds it with `World::new` from the same `MissionSpec`, seating and import
+  as the host did. Every test restores into a world that has not stepped
+  yet; restoring over a world that has stepped is not tested.
+
 The **mission identity** is FNV-1a 64 over what the fresh world fixes and the
 checkpoint relies on: the terrain's theater and layout, the aircraft
 identities of every loaded type in load order, every plane's slot, and the
@@ -383,6 +403,18 @@ volumes for every aircraft, about 16 KB per aircraft raw) and the AI actors'
 memories and sensors (3 to 6 KB each). Coding each rewind frame against the
 one before is part of the combat slice. Delta coding against the previous
 checkpoint is built only if the measured size needs it.
+
+*Measured (H9, [baseline](../baselines/checkpoint-2026-10-05.md)):* on the
+15 against 15 mission, 60 KB at the start, 770 KB to 1.0 MB through the
+first-minute furball and about 500 KB after two and five minutes; written in
+1 to 8 ms and restored in 2 to 9 ms; a catch-up costs what its ticks cost
+(0.3 to 0.9 s for 10 seconds late in the mission, 1.3 to 6 s in the first 30
+seconds on a loaded machine). The furball's bytes are flares and chaff, the
+AI's sensor pictures (which grow with the square of the aircraft count, and
+which destroyed actors keep) and the rewind history. *Agent decision:* no
+delta coding against the previous checkpoint, since at the peak only 2 to 3
+percent of a checkpoint is unchanged 10 seconds later; the baseline lists the
+cheaper levers for stage K.
 
 *Built (H3a):* the rewind history codes only the newest 61 frames, the ones a
 gun round's rewind (at most 60 ticks) can read, and each volume's previous
