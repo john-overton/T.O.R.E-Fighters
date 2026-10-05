@@ -74,6 +74,17 @@ pub fn start_host(setup: HostSetup) -> Result<Box<dyn Host>, String> {
         AfterEnd::Quit => tore_session::AfterEnd::Quit,
     };
     config.restart_delay = Duration::from_secs(u64::from(c.restart_delay_seconds));
+    // Stage F phase 2 (slice F2-1): the King's settings the file gives, and
+    // a King when it says `king first-player`. The listing stays the
+    // operator's `broadcast`, so the King's `public` is refused.
+    config.settings = c.settings;
+    config.crown = if c.king {
+        tore_session::CrownRule::FirstPlayer
+    } else {
+        tore_session::CrownRule::None
+    };
+    config.mission_locked = c.king_mission_locked;
+    config.listable = false;
     config.entropy = Entropy::System;
     // The program has already refused the switch; the host refuses it too.
     config.retail_stall_speeds = false;

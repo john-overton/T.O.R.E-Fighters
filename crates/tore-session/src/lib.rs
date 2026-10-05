@@ -34,6 +34,6 @@ pub use client::{
     Client, ClientConfig, ClientError, ClientEvent, ClientFrame, ClientPhase, ClientStats, Controls,
 };
 pub use host::{
-    AfterEnd, BuildId, CommandError, Host, HostConfig, HostError, HostLog, HostStatus, LeaveReason,
-    OpenPlanes, Phase, PlayerStatus, StartMode,
+    AfterEnd, BuildId, CommandError, CrownRule, Host, HostConfig, HostError, HostLog, HostStatus,
+    LeaveReason, OpenPlanes, Phase, PlayerStatus, StartMode,
 };

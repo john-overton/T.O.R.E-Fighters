@@ -135,10 +135,10 @@ start, so a typo never passes silently.
 | `password` | none | A password players must give. It crosses the network as plain text |
 | `max-players` | `30` | 1 to 30 (John's default, 2026-09-28); a co-op mission seats at most its 15 friendly planes |
 | `mission` | `mission.txt` | The [mission file](#the-mission-file), relative to the configuration file |
-| `open-planes` | `friendly` | Which planes humans may take: `friendly`, `all` (load tests; proper PvP is stage F) or a list of plane numbers |
+| `open-planes` | `friendly` | Which planes humans may take: `friendly` (the mode's planes: the friendly ones in co-op, every plane with `mode pvp`), `all` or a list of plane numbers |
 | `snapshot-rate` | `30` | Snapshots a second to each player: 10, 12, 15, 20, 24, 30, 40 or 60 |
 | `start` | `first-player` | `first-player`: the lobby waits, the mission not flying, until the first player holding a slot is ready; `now`: it flies from the start ([the lobby](#the-lobby)) |
-| `time-limit` | `0` | Minutes after which the mission ends; 0 for none |
+| `time-limit` | `0` | Minutes after which the mission ends; 0 for none. The King's own time limit (below) replaces it until the server goes back to its file |
 | `empty-timeout` | `60` | Seconds the mission keeps flying after the last player leaves, before it ends |
 | `after-end` | `restart` | `restart` the same mission, or `quit` |
 | `restart-delay` | `30` | Seconds between a mission's end and the next start |
@@ -146,6 +146,35 @@ start, so a typo never passes silently.
 | `broadcast` | `off` | `on` lists the server on the Internet Lobby, so players find it there ([broadcasting](#broadcasting-on-the-internet-lobby)); `off` keeps it private: players join by address or find it on their local network (John, 2026-10-05, as OpenRA's servers do) |
 | `master` | the public master | The master server the server broadcasts to, `HOST` or `HOST:PORT` (port 26901 when none is given) |
 | `telemetry` | `on` | While broadcasting, send the master anonymous statistics at the end of each mission (John, 2026-10-05: on by default); `off` sends none |
+| `king` | `none` | `first-player`: the first player to join wears the crown, and when the King leaves the longest-connected player does; the King changes the mission and the settings below, locks slots, starts, ends, kicks and passes the crown ([the King](#the-kings-settings-and-a-king)). `none` (John, 2026-10-05: the default): nobody is King |
+| `king-mission` | `open` | `locked`: the King may not change the mission or the settings; start, kick, slot locks and the crown still work. Needs `king first-player` |
+
+The King's settings ([architecture](ARCHITECTURE.md#the-kings-settings)) take
+the same names in the file, so a server without a King can still run a PvP game
+or a delayed observer. Each value is one of the setting's words or a number:
+
+| Setting | Default (co-op, PvP) | Values |
+| --- | --- | --- |
+| `mode` | `co-op` | `co-op` (humans fly for the friendly side) or `pvp` (for either side); `pvp` changes the defaults of the settings below to PvP's |
+| `join-in-progress` | `on` | `off` refuses every seating once the mission has flown its first tick |
+| `visibility` | `local` | `local` answers the local network's search, `hidden` does not; a server lists itself on the Internet Lobby only with `broadcast on`, so `public` is refused |
+| `friendly-fire` | `on` | `off`: no round damages an aircraft of its shooter's side |
+| `lock-sides` | `off`, `on` | `on` keeps each player on the side of the first plane it flew in a mission |
+| `loadouts` | `own` | `any` allows the loadout page's Cheat loading |
+| `respawn` | `none`, `revive` | `none`, `ai-slot` or `revive` |
+| `lives` | `unlimited` | 0 to 10 or `unlimited` |
+| `revive-delay` | `0` | Minutes: 0 to 5 (`none` is 0) |
+| `revive-distance` | `10` | Nautical miles: 1, 5, 10, 20 or 40 |
+| `revive-weapons` | `missiles` | `missiles`, `no-missiles`, `guns` or `half-guns` |
+| `fight` | `sides` | PvP only: `sides` or `free-for-all` |
+| `tally` | `kills` | PvP only: `kills`, `damage` or `ratio` |
+| `kill-limit` | `none`, `5` | PvP only: `none`, 1, 2, 3, 5, 7 or 10 |
+| `kill-owner` | `side` | PvP only: `total`, `side` or `player` |
+| `observer-delay` | `0` | PvP only, seconds: 0 (`none`), 10, 30 or 60 |
+| `idle-ai` | `10` | Seconds a player's game is away before the AI flies its aircraft: `never`, 10, 30 or 60 |
+
+The player limit, the password and the time limit are the settings
+`max-players`, `password` and `time-limit` above.
 
 *Built (D7b).* A name that appears twice is refused too, and a setting with no
 value. A comment runs from the first `#`, so a password cannot contain one.
@@ -156,6 +185,16 @@ numbers 0 to 29 separated by spaces or commas (and each must exist in the
 mission, which start-up checks), `time-limit` is at most 10,080 minutes (a
 week), `empty-timeout` at most 86,400 seconds, and `restart-delay` and
 `status-interval` at most 3,600 seconds.
+
+*Built (F2-1), agent decisions:* a setting that applies only in PvP (`fight`,
+`tally`, `kill-limit`, `kill-owner`, `observer-delay`) is refused without
+`mode pvp` ("line 7: `kill-limit` applies only in PvP: add `mode pvp`, or leave
+it out"), since a co-op server would never use it; `revive-delay` is written
+in minutes, as `time-limit` is, and every other number in the unit the table
+gives; a value off its list is refused with the list ("`kill-limit` must be
+none, 1, 2, 3, 5, 7 or 10, not `4`"). The file's time limit may be any whole
+minute up to a week, while a King picks from the lobby's list (none, 1, 5,
+10, 15, 20 or 30 minutes).
 
 ## The mission file
 
@@ -208,6 +247,7 @@ twice.
 | `enemy-skill novice/average/none` | The game's `--enemy-skill`: every enemy wing at one level. `none` by default |
 | `fixture-wings yes/no` | The game's `--fixture-wings` development setting: straight-flight fixtures instead of AI wings. A server does not use it |
 | `loadout fuel POUNDS`, `loadout cheat yes/no`, `loadout station N WEAPON COUNT QUANTITY` | The loadout of plane 0 for a single-player start, as the creator's Load Ordnance page leaves it: the fuel, the loadout screen's Cheat, and one line for every station, in the aircraft's station order, naming its weapon's resource, its capacity and what it carries. **Used only by single player**: an open (networked) mission refuses it, since nobody flies from the start |
+| `friendly-fire on/off`, `loadouts own/any` | A networked mission's two settings that its build needs (*built, F2-1*): `friendly-fire off` spares every aircraft its own side's rounds, `loadouts any` allows Cheat loadings. The host writes them from its settings into the mission it sends, so a server's own `friendly-fire` and `loadouts` settings decide them and the mission file leaves them out; single player refuses both |
 | `plane-loadout PLANE fuel POUNDS`, `plane-loadout PLANE cheat no`, `plane-loadout PLANE station N WEAPON COUNT QUANTITY` | The loadout a player chose in the lobby for one plane of a networked mission, the same lines as `loadout` with the plane number first. *Built (EF4).* The host writes them into the mission it sends when a flight starts, so every player builds the same aircraft; a server's own file normally leaves them out, and a plane with none carries its aircraft's standard load. Each is checked as the [lobby's loadout rule](#the-lobby) says, and single player refuses them |
 
 Planes are numbered as in the game: plane 0 is the lead of friendly wing 1,
@@ -303,7 +343,7 @@ dedicated server has none. *The dedicated server's rules, agent decisions:*
   player whose import cannot play it is told why and stays connected in the
   lobby, marked unable, and cannot take a slot.
 - **Slots** are the planes `open-planes` opens (every friendly plane by
-  default), one player a slot, held from the lobby across missions until the
+  default, every plane with `mode pvp`), one player a slot, held from the lobby across missions until the
   player leaves it or the game. A player holding a slot may send a loadout
   for it, which the host checks by the single-player Load Ordnance page's
   rule (each store within its station's capacity, only weapons that fly,
@@ -321,10 +361,11 @@ dedicated server has none. *The dedicated server's rules, agent decisions:*
   back in the lobby with its slot and loadout and its ready mark cleared,
   and after the restart delay the fresh mission waits in the lobby (or flies,
   with `start now`); `after-end quit` disconnects everyone and exits.
-- **Nobody is King**: the King's requests (change the mission, start, end the
-  mission, kick) are refused with "Only the King may do that."; the console
-  still ends and restarts, kicks a seated player by seat, and kicks any
-  player by lobby id (`kick-player`).
+- **Nobody is King** by default: the King's requests (change the mission and
+  the settings, start, end the mission, kick, pass the crown, lock a slot)
+  are refused with "Only the King may do that."; the console still ends and
+  restarts, kicks a seated player by seat, and kicks any player by lobby id
+  (`kick-player`). With `king first-player` the server has a King (below).
 - **Loadouts** are chosen in the lobby; one sent while the mission flies is
   refused. A player whose own copy of a loadout's other weapon differs from
   the server's is told at the flight's start and kept in the lobby for that
@@ -332,6 +373,32 @@ dedicated server has none. *The dedicated server's rules, agent decisions:*
   (`tore-app --connect`, `tore-bot`) takes its slot and marks ready by
   itself, so a server with `start first-player` starts as soon as the first
   such player joins, as before.
+
+### The King's settings and a King
+
+*Built (F2-1).* The file's King's settings (`mode`, `kill-limit` and the
+rest) apply from the start, whether or not the server has a King, and every
+player sees them in the lobby. With `king first-player` (John, 2026-10-05):
+
+- **The crown** goes to the first player to join; when the King leaves, to the
+  player connected longest. The log says "Viper wears the crown", and "Viper
+  passed the crown to Hawk" when the King gives it away.
+- **The King** changes the mission and the settings, locks slots (closed, or
+  kept for a callsign), starts the mission, ends it, kicks and passes the
+  crown, with the same rules as in a game a player hosts
+  ([architecture](ARCHITECTURE.md#the-kings-lobby-as-built-f2-1)). The log
+  names every change: "Viper changed the settings: mode pvp, kill-limit 3".
+- **The start** is the King's while a King is connected: `start first-player`
+  and `start now` wait for the King's Fly, and come back once nobody wears the
+  crown.
+- **`king-mission locked`** keeps the file's mission and settings: the King's
+  changes are refused "This server's mission and settings are its
+  operator's."; start, kick, slot locks and the crown still work.
+- **Empty again.** Once the last player has been gone for the `empty-timeout`
+  and the server is in its lobby, it goes back to its file's mission and
+  settings and opens every slot, so a public server does not keep a
+  stranger's choices: "The server has been empty for its empty timeout: back to
+  its file's mission and settings".
 
 ## Joining from the game
 
@@ -430,7 +497,8 @@ that differ. The game version and protocol must match as well
 *Since EF7* a player hosts from the menus too: Choose Activity, Multi,
 **Direct Connection**, **New**. It hosts the Quick Mission creator's current
 mission (build it first on the creator's page) under the game name, port and
-password of Options, and the game's own player is the King; unlike `--host`
+password of Options, and the game's own player is the house, which wears
+the crown; unlike `--host`
 it opens the lobby, where the King builds the mission with **Mission...**
 (the Quick Mission creator, its OK reading Accept), takes a slot, arms the
 aircraft with **Loadout**, readies, and presses **Fly** when everyone holding a
@@ -499,6 +567,13 @@ game takes it off the list at once. A game hosted without `--list`, and
 every game hosted from Direct Connection, never talks to the master. *Agent
 decision:* `--list` sends no anonymous statistics and no install id until
 the Internet Lobby's one-time notice and its switch exist (slice I4).
+
+*Since F2-1* the King's Visibility setting lists a hosted game as well:
+`public` lists it on the Internet Lobby (a game hosted without `--list` then
+lists itself on the public master, with no statistics), `local` or `hidden`
+takes it off, and `hidden` also stops answering the local network's search. A
+game hosted with `--list` starts public. The King can pass the crown to another
+player; the hosting player stays the house, whose leaving still ends the game.
 
 ## Finding games from the command line
 

@@ -106,11 +106,18 @@ fn the_registry_refuses_with_the_setting_and_its_values() {
     assert_eq!(refusal(0, 0).as_deref(), Some("There is no setting 0."));
     assert_eq!(refusal(21, 0).as_deref(), Some("There is no setting 21."));
     assert!(refusal(number::PASSWORD, 1).is_some());
-    assert_eq!(
-        refusal(number::VISIBILITY, 2).as_deref(),
-        Some("Public listing is not available yet.")
-    );
+    // Public is the registry's since stage I lists games; whether a host can
+    // list is the host's question (slice F2-1).
+    assert_eq!(refusal(number::VISIBILITY, 2), None);
     assert_eq!(refusal(number::VISIBILITY, 0), None);
+    assert_eq!(
+        words(&[
+            (number::MODE, 1),
+            (number::TIME_LIMIT, 600),
+            (number::LIVES, 255)
+        ]),
+        "mode pvp, time-limit 10 minutes, lives unlimited"
+    );
 }
 
 #[test]
@@ -185,6 +192,16 @@ fn a_host_starts_from_its_configuration() {
     assert_eq!(store.max_players(), 12);
     // A dedicated server's own limit is kept as given.
     assert_eq!(store.time_limit_seconds(), Some(2_700));
+
+    // A server's file sets the others (slice F2-1): the mode's defaults
+    // first, then its values, and the limit still as given.
+    config.settings = vec![(number::KILL_LIMIT, 3), (number::MODE, 1)];
+    let store = Store::from_config(&config);
+    assert_eq!(store.mode(), Mode::Pvp);
+    assert_eq!(store.kill_limit(), Some(3));
+    assert!(store.lock_sides(), "PvP's default");
+    assert_eq!(store.time_limit_seconds(), Some(2_700));
+    assert_eq!(store.max_players(), 12);
 }
 
 #[test]

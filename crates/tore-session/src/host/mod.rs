@@ -38,6 +38,8 @@ pub mod config;
 mod discover;
 pub mod inputs;
 mod king;
+#[cfg(test)]
+mod king_tests;
 mod lobby;
 mod observe;
 #[cfg(test)]
@@ -49,7 +51,7 @@ mod sorting;
 #[cfg(test)]
 mod tests;
 
-pub use config::{AfterEnd, BuildId, HostConfig, HostError, OpenPlanes, StartMode};
+pub use config::{AfterEnd, BuildId, CrownRule, HostConfig, HostError, OpenPlanes, StartMode};
 pub use lobby::LobbyEvent;
 pub use sorting::{BURST_SLACK_TICKS, round_interval};
 
@@ -447,8 +449,11 @@ struct Peer {
     /// flight's sections are never read against the last one's
     /// (protocol 3).
     flight: u8,
-    /// The King's own connection.
+    /// It wears the crown (stage F phase 2: a lobby role, passed on).
     king: bool,
+    /// The house: the connection whose game runs the host
+    /// ([`HostConfig::house`]); its leaving ends the game.
+    house: bool,
     /// The host said goodbye: why it disconnects the player.
     goodbye: Option<Goodbye>,
     /// The lobby changed since this player was last sent it, and when it
@@ -536,6 +541,9 @@ pub struct Host {
     out: TickOutput,
     /// The observers' pictures and delay ring (stage F phase 2).
     stream: observe::Stream,
+    /// The King's lobby beside the settings: slot locks, sides, a crowned
+    /// server's own mission (stage F phase 2, `king`).
+    court: king::Court,
     /// The mission's scores (stage F phase 2, `score`).
     score: score::Scoring,
     /// What each seat's game could not foresee, by tick (tests only).
@@ -742,6 +750,11 @@ impl Host {
         config: HostConfig,
     ) -> Result<Host, HostError> {
         config.validate()?;
+        // The settings the mission carries (friendly fire, the loadout
+        // rule) come from the configuration's settings (stage F phase 2).
+        let settings = crate::settings::Store::from_config(&config);
+        let court = king::Court::new(&config, &spec);
+        let spec = king::with_settings(spec, &settings);
         let (world, manifest) = build_world(&spec, &resources)?;
         let server = Server::new(ServerConfig {
             protocol_version: PROTOCOL_VERSION,
@@ -785,7 +798,8 @@ impl Host {
             out: TickOutput::default(),
             stream: observe::Stream::default(),
             score: score::Scoring::default(),
-            settings: crate::settings::Store::from_config(&config),
+            court,
+            settings,
             config,
         };
         if host.config.start == StartMode::Now {
@@ -845,6 +859,8 @@ impl Host {
             }
             Life::Lobby | Life::Stopped => {}
         }
+        // Stage F phase 2: a crowned server left empty goes back to its file.
+        self.king_update(now);
         self.close_departed(now);
         self.pump();
         if matches!(self.life, Life::Flying) {
@@ -1131,16 +1147,22 @@ impl Host {
             .roster
             .planes()
             .iter()
-            .filter(|plane| self.open(plane.id))
+            .filter(|plane| self.open(plane.id) && !self.closed_slot(plane.id.0))
             .count();
-        open.min(self.config.max_players)
+        // The King's player limit (stage F phase 2), the configuration's to
+        // start with; a closed slot seats nobody.
+        open.min(self.settings.max_players() as usize)
     }
 
+    /// Whether `plane` is open to players: the open planes, which follow the
+    /// King's mode by default (stage F phase 2).
     fn open(&self, plane: PlaneId) -> bool {
         self.world.roster.plane(plane).is_some_and(|p| {
-            self.config
-                .open_planes
-                .allows(plane.0, p.slot.wing.side == Side::Friendly)
+            self.config.open_planes.allows_in(
+                plane.0,
+                p.slot.wing.side == Side::Friendly,
+                self.settings.mode(),
+            )
         })
     }
 
@@ -1159,7 +1181,8 @@ impl Host {
         };
         HostGate {
             build: self.config.build.clone(),
-            password: self.config.password.clone(),
+            // The King's password (stage F phase 2), for the next joins.
+            password: self.settings.password().map(str::to_owned),
             closed,
             // A departing connection's place is free already.
             players: self
@@ -1280,7 +1303,8 @@ impl Host {
             .expect("the transport holds at most 30 connections");
         self.next_id = id.wrapping_add(1);
         self.joins += 1;
-        let king = self.config.king == Some(details.address);
+        let house = self.config.house == Some(details.address);
+        let king = self.crowned_at_join(house);
         self.peers.insert(
             connection,
             Peer {
@@ -1302,6 +1326,7 @@ impl Host {
                 lobby: Entry::new(id, self.joins),
                 flight: 0,
                 king,
+                house,
                 goodbye: None,
                 lobby_stale: true,
                 lobby_sent: None,
@@ -1315,15 +1340,18 @@ impl Host {
         self.log(HostLog::Connected {
             tick,
             address: details.address,
-            callsign,
+            callsign: callsign.clone(),
         });
-        // The King's connection is the hosting game's own, over the
-        // in-process link (a King at any other address is not exempt, and
+        if king {
+            self.lobby_log(callsign, LobbyEvent::Crowned);
+        }
+        // The house's connection is the hosting game's own, over the
+        // in-process link (a house at any other address is not exempt, and
         // the link drops socket datagrams that claim its address): it is never
         // dropped for silence. A window held still (dragged, resized, a
         // long load) stalls only that game; its plane flies on with its
         // last controls, as any late player's does, until it catches up.
-        if king && details.address == tore_net::LINK_ADDRESS {
+        if house && details.address == tore_net::LINK_ADDRESS {
             self.server.set_silence_exempt(connection, true);
         }
         let mission = self.mission_message();
@@ -1383,10 +1411,13 @@ impl Host {
             plane: plane.map(|p| p.0),
             reason,
         });
-        // The King's leaving ends a game a player hosts: nobody else can
-        // start or end its missions (passing the crown is phase 2's).
-        if peer.king && !matches!(self.life, Life::Stopped | Life::Ended { next_at: None, .. }) {
+        // The house's leaving ends a game a player hosts (until stage K
+        // migrates the host); a King who is not the house passes the crown
+        // to the longest-connected player.
+        if peer.house && !matches!(self.life, Life::Stopped | Life::Ended { next_at: None, .. }) {
             self.host_left();
+        } else if peer.king {
+            self.crown_departed();
         }
     }
 
@@ -1481,7 +1512,10 @@ impl Host {
                 self.answer(connection, kind::SET_READY, "ready", result);
             }
             Message::ChangeMission(text) => {
-                let result = self.change_mission(connection, &text);
+                let result = match self.mission_refusal() {
+                    Some(why) => Err(why),
+                    None => self.change_mission(connection, &text),
+                };
                 self.answer(connection, kind::CHANGE_MISSION, "a new mission", result);
             }
             Message::Start => {
@@ -1492,6 +1526,8 @@ impl Host {
                 let result = if self.peers.get(&connection).map(|p| p.lobby.id) == Some(kick.player)
                 {
                     Err("The King cannot kick the King.".to_owned())
+                } else if let Some(why) = self.kick_refusal(kick.player) {
+                    Err(why)
                 } else {
                     self.kick_player(kick.player, &kick.reason)
                         .map_err(|_| "There is no such player.".to_owned())
@@ -1753,9 +1789,11 @@ impl Host {
             .open_planes()
             .into_iter()
             .filter(|plane| {
-                self.config
-                    .open_planes
-                    .allows(plane.id, plane.wing.side == Side::Friendly)
+                self.config.open_planes.allows_in(
+                    plane.id,
+                    plane.wing.side == Side::Friendly,
+                    self.settings.mode(),
+                )
             })
             .collect()
     }
@@ -1802,6 +1840,10 @@ impl Host {
                         self.peers[&other].callsign
                     ));
                 }
+                // Stage F phase 2: the King's slot locks.
+                if let Some(why) = self.lock_refusal(connection, plane) {
+                    return Err(why);
+                }
                 Some(PlaneId(plane))
             }
             SlotRequest::Any => match held {
@@ -1810,7 +1852,10 @@ impl Host {
                     self.slots()
                         .into_iter()
                         .map(|slot| PlaneId(slot.id))
-                        .find(|plane| self.holder(*plane, connection).is_none())
+                        .find(|plane| {
+                            self.holder(*plane, connection).is_none()
+                                && self.lock_refusal(connection, plane.0).is_none()
+                        })
                         .ok_or("No slot is free.")?,
                 ),
             },
@@ -1857,7 +1902,8 @@ impl Host {
                 .iter()
                 .find(|kind| kind.profile.id == aircraft)
                 .ok_or("The mission holds no such aircraft.")?;
-            load.check_for_plane(&kind.profile, &*self.resources, self.spec.guns_only)
+            // Under the King's loadout rule, which the mission carries.
+            load.check_in(&kind.profile, &*self.resources, &self.spec)
                 .map_err(|error| error.to_string())?;
         }
         let own = loadout.is_some();
@@ -1905,7 +1951,7 @@ impl Host {
         }
         if ready {
             match self.life {
-                Life::Lobby if self.config.start == StartMode::FirstPlayer => {
+                Life::Lobby if self.start_rule() == StartMode::FirstPlayer => {
                     self.start_flying()?;
                 }
                 Life::Flying => {
@@ -1968,6 +2014,11 @@ impl Host {
             return;
         }
         let held = peer.lobby.slot;
+        // Stage F phase 2: join in progress off refuses every plane alike.
+        if let Some(why) = self.new_pilot_refusal() {
+            self.refuse_seat(connection, why);
+            return;
+        }
         let Some(seat) = self.free_seat() else {
             self.refuse_seat(connection, "No seat is free.".into());
             return;
@@ -2088,6 +2139,9 @@ impl Host {
             return Err("The mission can change only in the lobby.".into());
         }
         let spec = MissionSpec::from_text(text).map_err(|error| error.to_string())?;
+        // The King's settings decide what the mission carries of them
+        // (friendly fire, the loadout rule), whatever the text says.
+        let spec = king::with_settings(spec, &self.settings);
         if !spec.plane_loadouts.is_empty() {
             return Err(
                 "A lobby's mission carries no loadouts: each player arms their own.".into(),
@@ -2107,6 +2161,7 @@ impl Host {
         self.orphans.clear();
         self.gives.clear();
         self.number = self.number.wrapping_add(1);
+        self.king_mission_changed(&old);
         let slots = self.slots();
         for peer in self.peers.values_mut() {
             peer.lobby.ready = false;
@@ -2145,7 +2200,7 @@ impl Host {
             });
             let refused = match kind {
                 Some(kind) => load
-                    .check_for_plane(&kind.profile, &*self.resources, self.spec.guns_only)
+                    .check_in(&kind.profile, &*self.resources, &self.spec)
                     .err()
                     .map(|error| error.to_string()),
                 None => Some("the mission holds no such aircraft".into()),
@@ -2354,14 +2409,17 @@ impl Host {
                 Life::Flying => LobbyPhase::Flying,
                 Life::Ended { .. } | Life::Stopped => LobbyPhase::Ended,
             },
-            start: match self.config.start {
+            start: match self.start_rule() {
                 StartMode::King => StartRule::King,
                 StartMode::FirstPlayer => StartRule::FirstReady,
                 StartMode::Now => StartRule::Flying,
             },
             king,
-            // In a game a player hosts, the King's machine runs the host.
-            host: king,
+            // The house: the player whose machine runs the host.
+            host: peers
+                .iter()
+                .find(|peer| peer.house)
+                .map(|peer| peer.lobby.id),
             you,
             players: peers
                 .iter()
@@ -2388,8 +2446,7 @@ impl Host {
                     member: slot.member,
                     aircraft: slot.aircraft,
                     holder: holder(slot.id),
-                    // Slot locks are slice F2-1's.
-                    lock: messages::Lock::Open,
+                    lock: self.court.lock(slot.id),
                 })
                 .collect(),
             settings: self.settings.lobby_list(),
@@ -2481,8 +2538,10 @@ impl Host {
         self.life = Life::Flying;
         self.origin = None;
         self.ticks_run = 0;
-        // Stage F phase 2: fresh scores, and the world records score facts.
+        // Stage F phase 2: fresh scores, and the world records score facts;
+        // nobody has a side yet for lock sides.
         self.score_start();
+        self.king_mission_start();
         // The players have the lobby's mission already: the loadouts are
         // all they need to build the flight's (a joiner in flight gets the
         // whole text, loadouts included).
@@ -2709,8 +2768,10 @@ impl Host {
         tick: u64,
         out: &TickOutput,
     ) {
-        // An observer who takes a plane stops watching first.
+        // An observer who takes a plane stops watching first; the first
+        // plane flown fixes the player's side for lock sides.
         self.observe_seated(connection);
+        self.king_seated(connection, plane);
         let Some(cockpit) = self.world.cockpits.iter().find(|c| c.plane == plane) else {
             return;
         };
@@ -3171,7 +3232,7 @@ impl Host {
                 self.lobby_dirty = true;
                 self.log(HostLog::MissionRestarted { tick: 0 });
                 self.life = Life::Lobby;
-                if self.config.start == StartMode::Now {
+                if self.start_rule() == StartMode::Now {
                     // A failure is logged as a fault; the lobby stays.
                     let _ = self.start_flying();
                 }

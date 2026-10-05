@@ -74,6 +74,24 @@ pub enum LobbyEvent {
     /// The player sent more lobby requests in a second than the host
     /// answers; the rest of that second's are dropped.
     TooManyRequests,
+    /// The player wears the crown now: it joined first, or the King left
+    /// (stage F phase 2, slice F2-1).
+    Crowned,
+    /// The King gave the crown to this player.
+    CrownPassed(String),
+    /// The King changed the settings, in words ("mode pvp, kill-limit 5").
+    SettingsChanged(String),
+    /// The King locked a slot, or opened it.
+    SlotLocked {
+        plane: u32,
+        lock: crate::wire::messages::Lock,
+    },
+    /// The player started watching the flying mission, or stopped (slice
+    /// F2-O1's observers).
+    Watching(bool),
+    /// A crowned dedicated server, empty for its empty timeout, went back
+    /// to its file's mission and settings.
+    BackToFile,
 }
 
 impl fmt::Display for LobbyEvent {
@@ -98,6 +116,24 @@ impl fmt::Display for LobbyEvent {
             Self::TooManyRequests => {
                 f.write_str("sent too many lobby requests; the rest of this second's are dropped")
             }
+            Self::Crowned => f.write_str("wears the crown"),
+            Self::CrownPassed(to) => write!(f, "passed the crown to {to}"),
+            Self::SettingsChanged(words) => write!(f, "changed the settings: {words}"),
+            Self::SlotLocked { plane, lock } => {
+                use crate::wire::messages::Lock;
+                match lock {
+                    Lock::Open => write!(f, "opened the slot of plane {plane}"),
+                    Lock::Closed => write!(f, "closed the slot of plane {plane}"),
+                    Lock::Reserved(callsign) => {
+                        write!(f, "kept the slot of plane {plane} for {callsign}")
+                    }
+                }
+            }
+            Self::Watching(true) => f.write_str("is watching the mission"),
+            Self::Watching(false) => f.write_str("stopped watching"),
+            Self::BackToFile => f.write_str(
+                "has been empty for its empty timeout: back to its file's mission and settings",
+            ),
         }
     }
 }

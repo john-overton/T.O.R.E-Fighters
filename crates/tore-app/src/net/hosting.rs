@@ -20,10 +20,11 @@
 //!   stopping", closes its socket and ends; the game waits at most
 //!   [`JOIN_LIMIT`] for it. A game that drops its end of the channel stops
 //!   the thread the same way.
-//! - **The lobby** (EF4). The hosting player's own connection is the King
-//!   ([`HostConfig::king`] is the link's address), so the King's verbs
-//!   (change the mission, start, end the mission, kick) go over that
-//!   connection as messages, as a remote King's would in phase 2, and not
+//! - **The lobby** (EF4). The hosting player's own connection is the house
+//!   ([`HostConfig::house`] is the link's address), which wears the crown
+//!   when it joins, so the King's verbs (change the mission and the
+//!   settings, start, end the mission, kick, pass the crown) go over that
+//!   connection as messages, as a remote King's do since phase 2, and not
 //!   through [`Command`].
 //! - **Panic.** A panic on the thread is caught: it tries once to disconnect
 //!   every player with "server stopping" (best effort: the host may be
@@ -45,9 +46,19 @@
 //!   Internet Lobby while it is told to ([`Command::SetListed`]). It reports
 //!   where the listing stands ([`Report::Listing`]) and unregisters as the
 //!   thread stops, before its socket closes. A game started without one
-//!   (Direct Connection) never talks to the master. *Agent decision:* the
-//!   listing goes beside [`HostSetup`] ([`HostThread::start_listed`]) rather
-//!   than in it, so the hosts the tests build stay as they are.
+//!   (Direct Connection) never talks to the master until its King makes it
+//!   public. *Agent decision:* the listing goes beside [`HostSetup`]
+//!   ([`HostThread::start_listed`]) rather than in it, so the hosts the
+//!   tests build stay as they are.
+//! - **The King's Visibility** (stage F phase 2, slice F2-1). The thread
+//!   follows the host's `visibility` setting as it follows
+//!   [`Command::SetListed`]: when the King makes the game public it is
+//!   listed, and when the King makes it local or hidden it is taken off.
+//!   A game started without a listing gets one then, on the public master
+//!   and with no telemetry (agent decision: the King asked for the listing;
+//!   the statistics wait for the Internet Lobby's notice). Only a change
+//!   counts, so a game started listed while its setting says local stays
+//!   listed until the King or the screen says otherwise.
 use crate::net::{
     options::HostOptions,
     session::{Join, NetSession, Transport, build_id},
@@ -74,8 +85,10 @@ use tore_net::{
 };
 use tore_realtime_native::{Activity, real_time_thread, summary};
 use tore_session::{
-    AfterEnd, Host, HostConfig, HostLog, LeaveReason, OpenPlanes, Phase, StartMode,
-    host::TICKS_PER_SECOND, wire::messages::EndReason,
+    AfterEnd, CrownRule, Host, HostConfig, HostLog, LeaveReason, OpenPlanes, Phase, StartMode,
+    host::TICKS_PER_SECOND,
+    settings::{Visibility, number},
+    wire::messages::EndReason,
 };
 use tore_world::mission::MissionSpec;
 
@@ -136,8 +149,9 @@ pub enum Command {
     Stop,
     /// List the game on the Internet Lobby, or take it off. Ignored by a
     /// game started without a [`Listing`].
-    // The Internet Lobby (I4) and the King's Visibility (stage F phase 2)
-    // send it; until then only the tests do.
+    // The Internet Lobby (I4) sends it; until then only the tests do. The
+    // King's Visibility does the same from the host's own setting
+    // (`follow_visibility`).
     #[cfg_attr(not(test), allow(dead_code))]
     SetListed(bool),
     /// Panic on the thread, for the tests of the panic rule.
@@ -228,27 +242,16 @@ impl HostThread {
             )
         })?;
         let addresses = socket.local_addresses();
+        let port = addresses.first().map_or(port, |a| a.port());
         let listing = match listing {
             Some(listing) => {
-                let port = addresses.first().map_or(port, |a| a.port());
-                let mut host_listing = HostListing::new(
+                let mut host_listing = new_listing(
                     &listing.master,
-                    HostRendezvous {
-                        build: Build {
-                            protocol_version: tore_session::wire::PROTOCOL_VERSION,
-                            game_version: config.build.version.clone(),
-                            game_commit: config.build.commit.clone(),
-                            release: config.build.release,
-                        },
-                        dedicated: false,
-                        install_id: listing.install_id,
-                        platform: Platform::current().code(),
-                        entropy: tore_net::Entropy::System,
-                    },
+                    &config.build,
+                    listing.install_id,
                     port,
                     Duration::ZERO,
-                )
-                .map_err(|error| format!("Cannot list the game: {error}"))?;
+                )?;
                 host_listing.set_listed(listing.listed, Duration::ZERO);
                 Some(host_listing)
             }
@@ -267,7 +270,7 @@ impl HostThread {
                     resources,
                     config,
                     transport,
-                    listing,
+                    Listings { listing, port },
                     commands,
                     report_sender,
                 )
@@ -367,13 +370,79 @@ impl Drop for HostThread {
     }
 }
 
+/// A hosted game's listing, if it has one, and the game port a listing made
+/// later (the King's Visibility) registers from.
+struct Listings {
+    listing: Option<HostListing>,
+    port: u16,
+}
+
+/// A listing of the game on `master` from the game port `port`, as the
+/// thread starts it ([`HostThread::start_listed`]) or the King's Visibility
+/// asks for it.
+fn new_listing(
+    master: &str,
+    build: &tore_session::BuildId,
+    install_id: Option<u64>,
+    port: u16,
+    now: Duration,
+) -> Result<HostListing, String> {
+    HostListing::new(
+        master,
+        HostRendezvous {
+            build: Build {
+                protocol_version: tore_session::wire::PROTOCOL_VERSION,
+                game_version: build.version.clone(),
+                game_commit: build.commit.clone(),
+                release: build.release,
+            },
+            dedicated: false,
+            install_id,
+            platform: Platform::current().code(),
+            entropy: tore_net::Entropy::System,
+        },
+        port,
+        now,
+    )
+    .map_err(|error| format!("Cannot list the game: {error}"))
+}
+
+/// The King's Visibility (slice F2-1): lists the game when the host's
+/// setting turns public and takes it off when it turns local or hidden, as
+/// [`Command::SetListed`] does; `applied` is whether the setting was
+/// public when last seen, so only a change counts.
+fn follow_visibility(host: &Host, listings: &mut Listings, applied: &mut bool, now: Duration) {
+    let public = host.settings().visibility() == Visibility::Public;
+    if public == *applied {
+        return;
+    }
+    *applied = public;
+    match listings.listing.as_mut() {
+        Some(listing) => listing.set_listed(public, now),
+        None if public => match new_listing(
+            tore_net::master::DEFAULT_MASTER,
+            &host.config().build,
+            None,
+            listings.port,
+            now,
+        ) {
+            Ok(mut listing) => {
+                listing.set_listed(true, now);
+                listings.listing = Some(listing);
+            }
+            Err(error) => log::warn!("Host: the King made the game public, but {error}"),
+        },
+        None => {}
+    }
+}
+
 /// The thread: serve until stopped, catching a panic.
 fn run(
     spec: MissionSpec,
     resources: Arc<BTreeMap<String, Vec<u8>>>,
     config: HostConfig,
     mut transport: Linked<ServerSocket>,
-    mut listing: Option<HostListing>,
+    mut listings: Listings,
     commands: Receiver<Command>,
     reports: Sender<Report>,
 ) {
@@ -385,7 +454,7 @@ fn run(
             resources,
             config,
             &mut transport,
-            &mut listing,
+            &mut listings,
             &commands,
             &reports,
         )
@@ -405,7 +474,7 @@ fn run(
         }
     };
     // The listing goes before the socket closes, a panic included.
-    if let Some(listing) = listing.as_mut() {
+    if let Some(listing) = listings.listing.as_mut() {
         let _ = panic::catch_unwind(AssertUnwindSafe(|| {
             listing.stop(Duration::ZERO);
             let _ = listing.transmit(&mut transport);
@@ -535,7 +604,7 @@ fn serve(
     resources: Arc<BTreeMap<String, Vec<u8>>>,
     config: HostConfig,
     transport: &mut Linked<ServerSocket>,
-    listing: &mut Option<HostListing>,
+    listings: &mut Listings,
     commands: &Receiver<Command>,
     reports: &Sender<Report>,
 ) -> End {
@@ -573,8 +642,11 @@ fn serve(
     let mut stop_by: Option<Duration> = None;
     let measure = std::env::var_os("TORE_PERF_HOST").is_some();
     let mut report_at = clock.now() + Duration::from_secs(1);
+    let mut public = host.settings().visibility() == Visibility::Public;
     loop {
         let now = clock.now();
+        follow_visibility(host, listings, &mut public, now);
+        let listing = &mut listings.listing;
         turn(host, transport, listing, now, reports);
         if forward(host, reports, &mut phase) {
             tally.present(host.players().into_iter().map(|p| p.address));
@@ -668,7 +740,8 @@ fn forward(host: &mut Host, reports: &Sender<Report>, phase: &mut Option<Phase>)
 
 /// The settings of a game a player hosts (EF4). *Agent decisions:* the
 /// server guide's defaults, except that the hosting player's own connection
-/// is the King, who starts each mission (`StartMode::King`); a mission's
+/// is the house, which wears the crown and starts each mission
+/// (`StartMode::King`); a mission's
 /// end returns everyone to the lobby at once (`after-end restart` with no
 /// delay); and a mission nobody flies any more ends at once (no empty
 /// timeout), so the lobby returns when the last player leaves the flight.
@@ -677,7 +750,20 @@ pub fn config(options: &HostOptions) -> HostConfig {
     config.name = options.name.clone();
     config.password = options.password.clone();
     config.open_planes = options.open_planes.clone();
-    config.king = Some(LINK_ADDRESS);
+    config.house = Some(LINK_ADDRESS);
+    config.crown = CrownRule::FirstPlayer;
+    // The King's Visibility can list the game: the thread lists it while
+    // it is public (slice F2-1), and a game hosted to be listed starts so.
+    config.listable = true;
+    if options
+        .listing
+        .as_ref()
+        .is_some_and(|listing| listing.listed)
+    {
+        config
+            .settings
+            .push((number::VISIBILITY, Visibility::Public.value()));
+    }
     config.start = StartMode::King;
     config.after_end = AfterEnd::Restart;
     config.restart_delay = Duration::ZERO;

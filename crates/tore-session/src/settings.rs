@@ -10,9 +10,10 @@
 //! choice. Each setting knows its allowed values, its default in each mode,
 //! when the King may change it and whether it applies only in PvP.
 //!
-//! Slice F2-0 builds the registry and the store with its defaults; the King's
+//! Slice F2-0 built the registry and the store with its defaults; the King's
 //! changes and their phase rules are slice F2-1's (`host/king.rs`), which
-//! uses [`Store::apply`] for the registry's own checks.
+//! uses [`Store::apply`] for the registry's own checks, and a dedicated
+//! server's file sets them through [`HostConfig::settings`].
 
 use crate::host::HostConfig;
 use tore_world::world::revive::RevivalWeapons;
@@ -61,7 +62,9 @@ pub enum Visibility {
     Hidden,
     /// Answers the local network's search.
     Local,
-    /// Also listed on the Internet Lobby (stage I; refused until then).
+    /// Also listed on the Internet Lobby: a game a player hosts lists
+    /// itself while it is public (slice F2-1); a dedicated server's listing
+    /// is its operator's `broadcast`, so it refuses this.
     Public,
 }
 
@@ -517,9 +520,10 @@ impl Setting {
 }
 
 /// Why a King's change of setting `number` to `value` is refused by the
-/// registry and what is built so far, if it is: an unknown number, a value
-/// off its list, the password by number (it has a field of its own), or a
-/// value not available yet. The phase rules are the host's (slice F2-1).
+/// registry, if it is: an unknown number, a value off its list, or the
+/// password by number (it has a field of its own). The phase rules and what
+/// depends on the host (the player limit's floor, a listing) are the
+/// host's (`host/king.rs`, slice F2-1).
 pub fn refusal(number: u8, value: u32) -> Option<String> {
     let Some(setting) = setting(number) else {
         return Some(format!("There is no setting {number}."));
@@ -527,14 +531,18 @@ pub fn refusal(number: u8, value: u32) -> Option<String> {
     if number == number::PASSWORD {
         return Some("The password is set on its own, not by number.".into());
     }
-    if let Some(why) = setting.refusal(value) {
-        return Some(why);
-    }
-    if number == number::VISIBILITY && value == Visibility::Public.value() {
-        // Stage I builds the Internet Lobby's listing.
-        return Some("Public listing is not available yet.".into());
-    }
-    None
+    setting.refusal(value)
+}
+
+/// `values` in words, for the logs: "mode pvp, kill-limit 5".
+pub fn words(values: &[(u8, u32)]) -> String {
+    values
+        .iter()
+        .filter_map(|&(number, value)| {
+            setting(number).map(|s| format!("{} {}", s.name, s.text(value)))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The values in force on a host: every setting of the registry, the
@@ -558,12 +566,15 @@ impl Store {
         }
     }
 
-    /// A host's settings at the start: co-op's defaults, with the
-    /// configuration's name, password, player limit and time limit. A
-    /// dedicated server's configuration keys for the other settings are
-    /// slice F2-1's.
+    /// A host's settings at the start: co-op's defaults with the
+    /// configuration's other settings ([`HostConfig::settings`], a dedicated
+    /// server's file; a new mode's defaults first, as a King's change), then
+    /// its name, password, player limit and time limit.
     pub fn from_config(config: &HostConfig) -> Self {
         let mut store = Self::defaults(Mode::Coop);
+        // `HostConfig::validate` has checked them; a refused list changes
+        // nothing.
+        let _ = store.apply(&config.settings);
         store.name = config.name.clone();
         store.password = config.password.clone();
         store.put(

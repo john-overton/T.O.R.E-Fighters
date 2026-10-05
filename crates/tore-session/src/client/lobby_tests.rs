@@ -47,7 +47,8 @@ fn kings_rig(friendly: usize) -> Rig {
         LinkConfig::for_round_trip(40 * MS, 0., 0., 0.),
         7,
         |config| {
-            config.king = Some(Rig::player_address(0));
+            config.house = Some(Rig::player_address(0));
+            config.crown = crate::host::CrownRule::FirstPlayer;
             config.start = StartMode::King;
             config.after_end = AfterEnd::Restart;
             config.restart_delay = Duration::ZERO;
@@ -929,7 +930,8 @@ fn a_loadouts_other_weapon_is_checked_at_the_start_and_the_player_may_try_again(
         7,
         import.clone(),
         |config| {
-            config.king = Some(Rig::player_address(0));
+            config.house = Some(Rig::player_address(0));
+            config.crown = crate::host::CrownRule::FirstPlayer;
             config.start = StartMode::King;
             config.after_end = AfterEnd::Restart;
             config.restart_delay = Duration::ZERO;

@@ -2,12 +2,18 @@
 //! end of the line is a comment. Every setting, default and range is in
 //! docs/DEDICATED-SERVER.md, "The configuration file". An unknown name, a
 //! value out of range and a name that appears twice are refused with the line.
+//!
+//! Since stage F phase 2 (slice F2-1) the file also takes the King's settings
+//! by their registry names (`tore_session::settings`): `mode`, `kill-limit`,
+//! `observer-delay` and the rest, and `king` and `king-mission` for a
+//! server whose first player wears the crown.
 
 use std::{
     collections::BTreeSet,
     fmt,
     path::{Path, PathBuf},
 };
+use tore_session::settings::{self, Mode, Setting, Visibility, number};
 
 /// The snapshot rates that divide 120, the simulation's rate.
 pub const SNAPSHOT_RATES: [u32; 8] = [10, 12, 15, 20, 24, 30, 40, 60];
@@ -84,6 +90,16 @@ pub struct Config {
     /// Send anonymous statistics to the master while broadcasting (John,
     /// 2026-10-05: on by default).
     pub telemetry: bool,
+    /// `king first-player`: the first player to join wears the crown, and
+    /// then the longest-connected (stage F phase 2; John, 2026-10-05: none
+    /// by default).
+    pub king: bool,
+    /// `king-mission locked`: the King may not change the mission or the
+    /// settings.
+    pub king_mission_locked: bool,
+    /// The King's settings the file gives (by registry number, in file
+    /// order), beyond `max-players`, `password` and `time-limit`.
+    pub settings: Vec<(u8, u32)>,
 }
 
 impl Config {
@@ -108,6 +124,9 @@ impl Config {
             broadcast: false,
             master: tore_net::master::DEFAULT_MASTER.into(),
             telemetry: true,
+            king: false,
+            king_mission_locked: false,
+            settings: Vec::new(),
         }
     }
 
@@ -116,6 +135,8 @@ impl Config {
     pub fn parse(text: &str, base: &Path) -> Result<Self, ConfigError> {
         let mut config = Self::defaults(base);
         let mut seen = BTreeSet::new();
+        // The line of each King's setting, for the checks across lines.
+        let mut lines: Vec<(usize, &str)> = Vec::new();
         for (index, raw) in text.lines().enumerate() {
             let line = index + 1;
             let content = raw.split('#').next().unwrap_or("").trim();
@@ -140,8 +161,43 @@ impl Config {
                 return Err(fail(format!("`{name}` needs a value")));
             }
             config.set(name, value, base).map_err(fail)?;
+            lines.push((line, name));
         }
+        config.check_king_settings(&lines)?;
         Ok(config)
+    }
+
+    /// The checks across lines: a setting that applies only in PvP needs
+    /// `mode pvp` (agent decision: a co-op server would never use it), and
+    /// `king-mission` needs a King.
+    fn check_king_settings(&self, lines: &[(usize, &str)]) -> Result<(), ConfigError> {
+        let line_of = |key: &str| lines.iter().find(|(_, n)| *n == key).map_or(0, |(l, _)| *l);
+        let pvp = self
+            .settings
+            .iter()
+            .any(|&(n, v)| n == number::MODE && v == Mode::Pvp.value());
+        if !pvp
+            && let Some(setting) = self
+                .settings
+                .iter()
+                .filter_map(|&(n, _)| settings::setting(n))
+                .find(|s| s.pvp_only)
+        {
+            return Err(ConfigError {
+                line: line_of(setting.name),
+                message: format!(
+                    "`{}` applies only in PvP: add `mode pvp`, or leave it out",
+                    setting.name
+                ),
+            });
+        }
+        if self.king_mission_locked && !self.king {
+            return Err(ConfigError {
+                line: line_of("king-mission"),
+                message: "`king-mission` needs a King: add `king first-player`".into(),
+            });
+        }
+        Ok(())
     }
 
     fn set(&mut self, name: &str, value: &str, base: &Path) -> Result<(), String> {
@@ -257,7 +313,34 @@ impl Config {
                 self.master = value.to_owned();
             }
             "telemetry" => self.telemetry = switch(name, value)?,
-            _ => unreachable!("the name was checked against SETTINGS"),
+            "king" => {
+                self.king = match value {
+                    "first-player" => true,
+                    "none" => false,
+                    other => {
+                        return Err(format!(
+                            "`king` must be `first-player` or `none`, not `{other}`"
+                        ));
+                    }
+                };
+            }
+            "king-mission" => {
+                self.king_mission_locked = match value {
+                    "locked" => true,
+                    "open" => false,
+                    other => {
+                        return Err(format!(
+                            "`king-mission` must be `locked` or `open`, not `{other}`"
+                        ));
+                    }
+                };
+            }
+            king => {
+                let setting =
+                    settings::by_name(king).expect("the name was checked against SETTINGS");
+                let value = king_value(setting, value)?;
+                self.settings.push((setting.number, value));
+            }
         }
         Ok(())
     }
@@ -271,8 +354,9 @@ impl Config {
     }
 }
 
-/// Every setting's name, in the guide's order.
-pub const SETTINGS: [&str; 17] = [
+/// Every setting's name, in the guide's order: the server's own, then the
+/// King's (stage F phase 2) by their registry names.
+pub const SETTINGS: [&str; 36] = [
     "name",
     "port",
     "address",
@@ -290,7 +374,92 @@ pub const SETTINGS: [&str; 17] = [
     "broadcast",
     "master",
     "telemetry",
+    "king",
+    "king-mission",
+    "mode",
+    "join-in-progress",
+    "visibility",
+    "friendly-fire",
+    "lock-sides",
+    "loadouts",
+    "respawn",
+    "lives",
+    "revive-delay",
+    "revive-distance",
+    "revive-weapons",
+    "fight",
+    "tally",
+    "kill-limit",
+    "kill-owner",
+    "observer-delay",
+    "idle-ai",
 ];
+
+/// How many of the registry's units one of the file's is: `revive-delay` is
+/// written in minutes, as `time-limit` is; every other number as the
+/// registry counts it (seconds, nautical miles, a count).
+fn file_scale(setting: &Setting) -> u32 {
+    if setting.number == number::REVIVE_DELAY {
+        60
+    } else {
+        1
+    }
+}
+
+/// A King's setting's value as the file writes it: one of its words, or a
+/// number in the file's unit. `visibility public` is refused: a server's
+/// listing is `broadcast`.
+fn king_value(setting: &Setting, value: &str) -> Result<u32, String> {
+    let scale = file_scale(setting);
+    let read = setting
+        .words
+        .iter()
+        .find(|(_, word)| *word == value)
+        .map(|(v, _)| *v)
+        .or_else(|| value.parse::<u32>().ok().and_then(|n| n.checked_mul(scale)))
+        .filter(|v| setting.allows(*v));
+    let allowed = || {
+        let items: Vec<String> = match setting.allowed {
+            settings::Allowed::List(values) => values
+                .iter()
+                .filter(|v| {
+                    setting.number != number::VISIBILITY || **v != Visibility::Public.value()
+                })
+                .map(|&v| file_word(setting, v, scale))
+                .collect(),
+            settings::Allowed::Range(low, high, extra) => {
+                let mut items = vec![format!("{} to {}", low / scale, high / scale)];
+                items.extend(extra.iter().map(|&v| file_word(setting, v, scale)));
+                items
+            }
+        };
+        match items.as_slice() {
+            [rest @ .., last] if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+            _ => items.join(""),
+        }
+    };
+    match read {
+        Some(v) if setting.number == number::VISIBILITY && v == Visibility::Public.value() => {
+            Err("`visibility` is `hidden` or `local` on a server: `broadcast on` lists it on the Internet Lobby".into())
+        }
+        Some(v) => Ok(v),
+        None => Err(format!(
+            "`{}` must be {}, not `{value}`",
+            setting.name,
+            allowed()
+        )),
+    }
+}
+
+/// One allowed value as the file writes it: its word, or its number in the
+/// file's unit.
+fn file_word(setting: &Setting, value: u32, scale: u32) -> String {
+    setting
+        .words
+        .iter()
+        .find(|(v, _)| *v == value)
+        .map_or_else(|| (value / scale).to_string(), |(_, w)| (*w).to_owned())
+}
 
 fn switch(name: &str, value: &str) -> Result<bool, String> {
     match value {
@@ -362,6 +531,70 @@ mod tests {
         assert!(!config.broadcast);
         assert_eq!(config.master, tore_net::master::DEFAULT_MASTER);
         assert!(config.telemetry);
+        assert!(!config.king && !config.king_mission_locked);
+        assert!(config.settings.is_empty());
+    }
+
+    #[test]
+    fn the_kings_settings_read_by_their_registry_names() {
+        let config = parse(
+            "mode pvp\nkill-limit 3\nobserver-delay 30\nrevive-delay 2\nlives unlimited\n\
+             idle-ai never\nvisibility hidden\nfriendly-fire off\nloadouts any\nking first-player\n\
+             king-mission locked\njoin-in-progress off\nkill-owner player\nrevive-distance 40\n",
+        )
+        .unwrap();
+        assert!(config.king && config.king_mission_locked);
+        assert_eq!(
+            config.settings,
+            [
+                (number::MODE, 1),
+                (number::KILL_LIMIT, 3),
+                (number::OBSERVER_DELAY, 30),
+                (number::REVIVE_DELAY, 120),
+                (number::LIVES, settings::UNLIMITED_LIVES),
+                (number::IDLE_AI, 0),
+                (number::VISIBILITY, 0),
+                (number::FRIENDLY_FIRE, 0),
+                (number::LOADOUTS, 1),
+                (number::JOIN_IN_PROGRESS, 0),
+                (number::KILL_OWNER, 2),
+                (number::REVIVE_DISTANCE, 40),
+            ]
+        );
+        // The values the file allows, in its own units.
+        assert_eq!(
+            refused("kill-limit 4\nmode pvp"),
+            "line 1: `kill-limit` must be none, 1, 2, 3, 5, 7 or 10, not `4`"
+        );
+        assert_eq!(
+            refused("revive-delay 6"),
+            "line 1: `revive-delay` must be none, 1, 2, 3, 4 or 5, not `6`"
+        );
+        assert_eq!(
+            refused("lives 11"),
+            "line 1: `lives` must be 0 to 10 or unlimited, not `11`"
+        );
+        assert_eq!(
+            refused("mode duel"),
+            "line 1: `mode` must be co-op or pvp, not `duel`"
+        );
+        assert!(refused("visibility public").contains("`broadcast on`"));
+        assert!(refused("visibility everyone").contains("hidden or local"));
+        assert_eq!(
+            refused("king always"),
+            "line 1: `king` must be `first-player` or `none`, not `always`"
+        );
+        assert!(refused("king-mission shut").contains("`locked` or `open`"));
+        // Across lines: PvP's settings need PvP, a locked mission a King.
+        assert_eq!(
+            refused("port 1\nobserver-delay 10"),
+            "line 2: `observer-delay` applies only in PvP: add `mode pvp`, or leave it out"
+        );
+        assert_eq!(
+            refused("king-mission locked"),
+            "line 1: `king-mission` needs a King: add `king first-player`"
+        );
+        assert!(parse("king none\nking-mission open\nmode co-op\ntime-limit 90").is_ok());
     }
 
     #[test]
@@ -574,11 +807,37 @@ mod tests {
             "broadcast on",
             "master localhost",
             "telemetry off",
+            "king first-player",
+            "king-mission open",
+            "mode co-op",
+            "join-in-progress on",
+            "visibility local",
+            "friendly-fire on",
+            "lock-sides off",
+            "loadouts own",
+            "respawn none",
+            "lives 3",
+            "revive-delay 0",
+            "revive-distance 10",
+            "revive-weapons guns",
+            "fight sides",
+            "tally kills",
+            "kill-limit none",
+            "kill-owner side",
+            "observer-delay 0",
+            "idle-ai 10",
         ];
         assert_eq!(samples.len(), SETTINGS.len());
         for (sample, name) in samples.iter().zip(SETTINGS) {
             assert!(sample.starts_with(name), "{sample}");
-            parse(sample).unwrap();
+            // A setting of PvP's alone is refused in co-op.
+            let pvp = settings::by_name(name).is_some_and(|s| s.pvp_only);
+            let text = if pvp {
+                format!("mode pvp\n{sample}")
+            } else {
+                (*sample).to_owned()
+            };
+            parse(&text).unwrap();
         }
     }
 }

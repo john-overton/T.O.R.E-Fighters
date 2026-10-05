@@ -352,6 +352,9 @@ impl Host {
         if !watch.started || matches!(peer.stage, Stage::Closing { .. }) {
             return;
         }
+        // The host's log says so (slice F2-1's lobby event).
+        let callsign = peer.callsign.clone();
+        self.lobby_log(callsign, super::LobbyEvent::Watching(false));
         if tell {
             self.send(connection, &Message::Observing(Box::new(Observing::Ended)));
         }
@@ -656,6 +659,10 @@ impl Host {
         })));
         self.send(connection, &observing);
         self.lobby_dirty = true;
+        if let Some(peer) = self.peers.get(&connection) {
+            let callsign = peer.callsign.clone();
+            self.lobby_log(callsign, super::LobbyEvent::Watching(true));
+        }
         if behind {
             self.server
                 .disconnect(connection, DisconnectReason::ProtocolError);

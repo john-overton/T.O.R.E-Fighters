@@ -4537,7 +4537,8 @@ it starts as its `start` setting says. *Agent decisions.*
 *Built (EF4)*, on the wire and in the sessions (EF8 built the screen on this). Each an agent decision unless credited.
 
 - **The King** in a game a player hosts is the hosting player's own
-  connection: `HostConfig::king` is the in-process link's address
+  connection: `HostConfig::king` (since F2-1 `HostConfig::house`, the house
+  that wears the crown when it joins) is the in-process link's address
   (`tore_net::LINK_ADDRESS`), which no UDP sender can have, with
   `StartMode::King`. Only the King changes the mission, starts it, ends it
   and kicks; anyone else asking is refused ("Only the King may do that.").
@@ -4609,8 +4610,9 @@ it starts as its `start` setting says. *Agent decisions.*
   `tore_world::mission::LoadoutSpec::check_for_plane` puts the loadout on the
   aircraft's standard load and adds what the page's controls guarantee: one
   station for each, each station's capacity the page's, and nothing but the
-  gun with the creator's Guns only. Cheat loading is refused until the phase
-  2 King's setting for loadouts. Loadouts are chosen in the lobby only; one
+  gun with the creator's Guns only. Cheat loading is refused unless the
+  King's `loadouts any` (F2-1: `LoadoutSpec::check_in` takes the rule from
+  the mission). Loadouts are chosen in the lobby only; one
   sent while the mission flies is refused. At the start the mission is built
   again with the held slots' loadouts (`MissionSpec::plane_loadouts`), each
   player is sent them (Flight loadouts) with the manifest entries they add
@@ -5204,7 +5206,7 @@ choices below are fitted to retail's ranges ([numbers](spec/multiplayer.md#numbe
 | 1 | `mode` | `co-op` (humans on the friendly side), `pvp` (humans on either side) | co-op | pvp | In the lobby |
 | 2 | `max-players` | 1 to 30 | 30, or the server's | same | Any time, never below the players connected |
 | 3 | `join-in-progress` | `off`, `on` | on | on | Any time |
-| 4 | `visibility` | `hidden` (join by address only), `local` (answer the local network's search), `public` (also listed on the Internet Lobby: stage I builds it, refused until then) | local | local | Any time |
+| 4 | `visibility` | `hidden` (join by address only), `local` (answer the local network's search), `public` (also listed on the Internet Lobby; a game a player hosts only, built in F2-1) | local | local | Any time |
 | 5 | `password` | set or not (the text travels only in the King's request, never in the lobby state) | not set | not set | Any time; applies to the next joins |
 | 6 | `friendly-fire` | `off`, `on` | on | on | In the lobby |
 | 7 | `lock-sides` | `off`, `on` | off | on | In the lobby |
@@ -5309,6 +5311,99 @@ of the game. Phase 2 separates the two roles the guide already names:
   when absent, refused off in a single-player spec), which the build puts on
   combat's setting. Single player's spec never carries it, so its build is
   unchanged.
+
+##### The King's lobby as built (F2-1)
+
+*Built (F2-1, 2026-10-05).* `host/king.rs` holds the crown, the settings'
+phase rules, slot locks and the King's rules on taking a plane; the house is
+`HostConfig::house` and the crown's rule `HostConfig::crown`
+(`CrownRule::FirstPlayer` in a game a player hosts and on a server with `king
+first-player`). Each choice below is an agent decision unless it says
+otherwise.
+
+- **The crown.** The house wears it when it joins; with no house, the first
+  player to join does. A King who leaves passes it to the longest-connected
+  player ("Hawk wears the crown" in the log); a King who passes it is logged
+  "Viper passed the crown to Hawk". Passing it to oneself is refused "You wear
+  the crown already.", to a player who has gone "There is no such player.".
+  The King may not kick the house, whose leaving would end the game: "The
+  house runs the game; it cannot be kicked." The lobby state's house id is
+  the house's; a server has none.
+- **A change of settings** is checked whole before anything applies: the
+  registry's words; "Change it in the lobby, between missions." for a lobby
+  setting while the mission is not in the lobby (its short ended phase
+  counts as not); "kill-limit applies only in PvP." for a PvP setting while
+  the mode, as the change leaves it, is co-op; the player limit's floor ("2
+  players are connected: the limit cannot be lower.") and its ceiling, the
+  configuration's `max-players` ("This game takes at most 12 players.");
+  `public` where the game cannot be listed; a name of 1 to 64 bytes and a
+  password of printable text. The log line names every change: "Viper
+  changed the settings: mode pvp, kill-limit 3, name "Night owls", password
+  set".
+- **Friendly fire and the loadout rule** travel in the mission
+  (`MissionSpec::friendly_fire`, text `friendly-fire off`;
+  `MissionSpec::cheat_loadouts`, text `loadouts any`; neither written at its
+  default, so single player's text is unchanged), so every player's copy
+  builds the same rules. The host writes them from its settings into every
+  mission it builds: the King's own mission text and a server's file are
+  overruled by the settings. A change of either builds the lobby's mission
+  again and sends it again *under the same number*, so the requests already
+  made for it still stand; a kept loadout the new rule refuses drops to the
+  standard load with a Notice. The build puts friendly fire on combat's
+  setting, which combat keeps across its restarts; single player's build
+  refuses both lines. `LoadoutSpec::check_in` checks a loadout under the
+  mission's rule (a Cheat loading by the page's cheat capacities under
+  `any`); `check_for_plane` keeps the `own` rule for the lobby screen until
+  slice F2-L.
+- **Mode and slots.** `open-planes friendly`, the default, now means the
+  mode's planes: the friendly ones in co-op, every plane in PvP; `all` and a
+  list stay as given in either mode. A mode change frees every held slot that
+  is no longer one, with a Notice, drops its lock, and clears every ready
+  mark, as a change of lock sides or of the loadout rule does.
+- **Slot locks** apply in any phase and bind the next take: a player flying
+  a plane whose slot is closed flies on, and only its slot in the lobby
+  goes. A closed slot leaves the handshake's capacity. When the King changes
+  the mission a lock stays on a plane that is still a slot of the same
+  aircraft, as a kept loadout does. Refusals: "Plane 3 is closed: the AI
+  flies it.", "Plane 3 is kept for Hawk."; "any free slot" skips both. The
+  player who loses a slot reads "The King closed plane 3's slot: the AI
+  flies it." or "The King keeps plane 3's slot for Hawk."
+- **Join in progress off** refuses every seating after the mission's first
+  tick, a player who left its own plane included: "This game takes no new
+  pilots once the mission flies." A player ready in the lobby flies the next
+  mission.
+- **Lock sides** keeps each player's side by callsign (a player who leaves and
+  joins again keeps it) from the first plane it flies in a mission, until the
+  next start. `Host::sides_refusal` is the check for slice F2-V's revival,
+  which is not a new pilot.
+- **Players, password, visibility.** The handshake reads the player limit and
+  the password from the settings, and the discovery answer the name and the
+  lock; `hidden` answers no search. An observer still counts against the
+  room, as F2-O1 built it, so a full game takes no observer: a place in the
+  lobby is a place, and the King raises the limit or opens a slot for one.
+- **Visibility and the listing.** A game a player hosts
+  (`HostConfig::listable`) takes `public`: its hosting thread follows the
+  setting as it follows `Command::SetListed`, listing the game when the
+  setting turns public and taking it off when it turns local or hidden; only
+  a change counts. A game hosted without a listing gets one then, on the
+  public master and with no statistics; a game hosted to be listed starts
+  public. A dedicated server refuses `public`: its listing is its operator's
+  `broadcast`.
+- **A server's King** (John's decision, 2026-10-05). `king first-player` gives
+  the crown as above; while a King is connected the start rule is the King's
+  (the lobby state says so), and without one it is the file's again. `king-mission
+  locked` refuses the King's mission and settings ("This server's mission and
+  settings are its operator's."); start, kick, slot locks and the crown
+  still work. Once the last player has been gone for the server's
+  `empty-timeout`, in the lobby, it goes back to its file's mission, settings
+  and open slots ("The server has been empty for its empty timeout: back to
+  its file's mission and settings").
+- **The time limit** a King sets is one of the registry's; a server's file
+  gives any whole minute up to 10,080 (a week), which the store and the lobby
+  state carry as given (F2-0's decision, kept) until the King changes it or a
+  mode change resets it.
+- **Watching** is logged when it starts and stops ("Owl is watching the
+  mission", "Owl stopped watching"), the note F2-O1 left.
 
 ##### Death, revival and lives
 
@@ -5758,7 +5853,7 @@ every message below; no later slice changes the wire without the lead.
 | --- | --- | --- | --- | --- | --- |
 | F2-0 Wire and seams | Opus | | `tore-session`: `wire/messages.rs`, `wire/inputs.rs`, `wire/mod.rs` (the version), the wire tests and `wire-golden.txt`, new `settings.rs`, new empty `host/{king,revive,score,observe,away,results}.rs` and the calls to them in `host/mod.rs`, `client/mod.rs` (events and senders); `tore-world`: `seats.rs` (`WingReply`, `Pilot::Lost`), `world/commands.rs` (the new commands' variants), new `world/{revive,replies}.rs` and `score.rs` holding only the shared types | Every message and field of the [phase 2 wire](formats/net-protocol.md#phase-2-the-kings-settings-revival-scores-and-observers) with its coding; the settings registry with ranges, defaults, names and checks, and the host's settings store (defaults, no King's changes yet); the types the slices share (`Reply`, `Spawn`, `RevivalWeapons`, score facts); the hooks each slice fills (the take check, the tick's revive, score and away calls, message dispatch), each doing nothing yet; requests not built yet are refused "Not available yet." | Round trip, fuzz and golden tests for every new message and field; the golden refreshed under the next version; the host refuses each new request politely; every existing session test passes; quick check `--no-battery` (the new world variants are never sent). **Built (F2-0, 2026-10-05):** protocol 8; the messages in `wire/messages.rs` (`SettingsChange`, `Lock`, `SlotLock`, `Revival`, `Spawned`, `Scores`, `Results`, `Observe`, `Observing`, `EndReason::KillLimit`), the wing reply as command 22; `tore_session::settings` with the registry, typed choices (`Mode`, `Respawn`, `Fight`, `ScoreTally`, `KillOwner` and the rest) and the `Store` the host keeps and sends in every lobby state; the world's `Reply`, `Spawn`, `RevivalWeapons` and `score::Fact`; the host's hooks in `host/{king,revive,score,observe,away,results}.rs`, the take check calling `king_take_refusal` then `revive_take_refusal`; the client's senders and five new events. The step refuses `Abandon` and `Revive` and ignores `WingReply`. A lost plane's roster entry goes out as the AI's (agent decision: the roster has no "nobody"). Tests: `wire/phase2_tests.rs`, `client/phase2_seams_tests.rs`, `settings_tests.rs`, `world/phase2_seams_tests.rs` and the samples' round trip, fuzz and golden. The compile-only arms for the new variants in `tore-app` (`main.rs`, `net/play.rs`, `net/hosting.rs`, `net/debrief.rs`, the lobby preview), `tore-server`'s `wiring.rs` and `radio_calls.rs` are each one line |
 | F2-C Friend-or-foe cues and the new keys | Sonnet | | `tore-app`: `main.rs` (the X's side), new `target_info.rs`, `flight_ui.rs` (U, Ctrl+T and the Pref row), `input_catalog.rs` (every phase 2 key: IFF, Show Target Info, score board, the four replies, each answering "network games only" until its slice lands), `docs/CONTROLS.md` (generated), `docs/tore-keyboard-map.html` | The X on the presented plane's side; IFF's answers; Show Target Info's labels and colours; the catalog rows | Unit tests: the X for a viewer on each side; IFF for friendly, other and none; label text, colours and callsigns from a fixture picture and roster; the controls list test; a headless render of the labels; the menus lane's "Show target info" row no longer reports not implemented; quick guard. **Built (F2-C, 2026-10-05):** as [described above](#friend-or-foe); unit tests for the X on each side (and on a friendly and a hostile runway), IFF's three answers, label text, colours, callsigns, the cap and a headless render; the catalog rows and the controls test; a windowed `replay-script-friend-or-foe` scenario (the replay lane's input scripts) that presses U, Ctrl+T, K and a reply key in single player and compares a frame before and after for the orange text. Single-player change as planned (John, 2026-10-05): the full baseline was recorded and every difference explained in the run's notes |
-| F2-1 The King's lobby | Opus | F2-0 | `host/king.rs`, `host/config.rs`, `host/lobby.rs`, `host/discover.rs`, new `host/king_tests.rs`, `client/lobby_tests.rs` additions; `tore-world` `mission.rs` (`friendly_fire`, the loadout rule) and `world/build.rs`; `tore-server` `config.rs` and `wiring.rs`; `docs/DEDICATED-SERVER.md` | The settings store's King's changes with their phase rules; mode and slots; slot locks; join in progress; lock sides; max players, password and visibility; the loadout rule; friendly fire into the spec; house and crown, passing it, the King's departure; a server's King; the server's configuration keys for every setting | Simulator tests: each setting reaches every lobby state; a non-King and a wrong phase are refused; PvP opens both sides; closed and reserved slots; join in progress off; lock sides; the loadout rule; friendly fire off in a flown mission; the crown passed, used and passed on at a departure; the house's leaving ends the game and the King's does not; a server's first-player King; configuration parsing. A `net` lane scenario: a `tore-server` with `king first-player` and a King bot that changes settings and starts. Single-player baseline SAME |
+| F2-1 The King's lobby | Opus | F2-0 | `host/king.rs`, `host/config.rs`, `host/lobby.rs`, `host/discover.rs`, new `host/king_tests.rs`, `client/lobby_tests.rs` additions; `tore-world` `mission.rs` (`friendly_fire`, the loadout rule) and `world/build.rs`; `tore-server` `config.rs` and `wiring.rs`; `docs/DEDICATED-SERVER.md` | The settings store's King's changes with their phase rules; mode and slots; slot locks; join in progress; lock sides; max players, password and visibility; the loadout rule; friendly fire into the spec; house and crown, passing it, the King's departure; a server's King; the server's configuration keys for every setting | Simulator tests: each setting reaches every lobby state; a non-King and a wrong phase are refused; PvP opens both sides; closed and reserved slots; join in progress off; lock sides; the loadout rule; friendly fire off in a flown mission; the crown passed, used and passed on at a departure; the house's leaving ends the game and the King's does not; a server's first-player King; configuration parsing. A `net` lane scenario: a `tore-server` with `king first-player` and a King bot that changes settings and starts. Single-player baseline SAME. **Built (F2-1, 2026-10-05):** as [described above](#the-kings-lobby-as-built-f2-1): the crown and the house, the settings' checks and phase rules, mode and slots, slot locks, join in progress, lock sides, the limit, password and visibility (a hosted game's thread lists it while public), the loadout rule and friendly fire in the mission, a server's first-player King, `king-mission locked` and its return to the file; the server's keys for every setting (`mode`, `kill-limit`, `observer-delay` and the rest, `king`, `king-mission`); the host log's crown, settings, lock and watch lines; `tore-bot --king`. Tests: `host/king_tests.rs` (16 on the simulator), `host/config.rs`, `settings_tests.rs`, `mission.rs` (the lines, the rule, the build), `tore-server` `config.rs`, `tore-bot`'s options, a hosting thread test of the visibility; the net lane's `net-server-king`, `net-server-pvp` (a kill limit in PvP; the scripted pilot rarely lands a gun kill, so with none the time limit ends it in a draw) and `net-server-delay`. Single-player baseline SAME |
 | F2-R Orders and replies | Sonnet | F2-0, F2-C, stage G's G3a and G8 | `tore-world` `world/replies.rs`, `radio_calls.rs`, `ai_wings/orders.rs`, the comms delivery; the app's handling of the four reply actions; `tore-bot --reply` | The order call to human wingmen; the reply calls and their refusals | World tests on the crowd fixture: a human lead's order reaches its human wingman as a call and a line, and nobody else; each reply reaches the flight's humans only, respects radio silence, and a lead's reply is refused; the radio journal; a `net` scenario with two bots in one wing exchanging an order and a reply. Single-player baseline SAME |
 | F2-S Scoring | Opus | F2-0 | `tore-world` `score.rs` and its call in `world.rs`; `tore-sim` combat's `Strike` amount; `host/score.rs`, new `host/score_tests.rs`; the client's scores; `tore-app` new `net/scoreboard.rs` and its call in `net/play.rs` | Score facts; tallies; limits and the kill limit's end; Scores; the score board on K | World tests: a human killed with the pilot aboard counts two, after ejecting one, ground kills none, damage fractions, losses, AI shooters; host tests for each tally, fight type and owner, the kill limit's end with its winner and a draw, the time limit, the pace; a render test of the board. Single-player baseline SAME (facts off). **Built (F2-S, 2026-10-05):** as [described above](#scoring); the world's facts (`score.rs`, combat's `Strike::amount`), the host's tallies, limits, winner and pace (`host/score.rs`), the client's kept scores and their words (`client/scores.rs`), `tore-bot`'s scores lines, and K's board (`net/scoreboard.rs`, two short hunks in `main.rs`: the K arm and the draw call). Tests: `world/score_tests.rs` (a real gun burst's damage, kill and loss; ejection; AI shooters; no shooter; ground kills and fractions; recording changes nothing the mission does), `host/score_tests.rs` (on the simulator: kills, losses, damage, ratio, both fights, the kill limit by side, total and player with a winner and a draw, the time limit's winner, co-op, the pace, a late joiner and a departure), `client/scores.rs` (the words, and the real client keeping and counting down), the board's lines and a headless render, and the net lane's `net-server-scores` |
 | F2-V Death and revival | Opus | F2-0 | `tore-world` `world/revive.rs`, `world/handoff.rs`, `ai_wings.rs` (the spawned aircraft), new `world/revive_tests.rs`; `host/revive.rs`, new `host/revive_tests.rs`; the client's revival state and its own copy's spawn; `tore-app` `net/play.rs` (the prompt and Enter); `tore-bot --revive` | Abandon and Revive; the revival point and loadout; retiring; lives, delay and the three rules; Join after a loss; replaces the host's orphans | World tests: a revived plane's place, heading, speed, stores under each weapons rule and its handoff invariants; Abandon keeps a wreck falling; 100 revivals in one mission stay within 64 planes; host tests for each rule, lives, the delay, the lobby's Join, lock sides; a client copy that adds the spawned plane; a `net` scenario where a bot ejects, revives and flies on. Single-player baseline SAME |

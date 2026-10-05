@@ -192,6 +192,17 @@ by the King in the lobby and fixed for the flight. Not in phase 2: the Host row
 (pinned or calculated) and releasing a reserved aircraft (stage K), and what
 public visibility does on the master server (stage I).
 
+*Built on the wire (F2-1, 2026-10-05):* the King's settings with their phase
+rules, PvP's slots on both sides, slot locks (closed or kept for a callsign),
+join in progress, lock sides, the player limit, password and visibility (a
+hosted game lists itself on the Internet Lobby while it is public), the
+loadout rule (Cheat loading under `any`), friendly fire in the flown mission,
+the crown passed and passed on, the house apart from it, and a dedicated
+server's King with `king first-player` and `king-mission locked`; a server's
+file sets every setting by name. The Settings... and Players... panels are
+slice F2-L's. How it works and each agent decision:
+[architecture](ARCHITECTURE.md#the-kings-lobby-as-built-f2-1).
+
 **Start.** Everyone starts airborne, as in retail multiplayer. Late joiners take
 over aircraft already flying. *Retail gap-fill (agent):* until multiplayer
 ground starts exist, "back at a base" starts the player airborne near their
@@ -1026,6 +1037,9 @@ Raised while planning (2026-09-28):
   server's configuration may give the crown to the first player
   (`king first-player`) and may lock its mission (`king-mission locked`)
   ([architecture](ARCHITECTURE.md#the-king-the-crown-and-the-house)).
+  John took it on 2026-10-05 ([decisions](#decisions)); *built (F2-1)*: a
+  crowned server that has been empty for its empty timeout goes back to its
+  file's mission and settings ([server guide](DEDICATED-SERVER.md#the-kings-settings-and-a-king)).
 - **No eligible host.** If every peer can connect only through the relay, no one
   can be the calculated host. *Agent proposal:* the King sees a plain warning
   and can pin a relayed host anyway, or use a dedicated server.

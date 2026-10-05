@@ -4,19 +4,27 @@
 //! messages); this is the one place the host fills one in.
 
 use super::{Host, Life, Stage};
+use crate::settings::Visibility;
 use std::net::SocketAddr;
 use tore_net::packet::{Discover, DiscoverAnswer, DiscoverPhase};
 
 impl Host {
-    /// Queues the answer to a discover query from `from`, in every phase.
+    /// Queues the answer to a discover query from `from`, in every phase,
+    /// unless the King's visibility is `hidden` (stage F phase 2): then the
+    /// game is joined by address only and answers no search.
     pub(super) fn answer_discover(&mut self, from: SocketAddr, query: &Discover) {
+        if self.settings.visibility() == Visibility::Hidden {
+            return;
+        }
         let answer = self.discover_answer(query.nonce);
         self.server.answer_discover(from, answer);
     }
 
     /// What a discover query with `nonce` is answered: the game's name and
     /// mission, its players and capacity, the King, whether it needs a
-    /// password, and the phase. The transport fits it to the query's length.
+    /// password, and the phase; the name and the password as the King last
+    /// set them. The transport fits it to the query's length. A listing on
+    /// the Internet Lobby carries the same.
     pub fn discover_answer(&self, nonce: u64) -> DiscoverAnswer {
         let mut peers: Vec<_> = self
             .peers
@@ -37,11 +45,11 @@ impl Host {
             game_version: self.config.build.version.clone(),
             game_commit: self.config.build.commit.clone(),
             session_id: self.session_id,
-            name: self.config.name.clone(),
+            name: self.settings.name().to_owned(),
             summary: self.spec.summary(),
             players: u8::try_from(players).unwrap_or(u8::MAX),
             capacity: u8::try_from(capacity).unwrap_or(u8::MAX),
-            password: self.config.password.is_some(),
+            password: self.settings.password().is_some(),
             full: players >= capacity,
             phase,
             king: peers
@@ -67,7 +75,7 @@ mod tests {
     use tore_world::mission::{MissionSpec, Skill, Start};
     use tore_world::test_support::resources::{THEATER, resources};
 
-    use super::super::{BuildId, HostConfig, OpenPlanes, StartMode};
+    use super::super::{BuildId, CrownRule, HostConfig, OpenPlanes, StartMode};
 
     const MS: Duration = Duration::from_millis(1);
 
@@ -205,7 +213,8 @@ mod tests {
     #[test]
     fn players_the_king_and_the_password_are_listed_in_joining_order() {
         let mut host = host(spec(1), |config| {
-            config.king = Some("10.0.1.1:40000".parse().unwrap());
+            config.house = Some("10.0.1.1:40000".parse().unwrap());
+            config.crown = CrownRule::FirstPlayer;
             config.start = StartMode::King;
             config.password = Some("secret".into());
             config.max_players = 2;

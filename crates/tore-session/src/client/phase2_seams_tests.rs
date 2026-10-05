@@ -22,7 +22,8 @@ fn kings_rig() -> Rig {
         LinkConfig::for_round_trip(40 * MS, 0., 0., 0.),
         11,
         |config| {
-            config.king = Some(Rig::player_address(0));
+            config.house = Some(Rig::player_address(0));
+            config.crown = crate::host::CrownRule::FirstPlayer;
             config.start = StartMode::King;
             config.after_end = AfterEnd::Restart;
             config.restart_delay = Duration::ZERO;
@@ -122,20 +123,23 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
         );
     }
 
-    // The King's own: not built yet.
+    // The King's own are built (F2-1): taken, the crown passed last.
     let cobra_id = rig.players[cobra].client.lobby().unwrap().you;
     let player = &mut rig.players[king].client;
-    player.pass_crown(cobra_id);
     player.change_settings(change());
     player.lock_slot(1, Lock::Reserved("Cobra".into()));
     rig.run(Duration::from_millis(300));
-    for request in [kind::PASS_CROWN, kind::SETTINGS, kind::SLOT_LOCK] {
-        assert!(
-            refused(&rig, king, request, NOT_AVAILABLE),
-            "{request}: {:?}",
-            refusals(&rig, king)
-        );
-    }
+    rig.players[king].client.pass_crown(cobra_id);
+    rig.run(Duration::from_millis(300));
+    assert!(
+        refusals(&rig, king).is_empty(),
+        "{:?}",
+        refusals(&rig, king)
+    );
+    assert_eq!(
+        rig.players[cobra].client.lobby().unwrap().king,
+        Some(cobra_id)
+    );
 
     // Everyone's: not built yet.
     let player = &mut rig.players[cobra].client;
@@ -178,11 +182,11 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
     assert!(refused(&rig, cobra, kind::REVIVE, changed));
     assert!(refused(&rig, king, kind::SLOT_LOCK, changed));
 
-    // Nothing broke the protocol, and the lobby's settings are unchanged.
+    // Nothing broke the protocol, and the King's settings stand.
     for p in [king, cobra] {
         assert_eq!(rig.players[p].client.phase(), ClientPhase::Lobby);
     }
-    assert_eq!(rig.host.lobby_state(0).name, rig.host.config().name);
+    assert_eq!(rig.host.lobby_state(0).name, "Cobra's game");
 }
 
 #[test]

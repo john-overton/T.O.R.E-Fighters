@@ -1312,3 +1312,89 @@ fn a_bad_master_address_refuses_the_start() {
     .expect("refused");
     assert!(error.starts_with("Cannot list the game:"), "{error}");
 }
+
+/// The King's Visibility (slice F2-1) lists a hosted game and takes it off,
+/// as `SetListed` does: public registers with the master, local unlists it
+/// (three Unregisters).
+#[test]
+fn the_kings_visibility_lists_the_game_and_takes_it_off() {
+    use tore_net::master::{ListingState, MasterKind};
+    use tore_session::settings::{Visibility, number};
+    use tore_session::wire::messages::SettingsChange;
+    let master = LoopbackMaster::start();
+    let (mut thread, link) = HostThread::start_listed(
+        HostSetup {
+            spec: spec(),
+            resources: import(),
+            config: hosted_config(),
+            listen: loopback(),
+            port: 0,
+        },
+        Some(Listing {
+            master: master.address.to_string(),
+            listed: false,
+            install_id: None,
+        }),
+    )
+    .expect("the host starts");
+    let mut game = Game::join(link);
+    assert!(game.fly_until(Duration::from_secs(5), |g| {
+        g.bot.client.lobby().is_some_and(|l| l.is_king())
+    }));
+    let mut reports = Vec::new();
+    let set = |game: &mut Game, visibility: Visibility| {
+        game.bot.client.change_settings(SettingsChange {
+            values: vec![(number::VISIBILITY, visibility.value())],
+            ..SettingsChange::default()
+        });
+    };
+    let until = |game: &mut Game,
+                 thread: &mut HostThread,
+                 reports: &mut Vec<Report>,
+                 done: &dyn Fn(&[Report]) -> bool| {
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(10) {
+            game.pump();
+            reports.extend(thread.poll());
+            if done(reports) {
+                return true;
+            }
+            thread::sleep(FRAME);
+        }
+        false
+    };
+    let listed = |reports: &[Report]| {
+        reports
+            .iter()
+            .any(|r| matches!(r, Report::Listing(ListingState::Listed { .. })))
+    };
+    // Local, as it starts: nothing goes to the master.
+    game.fly(Duration::from_millis(300));
+    assert_eq!(master.count(MasterKind::Register), 0);
+    set(&mut game, Visibility::Public);
+    assert!(
+        until(&mut game, &mut thread, &mut reports, &listed),
+        "{reports:?}"
+    );
+    set(&mut game, Visibility::Local);
+    assert!(until(
+        &mut game,
+        &mut thread,
+        &mut reports,
+        &|r: &[Report]| {
+            r.iter()
+                .rev()
+                .find_map(|r| match r {
+                    Report::Listing(state) => Some(*state == ListingState::Off),
+                    _ => None,
+                })
+                .unwrap_or(false)
+        }
+    ));
+    let started = Instant::now();
+    while master.count(MasterKind::Unregister) < 3 && started.elapsed() < Duration::from_secs(5) {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(master.count(MasterKind::Unregister), 3);
+    assert!(thread.stop(JOIN_LIMIT));
+}

@@ -1274,7 +1274,9 @@ refused "The mission has changed; choose again.", as the lobby's requests are.
 - **Not built yet.** Until the slice that builds a request lands, the host
   answers it with a Refused "Not available yet." (the King's three after the
   King check), and a client passes each new host message on as an event
-  without acting on it.
+  without acting on it. Pass crown, Settings and Slot lock are built since
+  F2-1 ([the King's lobby](../ARCHITECTURE.md#the-kings-lobby-as-built-f2-1)),
+  with their refusals in words.
 - **Settings.** The count may be 0, for a change of only the name or the
   password (the design said 1 to 64). An empty password is refused by the
   writer and the reader. Setting 5 is refused by number: the password has its
@@ -1309,6 +1311,8 @@ refused "The mission has changed; choose again.", as the lobby's requests are.
   name, password, player limit and time limit (a dedicated server's time limit
   as its file gives it, which may lie outside the King's list); every slot is
   open and nobody observes or is away until slices F2-1, F2-O1 and F2-A.
+  *Since F2-1* the settings are the King's and a server's file's, each slot
+  carries its lock, and the house id is the house's (none on a server).
 - **Mission ended** (kind 11) and Results: reason 5 is the kill limit (3 bits
   already).
 - **Inputs**: command code 22 is a **wing reply**, followed by its kind in 2
@@ -1358,7 +1362,7 @@ value's coding. The names are the configuration file's and the logs'.
 | 1 | `mode` | 0 co-op, 1 PvP |
 | 2 | `max-players` | 1 to 30 |
 | 3 | `join-in-progress` | 0 off, 1 on |
-| 4 | `visibility` | 0 hidden, 1 local, 2 public (refused until stage I) |
+| 4 | `visibility` | 0 hidden, 1 local, 2 public (a game a player hosts; a dedicated server refuses it) |
 | 5 | `password` | 0 none, 1 set (in the lobby state only; Settings carries the text) |
 | 6 | `friendly-fire` | 0 off, 1 on |
 | 7 | `lock-sides` | 0 off, 1 on |
@@ -1370,7 +1374,7 @@ value's coding. The names are the configuration file's and the logs'.
 | 13 | `revive-weapons` | 0 missiles, 1 no missiles, 2 guns, 3 half guns |
 | 14 | `fight` | 0 sides, 1 free for all |
 | 15 | `tally` | 0 kills, 1 damage, 2 ratio |
-| 16 | `time-limit` | seconds: 0 none, 60, 300, 600, 900, 1,200 or 1,800 (a dedicated server's file may give any whole minute up to 30) |
+| 16 | `time-limit` | seconds: 0 none, 60, 300, 600, 900, 1,200 or 1,800 from the King; a dedicated server's file may give any whole minute up to 10,080 (a week), which the lobby state carries as given |
 | 17 | `kill-limit` | 0 none, 1, 2, 3, 5, 7 or 10 |
 | 18 | `kill-owner` | 0 total, 1 side, 2 player |
 | 19 | `observer-delay` | seconds: 0, 10, 30 or 60 |

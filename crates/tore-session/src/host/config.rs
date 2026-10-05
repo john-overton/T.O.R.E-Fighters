@@ -2,6 +2,7 @@
 //! (docs/DEDICATED-SERVER.md, "The configuration file") and the build the
 //! host runs, with the rules each setting must keep.
 
+use crate::settings::{self, Mode};
 use std::fmt;
 use std::time::Duration;
 use tore_net::Entropy;
@@ -14,23 +15,45 @@ pub const SNAPSHOT_RATES: [u32; 8] = [10, 12, 15, 20, 24, 30, 40, 60];
 /// Which planes humans may take.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OpenPlanes {
-    /// Every friendly plane (the default).
+    /// The mode's planes (the default): every friendly plane in co-op, every
+    /// plane of both sides in PvP (slice F2-1).
     Friendly,
-    /// Every plane, both sides: load tests (proper PvP is stage F).
+    /// Every plane, both sides, in either mode.
     All,
-    /// These plane numbers only.
+    /// These plane numbers only, in either mode.
     List(Vec<u32>),
 }
 
 impl OpenPlanes {
-    /// Whether `plane`, on the friendly side when `friendly`, is open.
+    /// Whether `plane`, on the friendly side when `friendly`, is open in
+    /// co-op.
     pub fn allows(&self, plane: u32, friendly: bool) -> bool {
+        self.allows_in(plane, friendly, Mode::Coop)
+    }
+
+    /// Whether `plane`, on the friendly side when `friendly`, is open in
+    /// `mode`: [`OpenPlanes::Friendly`] follows the mode.
+    pub fn allows_in(&self, plane: u32, friendly: bool, mode: Mode) -> bool {
         match self {
-            Self::Friendly => friendly,
+            Self::Friendly => friendly || mode == Mode::Pvp,
             Self::All => true,
             Self::List(planes) => planes.contains(&plane),
         }
     }
+}
+
+/// Who wears the crown (stage F phase 2, slice F2-1; docs/ARCHITECTURE.md,
+/// "The King, the crown and the house").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CrownRule {
+    /// Nobody: a dedicated server's default, whose mission and settings are
+    /// its file's and whose start rule is its own.
+    #[default]
+    None,
+    /// The house when it joins ([`HostConfig::house`]), else the first
+    /// player to join; when the King leaves, the longest-connected player.
+    /// A game a player hosts, and a dedicated server's `king first-player`.
+    FirstPlayer,
 }
 
 /// When the mission starts flying.
@@ -44,7 +67,9 @@ pub enum StartMode {
     /// It flies from the start; players who get ready join in flight.
     Now,
     /// The King starts it, once every player holding a slot is ready: a game
-    /// a player hosts ([`HostConfig::king`]).
+    /// a player hosts ([`HostConfig::house`]). A dedicated server with a King
+    /// keeps its own rule, which gives way to the King's start while a King
+    /// is connected.
     King,
 }
 
@@ -119,13 +144,31 @@ pub struct HostConfig {
     /// The retail stall-speed switch is on for this process: a host refuses
     /// to start with it (as it does when `tore_sim::flight` reports it on).
     pub retail_stall_speeds: bool,
-    /// The King's address: in a game a player hosts, the hosting player's
-    /// own connection over the in-process link (`tore_net::LINK_ADDRESS`),
-    /// which no UDP sender can have. Only the King changes the mission,
-    /// starts it, ends it and kicks, and the King's leaving ends the game for
-    /// everyone. `None` on a dedicated server, which has no King. Set with
-    /// [`StartMode::King`].
-    pub king: Option<std::net::SocketAddr>,
+    /// The house's address (stage F phase 2; until then `king`): in a game a
+    /// player hosts, the hosting player's own connection over the
+    /// in-process link (`tore_net::LINK_ADDRESS`), which no UDP sender can
+    /// have. The house wears the crown when it joins, and its leaving ends
+    /// the game for everyone (until stage K migrates the host). `None` on a
+    /// dedicated server. Set with [`StartMode::King`] and
+    /// [`CrownRule::FirstPlayer`].
+    pub house: Option<std::net::SocketAddr>,
+    /// Who wears the crown: only the King changes the mission and the
+    /// settings, locks slots, starts and ends the mission, kicks and passes
+    /// the crown.
+    pub crown: CrownRule,
+    /// The King may not change the mission or the settings (a dedicated
+    /// server's `king-mission locked`): its file's stay. Start, kick, slot
+    /// locks and the crown still work.
+    pub mission_locked: bool,
+    /// The King's settings the configuration sets beyond the fields above
+    /// (a dedicated server's file; [`crate::settings`]), by number: never
+    /// the player limit, the password or the time limit, which are fields
+    /// of their own.
+    pub settings: Vec<(u8, u32)>,
+    /// The King's `public` visibility can list the game on the Internet
+    /// Lobby: a game a player hosts, whose hosting thread lists it. A
+    /// dedicated server's listing is its operator's `broadcast`.
+    pub listable: bool,
 }
 
 impl HostConfig {
@@ -145,7 +188,11 @@ impl HostConfig {
             build,
             entropy: Entropy::System,
             retail_stall_speeds: false,
-            king: None,
+            house: None,
+            crown: CrownRule::None,
+            mission_locked: false,
+            settings: Vec::new(),
+            listable: false,
         }
     }
 
@@ -187,15 +234,72 @@ impl HostConfig {
         if self.time_limit.is_some_and(|t| t.is_zero()) {
             return bad("time-limit of 0 is written as none".into());
         }
-        if (self.start == StartMode::King) != self.king.is_some() {
-            return bad("a King starts the mission exactly when the game has one".into());
+        if (self.start == StartMode::King) != self.house.is_some() {
+            return bad("the King's start is a game a player hosts, which has a house".into());
         }
+        if self.house.is_some() && self.crown != CrownRule::FirstPlayer {
+            return bad("the house of a game a player hosts wears the crown".into());
+        }
+        self.check_settings().map_err(HostError::Setting)?;
         if self.retail_stall_speeds || tore_sim::flight::retail_stall_speeds() {
             return Err(HostError::RetailStallSpeeds);
         }
         Ok(())
     }
+
+    /// Checks [`HostConfig::settings`]: each a setting of the registry with
+    /// an allowed value, given once, and not one with a field of its own;
+    /// `public` only for a game that can be listed; a setting that applies
+    /// only in PvP only with `mode pvp` (agent decision: a co-op server would
+    /// ignore it, so it is refused rather than kept unseen).
+    pub fn check_settings(&self) -> Result<(), String> {
+        let mut seen = std::collections::BTreeSet::new();
+        for &(number, value) in &self.settings {
+            let Some(setting) = settings::setting(number) else {
+                return Err(format!("there is no setting {number}"));
+            };
+            if matches!(
+                number,
+                settings::number::MAX_PLAYERS
+                    | settings::number::PASSWORD
+                    | settings::number::TIME_LIMIT
+            ) {
+                return Err(format!("{} is set by its own field", setting.name));
+            }
+            if let Some(why) = settings::refusal(number, value) {
+                return Err(why.trim_end_matches('.').to_owned());
+            }
+            if !seen.insert(number) {
+                return Err(format!("{} is given twice", setting.name));
+            }
+            if number == settings::number::VISIBILITY
+                && value == settings::Visibility::Public.value()
+                && !self.listable
+            {
+                return Err(PUBLIC_IS_BROADCAST.trim_end_matches('.').to_owned());
+            }
+        }
+        let pvp = self
+            .settings
+            .iter()
+            .any(|&(n, v)| n == settings::number::MODE && v == Mode::Pvp.value());
+        if !pvp
+            && let Some(setting) = self
+                .settings
+                .iter()
+                .filter_map(|&(n, _)| settings::setting(n))
+                .find(|s| s.pvp_only)
+        {
+            return Err(format!("{} applies only in PvP (mode pvp)", setting.name));
+        }
+        Ok(())
+    }
 }
+
+/// Why a game that cannot be listed refuses `public` visibility: a
+/// dedicated server lists itself by its operator's `broadcast`.
+pub const PUBLIC_IS_BROADCAST: &str =
+    "A dedicated server lists itself on the Internet Lobby only by its operator's `broadcast on`.";
 
 /// Why a host could not start.
 #[derive(Debug)]
@@ -279,12 +383,33 @@ mod tests {
                 ..base.clone()
             },
             HostConfig {
-                king: Some("[100::]:0".parse().unwrap()),
+                house: Some("[100::]:0".parse().unwrap()),
+                crown: CrownRule::FirstPlayer,
+                ..base.clone()
+            },
+            HostConfig {
+                house: Some("[100::]:0".parse().unwrap()),
+                start: StartMode::King,
                 ..base.clone()
             },
         ] {
             assert!(matches!(config.validate(), Err(HostError::Setting(_))));
         }
+        // A game a player hosts, and a server whose first player is King.
+        HostConfig {
+            house: Some("[100::]:0".parse().unwrap()),
+            start: StartMode::King,
+            crown: CrownRule::FirstPlayer,
+            ..base.clone()
+        }
+        .validate()
+        .unwrap();
+        HostConfig {
+            crown: CrownRule::FirstPlayer,
+            ..base.clone()
+        }
+        .validate()
+        .unwrap();
         let stall = HostConfig {
             retail_stall_speeds: true,
             ..base
@@ -293,6 +418,52 @@ mod tests {
             stall.validate(),
             Err(HostError::RetailStallSpeeds)
         ));
+    }
+
+    #[test]
+    fn the_configurations_settings_are_checked() {
+        use settings::number;
+        let with = |values: &[(u8, u32)]| HostConfig {
+            settings: values.to_vec(),
+            ..HostConfig::new(build())
+        };
+        with(&[(number::MODE, 1), (number::KILL_LIMIT, 3)])
+            .validate()
+            .unwrap();
+        with(&[(number::FRIENDLY_FIRE, 0), (number::VISIBILITY, 0)])
+            .validate()
+            .unwrap();
+        let refused = |values: &[(u8, u32)]| match with(values).validate() {
+            Err(HostError::Setting(text)) => text,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            refused(&[(number::KILL_LIMIT, 3)]),
+            "kill-limit applies only in PvP (mode pvp)"
+        );
+        assert_eq!(
+            refused(&[(number::LIVES, 11)]),
+            "lives is 0 to 10 or unlimited"
+        );
+        assert_eq!(
+            refused(&[(number::MAX_PLAYERS, 4)]),
+            "max-players is set by its own field"
+        );
+        assert_eq!(
+            refused(&[(number::RESPAWN, 1), (number::RESPAWN, 2)]),
+            "respawn is given twice"
+        );
+        assert!(refused(&[(number::VISIBILITY, 2)]).contains("broadcast on"));
+        HostConfig {
+            listable: true,
+            ..with(&[(number::VISIBILITY, 2)])
+        }
+        .validate()
+        .unwrap();
+        // Open planes follow the mode by default.
+        assert!(!OpenPlanes::Friendly.allows_in(7, false, Mode::Coop));
+        assert!(OpenPlanes::Friendly.allows_in(7, false, Mode::Pvp));
+        assert!(!OpenPlanes::List(vec![1]).allows_in(7, false, Mode::Pvp));
     }
 
     #[test]
