@@ -430,6 +430,57 @@ impl Airframe {
     ) -> Vec<f32> {
         self.visual_vertices(s, camera, world, scenery, true)
     }
+    /// Clean source-space faces after the exact transforms used for drawing.
+    /// Headless surface probes use this boundary before camera culling or shading.
+    pub(crate) fn animation_faces(&self, state: &flight::State) -> Vec<tore_formats::shape::Face> {
+        self.transformed_faces(self.animation_shape(state), state, false)
+    }
+    pub(crate) fn animation_scale(&self) -> f32 {
+        self.rig.as_ref().map_or(1. / 3., |rig| rig.scale())
+    }
+    fn animation_shape(&self, state: &flight::State) -> &Shape {
+        &self.poses[if self.profile.id == tore_formats::aircraft::AircraftId::F18 {
+            15
+        } else if self.rig.is_some() {
+            0
+        } else {
+            usize::from(state.gear > 0.)
+        }]
+    }
+    fn transformed_faces(
+        &self,
+        shape: &Shape,
+        s: &flight::State,
+        damaged: bool,
+    ) -> Vec<tore_formats::shape::Face> {
+        let hornet_rig = self.profile.id == tore_formats::aircraft::AircraftId::F18;
+        shape
+            .faces
+            .iter()
+            .flat_map(|f| {
+                if damaged {
+                    vec![f.clone()]
+                } else if hornet_rig {
+                    crate::aircraft_animation::rudder_faces(f, s)
+                } else if let Some(rig) = &self.rig {
+                    rig.faces(f, s)
+                } else {
+                    vec![f.clone()]
+                }
+            })
+            .filter_map(|source| {
+                if damaged {
+                    Some(source)
+                } else if hornet_rig {
+                    crate::aircraft_animation::animate(&source, s)
+                } else if let Some(rig) = &self.rig {
+                    rig.animate(&source, s)
+                } else {
+                    crate::rafale_animation::animate(&source, s)
+                }
+            })
+            .collect()
+    }
     fn visual_vertices(
         &self,
         s: &flight::State,
@@ -458,7 +509,7 @@ impl Airframe {
             );
             direction.map(|v| (v * 32767.).round().clamp(-32767., 32767.) as i16)
         });
-        let model_scale = self.rig.as_ref().map_or(1. / 3., |r| r.scale());
+        let model_scale = self.animation_scale();
         let at = scenery.local(s.position);
         let hornet_rig = self.profile.id == tore_formats::aircraft::AircraftId::F18;
         let damaged = if fragment {
@@ -480,40 +531,9 @@ impl Airframe {
                 &self.damage_art.bodies[index]
             }
         } else {
-            &self.poses[if hornet_rig {
-                15
-            } else if self.rig.is_some() {
-                0
-            } else {
-                usize::from(s.gear > 0.)
-            }]
+            self.animation_shape(s)
         };
-        let faces: Vec<_> = shape
-            .faces
-            .iter()
-            .flat_map(|f| {
-                if damaged.is_some() {
-                    vec![f.clone()]
-                } else if hornet_rig {
-                    crate::aircraft_animation::rudder_faces(f, s)
-                } else if let Some(rig) = &self.rig {
-                    rig.faces(f, s)
-                } else {
-                    vec![f.clone()]
-                }
-            })
-            .filter_map(|source| {
-                if damaged.is_some() {
-                    Some(source)
-                } else if hornet_rig {
-                    crate::aircraft_animation::animate(&source, s)
-                } else if let Some(rig) = &self.rig {
-                    rig.animate(&source, s)
-                } else {
-                    crate::rafale_animation::animate(&source, s)
-                }
-            })
-            .collect();
+        let faces = self.transformed_faces(shape, s, damaged.is_some());
         // Positive when the stored normal faces the camera.
         let facing = |f: &tore_formats::shape::Face| {
             f.normal.map_or(1., |n| {

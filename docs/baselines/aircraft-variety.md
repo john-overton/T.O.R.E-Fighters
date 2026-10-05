@@ -11,7 +11,10 @@
 Implementation mode, 2026-10-05, on Linux in the `import-variety` worktree,
 started from multiplayer at `7d25975b`. This is the initial 23-aircraft import
 pass, bringing the catalog to 36 reviewed retail identities plus F/A-XX.
-The [matrix](../spec/aircraft-variety.md) tracks remaining feature coverage.
+These are integration checks, not complete control-surface acceptance. The
+[per-aircraft animation audit](aircraft-animations.md) records missing mappings,
+attachment defects and their targeted repairs. The
+[matrix](../spec/aircraft-variety.md) tracks remaining feature coverage.
 Retail media identity and dependency hashes are in the
 [source inventory](../formats/aircraft-variety.md); no original executable or
 imported module was run. Retail gameplay comparison is unavailable.

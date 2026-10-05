@@ -554,6 +554,20 @@ the isolated flight-model probe, not a complete rendered mission. Keep the
 default researched flight adapter unless the task explicitly concerns another
 adapter. Use `--aircraft rafale` for the exact Rafale C identity.
 
+For an individual aircraft's actual surface geometry, before broad integration
+checks:
+
+```sh
+TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --aircraft a7 --animation-probe .local/animation-probes/a7 --no-audio
+```
+
+This exits before window initialization. It writes actual transformed OBJ poses,
+`report.json`, `index.txt` and CPU orthographic contact sheets. Missing required
+motion or a reviewed attachment/direction failure returns an error after writing
+evidence. Raw candidate seams still need source review. Keep these user-owned
+geometry derivatives ignored. `--headless-flight` alone does not test rendered
+control surfaces. See the [aircraft animation audit](baselines/aircraft-animations.md).
+
 For a CPU-rendered Ordnance screen capture:
 
 ```sh

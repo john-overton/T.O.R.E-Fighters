@@ -222,11 +222,39 @@ pub struct Rig {
     id: Id,
     groups: BTreeMap<usize, Group>,
     scale: f32,
+    a7: Option<crate::a7_animation::Rig>,
+    f4: Option<crate::f4_animation::Rig>,
 }
 impl Rig {
     pub fn load(id: Id, bytes: &[u8]) -> AppResult<(Self, Shape)> {
         let spec = specification(id).ok_or("unreviewed variety aircraft rig")?;
         let mut shape = Shape::parse(bytes)?;
+        if id == Id::A7 {
+            let (a7, shape) = crate::a7_animation::Rig::load(bytes, shape)?;
+            return Ok((
+                Self {
+                    id,
+                    groups: BTreeMap::new(),
+                    scale: spec.scale,
+                    a7: Some(a7),
+                    f4: None,
+                },
+                shape,
+            ));
+        }
+        if matches!(id, Id::F4B | Id::F4J | Id::F4E | Id::F4G) {
+            let (f4, shape) = crate::f4_animation::Rig::load(id, bytes, shape)?;
+            return Ok((
+                Self {
+                    id,
+                    groups: BTreeMap::new(),
+                    scale: spec.scale,
+                    a7: None,
+                    f4: Some(f4),
+                },
+                shape,
+            ));
+        }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
             || shape.faces.len() != spec.faces
             || shape.state_words != spec.words.iter().copied().collect()
@@ -297,6 +325,8 @@ impl Rig {
                 id,
                 groups,
                 scale: spec.scale,
+                a7: None,
+                f4: None,
             },
             shape,
         ))
@@ -305,11 +335,23 @@ impl Rig {
         self.scale
     }
     pub fn flame(&self, address: usize) -> bool {
+        if let Some(f4) = &self.f4 {
+            return f4.flame(address);
+        }
+        if self.a7.is_some() {
+            return crate::a7_animation::flame(address);
+        }
         self.groups
             .get(&address)
             .is_some_and(|g| g.part == Part::Flame)
     }
     pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
+        if let Some(f4) = &self.f4 {
+            return f4.animate(source, state);
+        }
+        if let Some(a7) = &self.a7 {
+            return a7.animate(source, state);
+        }
         if !crate::variety_rotors::keep_face(self.id, source.address) {
             return None;
         }
@@ -433,6 +475,8 @@ mod tests {
         let rig = Rig {
             id: Id::F16C,
             scale: 1. / 3.,
+            a7: None,
+            f4: None,
             groups: [
                 (
                     1,

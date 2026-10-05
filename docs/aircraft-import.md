@@ -289,6 +289,21 @@ cadence, shared simulation/render muzzle transforms, and tests for blocked
 fire as well as successful firing. Importing references alone does not
 implement a special capability such as AWACS contact sharing.
 
+### Individual surface acceptance
+
+John requested aircraft-by-aircraft headless animation review on 2026-10-05.
+Before broad creator or flight validation, run the selected aircraft through
+`--animation-probe` and inspect its actual surface poses. Successful imports,
+finite flight and branch counts do not establish animation completeness.
+Require signed pitch/roll/yaw response, opposite roll surfaces, shared hinges,
+coherent upper/lower skins and intermediate device travel. Review gear wheel
+separation, roots and stow placement densely. Preserve source neutral geometry;
+a pre-deflected branch is not a neutral pose. Record fitted control assignments
+and motion constants in the behavior spec, and keep unknown mechanisms explicit.
+The [audit](baselines/aircraft-animations.md) and
+[A-7 worked contract](spec/variety-animation.md#a-7-surface-repair-and-acceptance)
+show the first per-aircraft repair and its limitations.
+
 ## Commands and implementation entry points
 
 For an aircraft with selectable external tanks, review its exact GAS record and
