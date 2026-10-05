@@ -569,6 +569,9 @@ simulator can seed them instead, which makes a whole session repeat exactly.
 arrivals spread uniformly within plus or minus a width (reordering follows),
 loss, duplication and optional burst loss (two states, good and bad), on a
 virtual clock. It can record every datagram with its fate and arrival times.
+Routers can stand between endpoints: address translation with each of RFC
+4787's mapping and filtering behaviours, nested routers and IPv6 firewalls
+([the NAT simulator](../ARCHITECTURE.md#the-nat-simulator)).
 
 ## Inputs
 

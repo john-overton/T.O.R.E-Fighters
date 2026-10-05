@@ -2560,7 +2560,7 @@ macOS timing.
 | Crate | Kind | Holds | Depends on |
 | --- | --- | --- | --- |
 | `tore-codec` | library | Bit writer and bounded bit reader, variable-length integers, quantizers, FNV-1a and CRC-32. Shared by the wire, the exact own-plane coder and, in stage H, the checkpoints | std only |
-| `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator. **Built (D2).** The host and client are state machines that never read a clock or touch a socket: the caller passes the time in, feeds them datagrams and sends what they give, over a UDP socket or the simulator (agent decision). *Slice EF3 adds* the in-process link (`link`) a hosting game flies through, and takes from `tore-server` the dual-stack `ServerSocket` (EF-X: it refuses a port another socket holds for IPv4 on every system, [the game port on each system](#the-game-port-on-each-system-ef-x)) and the sleep-then-spin `wait_until`, which the dedicated server and the game's host thread now share ([the host inside the game](#the-host-inside-the-game-stage-e)). *EF4 adds* `Server::set_silence_exempt`, which a hosting game uses for its own player's connection ([the lobby](#the-lobby)). *EF-K adds* the Keepalive packet and the `Keepalive` thread a joined game runs while its loop is stalled ([a stalled game stays connected](#a-stalled-game-stays-connected-ef-k)) | tore-codec |
+| `tore-net` | library | UDP transport, packet header and checksum, connection handshake, acknowledgements and round-trip time, reliable ordered messages, statistics, and the network simulator. **Built (D2).** The host and client are state machines that never read a clock or touch a socket: the caller passes the time in, feeds them datagrams and sends what they give, over a UDP socket or the simulator (agent decision). *Slice EF3 adds* the in-process link (`link`) a hosting game flies through, and takes from `tore-server` the dual-stack `ServerSocket` (EF-X: it refuses a port another socket holds for IPv4 on every system, [the game port on each system](#the-game-port-on-each-system-ef-x)) and the sleep-then-spin `wait_until`, which the dedicated server and the game's host thread now share ([the host inside the game](#the-host-inside-the-game-stage-e)). *EF4 adds* `Server::set_silence_exempt`, which a hosting game uses for its own player's connection ([the lobby](#the-lobby)). *EF-K adds* the Keepalive packet and the `Keepalive` thread a joined game runs while its loop is stalled ([a stalled game stays connected](#a-stalled-game-stays-connected-ef-k)). *J1 adds* routers to the simulator ([the NAT simulator](#the-nat-simulator)) | tore-codec |
 | `tore-import` | library | The data folder, the import pack's reader and writer, media detection and the import itself, moved out of `tore-app` so a server can import and load without the game. *Built (D3a).* | tore-formats |
 | `tore-session` | library | The game's side of networking: the wire messages, the host session (clock, inputs, snapshots, joins), the client session (prediction, interpolation, clock steering, readouts) and the headless bot client. *Wire built (D6)*: the module `wire` has every section and message, the cockpit readout's included, with each end's bookkeeping (acknowledged baselines, priorities, the event queue, the name table) and no clock or socket ([what it settled](formats/net-protocol.md#what-the-games-sections-settled)). *Host built (D7a)*: the module `host` ([the host session](#the-host-session)). *Client built (D8a)*: the modules `client` ([the client session](#the-client-session)) and `bot`, and the `tore-bot` program, which loads an import through `tore-import` | tore-world, tore-net, tore-codec, tore-import |
 | `tore-server` | binary | The dedicated server: configuration, import, logging and the console. **Built (D7b):** options, configuration file, `--import`, `--check`, start-up refusals, the real-time run loop, the console, status lines and the log, around `tore_session::Host`. The run loop drives the host through a small `Host` trait (`host.rs`) that `wiring.rs` implements with `tore_session::Host`, so the loop, console and log are tested against a scripted host on a fake clock (agent decision). Which build is a release is `app::is_release`, the stamped `TORE_BUILD_VERSION` tag, which the game's `--connect` (D8) must use too. *EF-M:* on macOS its loop runs as a real-time thread and it holds App Nap off for its life (`clock.rs`) | tore-session, tore-import, tore-realtime-native |
@@ -6135,26 +6135,75 @@ the master's [Report](formats/master-protocol.md#reports). The code:
 ### The NAT simulator
 
 `tore_net::sim` gains routers (`sim/nat.rs`), so every path above is tested
-in-process, deterministically, on the virtual clock:
+in-process, deterministically, on the virtual clock. **Built (J1).**
 
-- `SimNetwork::add_router(RouterConfig)`: the router's outside address, the
-  inside addresses (a prefix), how it maps (one outside port for every
-  destination; one per destination address; one per destination address and
-  port), how it filters (anyone; only addresses it has sent to; only
-  addresses and ports it has sent to), how it picks outside ports (keep the
-  inside port when free, the next free one, or seeded random), how long an
-  idle mapping lasts (refreshed by outgoing traffic only), whether it loops
-  back a datagram for its own outside address (hairpinning), and static
-  forwards (a mapped or hand-forwarded port).
+- `SimNetwork::add_router(RouterConfig) -> RouterId`: the router's outside
+  address, the inside addresses (a `Prefix`), how it maps (`Mapping`: one
+  outside port for every destination; one per destination address; one per
+  destination address and port), how it filters (`Filtering`: anyone; only
+  addresses it has sent to; only addresses and ports it has sent to), how it
+  picks outside ports (`PortChoice`: keep the inside port when free, the next
+  free one, or seeded random), how long an idle mapping lasts (refreshed by
+  outgoing traffic only), whether it loops back a datagram for its own
+  outside address (hairpinning), and static forwards (a mapped or
+  hand-forwarded port). The names are RFC 4787's.
 - A router's outside address may be inside another router: a home router
   behind a carrier's (CGNAT) or behind a second home router.
 - An IPv6 firewall is a router that translates nothing and filters by what
-  was sent out.
+  was sent out (`RouterConfig::firewall`, an outside address of `None`).
 - Each datagram is translated on its way out and on its way in, and the
   link's latency and loss apply as before; drops are counted per router and
-  cause (no mapping, filtered, expired).
+  cause (`SimNetwork::router_stats`: no mapping, filtered, expired, and no
+  hairpinning).
 - Every existing use of the simulator, with no router added, behaves exactly
-  as before.
+  as before: a test pins the received datagrams, the trace and the link
+  counts of a lossy, reordering, duplicating run to the values the code
+  before J1 gave.
+
+What the build settled (each an agent decision):
+
+- **When a router decides.** The routers on the sender's side translate a
+  datagram as it is sent; the routers on the receiver's side check their
+  mappings and filters when it arrives, with the state they have at that
+  moment. So two ends punching toward each other at the same moment both
+  get through, as on real routers, and a punch that arrives before the other
+  end has sent is dropped. The network takes arrivals in through routers
+  lazily, before anything sends or reads, each at its own arrival time.
+  Routers on one path add no delay of their own; the link between the two
+  sockets carries the whole latency.
+- **Links across routers** are still keyed by the sending socket's own
+  address and the address it sent to (for a datagram to a router, its
+  outside address), so `set_default_link` covers every path and
+  `set_link` can still single one out.
+- **Where a socket or router stands.** `bind` places an address behind the
+  router whose inside prefix holds it most narrowly, else on the open
+  network. Two homes on the same `192.168.1.0/24` behind one carrier are
+  told apart with `RouterConfig::behind` and `SimNetwork::bind_behind`.
+  Sockets on one side of a router reach each other without it. Routers are
+  added before the sockets behind them; a router that would take in an
+  address already bound, an outside address another router or a socket has,
+  or a forward to an address outside it is refused.
+- **Mappings and ports.** Outside ports are 1,024 and up; a mapping's port is
+  never shared, nor a forwarded one handed out. Keeping the inside port
+  falls back to the next free one above it. Random ports come from a
+  generator seeded by the network's seed and the router's number, so they
+  change nothing else a seed decides.
+- **Forwards** let anyone in, never expire, and carry the inside socket's own
+  traffic out from the forwarded port, as routers with a port mapping do. A
+  firewall's forward opens the inside address itself.
+- **Hairpinning** loops a datagram back from the sender's outside address,
+  through the filter like any other arrival; it is on by default, as RFC
+  4787 asks. `RouterConfig::nat` is a typical home router: one outside port
+  per socket, the inside port kept, filtering by address and port, two
+  minutes idle.
+- **Dual-stack sockets.** `SimNetwork::bind_dual(v4, v6)` is one socket at an
+  IPv4 and an IPv6 address, as the joining player's dual-stack socket is: it
+  sends from the address of the destination's family and receives at both,
+  so a race can try both families from one socket.
+- **What tests read.** Each trace entry gains `sent_as`, the source after the
+  sender's routers (`None` when one dropped it), and
+  `SimNetwork::mapped(router, inside, to)` gives a live mapping's outside
+  address.
 
 ### Testing on one machine
 
@@ -6199,7 +6248,7 @@ change in these stages.
 | Slice | Model | After | Owns | Work | Acceptance |
 | --- | --- | --- | --- | --- | --- |
 | I1 Master wire | Opus | | `tore-net/src/master/{mod,packet,candidate}.rs`, `tore-net/master-golden.txt`, one `pub mod master;` line in `tore-net/src/lib.rs` | Every packet of [master-protocol.md](formats/master-protocol.md): encode, bounded decode, padding, fitting answers to requests; addresses, candidates, mapping types; the summary coded as a discovery answer without its nonce; the constants (ports, version, the default master address as a placeholder until John names it); `CookieKey` made public for the master | Seeded round trips of every kind; 100,000 fuzzed datagrams never panic; the golden file; for every request an unproven sender may make, the largest possible answer is no longer than the request; a summary with every text at its limit and 30 callsigns fits Register, Heartbeat and Listing details, cut and flagged |
-| J1 NAT simulator | Opus | | `tore-net/src/sim.rs` moved to `sim/mod.rs`, new `sim/nat.rs` | [The NAT simulator](#the-nat-simulator) | One test per mapping, filtering and port-choice behaviour; mapping expiry refreshed by outgoing traffic only; hairpinning on and off; a router behind a router; an IPv6 firewall; static forwards; the same seed gives the same trace; every existing test that uses the simulator passes unchanged |
+| J1 NAT simulator | Opus | | `tore-net/src/sim.rs` moved to `sim/mod.rs`, new `sim/nat.rs` | [The NAT simulator](#the-nat-simulator) | One test per mapping, filtering and port-choice behaviour; mapping expiry refreshed by outgoing traffic only; hairpinning on and off; a router behind a router; an IPv6 firewall; static forwards; the same seed gives the same trace; every existing test that uses the simulator passes unchanged **Built (J1, 2026-10-05):** the routers as [designed](#the-nat-simulator), deciding arrivals when they arrive; 24 tests in `sim/nat.rs` cover each behaviour named here, a router deciding at arrival, two homes on one prefix behind a carrier, a dual-stack socket, links across routers and refused placements; a pinned fingerprint shows a run with no router gives exactly what the code before J1 gave, and every existing test passes unchanged |
 | J4 Port mapping library | Opus | | `tore-net/src/portmap/{mod,ssdp,http,xml,igd,natpmp,pcp,gateway}.rs`, one `pub mod portmap;` line in `tore-net/src/lib.rs` | [Port mapping](#port-mapping): the three protocols at once, the gateway, renewing, removing, the second-router check | Against fakes on loopback: SSDP and the device description (both IGD versions, chunked bodies), `AddPortMapping`, the conflict code and the next port, a device that takes only a lease of 0, `DeletePortMapping`; NAT-PMP and PCP answers, PCP's version refusal falling back to NAT-PMP, nonces checked; a private outside address reported as a second router; every call ends within its time with a silent fake; the HTTP, XML and packet parsers fuzzed |
 | I2 Master server | Opus | I1 | The new crate `crates/tore-master/` (every file), `tore-net/src/master/browse.rs`, the workspace `Cargo.toml` member and `Cargo.lock`, a `crates/tore-master/*` rule in `tools/battery_selection.py`, `docs/MASTER-SERVER.md` | [The master](#the-master): proving addresses, listings, heartbeats, keeps, expiry, Unknown listing, unregister, browse pages and details, probes on both ports, reports into daily counts, limits, the status line and daily table, the configuration and `--check-config`, the `flood` tool; the browse client. `introduce.rs` and `relay.rs` exist with their dispatch and drop their packets, counted, until J2 and J3 | On the simulator with a scripted host and browser: no listing without a cookie, and a forged source gets nothing but a 23-byte Challenge; a listing appears in the next Browse; a missing heartbeat drops it at 90 seconds (virtual clock), an Unregister at once; pages list every match once, filtered by build and fullness, in order; under a seeded flood from 1,000 sources the bytes answered to every unproven source are at most the bytes it sent, every limit holds, and a proper browser is still answered; IPv6 sources count by /64. Real sockets on 127.0.0.1: register and browse. Battery: `net-master-flood` (the master and its flood tool for 10 s; the status line shows the limits held and a browse during the flood answered) |
 | I3 Listing from hosts | Opus | I1; its end-to-end commit after I2 | `tore-net/src/master/{rendezvous,routed,local}.rs`, `meet.rs` and `relay.rs` as dispatch stubs, `crates/tore-server/src/{config,wiring,run,console,options}.rs` and its tests, `docs/DEDICATED-SERVER.md`, `crates/tore-app/src/net/{hosting,hosting_tests,options}.rs` | The host's `Rendezvous` and `Routed` ([one socket](#one-socket-two-protocols), [listing](#listing-a-game)): lookup, mapping test, register, heartbeats with the summary, change heartbeats, keeps, register again, back-off, unregister; the install id in Register; the host's or server's Report at the session's end. `tore-server`: `list` (off by default), `master`, `telemetry`, the console's `list on` and `list off`, the start and status lines. The game: `HostSetup.listing`, `Command::SetListed`, `Report::Listing`, `--host FILE --list [--master ADDRESS]` | On the simulator against `tore_master::Master` (a dev-dependency): a host is browsable within its first exchange and its summary's changes within 5 seconds; a vanished host is gone within 90 seconds; a master restart is healed within one heartbeat; a silent master is asked with back-off, never more than once a second; game datagrams pass `Routed` unchanged and no master datagram reaches the transport; a claim of `100::/64` from the socket is dropped. A hosting thread with `listing` registers to an in-test master and unregisters on stop. Battery: `net-master-listing` (a master, a `tore-server` with `list on`, `tore-app --browse 5` lists it; quitting the server removes it) |
