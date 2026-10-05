@@ -454,6 +454,8 @@ tore-app --host duel.txt --callsign Viper
 | `--open-planes friendly\|all\|N,N` | Which planes players may take, as the `open-planes` setting; default `friendly` |
 | `--password TEXT` | The password joining players must give; the hosting player's own game gives it too |
 | `--callsign NAME`, `--slot N` | The hosting player's own, as for `--connect` |
+| `--list` | Also list the game on the Internet Lobby (I3), as a server with `broadcast on` lists itself |
+| `--master HOST[:PORT]` | The master `--list` lists on; default the public one, port 26901 when none is given |
 
 The game runs the same host session as `tore-server`, on a thread of its own
 with its own 120 ticks a second, and joins it as an ordinary client over an
@@ -487,6 +489,16 @@ while flying, the hosting player is told "The game you were hosting stopped:
 be sent, the usual "no packets for 5 seconds". The host's log lines go to the
 game's log with `Host:` in front, and the hosted session keeps the same
 diagnostics log and capture as a joined one, the capture named `hosted`.
+
+*Built (I3).* With `--list` the host thread talks to the master from the
+game port, as a [broadcasting server](#broadcasting-on-the-internet-lobby)
+does, and the game's log says where the listing stands ("Listed on the
+Internet Lobby, seen at ADDRESS." or "The Internet Lobby does not answer, so
+the game is not listed. Players can still join by address."); leaving the
+game takes it off the list at once. A game hosted without `--list`, and
+every game hosted from Direct Connection, never talks to the master. *Agent
+decision:* `--list` sends no anonymous statistics and no install id until
+the Internet Lobby's one-time notice and its switch exist (slice I4).
 
 ## Finding games from the command line
 

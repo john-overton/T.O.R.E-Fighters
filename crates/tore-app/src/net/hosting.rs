@@ -39,6 +39,15 @@
 //!   120 Hz tick (`tore_realtime_native`), whose timers macOS does not
 //!   coalesce. It logs once what took ("Host: macOS real-time scheduling
 //!   on", or why not). Both do nothing on Linux and Windows.
+//! - **Listing** (slice I3). A game started with a [`Listing`] reads and
+//!   writes its socket through a `tore_net::master::HostListing`, so the
+//!   master's datagrams never reach the host, and lists itself on the
+//!   Internet Lobby while it is told to ([`Command::SetListed`]). It reports
+//!   where the listing stands ([`Report::Listing`]) and unregisters as the
+//!   thread stops, before its socket closes. A game started without one
+//!   (Direct Connection) never talks to the master. *Agent decision:* the
+//!   listing goes beside [`HostSetup`] ([`HostThread::start_listed`]) rather
+//!   than in it, so the hosts the tests build stay as they are.
 use crate::net::{
     options::HostOptions,
     session::{Join, NetSession, Transport, build_id},
@@ -55,8 +64,12 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
+use tore_net::master::{
+    Build, HostListing, HostRendezvous, HostTally, ListingState, RendezvousEvent, Role,
+    rendezvous::state_text,
+};
 use tore_net::{
-    LINK_ADDRESS, LinkEnd, Linked, Listen, MAX_NAP, RealClock, SPIN_MARGIN, ServerSocket,
+    LINK_ADDRESS, LinkEnd, Linked, Listen, MAX_NAP, Platform, RealClock, SPIN_MARGIN, ServerSocket,
     wait_until,
 };
 use tore_realtime_native::{Activity, real_time_thread, summary};
@@ -86,6 +99,34 @@ pub struct HostSetup {
     pub port: u16,
 }
 
+/// How a hosted game is listed on the Internet Lobby.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Listing {
+    /// The master server, `HOST` or `HOST:PORT`.
+    pub master: String,
+    /// Listed from the start; [`Command::SetListed`] changes it.
+    pub listed: bool,
+    /// The anonymous install id when telemetry is on, else `None`: then
+    /// nothing but the listing is sent. *Agent decision:* `--host --list`
+    /// gives none until the Internet Lobby's one-time notice and switch
+    /// exist (slice I4).
+    pub install_id: Option<u64>,
+}
+
+impl Listing {
+    /// Listed from the start on `master` (the public one when `None`), with
+    /// no telemetry.
+    pub fn listed(master: Option<&str>) -> Self {
+        Self {
+            master: master
+                .unwrap_or(tore_net::master::DEFAULT_MASTER)
+                .to_owned(),
+            listed: true,
+            install_id: None,
+        }
+    }
+}
+
 /// What the game asks of the thread. The lobby's verbs are the King's
 /// messages over the game's own connection, not commands.
 #[derive(Debug)]
@@ -93,6 +134,12 @@ pub enum Command {
     /// The hosting player leaves: end the game for everyone, politely, and
     /// stop.
     Stop,
+    /// List the game on the Internet Lobby, or take it off. Ignored by a
+    /// game started without a [`Listing`].
+    // The Internet Lobby (I4) and the King's Visibility (stage F phase 2)
+    // send it; until then only the tests do.
+    #[cfg_attr(not(test), allow(dead_code))]
+    SetListed(bool),
     /// Panic on the thread, for the tests of the panic rule.
     #[cfg(test)]
     Panic,
@@ -110,6 +157,9 @@ pub enum Report {
     Phase(Phase),
     /// A socket error, noted and survived, as the dedicated server notes it.
     Note(String),
+    /// Where the game's listing on the Internet Lobby stands, when it
+    /// changes (a game started with a [`Listing`]).
+    Listing(ListingState),
     /// The thread has ended, and why. Nothing follows.
     Ended(End),
 }
@@ -151,7 +201,19 @@ pub struct HostThread {
 impl HostThread {
     /// Binds the socket, so a port in use is refused at once, and starts the
     /// thread, which builds the host. Returns the game's end of the link.
+    // The game hosts through `start_listed`; the tests start plain hosts.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn start(setup: HostSetup) -> Result<(Self, LinkEnd), String> {
+        Self::start_listed(setup, None)
+    }
+
+    /// [`HostThread::start`], with the game listed on the Internet Lobby as
+    /// `listing` says. A master address that cannot be read is refused at
+    /// once.
+    pub fn start_listed(
+        setup: HostSetup,
+        listing: Option<Listing>,
+    ) -> Result<(Self, LinkEnd), String> {
         let HostSetup {
             spec,
             resources,
@@ -166,6 +228,32 @@ impl HostThread {
             )
         })?;
         let addresses = socket.local_addresses();
+        let listing = match listing {
+            Some(listing) => {
+                let port = addresses.first().map_or(port, |a| a.port());
+                let mut host_listing = HostListing::new(
+                    &listing.master,
+                    HostRendezvous {
+                        build: Build {
+                            protocol_version: tore_session::wire::PROTOCOL_VERSION,
+                            game_version: config.build.version.clone(),
+                            game_commit: config.build.commit.clone(),
+                            release: config.build.release,
+                        },
+                        dedicated: false,
+                        install_id: listing.install_id,
+                        platform: Platform::current().code(),
+                        entropy: tore_net::Entropy::System,
+                    },
+                    port,
+                    Duration::ZERO,
+                )
+                .map_err(|error| format!("Cannot list the game: {error}"))?;
+                host_listing.set_listed(listing.listed, Duration::ZERO);
+                Some(host_listing)
+            }
+            None => None,
+        };
         let (host_end, game_end) = tore_net::link::pair();
         let (command_sender, commands) = mpsc::channel();
         let (report_sender, reports) = mpsc::channel();
@@ -173,7 +261,17 @@ impl HostThread {
         let handle = thread::Builder::new()
             .name("tore-host".into())
             .stack_size(STACK)
-            .spawn(move || run(spec, resources, config, transport, commands, report_sender))
+            .spawn(move || {
+                run(
+                    spec,
+                    resources,
+                    config,
+                    transport,
+                    listing,
+                    commands,
+                    report_sender,
+                )
+            })
             .map_err(|error| format!("Cannot start the host: {error}"))?;
         Ok((
             Self {
@@ -275,6 +373,7 @@ fn run(
     resources: Arc<BTreeMap<String, Vec<u8>>>,
     config: HostConfig,
     mut transport: Linked<ServerSocket>,
+    mut listing: Option<HostListing>,
     commands: Receiver<Command>,
     reports: Sender<Report>,
 ) {
@@ -286,6 +385,7 @@ fn run(
             resources,
             config,
             &mut transport,
+            &mut listing,
             &commands,
             &reports,
         )
@@ -304,6 +404,13 @@ fn run(
             End::Panicked(panic_text(payload.as_ref()))
         }
     };
+    // The listing goes before the socket closes, a panic included.
+    if let Some(listing) = listing.as_mut() {
+        let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+            listing.stop(Duration::ZERO);
+            let _ = listing.transmit(&mut transport);
+        }));
+    }
     // The port is free before the game hears the end.
     drop(host);
     drop(transport);
@@ -318,14 +425,117 @@ fn panic_text(payload: &(dyn Any + Send)) -> String {
         .unwrap_or_else(|| "an unknown error".into())
 }
 
+/// The host's receive, update and transmit, through the listing when the
+/// game has one.
+fn turn(
+    host: &mut Host,
+    transport: &mut Linked<ServerSocket>,
+    listing: &mut Option<HostListing>,
+    now: Duration,
+    reports: &Sender<Report>,
+) {
+    let received = match listing.as_mut() {
+        Some(listing) => host.receive_from(now, &mut listing.over(transport, now)),
+        None => host.receive_from(now, transport),
+    };
+    if let Err(error) = received {
+        let _ = reports.send(Report::Note(format!("receive failed: {error}")));
+    }
+    host.update(now);
+    if let Some(listing) = listing.as_mut() {
+        let host = &*host;
+        listing.update(now, || host.discover_answer(0).into());
+    }
+    send(host, transport, listing, now, reports);
+}
+
+/// Sends what the host and the listing have queued.
+fn send(
+    host: &mut Host,
+    transport: &mut Linked<ServerSocket>,
+    listing: &mut Option<HostListing>,
+    now: Duration,
+    reports: &Sender<Report>,
+) {
+    let sent = match listing.as_mut() {
+        Some(listing) => host.transmit(&mut listing.over(transport, now)),
+        None => host.transmit(transport),
+    };
+    if let Err(error) = sent {
+        let _ = reports.send(Report::Note(format!("send failed: {error}")));
+    }
+    if let Some(listing) = listing.as_mut()
+        && let Err(error) = listing.transmit(transport)
+    {
+        let _ = reports.send(Report::Note(format!("send failed: {error}")));
+    }
+}
+
+/// The listing's news: its events to the game's log, and its state to the
+/// game when it changed.
+fn forward_listing(
+    listing: &mut Option<HostListing>,
+    reports: &Sender<Report>,
+    state: &mut Option<ListingState>,
+) {
+    let Some(listing) = listing.as_mut() else {
+        return;
+    };
+    let master = listing.master_text();
+    while let Some(event) = listing.poll_event() {
+        match event {
+            RendezvousEvent::MappingTested(mapping) => {
+                log::info!("Host: the Internet Lobby's router test: {mapping:?}");
+            }
+            RendezvousEvent::LookupFailed(why) => {
+                log::warn!("Host: cannot find the Internet Lobby at {master}: {why}");
+            }
+            other => log::info!("Host: Internet Lobby: {other:?}"),
+        }
+    }
+    let now = listing.state();
+    if state.as_ref() != Some(&now) {
+        *state = Some(now.clone());
+        let _ = reports.send(Report::Listing(now));
+    }
+}
+
+/// The hosting game's Report to the master as hosting stops, when the game
+/// is listed and telemetry is on (the rendezvous sends nothing without an
+/// install id).
+fn report_session(
+    host: &Host,
+    listing: &mut Option<HostListing>,
+    tally: &HostTally,
+    now: Duration,
+) {
+    let Some(listing) = listing.as_mut() else {
+        return;
+    };
+    if !listing.rendezvous().listed_wanted() || !tally.anyone() {
+        return;
+    }
+    let mapping = listing.rendezvous().mapping();
+    let report = tally.report(
+        now,
+        Role::HostingGame,
+        &host.config().build.version,
+        Platform::current().code(),
+        mapping,
+    );
+    listing.rendezvous_mut().report(report);
+}
+
 /// Builds the host and runs the dedicated server's loop until the host stops
 /// or the game stops it.
+#[allow(clippy::too_many_arguments)]
 fn serve(
     slot: &mut Option<Host>,
     spec: MissionSpec,
     resources: Arc<BTreeMap<String, Vec<u8>>>,
     config: HostConfig,
     transport: &mut Linked<ServerSocket>,
+    listing: &mut Option<HostListing>,
     commands: &Receiver<Command>,
     reports: &Sender<Report>,
 ) -> End {
@@ -358,19 +568,18 @@ fn serve(
         capacity,
     });
     let mut phase = None;
+    let mut listing_state = None;
+    let mut tally = HostTally::new(clock.now());
     let mut stop_by: Option<Duration> = None;
     let measure = std::env::var_os("TORE_PERF_HOST").is_some();
     let mut report_at = clock.now() + Duration::from_secs(1);
     loop {
         let now = clock.now();
-        if let Err(error) = host.receive_from(now, transport) {
-            let _ = reports.send(Report::Note(format!("receive failed: {error}")));
+        turn(host, transport, listing, now, reports);
+        if forward(host, reports, &mut phase) {
+            tally.present(host.players().into_iter().map(|p| p.address));
         }
-        host.update(now);
-        if let Err(error) = host.transmit(transport) {
-            let _ = reports.send(Report::Note(format!("send failed: {error}")));
-        }
-        forward(host, reports, &mut phase);
+        forward_listing(listing, reports, &mut listing_state);
         if measure && now >= report_at {
             let status = host.status(now);
             println!(
@@ -384,6 +593,12 @@ fn serve(
             report_at = now + Duration::from_secs(1);
         }
         if host.phase() == Phase::Stopped {
+            report_session(host, listing, &tally, now);
+            if let Some(listing) = listing.as_mut() {
+                listing.stop(now);
+            }
+            send(host, transport, listing, now, reports);
+            forward_listing(listing, reports, &mut listing_state);
             return if stop_by.is_some() {
                 End::Stopped
             } else {
@@ -394,6 +609,12 @@ fn serve(
         loop {
             match commands.try_recv() {
                 Ok(Command::Stop) => stop = true,
+                Ok(Command::SetListed(listed)) => match listing.as_mut() {
+                    Some(listing) => listing.set_listed(listed, now),
+                    None => log::info!(
+                        "Host: this game was not started for the Internet Lobby; it stays unlisted"
+                    ),
+                },
                 #[cfg(test)]
                 Ok(Command::Panic) => panic!("a test asked the host thread to panic"),
                 Err(TryRecvError::Empty) => break,
@@ -412,8 +633,13 @@ fn serve(
         }
         if stop_by.is_some_and(|by| now >= by) {
             host.stop();
-            let _ = host.transmit(transport);
+            report_session(host, listing, &tally, now);
+            if let Some(listing) = listing.as_mut() {
+                listing.stop(now);
+            }
+            send(host, transport, listing, now, reports);
             forward(host, reports, &mut phase);
+            forward_listing(listing, reports, &mut listing_state);
             return End::Stopped;
         }
         let wake = (now + host.next_wake(now)).min(now + MAX_NAP);
@@ -421,9 +647,12 @@ fn serve(
     }
 }
 
-/// Sends the host's new log entries and its phase when it changed.
-fn forward(host: &mut Host, reports: &Sender<Report>, phase: &mut Option<Phase>) {
+/// Sends the host's new log entries and its phase when it changed; true when
+/// a player joined or left.
+fn forward(host: &mut Host, reports: &Sender<Report>, phase: &mut Option<Phase>) -> bool {
+    let mut players_changed = false;
     while let Some(entry) = host.poll_log() {
+        players_changed |= matches!(entry, HostLog::Connected { .. } | HostLog::Left { .. });
         let _ = reports.send(Report::Log(entry));
     }
     let now = host.phase();
@@ -434,6 +663,7 @@ fn forward(host: &mut Host, reports: &Sender<Report>, phase: &mut Option<Phase>)
         *phase = Some(now);
         let _ = reports.send(Report::Phase(now));
     }
+    players_changed
 }
 
 /// The settings of a game a player hosts (EF4). *Agent decisions:* the
@@ -465,6 +695,7 @@ fn log_report(report: &Report) {
         Report::Log(entry) => log::info!("Host: {}", log_line(entry)),
         Report::Phase(phase) => log::info!("Host: phase {phase:?}"),
         Report::Note(text) => log::warn!("Host: {text}"),
+        Report::Listing(state) => log::info!("Host: {}", state_text(state)),
         Report::Ended(end) => match end {
             End::Stopped => log::info!("Host: stopped"),
             End::Finished => log::info!("Host: the mission ended; the host has stopped"),
@@ -597,13 +828,16 @@ impl crate::App {
         };
         crate::net::settings::remember_host(&data, &options);
         let resources = Arc::clone(&self.theater_resources);
-        let (thread, link) = HostThread::start(HostSetup {
-            spec: options.spec.clone(),
-            resources: Arc::clone(&resources),
-            config: config(&options),
-            listen: Listen::Any,
-            port: options.port,
-        })?;
+        let (thread, link) = HostThread::start_listed(
+            HostSetup {
+                spec: options.spec.clone(),
+                resources: Arc::clone(&resources),
+                config: config(&options),
+                listen: Listen::Any,
+                port: options.port,
+            },
+            options.listing.clone(),
+        )?;
         let listening: Vec<String> = thread.addresses().iter().map(ToString::to_string).collect();
         log::info!(
             "Host: hosting {} from {} on UDP {}",
@@ -624,8 +858,13 @@ impl crate::App {
         let mut session = NetSession::start(join, resources, &data, self.replay_library.as_ref())?;
         session.hosting = Some(thread);
         self.net = Some(session);
+        let listed = if options.listing.as_ref().is_some_and(|l| l.listed) {
+            " Listing it on the Internet Lobby."
+        } else {
+            ""
+        };
         self.message(format!(
-            "Hosting {} on UDP port {}...",
+            "Hosting {} on UDP port {}...{listed}",
             options.name, options.port
         ));
         Ok(())

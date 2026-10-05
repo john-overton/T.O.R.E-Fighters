@@ -62,6 +62,7 @@ fn hosted_config() -> HostConfig {
         password: None,
         callsign: "Host".into(),
         slot: None,
+        listing: None,
     })
 }
 
@@ -1103,4 +1104,211 @@ fn the_search_and_the_host_share_the_game_port_one_after_the_other() {
         thread::sleep(Duration::from_millis(10));
     }
     assert_eq!(search.games().len(), 1, "found through the unicast targets");
+}
+
+/// A master on loopback that answers just enough of the protocol to list a
+/// game (Challenge, then Listed) and counts what a host sends it, by kind.
+/// The end-to-end tests use the real master (`tore-master`); this checks the
+/// hosting thread's side alone.
+struct LoopbackMaster {
+    address: SocketAddr,
+    kinds: Arc<std::sync::Mutex<Vec<tore_net::master::MasterKind>>>,
+    stop: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl LoopbackMaster {
+    fn start() -> Self {
+        use tore_net::master::{Challenge, CookieKey, Listed, MasterPacket};
+        let socket = bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
+        let address = socket.local_addr().unwrap();
+        let kinds = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let handle = thread::spawn({
+            let kinds = Arc::clone(&kinds);
+            let stop = Arc::clone(&stop);
+            move || {
+                let key = CookieKey::new(tore_net::Entropy::System);
+                let clock = RealClock::new();
+                let mut buf = [0u8; 2048];
+                while !stop.load(Ordering::Relaxed) {
+                    let Ok((length, from)) = socket.recv_from(&mut buf) else {
+                        thread::sleep(Duration::from_millis(1));
+                        continue;
+                    };
+                    let Ok(packet) = MasterPacket::decode(&buf[..length]) else {
+                        continue;
+                    };
+                    kinds.lock().unwrap().push(packet.kind());
+                    let now = clock.now();
+                    let answer = match packet {
+                        MasterPacket::Register(r) if key.check(from, r.nonce, r.cookie, now) => {
+                            MasterPacket::Listed(Listed {
+                                nonce: r.nonce,
+                                listing_id: 1,
+                                token: 2,
+                                seen: from,
+                                heartbeat_secs: 30,
+                                keep_secs: 15,
+                                expiry_secs: 90,
+                            })
+                        }
+                        MasterPacket::Register(r) => MasterPacket::Challenge(Challenge {
+                            nonce: r.nonce,
+                            cookie: key.cookie(from, r.nonce, now),
+                        }),
+                        _ => continue,
+                    };
+                    let _ = socket.send_to(&answer.encode().unwrap(), from);
+                }
+            }
+        });
+        Self {
+            address,
+            kinds,
+            stop,
+            handle: Some(handle),
+        }
+    }
+
+    fn count(&self, kind: tore_net::master::MasterKind) -> usize {
+        self.kinds
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|k| **k == kind)
+            .count()
+    }
+}
+
+impl Drop for LoopbackMaster {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// Waits up to `limit` for `done`, polling the thread's reports.
+fn wait_for_reports(
+    thread: &mut HostThread,
+    reports: &mut Vec<Report>,
+    limit: Duration,
+    done: impl Fn(&[Report]) -> bool,
+) -> bool {
+    let started = Instant::now();
+    while started.elapsed() < limit {
+        reports.extend(thread.poll());
+        if done(reports) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    false
+}
+
+/// A game hosted with a listing registers with the master from its game
+/// port, reports where the listing stands, takes it off with `SetListed`
+/// (three Unregisters) and lists it again; a game hosted without one never
+/// talks to the master.
+#[test]
+fn a_listed_host_registers_reports_and_unlists_on_command_and_on_stop() {
+    use tore_net::master::{ListingState, MasterKind};
+    let master = LoopbackMaster::start();
+    let (mut thread, _link) = HostThread::start_listed(
+        HostSetup {
+            spec: spec(),
+            resources: import(),
+            config: hosted_config(),
+            listen: loopback(),
+            port: 0,
+        },
+        Some(Listing::listed(Some(&master.address.to_string()))),
+    )
+    .expect("the host starts");
+    let game_port = thread.addresses()[0];
+    let mut reports = Vec::new();
+    let listed = |reports: &[Report]| {
+        reports
+            .iter()
+            .filter(|r| matches!(r, Report::Listing(ListingState::Listed { .. })))
+            .count()
+    };
+    assert!(
+        wait_for_reports(
+            &mut thread,
+            &mut reports,
+            Duration::from_secs(10),
+            |r| listed(r) == 1
+        ),
+        "{reports:?}"
+    );
+    // The master saw the game port itself.
+    assert!(reports.iter().any(|r| matches!(
+        r,
+        Report::Listing(ListingState::Listed { seen, .. }) if *seen == game_port
+    )));
+    assert_eq!(master.count(MasterKind::Register), 2);
+    assert!(thread.send(Command::SetListed(false)));
+    assert!(wait_for_reports(
+        &mut thread,
+        &mut reports,
+        Duration::from_secs(5),
+        |r| r
+            .iter()
+            .any(|r| matches!(r, Report::Listing(ListingState::Off)))
+    ));
+    let started = Instant::now();
+    while master.count(MasterKind::Unregister) < 3 && started.elapsed() < Duration::from_secs(5) {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(master.count(MasterKind::Unregister), 3);
+    assert!(thread.send(Command::SetListed(true)));
+    assert!(wait_for_reports(
+        &mut thread,
+        &mut reports,
+        Duration::from_secs(10),
+        |r| listed(r) == 2
+    ));
+    assert!(thread.stop(JOIN_LIMIT));
+    let started = Instant::now();
+    while master.count(MasterKind::Unregister) < 6 && started.elapsed() < Duration::from_secs(5) {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(master.count(MasterKind::Unregister), 6);
+    assert!(port_is_free(game_port));
+
+    // Without a listing, nothing goes to any master, and SetListed is a
+    // note in the log only.
+    let quiet = LoopbackMaster::start();
+    let (mut thread, _link, _) = start_host(0);
+    assert!(thread.send(Command::SetListed(true)));
+    let mut reports = Vec::new();
+    wait_for_reports(
+        &mut thread,
+        &mut reports,
+        Duration::from_millis(500),
+        |_| false,
+    );
+    assert!(!reports.iter().any(|r| matches!(r, Report::Listing(_))));
+    assert_eq!(quiet.kinds.lock().unwrap().len(), 0);
+}
+
+/// A master address that cannot be read refuses the start at once.
+#[test]
+fn a_bad_master_address_refuses_the_start() {
+    let error = HostThread::start_listed(
+        HostSetup {
+            spec: spec(),
+            resources: import(),
+            config: hosted_config(),
+            listen: loopback(),
+            port: 0,
+        },
+        Some(Listing::listed(Some("host:0"))),
+    )
+    .err()
+    .expect("refused");
+    assert!(error.starts_with("Cannot list the game:"), "{error}");
 }

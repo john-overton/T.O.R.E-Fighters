@@ -1,7 +1,7 @@
 //! `--connect HOST[:PORT]` with `--callsign`, `--slot` and `--password`
 //! (docs/DEDICATED-SERVER.md, "Joining from the game"), and `--host
-//! MISSION_FILE` with `--port`, `--name`, `--open-planes` and the same three
-//! ("Hosting from the game").
+//! MISSION_FILE` with `--port`, `--name`, `--open-planes`, `--list`,
+//! `--master` and the same three ("Hosting from the game").
 //!
 //! Parsing and checking are here and need no network: the host name is looked
 //! up only when the game starts the session ([`ConnectOptions::resolve`]).
@@ -9,6 +9,8 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use tore_session::OpenPlanes;
+
+use crate::net::hosting::Listing;
 use tore_world::mission::MissionSpec;
 
 /// The port a server listens on unless it is told another.
@@ -140,6 +142,9 @@ pub struct HostOptions {
     pub slot: Option<u32>,
     /// The password joining players must give, `None` for none.
     pub password: Option<String>,
+    /// Listed on the Internet Lobby (`--list`), `None` for a game that never
+    /// talks to the master.
+    pub listing: Option<Listing>,
 }
 
 impl HostOptions {
@@ -193,6 +198,7 @@ impl HostOptions {
             callsign: joining.callsign,
             slot: joining.slot,
             password: Some(joining.password).filter(|p| !p.is_empty()),
+            listing: None,
         })
     }
 }
@@ -258,6 +264,10 @@ pub struct SessionArgs {
     pub port: Option<String>,
     pub name: Option<String>,
     pub open_planes: Option<String>,
+    /// `--list`: list the hosted game on the Internet Lobby.
+    pub list: bool,
+    /// `--master ADDRESS`: the master server `--list` lists on.
+    pub master: Option<String>,
 }
 
 impl SessionArgs {
@@ -274,15 +284,24 @@ impl SessionArgs {
             port,
             name,
             open_planes,
+            list,
+            master,
         } = self;
-        let hosting_only = port.is_some() || name.is_some() || open_planes.is_some();
+        if master.is_some() && !list {
+            return Err("--master goes with --list".into());
+        }
+        if let Some(master) = &master {
+            tore_net::master::local::parse_master(master)
+                .map_err(|error| format!("--master {error}"))?;
+        }
+        let hosting_only = port.is_some() || name.is_some() || open_planes.is_some() || list;
         let session = match (connect, host) {
             (Some(_), Some(_)) => {
                 return Err("--connect and --host cannot be used together".into());
             }
             (Some(server), None) => {
                 if hosting_only {
-                    return Err("--port, --name and --open-planes go with --host".into());
+                    return Err("--port, --name, --open-planes and --list go with --host".into());
                 }
                 if other_mode {
                     return Err("--connect joins a server and cannot combine with captures, probes, recordings or the replay viewer".into());
@@ -298,7 +317,7 @@ impl SessionArgs {
                 if other_mode {
                     return Err("--host hosts a game and cannot combine with captures, probes, recordings or the replay viewer".into());
                 }
-                Session::Host(Box::new(HostOptions::new(
+                let mut options = HostOptions::new(
                     &mission,
                     port.as_deref(),
                     name.as_deref(),
@@ -306,11 +325,13 @@ impl SessionArgs {
                     callsign.as_deref(),
                     slot.as_deref(),
                     password.as_deref(),
-                )?))
+                )?;
+                options.listing = list.then(|| Listing::listed(master.as_deref()));
+                Session::Host(Box::new(options))
             }
             (None, None) => {
                 if hosting_only {
-                    return Err("--port, --name and --open-planes go with --host".into());
+                    return Err("--port, --name, --open-planes and --list go with --host".into());
                 }
                 if callsign.is_some() || slot.is_some() || password.is_some() {
                     return Err(
@@ -336,7 +357,9 @@ pub fn find_games_port(args: &mut SessionArgs) -> Result<u16, String> {
         || args.slot.is_some()
         || args.password.is_some()
         || args.name.is_some()
-        || args.open_planes.is_some();
+        || args.open_planes.is_some()
+        || args.list
+        || args.master.is_some();
     if other {
         return Err("--find-games lists games and exits; only --port goes with it".into());
     }
@@ -577,6 +600,19 @@ mod tests {
         };
         assert!(error(port(Some("h"), false), false).contains("go with --host"));
         assert!(error(port(None, false), false).contains("go with --host"));
+        let listed = |connect, host, master: Option<&str>| SessionArgs {
+            list: true,
+            master: master.map(str::to_owned),
+            ..args(connect, host)
+        };
+        assert!(error(listed(Some("h"), false, None), false).contains("--list go with --host"));
+        assert!(error(listed(None, false, None), false).contains("--list go with --host"));
+        let unlisted_master = SessionArgs {
+            master: Some("127.0.0.1:26911".into()),
+            ..args(None, true)
+        };
+        assert!(error(unlisted_master, false).contains("--master goes with --list"));
+        assert!(error(listed(None, true, Some("host:0")), false).contains("--master"));
         if process_problem().is_none() {
             assert!(matches!(
                 args(Some("h:4000"), false).session(false),
@@ -584,8 +620,28 @@ mod tests {
             ));
             assert!(matches!(
                 port(None, true).session(false),
-                Ok(Some(Session::Host(options))) if options.port == 27_000
+                Ok(Some(Session::Host(options))) if options.port == 27_000 && options.listing.is_none()
             ));
+            let Ok(Some(Session::Host(options))) =
+                listed(None, true, Some("127.0.0.1:26911")).session(false)
+            else {
+                panic!("a listed host");
+            };
+            assert_eq!(
+                options.listing,
+                Some(Listing {
+                    master: "127.0.0.1:26911".into(),
+                    listed: true,
+                    install_id: None,
+                })
+            );
+            let Ok(Some(Session::Host(options))) = listed(None, true, None).session(false) else {
+                panic!("a listed host");
+            };
+            assert_eq!(
+                options.listing.unwrap().master,
+                tore_net::master::DEFAULT_MASTER
+            );
         }
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -612,6 +668,10 @@ mod tests {
             },
             SessionArgs {
                 name: Some("n".into()),
+                ..SessionArgs::default()
+            },
+            SessionArgs {
+                list: true,
                 ..SessionArgs::default()
             },
         ] {

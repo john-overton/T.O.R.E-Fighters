@@ -805,23 +805,20 @@ fn a_master_with_two_addresses_is_tried_in_turn_when_silent() {
 
 #[test]
 fn state_lines_say_what_a_player_reads() {
-    let master = "master.example.org:26901";
     assert_eq!(
-        state_text(&ListingState::Off, master),
-        "Not listed on the Internet Lobby"
+        state_text(&ListingState::Off),
+        "Not listed on the Internet Lobby."
     );
-    assert!(state_text(&ListingState::Silent, master).contains(
-        "does not answer, so the game is not listed. Players can still join by address."
-    ));
     assert_eq!(
-        state_text(
-            &ListingState::Listed {
-                listing_id: 1,
-                seen: address(HOST)
-            },
-            master
-        ),
-        "Listed on the Internet Lobby (master.example.org:26901), seen at 203.0.113.5:26900"
+        state_text(&ListingState::Silent),
+        "The Internet Lobby does not answer, so the game is not listed. Players can still join by address."
+    );
+    assert_eq!(
+        state_text(&ListingState::Listed {
+            listing_id: 1,
+            seen: address(HOST)
+        }),
+        "Listed on the Internet Lobby, seen at 203.0.113.5:26900."
     );
 }
 

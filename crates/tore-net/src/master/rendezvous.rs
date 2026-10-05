@@ -1021,21 +1021,20 @@ impl HostListing {
     }
 }
 
-/// A line for a log or a console about where the listing stands, for
-/// example `Listed on the Internet Lobby (master.example.org:26901), seen at
-/// 203.0.113.5:26900`.
-pub fn state_text(state: &ListingState, master: &str) -> String {
+/// Where the listing stands, as a player reads it (the words of the
+/// architecture guide's "Listing a game"), for example `Listed on the
+/// Internet Lobby, seen at 203.0.113.5:26900.`
+pub fn state_text(state: &ListingState) -> String {
     match state {
-        ListingState::Off => "Not listed on the Internet Lobby".into(),
-        ListingState::FindingMaster => format!("Looking up the Internet Lobby at {master}"),
-        ListingState::Registering => format!("Listing the game on the Internet Lobby at {master}"),
+        ListingState::Off => "Not listed on the Internet Lobby.".into(),
+        ListingState::FindingMaster => "Looking up the Internet Lobby...".into(),
+        ListingState::Registering => "Listing the game on the Internet Lobby...".into(),
         ListingState::Listed { seen, .. } => {
-            format!("Listed on the Internet Lobby ({master}), seen at {seen}")
+            format!("Listed on the Internet Lobby, seen at {seen}.")
         }
-        ListingState::Silent => format!(
-            "The Internet Lobby at {master} does not answer, so the game is not listed. \
-             Players can still join by address."
-        ),
+        ListingState::Silent => "The Internet Lobby does not answer, so the game is not \
+                                 listed. Players can still join by address."
+            .into(),
         ListingState::Refused(text) => format!("The Internet Lobby refused the listing: {text}"),
     }
 }

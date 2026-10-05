@@ -195,6 +195,7 @@ impl App {
             callsign,
             slot: None,
             password,
+            listing: None,
         };
         match self.begin_hosting(options, true) {
             // The lobby opens; its King presses Fly when everyone is ready.

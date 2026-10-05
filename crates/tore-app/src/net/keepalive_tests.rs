@@ -125,6 +125,7 @@ impl Game {
             password: None,
             callsign: "Host".into(),
             slot: None,
+            listing: None,
         };
         let (host, link) = HostThread::start(HostSetup {
             spec: spec(),
