@@ -16,13 +16,13 @@
 //!   explanation, started afresh on every step) and `AiActor::journal_memory`
 //!   (which journal lines were already written; it only gates journal text).
 //! - **Per-tick scratch:** `AiMission::missiles` and `AiMission::gun_rounds`
-//!   (proof at the skip), `AiActor::adapter` and `AiActor::last_input` (proofs
-//!   at the skip).
+//!   (proof at the skip) and `AiActor::adapter` (proof at the skip).
 //!
 //! Every other field is coded, including the ones that look like caches:
 //! `last_defense`, `pending_threats`, `pending_events`, `device_schedule`,
 //! `observed_attacks`, `ignored_attack_ids` and `received_emitters` are all
-//! read by a later tick.
+//! read by a later tick, and `last_input`, which a destroyed actor keeps
+//! from its last flown step.
 //!
 //! Copied records are shared records: the runway views of an actor (its home
 //! runway, its landing order, its ground start and its airfield sequence)
@@ -175,12 +175,6 @@ impl Checkpoint for AiActor {
         // `step_actor` before anything else and set again before the only
         // call to `controls`, in the same step.
         //
-        // `last_input`: the controls the actor flew last, kept for the
-        // formation trace rows and the replay recorder's control display.
-        // Nothing in the simulation reads it, and every step that flies
-        // overwrites it, so a restored actor reports neutral controls until
-        // its next flown step.
-        //
         // `trace` and `journal_memory`: why-records.
         let AiActor {
             identity,
@@ -223,7 +217,7 @@ impl Checkpoint for AiActor {
             pending_events,
             device_schedule,
             activity,
-            last_input: _,
+            last_input,
             alive,
             dummy,
             escape_monitor,
@@ -269,6 +263,11 @@ impl Checkpoint for AiActor {
         pending_events.save(s, None)?;
         device_schedule.save(s, None)?;
         activity.save(s, None)?;
+        // The controls the actor flew last (slice H9): read only by the
+        // formation trace and the replay recorder's control display, and
+        // rewritten by every step that flies, but a destroyed actor no
+        // longer flies, so they are coded rather than skipped as scratch.
+        last_input.save(s, None)?;
         alive.save(s, None)?;
         dummy.save(s, None)?;
         escape_monitor.save(s, None)
@@ -325,7 +324,7 @@ impl Checkpoint for AiActor {
             pending_events: Checkpoint::load(l, None)?,
             device_schedule: Checkpoint::load(l, None)?,
             activity: Checkpoint::load(l, None)?,
-            last_input: tore_input::PilotInput::default(),
+            last_input: Checkpoint::load(l, None)?,
             alive: Checkpoint::load(l, None)?,
             dummy: Checkpoint::load(l, None)?,
             escape_monitor: Checkpoint::load(l, None)?,

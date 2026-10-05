@@ -104,18 +104,79 @@ fn reading_every_ai_record_changes_no_behaviour() {
     let mut seen = RecordCoverage::default();
     let (plain, _) = mission_engagement(&Probe::default());
     let (read, _) =
-        mission_engagement_observed(&Probe::default(), &mut |mission| seen.read(mission));
+        mission_engagement_observed(&Probe::default(), &mut |_, _| {}, &mut |mission| {
+            seen.read(mission)
+        });
     assert_eq!(
         read, plain,
         "reading the AI records changed the engagement scenario"
     );
     let (plain, _) = airfield(&Probe::default());
-    let (read, _) = airfield_observed(&Probe::default(), &mut |mission| seen.read(mission));
+    let (read, _) = airfield_observed(&Probe::default(), &mut |_, _| {}, &mut |mission| {
+        seen.read(mission)
+    });
     assert_eq!(
         read, plain,
         "reading the AI records changed the airfield scenario"
     );
     seen.require();
+}
+
+/// Exact checkpoints (docs/formats/checkpoint.md, stage H): each AI mission
+/// replaced by a copy restored from its own checkpoint every 97 ticks (a
+/// prime, so the restores fall at every phase of the AI's 30- and 60-tick
+/// cycles) and on the ticks the engagement's script acts flies on exactly as
+/// the mission that never was: the same fingerprint, so a restore keeps
+/// every piece of AI state the fingerprint can see, through the engagement's
+/// orders, hits, kills and warnings and every airfield phase of the
+/// departure and the landing. The restore happens at the start of a tick,
+/// before the host reads the mission: a restored actor reports neutral
+/// controls (`last_input`, scratch) until its next step, and the fingerprint
+/// reads them after each step.
+#[test]
+fn restoring_the_ai_missions_mid_flight_changes_no_behaviour() {
+    const SCRIPTED: [u64; 12] = [
+        120, 360, 600, 900, 1_800, 2_000, 2_400, 2_600, 3_000, 3_600, 4_200, 4_800,
+    ];
+    let due = |tick: u64| tick % 97 == 1 || SCRIPTED.contains(&tick);
+    let restores = std::cell::Cell::new(0_usize);
+    let mut restore = |tick: u64, mission: &mut AiMission| {
+        if due(tick) {
+            *mission = restored(mission);
+            restores.set(restores.get() + 1);
+        }
+    };
+    let (plain, _) = mission_engagement(&Probe::default());
+    let (again, _) = mission_engagement_observed(&Probe::default(), &mut restore, &mut |_| {});
+    assert_eq!(
+        again, plain,
+        "a restored mission flew the engagement scenario differently"
+    );
+    let (plain, _) = airfield(&Probe::default());
+    let (again, _) = airfield_observed(&Probe::default(), &mut restore, &mut |_| {});
+    assert_eq!(
+        again, plain,
+        "a restored mission flew the airfield scenario differently"
+    );
+    // The engagement's 7,200 ticks, the departure's 18,000 and the
+    // landing's 48,000: 87, 198 and 507 restores.
+    let expected: usize = [7_200, 150 * 120, 400 * 120]
+        .into_iter()
+        .map(|ticks| (0..ticks).filter(|tick| due(*tick)).count())
+        .sum();
+    assert_eq!(restores.get(), expected);
+}
+
+/// `mission` coded and decoded with the flight models its actors fly, as a
+/// world's table holds them; the copy must code to the same bytes.
+fn restored(mission: &AiMission) -> AiMission {
+    let mut models = crate::checkpoint::Models::default();
+    for actor in mission.actors() {
+        models
+            .insert(actor.identity().aircraft, actor.flight().import_model())
+            .expect("a flight model");
+    }
+    crate::checkpoint::round_trip(mission, &models).expect("the mission restores")
 }
 
 /// What the records said across the two scenarios, so the neutrality test
@@ -2078,13 +2139,15 @@ impl Host {
 }
 
 fn mission_engagement(probe: &Probe) -> (u64, Coverage) {
-    mission_engagement_observed(probe, &mut |_| {})
+    mission_engagement_observed(probe, &mut |_, _| {}, &mut |_| {})
 }
 
-/// The engagement scenario with `observe` called on the mission right after
-/// every step, before the host acts on the output.
+/// The engagement scenario with `before` called on the mission at the start
+/// of every tick, before the host reads it, and `observe` right after every
+/// step, before the host acts on the output.
 fn mission_engagement_observed(
     probe: &Probe,
+    before: &mut dyn FnMut(u64, &mut AiMission),
     observe: &mut dyn FnMut(&mut AiMission),
 ) -> (u64, Coverage) {
     let pilot = |id, side, wing, member, aircraft, level, position, heading_deg| Pilot {
@@ -2226,6 +2289,7 @@ fn mission_engagement_observed(
     let terrain = fixtures::terrain;
     let surface = |x: f64, z: f64| Surface::terrain(fixtures::terrain(x, z));
     for tick in 0..7_200u64 {
+        before(tick, &mut host.mission);
         host.scripted_events(tick, &mut fp);
         let world = world_objects(&host.mission);
         host.mission.set_missiles(host.snapshots());
@@ -2329,12 +2393,17 @@ fn human_leader(t: f64, release_s: f64) -> WorldObject {
 }
 
 fn airfield(probe: &Probe) -> (u64, Coverage) {
-    airfield_observed(probe, &mut |_| {})
+    airfield_observed(probe, &mut |_, _| {}, &mut |_| {})
 }
 
-/// The airfield scenario with `observe` called on the mission right after
-/// every step.
-fn airfield_observed(probe: &Probe, observe: &mut dyn FnMut(&mut AiMission)) -> (u64, Coverage) {
+/// The airfield scenario with `before` called on the mission at the start of
+/// every tick of each part (the tick counted from that part's start) and
+/// `observe` right after every step.
+fn airfield_observed(
+    probe: &Probe,
+    before: &mut dyn FnMut(u64, &mut AiMission),
+    observe: &mut dyn FnMut(&mut AiMission),
+) -> (u64, Coverage) {
     let mut fp = Fingerprint::default();
     let mut coverage = Coverage::default();
     let terrain = |x: f64, z: f64| fixtures::runway_surface(x, z).height;
@@ -2379,6 +2448,7 @@ fn airfield_observed(probe: &Probe, observe: &mut dyn FnMut(&mut AiMission)) -> 
     mission.set_external_leader(Side(1), 0, HUMAN_LEADER);
     mission.start_in_formation();
     for tick in 0..(150 * 120u64) {
+        before(tick, &mut mission);
         let mut world = world_objects(&mission);
         world.push(human_leader(tick as f64 / 120., 5.));
         let output = mission
@@ -2419,6 +2489,7 @@ fn airfield_observed(probe: &Probe, observe: &mut dyn FnMut(&mut AiMission)) -> 
     record_order_result(&mut fp, outcome);
     mission.set_priority_landing(HUMAN_LEADER, Some(AIRPORT));
     for tick in 0..(400 * 120u64) {
+        before(tick, &mut mission);
         if tick == 20 * 120 {
             mission.set_priority_landing(HUMAN_LEADER, None);
         }

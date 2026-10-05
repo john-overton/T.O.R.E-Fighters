@@ -285,6 +285,40 @@ fn the_shared_leaf_types_round_trip() {
         unlimited_fuel: true,
         ..Default::default()
     });
+    // A pilot's controls with every command and switch (slice H9).
+    use tore_input::{PilotCommand, Switch};
+    let switches = [
+        Switch::Gear,
+        Switch::Flaps,
+        Switch::Airbrake,
+        Switch::Hook,
+        Switch::Bay,
+        Switch::Engine,
+        Switch::Burner,
+        Switch::Radar,
+        Switch::Jammer,
+        Switch::Autopilot,
+        Switch::WaypointAutopilot,
+    ];
+    let mut commands = vec![
+        PilotCommand::Eject,
+        PilotCommand::Throttle(0.75),
+        PilotCommand::AdjustThrottle(-0.1),
+    ];
+    for switch in switches {
+        commands.push(PilotCommand::Toggle(switch));
+        commands.push(PilotCommand::Set(switch, true));
+        commands.push(PilotCommand::Set(switch, false));
+    }
+    same(&PilotInput {
+        pitch: 0.25,
+        roll: -1.,
+        yaw: -0.,
+        throttle_rate: 0.5,
+        throttle: Some(0.9),
+        commands,
+    });
+    same(&PilotInput::default());
 }
 
 #[test]

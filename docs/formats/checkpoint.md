@@ -411,9 +411,12 @@ every `DecisionRandom`'s draw log, `Comms::journal`, `Channel::recent`,
 `Reports::{notes, queued, activity}` (journal entries only),
 `live::State::decoy_log`, `Ledger::outcomes`. Scratch:
 `Cockpit::previous_flight`, `Controller::{gun_views, formation_traffic}`,
-`ControlAdapter`, `AiActor::last_input`, `AiMission::{missiles, gun_rounds}`
+`ControlAdapter`, `AiMission::{missiles, gun_rounds}`
 (each with its proof at the skip); `RenderHistory::places` is rebuilt from the
-coded snapshot. Small outputs that a screen reads before the next step, such
+coded snapshot. `AiActor::last_input` looked like scratch (every step that
+flies rewrites it) but is coded: a destroyed actor stops flying and keeps its
+last controls, which the replay recorder reads (found by slice H9's golden
+round trip). Small outputs that a screen reads before the next step, such
 as combat's hit records and the sensors' map contacts, are coded: a standby
 that becomes a hosting game shows them. Setup: `World::{setup, phrases}`, `Terrain` but the weather,
 `Environment::configuration`, `Combat::{dummy_types, dummy_configs,

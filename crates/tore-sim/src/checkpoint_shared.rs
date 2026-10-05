@@ -1,7 +1,8 @@
 //! The leaf types that more than one module's coder needs, coded once here so
 //! stage H's slices do not code them twice: aircraft identity, sides, the AI's
 //! activity and experience, store accounting, runway views, attitude bases,
-//! and the types that already have an exact own-plane coder.
+//! a pilot's controls, and the types that already have an exact own-plane
+//! coder.
 //!
 //! Every type here has public fields; types with private fields are coded in
 //! their own module's `checkpoint` child (the random stream `DecisionRandom`
@@ -21,6 +22,7 @@ use crate::ai::{ScalarSpeed, SpeedLimits};
 use crate::airport::ApproachEnd;
 use crate::attitude::Basis;
 use crate::sensors::passive::{Emitter, Symbol};
+use tore_input::{PilotCommand, PilotInput, Switch};
 
 // The types with an exact own-plane coder already: one coder to keep
 // complete, not two.
@@ -308,4 +310,67 @@ crate::checkpoint_struct!(GunTarget {
 crate::checkpoint_enum!(crate::combat::missiles::Rules {
     Compatibility = 0,
     Spec = 1,
+});
+
+// A pilot's controls, as an AI actor last flew them (`AiActor::last_input`,
+// slice H9): a destroyed actor no longer steps, so its last controls are
+// never rewritten and a restore must carry them.
+
+crate::checkpoint_enum!(Switch {
+    Gear = 0,
+    Flaps = 1,
+    Airbrake = 2,
+    Hook = 3,
+    Bay = 4,
+    Engine = 5,
+    Burner = 6,
+    Radar = 7,
+    Jammer = 8,
+    Autopilot = 9,
+    WaypointAutopilot = 10,
+});
+
+impl Checkpoint for PilotCommand {
+    fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
+        match self {
+            Self::Eject => s.writer().write_varint(0),
+            Self::Toggle(switch) => {
+                s.writer().write_varint(1);
+                switch.save(s, None)?;
+            }
+            Self::Set(switch, on) => {
+                s.writer().write_varint(2);
+                switch.save(s, None)?;
+                on.save(s, None)?;
+            }
+            Self::Throttle(value) => {
+                s.writer().write_varint(3);
+                value.save(s, None)?;
+            }
+            Self::AdjustThrottle(value) => {
+                s.writer().write_varint(4);
+                value.save(s, None)?;
+            }
+        }
+        Ok(())
+    }
+    fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
+        Ok(match l.reader().read_varint()? {
+            0 => Self::Eject,
+            1 => Self::Toggle(Checkpoint::load(l, None)?),
+            2 => Self::Set(Checkpoint::load(l, None)?, Checkpoint::load(l, None)?),
+            3 => Self::Throttle(Checkpoint::load(l, None)?),
+            4 => Self::AdjustThrottle(Checkpoint::load(l, None)?),
+            other => return invalid(format!("PilotCommand has no variant {other}")),
+        })
+    }
+}
+
+crate::checkpoint_struct!(PilotInput {
+    pitch,
+    roll,
+    yaw,
+    throttle_rate,
+    throttle,
+    commands,
 });
