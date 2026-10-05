@@ -9,8 +9,12 @@
 > <!-- tore-header v2 -->
 
 Design of 2026-10-05 for stages I and J of the
-[multiplayer plan](../multiplayer-plan.md#stages). Nothing here is built yet;
-the [architecture guide](../ARCHITECTURE.md#master-server-and-connectivity)
+[multiplayer plan](../multiplayer-plan.md#stages). *Built (I1, 2026-10-05):*
+the wire itself, every packet's encoder and bounded decoder, in `tore-net`'s
+`master` module; what the build settled is in
+[the wire as built](#the-wire-as-built). The master, the game's side and the
+screens are not built yet. The
+[architecture guide](../ARCHITECTURE.md#master-server-and-connectivity)
 has the design and the slices that build it, and the
 [operations guide](../MASTER-SERVER.md) says how the master is run. Every
 choice below is an *agent proposal* awaiting John's review, unless it is
@@ -41,6 +45,7 @@ the master.
 - [Limits](#limits)
 - [Security](#security)
 - [Golden file](#golden-file)
+- [The wire as built](#the-wire-as-built)
 
 ## Overview
 
@@ -191,12 +196,12 @@ receives at its address, as the game's handshake does
 
 | Request | Padded to | Largest answer from an unproven sender | Answer to a proven one |
 | --- | --- | --- | --- |
-| Register | 1,200 | Challenge, 23 bytes | Listed, at most 60 bytes |
+| Register | 1,200 | Challenge, 23 bytes | Listed, at most 53 bytes |
 | Browse | 1,200 | Page, at most 1,200 | |
 | Details | 1,000 | Listing details, at most 1,000 | |
-| Probe | 64 | Probe answer, at most 43 | |
+| Probe | 64 | Probe answer, at most 35 | |
 | Introduce | 1,000 | Challenge, 23 bytes | Introduction, at most 1,000; and a Meet to the host |
-| Heartbeat, Keep, Unregister | not padded | Unknown listing (15 bytes), only when no longer than the request | Heartbeat ack, at most 40 |
+| Heartbeat, Keep, Unregister | not padded | Unknown listing (15 bytes), only when no longer than the request | Heartbeat ack, at most 34 |
 | Relay request, Relay | not padded | nothing | Relay offer; frames forwarded to the other end only |
 | Report | not padded | nothing | nothing |
 
@@ -559,3 +564,86 @@ The encodings of a fixed set of packets of every kind are kept in
 `crates/tore-net/master-golden.txt` and compared by a test, as the game's
 wire and discovery packets are. Bytes that change without a new master
 protocol version fail the test.
+
+The test is `master_golden` in `tore-net`'s `master/packet.rs`. The file
+records the master version (`master-version 1`) and one line per sample:
+a name, the length, and the bytes in hex (a padded request's bytes up to
+its padding). The test also decodes every committed line back to its sample.
+To add a sample, or after raising `MASTER_VERSION`, refresh it with
+`TORE_UPDATE_MASTER_GOLDEN=1 cargo test --locked -p tore-net master_golden`.
+Under the same version, a refresh that would change a committed line is
+refused.
+
+## The wire as built
+
+*Built (I1, 2026-10-05).* `tore_net::master`: `packet.rs` (the 26 kinds,
+their encoders and decoders, fitting), `candidate.rs` (addresses,
+candidates, mapping types) and `mod.rs` (the constants and the cookie key).
+What the build settled beyond the sections above (agent decisions unless
+the sections above say otherwise):
+
+- **One encoding for every packet.** Decoding is strict: an unnamed code, a
+  reserved bit that is set, a text over its limit, trailing bytes or a
+  stray bit after the last field, or padding that is not zero makes the
+  packet malformed. So whatever decodes is exactly what it encodes to again,
+  and the fuzz test checks this for every datagram it decodes.
+- **Fields are bit-packed** one after another, with no alignment between
+  them, as the tables give them. "2 bits, then 6 zero bits" and "1 bit, then
+  7 zero bits" are read as one byte whose value must be a named code (or 0
+  or 1).
+- **Addresses.** After the family bit, the address's octets go in their
+  usual order (`a.b.c.d`), 8 bits each, then the port as a 16-bit number.
+  An IPv4-mapped address sent as IPv6 is malformed, since it is sent as
+  IPv4. An IPv6 address's flow label and scope are not sent.
+- **A sender's own candidate lists** (Register, Heartbeat, Introduce) never
+  hold a Seen candidate: one that does is malformed. The master's lists
+  (Introduction, Meet) may.
+- **Versions are checked before kinds.** A packet with a good checksum in a
+  version outside the supported range is reported as unsupported, with its
+  version and kind byte, even when its kind is unknown here: a later version
+  may name it. **Unsupported** itself has a layout no version changes, so it
+  is read whatever its header's version, and the master writes it with the
+  request's version in its header.
+- **The install id goes with the telemetry bit.** In Register, an id that
+  is not 0 with telemetry off, or 0 with telemetry on, is malformed. A
+  Report with an install id of 0 is malformed.
+- **Platform codes are kept raw** (the byte, or 3 bits in a Page), not
+  checked against the codes this build names. One master serves every
+  build, and a later build may name a new system. A Page entry's code must
+  fit 3 bits (at most 7).
+- **Refusal texts.** An Introduction's and a Relay offer's text is at most
+  200 bytes, the game's own refusal limit. The other texts take the
+  discovery answer's limits: build texts and names 64 bytes, the mission
+  summary 200, a callsign 15.
+- **Relay frames.** A frame must carry a game datagram of 1 to 1,200 bytes:
+  an empty one is malformed. `RelayFrame` reads a frame without copying the
+  datagram, for the master's forwarding and the game's router.
+- **Fitting.** `Register::fit` (to 1,200 bytes), `Heartbeat::fit` (to 1,232)
+  and `ListingDetails::fit` (to the request's length) cut the summary's
+  texts to their limits, then keep callsigns from the start while they fit,
+  and set the truncated flag when any are left out. With a host's three
+  candidates, the largest lobby (every text at its limit and 30 callsigns
+  of 15 characters) fits all three whole: a Register of 1,103 bytes before
+  its padding, a Heartbeat of 954, Listing details of 929. Only a Register
+  with eight IPv6
+  candidates loses callsigns. `Page::fit` keeps entries from the start
+  while they fit (at most 255), and the master sets the next cursor from
+  how many it kept.
+- **Sizes.** The largest small answers, with IPv6 addresses: Listed 53
+  bytes, Heartbeat ack 34, Probe answer 35. The smallest Heartbeat is 37
+  bytes, longer than the 15-byte Unknown listing that may answer it. The
+  longest Unsupported (a 100-byte text) is 112 bytes, so it never answers a
+  64-byte Probe.
+- **The cookie key.** `tore_net::master::CookieKey` wraps the transport's
+  own cookie hash, so both use one keyed hash, and does the 10-second slot
+  arithmetic. A cookie is never 0, which a request uses for "no cookie yet".
+- **The default master** is the placeholder `master.invalid:26901` until
+  John names the public master (slice IJ7). The reserved `.invalid` name
+  never resolves, so no build sends anything to anyone before then.
+- **Constants** in `tore_net::master`: the version and its supported range,
+  the two ports, the listing intervals (30, 15 and 90 seconds, and 5 seconds
+  for a change heartbeat), 10 seconds to a silent master, three copies of
+  Unregister and Relay close, the 10-minute mapping test, the 30-second
+  introduction, the Meet's 250 ms and three tries, five punches 200 ms apart,
+  3 seconds to the relay and 15 to give up, 30 seconds of relay idle, and
+  200 matching listings.

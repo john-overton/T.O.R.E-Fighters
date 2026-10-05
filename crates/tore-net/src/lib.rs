@@ -66,6 +66,7 @@ use std::time::Duration;
 
 pub mod keepalive;
 pub mod link;
+pub mod master;
 pub mod packet;
 pub mod platform;
 pub mod reach;
