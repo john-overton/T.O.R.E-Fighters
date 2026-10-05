@@ -139,6 +139,29 @@ class ParsingTests(unittest.TestCase):
         alone = good.replace(", 2 Bot2 (friendly) 0/0 0.00", "")
         self.assertIn("no scores line of Bot1's lists every player", net.scores_problems(alone, ["Bot1", "Bot2"]))
 
+    def test_the_pvp_end_follows_the_kills(self):
+        line = "{who}: scores: players ranked by kills: 1 Blue (friendly) {b}/0 0.00, 2 Red (enemy) 0/{l} 0.00; " \
+            "sides {b}/0 to 0/{l}; {left} left; ends at 1 kill in all{end}\n"
+        flying = line.format(who="Blue", b=0, l=0, left="1:30", end="")
+        draw = flying + line.format(who="Blue", b=0, l=0, left="0:00", end="; a draw") + \
+            "Blue: Mission ended: the time limit.\n"
+        self.assertEqual(net.pvp_end_problems(draw, ["Blue", "Red"]), [])
+        won = flying + line.format(who="Red", b=2, l=1, left="1:02", end="; the friendly side wins") + \
+            "Red: Mission ended: the kill limit.\n"
+        self.assertEqual(net.pvp_end_problems(won, ["Blue", "Red"]), [])
+        # A kill that the kill limit did not answer, and a time limit with no draw.
+        scored = flying + line.format(who="Blue", b=1, l=1, left="0:00", end="; a draw") + \
+            "Blue: Mission ended: the time limit.\n"
+        self.assertIn("but the kill limit did not end the mission", net.pvp_end_problems(scored, ["Blue", "Red"])[0])
+        no_draw = flying + "Blue: Mission ended: the time limit.\n"
+        self.assertIn("not a draw", net.pvp_end_problems(no_draw, ["Blue", "Red"])[0])
+        co_op = draw.replace("(enemy)", "(friendly)").replace("ends at 1 kill in all", "")
+        self.assertEqual(
+            net.pvp_end_problems(co_op, ["Blue", "Red"]),
+            ["no scores line puts a player on the enemy side", "no scores line names the kill limit (1 kill in all)"],
+        )
+        self.assertEqual(net.pvp_end_problems("", ["Blue"]), ["no bot printed scores"])
+
     def test_bad_network_words_are_recognised(self):
         import re
 

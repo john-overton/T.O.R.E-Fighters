@@ -12,7 +12,7 @@
 //!          [--data-dir DIR] [--count N] [--callsign NAME]
 //!          [--slot PLANE] [--seconds S] [--password TEXT]
 //!          [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...
-//!          [--observe PLANE|none]
+//!          [--observe PLANE|none] [--king NAME=VALUE[,NAME=VALUE]...]
 //! ```
 //!
 //! `--master` and `--listing` join through the Internet Lobby (stage J,
@@ -42,6 +42,13 @@
 //! aircraft in the last. An observer succeeds when it watched, drew frames
 //! with aircraft in them and left cleanly.
 //!
+//! `--king` makes a bot that wears the crown (stage F phase 2, slice F2-1: a
+//! game it hosts, or a server with `king first-player`) change the King's
+//! settings once, by their registry names and values (`mode=pvp,kill-limit=3`,
+//! numbers in the wire's units), and start each mission once every player
+//! holding a slot is ready. Every bot prints when it wears the crown and the
+//! settings whenever they change (the values apart from co-op's defaults).
+//!
 //! It prints one line per join, seating, debrief, lobby change and
 //! departure, and each bot's figures every five seconds. It exits 0 when
 //! every bot was seated, got a debrief and then left cleanly, or was told the
@@ -61,14 +68,16 @@ use tore_net::{
 };
 use tore_session::bot::Bot;
 use tore_session::client::{Race, ended_text};
+use tore_session::settings::{self, Mode, Store};
 use tore_session::wire::chat::Receiver;
-use tore_session::wire::messages::{Goodbye, LobbyState, Observing, Subject};
+use tore_session::wire::messages::{Goodbye, LobbyState, Observing, SettingsChange, Subject};
 use tore_session::{BuildId, Client, ClientConfig, ClientEvent, ClientPhase};
 
 const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME \
 [--path auto|direct]) [--data-dir DIR] [--count N] \
 [--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] \
-[--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none]";
+[--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
+[--king NAME=VALUE[,NAME=VALUE]...]";
 
 /// How long the bot looks for the listing on the master's list.
 const FIND_LISTING: Duration = Duration::from_secs(10);
@@ -110,6 +119,8 @@ struct Options {
     quick: Vec<(Duration, u8)>,
     /// `--observe`: watch instead of flying, the camera on this subject.
     observe: Option<Subject>,
+    /// `--king`: as the King, these settings, then the start.
+    king: Option<Vec<(u8, u32)>>,
 }
 
 fn receiver(word: &str) -> Result<Receiver, String> {
@@ -144,6 +155,43 @@ fn say(value: &str) -> Result<(Duration, Receiver, String), String> {
     }
 }
 
+/// `--king NAME=VALUE[,NAME=VALUE]...`: settings by their registry names,
+/// each value a word of the setting's or a number in the wire's unit.
+fn king(value: &str) -> Result<Vec<(u8, u32)>, String> {
+    value
+        .split(',')
+        .filter(|item| !item.is_empty())
+        .map(|item| {
+            let (name, value) = item
+                .split_once('=')
+                .ok_or_else(|| format!("--king takes NAME=VALUE pairs, not {item:?}"))?;
+            let setting = settings::by_name(name)
+                .filter(|s| s.number != settings::number::PASSWORD)
+                .ok_or_else(|| format!("--king: {name:?} is not a setting"))?;
+            let value = setting
+                .parse(value)
+                .ok_or_else(|| format!("--king: {} is {}", setting.name, setting.values_text()))?;
+            Ok((setting.number, value))
+        })
+        .collect()
+}
+
+/// The settings apart from co-op's defaults, in words; "co-op's defaults"
+/// when there are none.
+fn settings_line(values: &[(u8, u32)]) -> String {
+    let defaults = Store::defaults(Mode::Coop).lobby_list();
+    let changed: Vec<(u8, u32)> = values
+        .iter()
+        .copied()
+        .filter(|value| !defaults.contains(value))
+        .collect();
+    if changed.is_empty() {
+        "co-op's defaults".into()
+    } else {
+        settings::words(&changed)
+    }
+}
+
 /// `--quick SECONDS,NUMBER`.
 fn quick(value: &str) -> Result<(Duration, u8), String> {
     let (at, number) = value
@@ -173,6 +221,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         say: Vec::new(),
         quick: Vec::new(),
         observe: None,
+        king: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -230,6 +279,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
                     ),
                 });
             }
+            "--king" => options.king = Some(king(&value()?)?),
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unknown option {other}\n{USAGE}")),
         }
@@ -443,6 +493,11 @@ struct Running {
     host_left: bool,
     /// An observer's flight started.
     observed: bool,
+    /// It wears the crown, and has sent `--king`'s settings.
+    crowned: bool,
+    settings_sent: bool,
+    /// The settings last printed.
+    settings: Option<Vec<(u8, u32)>>,
 }
 
 impl Running {
@@ -666,6 +721,9 @@ fn main() -> ExitCode {
             lobby: None,
             host_left: false,
             observed: false,
+            crowned: false,
+            settings_sent: false,
+            settings: None,
         };
         match (&options.target, &found) {
             (JoinBy::Master { path, .. }, Some((masters, listing_id))) => {
@@ -805,6 +863,47 @@ fn main() -> ExitCode {
                                 println!("{}: lobby: {line}", r.name);
                                 r.lobby = Some(line);
                             }
+                            if r.settings.as_ref() != Some(&lobby.settings) {
+                                println!(
+                                    "{}: settings: {}",
+                                    r.name,
+                                    settings_line(&lobby.settings)
+                                );
+                                r.settings = Some(lobby.settings.clone());
+                            }
+                            let king = lobby.is_king();
+                            let in_lobby =
+                                lobby.phase == tore_session::wire::messages::LobbyPhase::Lobby;
+                            let stand = options.king.as_ref().is_some_and(|values| {
+                                values.iter().all(|v| lobby.settings.contains(v))
+                            });
+                            if king != r.crowned {
+                                r.crowned = king;
+                                if king {
+                                    println!("{}: wears the crown", r.name);
+                                }
+                            }
+                            if let Some(values) = &options.king
+                                && king
+                                && in_lobby
+                                && !r.settings_sent
+                            {
+                                r.settings_sent = true;
+                                println!(
+                                    "{}: as the King, changing the settings: {}",
+                                    r.name,
+                                    settings::words(values)
+                                );
+                                bot.client.change_settings(SettingsChange {
+                                    values: values.clone(),
+                                    ..SettingsChange::default()
+                                });
+                            }
+                            // The King's start once the settings stand and
+                            // everyone holding a slot is ready (not before,
+                            // so a change that clears the ready marks does
+                            // not meet a start already on its way).
+                            bot.start_when_ready = r.settings_sent && stand;
                         }
                     }
                     ClientEvent::Goodbye(_) => {}
@@ -994,6 +1093,44 @@ mod tests {
         ] {
             assert!(parse(&args(bad)).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn king_takes_settings_by_name_and_refuses_what_is_not_one() {
+        use tore_session::settings::number;
+        let o = parse(&args(
+            "--connect 127.0.0.1 --king mode=pvp,kill-limit=3,observer-delay=10,lives=unlimited",
+        ))
+        .unwrap();
+        assert_eq!(
+            o.king.unwrap(),
+            [
+                (number::MODE, 1),
+                (number::KILL_LIMIT, 3),
+                (number::OBSERVER_DELAY, 10),
+                (number::LIVES, settings::UNLIMITED_LIVES),
+            ]
+        );
+        assert_eq!(parse(&args("--connect 127.0.0.1")).unwrap().king, None);
+        for bad in [
+            "--king mode",
+            "--king moods=pvp",
+            "--king kill-limit=4",
+            "--king password=1",
+        ] {
+            assert!(
+                parse(&args(&format!("--connect 127.0.0.1 {bad}"))).is_err(),
+                "{bad}"
+            );
+        }
+        assert_eq!(
+            settings_line(&Store::defaults(Mode::Coop).lobby_list()),
+            "co-op's defaults"
+        );
+        let mut pvp = Store::defaults(Mode::Coop);
+        pvp.apply(&[(number::MODE, 1), (number::KILL_LIMIT, 3)])
+            .unwrap();
+        assert!(settings_line(&pvp.lobby_list()).starts_with("mode pvp, "));
     }
 
     #[test]

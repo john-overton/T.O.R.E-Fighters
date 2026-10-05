@@ -203,6 +203,37 @@ def scores_problems(text: str, callsigns: list[str]) -> list[str]:
     return problems
 
 
+def pvp_end_problems(text: str, callsigns: list[str]) -> list[str]:
+    """A PvP mission with a kill limit (slice F2-1's server keys, F2-S's scoring), from what the bots printed: the
+    scores name the enemy side and the limit, and the end follows the kills. A kill by any player must end the
+    mission by the kill limit with a winner; with no kill (the scripted pilot rarely lands a gun kill) the time limit
+    ends it in a draw, and the kill limit's own end is the simulator's test (host::score_tests)."""
+    problems = []
+    lines = re.findall(r"^\w+: scores: (players ranked by kills: .*)$", text, re.M)
+    if not lines:
+        return ["no bot printed scores"]
+    if not any("(enemy)" in line for line in lines):
+        problems.append("no scores line puts a player on the enemy side")
+    if not any("ends at 1 kill in all" in line for line in lines):
+        problems.append("no scores line names the kill limit (1 kill in all)")
+    kills = {name: 0 for name in callsigns}
+    for line in lines:
+        for name, count in re.findall(r"\d+ (\w+)(?: \((?:friendly|enemy)\))? (\d+)/\d+", line):
+            kills[name] = max(kills.get(name, 0), int(count))
+    by_kill = re.search(r"^\w+: Mission ended: the kill limit", text, re.M)
+    by_time = re.search(r"^\w+: Mission ended: the time limit", text, re.M)
+    if any(kills.values()):
+        if not by_kill:
+            problems.append(f"a player scored ({kills}) but the kill limit did not end the mission")
+        elif not re.search(r"; (the \w+ side|\w+) wins$", lines[-1]):
+            problems.append(f"the kill limit's last scores name no winner: {lines[-1]}")
+    elif not by_time:
+        problems.append("nobody scored and the time limit did not end the mission")
+    elif not lines[-1].endswith("; a draw"):
+        problems.append(f"the time limit's last scores are not a draw: {lines[-1]}")
+    return problems
+
+
 def figures_problems(log: str, callsigns: list[str]) -> list[str]:
     """The once-a-minute figures a server logs for each player."""
     problems = []
@@ -368,6 +399,88 @@ def drive_scores(d: Drive) -> None:
         d.problem(problem)
     bots.forbid(NET_BAD, "a network problem")
     server.forbid(NET_BAD, "a network problem")
+
+
+def drive_king(d: Drive) -> None:
+    """A server whose first player wears the crown (`king first-player`, slice F2-1): the King bot changes the
+    settings (PvP, friendly fire off, a one-minute time limit, three lives) and starts the mission; a second bot then
+    joins and takes an enemy plane, which PvP opened. The time limit ends the mission and the server stops."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(separation_nm=20), king="first-player")
+    king = start_bots(
+        d, port, "king", 100, "--callsign", "King", "--king", "mode=pvp,friendly-fire=off,time-limit=60,lives=3",
+    )
+    if not server.wait_for(r"King changed the settings: mode pvp", 60):
+        raise DriveError("the King never changed the settings")
+    wing = start_bots(d, port, "wing", 100, "--callsign", "Wing", "--slot", "6")
+    if not server.wait_for(r"^mission ended: the time limit$", 150):
+        d.problem("the King's time limit did not end the mission")
+    king.finish(60, None)
+    wing.finish(60, None)
+    server.finish(40, 0)
+    king.expect(r"^King: wears the crown$", "the crown")
+    king.expect(
+        r"^King: as the King, changing the settings: mode pvp, friendly-fire off, time-limit 1 minute, lives 3$",
+        "the King's change",
+    )
+    king.expect(r"^King: lobby: Lobby, .*King \(King\)", "the lobby's crown")
+    king.expect(r"^King: seat \d+, plane 0, at tick \d+$", "the King flies")
+    for bot, name in ((king, "King"), (wing, "Wing")):
+        bot.expect(rf"^{name}: settings: mode pvp, .*friendly-fire off", f"{name} sees the King's settings")
+        bot.expect(rf"^{name}: Mission ended: the time limit", f"{name} hears the end")
+        bot.forbid(NET_BAD, "a network problem")
+    wing.expect(r"^Wing: seat \d+, plane 6, at tick \d+$", "an enemy plane, open in PvP")
+    wing.forbid(r"^Wing: wears the crown$", "a second crown")
+    server.forbid(NET_BAD, "a network problem")
+    log_must(
+        d, server_log(d), r"King wears the crown", r"King changed the settings: mode pvp, friendly-fire off",
+        r"mission started", r"mission ended: the time limit", forbid=NET_BAD,
+    )
+
+
+def drive_pvp(d: Drive) -> None:
+    """PvP from the server's file (slice F2-1's keys): `mode pvp`, a kill limit of one kill in all, two minutes at
+    most. One bot flies for each side; the scores name both sides and the limit, and the end follows the kills."""
+    port = d.port()
+    server = start_server(
+        d, port, guide_mission(separation_nm=5), mode="pvp", kill_limit=1, kill_owner="total", time_limit=2,
+    )
+    blue = start_bots(d, port, "blue", 170, "--callsign", "Blue", "--slot", "0")
+    red = start_bots(d, port, "red", 170, "--callsign", "Red", "--slot", "6")
+    if not server.wait_for(r"^mission ended: the (kill|time) limit$", 220):
+        d.problem("neither the kill limit nor the time limit ended the mission")
+    blue.finish(60, None)
+    red.finish(60, None)
+    server.finish(40, 0)
+    blue.expect(r"^Blue: seat \d+, plane 0, at tick \d+$", "a friendly plane")
+    red.expect(r"^Red: seat \d+, plane 6, at tick \d+$", "an enemy plane, open in PvP")
+    for problem in pvp_end_problems(blue.text() + red.text(), ["Blue", "Red"]):
+        d.problem(problem)
+    for bot in (blue, red):
+        bot.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+
+
+def drive_delay(d: Drive) -> None:
+    """A delayed observer (slice F2-O1's delay, set by slice F2-1's `observer-delay`): in a PvP mission a bot with no
+    plane watches two bots fight 10 seconds behind, and the server logs that it watches."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(separation_nm=5), mode="pvp", observer_delay=10)
+    flyers = start_bots(d, port, "flyers", 50, "--count", "2", "--callsign", "Bot")
+    if not server.wait_for(r"^mission started$", 60):
+        raise DriveError("the mission never started")
+    owl = start_bots(d, port, "owl", 30, "--callsign", "Owl", "--observe", "0")
+    owl.finish(60, 0)
+    flyers.finish(90, None)
+    server.finish(40, 0)
+    owl.expect(r"^Owl: settings: mode pvp, .*observer-delay 10 seconds", "the delay in the lobby's settings")
+    owl.expect(r"^Owl: observing from tick \d+, 10 s behind$", "the observer flight, 10 seconds behind")
+    owl.expect(r"^Owl: watching: frames [1-9]\d*, aircraft [1-9]\d*$", "frames with aircraft in them")
+    owl.forbid(r"^Owl: (seat \d+|debrief)", "a plane or a debrief for the observer")
+    owl.forbid(NET_BAD, "a network problem")
+    flyers.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+    log_must(d, server_log(d), r"Owl is watching the mission", forbid=NET_BAD)
 
 
 def drive_discovery(d: Drive) -> None:
@@ -636,6 +749,18 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-server-scores", lane="net", args=[], driver=drive_scores, uses=("server", "bot"), timeout=300,
             notes="a one-minute time limit with two bots: the scores while flying and the final ones at the end",
+        ),
+        Scenario(
+            name="net-server-king", lane="net", args=[], driver=drive_king, uses=("server", "bot"), timeout=300,
+            notes="`king first-player`: the King bot changes the settings to PvP and starts; a bot takes an enemy plane",
+        ),
+        Scenario(
+            name="net-server-pvp", lane="net", args=[], driver=drive_pvp, uses=("server", "bot"), timeout=360,
+            notes="PvP from the server's file with a kill limit: a bot on each side, the scores, the end by the kills",
+        ),
+        Scenario(
+            name="net-server-delay", lane="net", args=[], driver=drive_delay, uses=("server", "bot"), timeout=240,
+            notes="`observer-delay 10` in PvP: an observer bot watches two bots fight 10 seconds behind",
         ),
         Scenario(
             name="net-discovery", lane="net", args=[], driver=drive_discovery, uses=("server",), timeout=120,

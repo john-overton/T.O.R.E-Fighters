@@ -178,8 +178,12 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     # Net lane: real UDP on this machine, a driver per scenario.
     "net-check": ("the dedicated server's start-up and --check", ("net-server-check",)),
     "net-fly": (
-        "a server and bots over UDP: join, fly, chat, console, observe, scores, debrief, clean exit",
-        ("net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe", "net-server-scores"),
+        "a server and bots over UDP: join, fly, chat, console, observe, scores, the King, PvP, a delayed observer, "
+        "debrief, clean exit",
+        (
+            "net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe", "net-server-scores",
+            "net-server-king", "net-server-pvp", "net-server-delay",
+        ),
     ),
     "net-discovery": ("finding games on the local network", ("net-discovery",)),
     "net-master": (
@@ -328,7 +332,10 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-world/src/readout.rs", ("instruments", "flight-combat", "replay-live"), "the cockpit readout"),
     _r("crates/tore-world/src/snapshot.rs", ("replay-recording", "ai-fights"), "snapshots"),
     _r("crates/tore-world/src/mission_layout.rs", ("ai-missions", "menus-creator"), "mission layout"),
-    _r("crates/tore-world/src/mission.rs", ("ai-missions", "menus-creator"), "mission spec"),
+    _r(
+        "crates/tore-world/src/mission.rs", ("ai-missions", "menus-creator", "net-fly"),
+        "mission spec; its friendly-fire and loadouts lines and the loadout rule are a networked mission's",
+    ),
     _r("crates/tore-world/src/resources.rs", ("ai-missions", "menus-creator", "airports"), "mission resource reads"),
     _r("crates/tore-world/src/target_window.rs", ("instruments",), "target window"),
     _r("crates/tore-world/src/aircraft_type.rs", ("ai-fights", "menus-creator"), "aircraft types"),
@@ -384,6 +391,11 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-net/*", NET_FAMILIES + ("net-discovery", "net-introduce"), "network transport"),
     _r("crates/tore-session/src/settings.rs", NET_FAMILIES + ("net-discovery",), "the King's settings registry"),
     _r("crates/tore-session/src/client/scores.rs", NET_FAMILIES, "the scores a game keeps and their words (tore-bot prints them)"),
+    _r(
+        "crates/tore-session/src/host/king*",
+        NET_FAMILIES + ("net-discovery",),
+        "the King's lobby: the crown, settings, slot locks, visibility (tore-bot --king)",
+    ),
     _r(
         "crates/tore-session/*",
         NET_FAMILIES + ("net-discovery", "net-introduce"),
