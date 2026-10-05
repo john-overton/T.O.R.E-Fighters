@@ -174,7 +174,7 @@ compile without a section (see [keeping it complete](#keeping-it-complete)):
 | 2 | Combat | `Combat` and its `live::State`: ownships, targets, projectiles with guidance, effects, smoke, contrails, debris, marks, the ledger, the rewind history, random streams, the combat tick (`World::tick`) | In place |
 | 3 | AI wings | `AiWings` and its `AiMission`: actors with flight, controller, memory, sensors and stores; leaders, opportunities; the bridge's maps and random streams | In place |
 | 4 | Cockpits | Every human-flown plane's `Cockpit`: flight, turbulence and its stream, airport service, NAV mode, message clocks, tower radio, crew voice, result tracker | New value |
-| 5 | Weather | The weather clock and its fog selection (`Environment`'s mutable part) | In place |
+| 5 | Weather | The weather clock, its ticks, the fog random stream, the selection schedule, the active layers and each record's tint scalar (`Environment`'s mutable part) | In place |
 | 6 | Comms | Radio channels, cooldowns, the radio random stream | New value |
 | 7 | Wing status | The AI wingmen's airfield report memory | New value |
 | 8 | Radio | The radio call memory (hits by shooter and victim) | New value |

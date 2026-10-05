@@ -58,6 +58,8 @@ mod radio_checkpoint_tests;
 mod readout_tests;
 #[cfg(test)]
 mod records_checkpoint_tests;
+#[cfg(test)]
+mod shell_checkpoint_tests;
 pub use commands::{MissionCommand, OrderOutcome, OrderReply, Settings};
 #[cfg(test)]
 mod phase2_seams_tests;
