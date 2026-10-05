@@ -1,8 +1,10 @@
-//! What the world hands the AI each tick: a skeleton in slice G0.
+//! What the world hands the AI each tick.
 //!
-//! Later slices put it to work (G2 adds the humans' locked targets to the
-//! engagement table, G3b the linked-track pursuit, G4 the member state for AI
-//! leads). Nothing reads it yet, so the AI decides exactly as before.
+//! Slice G2 puts the humans' locked targets to work: `AiWings::set_link`
+//! reads `DataLink::human_engagements` before each step and the AI's
+//! engagement table counts them (B41's wing attackers). The tracks and member
+//! state of [`AiInput`] stay a skeleton until G3b (the linked-track pursuit)
+//! and G4 (the member state for AI leads).
 
 use super::{DataLink, Engagement, FlightId, FlightPicture, MemberStatus, Track, flight_key};
 
@@ -40,17 +42,22 @@ pub struct AiInput {
 }
 
 impl DataLink {
+    /// What the humans attack: each living human's locked target, in plane id
+    /// order. The AI cannot see a human's sensors for itself.
+    pub fn human_engagements(&self) -> Vec<Engagement> {
+        self.engagements()
+            .into_iter()
+            .filter(|e| self.member(e.plane).is_some_and(|m| m.human && m.alive))
+            .collect()
+    }
+
     /// What the AI receives of the picture now.
     pub fn ai_input(&self) -> AiInput {
         let mut flights: Vec<FlightFeed> = self.pictures().iter().map(FlightFeed::from).collect();
         flights.sort_by_key(|feed| flight_key(feed.flight));
         AiInput {
             tick: self.tick(),
-            human_engagements: self
-                .engagements()
-                .into_iter()
-                .filter(|e| self.member(e.plane).is_some_and(|m| m.human && m.alive))
-                .collect(),
+            human_engagements: self.human_engagements(),
             flights,
         }
     }

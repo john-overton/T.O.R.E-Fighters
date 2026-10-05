@@ -341,6 +341,35 @@ def datalink_picture_check(planes: int, designated: int) -> Callable[[str], list
     return check
 
 
+def datalink_player_lock_check(wingman: int, locked: int, takes: int) -> Callable[[str], list[str]]:
+    """The AI counts a human's locked target (slice G2): the player locks
+    aircraft `locked`, and its wingman `wingman`, ordered to attack later, ranks
+    that bandit with the wing-attacker penalty and takes the other one,
+    `takes`. The wingman's first lock must be on `takes` and it must never lock
+    `locked`. The two scenarios mirror each other, so the choice follows the
+    player's lock and not the geometry."""
+
+    def check(output: str) -> list[str]:
+        problems = probe_problems(output)
+        wingman_locks = [
+            (int(tick), int(target))
+            for tick, kind, plane, _, target in DATALINK_LINE.findall(output)
+            if kind == "lock" and int(plane) == wingman
+        ]
+        player = [int(target) for _, kind, plane, _, target in DATALINK_LINE.findall(output) if kind == "lock" and int(plane) == 0]
+        if locked not in player:
+            problems.append(f"the player never locked aircraft {locked}")
+        if not wingman_locks:
+            problems.append(f"wingman plane {wingman} never locked anything")
+        elif wingman_locks[0][1] != takes:
+            problems.append(f"wingman plane {wingman} first locked {wingman_locks[0][1]} at t={wingman_locks[0][0]}, expected {takes}")
+        if any(target == locked for _, target in wingman_locks):
+            problems.append(f"wingman plane {wingman} locked the player's bandit {locked}")
+        return problems
+
+    return check
+
+
 LAND_ORDER = re.compile(r'^t=(\d+) order=LandAtSelected reply="(.*)"$', re.M)
 PLAYER_DOWN = re.compile(r"^t=(\d+) \([\d.]+s\) player: .*crashed=true", re.M)
 LANDED_PHASES = ("Rollout", "Landed", "Parked", "TaxiIn")
@@ -605,6 +634,17 @@ def scenarios() -> list[Scenario]:
                      expect=[r"data link: assign plane=1 target=4 by=0 order=EngageMyTarget",
                              r"data link: clear plane=1 target=4 why=order"],
                      check=datalink_assign_check(plane=1, target=4, lead=0, cleared_by_order_at=900)))
+
+    # 9d. Humans in the engagement table (stage G2): the player locks one bandit of
+    # a pair 20 nm out, and its wingman, ordered to attack once the lock is held,
+    # takes the other (the player's lock counts as a wing member attacking it,
+    # B41's penalty). Mirrored, so the geometry cannot explain the choice.
+    for name, locked, takes in [("datalink-player-lock", 4, 5), ("datalink-player-lock-mirror", 5, 4)]:
+        out.append(probe(name, ["--probe-wing-size", "2", "--separation", "20",
+                                                              "--probe-player-lock", f"100:{locked}",
+                                                              "--probe-wing-order", "400:attack-on-contact"], ticks=3000,
+                         expect=[rf"data link: lock plane=0 target={locked}", rf"data link: lock plane=1 target={takes}"],
+                         check=datalink_player_lock_check(wingman=1, locked=locked, takes=takes)))
 
     # 10. Ground starts: takeoff, formation, landing orders.
     for size in [1, 2, 3, 4, 5]:

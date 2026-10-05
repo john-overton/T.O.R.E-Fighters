@@ -343,6 +343,11 @@ impl Checkpoint for AiActor {
 // that sets them once and steps many times must set them again after a
 // restore.
 //
+// `link`: per-step scratch too. The host hands the mission the data link's
+// input with `set_link` before every step and the step takes it
+// (`AiWings::step`'s caller does it every tick, empty when nothing is locked),
+// so between steps it is always empty and a restored mission starts the same.
+//
 // `journal`: why-record. Nothing reads the message journal; the host drains
 // it for the recorder.
 crate::checkpoint_struct!(AiMission {
@@ -366,6 +371,7 @@ crate::checkpoint_struct!(AiMission {
 } skip {
     missiles = Vec::new(),
     gun_rounds = Vec::new(),
+    link = crate::ai::link::LinkInput::default(),
     journal = Journal::default(),
 });
 

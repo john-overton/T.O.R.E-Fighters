@@ -7,6 +7,9 @@
 //! the old scans at every AI actor's turn of every tick; each tick also checks
 //! the one engagement and lock rule against the inline tests `locks_on`,
 //! `aiming_at` and the picture used before.
+//!
+//! Slice G2 adds the humans: a human's locked target is a row of the table in
+//! its own wing, read by that wing's AI wingmen (`humans_locks_are_read_by_their_wings_ai`).
 
 use super::checkpoint_scenarios::{self, Step};
 use super::crowd::{self, E_AI, E_LEAD, F_HUMAN};
@@ -18,6 +21,7 @@ use tore_sim::ai::{
     weapon_service::{Phase, StoreCapability},
     wing::PlayerOrder,
 };
+use tore_sim::combat::live::Command;
 
 /// What one audited run saw besides the audit's own counts.
 #[derive(Debug, Default)]
@@ -192,4 +196,62 @@ fn engagement_table_equals_the_live_scan_in_the_open_mission_with_handoffs() {
     );
     assert!(report.wing_checks > 0, "{report:?}");
     assert!(report.leader_checks > 0, "{report:?}");
+}
+
+#[test]
+fn humans_locks_are_read_by_their_wings_ai() {
+    // The friendly humans designate an enemy AI aircraft at step 40 and the
+    // leader orders its wing in; the enemy humans lock nothing, so the enemy
+    // wing's actors have no human lock to read. The audit's `human_attacking` counts the actor turns that saw
+    // a human lock in the actor's own wing; it must equal what the data link
+    // held, plane by plane, step by step: a lock reaches the actors of the
+    // human's wing, and nobody else's.
+    let mut world = crowd::crowded_mission();
+    arm_the_ai(&mut world);
+    let mut expected = 0u64;
+    let mut other_wing_locks = 0u64;
+    let mut out = TickOutput::default();
+    audit::start();
+    for step in 0..900u64 {
+        let inputs = crowd::inputs(&world, |seat| {
+            let plane = world.roster.seats()[usize::from(seat.0)].plane.unwrap();
+            let mut commands = Vec::new();
+            if step == 30 && seat == SeatId(0) {
+                commands.push(SeatCommand::WingOrder(PlayerOrder::AttackOnContact));
+            }
+            if step == 40 && plane.0 < 4 {
+                commands.push(SeatCommand::Combat(Command::DesignateTarget(E_AI[0].0)));
+            }
+            SeatInput {
+                pilot: if step == 10 {
+                    let mut pilot = PilotInput::default();
+                    pilot.commands.push(PilotCommand::Set(Switch::Radar, true));
+                    pilot
+                } else {
+                    PilotInput::default()
+                },
+                commands,
+                ..SeatInput::default()
+            }
+        });
+        world.step(&inputs, &mut out).unwrap();
+        let locks = world.datalink.human_engagements();
+        let wings = world.ai_wings.as_ref().unwrap();
+        for actor in wings.mission().actors() {
+            let seen = locks.iter().any(|lock| {
+                let flight = world.datalink.member(lock.plane).unwrap().flight;
+                flight.side.is_enemy() == (actor.identity().side == crate::ai_wings::ENEMY_SIDE)
+                    && flight.index == actor.identity().wing
+            });
+            expected += u64::from(seen);
+            other_wing_locks += u64::from(!locks.is_empty() && !seen);
+        }
+    }
+    let report = audit::finish();
+    assert!(expected > 0, "no human held a lock");
+    assert!(
+        other_wing_locks > 0,
+        "every actor shared a wing with a lock"
+    );
+    assert_eq!(report.human_attacking, expected, "{report:?}");
 }

@@ -10,10 +10,19 @@
 //! actor's turn earlier actors show this tick's targets and later ones last
 //! tick's, the AI's same-tick decision visibility (John, 2026-10-02).
 //!
-//! The table is not state: it is rebuilt from the controllers every tick, so
-//! exact checkpoints need not code it.
+//! Slice G2 adds the humans. The world hands the AI each human's locked
+//! target ([`LinkInput`]) before the step, and the table gets one row for each
+//! human with a lock, in the human's own side and wing, after the actors' rows.
+//! Humans do not decide in the loop, so their rows keep the value the world
+//! read after combat for the whole step. An AI wingman then counts the player's
+//! locked bandit among the targets its wing attacks (B41), and ranks it with
+//! the same penalty as one a wingman attacks.
+//!
+//! Neither the table nor the input is state: the table is rebuilt from the
+//! controllers every tick and the input is handed over again before every step
+//! (and consumed by it), so exact checkpoints need not code them.
 
-use super::mission::AiActor;
+use super::mission::{AiActor, HumanMember};
 use super::targeting::Side;
 use super::weapon_service::Phase;
 
@@ -34,6 +43,22 @@ pub fn lock_of(actor: &AiActor) -> Option<u32> {
             Phase::Tracking | Phase::Fire
         )
     })
+}
+
+/// What a human attacks: the target its sensors hold locked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HumanEngagement {
+    /// The human-flown aircraft.
+    pub plane: u32,
+    /// The target it holds locked.
+    pub target: u32,
+}
+
+/// What the world hands the AI before a step. In slice G2 it is the humans'
+/// locked targets, in plane id order.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LinkInput {
+    pub humans: Vec<HumanEngagement>,
 }
 
 /// One actor's row: who it is, its wing, and what it attacks.
@@ -62,6 +87,8 @@ impl Row {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Engagements {
     rows: Vec<Row>,
+    /// How many leading rows are actors; the rest are humans.
+    actors: usize,
 }
 
 impl Engagements {
@@ -70,13 +97,50 @@ impl Engagements {
     pub fn new(actors: &[AiActor]) -> Self {
         Self {
             rows: actors.iter().map(Row::of).collect(),
+            actors: actors.len(),
         }
+    }
+
+    /// Add a row for each human in `input` that belongs to a wing, after the
+    /// actors' rows. A plane the mission also holds an actor for keeps its
+    /// actor row, so a handoff never counts a plane twice.
+    pub fn with_humans(mut self, humans: &[HumanMember], input: &LinkInput) -> Self {
+        let actors = self.actors;
+        for engagement in &input.humans {
+            let Some(member) = humans.iter().find(|h| h.id == engagement.plane) else {
+                continue;
+            };
+            if self.rows[..actors]
+                .iter()
+                .any(|r| r.actor == engagement.plane)
+            {
+                continue;
+            }
+            self.rows.push(Row {
+                actor: engagement.plane,
+                side: member.side,
+                wing: member.wing,
+                target: Some(engagement.target),
+            });
+        }
+        self
     }
 
     /// Rewrite the row of the actor at `index`, right after it stepped.
     pub fn decided(&mut self, index: usize, actor: &AiActor) {
         debug_assert_eq!(self.rows[index].actor, actor.id(), "rows in actor order");
         self.rows[index] = Row::of(actor);
+    }
+
+    /// The targets the humans of a wing hold locked, in plane id order (slice
+    /// G2): the table's last rows, for the audit.
+    #[doc(hidden)]
+    pub fn human_wing_targets(&self, side: Side, wing: u8) -> Vec<u32> {
+        self.rows[self.actors..]
+            .iter()
+            .filter(|row| row.side == side && row.wing == wing)
+            .filter_map(|row| row.target)
+            .collect()
     }
 
     /// The target `actor` attacks, as the table holds it now.
@@ -87,8 +151,8 @@ impl Engagements {
             .and_then(|row| row.target)
     }
 
-    /// The targets the other members of `actor`'s wing attack, in decision
-    /// order, one entry per attacker.
+    /// The targets the other members of `actor`'s wing attack, one entry per
+    /// attacker: the actors' in decision order, then the humans' locks.
     pub fn wing_targets(&self, actor: u32, side: Side, wing: u8) -> Vec<u32> {
         self.rows
             .iter()
@@ -120,6 +184,8 @@ pub mod audit {
         pub wing_checks: u64,
         /// Of those, turns where some other member of the wing attacked.
         pub wing_attacking: u64,
+        /// Of those, turns where a human of the wing held a lock.
+        pub human_attacking: u64,
         /// Wingmen's turns whose leader target was compared.
         pub leader_checks: u64,
         /// Of those, turns where the leader had a target.
@@ -167,9 +233,13 @@ pub mod audit {
             .collect()
     }
 
-    /// Compare the table's wing targets with the old scan at `index`'s turn.
-    pub(crate) fn wing(actors: &[AiActor], index: usize, table: &[u32]) {
-        let scanned = scanned_wing_targets(actors, index);
+    /// Compare the table's wing targets with the old scan at `index`'s turn,
+    /// followed by the targets `humans` hold in the actor's wing (slice G2: the
+    /// humans' rows come after the actors').
+    pub(crate) fn wing(actors: &[AiActor], index: usize, table: &[u32], humans: &[u32]) {
+        let mut scanned = scanned_wing_targets(actors, index);
+        let actors_attacking = !scanned.is_empty();
+        scanned.extend_from_slice(humans);
         assert_eq!(
             table,
             scanned.as_slice(),
@@ -178,7 +248,8 @@ pub mod audit {
         );
         count(|r| {
             r.wing_checks += 1;
-            r.wing_attacking += u64::from(!scanned.is_empty());
+            r.wing_attacking += u64::from(actors_attacking);
+            r.human_attacking += u64::from(!humans.is_empty());
         });
     }
 

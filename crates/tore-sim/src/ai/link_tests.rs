@@ -63,6 +63,12 @@ fn audited_fight(workers: &tore_workers::Executor, seed: u64, ticks: u64) -> (au
         scripted_changes(&mut reference, tick, &mut reference_human);
         scripted_changes(&mut actual, tick, &mut actual_human);
         let before: Vec<_> = reference.actors.iter().map(link::engagement_of).collect();
+        // Once the human has actor 8, it holds a lock on an enemy (slice G2):
+        // its wing's table gains a row the audit expects after the actors'.
+        if reference_human.is_some() {
+            reference.set_link(locks(&[(8, 16)]));
+            actual.set_link(locks(&[(8, 16)]));
+        }
         compare_step(
             &mut reference,
             &mut actual,
@@ -93,6 +99,7 @@ fn audited_fight(workers: &tore_workers::Executor, seed: u64, ticks: u64) -> (au
 /// The audit saw the cases that matter, not just empty lists.
 fn assert_exercised(seed: u64, report: audit::Report, fresh: u64) {
     assert!(report.wing_attacking > 0, "{seed}: {report:?}");
+    assert!(report.human_attacking > 0, "{seed}: {report:?}");
     assert!(report.leader_checks > 0, "{seed}: {report:?}");
     assert!(report.leader_targets > 0, "{seed}: {report:?}");
     assert!(fresh > 0, "{seed}: no same-tick read was exercised");
@@ -197,4 +204,143 @@ fn the_table_holds_living_actors_targets_by_wing() {
     assert_eq!(table.target(targeted[0]), None);
     assert_eq!(link::engagement_of(&mission.actors[index]), None);
     assert_eq!(link::lock_of(&mission.actors[index]), None);
+}
+
+// Slice G2: the humans' locked targets in the table.
+
+use crate::ai::link::{HumanEngagement, LinkInput};
+use crate::ai::targeting::Side;
+
+fn human(id: u32, side: u32, wing: u8, member: u8) -> HumanMember {
+    HumanMember {
+        id,
+        side: Side(side),
+        wing,
+        member,
+        pilot_alive: false,
+    }
+}
+
+fn locks(pairs: &[(u32, u32)]) -> LinkInput {
+    LinkInput {
+        humans: pairs
+            .iter()
+            .map(|&(plane, target)| HumanEngagement { plane, target })
+            .collect(),
+    }
+}
+
+#[test]
+fn a_humans_lock_joins_its_own_wing_after_the_actors() {
+    let mission = fixture(10, 12345);
+    let (side, wing) = {
+        let first = &mission.actors[0].identity;
+        (first.side, first.wing)
+    };
+    let other_wing = mission
+        .actors
+        .iter()
+        .map(|a| (a.identity.side, a.identity.wing))
+        .find(|&sw| sw != (side, wing))
+        .unwrap();
+    let humans = [
+        HumanMember {
+            id: 9_001,
+            side,
+            wing,
+            member: 7,
+            pilot_alive: false,
+        },
+        HumanMember {
+            id: 9_002,
+            side: other_wing.0,
+            wing: other_wing.1,
+            member: 7,
+            pilot_alive: false,
+        },
+    ];
+    let plain = Engagements::new(&mission.actors);
+    let input = locks(&[(9_001, 4_242), (9_002, 4_343), (7_777, 4_444)]);
+    let table = Engagements::new(&mission.actors).with_humans(&humans, &input);
+    let reader = mission.actors[0].id();
+    // An actor reads its own wing's actors first, then the human's lock.
+    let mut expected = plain.wing_targets(reader, side, wing);
+    expected.push(4_242);
+    assert_eq!(table.wing_targets(reader, side, wing), expected);
+    assert_eq!(table.human_wing_targets(side, wing), vec![4_242]);
+    assert_eq!(
+        table.human_wing_targets(other_wing.0, other_wing.1),
+        vec![4_343]
+    );
+    // A lock from a plane the mission knows no wing for counts for nobody.
+    for (s, w) in [(side, wing), other_wing] {
+        assert!(!table.wing_targets(reader, s, w).contains(&4_444));
+    }
+    // The human is no actor: asking for its target finds no row to rewrite.
+    assert_eq!(table.target(reader), plain.target(reader));
+    // A plane the mission also flies as an actor keeps its actor row.
+    let doubled = [human(reader, side.0, wing, 0)];
+    let table = Engagements::new(&mission.actors).with_humans(&doubled, &locks(&[(reader, 4_242)]));
+    assert_eq!(table, plain);
+    // No input, no change.
+    assert_eq!(
+        Engagements::new(&mission.actors).with_humans(&humans, &LinkInput::default()),
+        plain
+    );
+}
+
+/// A wingman (actor 1) with two bandits in view and a human of its wing
+/// (plane 90): returns the bandit it chooses when the human locks `lock`.
+fn chosen_with_human_lock(lock: Option<u32>) -> Option<u32> {
+    use tests::{enable_test_radar, flat, object, perception_actor, visible_object};
+    let mut mission = AiMission::new();
+    let mut wingman = perception_actor(crate::ai::Experience::Ace);
+    enable_test_radar(&mut wingman);
+    mission.push(wingman);
+    mission.set_humans(vec![human(90, 1, 0, 3)]);
+    // Bandit 2 is the nearer by 3,000 ft, inside the 10,000 ft penalty.
+    let near = [0., 20_000., 6_000.];
+    let far = [0., 20_000., 9_000.];
+    for tick in 0..30 {
+        let actor = mission.actor(1).unwrap();
+        let world = vec![
+            object(actor, 1),
+            visible_object(actor, 2, near),
+            visible_object(actor, 3, far),
+        ];
+        mission.set_link(locks(
+            &lock.map(|t| (90, t)).into_iter().collect::<Vec<_>>(),
+        ));
+        mission.step(&world, &flat, TimeOfDay(tick)).unwrap();
+    }
+    mission.actor(1).unwrap().controller().target()
+}
+
+#[test]
+fn a_wingman_ranks_the_players_locked_bandit_with_the_penalty() {
+    // Alone, the wingman takes the nearer bandit.
+    assert_eq!(chosen_with_human_lock(None), Some(2));
+    // The player locks the nearer one: it costs 10,000 ft more, so the wingman
+    // takes the other. The player locking the far one changes nothing.
+    assert_eq!(chosen_with_human_lock(Some(2)), Some(3));
+    assert_eq!(chosen_with_human_lock(Some(3)), Some(2));
+}
+
+#[test]
+fn the_step_consumes_the_link_input() {
+    use tests::{enable_test_radar, flat, object, perception_actor, visible_object};
+    let mut mission = AiMission::new();
+    let mut wingman = perception_actor(crate::ai::Experience::Ace);
+    enable_test_radar(&mut wingman);
+    mission.push(wingman);
+    mission.set_humans(vec![human(90, 1, 0, 3)]);
+    mission.set_link(locks(&[(90, 2)]));
+    assert_eq!(mission.link, locks(&[(90, 2)]));
+    let actor = mission.actor(1).unwrap();
+    let world = vec![
+        object(actor, 1),
+        visible_object(actor, 2, [0., 20_000., 6_000.]),
+    ];
+    mission.step(&world, &flat, TimeOfDay(0)).unwrap();
+    assert_eq!(mission.link, LinkInput::default());
 }

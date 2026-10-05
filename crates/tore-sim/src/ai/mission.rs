@@ -1362,6 +1362,9 @@ pub struct AiMission {
     /// The aircraft each human-flown aircraft must keep alive, by aircraft id.
     must_survive: std::collections::BTreeMap<u32, Vec<u32>>,
     pending_attack_reports: Vec<(u32, ObservedAttack)>,
+    /// What the host last handed over from the flight data link, consumed by
+    /// the next step ([`Self::set_link`]). Per-step scratch, not state.
+    link: super::link::LinkInput,
     /// Airport where each human-flown aircraft holds landing priority, by
     /// aircraft id.
     priority_landing: std::collections::BTreeMap<u32, u32>,
@@ -1403,6 +1406,7 @@ impl AiMission {
             human_assignments: Default::default(),
             must_survive: Default::default(),
             pending_attack_reports: Vec::new(),
+            link: Default::default(),
             priority_landing: Default::default(),
             hostiles_seen: Vec::new(),
             airborne_seen: Vec::new(),
@@ -1672,6 +1676,14 @@ impl AiMission {
             member: 0,
             pilot_alive: false,
         });
+    }
+
+    /// Hand the mission what the flight data link holds for the next step:
+    /// the humans' locked targets (slice G2), which join the engagement table
+    /// at the start of the step. The step consumes it, so the host sets it
+    /// before every step; a step without it sees no human lock.
+    pub fn set_link(&mut self, input: super::link::LinkInput) {
+        self.link = input;
     }
 
     pub fn humans(&self) -> &[HumanMember] {
@@ -2087,7 +2099,9 @@ impl AiMission {
         // Who attacks what, in decision order (slice G1): each actor's row is
         // rewritten right after it steps, so an actor reads earlier actors'
         // targets of this tick and later actors' of the last.
-        let mut engagements = super::link::Engagements::new(&self.actors);
+        let link = std::mem::take(&mut self.link);
+        let mut engagements =
+            super::link::Engagements::new(&self.actors).with_humans(&self.humans, &link);
         for index in 0..self.actors.len() {
             let observed = if observations.peek().is_some_and(|(at, _)| *at == index) {
                 observations.next().map(|(_, observed)| observed)
@@ -2503,7 +2517,8 @@ impl AiMission {
         // The other wing members' targets (B41), from the engagement table.
         let assignments = engagements.wing_targets(actor_id, identity.side, identity.wing);
         if super::link::audit::active() {
-            super::link::audit::wing(&self.actors, index, &assignments);
+            let humans = engagements.human_wing_targets(identity.side, identity.wing);
+            super::link::audit::wing(&self.actors, index, &assignments, &humans);
         }
         let actor = &mut self.actors[index];
         // Write-only records start afresh on every mission step.

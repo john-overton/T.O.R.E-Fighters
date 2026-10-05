@@ -9,7 +9,7 @@
 > <!-- tore-header v2 -->
 
 Stage G design of 2026-10-05, for the [multiplayer plan](multiplayer-plan.md#stages).
-Built so far: the radar table and the picture's bookkeeping (slice G0), the engagement table (G1) and the assignments with their calls (G3a, 2026-10-05). Of this page a player today meets only the assignment call, below, and the rest waits for its slices. It is the guide for players and agents:
+Built so far: the radar table and the picture's bookkeeping (slice G0), the engagement table (G1), the assignments with their calls (G3a) and the player's locked target in the AI's engagement table (G2, 2026-10-05). Of this page a player today meets the assignment call and AI wingmen that spread away from the bandit the player has locked, and the rest waits for its slices. It is the guide for players and agents:
 what a flight shares, who can share it, what the player sees and
 hears, and how the AI uses it. The code design and the slices that build it
 are in the [architecture guide](ARCHITECTURE.md#flight-data-link); the bytes on
@@ -236,8 +236,12 @@ acknowledged: the cues stop blinking.
 
 - **Choosing a target.** The retail penalty against attacking a bandit a
   wingman already attacks now reads the flight's engagements in the picture.
-  The picture also counts a human member's locked target, which today's AI
-  cannot see.
+  The picture also counts a human member's locked target, which the AI could
+  not see before: **built (slice G2, 2026-10-05)**. An AI wingman ranks the
+  bandit its human flightmate has locked 10,000 ft farther away than it is
+  (20,000 ft when two others already attack it), so it takes another bandit if
+  one is nearly as close. A bandit the wingman already attacks and is within
+  20,000 ft stays its target, as before.
 - **Taking an assignment.** The wingman gets the target itself. If its
   own sensors do not hold the target, but a flightmate's track does, it
   flies toward the track until its own radar or eyes find it. Today it refuses

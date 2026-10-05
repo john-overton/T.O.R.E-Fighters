@@ -998,6 +998,9 @@ impl World {
                     ownship.configuration(),
                 ));
             }
+            // The humans' locked targets (G2): the data link's picture of
+            // what the humans attack, read after combat and before the step.
+            bridge.set_link(&self.datalink);
             let stepped = bridge.step(&mut self.combat.state, &humans, &self.terrain);
             self.combat.ai_crashes(&bridge, &self.terrain);
             for (id, message, friendly) in bridge.ejection_events.drain(..) {

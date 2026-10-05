@@ -1555,6 +1555,24 @@ impl AiWings {
         &self.mission
     }
 
+    /// Hand the AI what the flight data link holds for the next step, as
+    /// [`Self::step`]'s humans are handed over: the humans' locked targets
+    /// (slice G2), which its engagement table counts as attacks on the wing's
+    /// behalf. The step consumes them, so the world sets them before every
+    /// step, after combat has read the sensors.
+    pub fn set_link(&mut self, link: &crate::datalink::DataLink) {
+        self.mission.set_link(tore_sim::ai::link::LinkInput {
+            humans: link
+                .human_engagements()
+                .into_iter()
+                .map(|e| tore_sim::ai::link::HumanEngagement {
+                    plane: e.plane,
+                    target: e.target,
+                })
+                .collect(),
+        });
+    }
+
     /// The remaining waypoints of the wing aircraft `plane` flies in (a human
     /// or an AI aircraft), in order, world feet. A wing whose human leader is
     /// lost flies them after its search for the enemy
