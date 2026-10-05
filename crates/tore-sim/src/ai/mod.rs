@@ -33,6 +33,7 @@ pub mod geometry;
 pub mod gunnery;
 pub mod incoming_fire;
 pub mod launch;
+pub mod link;
 pub mod mission;
 pub mod motion;
 pub mod opportunity;

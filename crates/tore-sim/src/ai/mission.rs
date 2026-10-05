@@ -62,6 +62,10 @@ mod observation;
 #[path = "mission_observation_tests.rs"]
 mod observation_tests;
 
+#[cfg(test)]
+#[path = "link_tests.rs"]
+mod link_tests;
+
 /// Fitted dispatch floor: smaller missions keep their observation state in
 /// place. The worker-count comparison probe covers preparation and joining.
 const MIN_PARALLEL_OBSERVATIONS: usize = 4;
@@ -2080,6 +2084,10 @@ impl AiMission {
             .prepare_observations(world, terrain, surface, workers)
             .into_iter()
             .peekable();
+        // Who attacks what, in decision order (slice G1): each actor's row is
+        // rewritten right after it steps, so an actor reads earlier actors'
+        // targets of this tick and later actors' of the last.
+        let mut engagements = super::link::Engagements::new(&self.actors);
         for index in 0..self.actors.len() {
             let observed = if observations.peek().is_some_and(|(at, _)| *at == index) {
                 observations.next().map(|(_, observed)| observed)
@@ -2095,8 +2103,10 @@ impl AiMission {
                 now,
                 tick,
                 observed,
+                &engagements,
                 &mut output,
             )?;
+            engagements.decided(index, &self.actors[index]);
             self.journal_actor(index, tick);
         }
 
@@ -2465,6 +2475,7 @@ impl AiMission {
         now: TimeOfDay,
         tick: u64,
         observed: Option<observation::Prepared>,
+        engagements: &super::link::Engagements,
         output: &mut MissionOutput,
     ) -> Result<()> {
         // Researched aircraft stand on runways, so their ground is the full
@@ -2476,7 +2487,7 @@ impl AiMission {
             terrain
         };
         let actor_id = self.actors[index].id();
-        let mut leader = self.leader_view(index, world);
+        let mut leader = self.leader_view(index, world, engagements);
         let clearance = self.airfield_clearance(index, world);
         if leader.as_ref().is_none_or(|l| !l.recovering) {
             self.actors[index].join_cancelled = false;
@@ -2489,17 +2500,11 @@ impl AiMission {
         }
 
         let identity = self.actors[index].identity;
-        let assignments: Vec<u32> = self
-            .actors
-            .iter()
-            .filter(|a| {
-                a.alive()
-                    && a.id() != actor_id
-                    && a.identity.side == identity.side
-                    && a.identity.wing == identity.wing
-            })
-            .filter_map(|a| a.controller.target())
-            .collect();
+        // The other wing members' targets (B41), from the engagement table.
+        let assignments = engagements.wing_targets(actor_id, identity.side, identity.wing);
+        if super::link::audit::active() {
+            super::link::audit::wing(&self.actors, index, &assignments);
+        }
         let actor = &mut self.actors[index];
         // Write-only records start afresh on every mission step.
         actor.trace = ActorTrace::begin(tick);
@@ -3223,8 +3228,14 @@ impl AiMission {
         }
     }
 
-    /// The leader's pose for a wingman, taken from the leader actor itself.
-    fn leader_view(&self, index: usize, world: &[WorldObject]) -> Option<LeaderView> {
+    /// The leader's pose for a wingman, taken from the leader actor itself,
+    /// and the leader's target from the engagement table.
+    fn leader_view(
+        &self,
+        index: usize,
+        world: &[WorldObject],
+        engagements: &super::link::Engagements,
+    ) -> Option<LeaderView> {
         let actor = &self.actors[index];
         if !actor.neutral && actor.assignment.role == engagement::Role::Escort {
             let same_assignment_leader = self.actors.iter().any(|leader| {
@@ -3285,12 +3296,16 @@ impl AiMission {
         let pose = world
             .iter()
             .find(|o| o.id == leader.id() && o.alive && !o.destroyed)?;
+        let target = engagements.target(leader.id());
+        if super::link::audit::active() {
+            super::link::audit::leader(leader, target);
+        }
         Some(LeaderView {
             position: pose.position,
             velocity: pose.velocity,
             heading_deg: pose.heading_deg,
             speed: pose.speed,
-            target: leader.controller.target(),
+            target,
             recovering: matches!(leader.activity, Activity::ReturningToBase)
                 || leader.airfield.as_ref().is_some_and(|s| !s.is_departure()),
             on_ground: false,
@@ -6028,12 +6043,22 @@ mod tests {
         player.human_controlled = true;
         world.push(player);
         mission.refresh_leaders(&world, &mut MissionOutput::default());
-        assert_eq!(mission.leader_view(0, &world).unwrap().position[0], 90000.);
-        assert!(mission.leader_view(1, &world).is_none());
-        assert_eq!(mission.leader_view(2, &world).unwrap().position[0], 2000.);
-        assert_eq!(mission.leader_view(4, &world).unwrap().position[0], 4000.);
+        let table = super::super::link::Engagements::new(&mission.actors);
+        assert_eq!(
+            mission.leader_view(0, &world, &table).unwrap().position[0],
+            90000.
+        );
+        assert!(mission.leader_view(1, &world, &table).is_none());
+        assert_eq!(
+            mission.leader_view(2, &world, &table).unwrap().position[0],
+            2000.
+        );
+        assert_eq!(
+            mission.leader_view(4, &world, &table).unwrap().position[0],
+            4000.
+        );
         world.last_mut().unwrap().alive = false;
-        assert!(mission.leader_view(0, &world).is_none());
+        assert!(mission.leader_view(0, &world, &table).is_none());
     }
 
     #[test]

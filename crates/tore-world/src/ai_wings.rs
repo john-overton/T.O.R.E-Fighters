@@ -1465,22 +1465,17 @@ impl AiWings {
     }
 
     /// The seeker class (2 infrared, 3 radar) of each missile lock an enemy
-    /// holds on aircraft `id`: its target is that aircraft and its weapon
-    /// service has passed the lock check with a guided store chosen, and is
-    /// waiting out the tracking delay or firing. Read-only, for the RWR
-    /// warning tones (docs/spec/rwr.md#warning-tones).
+    /// holds on aircraft `id`: its lock is on that aircraft
+    /// ([`tore_sim::ai::link::lock_of`]: its target, with its weapon service
+    /// past the lock check with a guided store chosen, waiting out the
+    /// tracking delay or firing). Read-only, for the RWR warning tones
+    /// (docs/spec/rwr.md#warning-tones).
     pub fn locks_on(&self, id: u32) -> Vec<u8> {
-        use tore_sim::ai::weapon_service::Phase;
         self.mission
             .actors()
             .iter()
             .filter(|actor| {
-                actor.alive()
-                    && actor.controller().target() == Some(id)
-                    && matches!(
-                        actor.controller().weapon_phase(),
-                        Phase::Tracking | Phase::Fire
-                    )
+                tore_sim::ai::link::lock_of(actor) == Some(id)
                     && self
                         .slot(actor.id())
                         .is_some_and(|slot| slot.side.is_enemy())
@@ -1493,18 +1488,19 @@ impl AiWings {
             .collect()
     }
 
-    /// The AI aircraft that are alive, have `plane` as their target and carry a
-    /// guided air-to-air store that is ready (not inhibited, not spent). The
-    /// situation music reads it as "a missile is being aimed at you".
-    /// Read-only (docs/spec/flight-music.md).
+    /// The AI aircraft that engage `plane` ([`tore_sim::ai::link::engagement_of`]:
+    /// alive, with `plane` as their target) and carry a guided air-to-air
+    /// store that is ready (not inhibited, not spent). The situation music
+    /// reads it as "a missile is being aimed at you". It asks for no lock, so
+    /// the music builds before the warning receiver's tone. Read-only
+    /// (docs/spec/flight-music.md).
     pub fn aiming_at(&self, plane: u32) -> Vec<u32> {
         use tore_sim::ai::weapon_service::{self, Rounds, TargetClass};
         self.mission
             .actors()
             .iter()
             .filter(|actor| {
-                actor.alive()
-                    && actor.controller().target() == Some(plane)
+                tore_sim::ai::link::engagement_of(actor) == Some(plane)
                     && actor.stations().iter().any(|s| {
                         s.guided
                             && !s.store.inhibited

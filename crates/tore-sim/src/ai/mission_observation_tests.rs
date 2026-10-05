@@ -152,7 +152,7 @@ fn prepared_target_visibility_never_changes_observation_memory() {
     );
 }
 
-fn executors() -> Vec<tore_workers::Executor> {
+pub(super) fn executors() -> Vec<tore_workers::Executor> {
     [0, 1, 2, 4, 8]
         .into_iter()
         .map(|workers| tore_workers::Executor::parallel(workers).unwrap())
@@ -176,7 +176,7 @@ fn runway() -> super::super::airfield::RunwayView {
     }
 }
 
-fn surface(x: f64, z: f64) -> Surface {
+pub(super) fn surface(x: f64, z: f64) -> Surface {
     if x.abs() <= 100. && z.abs() <= 4000. {
         Surface::runway(0.)
     } else {
@@ -184,7 +184,7 @@ fn surface(x: f64, z: f64) -> Surface {
     }
 }
 
-fn fixture(actors: u32, seed: u64) -> AiMission {
+pub(super) fn fixture(actors: u32, seed: u64) -> AiMission {
     let mut mission = AiMission::new();
     for id in 1..=actors {
         let level = Experience::ALL[(id as usize - 1) % 4];
@@ -225,7 +225,7 @@ fn fixture(actors: u32, seed: u64) -> AiMission {
     mission
 }
 
-fn snapshot(mission: &AiMission, human: Option<&AiActor>) -> Vec<WorldObject> {
+pub(super) fn snapshot(mission: &AiMission, human: Option<&AiActor>) -> Vec<WorldObject> {
     mission
         .actors
         .iter()
@@ -264,7 +264,7 @@ fn assert_mission_state(left: &AiMission, right: &AiMission) {
     );
 }
 
-fn compare_step(
+pub(super) fn compare_step(
     reference: &mut AiMission,
     actual: &mut AiMission,
     workers: &tore_workers::Executor,
@@ -284,7 +284,7 @@ fn compare_step(
     result
 }
 
-fn scripted_changes(mission: &mut AiMission, stage: u64, human: &mut Option<AiActor>) {
+pub(super) fn scripted_changes(mission: &mut AiMission, stage: u64, human: &mut Option<AiActor>) {
     use super::super::airfield::{LandingOrder, LandingReason};
     use super::super::wing::WingRequest;
     match stage {
