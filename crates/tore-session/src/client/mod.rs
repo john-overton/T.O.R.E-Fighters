@@ -45,6 +45,9 @@ pub mod interpolation;
 mod lobby_tests;
 #[cfg(test)]
 mod matrix_tests;
+pub mod observe;
+#[cfg(test)]
+mod observe_tests;
 #[cfg(test)]
 mod phase2_seams_tests;
 pub mod prediction;
@@ -660,6 +663,8 @@ pub struct Client {
     corrections: Vec<Correction>,
     diagnostics: Option<Diagnostics>,
     capture: Option<CaptureWriter>,
+    /// Watching the flying mission (stage F phase 2, [`observe`]).
+    watching: Option<observe::Watching>,
     now: Duration,
 }
 
@@ -766,6 +771,7 @@ impl Client {
             corrections: Vec::new(),
             diagnostics: None,
             capture: None,
+            watching: None,
             now,
         })
         .map(|mut client| {
@@ -861,6 +867,7 @@ impl Client {
         self.pump();
         self.pending.extend(sampled.commands);
         self.view_subject = sampled.view_subject;
+        self.observe_update(now);
         if self.phase == ClientPhase::Flying {
             self.fly(now, sampled.frame);
             self.apply_own_states();
@@ -1127,10 +1134,13 @@ impl Client {
         );
     }
 
-    /// Start or stop watching the flying mission, or move the camera.
+    /// Start or stop watching the flying mission, or move the camera
+    /// ([`Client::watch`], [`Client::stop_watching`]).
     pub fn observe(&mut self, observe: Observe) {
-        let now = self.now;
-        self.request(now, Message::Observe(observe));
+        match observe {
+            Observe::Watch(subject) => self.watch(subject),
+            Observe::Stop => self.stop_watching(),
+        }
     }
 
     /// The game has been away for the `idle-ai` setting's seconds.
@@ -1639,6 +1649,9 @@ impl Client {
             }
             Message::Refused { request, reason } => {
                 self.log("refused", &[&request.to_string(), &reason]);
+                if request == crate::wire::messages::kind::OBSERVE {
+                    self.watch_refused();
+                }
                 self.auto_refused();
                 self.event(ClientEvent::Refused { request, reason });
             }
@@ -1661,11 +1674,7 @@ impl Client {
                 self.log("results", &[&results.rows.len().to_string()]);
                 self.event(ClientEvent::Results(results));
             }
-            Message::Observing(observing) => {
-                let started = matches!(*observing, Observing::Started(_));
-                self.log("observing", &[if started { "start" } else { "end" }]);
-                self.event(ClientEvent::Observing(observing));
-            }
+            Message::Observing(observing) => self.observing_message(*observing),
             // Client-to-host messages from the host break the protocol.
             _ => self.net.disconnect(DisconnectReason::ProtocolError),
         }
@@ -1708,6 +1717,7 @@ impl Client {
             || self.auto_wait
             || self.quit_after_debrief
             || self.unable.is_some()
+            || self.watching.is_some()
             || self.phase != ClientPhase::Lobby
         {
             return;

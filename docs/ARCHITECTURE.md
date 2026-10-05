@@ -5529,6 +5529,80 @@ holds live positions.
   go past live. The viewer's cameras, views, labels and panels work as on any
   replay. Esc leaves the view for the lobby.
 
+*Built (F2-O1, 2026-10-05): the stream.* The host's part is
+`host/observe.rs`, the client's `client/observe.rs`, the bot's `tore-bot
+--observe PLANE|none`. Each choice below is an agent decision unless it says
+otherwise.
+
+- **Asking.** Observe is taken from a player in the lobby, or leaving its plane
+  (its watch starts once it is back in the lobby), while the mission flies. It
+  is refused "The mission is not flying; watch once it flies.", "Leave your
+  aircraft before you watch." (taking or flying a plane) and "There is no plane
+  12." (an aircraft subject the roster does not hold). Stop with no watch does
+  nothing. The watch starts at the next tick that finds the game in the lobby:
+  a new flight of the connection, the Observing message, then snapshots.
+- **The picture** is the whole mission, quantized once a tick it is needed and
+  shared by every observer (`from_world::observer_picture`): while a human
+  flies, the first such seat's picture, whose own plane is an aircraft like any
+  other; with nobody flying, built from combat's targets as the combat snapshot
+  draws them (a test holds the two equal for the AI's aircraft). Every aircraft
+  and ejected pilot is sent, in real plane ids; no missile is "aimed at" an
+  observer.
+- **Relevance.** The camera's point is an aircraft subject's place in the
+  picture shown (kept while the aircraft is gone) or the point asked for; the
+  subject itself is "viewed". The netcode's bands then apply from that point:
+  within 20 nm, and missiles within 10 nm, at the full rate, the rest twice a
+  second. With no subject every entity is near, as the packet allows.
+- **The camera.** The host applies at most two changes a second from one
+  connection; a change sooner waits and the newest waiting is applied when the
+  half second has passed. The client sends the camera only when it changed (a
+  new subject, or a point more than 2 nm from the one sent), at most twice a
+  second, and a change in between goes with a later update.
+- **Events.** An observer gets the mission-wide events (the tracker's, and the
+  AI's ejections) and never a seat's own. Without a delay they are queued each
+  tick as a seated player's are, and a new observer is first sent the mission
+  as it stands (the destroyed ground objects in Observing, the craters, fires
+  and effects as events), as a seated player is.
+- **The delay** applies to every observer of a PvP mission whose
+  `observer-delay` is set (co-op has none). The ring records from the mission's
+  first tick whenever the mission flies with a delay, watched or not, so an
+  observer who starts sees the battle as it was a delay ago at once: one frame
+  each snapshot interval, at the ticks whose number is a multiple of the ticks
+  per snapshot, and every mission-wide event with the tick it became known.
+  **Every delayed observer's snapshot ticks are the ring's** (a correction to
+  the wire's lobby-id phase, which holds without a delay): the host sends the
+  frame of its tick less the delay, and with it the events that became known by
+  then and the messages held for that tick. Events falling out of the ring are
+  folded into the mission as it stood (the destroyed ground objects and the
+  craters and fires), which is what a new delayed observer is told stands;
+  short-lived effects are not carried. While the ring is younger than the delay
+  the first snapshot waits until the delay has passed (Observing's tick says
+  which it is).
+- **News at a tick** the other slices send observers goes through
+  `Host::send_as_of(connection, tick, message)`, which holds it for a delayed
+  observer until its stream shows that tick (F2-S's scores, F2-V's new planes).
+  The roster and the lobby state are not held: they carry no positions.
+- **The end.** The stream ends with Observing's end at the observer's Stop
+  (messages still held then go out), before the Seated message of a plane it
+  takes, and at the mission's end, before the results and Mission ended. A
+  delayed observer does not see the mission's last delay.
+- **The client.** `Client::watch(subject)` asks (and moves the camera),
+  `Client::stop_watching` stops, `Client::watching` says where it stands and
+  `Client::observer_frame` gives the frame: every aircraft as a target in its
+  real plane id, the ground objects, projectiles, debris, pilots, effects and
+  marks, an empty player pose (no aircraft, plane `u32::MAX`), and the
+  mission-wide events once the picture reaches them. The client stays in the
+  lobby phase while it watches, and its automatic ready takes no plane. An
+  observer's frames are not written to a capture.
+- **Measured** (`host/observe_tests.rs`): with 30 aircraft the ring holds about
+  4.6 KB a frame, 8.4 MB for a 60-second delay (1,800 frames); an observer of a
+  15 against 15 fight, its camera on a plane in it, is sent about 12 KB a
+  second, and the `net-server-observe` scenario's observer of twelve aircraft
+  about 5 KB a second.
+- **Room.** An observer is a connection like any other, so it counts against
+  the handshake's capacity (the lesser of the player limit and the open
+  planes): a game full of players takes no observer.
+
 ##### The AI flies an idle player's aircraft
 
 The open question since 2026-09-28 (the guide's agent proposal: after 10
@@ -5623,7 +5697,7 @@ every message below; no later slice changes the wire without the lead.
 | F2-R Orders and replies | Sonnet | F2-0, F2-C, stage G's G3a and G8 | `tore-world` `world/replies.rs`, `radio_calls.rs`, `ai_wings/orders.rs`, the comms delivery; the app's handling of the four reply actions; `tore-bot --reply` | The order call to human wingmen; the reply calls and their refusals | World tests on the crowd fixture: a human lead's order reaches its human wingman as a call and a line, and nobody else; each reply reaches the flight's humans only, respects radio silence, and a lead's reply is refused; the radio journal; a `net` scenario with two bots in one wing exchanging an order and a reply. Single-player baseline SAME |
 | F2-S Scoring | Opus | F2-0 | `tore-world` `score.rs` and its call in `world.rs`; `tore-sim` combat's `Strike` amount; `host/score.rs`, new `host/score_tests.rs`; the client's scores; `tore-app` new `net/scoreboard.rs` and its call in `net/play.rs` | Score facts; tallies; limits and the kill limit's end; Scores; the score board on K | World tests: a human killed with the pilot aboard counts two, after ejecting one, ground kills none, damage fractions, losses, AI shooters; host tests for each tally, fight type and owner, the kill limit's end with its winner and a draw, the time limit, the pace; a render test of the board. Single-player baseline SAME (facts off) |
 | F2-V Death and revival | Opus | F2-0 | `tore-world` `world/revive.rs`, `world/handoff.rs`, `ai_wings.rs` (the spawned aircraft), new `world/revive_tests.rs`; `host/revive.rs`, new `host/revive_tests.rs`; the client's revival state and its own copy's spawn; `tore-app` `net/play.rs` (the prompt and Enter); `tore-bot --revive` | Abandon and Revive; the revival point and loadout; retiring; lives, delay and the three rules; Join after a loss; replaces the host's orphans | World tests: a revived plane's place, heading, speed, stores under each weapons rule and its handoff invariants; Abandon keeps a wreck falling; 100 revivals in one mission stay within 64 planes; host tests for each rule, lives, the delay, the lobby's Join, lock sides; a client copy that adds the spawned plane; a `net` scenario where a bot ejects, revives and flies on. Single-player baseline SAME |
-| F2-O1 The observer stream | Opus | F2-0 | `host/observe.rs`, new `host/observe_tests.rs`; the observer flight in `wire/connection.rs` and `wire/from_world.rs`; new `client/observe.rs`; `tore-bot --observe` | Observe and Observing, snapshots with no own plane, relevance by the camera, the delay ring | Simulator tests: an observer gets entities near its subject at the full rate and far ones twice a second; with a delay nothing newer than now less the delay is ever sent, events included; the stream stops at seating and at the end; bandwidth and the ring's memory measured and recorded; a `net` scenario with an observing bot. Quick guard |
+| F2-O1 The observer stream | Opus | F2-0 | `host/observe.rs`, new `host/observe_tests.rs`; the observer flight in `wire/connection.rs` and `wire/from_world.rs`; new `client/observe.rs`; `tore-bot --observe` | Observe and Observing, snapshots with no own plane, relevance by the camera, the delay ring | Simulator tests: an observer gets entities near its subject at the full rate and far ones twice a second; with a delay nothing newer than now less the delay is ever sent, events included; the stream stops at seating and at the end; bandwidth and the ring's memory measured and recorded; a `net` scenario with an observing bot. Quick guard. **Built (F2-O1, 2026-10-05):** as [described above](#the-observer-view): the host's watches and stream (`host/observe.rs`, the hooks in `host/mod.rs`: the watch on each connection, the stream on the host, the stop before Seated and at the end, the lobby's observing mark), `from_world::observer_picture`, `HostConnection::observer_snapshot`, the client's `watch`, `stop_watching` and `observer_frame` (`client/observe.rs`), `Host::send_as_of` for the slices that send news at a tick, and `tore-bot --observe`. Delayed observers' snapshot ticks are the ring's (agent decision). Tests: `host/observe_tests.rs` (rates by the camera, a point and none, the camera's limit, refusals, human-flown planes and events, the delay for snapshots, events and held messages, the stops, measurements; the 60-second ring `#[ignore]`d for the full run), `client/observe_tests.rs`, `from_world`'s observer picture; the `net-server-observe` scenario. Measured: 8.4 MB at a 60-second delay for 30 aircraft; about 12 KB/s to an observer of 30 |
 | F2-L The lobby screen | Sonnet | F2-1 | `tore-app` `lobby_screen/` (new `settings_panel.rs` and `players_panel.rs`), `ordnance.rs` (lobby Cheat loading under the rule), the lobby's glue in `net/` | Settings..., Players..., slot locks, the seven buttons, Watch, the head's summary, greying | `facts` tests for who may press what; headless renders of each Settings page as King and not; a windowed run (through `tools/agent-run.sh`) hosting with a bot: settings changed and seen by the bot, the crown passed and taken back, a slot closed |
 | F2-D The multiplayer debrief | Sonnet | F2-S | `tore-world` `debrief.rs` (`results`); `host/results.rs`; the client's Results; `tore-app` `debrief.rs` and `net/debrief.rs` (the SCORES and RESULTS pages) | Results rows, the message at the end, the pages | A world test with rows for every plane, human and AI, retired included; a host test that every connection gets Results; headless renders of both pages with 30 aircraft; the existing single-player page tests unchanged; quick guard |
 | F2-A The AI flies an idle aircraft | Opus | F2-1, F2-O1 | `host/away.rs`, new `host/away_tests.rs`; away detection in `tore-app` `net/play.rs` and the banner; `tore-bot --away` | Away and Back, the stall's count, the reservation, the handoff both ways | Simulator tests: away for the setting's seconds hands the plane to the AI and reserves it; another player's take is refused; Back retakes it with its stores and damage; a stalled game the same; `never` does nothing; a `net` scenario with a bot away and back |

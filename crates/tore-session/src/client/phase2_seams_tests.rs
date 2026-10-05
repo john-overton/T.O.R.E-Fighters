@@ -93,7 +93,7 @@ fn the_lobby_state_carries_every_setting_by_number() {
         .unwrap();
     assert_eq!(lobby.settings, expected.lobby_list());
     assert_eq!(lobby.settings.len(), settings::REGISTRY.len());
-    // No locks, observers or away players before their slices.
+    // No locks or away players before their slices; nobody watches.
     assert!(lobby.slots.iter().all(|s| s.lock == Lock::Open));
     assert!(lobby.players.iter().all(|p| !p.observing && !p.away));
 }
@@ -144,13 +144,20 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
     player.away();
     player.back();
     rig.run(Duration::from_millis(300));
-    for request in [kind::REVIVE, kind::OBSERVE, kind::AWAY, kind::BACK] {
+    for request in [kind::REVIVE, kind::AWAY, kind::BACK] {
         assert!(
             refused(&rig, cobra, request, NOT_AVAILABLE),
             "{request}: {:?}",
             refusals(&rig, cobra)
         );
     }
+    // Watching is built (F2-O1): refused in words before the mission flies.
+    assert!(refused(
+        &rig,
+        cobra,
+        kind::OBSERVE,
+        "The mission is not flying; watch once it flies."
+    ));
 
     // A request meant for an earlier mission is refused as one.
     let now = rig.players[cobra].client.now;

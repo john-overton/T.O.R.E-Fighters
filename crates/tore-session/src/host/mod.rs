@@ -40,6 +40,8 @@ pub mod inputs;
 mod king;
 mod lobby;
 mod observe;
+#[cfg(test)]
+mod observe_tests;
 mod results;
 mod revive;
 mod score;
@@ -459,6 +461,8 @@ struct Peer {
     refusal_logged: Option<(Duration, String)>,
     /// The lines this player has chatted lately (protocol 4).
     chat_rate: RateLimit,
+    /// Watching the flying mission (stage F phase 2, slice F2-O1).
+    watch: Option<observe::Watch>,
 }
 
 /// The lifecycle's own state.
@@ -530,6 +534,8 @@ pub struct Host {
     costs: Costs,
     overloads: u64,
     out: TickOutput,
+    /// The observers' pictures and delay ring (stage F phase 2).
+    stream: observe::Stream,
     /// What each seat's game could not foresee, by tick (tests only).
     #[cfg(test)]
     unforeseen_log: Vec<(u64, SeatId, Unforeseen)>,
@@ -775,6 +781,7 @@ impl Host {
             #[cfg(test)]
             snapshot_executor: None,
             out: TickOutput::default(),
+            stream: observe::Stream::default(),
             settings: crate::settings::Store::from_config(&config),
             config,
         };
@@ -1298,6 +1305,7 @@ impl Host {
                 requests: (Duration::ZERO, 0),
                 refusal_logged: None,
                 chat_rate: RateLimit::default(),
+                watch: None,
             },
         );
         let tick = self.world.tick();
@@ -2361,8 +2369,8 @@ impl Host {
                     ready: peer.lobby.ready,
                     loadout: peer.lobby.loadout.is_some(),
                     flying: Self::in_flight(peer),
-                    // Observers and away players are slices F2-O1 and F2-A.
-                    observing: false,
+                    observing: peer.watch.as_ref().is_some_and(observe::Watch::started),
+                    // Away players are slice F2-A's.
                     away: false,
                     unable: peer.lobby.unable.clone(),
                     platform: peer.platform,
@@ -2677,7 +2685,7 @@ impl Host {
             self.broadcast_roster();
         }
         self.snapshots(tick, now, &out);
-        self.observe_tick(tick, now);
+        self.observe_tick(tick, now, &out, &wide);
         self.out = out;
         let cost = started.elapsed();
         self.costs.ticks += 1;
@@ -2696,6 +2704,8 @@ impl Host {
         tick: u64,
         out: &TickOutput,
     ) {
+        // An observer who takes a plane stops watching first.
+        self.observe_seated(connection);
         let Some(cockpit) = self.world.cockpits.iter().find(|c| c.plane == plane) else {
             return;
         };
@@ -3077,7 +3087,9 @@ impl Host {
             return;
         }
         let now = self.now;
-        // Stage F phase 2: every plane's results, before Mission ended.
+        // Stage F phase 2: the observers stop watching, and every plane's
+        // results go out, before Mission ended.
+        self.observe_end();
         self.send_results(reason);
         let ended = Message::MissionEnded(MissionEnded {
             reason,

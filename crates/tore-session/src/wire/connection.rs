@@ -192,6 +192,28 @@ impl HostConnection {
         })
     }
 
+    /// Builds an observer flight's snapshot packet (stage F phase 2;
+    /// docs/formats/net-protocol.md, "Observer flights"): the header of this connection's flight at `tick` with no own state
+    /// hash and zero for the input fields, no cockpit readout, the entities
+    /// chosen by their camera relevance and the mission-wide events queued.
+    pub fn observer_snapshot(
+        &mut self,
+        tick: u32,
+        entities: &[(Entity, Relevance)],
+        messages: usize,
+    ) -> WireResult<SnapshotPacket> {
+        let header = SnapshotHeader {
+            flight: self.flight(),
+            tick,
+            input_received: 0,
+            input_margin: 0,
+            inputs_repeated: 0,
+            commands_applied: 0,
+            own_hash: None,
+        };
+        self.snapshot_with_readout(&header, entities, None, messages)
+    }
+
     /// Builds an Own state section for the player's plane's `state` at
     /// `tick`, for a packet of its own.
     pub fn own_state(&mut self, tick: u32, state: &ExactState) -> WireResult<Vec<u8>> {

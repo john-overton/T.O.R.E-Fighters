@@ -1295,6 +1295,28 @@ camera ([architecture](../ARCHITECTURE.md#the-observer-view)). With a delay,
 the snapshot's tick is the delayed tick, never newer than the host's tick less
 the delay. Its snapshot ticks are its lobby id modulo the ticks per snapshot.
 
+*Built (F2-O1), each an agent decision:*
+
+- **With a delay** every observer's snapshot ticks are the delay ring's: the
+  ticks whose number is a multiple of the ticks per snapshot (the delay is a
+  whole number of seconds, so the host sends them at such ticks too). The
+  lobby-id phase above holds without a delay.
+- **Observing's tick** is the tick the first snapshot shows; with a delay, and a
+  ring younger than the delay, it can be the mission's first frame, sent once
+  the delay has passed. Its destroyed ground objects are those destroyed by the
+  ring's tail with a delay, and by now without.
+- **Events.** The Events section carries the mission-wide events and the AI's
+  wing ejections. Each one's tick is no later than the snapshot's; with a delay
+  an event goes out once the stream's tick has reached the tick it became
+  known (a finished gun burst's tick is its first round's, before that).
+- **Order.** Observing's end comes before the Seated message of a plane the
+  observer takes, and before Results and Mission ended at the mission's end.
+- **Refusals** of Observe are Refused (kind 20) with "The mission is not
+  flying; watch once it flies.", "Leave your aircraft before you watch." or
+  "There is no plane 12."; a Stop with no watch is ignored. Camera changes
+  sooner than half a second after the last wait, and the newest is applied
+  when the half second has passed.
+
 ### Settings by number
 
 The registry's numbers, which the Lobby and Settings messages carry, with each

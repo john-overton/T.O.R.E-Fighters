@@ -132,6 +132,137 @@ pub fn seat_picture(world: &World, plane: PlaneId) -> Option<RenderSnapshot> {
     )
 }
 
+/// The plane an observer's entities are taken for (stage F phase 2): no
+/// plane, so every aircraft and every ejected pilot is sent and no missile is
+/// aimed at the observer.
+pub const NO_PLANE: u32 = u32::MAX;
+
+/// The picture an observer's stream is made from (stage F phase 2,
+/// docs/ARCHITECTURE.md "The observer view"): every aircraft in the mission,
+/// in real plane ids. While a human flies, it is the first such seat's
+/// picture ([`seat_picture`]), whose player pose is an aircraft like any
+/// other; with no human-flown plane it is built from combat's targets as
+/// [`tore_world::combat::Combat::snapshot`] draws them, its player pose empty
+/// (no aircraft). Only what [`entities`] reads is filled in: the aircraft,
+/// projectiles, debris and pilots.
+pub fn observer_picture(world: &World) -> RenderSnapshot {
+    if let Some(picture) = world
+        .cockpits
+        .iter()
+        .find_map(|cockpit| seat_picture(world, cockpit.plane))
+    {
+        return picture;
+    }
+    targets_picture(world)
+}
+
+/// [`observer_picture`] with no human-flown plane: combat's targets, the
+/// projectiles, the debris and the AI's ejected pilots, as the combat
+/// snapshot of a mission with drawn models gives them.
+fn targets_picture(world: &World) -> RenderSnapshot {
+    use tore_world::snapshot::{AircraftPose, Damage, Engine};
+    let combat = &world.combat;
+    let state = &combat.state;
+    let actors = || {
+        world
+            .ai_wings
+            .iter()
+            .flat_map(|wings| wings.mission().actors())
+            .filter(|actor| actor.alive())
+    };
+    let flying: std::collections::BTreeMap<u32, [f64; tore_world::snapshot::DEVICES]> = actors()
+        .map(|actor| (actor.id(), tore_world::snapshot::devices(actor.flight())))
+        .collect();
+    let burning: std::collections::BTreeSet<u32> = actors()
+        .filter(|actor| actor.flight().afterburner_active())
+        .map(|actor| actor.id())
+        .collect();
+    RenderSnapshot {
+        tick: state.tick(),
+        player: AircraftPose::default(),
+        targets: state
+            .targets
+            .iter()
+            .map(|t| AircraftPose {
+                id: t.id,
+                aircraft: t.aircraft,
+                draw: t.aircraft.map_or(Draw::Hidden, Draw::Model),
+                position: t.position,
+                attitude: tore_world::combat::target_pose(t, combat.ai_poses),
+                velocity: t.velocity,
+                devices: flying
+                    .get(&t.id)
+                    .copied()
+                    .or_else(|| combat.current_target(t.id).and_then(|pose| pose.devices)),
+                engine: Engine {
+                    lit: true,
+                    afterburner: false,
+                    rates: [0.; 3],
+                    flame: t.airborne && t.hp > 0 && burning.contains(&t.id),
+                },
+                damage: Damage {
+                    hp: t.hp,
+                    initial_hp: t.initial_hp,
+                    sections: t.localized_damage.amounts,
+                    structural: t.localized_damage.structural_section,
+                },
+                airborne: t.airborne,
+                wreck: t.wreck.as_ref().map(|wreck| wreck.phase),
+                crashed: t.hp <= 0,
+            })
+            .collect(),
+        projectiles: state
+            .projectiles
+            .iter()
+            .map(|p| {
+                let weapon = state.weapon(p);
+                ProjectilePose {
+                    id: p.id,
+                    owner: p.owner,
+                    weapon: weapon.source.clone(),
+                    shape: weapon.shape.clone(),
+                    gun: tore_sim::combat::live::is_gun(weapon),
+                    tracer: p.tracer,
+                    position: p.position,
+                    previous: p.previous,
+                    direction: p.direction,
+                    target: p.target,
+                    incoming: p.incoming.is_some(),
+                    speed_f8: p.speed_f8,
+                }
+            })
+            .collect(),
+        debris: state
+            .debris
+            .iter()
+            .map(|piece| DebrisPose {
+                owner: piece.owner,
+                draw: Draw::Hidden,
+                position: piece.position,
+                attitude: piece.basis.angles(),
+                variant: state
+                    .targets
+                    .iter()
+                    .find(|target| target.id == piece.owner)
+                    .and_then(|target| target.localized_damage.structural_section)
+                    .map(|section| section as usize),
+            })
+            .collect(),
+        pilots: world
+            .ai_wings
+            .iter()
+            .flat_map(|wings| wings.escapees())
+            .map(|(owner, escape)| PilotPose {
+                owner,
+                position: escape.position,
+                heading: escape.heading,
+                phase: escape.phase,
+            })
+            .collect(),
+        ..RenderSnapshot::default()
+    }
+}
+
 /// Every entity of `current` a client flying `player` draws: every aircraft
 /// but its own (plane 0 included when another seat flies it), every missile,
 /// bomb and rocket (gun rounds are burst events), every debris piece, and
@@ -467,5 +598,66 @@ mod tests {
         assert_eq!(aircraft_ids(&sent_to(&world, 0)), [1, 2, 3]);
         assert_eq!(aircraft_ids(&sent_to(&world, 1)), [0, 2, 3]);
         check_plane_0_reaches(&world, 1);
+    }
+
+    /// What an observer is sent of `world`.
+    fn observed(world: &World) -> Vec<Entity> {
+        entities(
+            &observer_picture(world),
+            None,
+            NO_PLANE,
+            &mut NameTable::new(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn an_observer_gets_every_plane_with_or_without_a_human() {
+        // Nobody flies: the AI's aircraft from combat's targets.
+        let map = resources();
+        let mut world = World::new(&spec(), &map, Seating::Open).unwrap();
+        fly(&mut world, &[], &[]);
+        assert!(world.combat.state.ownships().is_empty());
+        let alone = observed(&world);
+        assert_eq!(aircraft_ids(&alone), [0, 1, 2, 3]);
+
+        // Two humans, in planes 0 and 2: every plane, theirs included, at
+        // their cockpits' positions, and the AI's as a seat sees them.
+        fly(&mut world, &[(1, 0), (2, 2)], &[1, 2]);
+        let all = observed(&world);
+        assert_eq!(aircraft_ids(&all), [0, 1, 2, 3]);
+        for plane in [0, 2] {
+            let cockpit = world
+                .cockpits
+                .iter()
+                .find(|c| c.plane == PlaneId(plane))
+                .unwrap();
+            let entity = all
+                .iter()
+                .find(|e| e.id == plane && e.state.kind() == EntityKind::Aircraft)
+                .unwrap();
+            assert_eq!(
+                *entity.state.motion(),
+                Motion::of(cockpit.flight.position, cockpit.flight.velocity)
+            );
+        }
+        let seat = sent_to(&world, 0);
+        for id in [1, 3] {
+            let ai = |list: &[Entity]| {
+                list.iter()
+                    .find(|e| e.id == id && e.state.kind() == EntityKind::Aircraft)
+                    .cloned()
+            };
+            assert_eq!(ai(&all), ai(&seat), "AI plane {id}");
+            // Built from combat's targets alone, as with no human.
+            let fallback = entities(
+                &targets_picture(&world),
+                None,
+                NO_PLANE,
+                &mut NameTable::new(),
+            )
+            .unwrap();
+            assert_eq!(ai(&fallback), ai(&seat), "AI plane {id} from the targets");
+        }
     }
 }
