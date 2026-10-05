@@ -76,6 +76,20 @@ explicit simple fits, without detailed rotor engineering or autorotation.
 
 New-family AI behavior was not added. Original-roster AI goldens remain scoped
 to their established aircraft; structural ownership changes only carry the
-new source configuration and human handoff state. Broad creator theater and
-input-fuzz sweeps are separate from the completed per-aircraft loadout and
-flight checks and must not be inferred from them.
+new source configuration and human handoff state.
+
+## Final acceptance battery
+
+The final targeted battery passed all 25 scenarios: the 23 aircraft flight
+checks, F-14 tank selection and the full creator validator. The creator tested
+37 player identities across 16 listed theaters and 75 layouts: 13,979 setups
+started, 43 invalid setups were refused with a message, and zero problems were
+reported. Creator input fuzz covered 147,000 events and screen input fuzz
+76,000 events, both with zero problems. The full creator case took about
+14 minutes; it is separate from the fast per-aircraft probes.
+
+Local results are in
+`.local/battery/20261005-114216-variety-final/summary.md`. The workspace Rust
+run recorded 2,941 passing tests and 42 ignored tests, with zero failures.
+These broad setup/input checks do not establish new-family AI tactics or
+replace human handling, controller and multi-machine acceptance.
