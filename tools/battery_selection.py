@@ -48,7 +48,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         (
             "flight-level-*", "flight-pull-*", "flight-loop-*", "flight-roll-*", "flight-bank-*",
             "flight-sprint-*", "flight-climb-*", "flight-overspeed-*", "flight-combatg-*",
-            "flight-autopilot-*", "flight-waypoint-*", "flight-lateral-rudder-*",
+            "flight-autopilot-*", "flight-waypoint-*", "flight-lateral-rudder-*", "flight-variety-*",
         ),
     ),
     "flight-stall": (
@@ -130,7 +130,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "menus-screens": ("menu screens captured on the CPU", ("menus-snap-*", "replay-snapshot-*")),
     "menus-creator": (
         "the Quick Mission creator, start-up runs and loadout pages",
-        ("menus-start-*", "menus-loadout-*", "menus-validate-creator", "menus-snap-quick-*"),
+        ("menus-start-*", "menus-loadout-*", "menus-tanks-*", "menus-validate-creator", "menus-snap-quick-*"),
     ),
     "menus-validate": (
         "text, maps, weather, creator and ILS validators",

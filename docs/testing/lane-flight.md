@@ -16,6 +16,23 @@ file is [`tools/battery_scenarios/flight.py`](../../tools/battery_scenarios/flig
 runner works is in the [testing overview](README.md). The `render-*` capture scenarios live in
 [`tools/battery_scenarios/render.py`](../../tools/battery_scenarios/render.py).
 
+## Variety aircraft checks
+
+`flight-variety-*` checks each of the 23 new identities through real application
+asset loading and 1,200 hybrid flight ticks, with finite motion, no crash and
+bounded fuel/energy output. It is separate from the original roster's fighter
+maneuver and AI acceptance cases. Source-backed powered-lift checks use
+`tore-sim`'s `variety_flight` example; synthetic tests cover hover limits,
+conversion, control release and exact-state continuation. See
+[the variety flight evidence](../baselines/variety-flight.md).
+
+```sh
+TORE_BATTERY_PROFILE="$PWD/.local/dev-profile" python3 tools/battery.py --scenario 'flight-variety-*' --profile .local/dev-profile --jobs 4
+```
+
+The profile must contain a current runtime import. Rendering cases use the
+required agent window wrapper; their captures remain local.
+
 ## What it means for the game
 
 Nothing in this lane crashed, produced a NaN, put an aircraft under the ground, let ammunition go
