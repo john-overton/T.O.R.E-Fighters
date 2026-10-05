@@ -3,8 +3,10 @@
 //! server can build each seat's report; the app keeps the screen
 //! (`crates/tore-app/src/debrief.rs`). Spec: docs/spec/debrief.md.
 use crate::ai_wings::outcome::{self, Requirements, Standing};
-use crate::seats::{PlaneId, Roster, SeatId};
+use crate::seats::{Plane, PlaneId, Roster, SeatId, Slot};
 use crate::world::{Cockpit, World};
+use tore_formats::aircraft::AircraftId;
+use tore_sim::ai::launch::Side;
 use tore_sim::combat::ledger::{Kill, Ledger, ShotKind, Tally};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -257,6 +259,21 @@ pub fn cockpit_airframe(
     }
 }
 
+/// An AI aircraft as the mission ends, from its actor.
+fn actor_airframe(mission: &tore_sim::ai::mission::AiMission, id: u32, friendly: bool) -> Airframe {
+    let actor = mission.actor(id);
+    Airframe {
+        id,
+        friendly,
+        alive: actor.is_some_and(|a| a.alive() && a.flight().escape.is_none()),
+        ejected: actor.is_some_and(|a| a.flight().escape.is_some()),
+        damage: actor.map_or(1., |a| a.flight().damage_fraction),
+        // AI aircraft do not land yet.
+        landing_grade: None,
+        cause: actor.and_then(|a| a.flight().systems.structure.cause),
+    }
+}
+
 /// Reads the mission's results for `seat` from the world: the pilot column is
 /// the plane the seat flies, the wingman column the first other member of its
 /// wing, the objectives are that plane's and friendly fire counts the kills it
@@ -290,17 +307,7 @@ pub fn capture(world: &World, seat: SeatId) -> Option<Report> {
             if aircraft.iter().any(|a| a.id == slot.id) {
                 continue;
             }
-            let actor = mission.actor(slot.id);
-            aircraft.push(Airframe {
-                id: slot.id,
-                friendly: slot.side == side,
-                alive: actor.is_some_and(|a| a.alive() && a.flight().escape.is_none()),
-                ejected: actor.is_some_and(|a| a.flight().escape.is_some()),
-                damage: actor.map_or(1., |a| a.flight().damage_fraction),
-                // AI aircraft do not land yet.
-                landing_grade: None,
-                cause: actor.and_then(|a| a.flight().systems.structure.cause),
-            });
+            aircraft.push(actor_airframe(mission, slot.id, slot.side == side));
         }
         requirements = Requirements::of(wings, plane.0, side);
     }
@@ -312,6 +319,247 @@ pub fn capture(world: &World, seat: SeatId) -> Option<Report> {
         wingman: wingman_of(&world.roster, plane),
         requirements,
     }))
+}
+
+/// How a plane ended the mission, in the multiplayer results.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowStatus {
+    Alive,
+    /// The pilot escaped.
+    Ejected,
+    Dead,
+    /// Taken out of the mission to make room for a revival
+    /// ([`World::retire_plane`]); it was an abandoned wreck.
+    Retired,
+}
+
+/// One plane's row of the multiplayer results: every plane the mission had,
+/// human-flown or not, retired ones included. The host adds the pilots'
+/// callsigns.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlaneResult {
+    pub plane: PlaneId,
+    /// Its side, wing and place in the wing.
+    pub slot: Slot,
+    pub aircraft: AircraftId,
+    pub status: RowStatus,
+    /// Airframe damage, 0 to 1; a plane that is not flying shows 1.
+    pub damage: f64,
+    /// Fighters, bombers and helicopters it shot down (the kill table's
+    /// first three rows).
+    pub aircraft_kills: u32,
+    /// Everything else it destroyed: ships, SAM and AAA sites, vehicles,
+    /// structures and the rest.
+    pub other_kills: u32,
+    /// Aircraft of its own side it shot down.
+    pub friendly_fire: u32,
+    pub air_to_air: Tally,
+    pub gun: Tally,
+    /// Air-to-ground missiles and bombs together.
+    pub air_to_ground: Tally,
+}
+
+/// A plane id no plane has: the results are read from no plane's point of
+/// view, so every lost aircraft credits its killer, a human's own included.
+const NO_VIEWER: u32 = u32::MAX;
+
+/// Reads every plane's results from the world, in the order a results page
+/// lists them: friendly side first, then each wing, then each member. The
+/// rows come from the same [`Ending::pilot`] rule each seat's report uses
+/// (status, damage, kills by the ten rows summed, friendly fire, shots and
+/// hits), read for each plane from its own side. Kills follow the debrief's
+/// credit: the ledger's kill, else the last aircraft to hit the lost one.
+/// Friendly fire counts by side, as the debrief does (so two humans of one
+/// side in a free-for-all count as friends here, which the scores do not).
+/// Planes retired for room are rows of status [`RowStatus::Retired`]; a
+/// plane whose aircraft the mission cannot name has no row.
+pub fn results(world: &World) -> Vec<PlaneResult> {
+    let state = &world.combat.state;
+    let retired = world.revival.retired();
+    let planes: Vec<(Plane, bool)> = world
+        .roster
+        .planes()
+        .iter()
+        .map(|p| (*p, false))
+        .chain(retired.iter().map(|p| (*p, true)))
+        .collect();
+    let mission = world.ai_wings.as_ref().map(|wings| wings.mission());
+    // Each plane's fate, with `friendly` filled in per viewpoint below.
+    let fate = |plane: &Plane, gone: bool| -> Airframe {
+        let id = plane.id.0;
+        if gone {
+            return Airframe {
+                id,
+                friendly: false,
+                alive: false,
+                ejected: false,
+                damage: 1.,
+                landing_grade: None,
+                cause: None,
+            };
+        }
+        if let Some(cockpit) = world.cockpits.iter().find(|c| c.plane == plane.id) {
+            let hp = state.ownship(id).map_or(0, |own| own.hp);
+            return cockpit_airframe(id, false, &cockpit.flight, hp);
+        }
+        match mission {
+            Some(mission) => actor_airframe(mission, id, false),
+            None => Airframe {
+                id,
+                friendly: false,
+                alive: false,
+                ejected: false,
+                damage: 1.,
+                landing_grade: None,
+                cause: None,
+            },
+        }
+    };
+    let fates: Vec<(Airframe, bool)> = planes
+        .iter()
+        .map(|(p, gone)| (fate(p, *gone), *gone))
+        .collect();
+    // The mission as each side sees it: its own aircraft are the friendly
+    // ones.
+    let viewpoint = |viewer: Side| -> Vec<Airframe> {
+        fates
+            .iter()
+            .zip(&planes)
+            .map(|((airframe, _), (plane, _))| Airframe {
+                friendly: plane.slot.wing.side == viewer,
+                ..*airframe
+            })
+            .collect()
+    };
+    let from = |viewer: Side| {
+        let aircraft = viewpoint(viewer);
+        let ending = Ending {
+            ledger: &state.ledger,
+            ticks: state.tick(),
+            player: Airframe {
+                id: NO_VIEWER,
+                friendly: true,
+                alive: true,
+                ejected: false,
+                damage: 0.,
+                landing_grade: None,
+                cause: None,
+            },
+            aircraft,
+            wingman: None,
+            requirements: Requirements::default(),
+        };
+        let kills = {
+            let fates = ending.fates();
+            Standing {
+                ledger: ending.ledger,
+                plane: NO_VIEWER,
+                aircraft: &fates,
+                requirements: &ending.requirements,
+            }
+            .kills()
+        };
+        (ending, kills)
+    };
+    let views = [
+        (Side::Friendly, from(Side::Friendly)),
+        (Side::Enemy, from(Side::Enemy)),
+    ];
+    let mut rows = Vec::with_capacity(planes.len());
+    for ((plane, gone), (airframe, _)) in planes.iter().zip(&fates) {
+        let Some(aircraft) = aircraft_of(world, plane) else {
+            continue;
+        };
+        let side = plane.slot.wing.side;
+        let (ending, kills) = &views[usize::from(side.is_enemy())].1;
+        let fates = ending.fates();
+        let standing = Standing {
+            ledger: ending.ledger,
+            plane: NO_VIEWER,
+            aircraft: &fates,
+            requirements: &ending.requirements,
+        };
+        let airframe = Airframe {
+            friendly: true,
+            ..*airframe
+        };
+        let pilot = ending.pilot(&airframe, &standing, kills);
+        let sum = |rows: &[usize]| rows.iter().map(|row| pilot.kills[*row]).sum::<u32>();
+        let merged = |a: Tally, b: Tally| Tally {
+            launched: a.launched + b.launched,
+            hit: a.hit + b.hit,
+            damage: a.damage + b.damage,
+            ..Tally::default()
+        };
+        rows.push(PlaneResult {
+            plane: plane.id,
+            slot: plane.slot,
+            aircraft,
+            status: if *gone {
+                RowStatus::Retired
+            } else {
+                match pilot.status {
+                    Status::Alive => RowStatus::Alive,
+                    Status::Ejected => RowStatus::Ejected,
+                    Status::Dead => RowStatus::Dead,
+                }
+            },
+            damage: pilot.damage,
+            aircraft_kills: sum(&[0, 1, 2]),
+            other_kills: sum(&[3, 4, 5, 6, 7, 8, 9]),
+            friendly_fire: pilot.friendly_fire,
+            air_to_air: pilot.air_to_air,
+            gun: pilot.gun,
+            air_to_ground: merged(pilot.air_to_ground, pilot.bombs),
+        });
+    }
+    rows.sort_by_key(|row| {
+        (
+            row.slot.wing.side.is_enemy(),
+            row.slot.wing.index,
+            row.slot.member,
+            row.plane,
+        )
+    });
+    rows
+}
+
+/// The aircraft `plane` is: the AI bridge's slot, else a human's ownship.
+/// A retired wreck has neither left, so it is what its wing flies: the
+/// mission's launch for that wing, else another plane of the wing (a wing
+/// flies one aircraft, and a revival keeps the type).
+fn aircraft_of(world: &World, plane: &Plane) -> Option<AircraftId> {
+    let own = |id: u32| {
+        world
+            .ai_wings
+            .as_ref()
+            .and_then(|wings| wings.slot(id))
+            .map(|slot| slot.aircraft)
+            .or_else(|| {
+                world
+                    .combat
+                    .state
+                    .ownship(id)
+                    .map(|own| own.configuration().aircraft)
+            })
+    };
+    own(plane.id.0)
+        .or_else(|| {
+            world
+                .setup
+                .ai
+                .as_ref()
+                .and_then(|ai| ai.wings.iter().find(|w| w.wing == plane.slot.wing))
+                .map(|wing| wing.aircraft)
+        })
+        .or_else(|| {
+            world
+                .roster
+                .planes()
+                .iter()
+                .filter(|other| other.slot.wing == plane.slot.wing)
+                .find_map(|other| own(other.id.0))
+        })
 }
 
 pub fn report(end: &Ending) -> Report {
@@ -401,9 +649,11 @@ impl Report {
 }
 
 #[cfg(test)]
+mod results_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::seats::Slot;
     fn airframe(id: u32, friendly: bool, alive: bool) -> Airframe {
         Airframe {
             id,
