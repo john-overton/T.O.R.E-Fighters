@@ -188,6 +188,9 @@ pub fn enemies(client: &Client) -> BTreeSet<u32> {
         .collect()
 }
 
+/// How long after its first eject press a bot presses again to confirm.
+const EJECT_CONFIRM: Duration = Duration::from_millis(500);
+
 /// A client with the scripted pilot.
 pub struct Bot {
     pub client: Client,
@@ -217,6 +220,20 @@ pub struct Bot {
     /// Observer frames drawn, and the aircraft the last one drew.
     pub watched: u64,
     pub watched_aircraft: usize,
+    /// Eject this long after the first seating, then fly again when the
+    /// host allows it ([`Bot::revive_after`], stage F phase 2).
+    revive_after: Option<Duration>,
+    /// When the bot was first seated.
+    first_seated: Option<Duration>,
+    /// The bot has pressed eject twice, the second press confirming the
+    /// first (retail's rule: within two seconds).
+    pub ejected: bool,
+    /// When eject was first pressed.
+    eject_pressed: Option<Duration>,
+    /// Revive was asked for since the plane was lost.
+    revive_asked: bool,
+    /// The plane it flies now.
+    plane: Option<u32>,
 }
 
 impl Bot {
@@ -238,6 +255,50 @@ impl Bot {
             observe_asked: false,
             watched: 0,
             watched_aircraft: 0,
+            revive_after: None,
+            first_seated: None,
+            ejected: false,
+            eject_pressed: None,
+            revive_asked: false,
+            plane: None,
+        }
+    }
+
+    /// The bot ejects `after` its first seating and then, once the host's
+    /// Revival allows it, asks to fly again (Revive), and flies on in the
+    /// plane it gets (stage F phase 2, slice F2-V's `tore-bot --revive`).
+    pub fn revive_after(&mut self, after: Duration) {
+        self.revive_after = Some(after);
+    }
+
+    /// The ejection when it is due, and Revive once it may fly again.
+    fn revive(&mut self, now: Duration, controls: &mut Controls) {
+        let Some(after) = self.revive_after else {
+            return;
+        };
+        let plane = self.client.seat().map(|(_, plane)| plane.0);
+        if plane.is_some() && plane != self.plane {
+            self.plane = plane;
+            self.revive_asked = false;
+        }
+        if plane.is_none() {
+            return;
+        }
+        let first = *self.first_seated.get_or_insert(now);
+        match self.eject_pressed {
+            None if now.saturating_sub(first) >= after => {
+                self.eject_pressed = Some(now);
+                controls.pilot.commands.push(flight::PilotCommand::Eject);
+            }
+            Some(pressed) if !self.ejected && now.saturating_sub(pressed) >= EJECT_CONFIRM => {
+                self.ejected = true;
+                controls.pilot.commands.push(flight::PilotCommand::Eject);
+            }
+            _ => {}
+        }
+        if self.ejected && !self.revive_asked && self.client.may_fly_again() {
+            self.revive_asked = true;
+            self.client.revive();
         }
     }
 
@@ -365,6 +426,8 @@ impl Bot {
             }
             None => Controls::default(),
         };
+        let mut controls = controls;
+        self.revive(now, &mut controls);
         self.client.update(now, &controls);
         self.watch_when_flying();
         self.start_if_ready();

@@ -13,6 +13,7 @@
 //!          [--slot PLANE] [--seconds S] [--password TEXT]
 //!          [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...
 //!          [--observe PLANE|none] [--king NAME=VALUE[,NAME=VALUE]...]
+//!          [--revive SECONDS]
 //! ```
 //!
 //! `--master` and `--listing` join through the Internet Lobby (stage J,
@@ -49,6 +50,12 @@
 //! holding a slot is ready. Every bot prints when it wears the crown and the
 //! settings whenever they change (the values apart from co-op's defaults).
 //!
+//! `--revive` makes every bot eject SECONDS after it is first seated and,
+//! once the host's Revival says it may, fly again (stage F phase 2's
+//! revival): it prints the ejection, each Revival's words, every Spawned
+//! plane and the new seating, and succeeds only if it was seated again
+//! after ejecting.
+//!
 //! It prints one line per join, seating, debrief, lobby change and
 //! departure, and each bot's figures every five seconds. It exits 0 when
 //! every bot was seated, got a debrief and then left cleanly, or was told the
@@ -77,7 +84,7 @@ const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS -
 [--path auto|direct]) [--data-dir DIR] [--count N] \
 [--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] \
 [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
-[--king NAME=VALUE[,NAME=VALUE]...]";
+[--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS]";
 
 /// How long the bot looks for the listing on the master's list.
 const FIND_LISTING: Duration = Duration::from_secs(10);
@@ -121,6 +128,8 @@ struct Options {
     observe: Option<Subject>,
     /// `--king`: as the King, these settings, then the start.
     king: Option<Vec<(u8, u32)>>,
+    /// `--revive`: eject this long after the first seating and fly again.
+    revive: Option<Duration>,
 }
 
 fn receiver(word: &str) -> Result<Receiver, String> {
@@ -222,6 +231,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         quick: Vec::new(),
         observe: None,
         king: None,
+        revive: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -280,6 +290,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 });
             }
             "--king" => options.king = Some(king(&value()?)?),
+            "--revive" => options.revive = Some(seconds(&value()?)?),
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unknown option {other}\n{USAGE}")),
         }
@@ -493,6 +504,9 @@ struct Running {
     host_left: bool,
     /// An observer's flight started.
     observed: bool,
+    /// Seatings, and the ejection printed (`--revive`).
+    seatings: u32,
+    ejection_told: bool,
     /// It wears the crown, and has sent `--king`'s settings.
     crowned: bool,
     settings_sent: bool,
@@ -526,6 +540,9 @@ impl Running {
         }
         if let Some(subject) = options.observe {
             bot.watch(subject);
+        }
+        if let Some(after) = options.revive {
+            bot.revive_after(after);
         }
         self.bot = Some(bot);
         Ok(())
@@ -721,6 +738,8 @@ fn main() -> ExitCode {
             lobby: None,
             host_left: false,
             observed: false,
+            seatings: 0,
+            ejection_told: false,
             crowned: false,
             settings_sent: false,
             settings: None,
@@ -827,6 +846,10 @@ fn main() -> ExitCode {
                 bot.client.disconnect(now);
             }
             bot.update(now);
+            if bot.ejected && !r.ejection_told {
+                r.ejection_told = true;
+                println!("{}: ejected", r.name);
+            }
             match (&mut r.through, &mut r.socket) {
                 (Some(t), _) => {
                     let _ = bot.client.transmit(&mut t.joiner.over(&mut t.socket, now));
@@ -909,6 +932,7 @@ fn main() -> ExitCode {
                     ClientEvent::Goodbye(_) => {}
                     ClientEvent::Seated { seat, plane, tick } => {
                         r.seated = true;
+                        r.seatings += 1;
                         println!("{}: seat {seat}, plane {plane}, at tick {tick}", r.name);
                     }
                     ClientEvent::Notice(text) => println!("{}: {text}", r.name),
@@ -959,8 +983,20 @@ fn main() -> ExitCode {
                         r.name,
                         tore_session::client::scores::summary(&scores)
                     ),
-                    ClientEvent::Revival(_) | ClientEvent::Spawned(_) | ClientEvent::Results(_) => {
-                    }
+                    ClientEvent::Revival(_) => println!(
+                        "{}: revival: {}",
+                        r.name,
+                        bot.client.revival_prompt().unwrap_or_default()
+                    ),
+                    ClientEvent::Spawned(spawned) => println!(
+                        "{}: spawned plane {} in {:?} wing {}, member {}",
+                        r.name,
+                        spawned.plane,
+                        spawned.wing.side,
+                        spawned.wing.index + 1,
+                        spawned.member + 1
+                    ),
+                    ClientEvent::Results(_) => {}
                 }
             }
         }
@@ -1015,6 +1051,11 @@ fn main() -> ExitCode {
     let clean = bots.iter().all(|r| {
         let done = if options.observe.is_some() {
             r.observed && r.bot.as_ref().is_some_and(|bot| bot.watched > 0)
+        } else if options.revive.is_some() {
+            r.seated
+                && r.debrief
+                && r.bot.as_ref().is_some_and(|bot| bot.ejected)
+                && r.seatings >= 2
         } else {
             r.seated && r.debrief
         };
@@ -1131,6 +1172,15 @@ mod tests {
         pvp.apply(&[(number::MODE, 1), (number::KILL_LIMIT, 3)])
             .unwrap();
         assert!(settings_line(&pvp.lobby_list()).starts_with("mode pvp, "));
+    }
+
+    #[test]
+    fn revive_takes_seconds() {
+        let o = parse(&args("--connect 127.0.0.1 --revive 12.5")).unwrap();
+        assert_eq!(o.revive, Some(Duration::from_millis(12_500)));
+        assert_eq!(parse(&args("--connect 127.0.0.1")).unwrap().revive, None);
+        assert!(parse(&args("--connect 127.0.0.1 --revive")).is_err());
+        assert!(parse(&args("--connect 127.0.0.1 --revive soon")).is_err());
     }
 
     #[test]

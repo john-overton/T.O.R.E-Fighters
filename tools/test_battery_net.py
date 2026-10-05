@@ -162,6 +162,28 @@ class ParsingTests(unittest.TestCase):
         )
         self.assertEqual(net.pvp_end_problems("", ["Blue"]), ["no bot printed scores"])
 
+    def test_a_revival_is_read_from_the_bots_lines(self):
+        good = (
+            "Phoenix: seat 0, plane 0, at tick 3\n"
+            "Phoenix: ejected\n"
+            "Phoenix: revival: Press Enter to fly again\n"
+            "Phoenix: spawned plane 12 in Friendly wing 1, member 4\n"
+            "Phoenix: seat 0, plane 12, at tick 1200\n"
+        )
+        self.assertEqual(net.revive_problems(good, "Phoenix", 12), [])
+        self.assertEqual(
+            net.revive_problems(good.replace("Phoenix: ejected\n", ""), "Phoenix", 12), ["Phoenix never ejected"]
+        )
+        never = good.replace("plane 12, at tick 1200", "plane 0, at tick 1200")
+        self.assertEqual(net.revive_problems(never, "Phoenix", 12), ["Phoenix was not seated again in plane 12"])
+        lines = good.splitlines(keepends=True)
+        early = lines[0] + lines[4] + lines[1] + lines[2] + lines[3]
+        self.assertIn(
+            "Phoenix's ejection, revival, new plane and seating came out of order",
+            net.revive_problems(early, "Phoenix", 12),
+        )
+        self.assertIn("Phoenix was not told of plane 13", net.revive_problems(good, "Phoenix", 13))
+
     def test_bad_network_words_are_recognised(self):
         import re
 

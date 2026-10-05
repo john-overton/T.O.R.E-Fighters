@@ -483,6 +483,53 @@ def drive_delay(d: Drive) -> None:
     log_must(d, server_log(d), r"Owl is watching the mission", forbid=NET_BAD)
 
 
+def revive_problems(text: str, name: str, new_plane: int) -> list[str]:
+    """What a `tore-bot --revive` printed (slice F2-V): it ejected, heard it may fly again, was told of its new
+    plane before it was seated in it, and was seated twice, the second time in that plane."""
+    problems = []
+    lines = text.splitlines()
+
+    def first(pattern: str) -> int | None:
+        return next((i for i, line in enumerate(lines) if re.search(pattern, line)), None)
+
+    ejected = first(rf"^{name}: ejected$")
+    revival = first(rf"^{name}: revival: Press Enter to fly again")
+    spawned = first(rf"^{name}: spawned plane {new_plane} in Friendly wing \d, member \d+$")
+    seatings = [i for i, line in enumerate(lines) if re.search(rf"^{name}: seat \d+, plane \d+, at tick \d+$", line)]
+    reseated = first(rf"^{name}: seat \d+, plane {new_plane}, at tick \d+$")
+    if ejected is None:
+        problems.append(f"{name} never ejected")
+    if revival is None:
+        problems.append(f"{name} never heard it may fly again")
+    if spawned is None:
+        problems.append(f"{name} was not told of plane {new_plane}")
+    if len(seatings) < 2 or reseated is None:
+        problems.append(f"{name} was not seated again in plane {new_plane}")
+    order = [ejected, revival, spawned, reseated]
+    if None not in order and order != sorted(order):
+        problems.append(f"{name}'s ejection, revival, new plane and seating came out of order")
+    return problems
+
+
+def drive_revive(d: Drive) -> None:
+    """Revival (slice F2-V): a server whose King's `respawn` is retail's revival; a bot ejects 8 seconds into its
+    flight, flies again in a new plane of its wing, flies on and leaves cleanly. The server's file sets the respawn rule
+    by its registry name (slice F2-1)."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(), respawn="revive")
+    bot = start_bots(d, port, "bot", 40, "--callsign", "Phoenix", "--revive", "8")
+    bot.finish(90, 0)
+    server.finish(40, 0)
+    # The guide's mission has twelve aircraft: the revival's is plane 12.
+    for problem in revive_problems(bot.text(), "Phoenix", 12):
+        d.problem(problem)
+    bot.expect(r"^Phoenix: debrief: ", "a debrief")
+    bot.expect(r"^Phoenix: The connection ended: the player left\.$", "a clean leave")
+    bot.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+    log_must(d, server_log(d), r"Phoenix took plane 0\b", r"Phoenix took plane 12\b", forbid=NET_BAD)
+
+
 def drive_discovery(d: Drive) -> None:
     """`tore-app --find-games` lists a server on this machine, and says so when there is none."""
     port = d.port()
@@ -894,6 +941,10 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-server-delay", lane="net", args=[], driver=drive_delay, uses=("server", "bot"), timeout=240,
             notes="`observer-delay 10` in PvP: an observer bot watches two bots fight 10 seconds behind",
+        ),
+        Scenario(
+            name="net-server-revive", lane="net", args=[], driver=drive_revive, uses=("server", "bot"), timeout=200,
+            notes="retail's revival: a bot ejects, flies again in a new plane of its wing (slice F2-V) and leaves",
         ),
         Scenario(
             name="net-discovery", lane="net", args=[], driver=drive_discovery, uses=("server",), timeout=120,

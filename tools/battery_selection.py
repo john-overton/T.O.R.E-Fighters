@@ -179,10 +179,10 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "net-check": ("the dedicated server's start-up and --check", ("net-server-check",)),
     "net-fly": (
         "a server and bots over UDP: join, fly, chat, console, observe, scores, the King, PvP, a delayed observer, "
-        "debrief, clean exit",
+        "revival, debrief, clean exit",
         (
             "net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe", "net-server-scores",
-            "net-server-king", "net-server-pvp", "net-server-delay",
+            "net-server-king", "net-server-pvp", "net-server-delay", "net-server-revive",
         ),
     ),
     "net-discovery": ("finding games on the local network", ("net-discovery",)),
@@ -391,6 +391,11 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-net/*", NET_FAMILIES + ("net-discovery", "net-introduce"), "network transport"),
     _r("crates/tore-session/src/settings.rs", NET_FAMILIES + ("net-discovery",), "the King's settings registry"),
     _r("crates/tore-session/src/client/scores.rs", NET_FAMILIES, "the scores a game keeps and their words (tore-bot prints them)"),
+    _r(
+        "crates/tore-session/src/client/revival.rs", NET_FAMILIES,
+        "the revival a game keeps, its words and the spawned planes (tore-bot prints them)",
+    ),
+    _r("crates/tore-session/src/host/revive.rs", NET_FAMILIES, "death and revival on the host"),
     _r(
         "crates/tore-session/src/host/king*",
         NET_FAMILIES + ("net-discovery",),
