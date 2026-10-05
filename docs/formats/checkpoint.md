@@ -312,14 +312,24 @@ macOS); every scenario is built from synthetic fixtures, never retail data.
 
 | Scenario | Fixture | At tick N the test asserts | N, M |
 | --- | --- | --- | --- |
-| Dogfight with missiles and rounds in flight | The crowd fixture (`world/crowd.rs`): four against four at 10,000 ft, four human seats. *Built (H0)* without the assertions | At least one missile guiding and one gun round in flight, a lock held | First tick after 600 with both in flight; 600 |
-| Damaged aircraft | The crowd fixture | An aircraft with hit points lost and a subsystem fault, a wreck falling, a pilot under canopy | First tick after 900 with all three; 600 |
-| Handoffs | The crowd fixture | A seat gave its plane back to the AI and another took one, after the fight started | 700; 600 |
-| Open mission, fresh build | `World::new` with `Seating::Open` from the synthetic import, three against three; seats take planes at steps 60 and 61, one gives its plane back at 500, another takes one at 640. *Built (H0)* | Restored into a world fresh from `World::new`, so the structure (cockpits, ownships, actors) differs from the fresh world's | 700; 600 |
-| AI landing | The single-player tick mission with the wing ordered to land on the fixture airport | An AI aircraft on approach, one on the runway | Picked by state; 600 |
-| Ground start | A synthetic import with an airport, `Start::Ground` | Aircraft parked, taxiing and rolling | 240; 900 |
-| Changing weather | The single-player tick mission with a weather configuration that reselects its layers inside the run | A fog reselection between N and N + M | Picked by state; 1,200 |
-| Single player | The full-tick fingerprint mission (`world/tick_tests.rs`) with its script and drones. *Built (H0)* | Turbulence, the airport service and the player's tower conversation in use | 600; 600 |
+| Single player | The full-tick fingerprint mission (`world/tick_tests.rs`) with its script and drones. *Built (H0, asserted H8)* | A turbulence event begun, the airport selected and the tower's reply held, the player flying fast | 600; 600 |
+| Dogfight with rounds in flight | The crowd fixture (`world/crowd.rs`): four against four at 10,000 ft, four human seats. *Built (H0, asserted H8)* | Gun rounds in flight, every ownship holding radar contacts | 600; 600 |
+| Handoffs in the open mission | `World::new` with `Seating::Open` from the synthetic import, three against three; seats take planes at steps 60 and 61, one gives its plane back at 500, another takes one at 640. *Built (H0, asserted H8)* | Restored into a world fresh from `World::new`, so the structure (cockpits, ownships, actors) differs from the fresh world's; the plane given back is the AI's again | 700; 600 |
+| Damaged aircraft | The crowd fixture with Realistic damage; the damage command on a human's aircraft at steps 800 to 802, one AI aircraft shot down at 840 (its row emptied, its pilot ejected by hand) and another hurt at 850. *Built (H8)* | An ownship with hit points lost and a system fault, a wreck falling, a pilot under canopy, a hurt AI aircraft flying | 900; 600 |
+| Handoffs in the fight | The crowd fixture; seat 1 gives its plane back at step 500 and takes an AI plane at 560. *Built (H8)* | The roster, cockpits and AI actors as the handoffs left them, the leaders holding a designated contact | 700; 600 |
+| Missile duel | `World::new` open mission, one against one at 5 nautical miles, two seats; seat 1 fires its guns at step 1,400 and seat 0 a guided missile when in range. *Built (H8)* | A guided missile in flight, a missile warning held by a threat service, gun rounds in flight, both aircraft alive; they meet 400 ticks after the checkpoint | 1,700; 1,100 |
+| Radio calls pending | The single-player fingerprint mission with three calls (delays of 5, 9 and 14 seconds) and two cooldowns put into the player's channel at step 570. *Built (H8)* | Both cooldowns running, the Comms section differing from the same mission's without the calls | 600; 900 |
+| AI landing | `World::new` over the synthetic import with an airport, airborne, the wing ordered to land at step 20; the two wingmen start at the first approach gate and 16,000 ft behind it. *Built (H8)* | One wingman in the rollout on the runway, the other holding or approaching; after the run the first has cleared the runway and the second is on approach | 12,500; 1,600 |
+| Ground start | `World::new` over the synthetic import with an airport, `Start::Ground`, a wing of four, the player's takeoff at step 5. *Built (H8)* | A wingman parked, one lining up on the taxiway, the player rolling at over 100 ft/s | 2,000; 1,400 |
+| Changing weather | The single-player fingerprint mission with a weather configuration whose two layers both run the fog callback and whose first layer ends five seconds in. *Built (H8)* | The first layer active with a fog tint drawn; after the run the second layer is active | 300; 1,200 |
+
+The scenarios live in `world/checkpoint_scenarios.rs`. Each has an `expect`
+that asserts its state at tick N, and the test
+`every_scenario_builds_twice_identically_and_reaches_its_asserted_state` runs
+them. The synthetic airport is `airport_resources()` in
+`test_support/resources.rs`: the import of `resources()` with one runway
+airport in the theater's layout, whose shape carries the contact boxes the
+AI's takeoff, landing and parking read.
 
 Until every section is coded, the whole-world test is ignored with its reason,
 and each slice runs the **twin restore** instead: build the scenario twice,
