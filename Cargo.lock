@@ -2097,6 +2097,7 @@ dependencies = [
  "tore-input",
  "tore-master",
  "tore-net",
+ "tore-replay",
  "tore-sim",
  "tore-workers",
  "tore-world",

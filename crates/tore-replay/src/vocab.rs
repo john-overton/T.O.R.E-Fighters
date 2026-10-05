@@ -220,6 +220,24 @@ pub mod kind {
     pub const SYSTEM_GAP: &str = "system.gap";
     /// A free-form note, for example what a headless probe does not run.
     pub const SYSTEM_NOTE: &str = "system.note";
+    /// A gun burst a network host reported, in a replay converted from a
+    /// client's capture. Subject: the shooter. Fields: `station` (Int),
+    /// `length_ticks` (Int, absent while the burst was still firing).
+    pub const WEAPON_GUN_BURST: &str = "weapon.gun_burst";
+    /// The network's figures for the second ending at this tick, in a replay
+    /// converted from a client's capture: `client_seconds` (Num) and the
+    /// diagnostics log's `stats` fields (`round_trip_ms`, `loss_percent`,
+    /// `snapshot_loss_percent`, `snapshot_spread_ms`, `input_margin_ticks`,
+    /// `interpolation_delay_ms`, `clock_rate`, `corrections`,
+    /// `corrections_shown`, `mismatches`, `frames`, `extrapolated`,
+    /// `inputs_repeated`, `bytes_up_per_second`, `bytes_down_per_second`,
+    /// `predicted_tick`, `render_tick`, all Num; a figure the log leaves as
+    /// `-` is absent).
+    pub const NET_STATS: &str = "net.stats";
+    /// Any other line of the client's diagnostics log (a join, a seating, a
+    /// refusal, a mission, a debrief, a drop). Fields: `client_seconds` (Num),
+    /// `kind` (Text: the line's kind). Text: the rest of the line.
+    pub const NET_EVENT: &str = "net.event";
 
     /// Every kind above, in the order listed.
     pub const ALL: &[&str] = &[
@@ -281,6 +299,9 @@ pub mod kind {
         SYSTEM_END,
         SYSTEM_GAP,
         SYSTEM_NOTE,
+        WEAPON_GUN_BURST,
+        NET_STATS,
+        NET_EVENT,
     ];
 }
 

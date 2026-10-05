@@ -545,14 +545,45 @@ impl Write for Shared {
     }
 }
 
+/// A capture run again, with the client it ran kept.
+pub(crate) struct Run {
+    pub client: Client,
+    copy: Shared,
+    pub records: u64,
+    pub frames: u64,
+    /// Bytes of the capture that held whole records.
+    pub consumed: usize,
+    /// The kind of the last record read.
+    pub last: Option<u8>,
+}
+
+/// The kind byte of a record, for [`Run::last`].
+fn kind_of(record: &Record) -> u8 {
+    match record {
+        Record::Start { .. } => kind::START,
+        Record::Receive { .. } => kind::RECEIVE,
+        Record::Update { .. } => kind::UPDATE,
+        Record::Frame { .. } => kind::FRAME,
+        Record::Leave { .. } => kind::LEAVE,
+        Record::Disconnect { .. } => kind::DISCONNECT,
+        Record::Sent { .. } => kind::SENT,
+        Record::Request { .. } => kind::REQUEST,
+        Record::Race(_) => kind::RACE,
+        Record::LeaveGame { .. } => kind::LEAVE_GAME,
+    }
+}
+
 /// Runs the client session of `capture` again, offline, with the game data
-/// `resources` (the same import), calling `on_frame` with every frame the
-/// player's game drew.
-pub fn replay(
+/// `resources`. `setup` sees the client before the first record; `on_frame`
+/// every frame the player's game drew; `after` the client and the record's
+/// time after each record has been given to it.
+pub(crate) fn run(
     capture: &[u8],
     resources: Arc<BTreeMap<String, Vec<u8>>>,
+    setup: &mut dyn FnMut(&mut Client),
     on_frame: &mut dyn FnMut(&ClientFrame),
-) -> Result<Replayed, CaptureError> {
+    after: &mut dyn FnMut(&mut Client, Duration, u8),
+) -> Result<Run, CaptureError> {
     let mut reader = Reader::new(capture)?;
     let Some(Record::Start {
         started,
@@ -586,48 +617,97 @@ pub fn replay(
         .map_err(|error| CaptureError::Start(error.to_string()))?;
     let copy = Shared::default();
     client.set_capture(Box::new(copy.clone()));
-    let mut out = Replayed {
-        records: 1 + u64::from(client.config.race.is_some()),
+    setup(&mut client);
+    let records = 1 + u64::from(client.config.race.is_some());
+    let mut out = Run {
+        client,
+        copy,
+        records,
         frames: 0,
-        identical: false,
+        consumed: 0,
+        last: Some(kind::START),
     };
     while let Some(record) = match pending.take() {
         Some(record) => Some(record),
         None => reader.next_record()?,
     } {
         out.records += 1;
-        match record {
+        let record_kind = kind_of(&record);
+        out.last = Some(record_kind);
+        let client = &mut out.client;
+        let at = match record {
             Record::Start { .. } => return Err(CaptureError::Damaged("a second start")),
             Record::Race(_) => return Err(CaptureError::Damaged("a race after the start")),
             Record::Receive {
                 now,
                 from,
                 datagram,
-            } => client.receive(now, from, &datagram),
-            Record::Update { now, sampled } => client.update_sampled(now, sampled),
+            } => {
+                client.receive(now, from, &datagram);
+                now
+            }
+            Record::Update { now, sampled } => {
+                client.update_sampled(now, sampled);
+                now
+            }
             Record::Frame { now } => {
                 if let Some(frame) = client.frame(now) {
                     out.frames += 1;
                     on_frame(&frame);
                 }
+                now
             }
-            Record::Leave { now } => client.leave(now),
-            Record::Disconnect { now } => client.disconnect(now),
+            Record::Leave { now } => {
+                client.leave(now);
+                now
+            }
+            Record::Disconnect { now } => {
+                client.disconnect(now);
+                now
+            }
             Record::Request { now, kind, body } => {
                 let message = crate::wire::messages::Message::decode(kind, &body)
                     .map_err(|_| CaptureError::Damaged("lobby request"))?;
                 client.request(now, message);
+                now
             }
-            Record::LeaveGame { now } => client.leave_game(now),
-            // The replayed client writes its own; the comparison below
-            // checks them.
-            Record::Sent { .. } => {}
-        }
+            Record::LeaveGame { now } => {
+                client.leave_game(now);
+                now
+            }
+            // The replayed client writes its own; the comparison checks them.
+            Record::Sent { now, .. } => now,
+        };
+        after(&mut out.client, at, record_kind);
     }
+    out.consumed = reader.position();
+    Ok(out)
+}
+
+/// Runs the client session of `capture` again, offline, with the game data
+/// `resources` (the same import), calling `on_frame` with every frame the
+/// player's game drew.
+pub fn replay(
+    capture: &[u8],
+    resources: Arc<BTreeMap<String, Vec<u8>>>,
+    on_frame: &mut dyn FnMut(&ClientFrame),
+) -> Result<Replayed, CaptureError> {
+    let Run {
+        client,
+        copy,
+        records,
+        frames,
+        consumed,
+        ..
+    } = run(capture, resources, &mut |_| {}, on_frame, &mut |_, _, _| {})?;
+    // The replayed client's capture is complete once it is dropped.
     drop(client);
     let copy = copy.0.lock().map(|b| b.clone()).unwrap_or_default();
-    out.identical = copy == capture[..reader.position()];
-    Ok(out)
+    Ok(Replayed {
+        records,
+        frames,
+        identical: copy == capture[..consumed],
+    })
 }
 
 #[cfg(test)]

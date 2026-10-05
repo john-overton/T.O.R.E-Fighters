@@ -10,7 +10,7 @@
 //! ```text
 //! tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME [--path auto|direct|relay])
 //!          [--data-dir DIR] [--count N] [--callsign NAME]
-//!          [--slot PLANE] [--seconds S] [--password TEXT]
+//!          [--slot PLANE] [--seconds S] [--password TEXT] [--capture FILE]
 //!          [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...
 //!          [--observe PLANE|none] [--king NAME=VALUE[,NAME=VALUE]...]
 //!          [--revive SECONDS] [--away SECONDS,FOR]
@@ -30,6 +30,11 @@
 //! for the relay at once and never races, for tests on one machine, where
 //! every direct path works. Tests point `--master` at a loopback
 //! `tore-master`, never the public one.
+//!
+//! `--capture FILE` writes each bot's capture (everything the client was
+//! given, docs/formats/net-protocol.md, "Captures") to FILE, or FILE-1,
+//! FILE-2 and so on with `--count`; the game's `--convert-capture` turns it
+//! into a replay.
 //!
 //! `--say` makes every bot send the text to the receiver (`all`,
 //! `friendlies`, `enemies`, `wing` or `target`) that many seconds after it
@@ -92,7 +97,7 @@ use tore_session::{BuildId, Client, ClientConfig, ClientEvent, ClientPhase};
 
 const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME \
 [--path auto|direct|relay]) [--data-dir DIR] [--count N] \
-[--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] \
+[--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] [--capture FILE] \
 [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
 [--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS] [--away SECONDS,FOR]";
 
@@ -132,6 +137,8 @@ struct Options {
     slot: Option<u32>,
     seconds: u64,
     password: String,
+    /// `--capture`: where the capture of each bot goes.
+    capture: Option<PathBuf>,
     /// `--say`: when, to whom, what.
     say: Vec<(Duration, Receiver, String)>,
     /// `--quick`: when, which line.
@@ -250,6 +257,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         slot: None,
         seconds: 60,
         password: String::new(),
+        capture: None,
         say: Vec::new(),
         quick: Vec::new(),
         observe: None,
@@ -296,6 +304,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
                     .map_err(|_| "--seconds is a whole number")?;
             }
             "--password" => options.password = value()?,
+            "--capture" => options.capture = Some(PathBuf::from(value()?)),
             "--say" => options.say.push(say(&value()?)?),
             "--quick" => options.quick.push(quick(&value()?)?),
             "--observe" => {
@@ -512,6 +521,8 @@ struct Running {
     /// The client's settings, kept until the master's introduction for a
     /// join through it.
     config: ClientConfig,
+    /// Where this bot's capture goes (`--capture`).
+    capture: Option<PathBuf>,
     /// The bot, once its client has started.
     bot: Option<Bot>,
     /// Why a join through the master ended before the race.
@@ -558,6 +569,20 @@ impl Running {
                 return Err(ExitCode::from(2));
             }
         };
+        let mut client = client;
+        if let Some(path) = &self.capture {
+            match std::fs::File::create(path) {
+                Ok(file) => client.set_capture(Box::new(std::io::BufWriter::new(file))),
+                Err(error) => {
+                    eprintln!(
+                        "{}: cannot write the capture {}: {error}",
+                        self.name,
+                        path.display()
+                    );
+                    return Err(ExitCode::from(2));
+                }
+            }
+        }
         let mut bot = Bot::new(client);
         for (at, to, text) in &options.say {
             bot.say_at(*at, *to, text);
@@ -811,6 +836,15 @@ fn main() -> ExitCode {
             socket: None,
             through: None,
             config,
+            capture: options.capture.as_ref().map(|base| {
+                if options.count == 1 {
+                    base.clone()
+                } else {
+                    let mut name = base.clone().into_os_string();
+                    name.push(format!("-{}", i + 1));
+                    PathBuf::from(name)
+                }
+            }),
             bot: None,
             failed: None,
             seated: false,

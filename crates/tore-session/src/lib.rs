@@ -25,6 +25,8 @@
 
 pub mod bot;
 pub mod client;
+#[cfg(feature = "test-support")]
+pub mod fixture;
 pub mod host;
 pub mod settings;
 pub mod wire;

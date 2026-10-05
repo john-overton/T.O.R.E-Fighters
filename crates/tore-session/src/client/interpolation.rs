@@ -295,7 +295,7 @@ impl Interpolator {
 }
 
 /// One entity at the drawn time.
-enum Sample {
+pub(crate) enum Sample {
     Aircraft(AircraftPose),
     Projectile(ProjectileState, [f64; 3], [f64; 3], [f64; 2]),
     Debris(DebrisState, [f64; 3], [f64; 3]),
@@ -303,13 +303,20 @@ enum Sample {
 }
 
 /// Velocity in feet per tick.
-fn per_tick(v: [f64; 3]) -> [f64; 3] {
+pub(crate) fn per_tick(v: [f64; 3]) -> [f64; 3] {
     v.map(|v| v / TICKS_PER_SECOND)
 }
 
 /// The cubic curve through `p0` and `p1` with velocities `v0` and `v1` (feet
 /// per tick), `h` ticks apart, at fraction `s`.
-fn hermite(p0: [f64; 3], v0: [f64; 3], p1: [f64; 3], v1: [f64; 3], h: f64, s: f64) -> [f64; 3] {
+pub(crate) fn hermite(
+    p0: [f64; 3],
+    v0: [f64; 3],
+    p1: [f64; 3],
+    v1: [f64; 3],
+    h: f64,
+    s: f64,
+) -> [f64; 3] {
     let s2 = s * s;
     let s3 = s2 * s;
     let h00 = 2. * s3 - 3. * s2 + 1.;
@@ -319,12 +326,12 @@ fn hermite(p0: [f64; 3], v0: [f64; 3], p1: [f64; 3], v1: [f64; 3], h: f64, s: f6
     std::array::from_fn(|i| h00 * p0[i] + h10 * h * v0[i] + h01 * p1[i] + h11 * h * v1[i])
 }
 
-fn lerp3(a: [f64; 3], b: [f64; 3], s: f64) -> [f64; 3] {
+pub(crate) fn lerp3(a: [f64; 3], b: [f64; 3], s: f64) -> [f64; 3] {
     std::array::from_fn(|i| a[i] + (b[i] - a[i]) * s)
 }
 
 /// An angle from `a` to `b` the short way, at fraction `s`, in -pi to pi.
-fn angle_between(a: f64, b: f64, s: f64) -> f64 {
+pub(crate) fn angle_between(a: f64, b: f64, s: f64) -> f64 {
     let d = (b - a + PI).rem_euclid(TAU) - PI;
     (a + d * s + PI).rem_euclid(TAU) - PI
 }
@@ -333,7 +340,7 @@ fn attitude(angles: [u16; 3]) -> [f64; 3] {
     angles.map(radians)
 }
 
-fn blend_attitude(a: [u16; 3], b: [u16; 3], s: f64) -> [f64; 3] {
+pub(crate) fn blend_attitude(a: [u16; 3], b: [u16; 3], s: f64) -> [f64; 3] {
     let [y0, p0, b0] = attitude(a);
     let [y1, p1, b1] = attitude(b);
     Basis::new(y0, p0, b0)
@@ -397,7 +404,7 @@ pub fn devices_of(state: &AircraftState) -> Option<[f64; tore_world::snapshot::D
     })
 }
 
-fn between(a: &EntityState, b: &EntityState, h: f64, s: f64) -> Sample {
+pub(crate) fn between(a: &EntityState, b: &EntityState, h: f64, s: f64) -> Sample {
     let (ma, mb) = (a.motion(), b.motion());
     let (p0, p1) = (ma.position_ft(), mb.position_ft());
     let (v0, v1) = (ma.velocity_fps(), mb.velocity_fps());
@@ -436,7 +443,7 @@ fn between(a: &EntityState, b: &EntityState, h: f64, s: f64) -> Sample {
 }
 
 /// `state` carried `ahead` ticks along its velocity.
-fn beyond(state: &EntityState, ahead: f64) -> Sample {
+pub(crate) fn beyond(state: &EntityState, ahead: f64) -> Sample {
     let motion = state.motion();
     let v = motion.velocity_fps();
     let p = motion.position_ft();

@@ -17,9 +17,14 @@ tore-formats = { path = "../tore-formats" }
 tore-import = { path = "../tore-import" }
 tore-input = { path = "../tore-input" }
 tore-net = { path = "../tore-net" }
+tore-replay = { path = "../tore-replay" }
 tore-sim = { path = "../tore-sim" }
 tore-world = { path = "../tore-world" }
 tore-workers = { path = "../tore-workers" }
+
+[features]
+# A synthetic networked fight for other crates' tests (`fixture`).
+test-support = ["tore-world/test-support"]
 
 [dev-dependencies]
 # The relay's tests run the real master on the network simulator (slice J3).

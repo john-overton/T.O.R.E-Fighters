@@ -507,7 +507,7 @@ fn the_prediction_equals_the_host_for_five_minutes() {
 
 /// A writer the test keeps a handle on.
 #[derive(Clone, Default)]
-struct Shared(Arc<std::sync::Mutex<Vec<u8>>>);
+pub(super) struct Shared(pub(super) Arc<std::sync::Mutex<Vec<u8>>>);
 
 impl Write for Shared {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {

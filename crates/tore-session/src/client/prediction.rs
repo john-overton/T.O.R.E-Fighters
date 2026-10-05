@@ -10,6 +10,7 @@
 //! again to now. The drawn plane then slides from where it was to where the
 //! correction put it ([`Offset`]).
 
+use super::seen::{OwnSample, own_sample};
 use crate::wire::inputs::{Command, InputFrame};
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
@@ -57,6 +58,19 @@ pub struct Record {
     pub hash: Option<u64>,
 }
 
+/// One thing the predictor did, kept for the capture's conversion into a
+/// replay ([`Predictor::trace_on`]).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Trace {
+    /// A tick was stepped (or stepped again after a correction): the plane
+    /// after it.
+    Stepped(OwnSample),
+    /// The host's exact state at its tick: `differs` when the prediction had
+    /// it somewhere else (the plane was restarted from it) and not when the
+    /// prediction already equalled it.
+    Host { sample: OwnSample, differs: bool },
+}
+
 /// What an exact state from the host did.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Restored {
@@ -90,6 +104,8 @@ pub struct Predictor {
     /// taken out as the host says.
     standing: BTreeSet<u32>,
     history: VecDeque<Record>,
+    /// What happened, when someone asked to keep it.
+    trace: Option<Vec<Trace>>,
 }
 
 impl Predictor {
@@ -117,7 +133,19 @@ impl Predictor {
             start_seconds,
             standing,
             history: VecDeque::new(),
+            trace: None,
         }
+    }
+
+    /// Starts keeping a [`Trace`] of every step and every exact state, for
+    /// [`Self::take_trace`].
+    pub fn trace_on(&mut self) {
+        self.trace.get_or_insert_with(Vec::new);
+    }
+
+    /// The trace kept since the last call, oldest first.
+    pub fn take_trace(&mut self) -> Vec<Trace> {
+        self.trace.as_mut().map(std::mem::take).unwrap_or_default()
     }
 
     /// The newest predicted tick.
@@ -203,6 +231,20 @@ impl Predictor {
         // The host gives these to the seat as its HUD lines.
         self.plane.flight.systems.messages.clear();
         self.tick = tick;
+        if self.trace.is_some() {
+            let sample = own_sample(
+                tick,
+                self.plane.plane,
+                &self.plane.flight,
+                &self.config,
+                self.terms.as_ref(),
+                terrain,
+                Some(&input.pilot),
+            );
+            self.trace
+                .get_or_insert_with(Vec::new)
+                .push(Trace::Stepped(sample));
+        }
         Ok(if tick % self.ticks_per_snapshot == self.phase {
             Some(self.exact().hash()?)
         } else {
@@ -225,7 +267,24 @@ impl Predictor {
         terrain: &Terrain,
     ) -> WorldResult<Restored> {
         let first = self.history.front().map(|r| r.tick);
+        let host_sample = |me: &Self, differs: bool| {
+            me.trace.is_some().then(|| Trace::Host {
+                sample: own_sample(
+                    tick,
+                    me.plane.plane,
+                    &state.flight,
+                    &me.config,
+                    state.terms.as_ref(),
+                    terrain,
+                    None,
+                ),
+                differs,
+            })
+        };
         if tick > self.tick {
+            if let Some(host) = host_sample(self, true) {
+                self.trace.get_or_insert_with(Vec::new).push(host);
+            }
             // Not reached yet: the plane is the host's from there.
             let (plane, terms) = state.into_own_plane(self.plane.plane);
             self.plane = plane;
@@ -244,6 +303,9 @@ impl Predictor {
         } else {
             self.hash_at(tick)
         };
+        if let Some(host) = host_sample(self, ours != Some(hash)) {
+            self.trace.get_or_insert_with(Vec::new).push(host);
+        }
         if ours == Some(hash) {
             return Ok(Restored::Same);
         }

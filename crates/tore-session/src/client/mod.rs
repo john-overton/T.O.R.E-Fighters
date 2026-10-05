@@ -42,6 +42,9 @@ pub mod capture;
 #[cfg(test)]
 mod chat_tests;
 pub mod clock;
+pub mod convert;
+#[cfg(test)]
+mod convert_tests;
 pub mod diagnostics;
 pub mod interpolation;
 #[cfg(test)]
@@ -54,6 +57,7 @@ mod observe_tests;
 #[cfg(test)]
 mod phase2_seams_tests;
 pub mod prediction;
+pub mod seen;
 #[cfg(test)]
 mod relay_tests;
 pub mod results;
@@ -704,6 +708,9 @@ pub struct Client {
     /// The AI flies the plane while the player is away (stage F phase 2,
     /// [`away`]).
     away: away::Away,
+    /// What the session was given, kept for converting a capture into a
+    /// replay ([`seen`]); off in a game.
+    observed: Option<seen::Observed>,
     now: Duration,
 }
 
@@ -821,6 +828,7 @@ impl Client {
             capture: None,
             watching: None,
             away: away::Away::default(),
+            observed: None,
             now,
         })
         .map(|mut client| {
@@ -849,6 +857,31 @@ impl Client {
         let mut writer = CaptureWriter::new(out);
         writer.header(&self.config, self.seed, self.started);
         self.capture = Some(writer);
+    }
+
+    /// Keeps what the session is given ([`seen::Observed`]), from here
+    /// on, for converting a capture into a replay. Set it right after the
+    /// client starts.
+    pub fn start_observing(&mut self) {
+        self.observed.get_or_insert_with(seen::Observed::default);
+    }
+
+    /// Ends the observation and hands over what was kept: the flight in
+    /// progress is closed at the client's time.
+    pub fn finish_observing(&mut self) -> Option<seen::Observed> {
+        self.flush_observed();
+        let names = self.wire.as_ref().map(|wire| wire.names.clone());
+        let now = self.now;
+        let mut observed = self.observed.take()?;
+        observed.end_flight(now, names.as_ref());
+        Some(observed)
+    }
+
+    /// Moves the predictor's trace to the observer.
+    fn flush_observed(&mut self) {
+        if let (Some(observed), Some(seat)) = (&mut self.observed, &mut self.seat) {
+            observed.trace(seat.predictor.take_trace());
+        }
     }
 
     /// Builds the mission with `builder` instead of `World::new` with open
@@ -920,6 +953,7 @@ impl Client {
         if self.phase == ClientPhase::Flying {
             self.fly(now, sampled.frame);
             self.apply_own_states();
+            self.flush_observed();
         }
         self.auto_ready();
         let margin = self.interpolation_margin(now);
@@ -1636,6 +1670,9 @@ impl Client {
                 self.mission_arrived(mission);
             }
             Message::Roster(roster) => {
+                if let Some(observed) = &mut self.observed {
+                    observed.roster(&roster);
+                }
                 self.roster = Some(roster);
                 self.event(ClientEvent::Roster);
             }
@@ -1753,6 +1790,14 @@ impl Client {
     fn end_flight(&mut self) {
         if matches!(self.phase, ClientPhase::Closed | ClientPhase::Connecting) {
             return;
+        }
+        self.flush_observed();
+        if self.observed.is_some() {
+            let names = self.wire.as_ref().map(|wire| wire.names.clone());
+            let now = self.now;
+            if let Some(observed) = &mut self.observed {
+                observed.end_flight(now, names.as_ref());
+            }
         }
         self.seat = None;
         self.pending_own.clear();
@@ -2001,7 +2046,18 @@ impl Client {
         for &id in &destroyed {
             self.destroyed.insert(id, 0);
         }
-        let predictor = Predictor::new(
+        let seen_sample = self.observed.is_some().then(|| {
+            seen::own_sample(
+                u64::from(seated.tick),
+                plane,
+                &state.flight,
+                &config,
+                state.terms.as_ref(),
+                &mission.world.terrain,
+                None,
+            )
+        });
+        let mut predictor = Predictor::new(
             SeatId(seated.seat),
             plane,
             u64::from(seated.tick),
@@ -2012,6 +2068,19 @@ impl Client {
             standing,
         );
         let now = self.now;
+        if let (Some(observed), Some(sample)) = (&mut self.observed, seen_sample) {
+            predictor.trace_on();
+            observed.ensure_flight(now, seated.flight);
+            observed.seated(
+                seen::SeatSeen {
+                    seat: seated.seat,
+                    plane,
+                    tick: seated.tick,
+                },
+                &seated.roster,
+                sample,
+            );
+        }
         // Ahead of the host by a round trip and the margin. Fill this initial
         // forecast with neutral input, which is what the host uses before it
         // hears from us. Fresh controls and commands start on the next tick,
@@ -2069,6 +2138,14 @@ impl Client {
     /// names start afresh, as the host's did, and so do the picture's
     /// clocks and what it held.
     fn begin_flight(&mut self, flight: u8) {
+        if self.observed.is_some() {
+            let names = self.wire.as_ref().map(|wire| wire.names.clone());
+            let now = self.now;
+            self.flush_observed();
+            if let Some(observed) = &mut self.observed {
+                observed.begin_flight(now, flight, names.as_ref());
+            }
+        }
         self.wire = Some(ClientConnection::for_flight(
             self.ticks_per_snapshot,
             flight,
@@ -2156,6 +2233,9 @@ impl Client {
             None => self.snapshot_tick = Some(tick),
         }
         self.render_clock.snapshot(now, tick);
+        if let Some(observed) = &mut self.observed {
+            observed.snapshot(now, &received);
+        }
         self.interp.receive(&received);
         self.input_acked = self.input_acked.max(header.input_received);
         let applied = header.commands_applied;
@@ -2319,6 +2399,9 @@ impl Client {
     /// An event from the host: the seat's cues are released at once, the
     /// mission-wide ones when the picture reaches their tick.
     fn route(&mut self, event: ReceivedEvent) {
+        if let Some(observed) = &mut self.observed {
+            observed.event(self.now, &event);
+        }
         let position = |p: &[i64; 3]| p.map(|q| q as f64 * crate::wire::entity::POSITION_STEP);
         match &event.event {
             WireEvent::Message { .. }
