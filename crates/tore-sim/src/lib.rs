@@ -8,6 +8,7 @@ pub mod autopilot;
 pub mod cheats;
 pub mod checkpoint;
 pub mod combat;
+pub mod datalink;
 pub mod ejection;
 pub mod environment;
 pub mod flight;
