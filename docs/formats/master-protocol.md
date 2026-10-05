@@ -643,9 +643,9 @@ the sections above say otherwise):
 - **The cookie key.** `tore_net::master::CookieKey` wraps the transport's
   own cookie hash, so both use one keyed hash, and does the 10-second slot
   arithmetic. A cookie is never 0, which a request uses for "no cookie yet".
-- **The default master** is the placeholder `master.invalid:26901` until
-  John names the public master (slice IJ7). The reserved `.invalid` name
-  never resolves, so no build sends anything to anyone before then.
+- **The default master** is `master.jroverton.com:26901`, John's public
+  master, deployed on 2026-10-05. Until then it was the placeholder
+  `master.invalid:26901` (the reserved `.invalid` name never resolves).
 - **Constants** in `tore_net::master`: the version and its supported range,
   the two ports, the listing intervals (30, 15 and 90 seconds, and 5 seconds
   for a change heartbeat), 10 seconds to a silent master, three copies of

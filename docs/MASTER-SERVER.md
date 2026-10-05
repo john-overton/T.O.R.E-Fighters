@@ -245,9 +245,9 @@ own port, 26900, is not used on the master machine.
 
 The game is built with the master's name and port (and a player or server
 operator can change it in Options, `--master`, or the server's `master`
-setting). *Agent proposal, for John to confirm:* `master.jroverton.com`,
-port 26901, with an A record for the machine's IPv4 address and an AAAA
-record for its IPv6 address. With both records, games that have IPv6 reach
+setting). The public master is `master.jroverton.com`, port 26901 (John,
+2026-10-05; deployed the same day), with an A record for the machine's IPv4
+address and an AAAA record for its IPv6 address. With both records, games that have IPv6 reach
 it over IPv6 too, which lets them learn their own IPv6 address for direct
 connections. A short time to live (300 seconds) while setting up makes a
 move to another machine quick. Moving the master later means pointing the

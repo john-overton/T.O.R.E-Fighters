@@ -117,10 +117,10 @@ pub const PROBE_PORT: u16 = 26902;
 
 /// The master a game talks to unless its options name another.
 ///
-/// A placeholder until John names the public master (slice IJ7 sets it).
-/// *Agent decision:* the reserved `.invalid` name (RFC 6761) never resolves,
-/// so no build sends anything to anyone before then.
-pub const DEFAULT_MASTER: &str = "master.invalid:26901";
+/// The public master John runs at jroverton.com (deployed 2026-10-05). A game
+/// talks to it only to list a hosted game or to browse the Internet Lobby;
+/// Direct Connection and a `tore-server` without `broadcast` never do.
+pub const DEFAULT_MASTER: &str = "master.jroverton.com:26901";
 
 /// A listed host sends a Heartbeat this often (the master's Listed says so;
 /// this is its default).
