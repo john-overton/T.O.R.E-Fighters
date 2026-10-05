@@ -51,6 +51,14 @@ parallel and a server left running elsewhere on 26900 is no trouble. The two
 against `--windows`; the quick check leaves them out unless a change reaches the
 game's own network code (see "Choosing scenarios by change").
 
+A hosting game asks the router to forward its port by default (J4b), so the
+runner sets `TORE_NO_PORT_MAPPING=1` for every scenario, `quick_check.py` and
+`tools/agent-run.sh` do too, and the Rust tests never choose the real router.
+There is no scenario for port mapping itself: a real one would change a real
+router, so it is the manual `tore-app --map-port SECONDS` check (slice IJ7);
+the keeper, the hosts and the server are tested against fake gateways on
+loopback in the crates.
+
 ## What each scenario checks
 
 | Scenario | Seconds | What it does | What has to hold |

@@ -140,9 +140,10 @@ the lobby or flying, a lock for a password, another build shown as such), shows
 the selected game's mission and players, joins the selected game or a typed
 address or name (every address a name gives is tried, and a refusal comes back
 as a plain line), and **New** hosts a game from the Quick Mission creator's
-current mission. Options holds the port, the password and the game's name, and
+current mission. Options holds the port, the password and the game's name, the
+"Forward the game port on my router" switch (on by default), and
 shows the retail quick messages. The game remembers the callsign, the port, the
-game name, the last eight addresses and "Show full games"; the password is
+game name, the switch, the last eight addresses and "Show full games"; the password is
 never kept. A join or New opens the lobby (EF8, below). How it works:
 [architecture](ARCHITECTURE.md#the-direct-connection-screen-as-built-ef7).
 
@@ -617,7 +618,10 @@ works:
    asks its router to forward the game port by UPnP, NAT-PMP or PCP, whichever
    the router speaks, on by default with a switch in Options; the lobby's
    Messages say whether it worked and the address friends can join at. It
-   also helps a friend joining a Direct Connection game by address.
+   also helps a friend joining a Direct Connection game by address. *Built
+   (J4b):* both Options panels have the switch; `tore-app --map-port SECONDS`
+   checks a router by itself; a dedicated server does it with `port-mapping on`
+   ([how it works](ARCHITECTURE.md#port-mapping-in-the-hosts-as-built-j4b)).
 2. **Direct IPv6**, *agent proposal*. Many CGNAT providers, including Starlink
    and T-Mobile Home Internet, give customers public IPv6 addresses, so two IPv6
    players can often connect directly without the relay.

@@ -4097,7 +4097,7 @@ The **Direct Connection** screen replaces the MULTI menu's stubs:
 | Connect to | An address or a domain name, with an optional port; the last few are remembered |
 | New | Host a game: start the host and open its lobby as King |
 | Join | Join the selected game, or the address typed |
-| Options | Port, password to send, the quick messages |
+| Options | Port, password to send, the game name, "Forward the game port on my router" (J4b), the quick messages |
 | Cancel | Back to Choose Activity |
 
 The look (John, 2026-10-05; from 2026-10-01 it was `MODEM3`'s red photograph
@@ -6430,8 +6430,8 @@ decisions:
   master's answer. Turning statistics off in Options deletes the id; turning
   them on again draws a new one.
 - **Options** keeps the master's address (empty is the built-in one,
-  `master.jroverton.com:26901`), the port-forward switch (kept for J4b, which
-  reads it; nothing maps a port yet) and the statistics switch in
+  `master.jroverton.com:26901`), the port-forward switch (read by every
+  hosted game since J4b) and the statistics switch in
   `network-v1.conf`, which Direct Connection shares; the password is never
   kept.
 - **Shared pieces**: the kit is Direct Connection's (the Internet Lobby
@@ -6653,8 +6653,8 @@ sequenceDiagram
 `tore_net::portmap::PortMapper` asks the router to forward the game port. It
 blocks, for at most 5 seconds in all, so the hosting game runs it on a thread
 of its own; the dedicated server runs it on start when `port-mapping on`.
-*Built (J4):* the library, standard library only; the hosts' use of it is
-slice J4b.
+*Built (J4):* the library, standard library only. *Built (J4b):* the hosts'
+use of it, in [the hosts](#port-mapping-in-the-hosts-as-built-j4b).
 
 - **Three protocols at once.** UPnP: an SSDP search (`M-SEARCH` to
   239.255.255.250:1900 for an InternetGatewayDevice, 2 seconds), the
@@ -6731,6 +6731,79 @@ slice J4b.
   off by default, since a server's port is normally forwarded by its owner.
   `tore-app --map-port SECONDS` maps, prints the result, waits and removes
   the mapping.
+
+#### Port mapping in the hosts, as built (J4b)
+
+`tore_net::portmap::keeper` is the thread a host keeps its mapping on, shared
+by the game and the server: a `Keeper` runs a `PortMapper` on a thread of its
+own and tells the host what came of it. Agent decisions unless credited.
+
+```mermaid
+sequenceDiagram
+  participant H as Host thread (or server loop)
+  participant K as Keeper thread
+  participant R as Router (UPnP, NAT-PMP, PCP)
+  participant M as Master
+  H->>K: start(port), when the socket is bound
+  K->>R: map (at most 5 s)
+  K-->>H: News::Mapped (lines, outside address, telemetry value)
+  H->>M: Heartbeat with the Mapped candidate (set_mapped)
+  loop at half the lease
+    K->>R: renew
+    Note over K,H: news only when the address or the result changes
+  end
+  H->>K: begin_stop, when hosting stops
+  K->>R: remove (at most 2 s)
+  K-->>H: News::Removed
+```
+
+- **Where it starts.** The game's host thread starts it when its socket is
+  bound, so mapping runs while the mission builds. The server starts it with
+  the host. A start that is refused (a port in use, a bad master address)
+  asks the router nothing.
+- **The switch.** "Forward the game port on my router" in both Options
+  panels (Direct Connection's new in J4b, the Internet Lobby's from I4), kept
+  as `port-forward` in `network-v1.conf`, on by default, read by every game
+  the player hosts, from either screen or `--host`. `tore-server`'s
+  `port-mapping on|off`, off by default.
+- **The Mapped candidate.** `Rendezvous::set_mapped` (and
+  `HostListing::set_mapped`) keeps the IPv4 mapping's outside address apart
+  from the host's own candidates, so the master lookups that rebuild those
+  do not lose it. A change raises the change counter and goes out in the
+  next Heartbeat (within 5 seconds); the same address again changes nothing.
+  The mapping test ignores a Mapped candidate when it looks for the
+  machine's own address. An IPv6 mapping is not a Mapped candidate: the
+  GlobalIpv6 candidate already is that address.
+- **What the player reads.** The lobby's Messages, from the host thread's
+  `Report::Forward`: "Your router forwards UDP port 26900 (UPnP). Friends can
+  join at 203.0.113.5:26900.", or the library's one-line reason followed by
+  "Friends outside your network may need the relay." (agent decision, John
+  asked for plain failure words). The IPv6 line appears only when it
+  worked. The server logs the same lines with "Port mapping:" in front. The
+  hosting game's telemetry Report carries the "Port mapping" value
+  (`MapReport::telemetry`).
+- **Only a change is news, and a failure is asked again.** A renewal that
+  keeps the address says nothing. After a failure the keeper asks again every
+  10 minutes; a mapping with no end (an old device) is never renewed.
+- **Stopping.** When the King or the window stops the game, the keeper is told
+  to remove the mapping at once, so the removal runs while the players are
+  told; the host thread waits for it at most 2.5 seconds before it reports
+  its end. A mapping still being asked for when the game stops is removed as
+  soon as the library returns, if the process is still running; otherwise it
+  lapses with its lease. The server removes it in `stop`.
+- **No test reaches a real router.** The only ways to the real router are
+  `net::hosting::forward::choose` in the game and `wiring::mapping_choice` in
+  the server, and both answer `None` in a test build (`cfg!(test)`), whatever
+  the settings file says. A test that needs a mapper gives the host a fake
+  gateway (`HostThread::start_forwarded`, `wiring::start_host_with`). The
+  battery, `quick_check.py` and `agent-run.sh` also set
+  `TORE_NO_PORT_MAPPING=1`, which turns the real choice off for a run of the
+  built binaries, `tore-app --map-port` included (it prints that it is
+  turned off).
+- **`--map-port SECONDS [--port N]`.** Asks as a hosting game does, prints the
+  result, holds the mapping for that long and removes it; it exits with an
+  error when the router did not forward the port. It is John's manual check
+  of his router (slice IJ7).
 
 ### The connection path, shown and reported
 
@@ -6892,7 +6965,7 @@ change in these stages.
 | I4 Internet Lobby screen | Sonnet | I2; New after I3 | `crates/tore-app/src/internet_screen/*`, `net/{browse,telemetry,settings}.rs`, `menu.rs`, `main.rs` (routing, `--browse`, snapshot states), `widgets/header.rs`, `assets/internet-lobby-title.png`, the `internet_screen/*` rule in `tools/battery_selection.py`, the menus lane's `menus-snap-internet*` scenarios, `README.md`'s telemetry section | [The screen](#the-internet-lobby-screen); Join straight to the seen address; New hosting a listed game; Options (the master's address, port forwarding and statistics switches, kept in `network-v1.conf`); the install id; the player's Report | Screen tests (paging, filters, sorting, selection, keys, the shared callsign and port); headless renders of the five snapshot states; `--browse` against a scripted master; a windowed run through `tools/agent-run.sh`: open the Internet Lobby with a loopback master and a listed `tore-server`, join, fly 30 seconds, leave, and New lists a hosted game that a second `--browse` sees **Built (I4, 2026-10-05):** as [the screen](#the-internet-lobby-screen) describes, with its decisions; Join works through the master's introduction; `net-window-internet` runs the windowed part |
 | J2 Introductions and punching | Opus | I2, I3, J1 | `crates/tore-master/src/introduce.rs`, `tore-net/src/master/{meet,join}.rs`, `tore-net/src/{client,server,packet}.rs`, `tore-session/src/client/` (joining through candidates), `tore-session/src/{bot.rs,bin/tore-bot.rs}`, the protocol version and `wire-golden.txt` | [Joining through the master](#joining-through-the-master) up to the race, and [hole punching](#hole-punching): Introduce with its cookie, Introduction and Meet with retries and hints on the master; Meet, punches and the ack on the host; the player's rendezvous; `Client::connect_any` with candidates learned from punches; the path byte in the Challenge answer and `ConnectDetails::path`; `tore-bot --master --listing --path`. The next protocol version | On the simulator, every row of the [punching table](#hole-punching) gives its expected path, at a 100 ms round trip within 1.5 seconds where it punches; a forged Introduce gets only a Challenge; a host sends at most five punches per address per Meet and acts on at most 10 Meets a second; a Punch with another id is only counted; the wire golden file. Battery: `net-master-introduce` (a master, a listed `tore-server`, `tore-bot --listing` joins through an introduction and flies 30 seconds). **Built (J2, 2026-10-05):** protocol 9 (the Punch, kind 11, and the path byte after the platform byte; `ConnectDetails::path`, the relay for a relayed address); `Client::connect_any` with `Target`s and up to four addresses learned from punches; the master's introductions ([as built](formats/master-protocol.md#introductions-as-built)); a host's `meet.rs`, which its rendezvous drives, sending the punches and the Meet ack itself (a hook in `rendezvous.rs`, outside the row's files, the lead's stub for it); a player's `join.rs` (`Joiner`, its own socket router); the session client's `ClientConfig::race` and the capture's Race record; `tore-bot --master --listing --path auto\|direct`, `--path relay` refused until J3. Tests: the punching table in `crates/tore-master/tests/punch.rs` (12 tests, every row, 320 to 550 ms where it punches), `introduce_tests.rs` in `tore-master` (the forged Introduce, results, retries, the hint, limits), `meet.rs`'s and `join_tests.rs`'s unit tests, the transport client's race and the server's path, a raced session join whose capture replays, and `net-master-introduce` in the net lane. A seen address that is the host's own Mapped or Global IPv6 candidate reads as that path (agent decision). The master's `I2` stub test and flood allowance now expect the Introduce's 23-byte Challenge |
 | J3 Relay | Opus | J2 | `crates/tore-master/src/relay.rs`, `tore-net/src/master/relay.rs`, `tore-net/src/master/routed.rs` (relayed addresses), `tore-net/src/socket.rs` (`try_clone`), the bot's `--path relay` | [The relay](#the-relay): channels, keys, the host's ack, rates, idle, the allowance and its file, closing; relayed addresses; the framing wrapper for the keepalive thread | On the simulator: the two relay rows of the punching table connect through the relay; a host with two relayed bots and one direct flies 60 seconds with the stage D matrix's limits for the direct and relayed bots alike (the relay adds only its delay); a frame from a third address or with a wrong key is dropped; a channel flooded at 200 KB/s passes 64 KB/s; idle channels close at 30 seconds; a spent allowance refuses new channels with its text and survives a master restart; a relayed bot stalled 15 seconds stays connected through its framed keepalives. Battery: `net-master-relay` (`tore-bot --path relay` against a listed `tore-server` through a loopback master, 30 seconds, no drop, the master's status counts the bytes). **Built (J3, 2026-10-05):** as [the relay](#the-relay) describes, with its decisions there. Beyond the row's files: the player's side in `join.rs` (`ask_relay`, the offer, `close_relay`, `keepalive_socket`, new `JoinEvent`s) and the host's in `rendezvous.rs` (the ack, the close, `relayed`, `close_relayed`), the master's dispatch in `master.rs`, `Introductions::ends`, the run loop's month file, `--check-config` and start lines that say plainly whether the relay is active, `relay opened`, `relay closed` and allowance log lines, and the status line's `relayed`, `channels` and `relay-month`. Tests: every relay row of the punching table connects through the relay (`tests/punch.rs`); `relay_tests.rs` in `tore-master` (a channel both ways with the longest datagram, a third address and a wrong key, a request checked against its introduction, 200 KB/s passing 64 and the channel closed after 30 seconds over its rate, idle at 30 seconds, the refusals, two per source, a silent host, the allowance at 95 and 100 percent, a stopping master, and the month's figure read back by a restarted `Running`); `relay_tests.rs` in `tore-session`'s client (two relayed bots and one direct under the matrix's limits in its 150 ms, 2 percent cell, about 25 seconds; a relayed bot stalled 15 seconds kept by keepalives framed for its channel); unit tests of the channels, the host's acks, the wrapper, the joiner's requests and `ServerSocket::try_clone`; and `net-master-relay` in the net lane. `tore-session` gains `tore-master` as a dev-dependency; the matrix's `run` became `fly`, for any bots and any step |
-| J4b Port mapping in hosts | Sonnet | J4, I3, I4 | `crates/tore-app/src/net/{hosting,options}.rs`, `direct_screen/options.rs`, `internet_screen/options.rs`, `crates/tore-server/src/{config,wiring}.rs`, `docs/DEDICATED-SERVER.md` | A hosting game's mapper thread, its messages and the Mapped candidate; the switch in both Options panels; `tore-server`'s `port-mapping`; `tore-app --map-port` | Against the loopback fakes: hosting maps the port, shows the address, gives the rendezvous the Mapped candidate and removes the mapping when hosting stops; the switch off maps nothing; a second router is reported. No battery scenario (a real one would change John's router); the manual test is in IJ7 |
+| J4b Port mapping in hosts | Sonnet | J4, I3, I4 | `crates/tore-app/src/net/{hosting,options}.rs`, `direct_screen/options.rs`, `internet_screen/options.rs`, `crates/tore-server/src/{config,wiring}.rs`, `docs/DEDICATED-SERVER.md` | A hosting game's mapper thread, its messages and the Mapped candidate; the switch in both Options panels; `tore-server`'s `port-mapping`; `tore-app --map-port` | Against the loopback fakes: hosting maps the port, shows the address, gives the rendezvous the Mapped candidate and removes the mapping when hosting stops; the switch off maps nothing; a second router is reported. No battery scenario (a real one would change John's router); the manual test is in IJ7. **Built (J4b, 2026-10-05):** [the hosts' mapper thread, the Mapped candidate, the lobby's lines and the switch](#port-mapping-in-the-hosts-as-built-j4b); `tore_net::portmap::keeper` (the thread, shared by the game and the server), `Rendezvous::set_mapped` and `HostListing::set_mapped` in `tore-net`, `HostThread::start_forwarded` and `Report::Forward` in the game, `port-mapping` in `tore-server`, the switch in Direct Connection's Options (the Internet Lobby's was there), and `tore-app --map-port SECONDS [--port N]`. Files beyond the row, with the lead's approval: `portmap/keeper.rs` and its one `mod` line, `master/rendezvous.rs` (and its tests), `lobby_screen/app.rs` (the lobby drains the host thread's lines into Messages), `main.rs` (the `--map-port` arm and help), `direct_screen/{mod,tests}.rs`, `tools/{battery,quick_check}.py` and `tools/agent-run.sh` (`TORE_NO_PORT_MAPPING=1`). Tests: 7 in `portmap::keeper` (map, tell the address, remove on finish for PCP and UPnP; a silent router reported plainly and asked again; a second router; a renewal that changes nothing is no news; finish within its limit with a router silent at the end), 4 in `master::rendezvous` (the Mapped candidate in Register and Heartbeats, a change reaching the master within 5 seconds, surviving new own candidates and the mapping test, a host listing after its lookup), 2 hosting-thread tests (maps, lists the Mapped candidate through a loopback master and removes the mapping before the thread ends; a refusing router is told and the host runs on) and the switch-off case, 1 server test (maps at start, logs, removes at quit), `--map-port` against fakes, the Direct Options switch by key, mouse and Cancel, and the tests that a test build never chooses the real router. All against fakes on loopback; none reaches a real router. Agent decisions: the keeper lives in `tore-net` so the server shares it; the `TORE_NO_PORT_MAPPING` veto; failure words end with "Friends outside your network may need the relay."; a failure is asked again after 10 minutes; the removal starts when the stop is asked for and the host waits at most 2.5 seconds for it |
 | J5 Joining through the master in the game | Opus | J2, I4; its relay commit after J3 | `crates/tore-app/src/net/{session,play}.rs`, `internet_screen/{mod,app}.rs`, a new `net/join_tests.rs` | `Transport::Internet`; Join on a listing runs the mapping test, the introduction, the race and the relay; the Messages lines; the framed keepalive for a relayed session; the path in the net log and the player's report | In-process: a hosting thread with a rendezvous, a master core and a game session joined by listing, once direct and once with `--path relay`, each seated and flying; the Messages lines in order; a refused introduction is a plain line. A windowed run joins a listed `tore-server` through a loopback master with the relay forced |
 | J6 Path in the lobby | Sonnet | J5, J3 | `tore-session/src/wire/messages.rs` and `host/lobby.rs` (the player's path in 3 bits), `wire-golden.txt`, `crates/tore-app/src/lobby_screen/*`, `widgets/icons.rs` (the relay mark), `tore-server`'s per-player log lines | [Shown and reported](#the-connection-path-shown-and-reported); the next protocol version | Lobby state round trip with every path; the lobby screen's snapshot with a relayed player; the wire golden file |
 | IJ7 Deployment and acceptance | lead, then John | all | `docs/baselines/master-<date>.md`, the default master address | John sets up the master as [the operations guide](MASTER-SERVER.md#deploying-at-jrovertoncom) says; the lead sets the default address and smoke-tests on this machine (a loopback master, a listed hosting game, a bot joining direct and relayed); then John's tests on real networks | The plan's acceptance for I and J: a session hosted on one machine appears in another's browser within one heartbeat and is gone within 90 seconds of its host vanishing; the flood test holds; connections succeed on a home router, through double NAT, over a phone hotspot (CGNAT) through the relay, and directly over IPv6 |

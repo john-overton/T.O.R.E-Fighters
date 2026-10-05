@@ -146,6 +146,7 @@ start, so a typo never passes silently.
 | `broadcast` | `off` | `on` lists the server on the Internet Lobby, so players find it there ([broadcasting](#broadcasting-on-the-internet-lobby)); `off` keeps it private: players join by address or find it on their local network (John, 2026-10-05, as OpenRA's servers do) |
 | `master` | the public master | The master server the server broadcasts to, `HOST` or `HOST:PORT` (port 26901 when none is given) |
 | `telemetry` | `on` | While broadcasting, send the master anonymous statistics at the end of each mission (John, 2026-10-05: on by default); `off` sends none |
+| `port-mapping` | `off` | `on` asks the router to forward the game port when the server starts, by UPnP, NAT-PMP or PCP, and removes it when the server stops ([ports](#ports-and-firewalls)). Off by default, since a server's port is normally forwarded by its owner |
 | `king` | `none` | `first-player`: the first player to join wears the crown, and when the King leaves the longest-connected player does; the King changes the mission and the settings below, locks slots, starts, ends, kicks and passes the crown ([the King](#the-kings-settings-and-a-king)). `none` (John, 2026-10-05: the default): nobody is King |
 | `king-mission` | `open` | `locked`: the King may not change the mission or the settings; start, kick, slot locks and the crown still work. Needs `king first-player` |
 
@@ -741,7 +742,13 @@ stretches of up to 0.1 s after half a second of such work.
 
 The server uses one UDP port, 26900 unless set. On a LAN nothing else is
 needed. For players on the internet, forward that UDP port on the router to the
-server; automatic port mapping, NAT traversal and the relay are stage J. A
+server by hand, or let the server ask the router with `port-mapping on`. *Built (J4b).*
+The server asks by UPnP, NAT-PMP and PCP at once when it starts, logs what the router did
+(`Port mapping: Your router forwards UDP port 26900 (UPnP). Friends can join at
+203.0.113.5:26900.`, or why not), tells the master the outside address
+when it broadcasts, asks again after 10 minutes if the router did not answer, and removes the
+mapping when it stops. A router behind another router cannot be mapped; the log says so.
+NAT traversal and the relay are the rest of stage J. A
 server that [broadcasts](#broadcasting-on-the-internet-lobby) talks to the
 master from the same port, so it needs no other rule.
 Windows and macOS ask once whether the unsigned program may accept connections.
