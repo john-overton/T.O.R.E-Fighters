@@ -916,3 +916,7 @@ mod tests {
         assert!(journaled > 0);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "chatter_checkpoint.rs"]
+mod checkpoint;

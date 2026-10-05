@@ -18,6 +18,8 @@ use crate::{
 use tore_sim::models::FlightModel;
 use tore_sim::{attitude, flight};
 
+#[cfg(test)]
+mod ai_wings_checkpoint_tests;
 mod build;
 #[cfg(test)]
 mod checkpoint_scenarios;

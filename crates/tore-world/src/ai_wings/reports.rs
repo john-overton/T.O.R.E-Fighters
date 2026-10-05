@@ -455,3 +455,7 @@ mod tests {
         );
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "reports_checkpoint.rs"]
+mod checkpoint;
