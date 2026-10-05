@@ -254,6 +254,11 @@ fn shape(extent: i16) -> Vec<u8> {
     }
     // A plain polygon of the three vertices, then the end of the shape.
     code.extend([0xfc, 0, 0, 0, 0, 3, 0, 1, 2, 0]);
+    module(&code)
+}
+
+/// A shape module around `code`, in the container the shape reader takes.
+fn module(code: &[u8]) -> Vec<u8> {
     let mut module = vec![0; 256 + code.len()];
     module[..2].copy_from_slice(b"MZ");
     module[60..64].copy_from_slice(&64u32.to_le_bytes());
@@ -265,8 +270,98 @@ fn shape(extent: i16) -> Vec<u8> {
     for (offset, value) in [(8, code.len()), (12, 4096), (16, code.len()), (20, 256)] {
         module[120 + offset..124 + offset].copy_from_slice(&(value as u32).to_le_bytes());
     }
-    module[256..].copy_from_slice(&code);
+    module[256..].copy_from_slice(code);
     module
+}
+
+/// The airport's paving, in feet: a flat rectangle `[right_min, right_max]`
+/// by `[back, front]` that holds the runway, the taxiways and the parking
+/// area, the way a real airport's one mesh does.
+const PAVING: [[i16; 2]; 2] = [[-300, 1800], [-4300, 4300]];
+
+/// The airport's contact boxes, each an id and a point in the shape's frame
+/// `[right, up, forward]` in feet: the takeoff spot and landing point on the
+/// runway's centreline, the taxiway out to the takeoff spot and back in, and
+/// nine parking slots (docs/formats/native-strip.md). The layout is the one
+/// `tore-sim`'s airfield golden scenario flies.
+fn airport_boxes() -> Vec<(u8, [i16; 3])> {
+    let mut boxes = vec![(0x11, [0, 0, -3700]), (0x12, [0, 0, -2000])];
+    for (id, right, forward) in [
+        (0x25, 1200, -1000),
+        (0x26, 600, -1000),
+        (0x27, 600, -4100),
+        (0x28, 0, -4070),
+        (0x29, 0, 1000),
+        (0x2a, 600, 1300),
+        (0x2b, 600, 0),
+        (0x2c, 1200, -500),
+    ] {
+        boxes.push((id, [right, 0, forward]));
+    }
+    for slot in 0..9 {
+        boxes.push((0x19 + slot as u8, [1500, 0, -2000 + 250 * slot]));
+    }
+    boxes
+}
+
+/// The shape of a runway airport: the contact boxes the AI's takeoff and
+/// landing read, then one flat polygon of the paving. The object scale
+/// exponent is 8, so shape units are feet.
+fn airport_shape() -> Vec<u8> {
+    let boxes = airport_boxes();
+    let mut code = vec![0u8; 0x22];
+    // Jump over the data to the drawing code, which starts after the boxes
+    // and their terminating byte.
+    let start = 0x22 + 14 * boxes.len() + 1;
+    code[0] = 0x48;
+    code[2..4].copy_from_slice(&((start - 4) as i16).to_le_bytes());
+    // The object scale exponent: 2^(8 - 8) is one foot per unit.
+    code[6..8].copy_from_slice(&8u16.to_le_bytes());
+    // The contact boxes follow the 16-byte record at 0x12.
+    code[0x0e..0x10].copy_from_slice(&0xf2u16.to_le_bytes());
+    for (id, point) in &boxes {
+        let mut record = vec![0x80, *id];
+        for axis in point {
+            // Both sides of an axis are the point, so the midpoint is it.
+            record.extend(axis.to_le_bytes());
+            record.extend(axis.to_le_bytes());
+        }
+        code.extend(record);
+    }
+    code.push(0);
+    assert_eq!(code.len(), start);
+    // Four vertices, as `[right, forward, up]`, and a polygon through them.
+    let [[right_min, right_max], [back, front]] = PAVING;
+    code.extend([0x82, 0, 4, 0, 0, 0]);
+    for vertex in [
+        [right_min, back, 0],
+        [right_max, back, 0],
+        [right_max, front, 0],
+        [right_min, front, 0],
+    ] {
+        for word in vertex {
+            code.extend(word.to_le_bytes());
+        }
+    }
+    code.extend([0xfc, 0, 0, 0, 0, 4, 0, 1, 2, 3, 0]);
+    module(&code)
+}
+
+/// The static object definition of the airport: a strip, the callback that
+/// marks a runway.
+fn airport_definition() -> Vec<u8> {
+    let value = |name: &str| match name {
+        "structType" => 1,
+        "typeSize" => 166,
+        "obj_class" => 0x100,
+        "hitPoints" => 1000,
+        _ => 0,
+    };
+    let mut text = String::from(HEADER);
+    text += &fields(schema::OBJECT, &["ot_names", "shape"], "_STRIPProc", &value);
+    text += ":ot_names\nstring \"Runway\"\nstring \"Synthetic airport\"\nstring \"STRIP.OT\"\n";
+    text += ":shape\nstring \"AIRPORT.SH\"\nend\n";
+    text.into_bytes()
 }
 
 /// A terrain grid of `tiles` by `tiles` tiles of 32 cells, every cell sea
@@ -355,5 +450,31 @@ pub fn resources() -> BTreeMap<String, Vec<u8>> {
             },
         ]),
     );
+    resources
+}
+
+/// Where the synthetic airport's origin stands on the map, feet east and
+/// north: the middle of the theater. The runway runs north from it.
+pub const AIRPORT_AT: f64 = 64. * 8192.;
+
+/// The object id of the synthetic airport's runway: the first placement of
+/// its layout, for a `Start::Ground`.
+pub const AIRPORT_RUNWAY: u32 = crate::mission::RUNWAY_OBJECT_BASE;
+
+/// The synthetic import with an airport: [`resources`] with the theater's
+/// layout holding one runway airport, 8,000 feet long with its taxiways and
+/// parking, in the middle of the map. A mission built from these can start on
+/// the ground. [`resources`] itself is unchanged, so no other test sees the
+/// airport.
+pub fn airport_resources() -> BTreeMap<String, Vec<u8>> {
+    let mut resources = resources();
+    let middle = AIRPORT_AT as i64;
+    let layout = format!(
+        "textFormat\nmap UKR.T2\nlayer CLEAR.LAY 0\ntime 12 0\n;--- Synthetic Field\nobj\n\
+         \ttype STRIP.OT\n\tpos {middle} 0 {middle}\n\tangle 0 0 0\n\tname \u{1}Synthetic Field\u{1}\n\t.\n"
+    );
+    resources.insert("UKR.MM".to_owned(), layout.into_bytes());
+    resources.insert("STRIP.OT".to_owned(), airport_definition());
+    resources.insert("AIRPORT.SH".to_owned(), airport_shape());
     resources
 }
