@@ -38,6 +38,9 @@ use winit::event_loop::ActiveEventLoop;
 const MAX_PRESENTED_TICKS: u64 = 8;
 /// How long a message that ends a session stays on the main menu.
 const MESSAGE_SECONDS: u64 = 12;
+/// How often the revival prompt is said again while the plane is lost
+/// (agent decision, F2-V: the HUD's message lines fade).
+const REVIVAL_PROMPT_EVERY: Duration = Duration::from_secs(5);
 
 /// The flight frame of the moment between redraws, for the commands that
 /// read what the screen shows: the client's newest frame in a networked
@@ -94,6 +97,9 @@ pub struct NetFlight {
     was_burning: bool,
     /// K's score board is open (`scoreboard`).
     pub score_board: bool,
+    /// When the revival prompt was last said, and whether it said the
+    /// player may fly again (stage F phase 2, slice F2-V).
+    revival_said: Option<(Instant, bool)>,
 }
 
 impl App {
@@ -295,6 +301,12 @@ impl App {
                     session.ended = None;
                 }
                 log::info!("Network: seated in plane {plane}");
+                // Seated again in flight (a revival, slice F2-V): this
+                // flight is put away and the next turn starts the new one,
+                // as a player who left its flight and joined again starts.
+                if self.net_flight.is_some() {
+                    self.end_net_flight();
+                }
             }
             ClientEvent::Roster => {}
             ClientEvent::Notice(text) => self.message(text),
@@ -340,12 +352,20 @@ impl App {
                 }
             }
             ClientEvent::Goodbye(_) => {}
-            // Stage F phase 2: the slices that build each part show them.
-            ClientEvent::Revival(_)
-            | ClientEvent::Spawned(_)
-            | ClientEvent::Scores(_)
-            | ClientEvent::Results(_)
-            | ClientEvent::Observing(_) => {}
+            // Stage F phase 2 (slice F2-V): the revival prompt, and a
+            // revival's plane added to the flight's copy of the mission.
+            ClientEvent::Revival(_) => {
+                if let Some(flight) = &mut self.net_flight {
+                    flight.revival_said = None;
+                }
+            }
+            ClientEvent::Spawned(spawned) => {
+                if self.net_flight.is_some() {
+                    add_spawned(&mut self.world, std::slice::from_ref(&spawned));
+                }
+            }
+            // The slices that build each part show them.
+            ClientEvent::Scores(_) | ClientEvent::Results(_) | ClientEvent::Observing(_) => {}
             ClientEvent::Closed(reason) => {
                 let left = self.net.as_ref().is_some_and(|s| s.left_at.is_some());
                 let text = self
@@ -468,6 +488,10 @@ impl App {
         // A page of the lobby still open gives way to the flight.
         self.close_lobby_page();
         let crate::net::session::Built { mut world, models } = built;
+        // The planes revivals have added to the mission so far (slice F2-V).
+        if let Some(session) = &self.net {
+            add_spawned(&mut world, session.client.spawned());
+        }
         let aircraft = match world.ai_wings.as_ref().and_then(|wings| wings.slot(plane)) {
             Some(slot) => slot.aircraft,
             None => {
@@ -555,6 +579,7 @@ impl App {
             was_crashed: false,
             was_burning: false,
             score_board: false,
+            revival_said: None,
         });
         true
     }
@@ -685,6 +710,56 @@ impl App {
         flight.was_burning = state.was_burning;
         drop(presented);
         flight.frame = Some(frame);
+        self.revival_prompt();
+    }
+
+    /// While the plane is lost, the host's Revival in words on the HUD
+    /// ("Press Enter to fly again (2 lives left)", "You can fly again in
+    /// 0:45"), said again every few seconds and when the player may fly
+    /// again (slice F2-V).
+    fn revival_prompt(&mut self) {
+        let Some(session) = &self.net else {
+            return;
+        };
+        let (Some(text), may) = (
+            session.client.revival_prompt(),
+            session.client.may_fly_again(),
+        ) else {
+            return;
+        };
+        let Some(flight) = &mut self.net_flight else {
+            return;
+        };
+        let now = Instant::now();
+        let due = flight
+            .revival_said
+            .is_none_or(|(at, said)| said != may || now.duration_since(at) >= REVIVAL_PROMPT_EVERY);
+        if due {
+            flight.revival_said = Some((now, may));
+            self.flight_ui.message(text);
+        }
+    }
+
+    /// Enter (the visual designation key) after a loss: fly again, if the
+    /// host's Revival allows it, else say why not. `false` when the plane is
+    /// not lost, and the key designates as ever (slice F2-V).
+    pub(crate) fn fly_again(&mut self) -> bool {
+        if self.net_flight.is_none() || self.flight_ui.frozen() {
+            return false;
+        }
+        let Some(session) = &mut self.net else {
+            return false;
+        };
+        let Some(text) = session.client.revival_prompt() else {
+            return false;
+        };
+        if session.client.may_fly_again() {
+            session.client.revive();
+            self.flight_ui.message("Flying again...");
+        } else {
+            self.flight_ui.message(text);
+        }
+        true
     }
 
     /// End Mission: the hosting player ends the mission for everyone; any
@@ -1054,5 +1129,103 @@ impl TickPresenter<'_> {
             audio.controls(frame.previous, flight);
         }
         let _ = flight::DT;
+    }
+}
+
+/// Adds each of `spawned`, a revival's new plane, to `world`, a copy of the
+/// mission the game built, unless it holds that plane already.
+fn add_spawned(world: &mut crate::world::World, spawned: &[tore_session::wire::messages::Spawned]) {
+    for spawned in spawned {
+        let plane = crate::seats::PlaneId(spawned.plane);
+        if world.roster.plane(plane).is_some() {
+            continue;
+        }
+        let new = crate::world::revive::NewPlane {
+            plane,
+            slot: crate::seats::Slot {
+                wing: spawned.wing,
+                member: spawned.member,
+            },
+            aircraft: spawned.aircraft,
+            spawn: spawned.spawn.clone(),
+        };
+        if let Err(error) = world.add_plane(&new) {
+            log::warn!(
+                "Network: plane {} could not be added: {error}",
+                spawned.plane
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::add_spawned;
+    use crate::seats::{PlaneId, SeatId, SeatInput};
+    use crate::world::{MissionCommand, Seating, TickOutput, World, revive::RevivalWeapons};
+    use tore_formats::aircraft::AircraftId;
+    use tore_session::wire::messages::Spawned;
+    use tore_world::mission::{MissionSpec, Start};
+    use tore_world::test_support::resources::{THEATER, resources};
+
+    fn open_mission() -> World {
+        let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+        spec.wings[0].count = 2;
+        spec.wings[3].count = 2;
+        spec.start = Start::Airborne {
+            altitude_ft: 10_000,
+        };
+        World::new(&spec, &resources(), Seating::Open).unwrap()
+    }
+
+    fn step(world: &mut World, commands: &[MissionCommand]) {
+        let input = SeatInput {
+            seat: SeatId(0),
+            tick: world.tick(),
+            ..SeatInput::default()
+        };
+        let mut out = TickOutput::default();
+        world
+            .step_with(commands, &[input], &mut out, |_, _| Ok(()))
+            .unwrap();
+    }
+
+    /// A game's copy of the mission gets each revival's plane once, from the
+    /// Spawned messages the client kept (slice F2-V).
+    #[test]
+    fn a_games_copy_of_the_mission_adds_each_spawned_plane_once() {
+        let mut host = open_mission();
+        host.take_plane(SeatId(0), PlaneId(0)).unwrap();
+        let start = host
+            .side_mean(tore_sim::ai::launch::Side::Friendly)
+            .unwrap();
+        host.cockpits[0].flight.systems.pilot.dead = true;
+        step(&mut host, &[]);
+        let spawn = host
+            .revival_spawn(SeatId(0), start, 30_000., None, RevivalWeapons::Missiles)
+            .unwrap();
+        let new = host.revival_plane(SeatId(0), &spawn).unwrap();
+        step(
+            &mut host,
+            &[MissionCommand::Revive {
+                seat: SeatId(0),
+                spawn: Box::new(spawn.clone()),
+            }],
+        );
+        let spawned = Spawned {
+            plane: new.plane.0,
+            tick: 2,
+            wing: new.slot.wing,
+            member: new.slot.member,
+            aircraft: new.aircraft,
+            spawn,
+        };
+        let mut copy = open_mission();
+        add_spawned(&mut copy, std::slice::from_ref(&spawned));
+        add_spawned(&mut copy, &[spawned]);
+        assert_eq!(copy.roster.planes().len(), 5);
+        assert_eq!(copy.roster.plane(new.plane).unwrap().slot, new.slot);
+        // The game seats its player in it as it seats any plane.
+        copy.take_plane(SeatId(0), new.plane).unwrap();
     }
 }

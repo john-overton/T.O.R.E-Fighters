@@ -1545,6 +1545,9 @@ impl App {
                 });
                 Action::None
             }
+            // After a loss in a networked flight Enter flies again (slice
+            // F2-V, net/play.rs); otherwise it designates.
+            Command::TargetVisual if self.fly_again() => Action::None,
             Command::Target | Command::TargetPrevious | Command::TargetVisual => {
                 use tore_sim::combat::live::Command as Live;
                 self.queue(seats::SeatCommand::Combat(match command {
@@ -6810,6 +6813,7 @@ fn ai_probe_run(
         wing_status: Default::default(),
         datalink: Default::default(),
         score: None,
+        revival: Default::default(),
         radio,
         phrases,
         // The probe builds its own mission; only a restart reads the setup,
@@ -11426,6 +11430,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         wing_status: Default::default(),
         datalink: Default::default(),
         score: None,
+        revival: Default::default(),
         radio: Default::default(),
     };
     let presented_plane = world.picture_plane().0;
