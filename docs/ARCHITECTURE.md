@@ -4822,7 +4822,9 @@ joined a flying mission as described above; a fourth saw the server stop while
 the game sat in its lobby and showed "The server ended the connection: the
 server is stopping." on Direct Connection.
 
-**Smoke-test fixes (EF-F).** *Built (EF-F), 2026-10-01; each an agent decision
+##### Smoke-test fixes (EF-F)
+
+*Built (EF-F), 2026-10-01; each an agent decision
 unless it is the lead's brief.* The EF9 smoke test (a hosting game, two more
 games and a bot, in the lead's notes `.local/mp-notes/ef9/`) found these and
 they are fixed:
