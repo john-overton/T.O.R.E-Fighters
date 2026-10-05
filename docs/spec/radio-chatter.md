@@ -565,7 +565,10 @@ Everything below is **spec-derived** unless the fitted table says otherwise.
   instead of "Attack": "Two, attack bandit, bearing 270, 15 miles, angels 20",
   measured from the wingman ([guide](../DATALINK.md#what-the-player-hears)),
   and Attack on contact says "Attack bandits". These are TORE's own words,
-  not retail's.
+  not retail's. The bearing follows John's rule of 2026-10-05, real-world
+  brevity: always three digits one by one ("zero one six", "zero zero five",
+  "two seven zero"), the last falling in pitch; the waypoint call's rule above
+  (up to twelve one word) still applies to the range and the height.
 
 ### Several seats (multiplayer, agent decisions, 2026-09-29)
 

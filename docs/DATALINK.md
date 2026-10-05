@@ -168,13 +168,14 @@ dropped by radio silence, as the player's orders are not.
 | --- | --- | --- |
 | Who | The wingman's position, "Two"; the flight colour, "Red", when the whole flight is addressed | `^NUM02`; `^RED`, `^BLUE`, `^GREEN`, `^BLACK`, `^WHITE` (orange, purple and yellow flights have the words only) |
 | What | "attack bandit" | `^ATTACK`, `^BANDIT` |
-| Bearing | "bearing 270": from the wingman to the target, true, whole degrees from 1 to 360 (north is "three six zero") | `^BEARING` and the number |
+| Bearing | "bearing 270": from the wingman to the target, true, whole degrees from 1 to 360, always three digits said one by one: 016 is "zero one six", 005 is "zero zero five", north is "three six zero" (John, 2026-10-05: real-world brevity) | `^BEARING` and one `^NUMnn` for each digit, `^NUM00` for a zero |
 | Range | "15 miles": from the wingman, over the ground, whole nautical miles; left out under 1 mile | the miles rule of the contact report |
 | Height | "angels 20": the target's height in thousands of feet, to the nearest thousand | `^ANGELS` and the number |
 
-Example: "Two, attack bandit, bearing 270, 15 miles, angels 20." Numbers
-follow retail's rule for the waypoint call: up to twelve is one word, larger
-numbers are said digit by digit ("two seven zero"), and the last digit of the
+Example: "Two, attack bandit, bearing 270, 15 miles, angels 20." The bearing
+is John's: three digits one by one, with the original's zero recording. The
+range and the height follow retail's rule for the waypoint call: up to twelve
+is one word, larger numbers are said digit by digit, and the last digit of the
 bearing and the height falls in pitch
 ([radio chatter](spec/radio-chatter.md#waypoint-calls)). Ranges of 1 to 10,
 20 and 30 miles have their own recordings. The recordings for bearing, angels
