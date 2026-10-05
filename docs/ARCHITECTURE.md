@@ -3891,6 +3891,146 @@ the own aircraft follows the host's states and the prediction between them;
 events, radio and effects come from the host's events. The replay carries the
 diagnostics. The dedicated server logs the same figures for every player.
 
+#### Converting a capture into a replay
+
+*Design (slice E-replay, `mp/capture-replay`). Everything here that John did
+not say on 2026-09-30 is an agent decision.*
+
+**Where it runs.** The conversion lives in `tore_session::capture::convert`
+(it needs the client session, to decode what the capture holds, and it writes
+with `tore-replay`, so `tore-session` takes that existing workspace crate as a
+dependency). The game calls it in two places, both in `replay/net_convert.rs`:
+
+- **Automatically when a networked flight ends.** When the session is over
+  and its capture file is closed, the game starts a background thread that
+  converts the capture and logs the result (the replay's path, or why not).
+  Nothing waits for it: the render thread has gone back to the menu, and the
+  new replay shows in the Replays list the next time the screen opens. A game
+  closed before the thread ends leaves the capture, which converts the next
+  time you ask.
+- **By hand, `--convert-capture CAPTURE [OUT]`.** Headless, needs only the
+  import (the same data folder the game and `tore-bot` read). It converts old
+  captures and gives the tests and the battery a way to run the conversion.
+  `OUT` is a new file; without it the replay goes beside the capture, named
+  like any recording (`2026-10-05_1540_UKR_F18.tore-replay`, with the date and
+  time of the capture's name and a `-2` on a clash). A capture of several
+  flights (the player left and joined again) gives one replay a flight.
+
+```mermaid
+flowchart LR
+  capture["capture file"] --> observe["run the client session offline<br/>(capture::replay) with an observer"]
+  observe --> seen["what it was given:<br/>entity states by tick, exact own states,<br/>the own plane's predicted ticks, events,<br/>diagnostics lines"]
+  seen --> smooth["one frame per host tick:<br/>curves through every received state"]
+  smooth --> writer["tore-replay writer"]
+  writer --> replay["NAME.tore-replay"]
+```
+
+The conversion runs twice over the data: first the client is run again from
+the capture with an observer that keeps what the client was given, then one
+replay frame is built for every host tick and handed to the writer as it is
+made (a ten-minute flight with 30 aircraft is 72,000 frames, too many to hold).
+Running the client again is the only way to decode the snapshots, whose
+entries are coded against baselines, so the conversion needs the same import
+the capture was made with, as `capture::replay` does.
+
+**The smoothing.** The replay's tick range runs from the tick the player was
+seated to the newest host tick any snapshot reached; nothing is shown beyond
+what the host said.
+
+- *Other aircraft, missiles, debris and ejected pilots.* Each keeps every
+  state any snapshot carried for it (the quantized position and velocity, and
+  the rest of the record). The frame at tick *t* lies on a cubic Hermite curve
+  through the two states either side of *t*, using their positions and
+  velocities, as the live client draws between two snapshots, but with
+  hindsight: the live client had no state after its newest and so went on
+  along the last velocity for up to 250 ms, and drew an entity the host sends
+  twice a second a whole interval late. The replay never guesses ahead: it
+  draws such an entity exactly between its two updates, at the time they say.
+  Attitudes turn the short way (`Basis::blended`, as live), devices blend,
+  velocity blends, and the stepped fields (engine, damage, flags, wreck phase)
+  keep the earlier state's value until the later state's tick. At a state's own
+  tick the curve gives that state's position, so the path passes through every
+  received sample and is exact there.
+- *Gaps.* A lost snapshot just widens the span between two states. A span of
+  more than 2 seconds (240 ticks) is not bridged: the entity is left out of
+  the frames in between, since a curve that long says nothing. An entity
+  appears at its first state and ends at its last (or its removal, whichever
+  is earlier), so a slow entity shows up to half a second after the player
+  would first have seen it live.
+- *The slow entities (2 Hz).* The same curve over a 60-tick span. A far
+  aircraft's position between two of its updates is therefore a smooth curve
+  rather than a hold, and the curve is as good as its two velocities.
+- *The own aircraft.* The host sends an exact state of the plane once a second
+  and whenever the client's prediction differed from its hashes; between them
+  the client flew the plane itself. The replay takes the host's exact state at
+  each of its ticks, and between two exact states the prediction as the client
+  stepped it from the earlier one. When the prediction was wrong (the next exact
+  state is not where it ended up), the error is spread back over the span:
+  the predicted path plus a share of the error that grows linearly from none at
+  the earlier exact state to all of it at the later one. The result is smooth
+  and equals the host's state at every exact state's tick. A flight with no
+  corrections is simply the prediction. The predictor's per-tick states are what
+  the observer keeps; no second simulation runs. Flight data the host does not
+  send for other aircraft (fuel, G, their controls) is written as zeros and is
+  not shown for them; the own aircraft's come from the predicted flight.
+- *Events, radio and effects.* They come from the host's events and effects
+  only: HUD lines, radio, crew and tower lines (with their recordings'
+  names), the player's order voice, launches, chaff and flare releases (the
+  exact release geometry the host sent), explosions, hits and ground strikes
+  (spawns), craters and crash-site fires, ground objects destroyed, wingmen
+  ejecting and the host's gun bursts, each on the tick the host gave. Effects
+  and smoke the host never sends are not invented: converted replays have no
+  smoke trails, contrails or gun rounds yet (a known limit; the live client
+  regenerates smoke from the drawn picture and draws gun rounds from the
+  bursts, and the replay can do the same later). Cockpit readout, radar
+  contacts and the HUD are not part of a replay.
+
+**What carries the diagnostics.** The replay format does not change, and the
+version stays 1 (new data arrives as new events, header entries and result
+entries, which a reader that does not know them ignores, the format's own rule):
+
+- `net.stats`, an event once a second on the host tick the client was
+  drawing then, with the diagnostics log's `stats` fields as numbers (round
+  trip, loss, snapshot loss and spread, input margin, interpolation delay,
+  clock rate, corrections, mismatches, extrapolated entities, bytes each way,
+  predicted and render tick);
+- `net.event`, an event for every other diagnostics line (a join, seating,
+  refusal, mission, debrief, drop), with the line's kind in its `kind` field
+  and the rest as its text;
+- the header holds the connection (`net.server`, `net.callsign`,
+  `net.build`, `net.capture`, with the capture's own format and protocol
+  version) and the footer's result holds the flight's summary (`net.rtt_ms_mean`,
+  `net.rtt_ms_max`, `net.loss_percent_mean`, `net.snapshot_loss_percent_mean`,
+  `net.corrections`, `net.mismatches`, `net.seconds`), which the Replays
+  screen reads without decoding a frame.
+
+The conversion writes the lines the replayed client writes itself (the same
+`Diagnostics` writer), so they equal the log the game kept, apart from the
+header line.
+
+**A cut capture.** A capture that ends in the middle of a record (the game
+closed or crashed) converts up to its last whole record. The replay's footer
+result says `capture: cut short` with the byte it was cut at and the seconds
+converted, the command prints the same, and a capture with no seating in it
+(a join that never reached a flight) gives no replay and says why.
+
+**Repeatable.** Converting a capture twice gives the same bytes: nothing in
+the conversion reads the clock, the system, or an order that varies (maps are
+ordered, floats come from the same sums in the same order). The header's
+recording time comes from the capture's file name, and the platform string the
+live recorder writes is left out, since a replay of a flight is the same
+wherever it is converted.
+
+**How the Replays screen shows it.** A converted replay is an ordinary
+recording to the list: it sorts by the capture's start and has the theater,
+the player's aircraft and the length. Its details panel adds a **Network** row
+(the server as typed, the callsign and the mean round trip and loss) from the
+header and footer. The viewer plays it with its controls, views, sound for the
+host's radio lines, debug event list and Tacview export; its debug panels show
+the `net.*` events with the rest. The replays' auto-delete rule counts a
+converted replay with the other replays, and the capture it came from as before
+(captures are a list of their own).
+
 ### How stage D lands
 
 Slices, each on its own `mp/d-<topic>` branch and worktree, merged by the lead
