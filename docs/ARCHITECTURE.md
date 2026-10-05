@@ -7567,3 +7567,361 @@ is needed only if a slice must touch a simulation file, which it should not.
 they become new `World` fields, each gets a section id and a coder in its own
 `*_checkpoint.rs`; if they live inside `AiWings` or `Comms`, they join that
 section's coder, whose field list will not compile until they are named.
+
+## Compatibility
+
+Design for stage L of the [multiplayer plan](multiplayer-plan.md#stages),
+written on 2026-10-05 by a design agent for the lead. The wire is in
+[the protocol's compatibility section](formats/net-protocol.md#compatibility-stage-l);
+what a player sees is in the guide's
+[compatibility handshake](MULTIPLAYER.md#compatibility-handshake). The slice
+table below marks each slice that is built.
+
+John's decisions bind it: the T.O.R.E build and protocol must match
+(2026-09-28, with the match rule approved on 2026-09-30); a 1.0 import and a
+1.02F import play together once verified (approved 2026-09-30, verified by
+slice D3a); the lobby offers only aircraft and theaters that every human in
+the session has, and a player missing something is told why in plain words
+instead of a failed join (the feature spec, 2026-09-28). Every other choice
+here is an agent proposal.
+
+In short:
+
+- Stage D already plays a 1.0 player with a 1.02F player: everything the
+  simulation reads is byte for byte the same in both imports. What is missing
+  is knowing it in advance. Today a difference shows up only once a mission is
+  built, as a list of file names.
+- Each game works out its **content**: one entry per aircraft, theater and
+  weapon it can load, plus the shared data every mission reads, each with a
+  hash of exactly the files that item reads. It also says which Fighters
+  Anthology build it imported and which T.O.R.E made the import.
+- A joining game sends its content to the host once. The host compares every
+  player's content with its own and tells everyone the **gaps**: the items
+  some human cannot use, and who. Usually there are none.
+- The King's creator dims what is in a gap and says why; the host refuses a
+  mission or a loadout that uses it, with the same words. The lobby shows each
+  player's Fighters Anthology build, and a line says how it differs from the
+  host's: for 1.0 against 1.02F, "every aircraft, weapon and theater is the
+  same".
+- A player who joins a lobby whose mission it cannot fly stays, is marked
+  unable, and everyone reads why ("Hawk's game has no Su-27, which this
+  mission flies."). The exact check of stage D stays as the last word, now
+  explained by item.
+- One new protocol version, two new messages and one new field in the lobby
+  state. No new dependency. Single player is unchanged.
+
+### What the survey found
+
+Read at `d7244b0c` (the `multiplayer` tip):
+
+- **The build rule.** The handshake refuses another protocol version (code
+  1) or another T.O.R.E build (code 2: two tagged releases match by version,
+  anything else by commit; `tore_session::host::config`,
+  `builds_match_by_commit_or_by_a_release_version`). Direct Connection and the
+  Internet Lobby already show a game of another build dimmed and say "runs
+  another version (...) and cannot be joined" (`direct_screen/mod.rs`,
+  `internet_screen/mod.rs`); the master filters by build
+  (`tore_master::browse::same_build`). Two players who can join each other
+  therefore run the same code, the same aircraft list and the same theater
+  list. Stage L leaves this alone.
+- **The content check.** `tore_world::resources::ResourceReads` notes every
+  resource a build asks for; `Manifest` is the sorted names with an FNV-1a 64
+  hash each, `Manifest::digest` one number for it, `Manifest::differences` the
+  names that disagree. The host sends its manifest in the Mission message and
+  the loadouts' additions in Flight loadouts. The client builds the mission
+  from its own import (`Client::build_mission` in
+  `tore-session/src/client/mod.rs`) and on a difference sends Content refused
+  with the names and the line "Your game data differs from the host's in 3
+  file(s), such as SU27.PT. Import the same version of the game." The host
+  keeps that line as the player's `unable` text (`Host::content_refused`), and
+  the lobby state carries it to every player, so other players also read
+  "Your game data differs...".
+- **1.0 and 1.02F.** Slice D3a imported both builds and compared the packs:
+  4,093 resources each, every one of the 1,405 the simulation reads
+  byte-identical, 24 presentation files (menus, dialogs, HUD layouts and three
+  unread mission modules) different only in a four-byte link timestamp
+  ([result](formats/esa-installer.md#the-import-pack-under-both-builds)). Both
+  builds already pass each other's content check. But nothing records which
+  build a player imported: `tore_import::import` identifies the executable
+  (`tore_formats::executable::identify`) and writes the build only to the
+  `FA.EXE:` line of `import-report.txt`, not into the pack.
+- **What can really differ** between two players of the same T.O.R.E build:
+  1. *An import made by an older T.O.R.E.* The creator lists only the
+     aircraft whose `.PT` the import holds (`QuickMission::new` filters
+     `AircraftId::SELECTABLE`). The pack's markers (`tore_import::check_markers`)
+     force a re-import only for the kinds they name. The `import-variety`
+     branch, for example, grows `SELECTABLE` from 14 to 37 aircraft with no
+     new marker, so after it lands a King who has re-imported can pick an
+     aircraft that a friend's older import lacks. This is the likely case.
+  2. *A damaged or edited file* in one player's data folder.
+  3. *Mods and custom aircraft, later.* Nothing exists yet; the F/A-XX is a
+     built-in variant of `F22N.PT` (`AircraftId::Faxx`), not a mod.
+- **Every grid in every manifest.** `Terrain::build` (`tore-world/src/terrain.rs`)
+  asks the theater catalog for its label, and
+  `ResourceReads::theater_catalog` notes all sixteen `.T2` grids, because
+  `tore_formats::theater::map_catalog` parses them all. So every mission's
+  manifest holds every grid, and a bad grid of any theater fails every
+  mission. The label needs only the mission's own grid (a base theater's
+  label is its grid's name; a `~` variant's is its base's name and the
+  variant).
+- **What the King can choose.** The creator's aircraft (the selectable ones
+  the import has) and its sixteen base theaters (`source_theaters`); the
+  lobby's Load Ordnance page offers every `.JT` in the pack that parses
+  (`Ordnance::new` in `ordnance.rs`). `QuickMission::lobby_spec` refuses what a
+  host cannot take before anything is sent. The host refuses a mission its
+  build fails, with the build's words (`Host::change_mission`), and a loadout
+  `LoadoutSpec::check_in` refuses.
+- **The lobby.** Each player in the lobby state has an `unable` reason and,
+  since protocol 7, a platform. The screen shows a red cross and "Unable",
+  and the hint line gives the reason (`lobby_screen/facts.rs`, `hint`,
+  `player_rows`).
+- **The operator.** `tore-server --check` prints the mission's manifest size
+  and digest (`tore-server/src/check.rs`).
+- **Loading a weapon reads its `.JT` only** (`LoadoutSpec::apply` in
+  `tore-world/src/mission.rs`); loading an aircraft type reads its `.PT` and
+  its sensors (`AircraftType::load`), and its combat configuration reads its
+  default stores' weapons and equipment (`live::Configuration::from_source`).
+
+### Content items
+
+*Agent proposal.* A game's **content** is a list of items. An item is
+something a player chooses, or the data under every choice. Each item has a
+kind, a key, the names of the resources it reads and a digest: FNV-1a 64 over
+those names and their hashes, coded as `Manifest::digest` codes a manifest.
+Two games whose item digests are equal simulate that item from the same
+bytes.
+
+| Kind | Key | What its digest covers |
+| --- | --- | --- |
+| Aircraft | The creator's selection key (`F18.PT`, `faxx`) | What `AircraftType::load` and the combat configuration of the type read: the profile, its sensors, its default stores' weapons and equipment |
+| Theater | The theater code (`UKR`) | What `Terrain::build` reads for the theater under each of the six weather conditions: its layout, its own grid, the condition layers, the placed objects and their shapes |
+| Weapon | The weapon record (`AIM9X.JT`) | The record itself, the only file a loadout reads for it |
+| Shared | `shared` | What every mission reads beyond its own items: combat effects, the radio phrases, the creator and cloud tables, and the rest |
+
+- **Which items.** Every selectable aircraft and every base theater the code
+  knows (the same lists in every game of one build), every weapon record the
+  import holds that the Load Ordnance page would offer, and the shared item.
+  An item the import cannot load (a file missing or unreadable) is left out:
+  the game does not have it.
+- **How an item is read.** By running the item's own loader through a
+  `ResourceReads`, so the names are what the mission core really reads, not a
+  list kept by hand. The shared item is a **reference build**: a small mission
+  built from the first aircraft and theater the import has, less the names of
+  its own items. A probe may stop before the costly derived data (heights and
+  normals) if its names stay the same.
+- **The coverage rule** keeps the items honest, the way the checkpoint's
+  equivalence keeps the checkpoint honest: for every mission tested, its
+  manifest is inside the shared item and its own items (its aircraft, its
+  theater, its loadouts' weapons), and the shared item is inside its
+  manifest. A future read that belongs to no item, or a shared read that only
+  some missions make, fails the test, and its author moves it into the right
+  probe.
+- **The catalog fix.** The terrain asks for its own grid only when it labels
+  the theater (a `ResourceSource::theater_label(code)` beside
+  `theater_catalog`), so a theater is one item and a bad grid fails only its
+  own theater. Labels are unchanged; every manifest loses the fifteen other
+  grids.
+
+The game keeps the names of each item in memory; only the digests travel.
+
+```mermaid
+flowchart LR
+  import["Import<br/>(the pack and its<br/>source entry)"] --> content["Content<br/>items and digests,<br/>FA build, importer"]
+  content -->|"at join"| host["Host<br/>compares with<br/>its own content"]
+  host -->|"Content gaps"| lobby["Every player's lobby:<br/>builds, gaps, words"]
+  lobby --> creator["King's creator and<br/>Load Ordnance<br/>dim what is missing"]
+  host -->|"Refused, with the words"| creator
+  mission["Mission message<br/>(the exact manifest)"] --> check["Client's exact check,<br/>explained by item"]
+```
+
+### The source: build and importer
+
+*Agent proposal.* The import writes one more pack entry, `TORE_SOURCE_V1`, a
+short text: the Fighters Anthology build as `tore_formats::executable` names
+it (`1.0 (disc)` or `1.02F`) and the version and commit of the T.O.R.E that
+made the import. Nothing in single player reads it. A pack made before stage
+L has no such entry; the game then reads the build from the `FA.EXE:` line of
+`import-report.txt` beside the pack, and the importer is unknown. No re-import
+is asked for.
+
+`tore_import::source::Source::read(data_dir, &resources)` gives the build
+(1.0, 1.02F or unknown) and the importer (a version and commit, or unknown).
+
+### Joining
+
+```mermaid
+sequenceDiagram
+  participant C as Joining game
+  participant H as Host
+  participant O as Every player
+  C->>H: Connect, as today
+  H->>C: Accepted, then the lobby and the Mission
+  C->>H: Content: FA build, importer, item digests
+  H->>H: Compare with its own content, find the gaps
+  H->>O: Lobby state (each player's FA build) and Content gaps, when they change
+  C->>C: Build the mission, the exact check
+  alt it cannot play the mission
+    C->>H: Content refused, as today
+    H->>O: The player is unable, in words about the item
+  end
+```
+
+- **Content** is the joining game's first reliable message. It is computed
+  before the join from the game's import, and only once for each import: the
+  game starts it on a worker when a multiplayer screen first opens, so single
+  player never pays for it; `tore-server` and `tore-bot` compute it at start.
+  A host, a client or a bot given none computes it itself.
+- **The host's own content is the reference**: the dedicated server's, or the
+  hosting game's. A player whose item digest differs from the host's cannot
+  use that item, exactly as one that lacks it. An item a player has and the
+  host lacks is in a gap too, which matters when a player is King on a
+  dedicated server.
+- **The gaps** are every item that at least one connected human, or the host,
+  lacks or has with another digest, each with who. Every connection counts,
+  in the lobby, flying, observing or unable, since each one builds the
+  mission. A player whose Content has not arrived yet does not count until it
+  does (it is the first message, so this lasts a round trip). The host sends
+  the gaps to every player when it has a new player's content and whenever
+  they change (a join, a leave); a lobby with none sends an empty list once.
+- **The lobby state** carries each player's Fighters Anthology build beside
+  its platform.
+
+### What the lobby offers
+
+*Agent proposals.*
+
+- **The King's creator** (lobby mode only) shows an aircraft or a theater in
+  a gap dimmed. Choosing one leaves the choice as it was and puts the reason
+  in the creator's notice: "Not everyone can fly the Su-27: Hawk's game has
+  no Su-27." Accept checks the whole mission the same way before anything is
+  sent. Single player's creator is unchanged.
+- **The lobby's Load Ordnance page** refuses a weapon in a gap with the same
+  kind of line ("Not everyone has the AGM-65G: Hawk's game has no AGM-65G.").
+- **The host refuses** a Change mission whose aircraft or theater is in a gap,
+  and a Loadout whose weapon is, with the same words as a Refused, whatever
+  the King's game showed. A dedicated server's own mission file is the
+  operator's choice and is not refused: a player who cannot fly it is unable.
+- **A player who cannot fly the mission in the lobby** is marked unable as
+  today, and the reason the host keeps is now in the third person ("Hawk's
+  game has no Su-27, which this mission flies."). The player's own screen
+  keeps its second-person line ("Your game has no Su-27, which this mission
+  flies. Re-import Fighters Anthology (Pref, Re-import) to add it."). The
+  King can change the mission, now offered only what everyone has.
+- **The shared item in a gap** restricts nothing (no choice avoids it): the
+  player is unable for every mission, and the words say so.
+
+### The words
+
+*Agent proposals*; the code keeps them in one place in each crate (the host's
+in `tore-session/src/host/content.rs`, the player's own in
+`tore-session/src/client/content.rs`). An item is named by its label: the
+aircraft's (`AircraftId::label`), the theater's (its grid's name), the
+weapon's (its record's name), each from the host's import, or its key when
+the host lacks it. A list of players names up to three callsigns, then "and 2
+more".
+
+| When | Who reads it | Line |
+| --- | --- | --- |
+| The King picks an item in a gap | The King, in the creator's notice; the host's Refused says the same | "Not everyone can fly the Su-27: Hawk's game has no Su-27." / "...: Hawk's Su-27 differs from the host's." / "...: the server has no Su-27." / a theater: "Not everyone has Vietnam: ..." |
+| A loadout uses a weapon in a gap | The player, on the page; the host's Refused | "Not everyone has the AGM-65G: Hawk's game has no AGM-65G." |
+| A player cannot fly the mission | Everyone, in the hint for that player and in Messages | "Hawk's game has no Su-27, which this mission flies." / "Hawk's Su-27 differs from the host's." / "Hawk's game data differs from the host's in 3 files, such as CRATER.SH." |
+| The same, the player's own | The player, in its hint and Messages | "Your game has no Su-27, which this mission flies. Re-import Fighters Anthology (Pref, Re-import) to add it." When its importer is older than this build: "Your import was made by an earlier T.O.R.E (0.1.3). Re-import Fighters Anthology (Pref, Re-import) to add it." A differing item: "Your Su-27's data differs from the host's." The shared item: "Your game's shared flight data differs from the host's (3 files, such as CRATER.SH). Re-import Fighters Anthology with this version of T.O.R.E." |
+| A player joins whose build or items differ from the host's | Everyone, once, in Messages | "Hawk imported Fighters Anthology 1.0; the host, 1.02F. Every aircraft, weapon and theater is the same." / "Hawk's game differs from the host's: no Su-27, a different AIM-9X." / "Hawk's import does not say which Fighters Anthology build it came from." |
+| The same, the joining player | The joiner | "You imported Fighters Anthology 1.0; the host, 1.02F. Every aircraft, weapon and theater is the same." |
+| A player is selected in Players | Everyone, in the hint | "Hawk: Fighters Anthology 1.0, on Linux." (or the unable reason) |
+
+Nothing is said when a player's build and items equal the host's. The exact
+check of stage D stays: the client attributes each differing name to the
+items whose names hold it, and to the shared data otherwise, and words its
+Content refused with the lines above; the names travel as before.
+
+### A dedicated server
+
+- `tore-server --check` adds the source ("Fighters Anthology 1.02F, imported
+  by T.O.R.E 0.1.4 (48d62dac)"), the content's counts and one line per item
+  (kind, key, digest), so an operator can compare imports.
+- The log gains a `content` line per player that joins (callsign, build,
+  importer, and the items it lacks or has differently) and `gaps` when the
+  gaps change ([log lines](DEDICATED-SERVER.md)).
+- A server's mission file is never refused for a gap; a player who cannot
+  fly it is unable, with the words above, and the log says so as today.
+
+### Mods, later
+
+Nothing here builds a mod system. The design leaves room for one:
+
+- Items are named by kind and key, so a mod's added aircraft is a new item
+  that only players with the mod hold, and the gaps keep it out of the King's
+  creator until everyone has it.
+- A mod that changes a file changes the digest of every item that reads it;
+  those items are "different" and not offered. The words say "differs".
+- A mod that needs code is another T.O.R.E build, which the build rule keeps
+  apart, as today.
+
+### Interplay with other stages
+
+- **Host migration (stage K).** The gaps are relative to the host's import. A
+  standby that takes over has played the same mission, so the mission's items
+  match; its other items may not. *Agent proposal:* each client sends its
+  Content again to the new host at its reconnect, as at a join, and the new
+  host sends new gaps; nothing goes into the checkpoint.
+- **The Internet Lobby and discovery.** Unchanged: another T.O.R.E build is
+  dimmed and named; a game whose mission a player lacks content for is
+  joined and explained in its lobby, never refused at the door.
+- **The data link (stage G)** and **phase 2 (stage F)** add no content kinds.
+
+### Cost
+
+*Agent proposals, to be measured by L1:* computing the content with real data
+takes under 1 second in a release build on the development machine (Ryzen 9
+7900X), off the main thread. Items are independent, so the probes may run on
+the shared workers (`tore-workers`). If the measurement is over, L1 keeps the
+content on disk beside the pack (`content-<pack file>.txt`, keyed by the pack's
+file name and this build's commit) and says so here. The Content message is
+about 3 KB for 14 aircraft, 16 theaters and about 135 weapons, a dozen
+reliable fragments once per join; the gaps are a few bytes in the usual case.
+
+### Testing and the full suite
+
+Minimal, targeted and tracked, as John asked on 2026-10-05:
+
+- **Rust, in the normal suite:** the items and their digests over synthetic
+  imports (an item present, missing, different; the shared item); the
+  coverage rule over the synthetic missions; the source entry and the report
+  fallback; the theater label from the mission's own grid; the wire's round
+  trips, bounds and golden; the host's gaps, refusals and words, and the
+  client's words, on the network simulator with synthetic imports.
+- **Rust, ignored for the full run** (they need real data, `TORE_DATA_DIR`):
+  the coverage rule with real data over every aircraft once, every theater
+  once and every weather condition once; the content's cost; and the two
+  builds compared: a 1.0 import and a 1.02F import (`TORE_DATA_DIR_10` names
+  the second) have the same digest for every item.
+- **Battery, `net` lane:** `net-content-builds` (a server on the 1.02F import
+  and a bot on a 1.0 import the scenario makes; the bot reads that every item
+  is the same and flies) and `net-content-missing` (a bot whose import lacks
+  `SU27.PT` joins the guide's mission and is unable with the words, another
+  flies, the server's log names the gap).
+- **Headless screen tests** in `tore-app` for the creator's dimming and
+  notice, Load Ordnance's refusal, the hint and the Messages lines.
+
+### Single player
+
+No change. The import writes one more entry that nothing in single player
+reads. The terrain's label comes from the mission's own grid, which gives the
+same label; the slice that changes it (L1) runs the full single-player
+baseline once and expects SAME. The creator and Load Ordnance change only in
+lobby mode.
+
+### How stage L lands
+
+Four slices on `mp/l-<topic>` branches. L1 and L2 run at the same time; L3
+needs both; L4 needs L3, and the lobby screen's phase 2 panels (slice F2-L)
+merged first, since both edit `lobby_screen/`. The lead hands out the
+protocol version and the two message kinds at L2's merge.
+
+| Slice | Model | After | Owns | Work | Acceptance | Single player |
+| --- | --- | --- | --- | --- | --- | --- |
+| L1 Content and source | Sonnet | none | `crates/tore-world/src/content.rs` and `content_tests.rs` (new), `resources.rs`, `terrain.rs` (the label only), `lib.rs` (the `mod` line); `crates/tore-import/src/source.rs` (new), `import.rs`, `lib.rs`; rules in `tools/battery_selection.py` for the new files; this section | [Content items](#content-items): `tore_world::content::Content::of(&resources)` with each item's kind, key, names and digest, probed through `ResourceReads`; the shared item's reference build; `ResourceSource::theater_label`, used by `Terrain::build`; `TORE_SOURCE_V1` written by the import; `tore_import::source::Source::read` with the report fallback; the cost measured, and the disk copy if it is over 1 second | Synthetic: an item present, missing and different gives the right digests; the shared item; the coverage rule over every synthetic mission; a manifest holds only its own grid and the label is unchanged; the source entry round trips, an old pack reads its build from the report, and a pack with neither reads as unknown. Ignored with real data: the coverage rule over every aircraft, theater and condition once; the cost; the 1.0 and 1.02F imports equal item for item | SAME (quick guard per change; the full baseline once) |
+| L2 Wire | Opus | none | `crates/tore-session/src/wire/messages.rs`, `wire/samples.rs`, `wire/mod.rs` (the protocol version), `wire-golden.txt`, the wire's tests; the protocol's [compatibility section](formats/net-protocol.md#compatibility-stage-l) | The Content and Content gaps messages and the lobby state's build field, as the protocol section codes them, with the protocol version raised and the golden refreshed | Round trips of both messages at their limits; every bound refused by the writer and the reader; the decoders survive random and mutated bodies (the shared fuzz test); `wire_golden` under the new version | SAME (no app or simulation change; `--no-battery`) |
+| L3 Sessions, server and bot | Opus | L1, L2 | `crates/tore-session/src/host/content.rs` and `client/content.rs` (new) with their tests, `host/mod.rs`, `host/config.rs`, `client/mod.rs`, `src/bin/tore-bot.rs`; `crates/tore-server/src/prepare.rs`, `check.rs`, `wiring.rs`; `tools/battery_scenarios/net.py`, `tools/battery_selection.py` (rules for its new files and scenarios), `docs/testing/lane-net.md`, `docs/DEDICATED-SERVER.md`; this section | [Joining](#joining), [what the lobby offers](#what-the-lobby-offers) on the host side and [the words](#the-words): the client sends Content first; the host keeps each player's, finds the gaps, sends them, fills the build field, refuses a mission or loadout in a gap, words the unable reason in the third person; the client words its own refusal by item; `ClientConfig::content` and `HostConfig::content` (computed when not given); `tore-server --check`'s source and items and its `content` and `gaps` log lines; `tore-bot --drop-resource NAME` (a test aid that removes a resource from the bot's loaded import) and `--content-report`, and the bot printing the gaps and build lines | Simulator, synthetic imports: a player lacking an aircraft joins, every player gets the gap, the King's mission with it and a loadout with a lacking weapon are refused with the words, the player is unable for a mission that uses it with the third-person reason, and the gap closes when it leaves; a player whose item differs is treated alike; a server's file mission is not refused; two players whose builds differ and items match get the "same" line and fly. Battery: `net-content-builds`, `net-content-missing` | SAME |
+| L4 The game | Sonnet | L3, F2-L | `crates/tore-app/src/quick_mission.rs` (lobby mode only), `ordnance.rs` (lobby mode only), `lobby_screen/facts.rs`, `mod.rs`, `tests.rs`, `crates/tore-app/src/net/session.rs` and `net/hosting.rs` (passing the content); the guide's [compatibility handshake](MULTIPLAYER.md#compatibility-handshake) | The game computes its content on a worker when a multiplayer screen first opens and passes it to the client and the host; the creator dims items in a gap and says why, Accept checks; Load Ordnance refuses a weapon in a gap; the hint shows a selected player's build and platform; Messages gets the build and difference lines | Headless: the creator in lobby mode dims an aircraft and a theater in a gap, choosing one keeps the old choice and sets the notice, Accept refuses a mission with one, and single player's creator is unchanged (both covered); Load Ordnance refuses a weapon in a gap in lobby mode only; the hint and Messages lines for a build difference, a gap and an unable player; the lobby preview pictures. No windowed run is required; the lead may add one to the full run | SAME (creator and Load Ordnance change in lobby mode only) |

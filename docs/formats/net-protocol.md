@@ -40,6 +40,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Quantization](#quantization)
 - [What the game's sections settled](#what-the-games-sections-settled)
 - [Phase 2: the King's settings, revival, scores and observers](#phase-2-the-kings-settings-revival-scores-and-observers) (designed)
+- [Compatibility (stage L)](#compatibility-stage-l) (designed)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -1425,6 +1426,90 @@ value's coding. The names are the configuration file's and the logs'.
 
 A number the host does not know, or a value outside its list, is refused with
 the setting's name and its values.
+
+## Compatibility (stage L)
+
+*Designed 2026-10-05 for stage L; agent proposals awaiting John's review.*
+The bytes that let every player know, before a mission is built, which
+aircraft, theaters and weapons every human can use, and which Fighters
+Anthology build each imported. Why and how the game uses them is in the
+[architecture](../ARCHITECTURE.md#compatibility); the content items and their
+digests are defined there. Everything here comes in one new protocol version,
+the next after the current one, which the lead assigns at the merge of slice
+L2, with two new message kinds, numbered then too (37 and 38 if no other stage
+has taken them). Codings follow [what the game's sections
+settled](#what-the-games-sections-settled): varints are `tore-codec`'s,
+strings a length byte and UTF-8, "a presence bit" a 1 then the value or a 0
+alone.
+
+### Content
+
+Player to host, reliable. The player's content, sent once as its first
+message after Accepted.
+
+| Field | Coding |
+| --- | --- |
+| Build | 2 bits: 0 unknown, 1 Fighters Anthology 1.0 (the disc), 2 1.02F; 3 is invalid |
+| Importer | A presence bit, then the version and the commit of the T.O.R.E that made the import (two strings, each at most 64 bytes) |
+| Items | A count (varint, 1 to 1,024), then each item: its kind (2 bits: 0 aircraft, 1 theater, 2 weapon, 3 shared), its key (a string of 0 to 32 printable ASCII bytes: the selection key, the theater code or the weapon record's name; empty for the shared item and only for it) and its digest (64 bits) |
+
+- Items are sorted by kind and then key, with no key twice in one kind, so
+  two equal contents code to equal bytes; a reader refuses any other order.
+  At most one shared item.
+- An item the player's import cannot load is left out: the player does not
+  have it.
+- A second Content on the same connection replaces the first (a re-import
+  restarts the game, so it does not happen today; the rule keeps the host
+  simple). It counts against the 20 requests a second the host answers.
+- About 3 KB for 14 aircraft, 16 theaters and about 135 weapons: a dozen
+  fragments, once per join.
+
+### Content gaps
+
+Host to every player, reliable. The items not every human can use. Sent to
+every player when a player's Content arrives and whenever the gaps change (a
+player joins or leaves); each message replaces the last.
+
+| Field | Coding |
+| --- | --- |
+| Host build | 2 bits, as Content's: the build the host's own import came from |
+| Host importer | A presence bit, then the version and commit (two strings, each at most 64 bytes) |
+| Gaps | A count (varint, 0 to 1,024), then each gap: its kind (2 bits) and key (a string), as Content codes them; its label (a string of at most 64 bytes: the host's name for the item, or empty when the host lacks it); a bit, 1 when the host lacks the item; and the players who cannot use it (a count, 0 to 64, then each: the lobby id, 8 bits, and a bit: 0 lacks it, 1 has it with another digest) |
+
+- A gap the host lacks may name no player. Any other gap names at least one.
+- Gaps are in Content's order. A player's game words every line from these
+  and the lobby state ([the words](../ARCHITECTURE.md#the-words)).
+- Usually empty: a few bytes.
+
+### The lobby state
+
+**Lobby** (kind 19): each player gains its Fighters Anthology build, 2 bits
+after the platform, coded as Content's build. A player whose Content has not
+arrived yet reads 0 (unknown).
+
+### What does not change
+
+- **Content refused** keeps its bytes. Its reason is now worded by item, and
+  the host words the player's `unable` text in the third person before the
+  lobby state carries it ([the words](../ARCHITECTURE.md#the-words)).
+- **Refused** carries the host's refusal of a Change mission or a Loadout
+  that uses an item in a gap, in the same words.
+- The handshake, the discovery packets and the master's protocol are
+  unchanged: another T.O.R.E build is still refused with code 2, and a
+  missing aircraft is never a refusal at the door.
+
+### Limits of stage L
+
+| Limit | Value |
+| --- | --- |
+| Items in a Content | 1,024 |
+| A key | 32 bytes of printable ASCII |
+| A label | 64 bytes |
+| Gaps in a Content gaps | 1,024 |
+| Players named in one gap | 64 |
+| Importer version and commit | 64 bytes each |
+
+Slice L2 moves these rows into [Limits](#limits) when it builds them.
 
 ## Limits
 

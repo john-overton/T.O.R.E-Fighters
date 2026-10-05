@@ -808,6 +808,49 @@ from mods and custom aircraft such as the [F/A-XX](spec/fa-xx.md). The lobby
 only offers aircraft and theaters that every human in the session has. A player
 missing something sees why in plain language instead of a failed join.
 
+*Built (stage D):* a game of another T.O.R.E build is refused at the door and
+shown dimmed, "runs another version", in Direct Connection and the Internet
+Lobby. The content is checked once a mission loads: each game builds the
+mission from its own import and compares the files it read with the host's. A
+1.0 import and a 1.02F import pass it, since every file the simulation reads
+is the same in both (slice D3a, [the comparison](formats/esa-installer.md#the-import-pack-under-both-builds)).
+A game that fails it stays in the lobby, marked unable, with a list of file
+names.
+
+*Designed (stage L, 2026-10-05; agent proposals awaiting John):*
+
+- **Knowing before the mission.** Each game works out its **content**: every
+  aircraft, theater and weapon it can load and the shared data every mission
+  reads, each with a fingerprint of exactly the files it reads. It sends this
+  to the host when it joins, with the Fighters Anthology build it imported
+  and the T.O.R.E version that made the import. The host compares every
+  player's content with its own and tells everyone what not everyone can use
+  ([how](ARCHITECTURE.md#compatibility), [the wire](formats/net-protocol.md#compatibility-stage-l)).
+- **The King's choices.** In the lobby, the Quick Mission creator dims an
+  aircraft or a theater that some player cannot use and says why ("Not
+  everyone can fly the Su-27: Hawk's game has no Su-27."); Load Ordnance does
+  the same for a weapon. The host refuses such a mission or loadout with the
+  same words.
+- **A missing aircraft is explained, not a failed join.** A player joins
+  whatever its import holds. If it cannot fly the lobby's mission, it is
+  marked unable and every player reads why: "Hawk's game has no Su-27, which
+  this mission flies." The player's own screen says what to do: "Re-import
+  Fighters Anthology (Pref, Re-import) to add it."
+- **Builds side by side.** Selecting a player in the lobby shows its build and
+  platform ("Hawk: Fighters Anthology 1.0, on Linux."). When a player's build
+  or content differs from the host's, Messages says how, once: "Hawk imported
+  Fighters Anthology 1.0; the host, 1.02F. Every aircraft, weapon and theater
+  is the same." Nothing is said when they are equal.
+- **Where differences come from.** Between 1.0 and 1.02F, none that a player
+  can fly or fight with. In practice, an import made by an older T.O.R.E,
+  which lacks aircraft added since; a damaged file; and, later, mods. A mod's
+  new aircraft is offered only once everyone has it.
+- **A dedicated server** keeps the mission its file names; a player who
+  cannot fly it is unable, with the words above, and the server's log and
+  `tore-server --check` list the content
+  ([server guide](DEDICATED-SERVER.md)).
+- Single player does not change.
+
 ## Replay and telemetry
 
 **Replay** stays separate from netcode and records on each local machine. A
@@ -1034,6 +1077,24 @@ proposal the design is built on:
 - **The Internet Lobby's title.** *Agent proposal:* INTERNET LOBBY lettered
   the way DIRECT NETWORK CONNECTION is (Liberation Sans with its shadow,
   shipped), with a player's own `InternetLobby.png` taking its place.
+
+Raised by the stage L design (2026-10-05), each with the agent proposal the
+design is built on ([compatibility](ARCHITECTURE.md#compatibility)):
+
+- **Dimmed or hidden.** Should the King's creator hide an aircraft or theater
+  that not every player can use, or show it dimmed? *Agent proposal:* dimmed,
+  and choosing it says who lacks it, so the King knows why it is not offered.
+- **Who counts.** Whose content limits the King's choices? *Agent proposal:*
+  every connected player, including one marked unable or watching, since each
+  builds the mission; a King who wants the full list can kick.
+- **Showing the build.** *Agent proposal:* each player's Fighters Anthology
+  build appears in the lobby's hint when the player is selected, and once in
+  Messages when it differs from the host's; no new mark in the Players list.
+  An import made before stage L reads its build from its import report, and
+  no one is asked to re-import for it.
+- **Before joining.** Should the Internet Lobby warn that a listed game's
+  mission uses something the player lacks? *Agent proposal:* not in v1; the
+  player joins, stays in the lobby, and reads why there.
 
 Raised while planning (2026-09-28):
 
