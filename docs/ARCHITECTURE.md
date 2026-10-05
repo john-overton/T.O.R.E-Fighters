@@ -5437,9 +5437,12 @@ player's debrief is unchanged: the pages appear only with a Results message.
 - **The order call.** A human lead's Alt-key order reaches human wingmen today
   only as a note that one was flown by a human (`ai_wings/orders.rs`). It
   becomes a radio call to each human member the order addressed: the lead's
-  own order stems and a text line ("Lead: Engage my target"), delivered on that
+  own order stems and a text line ("Lead: Break left"), delivered on that
   seat's channel with the usual hold and radio silence. The AI members act as
-  before.
+  before. Stage G's design (slice G3a, on the `multiplayer` branch) already
+  turns the engage orders into assignment calls that every addressed wingman,
+  human or AI, hears with its own bearing and range; F2-R voices every other
+  order the same way and leaves those to G.
 - **Replies and requests** are a new seat command, `SeatCommand::WingReply`,
   with four kinds from the guide: **Engaging** (Alt+Shift+E, `^ENGAGE`),
   **Winchester** (Alt+Shift+W, text only: no retail recording says it),
@@ -5550,6 +5553,16 @@ U's IFF answer, Show Target Info, and the reply keys' "You lead this flight."
 line. The slices that touch the mission core (F2-1, F2-S, F2-V, F2-R) run the
 single-player baseline and must compare SAME; the others run the quick guard.
 
+##### State for exact checkpoints
+
+Stage H must carry what phase 2 adds to the mission core: the scoring switch
+(`World::set_scoring`), every `Pilot::Lost` plane and its cockpit, the
+spawned planes (their roster entries, AI actors, combat rows) and which planes
+are retired. The facts themselves are drained every tick and are not state.
+What the host session keeps (the settings, the crown and the house, slot
+locks, lives and delays, tallies, observers' delay rings, away reservations)
+is the session's, which stage K moves with the host.
+
 ##### Phase 2 slices
 
 Every slice follows the lead's rules for Milestone 2's remaining stages
@@ -5567,7 +5580,7 @@ every message below; no later slice changes the wire without the lead.
 | F2-0 Wire and seams | Opus | | `tore-session`: `wire/messages.rs`, `wire/inputs.rs`, `wire/mod.rs` (the version), the wire tests and `wire-golden.txt`, new `settings.rs`, new empty `host/{king,revive,score,observe,away,results}.rs` and the calls to them in `host/mod.rs`, `client/mod.rs` (events and senders); `tore-world`: `seats.rs` (`WingReply`, `Pilot::Lost`), `world/commands.rs` (the new commands' variants), new `world/{revive,replies}.rs` and `score.rs` holding only the shared types | Every message and field of the [phase 2 wire](formats/net-protocol.md#phase-2-the-kings-settings-revival-scores-and-observers) with its coding; the settings registry with ranges, defaults, names and checks, and the host's settings store (defaults, no King's changes yet); the types the slices share (`Reply`, `Spawn`, `RevivalWeapons`, score facts); the hooks each slice fills (the take check, the tick's revive, score and away calls, message dispatch), each doing nothing yet; requests not built yet are refused "Not available yet." | Round trip, fuzz and golden tests for every new message and field; the golden refreshed under the next version; the host refuses each new request politely; every existing session test passes; quick check `--no-battery` (the new world variants are never sent) |
 | F2-C Friend-or-foe cues and the new keys | Sonnet | | `tore-app`: `main.rs` (the X's side), new `target_info.rs`, `flight_ui.rs` (U, Ctrl+T and the Pref row), `input_catalog.rs` (every phase 2 key: IFF, Show Target Info, score board, the four replies, each answering "network games only" until its slice lands), `docs/CONTROLS.md` (generated), `docs/tore-keyboard-map.html` | The X on the presented plane's side; IFF's answers; Show Target Info's labels and colours; the catalog rows | Unit tests: the X for a viewer on each side; IFF for friendly, other and none; label text, colours and callsigns from a fixture picture and roster; the controls list test; a headless render of the labels; the menus lane's "Show target info" row no longer reports not implemented; quick guard |
 | F2-1 The King's lobby | Opus | F2-0 | `host/king.rs`, `host/config.rs`, `host/lobby.rs`, `host/discover.rs`, new `host/king_tests.rs`, `client/lobby_tests.rs` additions; `tore-world` `mission.rs` (`friendly_fire`, the loadout rule) and `world/build.rs`; `tore-server` `config.rs` and `wiring.rs`; `docs/DEDICATED-SERVER.md` | The settings store's King's changes with their phase rules; mode and slots; slot locks; join in progress; lock sides; max players, password and listing; the loadout rule; friendly fire into the spec; house and crown, passing it, the King's departure; a server's King; the server's configuration keys for every setting | Simulator tests: each setting reaches every lobby state; a non-King and a wrong phase are refused; PvP opens both sides; closed and reserved slots; join in progress off; lock sides; the loadout rule; friendly fire off in a flown mission; the crown passed, used and passed on at a departure; the house's leaving ends the game and the King's does not; a server's first-player King; configuration parsing. A `net` lane scenario: a `tore-server` with `king first-player` and a King bot that changes settings and starts. Single-player baseline SAME |
-| F2-R Orders and replies | Sonnet | F2-0, F2-C | `tore-world` `world/replies.rs`, `radio_calls.rs`, `ai_wings/orders.rs`, the comms delivery; the app's handling of the four reply actions; `tore-bot --reply` | The order call to human wingmen; the reply calls and their refusals | World tests on the crowd fixture: a human lead's order reaches its human wingman as a call and a line, and nobody else; each reply reaches the flight's humans only, respects radio silence, and a lead's reply is refused; the radio journal; a `net` scenario with two bots in one wing exchanging an order and a reply. Single-player baseline SAME |
+| F2-R Orders and replies | Sonnet | F2-0, F2-C, stage G's G3a and G8 | `tore-world` `world/replies.rs`, `radio_calls.rs`, `ai_wings/orders.rs`, the comms delivery; the app's handling of the four reply actions; `tore-bot --reply` | The order call to human wingmen; the reply calls and their refusals | World tests on the crowd fixture: a human lead's order reaches its human wingman as a call and a line, and nobody else; each reply reaches the flight's humans only, respects radio silence, and a lead's reply is refused; the radio journal; a `net` scenario with two bots in one wing exchanging an order and a reply. Single-player baseline SAME |
 | F2-S Scoring | Opus | F2-0 | `tore-world` `score.rs` and its call in `world.rs`; `tore-sim` combat's `Strike` amount; `host/score.rs`, new `host/score_tests.rs`; the client's scores; `tore-app` new `net/scoreboard.rs` and its call in `net/play.rs` | Score facts; tallies; limits and the kill limit's end; Scores; the score board on K | World tests: a human killed with the pilot aboard counts two, after ejecting one, ground kills none, damage fractions, losses, AI shooters; host tests for each tally, fight type and owner, the kill limit's end with its winner and a draw, the time limit, the pace; a render test of the board. Single-player baseline SAME (facts off) |
 | F2-V Death and revival | Opus | F2-0 | `tore-world` `world/revive.rs`, `world/handoff.rs`, `ai_wings.rs` (the spawned aircraft), new `world/revive_tests.rs`; `host/revive.rs`, new `host/revive_tests.rs`; the client's revival state and its own copy's spawn; `tore-app` `net/play.rs` (the prompt and Enter); `tore-bot --revive` | Abandon and Revive; the revival point and loadout; retiring; lives, delay and the three rules; Join after a loss; replaces the host's orphans | World tests: a revived plane's place, heading, speed, stores under each weapons rule and its handoff invariants; Abandon keeps a wreck falling; 100 revivals in one mission stay within 64 planes; host tests for each rule, lives, the delay, the lobby's Join, lock sides; a client copy that adds the spawned plane; a `net` scenario where a bot ejects, revives and flies on. Single-player baseline SAME |
 | F2-O1 The observer stream | Opus | F2-0 | `host/observe.rs`, new `host/observe_tests.rs`; the observer flight in `wire/connection.rs` and `wire/from_world.rs`; new `client/observe.rs`; `tore-bot --observe` | Observe and Observing, snapshots with no own plane, relevance by the camera, the delay ring | Simulator tests: an observer gets entities near its subject at the full rate and far ones twice a second; with a delay nothing newer than now less the delay is ever sent, events included; the stream stops at seating and at the end; bandwidth and the ring's memory measured and recorded; a `net` scenario with an observing bot. Quick guard |
@@ -5585,6 +5598,7 @@ flowchart TD
   W --> O1["F2-O1 Observer stream"]
   W --> R["F2-R Orders and replies"]
   C["F2-C Friend-or-foe cues<br/>and the new keys"] --> R
+  G["Stage G: G3a and G8<br/>(designed apart)"] --> R
   K --> L["F2-L Lobby screen"]
   S --> D["F2-D Multiplayer debrief"]
   K --> A["F2-A Idle aircraft"]
@@ -5607,6 +5621,14 @@ F2-V's fields), the client's `mod.rs` (event handling), `net/play.rs` (F2-S's
 board, F2-V's prompt, later F2-A) and `tore-bot`'s options; each keeps those
 diffs short and the later merge rebases. Then F2-L, F2-D and F2-A run together,
 and F2-O2 last, once stage E's replays have merged.
+
+**Beside stage G.** Stage G's slices edit some of the same files: G3a and G8
+`world/commands.rs` (F2-0 adds one match arm there), G8 `comms.rs` and
+`radio_calls.rs` (F2-R's), G3c and G8 the controls list and
+`input_catalog.rs` (F2-C's), G6 `main.rs` and `weapon_hud.rs` (F2-C's X) and
+G7 the wire (F2-0's). F2-R follows G3a and G8, since its order call extends
+G's; for the others, whichever lands second rebases on the first, and the two
+wire slices take the protocol versions the lead hands out in merge order.
 
 ##### Questions for John
 
