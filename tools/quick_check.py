@@ -136,7 +136,7 @@ class Runner:
         log = self.log_dir / f"{re.sub(r'[^a-z0-9]+', '-', name.lower())}.log"
         try:
             done = subprocess.run(
-                cmd, cwd=ROOT, env={**os.environ, **(env or {})}, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                cmd, cwd=ROOT, env={**os.environ, "TORE_NO_PORT_MAPPING": "1", **(env or {})}, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, errors="replace",
             )
             output, code = done.stdout, done.returncode

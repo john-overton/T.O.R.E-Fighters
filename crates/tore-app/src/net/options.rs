@@ -351,6 +351,18 @@ impl SessionArgs {
 /// The port `--find-games` searches: `--port`, else the default. Any other
 /// session option is refused, since `--find-games` joins and hosts nothing.
 pub fn find_games_port(args: &mut SessionArgs) -> Result<u16, String> {
+    only_port(args, "--find-games", "lists games and exits")
+}
+
+/// The port `--map-port` forwards (slice J4b): `--port`, else the default.
+/// Any other session option is refused.
+pub fn map_port_port(args: &mut SessionArgs) -> Result<u16, String> {
+    only_port(args, "--map-port", "forwards the port and exits")
+}
+
+/// The port a command that joins and hosts nothing uses: only `--port` goes
+/// with `flag`.
+fn only_port(args: &mut SessionArgs, flag: &str, what: &str) -> Result<u16, String> {
     let other = args.connect.is_some()
         || args.host.is_some()
         || args.callsign.is_some()
@@ -361,7 +373,7 @@ pub fn find_games_port(args: &mut SessionArgs) -> Result<u16, String> {
         || args.list
         || args.master.is_some();
     if other {
-        return Err("--find-games lists games and exits; only --port goes with it".into());
+        return Err(format!("{flag} {what}; only --port goes with it"));
     }
     match args.port.take() {
         Some(text) => text
@@ -682,6 +694,24 @@ mod tests {
                     .contains("only --port")
             );
         }
+    }
+
+    #[test]
+    fn map_port_takes_a_port_and_nothing_else() {
+        let mut args = SessionArgs::default();
+        assert_eq!(map_port_port(&mut args), Ok(26_900));
+        args.port = Some("27001".into());
+        assert_eq!(map_port_port(&mut args), Ok(27_001));
+        args.port = Some("0".into());
+        assert!(map_port_port(&mut args).is_err());
+        let mut args = SessionArgs {
+            host: Some("m.txt".into()),
+            ..SessionArgs::default()
+        };
+        assert_eq!(
+            map_port_port(&mut args).unwrap_err(),
+            "--map-port forwards the port and exits; only --port goes with it"
+        );
     }
 
     #[test]
