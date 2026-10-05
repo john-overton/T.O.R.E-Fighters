@@ -3,8 +3,8 @@
 //! It keeps the list of listed games, answers the Internet Lobby's browse
 //! and details requests, answers the mapping test's probes on its two ports
 //! and counts anonymous telemetry. It introduces a joining player to a host
-//! (slice J2, [`introduce`]). The relay (slice J3) has its dispatch here
-//! already and drops its packets, counted, until that slice builds it. Standard library only; it never
+//! (slice J2, [`introduce`]) and relays the traffic of a pair that cannot
+//! reach each other (slice J3, [`relay`]). Standard library only; it never
 //! reads Fighters Anthology's data.
 //!
 //! - [`master::Master`] is the server as a state machine that never reads a
@@ -38,3 +38,5 @@ pub use master::{Counters, Master, MasterPort, Outgoing, Settings};
 mod introduce_tests;
 #[cfg(test)]
 mod master_tests;
+#[cfg(test)]
+mod relay_tests;

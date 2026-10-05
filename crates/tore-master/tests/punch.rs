@@ -7,8 +7,9 @@
 //! Every link has a 100 ms round trip. A row that punches connects within
 //! 1.5 seconds of the player starting its join, along the row's path. A row
 //! whose expected path is the relay finds no direct path within the 3
-//! seconds the game races before it asks for the relay (slice J3 then
-//! carries it).
+//! seconds the game races before it asks for the relay, or is told by the
+//! master's hint to ask at once, and then connects through the relay (slice
+//! J3): the same handshake, to the channel's relayed address.
 
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
@@ -17,7 +18,7 @@ use tore_master::{Master, MasterPort, Settings};
 use tore_net::master::join::{JoinConfig, JoinEvent, Joiner};
 use tore_net::master::{
     Build, Candidate, CandidateKind, Hint, HostRendezvous, ListingState, ListingSummary, Path,
-    RACE_BEFORE_RELAY, Rendezvous,
+    RACE_BEFORE_RELAY, Rendezvous, is_relayed,
 };
 use tore_net::packet::DiscoverPhase;
 use tore_net::sim::{
@@ -122,6 +123,8 @@ struct Outcome {
     /// The path the host's transport was told.
     host_path: Option<Path>,
     punches: u64,
+    /// Connected through the relay, after the race found nothing.
+    relayed: bool,
 }
 
 struct Row {
@@ -203,6 +206,8 @@ impl Row {
         let mut connected = None;
         let mut hint = Hint::Race;
         let mut listing_id = None;
+        let mut relay_asked = false;
+        let mut relayed = false;
 
         let deadline = net.now() + Duration::from_secs(20);
         while net.now() < deadline {
@@ -297,6 +302,16 @@ impl Row {
                         );
                     }
                     JoinEvent::MappingTested(_) => {}
+                    JoinEvent::Relayed { address } => {
+                        // The race found nothing: the same join, to the
+                        // channel's relayed address.
+                        relayed = true;
+                        let config = ClientConfig {
+                            entropy: Entropy::Seeded(7),
+                            ..ClientConfig::new(VERSION, "Viper")
+                        };
+                        client = Some(Client::connect(config, address, now).unwrap());
+                    }
                     other => panic!("the join through the master failed: {other:?}"),
                 }
             }
@@ -307,9 +322,14 @@ impl Row {
                     connected = Some(now);
                 }
             }
-            j.transmit(&mut player_socket).unwrap();
             let race_over = raced.is_some_and(|at| now >= at + RACE_BEFORE_RELAY);
-            if (connected.is_some() && host_path.is_some()) || race_over {
+            let race_lost = client.as_ref().is_some_and(|c| !c.chosen());
+            if !relay_asked && race_lost && (race_over || hint == Hint::RelayNow) {
+                relay_asked = j.ask_relay(now);
+                assert!(relay_asked);
+            }
+            j.transmit(&mut player_socket).unwrap();
+            if connected.is_some() && host_path.is_some() {
                 break;
             }
         }
@@ -327,12 +347,14 @@ impl Row {
             seen,
             host_path,
             punches: rendezvous.counters.punches,
+            relayed,
         }
     }
 }
 
 /// A row that punches: connected along `path` within 1.5 seconds.
 fn punched(outcome: &Outcome, path: Path) {
+    assert!(!outcome.relayed, "{outcome:?}");
     assert_eq!(outcome.path, Some(path), "{outcome:?}");
     assert_eq!(outcome.host_path, Some(path), "{outcome:?}");
     assert!(
@@ -342,9 +364,20 @@ fn punched(outcome: &Outcome, path: Path) {
     assert!(outcome.punches > 0, "{outcome:?}");
 }
 
-/// A row whose path is the relay: no direct path in the race's 3 seconds.
+/// A row whose path is the relay: no direct path in the race's 3 seconds
+/// (or at once by the hint), then connected through the relay, both ends
+/// knowing it, within a second more.
 fn relay(outcome: &Outcome) {
-    assert_eq!(outcome.path, None, "{outcome:?}");
+    eprintln!("{outcome:?}");
+    assert!(outcome.relayed, "{outcome:?}");
+    assert_eq!(outcome.path, Some(Path::Relay), "{outcome:?}");
+    assert_eq!(outcome.host_path, Some(Path::Relay), "{outcome:?}");
+    assert!(is_relayed(outcome.chosen.unwrap()), "{outcome:?}");
+    let limit = match outcome.hint {
+        Hint::Race => RACE_BEFORE_RELAY + Duration::from_secs(1),
+        Hint::RelayNow => Duration::from_millis(1500),
+    };
+    assert!(outcome.took.unwrap() <= limit, "{outcome:?}");
 }
 
 #[test]

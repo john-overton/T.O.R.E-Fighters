@@ -8,7 +8,7 @@
 //! first and waiting for its debrief).
 //!
 //! ```text
-//! tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME [--path auto|direct])
+//! tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME [--path auto|direct|relay])
 //!          [--data-dir DIR] [--count N] [--callsign NAME]
 //!          [--slot PLANE] [--seconds S] [--password TEXT]
 //!          [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...
@@ -22,10 +22,13 @@
 //! game named NAME, and each bot runs the mapping test, asks for an
 //! introduction from a dual-stack socket of its own and races every address
 //! the master gives for the host while the host punches back. It prints
-//! each step and the path the join took. `--path auto` (the default) says
-//! when 3 seconds pass without a direct path or the master says the relay is
-//! needed; the relay itself, and `--path relay`, come with slice J3.
-//! `--path direct` races only. Tests point `--master` at a loopback
+//! each step and the path the join took. `--path auto` (the default) asks
+//! the master for the relay (slice J3) when 3 seconds pass without a direct
+//! path, or at once when the master's hint says only the relay reaches the
+//! game, and joins through the relay if the race has still found nothing
+//! when the channel opens. `--path direct` races only. `--path relay` asks
+//! for the relay at once and never races, for tests on one machine, where
+//! every direct path works. Tests point `--master` at a loopback
 //! `tore-master`, never the public one.
 //!
 //! `--say` makes every bot send the text to the receiver (`all`,
@@ -81,7 +84,7 @@ use tore_session::wire::messages::{Goodbye, LobbyState, Observing, SettingsChang
 use tore_session::{BuildId, Client, ClientConfig, ClientEvent, ClientPhase};
 
 const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME \
-[--path auto|direct]) [--data-dir DIR] [--count N] \
+[--path auto|direct|relay]) [--data-dir DIR] [--count N] \
 [--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] \
 [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none] \
 [--king NAME=VALUE[,NAME=VALUE]...] [--revive SECONDS]";
@@ -92,10 +95,12 @@ const FIND_LISTING: Duration = Duration::from_secs(10);
 /// How a join through the master may go (`--path`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum JoinPath {
-    /// Race the host's addresses; say when the relay would be asked for.
+    /// Race the host's addresses; the relay when the race finds nothing.
     Auto,
     /// Race only.
     Direct,
+    /// The relay at once, never racing.
+    Relay,
 }
 
 /// Where the bots join: an address, or a listing through the master.
@@ -248,14 +253,10 @@ fn parse(args: &[String]) -> Result<Options, String> {
                 path = match value()?.as_str() {
                     "auto" => JoinPath::Auto,
                     "direct" => JoinPath::Direct,
-                    "relay" => {
-                        return Err(
-                            "--path relay is not available yet: the Internet Lobby's relay \
-                             comes with a later build"
-                                .into(),
-                        );
+                    "relay" => JoinPath::Relay,
+                    other => {
+                        return Err(format!("--path is auto, direct or relay, not {other:?}"));
                     }
-                    other => return Err(format!("--path is auto or direct, not {other:?}")),
                 }
             }
             "--data-dir" => options.data_dir = Some(PathBuf::from(value()?)),
@@ -475,9 +476,10 @@ struct Through {
     socket: ServerSocket,
     joiner: Joiner,
     path: JoinPath,
-    /// When the race started; the relay line once said.
+    /// When the race started.
     raced: Option<Duration>,
-    relay_said: bool,
+    /// The relay was asked for.
+    relay_asked: bool,
 }
 
 /// One bot and how it is doing.
@@ -549,7 +551,8 @@ impl Running {
     }
 
     /// A join through the master: the joiner's datagrams and timers, its
-    /// steps printed, and the client started on the introduction.
+    /// steps printed, the client started on the introduction, and the
+    /// relay asked for and joined (slice J3).
     fn join_through(
         &mut self,
         now: Duration,
@@ -568,7 +571,10 @@ impl Running {
             while let Ok(Some(_)) = routed.recv_datagram(&mut buf) {}
         }
         t.joiner.update(now);
+        let path = t.path;
         let mut race = None;
+        let mut relay_now = None;
+        let mut relayed = None;
         while let Some(event) = t.joiner.poll_event() {
             match event {
                 JoinEvent::MappingTested(mapping) => {
@@ -577,19 +583,21 @@ impl Running {
                 JoinEvent::Introduced(introduced) => {
                     let count = introduced.targets.len();
                     let plural = if count == 1 { "" } else { "es" };
-                    println!("{name}: introduced; trying {count} address{plural}...");
-                    if introduced.hint == Hint::RelayNow && t.path == JoinPath::Auto {
-                        println!(
-                            "{name}: the Internet Lobby says only the relay reaches this game; \
-                             the relay comes with a later build, so the race goes on"
-                        );
-                        t.relay_said = true;
+                    if path == JoinPath::Relay {
+                        println!("{name}: introduced; not racing its {count} address{plural}");
+                        relay_now = Some("--path relay");
+                    } else {
+                        println!("{name}: introduced; trying {count} address{plural}...");
+                        if introduced.hint == Hint::RelayNow && path == JoinPath::Auto {
+                            relay_now =
+                                Some("the Internet Lobby says only the relay reaches this game");
+                        }
+                        t.raced = Some(now);
+                        race = Some(Race {
+                            targets: introduced.targets,
+                            introduction: introduced.introduction_id,
+                        });
                     }
-                    t.raced = Some(now);
-                    race = Some(Race {
-                        targets: introduced.targets,
-                        introduction: introduced.introduction_id,
-                    });
                 }
                 JoinEvent::Refused { text, .. } | JoinEvent::Unsupported(text) => {
                     println!("{name}: {text}");
@@ -600,26 +608,72 @@ impl Running {
                     println!("{name}: {text}");
                     self.failed = Some(text);
                 }
+                JoinEvent::Relayed { address } => {
+                    println!("{name}: the relay is open; joining through it");
+                    relayed = Some(address);
+                }
+                JoinEvent::RelayRefused { text, .. } => {
+                    println!("{name}: {text}");
+                    if path == JoinPath::Relay {
+                        self.failed = Some(text);
+                    }
+                }
+                JoinEvent::RelaySilent => {
+                    let text = "The Internet Lobby did not answer the relay request.".to_owned();
+                    println!("{name}: {text}");
+                    if path == JoinPath::Relay {
+                        self.failed = Some(text);
+                    }
+                }
+                JoinEvent::RelayClosed(reason) => {
+                    println!("{name}: {}", tore_net::master::relay::close_text(reason));
+                }
             }
         }
-        let _ = t.joiner.transmit(&mut t.socket);
-        let relay_due = t.path == JoinPath::Auto
-            && !t.relay_said
-            && t.raced.is_some_and(|at| now >= at + RACE_BEFORE_RELAY);
+        let race_over = t.raced.is_some_and(|at| now >= at + RACE_BEFORE_RELAY);
         if let Some(race) = race {
             self.config.server = race.targets[0].address;
             self.config.race = Some(race);
             self.start(options, resources, lines, now)?;
         }
-        if relay_due && self.bot.as_ref().is_some_and(|b| !b.client.chosen()) {
-            println!(
-                "{name}: no direct path; the relay comes with a later build, so the race goes on"
-            );
-            if let Some(t) = self.through.as_mut() {
-                t.relay_said = true;
+        let racing = self.bot.as_ref().is_some_and(|b| !b.client.chosen());
+        if let Some(why) = relay_now {
+            self.ask_relay(now, why);
+        } else if path == JoinPath::Auto && race_over && racing {
+            self.ask_relay(now, "no direct path in 3 seconds");
+        }
+        if let Some(address) = relayed {
+            let racing = self.bot.as_ref().is_none_or(|b| !b.client.chosen());
+            if racing {
+                // The race found nothing: the same join, to the channel's
+                // relayed address.
+                self.config.server = address;
+                self.config.race = None;
+                self.start(options, resources, lines, now)?;
+            } else if let Some(t) = self.through.as_mut() {
+                println!("{name}: the race won after all; closing the relay");
+                t.joiner.close_relay();
             }
         }
+        if let Some(t) = self.through.as_mut() {
+            let _ = t.joiner.transmit(&mut t.socket);
+        }
         Ok(())
+    }
+
+    /// Asks the master for the relay, once, with a line saying why.
+    fn ask_relay(&mut self, now: Duration, why: &str) {
+        let name = self.name.clone();
+        let Some(t) = self.through.as_mut() else {
+            return;
+        };
+        if t.relay_asked || t.path == JoinPath::Direct {
+            return;
+        }
+        t.relay_asked = true;
+        if t.joiner.ask_relay(now) {
+            println!("{name}: {why}; asking for the relay...");
+        }
     }
 }
 
@@ -776,7 +830,7 @@ fn main() -> ExitCode {
                     joiner,
                     path: *path,
                     raced: None,
-                    relay_said: false,
+                    relay_asked: false,
                 });
             }
             _ => {
@@ -962,6 +1016,12 @@ fn main() -> ExitCode {
                     }
                     ClientEvent::Closed(reason) => {
                         println!("{}: {}", r.name, bot.client.close_text(&reason));
+                        // The game connection through the relay ended: the
+                        // channel goes too.
+                        if let Some(t) = r.through.as_mut() {
+                            t.joiner.close_relay();
+                            let _ = t.joiner.transmit(&mut t.socket);
+                        }
                         r.host_left = bot.client.goodbye() == Some(&Goodbye::HostLeft);
                         r.closed = Some(reason);
                     }
@@ -1123,11 +1183,18 @@ mod tests {
                 ..
             }
         ));
+        let o = parse(&args("--master 127.0.0.1 --listing x --path relay")).unwrap();
+        assert!(matches!(
+            o.target,
+            JoinBy::Master {
+                path: JoinPath::Relay,
+                ..
+            }
+        ));
         for bad in [
             "--master 127.0.0.1",
             "--listing Friday",
             "--connect 127.0.0.1 --master 127.0.0.1 --listing x",
-            "--master 127.0.0.1 --listing x --path relay",
             "--master 127.0.0.1 --listing x --path sideways",
             "--master host:0 --listing x",
             "",

@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use super::*;
-use crate::master::{Challenge, Introduction, ProbeAnswer, Unsupported};
+use crate::master::{Challenge, Introduction, ProbeAnswer, Unsupported, relayed_address};
 use crate::sim::SimNetwork;
 
 const MASTER: &str = "198.51.100.1:26901";
@@ -396,10 +396,212 @@ fn the_master_never_reaches_the_transport_and_relayed_claims_are_dropped() {
     assert_eq!(got, [(b"game datagram".to_vec(), host_address)]);
     assert_eq!(joiner.counters.received, 1);
     assert_eq!(joiner.counters.relayed_claims, 1);
-    // A send to a relayed address goes nowhere until the relay.
+    // A send to a relayed address goes nowhere without an open channel.
     joiner
         .over(&mut socket, now)
         .send_datagram(a("[100::1:0:7]:0"), b"x")
         .unwrap();
     assert_eq!(joiner.counters.relay_sends_dropped, 1);
+}
+
+/// A joiner the master has introduced (introduction 0xABCD), its events and
+/// datagrams taken; the Introduce's nonce.
+fn introduced(start: Duration) -> (Joiner, u64) {
+    let mut joiner = joiner(start);
+    sent(&mut joiner);
+    joiner.update(start + MAPPING_WAIT);
+    let (_, asked) = introduce(&sent(&mut joiner)).unwrap();
+    give(
+        &mut joiner,
+        start + ms(1100),
+        MASTER,
+        introduction(asked.nonce, IntroductionResult::Introduced),
+    );
+    while joiner.poll_event().is_some() {}
+    (joiner, asked.nonce)
+}
+
+fn offer(nonce: u64, result: RelayResult, text: &str) -> MasterPacket {
+    MasterPacket::RelayOffer(crate::master::RelayOffer {
+        nonce,
+        introduction_id: 0xABCD,
+        result,
+        channel: 7,
+        key: 99,
+        text: text.into(),
+    })
+}
+
+#[test]
+fn the_relay_is_asked_for_twice_at_most_then_the_master_is_silent() {
+    let start = Duration::from_secs(10);
+    // No introduction, no relay.
+    let mut fresh = joiner(start);
+    assert!(!fresh.ask_relay(start));
+    let (mut joiner, nonce) = introduced(start);
+    let asked = start + ms(4100);
+    assert!(joiner.ask_relay(asked));
+    assert!(!joiner.ask_relay(asked), "asked once");
+    assert_eq!(joiner.relay_state(), RelayState::Asking);
+    let mut requests = Vec::new();
+    let mut now = asked;
+    while now < asked + Duration::from_secs(6) {
+        joiner.update(now);
+        for (to, packet, len) in sent(&mut joiner) {
+            if let MasterPacket::RelayRequest(request) = packet {
+                assert_eq!((to, len), (a(MASTER), 23));
+                assert_eq!((request.nonce, request.introduction_id), (nonce, 0xABCD));
+                requests.push(now - asked);
+            }
+        }
+        if let Some(event) = joiner.poll_event() {
+            assert_eq!(event, JoinEvent::RelaySilent);
+            assert_eq!(now - asked, RELAY_WAIT);
+        }
+        now += ms(50);
+    }
+    assert_eq!(requests, [Duration::ZERO, RELAY_REQUEST_RETRY]);
+    assert_eq!(joiner.relay_state(), RelayState::Ended);
+}
+
+#[test]
+fn an_open_offer_gives_the_relayed_address_and_frames_the_transport() {
+    let start = Duration::from_secs(10);
+    let (mut joiner, nonce) = introduced(start);
+    let now = start + ms(4100);
+    joiner.ask_relay(now);
+    sent(&mut joiner);
+    // Another nonce is not ours.
+    give(
+        &mut joiner,
+        now,
+        MASTER,
+        offer(nonce ^ 1, RelayResult::Open, ""),
+    );
+    assert_eq!(joiner.counters.unexpected, 1);
+    assert!(joiner.keepalive_socket(()).is_none());
+    give(
+        &mut joiner,
+        now,
+        MASTER,
+        offer(nonce, RelayResult::Open, ""),
+    );
+    let relayed = relayed_address(7);
+    assert_eq!(
+        joiner.poll_event(),
+        Some(JoinEvent::Relayed { address: relayed })
+    );
+    assert_eq!(joiner.relayed(), Some(relayed));
+    assert_eq!(joiner.relay_state(), RelayState::Open { channel: 7 });
+    assert_eq!(joiner.keepalive_socket(()).unwrap().address(), relayed);
+
+    // The transport's datagrams to the relayed address leave as frames, and
+    // the channel's frames from the master arrive from it.
+    let net = SimNetwork::new(1);
+    let mut socket = net.bind(a(OWN)).unwrap();
+    let mut master = net.bind(a(MASTER)).unwrap();
+    joiner
+        .over(&mut socket, now)
+        .send_datagram(relayed, b"connect")
+        .unwrap();
+    net.advance(ms(1));
+    let mut buf = [0u8; 2048];
+    let (len, from) = master.recv_datagram(&mut buf).unwrap().unwrap();
+    assert_eq!(from, a(OWN));
+    let frame = crate::master::RelayFrame::open(&buf[..len]).unwrap();
+    assert_eq!(
+        (frame.channel, frame.key, frame.datagram),
+        (7, 99, &b"connect"[..])
+    );
+    let back = crate::master::RelayFrame {
+        channel: 7,
+        key: 99,
+        datagram: b"challenge",
+    }
+    .encode()
+    .unwrap();
+    master.send_datagram(a(OWN), &back).unwrap();
+    net.advance(ms(1));
+    let mut small = [0u8; crate::MAX_DATAGRAM + 1];
+    let got = joiner
+        .over(&mut socket, net.now())
+        .recv_datagram(&mut small)
+        .unwrap();
+    assert_eq!(got, Some((9, relayed)));
+    assert_eq!(&small[..9], b"challenge");
+    assert_eq!(joiner.relay_counters().frames_in, 1);
+
+    // The game connection ended: three closes to the master.
+    joiner.close_relay();
+    let closes: Vec<_> = sent(&mut joiner)
+        .into_iter()
+        .filter(|(to, p, _)| {
+            *to == a(MASTER)
+                && matches!(p, MasterPacket::RelayClose(c) if c.channel == 7 && c.key == 99)
+        })
+        .collect();
+    assert_eq!(closes.len(), 3);
+    assert_eq!(joiner.relayed(), None);
+}
+
+#[test]
+fn a_refusal_and_a_close_are_said_in_the_players_words() {
+    let start = Duration::from_secs(10);
+    let (mut joiner, nonce) = introduced(start);
+    let now = start + ms(4100);
+    joiner.ask_relay(now);
+    give(
+        &mut joiner,
+        now,
+        MASTER,
+        offer(nonce, RelayResult::Full, ""),
+    );
+    assert_eq!(
+        joiner.poll_event(),
+        Some(JoinEvent::RelayRefused {
+            result: RelayResult::Full,
+            text: "The Internet Lobby's relay is busy. Try again in a few minutes.".into()
+        })
+    );
+    // The master's own text wins.
+    let (mut joiner, nonce) = introduced(start);
+    joiner.ask_relay(now);
+    give(
+        &mut joiner,
+        now,
+        MASTER,
+        offer(nonce, RelayResult::Off, "Not tonight."),
+    );
+    assert_eq!(
+        joiner.poll_event(),
+        Some(JoinEvent::RelayRefused {
+            result: RelayResult::Off,
+            text: "Not tonight.".into()
+        })
+    );
+    // An open channel the master closes.
+    let (mut joiner, nonce) = introduced(start);
+    joiner.ask_relay(now);
+    give(
+        &mut joiner,
+        now,
+        MASTER,
+        offer(nonce, RelayResult::Open, ""),
+    );
+    joiner.poll_event();
+    let close = |key| {
+        MasterPacket::RelayClose(crate::master::RelayClose {
+            channel: 7,
+            key,
+            reason: CloseReason::Idle,
+        })
+    };
+    give(&mut joiner, now, MASTER, close(1));
+    assert_eq!(joiner.relayed(), Some(relayed_address(7)), "another key");
+    give(&mut joiner, now, MASTER, close(99));
+    assert_eq!(
+        joiner.poll_event(),
+        Some(JoinEvent::RelayClosed(CloseReason::Idle))
+    );
+    assert_eq!(joiner.relay_state(), RelayState::Ended);
 }

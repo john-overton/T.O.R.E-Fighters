@@ -69,7 +69,9 @@ impl Running {
             port => Some(ServerSocket::bind(config.listen, port)?),
         };
         let today = log::day_of(log::unix_seconds());
+        let month = log::month_of(today);
         let mut master = Master::new(config.settings.clone(), entropy, today);
+        master.relays_mut().roll_month(month);
         let files = if files {
             match StateFiles::open(&config.state_dir) {
                 Ok(files) => {
@@ -77,6 +79,15 @@ impl Running {
                         master.telemetry_mut().resume(&text);
                         notes.push("telemetry: carrying on with today's counts".into());
                     }
+                    let relayed = files.read_relay_month(month).unwrap_or(0);
+                    master.relays_mut().resume_month(month, relayed);
+                    notes.push(format!(
+                        "relay this month ({:04}-{:02}): {} of {} GB relayed",
+                        month.0,
+                        month.1,
+                        crate::stats::bytes(relayed),
+                        config.settings.relay.month_gb
+                    ));
                     Some(files)
                 }
                 Err(error) => {
@@ -221,6 +232,20 @@ impl Running {
         if let Err(error) = files.append_stats(unix, &status) {
             problems.push(format!("statistics file: {error}"));
         }
+        // The relay's month figure: a finished month's last figure, then
+        // the current one.
+        let relays = self.master.relays_mut();
+        if let Some((finished, bytes)) = relays.roll_month(log::month_of(today))
+            && let Err(error) = files.write_relay_month(finished, bytes)
+        {
+            problems.push(format!("relay file: {error}"));
+        }
+        let relays = self.master.relays();
+        if let Some(month) = relays.month()
+            && let Err(error) = files.write_relay_month(month, relays.month_bytes())
+        {
+            problems.push(format!("relay file: {error}"));
+        }
         let telemetry = self.master.telemetry_mut();
         let counted = telemetry.day();
         if let Some(finished) = telemetry.roll(today) {
@@ -243,12 +268,24 @@ impl Running {
         Ok(())
     }
 
-    /// Writes the telemetry counts, as the master stops.
+    /// Closes the relay's channels (both ends told) and writes the
+    /// telemetry counts and the relay's month figure, as the master stops.
     pub fn finish(&mut self, out: &mut dyn Write) -> io::Result<()> {
+        self.master.stop();
+        let _ = self.master.transmit(&mut self.main, self.probe.as_mut());
+        while let Some(line) = self.master.poll_log() {
+            writeln!(out, "{line}")?;
+        }
         if let Some(files) = &self.files {
             let telemetry = self.master.telemetry();
             if let Err(error) = files.write_telemetry(telemetry.day(), &telemetry.to_tsv()) {
                 writeln!(out, "telemetry file: {error}")?;
+            }
+            let relays = self.master.relays();
+            if let Some(month) = relays.month()
+                && let Err(error) = files.write_relay_month(month, relays.month_bytes())
+            {
+                writeln!(out, "relay file: {error}")?;
             }
         }
         Ok(())

@@ -330,7 +330,8 @@ Join by address always works without it.
 
 *Design of 2026-10-05 for stages I and J; agent proposals awaiting John's
 review. Built (J2, 2026-10-05, protocol 9):* the Punch, joining from several
-addresses at once and the path byte; the relayed addresses are slice J3's.
+addresses at once and the path byte. *Built (J3, 2026-10-05):* the relayed
+addresses, with no change to the game's protocol.
 What the game's own transport needs so that players can find and reach each
 other across the internet. What is said to the master itself
 is its own protocol, [master-protocol.md](master-protocol.md); how the pieces
@@ -421,6 +422,15 @@ socket that claims any address in it is dropped and counted.
 - A host knows a relayed player by the address. Stage K never calculates a
   relayed host (John, 2026-09-28: relayed peers are never the calculated
   host).
+
+*As built (J3):* both ends' routers (`tore_net::master::routed`) do the
+wrapping, and `relayed_address` and `channel_of` turn a channel into its
+address and back. Only `[100::1:HHHH:LLLL]:0` stands for a channel; the
+rest of the prefix is never handed out. A joining player connects to the
+relayed address with an ordinary `Client::connect`, so the path reads
+"relay" at both ends. The keepalive thread's wrapper is
+`tore_net::master::RelayFraming`, over a clone of the joining socket
+(`ServerSocket::try_clone`).
 
 ### The path in the Challenge answer
 

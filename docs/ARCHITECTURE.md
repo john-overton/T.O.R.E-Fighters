@@ -6233,8 +6233,8 @@ seconds). With every table full it holds a few tens of megabytes.
   millisecond sleep stays.
 - `tore-master` depends on `tore-net` only; `tore-codec` comes through it.
   `log.rs` holds the state folder's files and their UTC dates; `stats.rs`
-  the status line and the minute table; `relay.rs` counts and drops its
-  packets until J3 (`introduce.rs` was built by J2).
+  the status line and the minute table. `introduce.rs` was built by J2 and
+  `relay.rs` by J3 ([the relay](#the-relay)).
 
 ### One socket, two protocols
 
@@ -6491,13 +6491,23 @@ player's own candidates, it runs the mapping test, asks for the
 introduction with its cookie, and hands over the host's addresses as the
 race's `Target`s with their paths ([as built](formats/master-protocol.md#introductions-as-built)).
 Its socket is read through `Joiner::over`, a router of its own beside the
-host's `Routed` (agent decision; J3 may join the two). The session's
+host's `Routed` (agent decision; J3 has the two share their code). The session's
 `ClientConfig::race` starts `tore_session::Client` with `connect_any`, and a
 capture records the race so it replays. `tore-bot --master --listing`
 finds the listing by name, joins each bot from a dual-stack socket of its
-own and prints each step and the path; `--path auto` says when the race has
-found no direct path in 3 seconds or the master's hint says the relay,
-which arrives with J3, as does `--path relay` (refused until then).
+own and prints each step and the path.
+
+*Built (J3, 2026-10-05): the relay.* `Joiner::ask_relay` sends the Relay
+request and the offer opens the channel (`JoinEvent::Relayed` with the
+channel's relayed address) or refuses it with its text; the game then
+joins that address with an ordinary `Client::connect`, the path reading
+"relay". `tore-bot --path auto` asks for the relay when the race has found
+nothing in 3 seconds, or at once on the master's hint, and joins through it
+if the race has still found nothing when the channel opens (otherwise it
+closes the channel); `--path relay` asks at once and never races. The
+punching table's four relay rows connect through the relay
+(`tests/punch.rs`): 0.9 seconds from the player's first Probe with the
+hint, 3.9 seconds after the race's 3.
 
 ### Hole punching
 
@@ -6556,12 +6566,87 @@ and the player gets the channel and its key. From then on:
 - When the game connection ends, each end closes the channel; the master
   closes channels idle for 30 seconds, over their rate, or when the month's
   allowance is spent ([channel rules](formats/master-protocol.md#relay)).
+- John, 2026-10-05: the relay is on; new channels are refused at 95
+  percent of `relay-month-gb` (800 GB) and open ones closed at 100 percent;
+  relayed peers are never the calculated host; a stalled relayed game stays
+  connected through its framed keepalives.
 - A relayed player's round trip is the player to the master to the host:
   where the master is matters, which is a question for John (the region).
 - Cost, from the [plan's budget](multiplayer-plan.md#bandwidth-budget): about
   13 KB/s down and 2.6 KB/s up for a player in a full mission, about 60 MB
   an hour leaving the master, so 800 GB a month is about 13,000 relayed
   player-hours.
+
+**Built (J3, 2026-10-05).** The master's side is `tore-master`'s
+`relay.rs`; both ends' side is `tore_net::master::relay` (`Channels`,
+`HostRelays`, `RelayFraming`), the relayed addresses
+(`relayed_address`, `channel_of`) are in `routed.rs`, and a player's
+requests are in `join.rs`. What the build settled (agent decisions unless
+credited to John):
+
+```mermaid
+sequenceDiagram
+  participant P as Player's Joiner
+  participant M as Master
+  participant H as Host's Rendezvous
+  P->>M: Relay request (nonce, introduction)
+  M->>H: Relay open (every 250 ms, 3 at most)
+  H->>M: Relay open ack (listing token)
+  M->>P: Relay offer: channel and key
+  P->>M: Relay frame: Connect request
+  M->>H: the same frame, unchanged
+  H->>M: Relay frame: Challenge
+  M->>P: the same frame, unchanged
+  Note over P,H: The handshake and the session run on,<br/>each end's transport seeing [100::1:HHHH:LLLL]:0
+```
+
+- **One router for both ends.** The host's `Routed` and the player's
+  `JoinRouted` share their code (`routed.rs`, `route_receive` and
+  `route_send` over a `MasterSide`): a Relay frame from the master of an
+  open channel, with its key and from the master's address that opened it,
+  reaches the transport as a datagram from the channel's relayed address;
+  a send there leaves as a frame; everything else is as I3 built it. The
+  routers read into a buffer of their own, as long as the longest master
+  datagram (1,232 bytes), so a frame is never cut by the transport's
+  1,201-byte buffer.
+- **The host** acknowledges a Relay open only while listed (the ack
+  carries its token), again for a repeated open, keeps at most 64 channels,
+  and forgets one with no frame either way for 60 seconds (twice the
+  master's idle time, as its Relay close may be lost). The host loops are
+  unchanged: the master's idle close ends a channel whose connection ended
+  at the host (`Rendezvous::close_relayed` exists for a loop that wants to
+  close at once), and the player's end closes its own.
+- **The player** asks with `Joiner::ask_relay`, sends the request again once
+  after 1.5 seconds (the master takes 2 a minute from one source) and calls
+  the master silent 4 seconds after the first. `Joiner::close_relay` sends
+  three Relay closes when the game connection ends.
+- **The master** (`relay.rs`) checks a request against the introduction it
+  names (its player address and nonce), then refuses, in order: the relay
+  off, the allowance at 95 percent, 64 channels, 2 from the player's source,
+  30 to the listing. A refusal is a Relay offer with the result and the
+  player's words; a host that never acknowledges is a refusal 250 ms after
+  the third Relay open. Relay opens and offers are not answers fitted to a
+  request: each goes to an address a listing or an introduction proves, as
+  the Meets do.
+- **Rates.** 64 KB/s each way (1 KB is 1,000 bytes), bursts of twice that,
+  counted over the frames' bytes in integer time; over it a frame is
+  dropped. A channel over its rate in every second for 30 seconds is closed
+  (reason 2): a game never comes near it (38 KB/s at most in stage D), so
+  that is a flood.
+- **The allowance** counts what the master sends in Relay frames with each
+  datagram's IP and UDP headers (28 bytes over IPv4, 48 over IPv6), as the
+  provider counts transfer. `relay-YYYY-MM.txt` in the state folder holds
+  the month's figure, written every minute and at `quit`, read back at
+  start; a new month starts at zero. 95 and 100 percent are each logged
+  once a month.
+- **Stopping.** `quit` closes every channel with Relay close reason 4 to
+  both ends before the sockets close; Ctrl+C and SIGTERM cannot (the
+  standard library cannot catch them), and the relayed games then time out
+  as after any lost connection.
+- **The keepalive thread's wrapper** is `RelayFraming`, made by
+  `Joiner::keepalive_socket` around a clone of the joining socket
+  (`ServerSocket::try_clone`): a send to the channel's relayed address goes
+  to the master as a frame; it never reads.
 
 ### Port mapping
 
@@ -6806,7 +6891,7 @@ change in these stages.
 | I3 Listing from hosts | Opus | I1; its end-to-end commit after I2 | `tore-net/src/master/{rendezvous,routed,local}.rs`, `meet.rs` and `relay.rs` as dispatch stubs, `crates/tore-server/src/{config,wiring,run,console,options}.rs` and its tests, `docs/DEDICATED-SERVER.md`, `crates/tore-app/src/net/{hosting,hosting_tests,options}.rs` | The host's `Rendezvous` and `Routed` ([one socket](#one-socket-two-protocols), [listing](#listing-a-game)): lookup, mapping test, register, heartbeats with the summary, change heartbeats, keeps, register again, back-off, unregister; the install id in Register; the host's or server's Report at the session's end. `tore-server`: `broadcast` (off by default; John named it, the design said `list`), `master`, `telemetry`, the console's `broadcast on` and `broadcast off`, the start and status lines. The game: `HostSetup.listing`, `Command::SetListed`, `Report::Listing`, `--host FILE --list [--master ADDRESS]` | On the simulator against `tore_master::Master` (a dev-dependency): a host is browsable within its first exchange and its summary's changes within 5 seconds; a vanished host is gone within 90 seconds; a master restart is healed within one heartbeat; a silent master is asked with back-off, never more than once a second; game datagrams pass `Routed` unchanged and no master datagram reaches the transport; a claim of `100::/64` from the socket is dropped. A hosting thread with `listing` registers to an in-test master and unregisters on stop. Battery: `net-master-listing` (a master, a `tore-server` with `broadcast on`, `tore-app --browse 5` lists it; quitting the server removes it). **Built (I3, 2026-10-05):** `tore_net::master::{rendezvous,routed,local}` with `HostListing` tying the state machine to the master's lookup on a thread (again every 10 minutes and after a silence) and the host's own addresses; `tore-server`'s `broadcast`, `master`, `telemetry`, the console's `broadcast on` and `broadcast off`, a `Broadcast:` start line and the listing at the end of the status line; the game's `HostThread::start_listed` with a `Listing` beside the `HostSetup` (so the tests' hosts stay unchanged), `Command::SetListed`, `Report::Listing(ListingState)` and `--host FILE --list [--master ADDRESS]`. Agent decisions: the probes and the Register go out together (the listing does not wait for the mapping test); an unanswered request is repeated every 3 seconds until the master is silent, then after 2 to 60 seconds, the master's next address each time; no two Heartbeats or Keeps closer than 2 seconds, and no Keep when a Heartbeat is due within that; a change Heartbeat goes when the summary changes, at most one every 5 seconds, the summary looked at once a second; three Unregisters at once; the master's second port is the main port plus one; a stage I host counts its players' paths as local network or by address from their addresses; a server keeps its install id in `server-install-id` in its data folder, drawn at start while telemetry is on; `--host --list` sends no install id and no Report until I4's notice and switch. Tested on the simulator against a scripted master in `tore-net`, and end to end against the real `tore_master::Master` (a dev-dependency of `tore-server`, `listing_test.rs`: on the simulator with the Internet Lobby's own `Browser`, and a real server on 127.0.0.1); the hosting thread's test uses a small loopback master. `net-master-listing` judges the listing from `tore-master`'s own output until I4 adds `tore-app --browse 5` to it (the lead's call) |
 | I4 Internet Lobby screen | Sonnet | I2; New after I3 | `crates/tore-app/src/internet_screen/*`, `net/{browse,telemetry,settings}.rs`, `menu.rs`, `main.rs` (routing, `--browse`, snapshot states), `widgets/header.rs`, `assets/internet-lobby-title.png`, the `internet_screen/*` rule in `tools/battery_selection.py`, the menus lane's `menus-snap-internet*` scenarios, `README.md`'s telemetry section | [The screen](#the-internet-lobby-screen); Join straight to the seen address; New hosting a listed game; Options (the master's address, port forwarding and statistics switches, kept in `network-v1.conf`); the install id; the player's Report | Screen tests (paging, filters, sorting, selection, keys, the shared callsign and port); headless renders of the five snapshot states; `--browse` against a scripted master; a windowed run through `tools/agent-run.sh`: open the Internet Lobby with a loopback master and a listed `tore-server`, join, fly 30 seconds, leave, and New lists a hosted game that a second `--browse` sees **Built (I4, 2026-10-05):** as [the screen](#the-internet-lobby-screen) describes, with its decisions; Join works through the master's introduction; `net-window-internet` runs the windowed part |
 | J2 Introductions and punching | Opus | I2, I3, J1 | `crates/tore-master/src/introduce.rs`, `tore-net/src/master/{meet,join}.rs`, `tore-net/src/{client,server,packet}.rs`, `tore-session/src/client/` (joining through candidates), `tore-session/src/{bot.rs,bin/tore-bot.rs}`, the protocol version and `wire-golden.txt` | [Joining through the master](#joining-through-the-master) up to the race, and [hole punching](#hole-punching): Introduce with its cookie, Introduction and Meet with retries and hints on the master; Meet, punches and the ack on the host; the player's rendezvous; `Client::connect_any` with candidates learned from punches; the path byte in the Challenge answer and `ConnectDetails::path`; `tore-bot --master --listing --path`. The next protocol version | On the simulator, every row of the [punching table](#hole-punching) gives its expected path, at a 100 ms round trip within 1.5 seconds where it punches; a forged Introduce gets only a Challenge; a host sends at most five punches per address per Meet and acts on at most 10 Meets a second; a Punch with another id is only counted; the wire golden file. Battery: `net-master-introduce` (a master, a listed `tore-server`, `tore-bot --listing` joins through an introduction and flies 30 seconds). **Built (J2, 2026-10-05):** protocol 9 (the Punch, kind 11, and the path byte after the platform byte; `ConnectDetails::path`, the relay for a relayed address); `Client::connect_any` with `Target`s and up to four addresses learned from punches; the master's introductions ([as built](formats/master-protocol.md#introductions-as-built)); a host's `meet.rs`, which its rendezvous drives, sending the punches and the Meet ack itself (a hook in `rendezvous.rs`, outside the row's files, the lead's stub for it); a player's `join.rs` (`Joiner`, its own socket router); the session client's `ClientConfig::race` and the capture's Race record; `tore-bot --master --listing --path auto\|direct`, `--path relay` refused until J3. Tests: the punching table in `crates/tore-master/tests/punch.rs` (12 tests, every row, 320 to 550 ms where it punches), `introduce_tests.rs` in `tore-master` (the forged Introduce, results, retries, the hint, limits), `meet.rs`'s and `join_tests.rs`'s unit tests, the transport client's race and the server's path, a raced session join whose capture replays, and `net-master-introduce` in the net lane. A seen address that is the host's own Mapped or Global IPv6 candidate reads as that path (agent decision). The master's `I2` stub test and flood allowance now expect the Introduce's 23-byte Challenge |
-| J3 Relay | Opus | J2 | `crates/tore-master/src/relay.rs`, `tore-net/src/master/relay.rs`, `tore-net/src/master/routed.rs` (relayed addresses), `tore-net/src/socket.rs` (`try_clone`), the bot's `--path relay` | [The relay](#the-relay): channels, keys, the host's ack, rates, idle, the allowance and its file, closing; relayed addresses; the framing wrapper for the keepalive thread | On the simulator: the two relay rows of the punching table connect through the relay; a host with two relayed bots and one direct flies 60 seconds with the stage D matrix's limits for the direct and relayed bots alike (the relay adds only its delay); a frame from a third address or with a wrong key is dropped; a channel flooded at 200 KB/s passes 64 KB/s; idle channels close at 30 seconds; a spent allowance refuses new channels with its text and survives a master restart; a relayed bot stalled 15 seconds stays connected through its framed keepalives. Battery: `net-master-relay` (`tore-bot --path relay` against a listed `tore-server` through a loopback master, 30 seconds, no drop, the master's status counts the bytes) |
+| J3 Relay | Opus | J2 | `crates/tore-master/src/relay.rs`, `tore-net/src/master/relay.rs`, `tore-net/src/master/routed.rs` (relayed addresses), `tore-net/src/socket.rs` (`try_clone`), the bot's `--path relay` | [The relay](#the-relay): channels, keys, the host's ack, rates, idle, the allowance and its file, closing; relayed addresses; the framing wrapper for the keepalive thread | On the simulator: the two relay rows of the punching table connect through the relay; a host with two relayed bots and one direct flies 60 seconds with the stage D matrix's limits for the direct and relayed bots alike (the relay adds only its delay); a frame from a third address or with a wrong key is dropped; a channel flooded at 200 KB/s passes 64 KB/s; idle channels close at 30 seconds; a spent allowance refuses new channels with its text and survives a master restart; a relayed bot stalled 15 seconds stays connected through its framed keepalives. Battery: `net-master-relay` (`tore-bot --path relay` against a listed `tore-server` through a loopback master, 30 seconds, no drop, the master's status counts the bytes). |
 | J4b Port mapping in hosts | Sonnet | J4, I3, I4 | `crates/tore-app/src/net/{hosting,options}.rs`, `direct_screen/options.rs`, `internet_screen/options.rs`, `crates/tore-server/src/{config,wiring}.rs`, `docs/DEDICATED-SERVER.md` | A hosting game's mapper thread, its messages and the Mapped candidate; the switch in both Options panels; `tore-server`'s `port-mapping`; `tore-app --map-port` | Against the loopback fakes: hosting maps the port, shows the address, gives the rendezvous the Mapped candidate and removes the mapping when hosting stops; the switch off maps nothing; a second router is reported. No battery scenario (a real one would change John's router); the manual test is in IJ7 |
 | J5 Joining through the master in the game | Opus | J2, I4; its relay commit after J3 | `crates/tore-app/src/net/{session,play}.rs`, `internet_screen/{mod,app}.rs`, a new `net/join_tests.rs` | `Transport::Internet`; Join on a listing runs the mapping test, the introduction, the race and the relay; the Messages lines; the framed keepalive for a relayed session; the path in the net log and the player's report | In-process: a hosting thread with a rendezvous, a master core and a game session joined by listing, once direct and once with `--path relay`, each seated and flying; the Messages lines in order; a refused introduction is a plain line. A windowed run joins a listed `tore-server` through a loopback master with the relay forced |
 | J6 Path in the lobby | Sonnet | J5, J3 | `tore-session/src/wire/messages.rs` and `host/lobby.rs` (the player's path in 3 bits), `wire-golden.txt`, `crates/tore-app/src/lobby_screen/*`, `widgets/icons.rs` (the relay mark), `tore-server`'s per-player log lines | [Shown and reported](#the-connection-path-shown-and-reported); the next protocol version | Lobby state round trip with every path; the lobby screen's snapshot with a relayed player; the wire golden file |

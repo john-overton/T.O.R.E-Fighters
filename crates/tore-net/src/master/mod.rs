@@ -84,7 +84,7 @@ pub mod join;
 pub mod local;
 pub mod meet;
 pub mod packet;
-mod relay;
+pub mod relay;
 pub mod rendezvous;
 pub mod routed;
 
@@ -97,11 +97,12 @@ pub use packet::{
     RelayOffer, RelayOpen, RelayOpenAck, RelayRequest, RelayResult, Report, Role, UnknownListing,
     Unregister, Unsupported,
 };
+pub use relay::{Channels, HostRelays, RelayCounters, RelayFraming};
 pub use rendezvous::{
     HostListing, HostRendezvous, HostTally, ListingState, Rendezvous, RendezvousCounters,
     RendezvousEvent,
 };
-pub use routed::Routed;
+pub use routed::{Routed, channel_of, is_relayed, relayed_address};
 
 /// The master protocol version this build speaks. It is separate from the
 /// game's protocol version: one master serves every build of the game.

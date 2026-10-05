@@ -45,6 +45,7 @@ use tore_net::{Entropy, SplitMix64};
 use crate::browse::same_build;
 use crate::limits::{Bucket, Rate, SourceKey};
 use crate::listings::Listings;
+use crate::relay::Ends;
 
 /// Introduce per source, after the cookie: 30 a minute.
 pub const PER_SOURCE: Rate = Rate::per_minute(30, 30);
@@ -320,6 +321,17 @@ impl Introductions {
     /// The next Meet to send from the main port, and where to.
     pub fn poll_send(&mut self) -> Option<(SocketAddr, Vec<u8>)> {
         self.out.pop_front()
+    }
+
+    /// The two ends of introduction `id`, while it is under way: what a
+    /// Relay request names (slice J3).
+    pub fn ends(&self, id: u64) -> Option<Ends> {
+        self.by_id.get(&id).map(|intro| Ends {
+            listing_id: intro.listing_id,
+            host: intro.host,
+            player: intro.player,
+            nonce: intro.nonce,
+        })
     }
 
     /// Introductions under way.

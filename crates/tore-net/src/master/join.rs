@@ -23,6 +23,18 @@
 //!    the introduction id the host's punches carry, and the hint; or a
 //!    refusal with its text.
 //!
+//! 4. The relay (slice J3), when the race finds no path in
+//!    [`super::RACE_BEFORE_RELAY`] or the hint says so: [`Joiner::ask_relay`]
+//!    sends a Relay request, again once after [`RELAY_REQUEST_RETRY`] (the
+//!    master takes two a minute from one address), and the master's Relay
+//!    offer opens the channel ([`JoinEvent::Relayed`]) or refuses it with
+//!    its text. With no offer in [`RELAY_WAIT`] the master counts as silent
+//!    (agent decisions). The game then joins the channel's relayed address
+//!    with an ordinary `Client::connect`; [`Joiner::over`] frames its
+//!    datagrams, and a stalled game's keepalive thread sends through
+//!    [`Joiner::keepalive_socket`]. [`Joiner::close_relay`] closes the
+//!    channel when the game connection ends.
+//!
 //! The race itself is the transport client's. What a player's router does
 //! to the host's punches and the player's Connect requests is the
 //! simulator's ([`crate::sim`]) to show.
@@ -35,12 +47,14 @@ use std::time::Duration;
 use super::candidate::{Candidate, CandidateKind, MappingType, canonical};
 use super::local::probe_address;
 use super::packet::{
-    Build, Hint, Introduce, IntroductionResult, MasterPacket, Path, Probe, ProbePort,
+    Build, CloseReason, Hint, Introduce, IntroductionResult, MasterPacket, Path, Probe, ProbePort,
+    RelayRequest, RelayResult,
 };
-use super::routed::is_relayed;
+use super::relay::{Channels, RelayCounters, RelayFraming, goodbye};
+use super::routed::{MasterSide, relayed_address, route_receive, route_send};
 use crate::client::Target;
 use crate::entropy::{Entropy, Rng};
-use crate::{Datagrams, MAX_RECEIVE_BATCH, Transmit};
+use crate::{Datagrams, Transmit};
 
 /// The introduction waits this long at most for the mapping test's answers.
 pub const MAPPING_WAIT: Duration = Duration::from_secs(1);
@@ -52,6 +66,13 @@ pub const INTRODUCE_RETRY: Duration = Duration::from_secs(1);
 pub const TRIES_PER_ADDRESS: u32 = 3;
 /// Introduces sent in all before the master counts as silent.
 pub const INTRODUCE_TRIES: u32 = 6;
+/// An unanswered Relay request is sent once more after this long (the
+/// master takes two a minute from one address).
+pub const RELAY_REQUEST_RETRY: Duration = Duration::from_millis(1500);
+/// With no Relay offer this long after the first request, the master counts
+/// as silent. Long enough for the master's three Relay opens to the host
+/// (750 ms) and its answer either way.
+pub const RELAY_WAIT: Duration = Duration::from_secs(4);
 
 /// What a join asks the master for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -98,6 +119,40 @@ pub enum JoinEvent {
     MasterSilent,
     /// The master does not speak this build's master protocol: its text.
     Unsupported(String),
+    /// The relay's channel is open: join the host at this relayed address
+    /// (slice J3).
+    Relayed {
+        /// The channel's relayed address, the host as the transport sees it.
+        address: SocketAddr,
+    },
+    /// The master would not relay: why, and its text.
+    RelayRefused {
+        /// The Relay offer's result.
+        result: RelayResult,
+        /// The plain reason the player reads.
+        text: String,
+    },
+    /// The master did not answer the Relay request.
+    RelaySilent,
+    /// The master closed the channel (idle, over its rate, the allowance
+    /// spent, the master stopping): the game connection through it is lost.
+    RelayClosed(CloseReason),
+}
+
+/// Where a join's relay stands (slice J3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayState {
+    /// Not asked for.
+    None,
+    /// Asked for; no offer yet.
+    Asking,
+    /// The channel is open.
+    Open {
+        /// The channel.
+        channel: u32,
+    },
+    /// Refused, silent or closed.
+    Ended,
 }
 
 /// Where the join stands with the master.
@@ -128,9 +183,11 @@ pub struct JoinCounters {
     pub unexpected: u64,
     /// Datagrams from a real socket claiming a relayed address, dropped.
     pub relayed_claims: u64,
-    /// Sends by the transport to a relayed address, dropped (no relay
-    /// before slice J3).
+    /// Sends by the transport to a relayed address with no open channel,
+    /// dropped.
     pub relay_sends_dropped: u64,
+    /// Relay requests sent.
+    pub relay_requests: u64,
 }
 
 /// A joining player's side of the master: see the module documentation.
@@ -153,6 +210,12 @@ pub struct Joiner {
     next_introduce: Duration,
     tries: u32,
     introduced: Option<Introduced>,
+    relay: RelayState,
+    /// The master's address the relay was asked of.
+    relay_master: Option<SocketAddr>,
+    relay_asked: Duration,
+    relay_requests: u32,
+    channels: Channels,
     out: VecDeque<Transmit>,
     events: VecDeque<JoinEvent>,
     /// What the joiner counted.
@@ -217,6 +280,11 @@ impl Joiner {
             next_introduce: now,
             tries: 0,
             introduced: None,
+            relay: RelayState::None,
+            relay_master: None,
+            relay_asked: now,
+            relay_requests: 0,
+            channels: Channels::default(),
             out: VecDeque::new(),
             events: VecDeque::new(),
             counters: JoinCounters::default(),
@@ -279,6 +347,82 @@ impl Joiner {
         self.introduced.as_ref()
     }
 
+    /// Asks the master for the relay (slice J3): after the race's 3 seconds
+    /// with no path, or at once on the hint. False when there is no
+    /// introduction to name, or the relay was asked for already.
+    pub fn ask_relay(&mut self, now: Duration) -> bool {
+        if self.introduced.is_none() || self.relay != RelayState::None {
+            return false;
+        }
+        let Some(master) = self.master() else {
+            return false;
+        };
+        self.relay = RelayState::Asking;
+        self.relay_master = Some(master);
+        self.relay_asked = now;
+        self.send_relay_request();
+        true
+    }
+
+    /// Where the relay stands.
+    pub fn relay_state(&self) -> RelayState {
+        self.relay
+    }
+
+    /// The channel's relayed address once it is open: the host as the
+    /// transport sees it.
+    pub fn relayed(&self) -> Option<SocketAddr> {
+        match self.relay {
+            RelayState::Open { channel } => Some(relayed_address(channel)),
+            _ => None,
+        }
+    }
+
+    /// What the relay's channel counted.
+    pub fn relay_counters(&self) -> RelayCounters {
+        self.channels.counters
+    }
+
+    /// The game connection through the relay ended: the channel is closed
+    /// and the master told ([`super::GOODBYE_COPIES`] Relay closes).
+    pub fn close_relay(&mut self) {
+        let RelayState::Open { channel } = self.relay else {
+            return;
+        };
+        self.relay = RelayState::Ended;
+        if let Some((key, master)) = self.channels.get(channel)
+            && self.channels.close(channel, key).is_some()
+        {
+            for packet in goodbye(channel, key) {
+                self.send(master, &packet);
+            }
+        }
+    }
+
+    /// A clone of the joining socket wrapped so that what the game's
+    /// keepalive thread sends to the relayed host goes out as a Relay frame:
+    /// `None` until the channel is open.
+    pub fn keepalive_socket<S>(&self, socket: S) -> Option<RelayFraming<S>> {
+        let RelayState::Open { channel } = self.relay else {
+            return None;
+        };
+        let (key, master) = self.channels.get(channel)?;
+        Some(RelayFraming::new(socket, master, channel, key))
+    }
+
+    fn send_relay_request(&mut self) {
+        let (Some(master), Some(introduced)) = (self.relay_master, self.introduced.as_ref()) else {
+            return;
+        };
+        let request = MasterPacket::RelayRequest(RelayRequest {
+            nonce: self.nonce,
+            introduction_id: introduced.introduction_id,
+        });
+        self.send(master, &request);
+        self.relay_requests += 1;
+        self.counters.relay_requests += 1;
+    }
+
     /// The socket as the transport should see it, for one receive or one
     /// transmit: the master's datagrams go to the joiner, never to the
     /// transport.
@@ -310,8 +454,18 @@ impl Joiner {
         crate::datagram::transmit_all(&mut self.out, socket)
     }
 
-    /// Timers: the mapping test's wait, the Introduce's retries.
+    /// Timers: the mapping test's wait, the Introduce's retries, the Relay
+    /// request's retry and wait.
     pub fn update(&mut self, now: Duration) {
+        if self.relay == RelayState::Asking {
+            let waited = now.saturating_sub(self.relay_asked);
+            if waited >= RELAY_WAIT {
+                self.relay = RelayState::Ended;
+                self.events.push_back(JoinEvent::RelaySilent);
+            } else if waited >= RELAY_REQUEST_RETRY && self.relay_requests < 2 {
+                self.send_relay_request();
+            }
+        }
         match self.state {
             JoinState::Testing => {
                 let waited = now.saturating_sub(self.probed_at);
@@ -408,6 +562,50 @@ impl Joiner {
                 self.introduced = Some(introduced.clone());
                 self.events.push_back(JoinEvent::Introduced(introduced));
             }
+            MasterPacket::RelayOffer(offer) => {
+                let ours = self.relay == RelayState::Asking
+                    && offer.nonce == self.nonce
+                    && self
+                        .introduced
+                        .as_ref()
+                        .is_some_and(|i| i.introduction_id == offer.introduction_id);
+                if !ours {
+                    self.counters.unexpected += 1;
+                    return;
+                }
+                if offer.result == RelayResult::Open
+                    && self.channels.open(offer.channel, offer.key, from, now)
+                {
+                    self.relay = RelayState::Open {
+                        channel: offer.channel,
+                    };
+                    self.events.push_back(JoinEvent::Relayed {
+                        address: relayed_address(offer.channel),
+                    });
+                } else {
+                    self.relay = RelayState::Ended;
+                    let result = offer.result;
+                    let text = if offer.text.is_empty() || result == RelayResult::Open {
+                        super::relay::refusal_text(result).to_owned()
+                    } else {
+                        offer.text
+                    };
+                    self.events
+                        .push_back(JoinEvent::RelayRefused { result, text });
+                }
+            }
+            MasterPacket::RelayClose(close) => {
+                let RelayState::Open { channel } = self.relay else {
+                    self.counters.unexpected += 1;
+                    return;
+                };
+                if close.channel != channel || self.channels.close(channel, close.key).is_none() {
+                    self.counters.unexpected += 1;
+                    return;
+                }
+                self.relay = RelayState::Ended;
+                self.events.push_back(JoinEvent::RelayClosed(close.reason));
+            }
             MasterPacket::Unsupported(unsupported) => {
                 if self.state == JoinState::Ended || self.state == JoinState::Introduced {
                     self.counters.unexpected += 1;
@@ -502,6 +700,10 @@ impl Joiner {
         self.second = None;
         self.introduced = None;
         self.probe_retried = false;
+        self.close_relay();
+        self.relay = RelayState::None;
+        self.relay_master = None;
+        self.relay_requests = 0;
         self.state = JoinState::FindingMaster;
         if !self.masters.is_empty() {
             self.state = JoinState::Testing;
@@ -526,12 +728,15 @@ pub fn refusal_text(result: IntroductionResult) -> &'static str {
 }
 
 /// The joining socket seen through a [`Joiner`]: every datagram from one of
-/// the master's addresses goes to the joiner and never to the transport; a
-/// datagram from a real socket that claims an address in the relayed prefix
-/// is dropped and counted; everything else passes unchanged. Made with
-/// [`Joiner::over`] for one receive or one transmit. *Agent decision:* a
-/// router of its own beside the host's [`super::Routed`], which stays the
-/// host's; the relay (slice J3) may join the two.
+/// the master's addresses goes to the joiner and never to the transport,
+/// but a Relay frame of the open channel, which reaches the transport as a
+/// datagram from the channel's relayed address; a datagram from a real
+/// socket that claims an address in the relayed prefix is dropped and
+/// counted; a send to the relayed address goes to the master as a frame;
+/// everything else passes unchanged. Made with [`Joiner::over`] for one
+/// receive or one transmit. *Agent decisions:* a router of its own beside
+/// the host's [`super::Routed`] (J2), the two sharing their code
+/// ([`super::routed`], J3).
 pub struct JoinRouted<'a, D: ?Sized> {
     joiner: &'a mut Joiner,
     socket: &'a mut D,
@@ -540,27 +745,33 @@ pub struct JoinRouted<'a, D: ?Sized> {
 
 impl<D: Datagrams + ?Sized> Datagrams for JoinRouted<'_, D> {
     fn send_datagram(&mut self, to: SocketAddr, datagram: &[u8]) -> io::Result<()> {
-        if is_relayed(to) {
-            self.joiner.counters.relay_sends_dropped += 1;
-            return Ok(());
-        }
-        self.socket.send_datagram(to, datagram)
+        route_send(self.joiner, self.socket, to, datagram, self.now)
     }
 
     fn recv_datagram(&mut self, buf: &mut [u8]) -> io::Result<Option<(usize, SocketAddr)>> {
-        for _ in 0..MAX_RECEIVE_BATCH {
-            let Some((length, from)) = self.socket.recv_datagram(buf)? else {
-                return Ok(None);
-            };
-            if self.joiner.is_master(from) {
-                self.joiner.receive(self.now, from, &buf[..length]);
-            } else if is_relayed(from) {
-                self.joiner.counters.relayed_claims += 1;
-            } else {
-                return Ok(Some((length, from)));
-            }
-        }
-        Ok(None)
+        route_receive(self.joiner, self.socket, buf, self.now)
+    }
+}
+
+impl MasterSide for Joiner {
+    fn is_master(&self, from: SocketAddr) -> bool {
+        Joiner::is_master(self, from)
+    }
+
+    fn take_master(&mut self, now: Duration, from: SocketAddr, datagram: &[u8]) {
+        self.receive(now, from, datagram);
+    }
+
+    fn channels(&mut self) -> &mut Channels {
+        &mut self.channels
+    }
+
+    fn claimed(&mut self) {
+        self.counters.relayed_claims += 1;
+    }
+
+    fn send_dropped(&mut self) {
+        self.counters.relay_sends_dropped += 1;
     }
 }
 

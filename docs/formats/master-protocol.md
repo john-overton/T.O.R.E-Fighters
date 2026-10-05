@@ -17,8 +17,10 @@ master itself, `tore-master`, apart from introductions and the relay
 (slices J2 and J3), and the Internet Lobby's browse client. *Built (J2,
 2026-10-05):* [introductions](#introductions): the master's side, a host's
 Meet, punches and Meet ack, and a joining player's mapping test,
-Introduce and race ([as built](#introductions-as-built)). The relay is slice
-J3's; the game's screens join through the master in slice J5. The
+Introduce and race ([as built](#introductions-as-built)). *Built (J3,
+2026-10-05):* [the relay](#relay), the master's channels and both ends'
+frames ([as built](#the-relay-as-built)); the game's screens join through
+the master in slice J5. The
 [architecture guide](../ARCHITECTURE.md#master-server-and-connectivity)
 has the design and the slices that build it, and the
 [operations guide](../MASTER-SERVER.md) says how the master is run. Every
@@ -46,6 +48,7 @@ the master.
 - [Mapping test](#mapping-test)
 - [Introductions](#introductions)
 - [Relay](#relay)
+  - [The relay as built](#the-relay-as-built)
 - [Reports](#reports)
 - [Limits](#limits)
 - [Security](#security)
@@ -525,6 +528,48 @@ A channel is tied to the two addresses it was opened for. If either end's
 router moves its port to a new outside address, the channel's frames from
 there are dropped and the game connection times out as any lost connection
 does; stage K's rejoin brings the player back.
+
+### The relay as built
+
+*Built (J3, 2026-10-05):* the master's side in `tore-master`'s `relay.rs`,
+both ends' side in `tore_net::master::relay`. John decided on 2026-10-05
+that the relay is on, refuses new channels at 95 percent of the month's
+allowance and closes open ones at 100 percent. Agent decisions beyond the
+sections above:
+
+- **A Relay request** counts against its source's 2 a minute first; then it
+  must name an introduction still under way (30 seconds), from that
+  introduction's player address, with its Introduce nonce, or it is dropped
+  unanswered. The same request again gets the same offer once the channel
+  is open.
+- **Refusals,** checked in this order: switched off (result 4), the
+  allowance at 95 percent (3), every channel taken (2), two channels from
+  the player's source, an IPv4 address or an IPv6 /64 (5), 30 channels to
+  the listing (2). A host that has not acknowledged 250 ms after the third
+  Relay open is result 1. The text is the game's own words for the result,
+  for example "The Internet Lobby's relay is full for this month.".
+- **A Relay open ack** counts only from the host's listed address with the
+  listing's token. A host acknowledges only while listed, again for a
+  repeated open, and keeps at most 64 channels.
+- **Frames** are forwarded only for a channel the host acknowledged, with
+  its key, from one of its two ends; anything else is dropped and counted.
+  An end takes a frame only from the master's address that opened the
+  channel.
+- **Rates** are counted over the frames' own bytes, 1 KB being 1,000 bytes,
+  with a burst of twice the rate. A channel over its rate in every second
+  for 30 seconds is closed with reason 2.
+- **The allowance** counts each forwarded datagram with its IP and UDP
+  headers (28 bytes over IPv4, 48 over IPv6), as the provider counts
+  transfer.
+- **Closing.** When one end closes a channel the master tells the other
+  (reason 0); when the master closes one itself it tells both. A player's
+  game closes its channel when its connection ends; a host's channel ends
+  by the master's idle close, and an end forgets a channel with no frame
+  for 60 seconds in case the Relay close was lost. `quit` closes every
+  channel with reason 4.
+- **Relay opens and offers are not answers:** each goes to an address a
+  listing or an introduction proves, so neither is fitted to a request or
+  charged to the answer rate, as Meets are not.
 
 ## Reports
 

@@ -34,6 +34,10 @@
 //!
 //! 6. A Meet (slice J2) is answered with punches to the player's addresses
 //!    from the game port and a Meet ack ([`meet`](super::meet)).
+//! 7. A Relay open (slice J3) is acknowledged with the listing's token, and
+//!    the channel's frames reach the transport as datagrams from its relayed
+//!    address ([`relay`](super::relay)); the master's Relay close, or no
+//!    frame for a minute, closes it here.
 //!
 //! The summary is the host's discovery answer without its nonce. The host's
 //! loop offers it through [`Rendezvous::wants_summary`] and
@@ -54,10 +58,11 @@ use super::packet::{
     Build, Heartbeat, Keep, ListingSummary, MasterPacket, MeetAck, Path, PortMapping, Probe,
     ProbePort, Register, Report, Role, Unregister,
 };
-use super::routed::{Routed, is_relayed};
+use super::relay::{Channels, HostRelays, RelayCounters};
+use super::routed::{MasterSide, Routed, is_relayed};
 use super::{
     CHANGE_HEARTBEAT_DELAY, GOODBYE_COPIES, HEARTBEAT_INTERVAL, KEEP_INTERVAL,
-    MAPPING_TEST_INTERVAL, MASTER_SILENT, relay,
+    MAPPING_TEST_INTERVAL, MASTER_SILENT,
 };
 use crate::entropy::{Entropy, Rng};
 use crate::packet::{Packet, Punch};
@@ -159,8 +164,10 @@ pub struct RendezvousCounters {
     /// Good packets this side does not take, or not now (an old nonce, a
     /// token not ours).
     pub unexpected: u64,
-    /// Relay packets dropped until slice J3.
-    pub not_yet: u64,
+    /// Relay opens acknowledged (slice J3), repeats included.
+    pub relay_opens: u64,
+    /// Relay closes from the master that closed a channel.
+    pub relay_closes: u64,
     /// Meets acted on: punched and acknowledged (slice J2).
     pub meets: u64,
     /// Meets repeated for an introduction already met: acknowledged again.
@@ -171,8 +178,8 @@ pub struct RendezvousCounters {
     pub punches: u64,
     /// Datagrams from a real socket claiming a relayed address, dropped.
     pub relayed_claims: u64,
-    /// Sends by the transport to a relayed address, dropped (no channel
-    /// before slice J3).
+    /// Sends by the transport to a relayed address with no open channel,
+    /// dropped.
     pub relay_sends_dropped: u64,
 }
 
@@ -248,6 +255,8 @@ pub struct Rendezvous {
     refused: Option<String>,
     mapping: Mapping,
     meets: Meets,
+    /// The relay's channels to this host (slice J3).
+    pub(super) relays: HostRelays,
     out: VecDeque<Transmit>,
     events: VecDeque<RendezvousEvent>,
     /// What the rendezvous counted.
@@ -285,9 +294,32 @@ impl Rendezvous {
             refused: None,
             mapping: Mapping::new(MappingType::Unknown, now),
             meets: Meets::default(),
+            relays: HostRelays::default(),
             out: VecDeque::new(),
             events: VecDeque::new(),
             counters: RendezvousCounters::default(),
+        }
+    }
+
+    /// The relayed addresses of the relay's channels open to this host: one
+    /// per relayed player (slice J3).
+    pub fn relayed(&self) -> Vec<SocketAddr> {
+        self.relays.channels.addresses()
+    }
+
+    /// What the relay's channels counted.
+    pub fn relay_counters(&self) -> RelayCounters {
+        self.relays.channels.counters
+    }
+
+    /// The host's connection at the relayed address `relayed` ended: its
+    /// channel is closed, and the master told ([`GOODBYE_COPIES`] Relay
+    /// closes). Nothing happens for an address with no channel. *Agent
+    /// decision:* the host loops need not call it, since the master closes a
+    /// channel idle for 30 seconds and the player's end closes its own.
+    pub fn close_relayed(&mut self, relayed: SocketAddr) {
+        for (to, packet) in self.relays.close_address(relayed) {
+            self.send(to, &packet);
         }
     }
 
@@ -566,11 +598,24 @@ impl Rendezvous {
                 self.heard(now, false);
                 self.meet(now, from, &meet);
             }
-            packet @ (MasterPacket::RelayOpen(_)
-            | MasterPacket::Relay(_)
-            | MasterPacket::RelayClose(_)) => {
+            MasterPacket::RelayOpen(open) => {
                 self.heard(now, false);
-                relay::dispatch(&packet, &mut self.counters.not_yet);
+                let token = self
+                    .listing
+                    .filter(|_| self.wanted)
+                    .map(|listing| listing.token);
+                if let Some(ack) = self.relays.open(now, from, &open, token) {
+                    self.counters.relay_opens += 1;
+                    self.send(from, &ack);
+                }
+            }
+            MasterPacket::RelayClose(close) => {
+                self.heard(now, false);
+                if self.relays.close(&close) {
+                    self.counters.relay_closes += 1;
+                } else {
+                    self.counters.unexpected += 1;
+                }
             }
             _ => self.counters.unexpected += 1,
         }
@@ -617,6 +662,7 @@ impl Rendezvous {
         if self.meets.punching() {
             self.send_punches(now);
         }
+        self.relays.channels.forget_idle(now);
         if !self.wanted || self.refused.is_some() || self.masters.is_empty() {
             return;
         }
@@ -832,6 +878,28 @@ impl Rendezvous {
         self.mapping.next = self.mapping.started + MAPPING_TEST_INTERVAL;
         self.events
             .push_back(RendezvousEvent::MappingTested(result));
+    }
+}
+
+impl MasterSide for Rendezvous {
+    fn is_master(&self, from: SocketAddr) -> bool {
+        Rendezvous::is_master(self, from)
+    }
+
+    fn take_master(&mut self, now: Duration, from: SocketAddr, datagram: &[u8]) {
+        self.receive(now, from, datagram);
+    }
+
+    fn channels(&mut self) -> &mut Channels {
+        &mut self.relays.channels
+    }
+
+    fn claimed(&mut self) {
+        self.counters.relayed_claims += 1;
+    }
+
+    fn send_dropped(&mut self) {
+        self.counters.relay_sends_dropped += 1;
     }
 }
 

@@ -23,7 +23,7 @@ pub struct Status {
     pub introductions_per_minute: f64,
     /// Introductions that ended punched, over the interval (stage J).
     pub punched: u64,
-    /// Introductions that ended relayed, over the interval (stage J).
+    /// Relay channels opened, over the interval (stage J).
     pub relayed: u64,
     /// Relay channels open now (stage J).
     pub channels: usize,
@@ -44,7 +44,7 @@ impl Status {
     /// The status line.
     pub fn line(&self) -> String {
         format!(
-            "status listings={} sources={} browse/s={:.1} introductions/min={:.0} punched={} relayed={} channels={} relay-month={:.1}GB dropped(limit)={} invalid={} in={} out={}",
+            "status listings={} sources={} browse/s={:.1} introductions/min={:.0} punched={} relayed={} channels={} relay-month={} dropped(limit)={} invalid={} in={} out={}",
             self.listings,
             self.sources,
             self.browse_per_second,
@@ -52,7 +52,7 @@ impl Status {
             self.punched,
             self.relayed,
             self.channels,
-            self.relay_month_bytes as f64 / 1e9,
+            bytes(self.relay_month_bytes),
             self.dropped_limit,
             self.invalid,
             bytes(self.bytes_in),
@@ -83,14 +83,16 @@ impl Status {
     }
 }
 
-/// A size in bytes, kilobytes or megabytes.
-fn bytes(n: u64) -> String {
+/// A size in bytes, kilobytes, megabytes or gigabytes.
+pub fn bytes(n: u64) -> String {
     if n < 10_000 {
         format!("{n}B")
     } else if n < 10_000_000 {
         format!("{:.1}KB", n as f64 / 1e3)
-    } else {
+    } else if n < 10_000_000_000 {
         format!("{:.1}MB", n as f64 / 1e6)
+    } else {
+        format!("{:.1}GB", n as f64 / 1e9)
     }
 }
 
@@ -99,6 +101,7 @@ fn bytes(n: u64) -> String {
 pub struct Interval {
     last: Counters,
     introductions: u64,
+    relayed: u64,
     at: Duration,
 }
 
@@ -108,6 +111,7 @@ impl Interval {
         Self {
             last: master.counters(),
             introductions: master.introductions().introduced,
+            relayed: master.relays().counters.opened,
             at: now,
         }
     }
@@ -119,13 +123,14 @@ impl Interval {
         let l = self.last;
         let seconds = now.saturating_sub(self.at).as_secs_f64().max(1e-3);
         let introductions = master.introductions().introduced;
+        let relayed = master.relays().counters.opened;
         let status = Status {
             listings: master.listings().len(),
             sources: master.sources(),
             browse_per_second: (c.browses + c.details - l.browses - l.details) as f64 / seconds,
             introductions_per_minute: (introductions - self.introductions) as f64 * 60.0 / seconds,
             punched: 0,
-            relayed: 0,
+            relayed: relayed - self.relayed,
             channels: master.relays().channels(),
             relay_month_bytes: master.relays().month_bytes(),
             dropped_limit: c.dropped_limit + c.dropped_answers
@@ -139,6 +144,7 @@ impl Interval {
         *self = Self {
             last: c,
             introductions,
+            relayed,
             at: now,
         };
         status

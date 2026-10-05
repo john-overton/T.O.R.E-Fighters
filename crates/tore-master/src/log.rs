@@ -4,7 +4,10 @@
 //! - `stats/YYYY-MM-DD.tsv`: the minute table, kept 90 days, then deleted by
 //!   the master;
 //! - `telemetry/YYYY-MM-DD.tsv`: the day's counts, rewritten every minute and
-//!   when the master stops, kept until deleted by hand.
+//!   when the master stops, kept until deleted by hand;
+//! - `relay-YYYY-MM.txt`: the bytes relayed out in that calendar month, one
+//!   number, rewritten every minute and when the master stops, and read back
+//!   at start so a restart does not forget them (slice J3).
 //!
 //! The standard library has no time zones, so dates are UTC, as the server's
 //! log is.
@@ -14,6 +17,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::relay::Month;
 use crate::stats::Status;
 
 /// The minute table's files are deleted after this many days.
@@ -56,6 +60,12 @@ pub fn civil_from_days(days: i64) -> (i64, u32, u32) {
 pub fn date(day: i64) -> String {
     let (year, month, day) = civil_from_days(day);
     format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// The calendar month a day falls in.
+pub fn month_of(day: i64) -> Month {
+    let (year, month, _) = civil_from_days(day);
+    (year, month)
 }
 
 /// `HH:MM:SS` UTC for a Unix time.
@@ -118,6 +128,31 @@ impl StateFiles {
         let path = self.telemetry_path(day);
         let partial = path.with_extension("tsv.partial");
         fs::write(&partial, text)?;
+        fs::rename(&partial, &path)
+    }
+
+    /// The relay's figure for a month.
+    pub fn relay_path(&self, month: Month) -> PathBuf {
+        self.dir
+            .join(format!("relay-{:04}-{:02}.txt", month.0, month.1))
+    }
+
+    /// The bytes relayed in `month` written so far, if any. A file that does
+    /// not hold one number reads as none.
+    pub fn read_relay_month(&self, month: Month) -> Option<u64> {
+        fs::read_to_string(self.relay_path(month))
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    }
+
+    /// Replaces the relay's figure for `month`, through a file beside it so
+    /// a crash never leaves half a file.
+    pub fn write_relay_month(&self, month: Month, bytes: u64) -> io::Result<()> {
+        let path = self.relay_path(month);
+        let partial = path.with_extension("txt.partial");
+        fs::write(&partial, format!("{bytes}\n"))?;
         fs::rename(&partial, &path)
     }
 
@@ -207,6 +242,12 @@ mod tests {
                 .starts_with("00:02:00\t1\t2\t")
         );
         files.write_telemetry(today, "installs\t1\n").unwrap();
+        // The relay's month figure.
+        assert_eq!(month_of(today), (2026, 10));
+        assert_eq!(files.read_relay_month((2026, 10)), None);
+        files.write_relay_month((2026, 10), 12_345).unwrap();
+        assert_eq!(files.read_relay_month((2026, 10)), Some(12_345));
+        assert!(dir.join("relay-2026-10.txt").exists());
         assert_eq!(files.read_telemetry(today).unwrap(), "installs\t1\n");
         // An old table goes; a recent one and a stranger stay.
         fs::write(files.stats_path(today - 91), "old").unwrap();

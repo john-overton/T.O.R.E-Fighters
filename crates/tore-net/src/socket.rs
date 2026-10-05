@@ -66,6 +66,18 @@ impl ServerSocket {
             .filter_map(|socket| socket.local_addr().ok())
             .collect()
     }
+
+    /// Another handle to the same sockets (slice J3), for a thread that
+    /// sends on them: a relayed game's keepalive thread
+    /// ([`crate::Keepalive`]) gets one wrapped in
+    /// [`crate::master::RelayFraming`]. Both handles send from the same
+    /// ports and stay non-blocking.
+    pub fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            v6: self.v6.as_ref().map(UdpSocket::try_clone).transpose()?,
+            v4: self.v4.as_ref().map(UdpSocket::try_clone).transpose()?,
+        })
+    }
 }
 
 /// `Listen::Any`'s sockets on `port`; see the module documentation.
@@ -236,6 +248,34 @@ mod tests {
         };
         assert!(!server.local_addresses().is_empty());
         assert!(UdpSocket::bind(("0.0.0.0", port)).is_err());
+    }
+
+    /// A clone sends from the same port and stays non-blocking, and what it
+    /// sends to a peer is answered to the original.
+    #[test]
+    fn a_clone_sends_from_the_same_port() {
+        let mut server =
+            ServerSocket::bind(Listen::Address(Ipv4Addr::LOCALHOST.into()), 0).unwrap();
+        let mut clone = server.try_clone().unwrap();
+        assert_eq!(clone.local_addresses(), server.local_addresses());
+        let mut buf = [0u8; 16];
+        assert!(
+            clone.recv_datagram(&mut buf).unwrap().is_none(),
+            "non-blocking"
+        );
+        let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        clone
+            .send_datagram(peer.local_addr().unwrap(), b"keep")
+            .unwrap();
+        let (length, from) = peer.recv_from(&mut buf).unwrap();
+        assert_eq!(
+            (&buf[..length], from),
+            (&b"keep"[..], server.local_addresses()[0])
+        );
+        peer.send_to(b"back", from).unwrap();
+        let (bytes, _) = receive(&mut server).expect("the original reads the answer");
+        assert_eq!(bytes, b"back");
     }
 
     /// Discovery's question to a host on the network is a datagram to the

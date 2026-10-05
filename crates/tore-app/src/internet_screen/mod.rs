@@ -612,6 +612,14 @@ impl InternetScreen {
                     ));
                     failed = true;
                 }
+                // The screen never asks for the relay; joining through it is
+                // slice J5's. Logged in case a master sends one anyway.
+                event @ (JoinEvent::Relayed { .. }
+                | JoinEvent::RelayRefused { .. }
+                | JoinEvent::RelaySilent
+                | JoinEvent::RelayClosed(_)) => {
+                    log::info!("Internet Lobby: relay event before J5: {event:?}");
+                }
             }
         }
         let outcome = match introduced {

@@ -14,9 +14,10 @@ the game's Internet Lobby. Design of 2026-10-05 for stages I and J of the
 program, its configuration, listings, browsing, the router test's probes,
 telemetry counts, the limits, the status line and files, and the `flood`
 tool. *Built (J2, 2026-10-05):* introductions, the Meets to hosts and their
-retries ([as built](formats/master-protocol.md#introductions-as-built)). The
-relay comes with slice J3: until then the master reads its packets and
-drops them, counted. Every setting, default
+retries ([as built](formats/master-protocol.md#introductions-as-built)).
+*Built (J3, 2026-10-05):* the relay, on by default, with its channels,
+rates, idle closing and monthly allowance
+([as built](formats/master-protocol.md#the-relay-as-built)). Every setting, default
 and number is an *agent proposal* unless it is credited to John; John
 approved the abuse limits, the ports, the relay cap and where it runs on
 2026-10-05 ([decisions](MULTIPLAYER.md#decisions)). How it works inside: [architecture](ARCHITECTURE.md#master-server-and-connectivity).
@@ -110,20 +111,34 @@ tore-master --version
 | Option | Meaning |
 | --- | --- |
 | `--config FILE` | The configuration file. Without one, every setting has its default |
-| `--check-config` | Reads the configuration, says what it would do, and exits: 0 when it is good, 1 with the line and the reason when not |
+| `--check-config` | Reads the configuration, says what it would do, and exits: 0 when it is good, 1 with the line and the reason when not. One line says plainly whether the relay is active and its limits |
 | `flood TARGET SECONDS` | A load tool: sends every kind of request at a master from many ports of this machine for that long, then prints what came back ([the flood tool](#the-flood-tool)). Only point it at a master you run |
 | `--version` | The build: version and commit |
 
 It runs in the foreground and writes its lines to standard output. Typed on
 its standard input, `status` prints the status line now, `listings` prints
-one line per listing and the count, and `quit` stops it cleanly: it writes
-the day's telemetry counts and prints `Stopped`. Ctrl+C and SIGTERM (what
+one line per listing and the count, and `quit` stops it cleanly: it closes
+every relay channel (both ends are told), writes the day's telemetry counts
+and the relay's month figure, and prints `Stopped`. Ctrl+C and SIGTERM (what
 `systemctl stop` sends) end it at once (agent decision: the standard library
 cannot catch a signal without unsafe code, which the project forbids). That
-loses little: the counts and the minute table are written every minute, and
-the listings are rebuilt within one heartbeat of a restart. From slice J3 a
-stop also ends the relayed pairs, which time out and rejoin as after any
-lost connection.
+loses little: the counts, the minute table and the relay's figure are
+written every minute, and the listings are rebuilt within one heartbeat of
+a restart. Either way a stop ends the relayed pairs, which time out and
+rejoin as after any lost connection.
+
+The start lines, and `--check-config`, say what the relay will do in one
+line, for example:
+
+```text
+relay ACTIVE: up to 64 channels, 2 per player address, 64 KB/s each way per channel; 800 GB a month (new channels refused from 760 GB, open ones closed at 800 GB)
+relay this month (2026-10): 12.7GB of 800 GB relayed
+```
+
+With `relay off` the line reads `relay OFF: players who cannot connect
+directly cannot join`; with `relay-channels 0` or `relay-month-gb 0` it says
+that every relay request is refused. The second line is a start line only:
+the figure read back from the state folder.
 
 ### The flood tool
 
@@ -178,11 +193,11 @@ Numbers may be written with thousands commas (`100,000`).
 | `browse-rate` | 1 to 1,000 a second | 20 | Browse and details requests answered per source, with bursts of twice as many |
 | `introduce-rate` | 1 to 100 a second | 4 | Introduce requests per source, before the cookie is checked. After it, 30 a minute per source and 10 a second per listing (fixed, agent decision, J2) |
 | `answer-rate` | 100 to 100,000 a second | 5,000 | Answers of every kind together |
-| `relay` | `on`, `off` | `on` | Whether to relay at all. The `relay-` settings are read and checked now and used from slice J3 |
+| `relay` | `on`, `off` | `on` | Whether to relay at all (John, 2026-10-05: on) |
 | `relay-channels` | 0 to 1,000 | 64 | Relayed pairs at once |
 | `relay-channels-per-source` | 1 to 30 | 2 | Relayed pairs one player's address may have |
-| `relay-rate` | 8 to 1,024 KB/s | 64 | Each channel's limit, each way |
-| `relay-month-gb` | 0 to 100,000 | 800 | Relayed gigabytes sent out each calendar month (UTC) |
+| `relay-rate` | 8 to 1,024 KB/s | 64 | Each channel's limit, each way, with bursts of twice as much (1 KB is 1,000 bytes) |
+| `relay-month-gb` | 0 to 100,000 | 800 | Relayed gigabytes sent out each calendar month (UTC): new channels are refused from 95 percent of it, open ones closed at 100 (John, 2026-10-05) |
 | `telemetry` | `on`, `off` | `on` | Whether to count the games' anonymous reports |
 | `status-interval` | 0 to 3,600 seconds | 60 | How often the status line is written; 0 for never |
 
@@ -263,10 +278,10 @@ whenever the master falls silent.
   that differ from the defaults, then `Ready`), one status line every
   `status-interval`, and notable events: each listing made, moved and
   removed with why, a source over a limit (once a minute per source, with
-  its address, or its /64 for IPv6, and the limit), from slice J3 a relay
-  channel opened or closed (with the two ends' addresses and its bytes) and
-  the allowance reaching 95 and 100 percent, and problems writing the state
-  folder.
+  its address, or its /64 for IPv6, and the limit), each relay channel
+  opened or closed (with the two ends' addresses and, on closing, why and
+  its bytes each way), each relay request refused, the allowance reaching 95
+  and 100 percent, and problems writing the state folder.
 
   ```text
   status listings=41 sources=318 browse/s=2.4 introductions/min=7 punched=5 relayed=2 channels=3 relay-month=12.7GB dropped(limit)=0 invalid=4 in=812.3KB out=95.1KB
@@ -274,6 +289,10 @@ whenever the master falls silent.
   moved id=4f1c2a9be07d3e11 from=203.0.113.5:26900 to=203.0.113.5:31877
   unlisted id=4f1c2a9be07d3e11 from=203.0.113.5:31877 name="Friday night" reason=expired listings=41
   limit source=198.51.100.7 over=browse (20 a second, bursts of 40)
+  relay opened channel=d966e9a6 host=203.0.113.5:26900 player=198.51.100.20:40112 channels=3
+  relay closed channel=d966e9a6 host=203.0.113.5:26900 player=198.51.100.20:40112 reason=closed by an end to-host=100384 to-player=378236 channels=2
+  relay refused player=198.51.100.21:40007 result=too-many
+  relay allowance: 95 percent of 800 GB relayed this month, so new channels are refused
   ```
 
   In the status line, `listings`, `sources` (remembered sources) and
@@ -283,9 +302,14 @@ whenever the master falls silent.
   `invalid` (datagrams that are not a master packet this master answers:
   damaged, malformed, another version, or one of the master's own kinds) and
   `in`/`out` (bytes) are over the time since the previous line.
-  `introductions/min` counts the introductions made (J2); `punched`,
-  `relayed`, `channels` and `relay-month` stay 0 until slice J3 and the
-  games' reports of their paths. A listing's `reason` is `unregistered`,
+  `introductions/min` counts the introductions made (J2); `relayed` the
+  relay channels opened (J3), `channels` those open now, and `relay-month`
+  the bytes relayed out this month with their headers (B, KB, MB or GB, a
+  thousand each). `punched` stays 0: the master cannot see a punch, and
+  the games' reports count their paths in the telemetry. A channel's
+  `reason` is `closed by an end`, `idle`, `over its rate`, `allowance
+  spent` or `the master is stopping`; `to-host` and `to-player` are the
+  bytes of the frames it forwarded each way. A listing's `reason` is `unregistered`,
   `expired`, `replaced by a new registration` (the game restarted on the
   same port) or `another listing moved to its address`. The name is quoted
   with its quotes and control characters escaped.
@@ -297,8 +321,9 @@ whenever the master falls silent.
   keeps](#what-the-master-keeps)), rewritten every minute and when the
   master stops, and read back when it starts again the same day. Kept until
   deleted by hand.
-- **`state-dir/relay-YYYY-MM.txt`**: the month's relayed bytes, written every
-  minute so a restart does not forget them.
+- **`state-dir/relay-YYYY-MM.txt`**: the month's relayed bytes, one
+  number, written every minute and at `quit`, and read back at start so a
+  restart does not forget them.
 
 ## What the master keeps
 
@@ -334,7 +359,11 @@ month, UTC:
 
 - At 95 percent of `relay-month-gb` it refuses new channels ("The Internet
   Lobby's relay is full for this month."); at 100 percent it closes the open
-  ones. Players who can connect directly are not affected.
+  ones (John, 2026-10-05). Players who can connect directly are not
+  affected. Each is logged once a month.
+- It counts each relayed datagram it sends with its IP and UDP headers (28
+  bytes over IPv4, 48 over IPv6), as the provider counts transfer (agent
+  decision), so the figure is a little above the game's own bytes.
 - The figure survives restarts (`relay-YYYY-MM.txt`) and starts again at
   zero on the first of the month.
 - From the [plan's budget](multiplayer-plan.md#bandwidth-budget), a relayed
@@ -348,14 +377,28 @@ month, UTC:
 
 1. Build or download the new `tore-master`.
 2. `tore-master --config /etc/tore-master/master.conf --check-config` with
-   the new program.
+   the new program. Read its `relay` line: from slice J3's build on it says
+   `relay ACTIVE` with its limits (the default, John's choice), or `relay
+   OFF` when the configuration turns it off.
 3. `sudo systemctl stop tore-master`, replace
    `/opt/tore-master/tore-master`, `sudo systemctl start tore-master`.
+4. `journalctl -u tore-master -n 20` shows the new start lines: the same
+   `relay` line, and `relay this month (YYYY-MM): ... of 800 GB relayed`,
+   the figure carried over from before the update.
 
 Hosts list themselves again within one heartbeat (30 seconds) and browsers
-refill. Relayed players are disconnected by the stop; stage K's rejoin
-brings them back. The status line's `channels=` says how many are relayed
-at the moment, so update when it is 0 if you can.
+refill. Relayed players are disconnected by the stop (SIGTERM cannot tell
+them first; `quit` on the console would); stage K's rejoin brings them back.
+The status line's `channels=` says how many are relayed at the moment, so
+update when it is 0 if you can. The month's figure survives the update in
+`relay-YYYY-MM.txt`.
+
+**The first update with the relay (J3).** A master from before slice J3
+read the `relay` settings and dropped every relay packet. The update needs
+no change to `master.conf`: the relay is on by default. The machine's
+firewall needs nothing new (the relay uses the main port, 26901). Watch the
+first `relay opened` and `relay closed` lines in the journal, and the
+`relay-month=` figure, which now grows.
 
 **Versions.** A master answers every master protocol version it knows, so
 one master serves old and new games at once
@@ -383,18 +426,20 @@ target/debug/tore-server --config server.conf --data-dir "$TORE_DATA_DIR"
 # The games it lists, headless:
 target/debug/tore-app --browse 5 --master 127.0.0.1:26911
 # A bot that joins it through an introduction (slice J2), and one through the
-# relay (slice J3; until then the bot refuses --path relay):
+# relay (slice J3):
 target/debug/tore-bot --master 127.0.0.1:26911 --listing "Friday night" --data-dir "$TORE_DATA_DIR"
 target/debug/tore-bot --master 127.0.0.1:26911 --listing "Friday night" --path relay --data-dir "$TORE_DATA_DIR"
 # The flood tool against the local master:
 target/debug/tore-master flood 127.0.0.1:26911 10
 ```
 
-The battery's net lane runs the last of these as `net-master-flood`, and a
+The battery's net lane runs the last of these as `net-master-flood`, a
 master, a listed server and a bot joining through an introduction as
-`net-master-introduce` ([the lane](testing/lane-net.md)); the Rust tests run
+`net-master-introduce`, and the same with `--path relay` as
+`net-master-relay` ([the lane](testing/lane-net.md)); the Rust tests run
 the master on the network simulator (`cargo test --locked -p tore-master`),
-the punching table among them (`tests/punch.rs`).
+the punching table among them (`tests/punch.rs`, whose relay rows connect
+through the relay), and the relay's own rules (`src/relay_tests.rs`).
 
 In the game, set the master's address in the Internet Lobby's Options (or
 start it with `--master 127.0.0.1:26911`). On one machine every direct path

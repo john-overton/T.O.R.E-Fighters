@@ -201,6 +201,7 @@ impl Config {
             format!("probe port {}", self.probe_port)
         });
         lines.push(format!("state folder {}", self.state_dir.display()));
+        lines.push(self.relay_line());
         let defaults = Self::defaults(&self.state_dir);
         let (s, d) = (&self.settings, &defaults.settings);
         let mut differ = Vec::new();
@@ -273,6 +274,29 @@ impl Config {
             ));
         }
         lines
+    }
+}
+
+impl Config {
+    /// What the relay will do, in one plain line: whether it is active, and
+    /// its limits (John, 2026-10-05: say plainly that it is).
+    pub fn relay_line(&self) -> String {
+        let r = &self.settings.relay;
+        if !r.on {
+            return "relay OFF: players who cannot connect directly cannot join".into();
+        }
+        if r.channels == 0 {
+            return "relay on but relay-channels is 0: every relay request is refused".into();
+        }
+        if r.month_gb == 0 {
+            return "relay on but relay-month-gb is 0: every relay request is refused".into();
+        }
+        let refuse = u64::from(r.month_gb) * crate::relay::REFUSE_PERCENT / 100;
+        format!(
+            "relay ACTIVE: up to {} channels, {} per player address, {} KB/s each way per channel; \
+             {} GB a month (new channels refused from {refuse} GB, open ones closed at {} GB)",
+            r.channels, r.channels_per_source, r.rate_kb, r.month_gb, r.month_gb
+        )
     }
 }
 
@@ -352,8 +376,28 @@ mod tests {
         assert!(!s.relay.on && !s.telemetry);
         assert_eq!(config.status_interval, 0);
         let described = config.describe().join("\n");
+        assert!(described.contains("relay OFF"), "{described}");
         assert!(described.contains("probe port off"));
         assert!(described.contains("telemetry off"));
+    }
+
+    #[test]
+    fn the_relay_line_says_plainly_whether_it_is_active() {
+        let config = Config::parse("", &base()).unwrap();
+        assert_eq!(
+            config.relay_line(),
+            "relay ACTIVE: up to 64 channels, 2 per player address, 64 KB/s each way per channel; \
+             800 GB a month (new channels refused from 760 GB, open ones closed at 800 GB)"
+        );
+        assert!(config.describe().contains(&config.relay_line()));
+        for (text, words) in [
+            ("relay off\n", "relay OFF"),
+            ("relay-channels 0\n", "relay-channels is 0"),
+            ("relay-month-gb 0\n", "relay-month-gb is 0"),
+        ] {
+            let line = Config::parse(text, &base()).unwrap().relay_line();
+            assert!(line.contains(words), "{text}: {line}");
+        }
     }
 
     #[test]

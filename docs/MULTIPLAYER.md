@@ -563,8 +563,9 @@ flowchart TB
 A small service, planned for jroverton.com, that lists games, introduces
 players to hosts and relays the traffic of those who cannot connect any
 other way. Its protocol is versioned from day one. *Designed 2026-10-05;
-the master program, `tore-master`, is built apart from introductions and the
-relay (I2, 2026-10-05), the game's side is not yet; every item below is an
+the master program, `tore-master`, is built (I2, 2026-10-05), with its
+introductions (J2) and the relay (J3, on by default), and `tore-bot` joins
+through both; the game's own screens are not yet; every item below is an
 agent proposal unless credited, and John's decisions of 2026-10-05 are in
 the [last table of decisions](#decisions):* the [architecture](ARCHITECTURE.md#master-server-and-connectivity),
 the [master's wire](formats/master-protocol.md) and
@@ -966,7 +967,7 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | Telemetry | On by default, with a switch and a one-time notice, sending only what [Replay and telemetry](#replay-and-telemetry) lists |
 | A dedicated server's listing | Off by default; the operator turns broadcasting on in its configuration (as OpenRA's servers do) |
 | Port mapping | On by default while hosting, with a switch; the mapping is removed when hosting stops |
-| Relay cap | New relay channels are refused at 95 percent of 800 GB a month; John confirms the plan's transfer allowance on the account |
+| Relay cap | New relay channels are refused at 95 percent of 800 GB a month and open ones closed at 100 percent; the relay is on; a stalled relayed game stays connected (framed keepalives); John confirms the plan's transfer allowance on the account |
 | Master abuse limits | Approved as in the [master protocol's limits](formats/master-protocol.md) |
 | Internet Lobby title | Lettered like DIRECT NETWORK CONNECTION; a player's own `InternetLobby.png` takes its place |
 | Master in releases | The release workflow also publishes a Linux `tore-master`, built on Ubuntu |

@@ -23,7 +23,8 @@ use tore_net::master::packet::{MAX_MASTER_DATAGRAM, peek_kind};
 use tore_net::master::{
     CandidateKind, Challenge, CookieKey, Details, Heartbeat, HeartbeatAck, Introduce, Keep, Listed,
     ListingDetails, MasterDecodeError, MasterKind, MasterPacket, Probe, ProbeAnswer, ProbePort,
-    Register, RelayFrame, Report, SUPPORTED_VERSIONS, UnknownListing, Unregister, Unsupported,
+    Register, RelayFrame, RelayRequest, Report, SUPPORTED_VERSIONS, UnknownListing, Unregister,
+    Unsupported,
 };
 use tore_net::{Datagrams, Entropy, MAX_RECEIVE_BATCH, SplitMix64};
 
@@ -66,7 +67,7 @@ pub struct Settings {
     pub max_sources: usize,
     /// Whether reports are counted.
     pub telemetry: bool,
-    /// The relay's settings (used from slice J3).
+    /// The relay's settings (slice J3).
     pub relay: RelaySettings,
 }
 
@@ -209,7 +210,7 @@ impl Master {
             listings: Listings::default(),
             tests: MappingTests::default(),
             introductions: Introductions::new(entropy),
-            relays: Relays::default(),
+            relays: Relays::new(settings.relay, entropy),
             telemetry: Telemetry::new(day, entropy),
             counters: Counters::default(),
             out: VecDeque::new(),
@@ -248,6 +249,18 @@ impl Master {
         &self.relays
     }
 
+    /// The relay, to resume or roll its month's figure.
+    pub fn relays_mut(&mut self) -> &mut Relays {
+        &mut self.relays
+    }
+
+    /// The master is stopping: every relay channel is closed and both its
+    /// ends told (Relay close, reason 4), to send before the sockets close.
+    pub fn stop(&mut self) {
+        self.relays.stop();
+        self.send_relays();
+    }
+
     /// The day's telemetry counts.
     pub fn telemetry(&self) -> &Telemetry {
         &self.telemetry
@@ -267,9 +280,10 @@ impl Master {
     }
 
     /// The next notable event for the log: a listing made, moved or removed,
-    /// a source over a limit.
+    /// a source over a limit, a relay channel opened or closed, the relay's
+    /// allowance.
     pub fn poll_log(&mut self) -> Option<String> {
-        self.log.pop_front()
+        self.log.pop_front().or_else(|| self.relays.poll_log())
     }
 
     /// Timers: listings that expire, Meets due again, introductions to
@@ -281,6 +295,21 @@ impl Master {
         self.introductions.update(now);
         self.send_meets();
         self.relays.update(now);
+        self.send_relays();
+    }
+
+    /// Queues what the relay wants sent from the main port: forwarded
+    /// frames, Relay opens, offers and closes. None of them is an answer
+    /// fitted to a request (agent decision, as the Meets): each goes to an
+    /// address proven by a listing or an introduction.
+    fn send_relays(&mut self) {
+        while let Some((to, datagram)) = self.relays.poll_send() {
+            self.out.push_back(Outgoing {
+                port: MasterPort::Main,
+                to,
+                datagram,
+            });
+        }
     }
 
     /// Queues the Meets the introductions want sent, from the main port. A
@@ -350,7 +379,10 @@ impl Master {
         // Relay frames take the fast path: read in place, never copied.
         if port == MasterPort::Main && peek_kind(bytes) == Some(MasterKind::Relay) {
             match RelayFrame::open(bytes) {
-                Ok(frame) => self.relays.frame(now, from, &frame),
+                Ok(frame) => {
+                    self.relays.frame(now, from, &frame, bytes);
+                    self.send_relays();
+                }
                 Err(error) => self.refuse(now, port, from, bytes.len(), error),
             }
             return;
@@ -374,9 +406,15 @@ impl Master {
             (_, MasterPacket::MeetAck(ack)) => {
                 self.introductions.meet_ack(now, from, &ack, &self.listings)
             }
-            (_, MasterPacket::RelayRequest(request)) => self.relays.request(now, from, &request),
-            (_, MasterPacket::RelayOpenAck(ack)) => self.relays.open_ack(now, from, &ack),
-            (_, MasterPacket::RelayClose(close)) => self.relays.close(now, from, &close),
+            (_, MasterPacket::RelayRequest(request)) => self.relay_request(now, from, request),
+            (_, MasterPacket::RelayOpenAck(ack)) => {
+                self.relays.open_ack(now, from, &ack, &self.listings);
+                self.send_relays();
+            }
+            (_, MasterPacket::RelayClose(close)) => {
+                self.relays.close(now, from, &close);
+                self.send_relays();
+            }
             // The master's own kinds: nobody sends them to it.
             (_, _) => self.counters.unexpected += 1,
         }
@@ -785,6 +823,17 @@ impl Master {
             self.answer(now, from, &packet, len, true);
         }
         self.send_meets();
+    }
+
+    /// A Relay request: the source's limit (2 a minute), then the
+    /// introduction it names, then the relay's own rules.
+    fn relay_request(&mut self, now: Duration, from: SocketAddr, request: RelayRequest) {
+        if self.limit(now, from, Limit::RelayRequest).is_none() {
+            return;
+        }
+        let ends = self.introductions.ends(request.introduction_id);
+        self.relays.request(now, from, &request, ends);
+        self.send_relays();
     }
 
     fn report(&mut self, now: Duration, from: SocketAddr, report: Report) {

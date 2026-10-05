@@ -886,7 +886,7 @@ fn reports_are_counted_without_answers_and_limited() {
 }
 
 #[test]
-fn an_introduce_is_challenged_and_the_relay_dropped_and_counted_until_slice_j3() {
+fn an_introduce_is_challenged_and_a_frame_of_no_channel_dropped_and_counted() {
     let mut rig = Rig::new(Settings::default());
     let mut player = rig.net.bind(a("192.0.2.50:40000")).unwrap();
     let introduce = MasterPacket::Introduce(Introduce {
