@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Battery test runner for T.O.R.E-Fighters.
 
-Runs scenarios (one `tore-app` invocation each) in parallel, checks the output
-for problems and writes one results folder per run. See docs/testing/README.md.
+Runs scenarios (one `tore-app` invocation each, or for the `net` lane a Python
+driver that owns several processes) in parallel, checks the output for problems
+and writes one results folder per run. See docs/testing/README.md.
 
     python3 tools/battery.py --list
     python3 tools/battery.py --lane ai --jobs 8
@@ -25,10 +26,13 @@ import json
 import os
 import re
 import shutil
+import signal
+import socket
 import subprocess
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -37,7 +41,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import battery_selection as selection  # noqa: E402
 
-LANES = ("menus", "flight", "ai", "replay")
+# Run as a script, this file is `__main__`; the scenario modules `import battery`, which must be this same
+# module, so that the classes they raise and build are the ones the runner catches and calls.
+if __name__ == "__main__":
+    sys.modules.setdefault("battery", sys.modules["__main__"])
+
+LANES = ("menus", "flight", "ai", "replay", "net")
 
 # Output that means something is wrong in any scenario, unless it opts out.
 GENERIC_BAD = [
@@ -77,6 +86,14 @@ class Scenario:
     # failure is reported as known instead of failing the run, and it fails
     # once it starts passing so the marker gets removed.
     known_failure: str = ""
+    # Several processes instead of one `tore-app` run: a function that gets a `Drive` and starts, feeds,
+    # waits for and stops its own processes (a `tore-server` and `tore-bot`s, a hosting game and a bot).
+    # The runner gives it the same timeout, the same per-scenario data folder and the same checks on the
+    # combined output (every line is prefixed with its process's label, `[server] `), and kills whatever
+    # it leaves running. `args` is unused. A driver that starts a windowed process sets `window=True`.
+    driver: Optional[Callable[["Drive"], None]] = None
+    # The binaries a driver starts besides the game: "server" and "bot". Checked before the run starts.
+    uses: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass
@@ -100,6 +117,284 @@ class Result:
     problems: list[str]
     command: list[str]
     log: str
+
+
+class DriveError(Exception):
+    """A driver gives up: the message becomes the scenario's problem."""
+
+
+class DriveTimeout(DriveError):
+    """The scenario's time ran out while the driver was waiting."""
+
+
+_PORT_LOCK = threading.Lock()
+_PORTS_GIVEN: set[int] = set()
+
+
+def free_port() -> int:
+    """A UDP port nothing on this machine is using (IPv4 and IPv6), never handed out twice in this run."""
+    with _PORT_LOCK:
+        for _ in range(200):
+            found = None
+            for family, host in ((socket.AF_INET6, "::"), (socket.AF_INET, "0.0.0.0")):
+                try:
+                    probe = socket.socket(family, socket.SOCK_DGRAM)
+                except OSError:
+                    continue
+                try:
+                    probe.bind((host, found or 0))
+                    found = probe.getsockname()[1]
+                except OSError:
+                    found = None
+                    break
+                finally:
+                    probe.close()
+            if found and found not in _PORTS_GIVEN:
+                _PORTS_GIVEN.add(found)
+                return found
+    raise DriveError("no free UDP port")
+
+
+class Proc:
+    """One process a driver started: its output is captured (merged, line by line) as it runs."""
+
+    def __init__(self, drive: "Drive", label: str, argv: list[str], window: bool, stdin: bool) -> None:
+        self.drive = drive
+        self.label = label
+        self.argv = argv
+        self.window = window
+        self.stopped = False  # the driver stopped it on purpose
+        self._lines: list[str] = []
+        self._lock = threading.Lock()
+        cmd = [str(ROOT / "tools" / "agent-run.sh"), *argv] if window else argv
+        self.popen = subprocess.Popen(
+            cmd, cwd=ROOT, env=drive.env, stdin=subprocess.PIPE if stdin else subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1,
+            start_new_session=True,
+        )
+        self._reader = threading.Thread(target=self._read, daemon=True)
+        self._reader.start()
+
+    def _read(self) -> None:
+        assert self.popen.stdout is not None
+        for line in self.popen.stdout:
+            line = line.rstrip("\n")
+            with self._lock:
+                self._lines.append(line)
+            self.drive._record(f"[{self.label}] {line}")
+        self.popen.stdout.close()
+
+    def close(self) -> None:
+        """Releases the pipes once the process is over."""
+        for pipe in (self.popen.stdin,):
+            try:
+                if pipe:
+                    pipe.close()
+            except OSError:
+                pass
+
+    def text(self) -> str:
+        """Everything the process has printed so far, without the label."""
+        with self._lock:
+            return "\n".join(self._lines)
+
+    @property
+    def code(self) -> Optional[int]:
+        return self.popen.poll()
+
+    def alive(self) -> bool:
+        return self.popen.poll() is None
+
+    def send(self, line: str) -> None:
+        """Writes one line to the process's standard input (the server's console)."""
+        self.drive._record(f"[driver] to {self.label}: {line}")
+        try:
+            assert self.popen.stdin is not None
+            self.popen.stdin.write(line + "\n")
+            self.popen.stdin.flush()
+        except (BrokenPipeError, ValueError, OSError):
+            pass
+
+    def wait(self, timeout: float) -> Optional[int]:
+        """The exit code, or None when it is still running after `timeout` seconds (scaled by --timeout-scale)."""
+        limit = time.time() + timeout * self.drive.scale
+        while self.alive():
+            self.drive._check_time()
+            if time.time() >= limit:
+                return None
+            time.sleep(0.05)
+        self._reader.join(5)
+        return self.code
+
+    def wait_for(self, pattern: str, timeout: float) -> bool:
+        """True once the output matches `pattern`; False when it exits or `timeout` seconds pass without it."""
+        limit = time.time() + timeout * self.drive.scale
+        while True:
+            if re.search(pattern, self.text(), re.M):
+                return True
+            if not self.alive():
+                self._reader.join(5)
+                return bool(re.search(pattern, self.text(), re.M))
+            self.drive._check_time()
+            if time.time() >= limit:
+                return False
+            time.sleep(0.05)
+
+    def expect(self, pattern: str, what: str = "") -> bool:
+        """Records a problem unless the output so far matches `pattern`."""
+        if re.search(pattern, self.text(), re.M):
+            return True
+        self.drive.problem(f"{self.label}: missing {what or 'output'} /{pattern}/")
+        return False
+
+    def forbid(self, pattern: str, what: str = "") -> bool:
+        """Records a problem when the output so far matches `pattern`."""
+        m = re.search(pattern, self.text(), re.M)
+        if m:
+            self.drive.problem(f"{self.label}: forbidden {what or 'output'} /{pattern}/: {m.group(0)[:200]}")
+        return not m
+
+    def finish(self, timeout: float, expect_exit: Optional[int] = 0) -> Optional[int]:
+        """Waits for the process to end on its own; one that does not is stopped and reported. Checks the code."""
+        code = self.wait(timeout)
+        if code is None:
+            self.drive.problem(f"{self.label} did not exit within {timeout:.0f}s")
+            self.stop()
+            return None
+        self.stopped = True
+        if expect_exit is not None and code != expect_exit:
+            self.drive.problem(f"{self.label} exit code {code}, expected {expect_exit}")
+        return code
+
+    def stop(self, grace: float = 10.0) -> Optional[int]:
+        """Asks the process group to end, and kills it after `grace` seconds."""
+        self.stopped = True
+        if self.alive():
+            self._signal(signal.SIGTERM)
+            try:
+                self.popen.wait(grace)
+            except subprocess.TimeoutExpired:
+                self._signal(signal.SIGKILL)
+                self.popen.wait()
+        self._reader.join(5)
+        return self.code
+
+    def _signal(self, sig: int) -> None:
+        try:
+            os.killpg(self.popen.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+class Drive:
+    """What a driver scenario works with: its folders, binaries and processes. See `Scenario.driver`."""
+
+    def __init__(self, s: Scenario, opts: argparse.Namespace, work: Path, data: Path, env: dict, scale: float) -> None:
+        self.scenario = s
+        self.work = work
+        self.data = data
+        self.env = env
+        self.scale = scale
+        self.app = opts.bin
+        self.server = opts.server_bin
+        self.bot = opts.bot_bin
+        self.problems: list[str] = []
+        self.procs: list[Proc] = []
+        self.timed_out = False
+        self._lines: list[str] = []
+        self._lock = threading.Lock()
+
+    def _record(self, line: str) -> None:
+        with self._lock:
+            self._lines.append(line)
+
+    def output(self) -> str:
+        with self._lock:
+            return "\n".join(self._lines) + "\n"
+
+    def log(self, text: str) -> None:
+        """A line of the driver's own in the log."""
+        self._record(f"[driver] {text}")
+
+    def problem(self, text: str) -> None:
+        self.problems.append(text)
+        self.log(f"PROBLEM: {text}")
+
+    def port(self) -> int:
+        return free_port()
+
+    def _check_time(self) -> None:
+        if self.timed_out:
+            raise DriveTimeout("the scenario's time ran out")
+
+    def start(self, label: str, argv: list, window: bool = False, stdin: bool = False) -> Proc:
+        """Starts a process (`argv[0]` is a path such as `d.server`), labelled in the log."""
+        self._check_time()
+        if window and not self.scenario.window:
+            raise DriveError(f"{label}: a driver that opens a window must set window=True on its Scenario")
+        argv = [str(a).replace("{work}", str(self.work)) for a in argv]
+        self.log(f"start {label}: {' '.join(argv)}")
+        proc = Proc(self, label, argv, window, stdin)
+        self.procs.append(proc)
+        return proc
+
+    def run(self, label: str, argv: list, timeout: float = 60.0, expect_exit: Optional[int] = 0, window: bool = False) -> Proc:
+        """Starts a process and waits for it to end (a probe such as `--find-games`)."""
+        proc = self.start(label, argv, window=window)
+        proc.finish(timeout, expect_exit)
+        return proc
+
+    def sleep(self, seconds: float) -> None:
+        end = time.time() + seconds
+        while time.time() < end:
+            self._check_time()
+            time.sleep(min(0.1, max(0.0, end - time.time())))
+
+    def expire(self) -> None:
+        """The scenario's time ran out: stop every process (from the timer's thread)."""
+        self.timed_out = True
+        for proc in list(self.procs):
+            proc._signal(signal.SIGTERM)
+
+        def reap() -> None:
+            time.sleep(10)
+            for proc in list(self.procs):
+                if proc.alive():
+                    proc._signal(signal.SIGKILL)
+
+        threading.Thread(target=reap, daemon=True).start()
+
+    def cleanup(self, finished_cleanly: bool) -> None:
+        """Stops anything still running; after a clean driver that is a problem of its own."""
+        for proc in self.procs:
+            if proc.alive():
+                if finished_cleanly and not proc.stopped:
+                    self.problem(f"{proc.label} was still running when the driver finished")
+                proc.stop()
+            proc.close()
+
+
+def run_driver(s: Scenario, opts: argparse.Namespace, work: Path, data: Path, env: dict) -> tuple[str, bool, list[str]]:
+    """Runs a driver scenario. Returns (the combined output, timed out, the driver's problems)."""
+    drive = Drive(s, opts, work, data, env, opts.timeout_scale)
+    timer = threading.Timer(s.timeout * opts.timeout_scale, drive.expire)
+    timer.daemon = True
+    timer.start()
+    clean = False
+    try:
+        s.driver(drive)
+        clean = True
+    except DriveTimeout:
+        pass
+    except DriveError as e:
+        drive.problem(str(e))
+    except Exception:  # a bug in the driver or a check it ran: report it with its trace
+        drive.problem("the driver failed: " + traceback.format_exc().strip().splitlines()[-1])
+        drive.log(traceback.format_exc())
+    finally:
+        timer.cancel()
+        drive.cleanup(clean and not drive.timed_out)
+    return drive.output(), drive.timed_out, drive.problems
 
 
 def load_scenarios() -> list[Scenario]:
@@ -209,7 +504,9 @@ def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: 
     clone_profile(Path(opts.profile), data)
     resolved = [a.replace("{work}", str(work)) for a in s.args]
     cmd = [opts.bin, *resolved]
-    if s.window:
+    if s.driver:
+        cmd = ["driver", s.name]
+    elif s.window:
         cmd = [str(ROOT / "tools" / "agent-run.sh"), *cmd]
     env = dict(os.environ)
     env.update({"TORE_DATA_DIR": str(data), "TORE_NO_ERROR_DIALOG": "1", "RUST_BACKTRACE": "1"})
@@ -219,26 +516,32 @@ def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: 
     if s.window:
         window_slots.acquire()
     try:
-        proc = subprocess.Popen(
-            cmd, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
-            start_new_session=True,
-        )
-        timed_out = False
-        try:
-            output, _ = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            try:
-                os.killpg(proc.pid, 15)
-            except ProcessLookupError:
-                pass
-            try:
-                output, _ = proc.communicate(timeout=10)
-            except subprocess.TimeoutExpired:
-                os.killpg(proc.pid, 9)
-                output, _ = proc.communicate()
         step_problems: list[str] = []
-        output = run_steps(s, opts, env, work, output, step_problems, window_slots)
+        if s.driver:
+            output, timed_out, driver_problems = run_driver(s, opts, work, data, env)
+            step_problems += driver_problems
+            returncode = 0  # the driver's own problems carry what went wrong
+        else:
+            proc = subprocess.Popen(
+                cmd, cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
+                start_new_session=True,
+            )
+            timed_out = False
+            try:
+                output, _ = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                try:
+                    os.killpg(proc.pid, 15)
+                except ProcessLookupError:
+                    pass
+                try:
+                    output, _ = proc.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(proc.pid, 9)
+                    output, _ = proc.communicate()
+            returncode = proc.returncode
+            output = run_steps(s, opts, env, work, output, step_problems, window_slots)
     finally:
         if s.window:
             window_slots.release()
@@ -246,7 +549,7 @@ def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: 
     log = run_dir / "logs" / f"{s.name}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(f"$ {' '.join(cmd)}\n\n{output}")
-    problems = judge(s, output, None if timed_out else proc.returncode, timed_out, work) + step_problems
+    problems = judge(s, output, None if timed_out else returncode, timed_out, work) + step_problems
     if s.known_failure:
         if problems:
             problems = [f"known failure ({s.known_failure}): {p}" for p in problems[:1]]
@@ -258,7 +561,13 @@ def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: 
         passed = not problems
     if not opts.keep_data:
         shutil.rmtree(data, ignore_errors=True)
-    return Result(s.name, s.lane, passed, seconds, None if timed_out else proc.returncode, problems, cmd, str(log.relative_to(run_dir)))
+    return Result(s.name, s.lane, passed, seconds, None if timed_out else returncode, problems, cmd, str(log.relative_to(run_dir)))
+
+
+def missing_binaries(scenarios: list[Scenario], opts: argparse.Namespace) -> list[str]:
+    """The server and bot programs the chosen driver scenarios start that are not built."""
+    wanted = {"server": opts.server_bin, "bot": opts.bot_bin}
+    return [path for kind, path in wanted.items() if any(kind in s.uses for s in scenarios) and not Path(path).exists()]
 
 
 def write_summary(run_dir: Path, results: list[Result], started: float) -> None:
@@ -304,6 +613,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--jobs", type=int, default=None, help="scenarios at once (default 6; with --changed, half the cores, 4 to 12)")
     ap.add_argument("--windows", type=int, default=3, help="windowed scenarios at once (default 3)")
     ap.add_argument("--bin", default=str(ROOT / "target" / "debug" / "tore-app"))
+    ap.add_argument("--server-bin", default=None, help="tore-server for the net lane (default: beside --bin)")
+    ap.add_argument("--bot-bin", default=None, help="tore-bot for the net lane (default: beside --bin)")
     ap.add_argument("--profile", default=str(ROOT / ".local" / "bugbash-data"), help="imported data folder to clone per scenario")
     ap.add_argument("--out", default=str(ROOT / ".local" / "battery"), help="folder that receives one subfolder per run")
     ap.add_argument("--timeout-scale", type=float, default=1.0)
@@ -320,6 +631,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--plan", action="store_true", help="with --changed: print the choice and stop")
     ap.add_argument("--no-unit-tests", action="store_true", help="with --changed: skip the Python unit tests it names for the battery's own files")
     opts = ap.parse_args(argv)
+    sibling = lambda name: str(Path(opts.bin).with_name(name + (".exe" if sys.platform == "win32" else "")))  # noqa: E731
+    opts.server_bin = opts.server_bin or sibling("tore-server")
+    opts.bot_bin = opts.bot_bin or sibling("tore-bot")
     if opts.jobs is None:
         opts.jobs = selection.default_jobs() if opts.changed is not None else 6
     if opts.changed is None and (opts.budget is not None or opts.head or opts.plan):
@@ -358,6 +672,9 @@ def main(argv: list[str]) -> int:
         return 2
     if not Path(opts.bin).exists():
         print(f"binary not found: {opts.bin} (build it first)", file=sys.stderr)
+        return 2
+    for path in missing_binaries(scenarios, opts):
+        print(f"binary not found: {path} (cargo build --locked -p tore-server -p tore-session)", file=sys.stderr)
         return 2
     if not (Path(opts.profile) / "media-source.txt").exists():
         print(f"{opts.profile} is not an imported data folder; import once with --import ... --import-only", file=sys.stderr)

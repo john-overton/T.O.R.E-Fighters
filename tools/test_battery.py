@@ -5,6 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import battery  # noqa: E402
+from battery import DriveError  # noqa: E402
 
 
 def scenario(**kw):
@@ -91,6 +92,202 @@ class JudgeTests(unittest.TestCase):
     def test_scenario_names_are_unique_and_lanes_valid(self):
         names = [s.name for s in battery.load_scenarios()]
         self.assertEqual(len(names), len(set(names)))
+
+
+PY = sys.executable
+
+
+def drive_opts(directory, scale=1.0):
+    import argparse
+
+    profile = Path(directory) / "profile"
+    profile.mkdir(exist_ok=True)
+    return argparse.Namespace(
+        bin=PY, server_bin=PY, bot_bin=PY, profile=str(profile), keep_data=True, timeout_scale=scale, out=directory,
+    )
+
+
+def run_driver_scenario(driver, timeout=30, scale=1.0, **kw):
+    import threading
+
+    with tempfile.TemporaryDirectory() as d:
+        opts = drive_opts(d, scale)
+        sc = battery.Scenario(name="drv", lane="net", args=[], driver=driver, timeout=timeout, **kw)
+        run_dir = Path(d) / "run"
+        result = battery.run_one(sc, opts, run_dir, threading.Semaphore(1))
+        return result, (run_dir / result.log).read_text()
+
+
+class DriverTests(unittest.TestCase):
+    """Scenarios that own several processes (the net lane); the running Python stands in for the programs."""
+
+    def test_output_is_labelled_and_checked_like_a_single_run(self):
+        def driver(d):
+            one = d.start("one", [d.app, "-c", "print('hello from one')"])
+            two = d.start("two", [d.server, "-c", "print('hello from two')"])
+            one.finish(20)
+            two.finish(20)
+            one.expect(r"^hello from one$")
+            two.forbid(r"one")
+
+        result, log = run_driver_scenario(driver, expect=[r"^\[two\] hello from two$"], forbid=[r"NaN"])
+        self.assertTrue(result.ok, result.problems)
+        self.assertIn("[one] hello from one", log)
+        self.assertIn("[driver] start one:", log)
+        self.assertEqual(result.exit_code, 0)
+
+    def test_the_generic_checks_see_every_process(self):
+        def driver(d):
+            d.start("a", [d.app, "-c", "print('speed=NaN')"]).finish(20)
+
+        result, _ = run_driver_scenario(driver)
+        self.assertFalse(result.ok)
+        self.assertTrue(any("NaN" in p for p in result.problems), result.problems)
+
+    def test_exit_codes_expectations_and_problems_fail_the_scenario(self):
+        def driver(d):
+            d.start("bad", [d.app, "-c", "raise SystemExit(3)"]).finish(20)
+            d.start("ok", [d.app, "-c", "raise SystemExit(3)"]).finish(20, expect_exit=3)
+            d.start("any", [d.app, "-c", "raise SystemExit(9)"]).finish(20, expect_exit=None)
+            d.start("quiet", [d.app, "-c", "print('x')"]).expect(r"never printed")
+
+        result, _ = run_driver_scenario(driver)
+        self.assertFalse(result.ok)
+        self.assertIn("bad exit code 3, expected 0", result.problems)
+        self.assertTrue(any(p.startswith("quiet: missing") for p in result.problems), result.problems)
+        self.assertEqual(len([p for p in result.problems if p.startswith(("ok ", "any "))]), 0)
+
+    def test_the_console_and_waits(self):
+        code = "import sys\nprint('ready', flush=True)\nfor line in sys.stdin:\n    print('got', line.strip(), flush=True)\n    if line.strip() == 'quit': break\n"
+
+        def driver(d):
+            server = d.start("server", [d.server, "-u", "-c", code], stdin=True)
+            if not server.wait_for(r"^ready$", 20):
+                raise DriveError("no ready")
+            server.send("hello")
+            self.assertTrue(server.wait_for(r"^got hello$", 20))
+            self.assertFalse(server.wait_for(r"never", 0.2))
+            server.send("quit")
+            self.assertEqual(server.finish(20), 0)
+
+        result, _ = run_driver_scenario(driver)
+        self.assertTrue(result.ok, result.problems)
+
+    def test_a_process_left_running_is_a_problem_and_is_stopped(self):
+        pids = []
+
+        def driver(d):
+            proc = d.start("stray", [d.app, "-c", "import time; time.sleep(60)"])
+            pids.append(proc.popen.pid)
+            d.sleep(0.2)
+
+        result, _ = run_driver_scenario(driver)
+        self.assertFalse(result.ok)
+        self.assertIn("stray was still running when the driver finished", result.problems)
+        self.assert_gone(pids[0])
+
+    def test_a_process_the_driver_stopped_is_not_a_problem(self):
+        def driver(d):
+            proc = d.start("stray", [d.app, "-c", "import time; time.sleep(60)"])
+            d.sleep(0.2)
+            proc.stop(grace=5)
+
+        result, _ = run_driver_scenario(driver)
+        self.assertTrue(result.ok, result.problems)
+
+    def test_a_process_that_will_not_exit_is_stopped_and_reported(self):
+        def driver(d):
+            self.assertIsNone(d.start("slow", [d.app, "-c", "import time; time.sleep(60)"]).finish(0.3))
+
+        result, _ = run_driver_scenario(driver)
+        self.assertIn("slow did not exit within 0s", result.problems)
+
+    def test_the_timeout_stops_every_process_and_the_driver(self):
+        import time
+
+        pids = []
+
+        def driver(d):
+            pids.append(d.start("a", [d.app, "-c", "import time; time.sleep(60)"]).popen.pid)
+            pids.append(d.start("b", [d.app, "-c", "import time; time.sleep(60)"]).popen.pid)
+            d.sleep(60)
+
+        started = time.time()
+        result, _ = run_driver_scenario(driver, timeout=1)
+        self.assertLess(time.time() - started, 20)
+        self.assertFalse(result.ok)
+        self.assertIsNone(result.exit_code)
+        self.assertTrue(any("timed out" in p for p in result.problems), result.problems)
+        for pid in pids:
+            self.assert_gone(pid)
+
+    def test_a_driver_that_fails_or_gives_up_is_reported(self):
+        def broken(d):
+            raise ValueError("bad regex")
+
+        def gives_up(d):
+            raise DriveError("the server never came up")
+
+        result, log = run_driver_scenario(broken)
+        self.assertFalse(result.ok)
+        self.assertTrue(any("the driver failed: ValueError: bad regex" in p for p in result.problems), result.problems)
+        self.assertIn("Traceback", log)
+        result, _ = run_driver_scenario(gives_up)
+        self.assertIn("the server never came up", result.problems)
+
+    def test_a_window_needs_a_windowed_scenario(self):
+        def driver(d):
+            d.start("w", [d.app, "-c", "pass"], window=True)
+
+        result, _ = run_driver_scenario(driver)
+        self.assertTrue(any("must set window=True" in p for p in result.problems), result.problems)
+
+    def test_the_work_folder_and_the_data_folder_are_given(self):
+        def driver(d):
+            self.assertTrue(d.data.is_dir())
+            self.assertEqual(d.data.parent, d.work)
+            proc = d.start("env", [d.app, "-c", "import os; print(os.environ['TORE_DATA_DIR'])"])
+            proc.finish(20)
+            self.assertIn(str(d.data), proc.text())
+
+        result, _ = run_driver_scenario(driver)
+        self.assertTrue(result.ok, result.problems)
+
+    def test_ports_are_free_and_never_handed_out_twice(self):
+        import socket
+
+        ports = [battery.free_port() for _ in range(25)]
+        self.assertEqual(len(set(ports)), 25)
+        for port in ports[:5]:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.bind(("127.0.0.1", port))
+
+    def test_missing_server_and_bot_programs_are_named(self):
+        import argparse
+
+        sc = battery.Scenario(name="a", lane="net", args=[], driver=lambda d: None, uses=("server", "bot"))
+        plain = battery.Scenario(name="b", lane="ai", args=[])
+        opts = argparse.Namespace(server_bin="/nonexistent/tore-server", bot_bin=PY)
+        self.assertEqual(battery.missing_binaries([sc, plain], opts), ["/nonexistent/tore-server"])
+        self.assertEqual(battery.missing_binaries([plain], opts), [])
+
+    def assert_gone(self, pid):
+        import os
+        import time
+
+        for _ in range(100):
+            try:
+                os.kill(pid, 0)
+            except (ProcessLookupError, PermissionError):
+                return
+            # A child that has exited but is not yet collected still answers signal 0.
+            try:
+                if os.waitpid(pid, os.WNOHANG)[0] == pid:
+                    return
+            except ChildProcessError:
+                pass
+            time.sleep(0.05)
+        self.fail(f"process {pid} is still running")
 
 
 if __name__ == "__main__":
