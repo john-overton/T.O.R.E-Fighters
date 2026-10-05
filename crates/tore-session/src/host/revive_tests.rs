@@ -168,6 +168,9 @@ fn a_lost_player_is_told_and_flies_again_in_a_new_plane() {
             .map(|s| s.quantity)
             .collect::<Vec<_>>()
     );
+    // A revival's plane seats nobody more.
+    let status = rig.host.status(rig.net.now());
+    assert_eq!((status.aircraft, status.capacity), (5, 4));
     // Viper flies on in it, and nothing went wrong.
     rig.clients[viper].flying = true;
     rig.run(Duration::from_millis(500));

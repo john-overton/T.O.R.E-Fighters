@@ -105,6 +105,11 @@ impl Revivals {
     pub(super) fn held_seats(&self) -> impl Iterator<Item = SeatId> + '_ {
         self.held.values().copied()
     }
+
+    /// Whether a revival added `plane` to the mission.
+    pub(super) fn added(&self, plane: PlaneId) -> bool {
+        self.spawned.iter().any(|spawned| spawned.plane == plane.0)
+    }
 }
 
 impl Host {

@@ -1141,14 +1141,19 @@ impl Host {
     }
 
     /// Players the host can seat: the lesser of the maximum and the open
-    /// planes.
+    /// planes. A revival's new plane is its player's, so it seats nobody
+    /// more (stage F phase 2).
     fn capacity(&self) -> usize {
         let open = self
             .world
             .roster
             .planes()
             .iter()
-            .filter(|plane| self.open(plane.id) && !self.closed_slot(plane.id.0))
+            .filter(|plane| {
+                self.open(plane.id)
+                    && !self.closed_slot(plane.id.0)
+                    && !self.revival.added(plane.id)
+            })
             .count();
         // The King's player limit (stage F phase 2), the configuration's to
         // start with; a closed slot seats nobody.
