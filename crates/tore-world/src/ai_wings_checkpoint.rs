@@ -629,7 +629,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_rules_and_damaged_bytes_are_refused_without_a_panic() {
+    fn damaged_bytes_are_refused_without_a_panic() {
         let bytes = coded(&lived_in());
         let mut fresh = wings();
         for cut in 0..bytes.0.len() {
@@ -647,13 +647,6 @@ mod tests {
             let at = next() as usize % damaged.len();
             damaged[at] ^= 1 << (next() % 8);
             let _ = restore(&mut fresh, &(damaged, bytes.1.clone()));
-        }
-        // The whole-section coder reaches the mission first, which is not
-        // coded until slice H4 merges: it says so rather than guessing.
-        let mut s = Saver::with_models(Models::default());
-        match wings().save_in_place(&mut s) {
-            Ok(()) | Err(CheckpointError::NotCovered(_)) => {}
-            Err(error) => panic!("{error}"),
         }
     }
 }

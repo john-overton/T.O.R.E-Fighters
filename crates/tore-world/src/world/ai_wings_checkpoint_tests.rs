@@ -149,3 +149,48 @@ fn damaged_bridge_bytes_never_panic() {
     let mut l = Loader::new(&bytes.0, &[], &models);
     let _ = wings.restore_bridge(&mut l);
 }
+
+/// The whole AI wings section, with the AI mission inside it, restores into
+/// a world fresh from the build and codes the same bytes. Until slice H4's
+/// coder merges the section is not covered, and this says so and passes; the
+/// harness's twin restore takes over from there.
+#[test]
+fn the_whole_section_restores_into_a_fresh_world_once_the_mission_is_coded() {
+    use crate::checkpoint::{self, Section};
+    use tore_sim::checkpoint::CheckpointError;
+
+    for scenario in checkpoint_scenarios::all() {
+        let mut world = (scenario.build)();
+        advance(&mut world, &scenario, 0, scenario.at);
+        let bytes = match world.checkpoint_sections(&[Section::AiWings]) {
+            Ok(bytes) => bytes,
+            Err(CheckpointError::NotCovered(what)) => {
+                eprintln!("skipping the AI wings section: {what} is not coded yet");
+                continue;
+            }
+            Err(error) => panic!("{}: {error}", scenario.name),
+        };
+        let mut fresh = (scenario.build)();
+        assert_eq!(
+            fresh.restore_sections(&bytes).unwrap(),
+            vec![Section::AiWings]
+        );
+        let again = fresh.checkpoint_sections(&[Section::AiWings]).unwrap();
+        let (held, restored) = (
+            checkpoint::layout(&bytes).unwrap(),
+            checkpoint::layout(&again).unwrap(),
+        );
+        assert_eq!(held.records, restored.records, "{}", scenario.name);
+        assert!(
+            held.body(&bytes, Section::AiWings) == restored.body(&again, Section::AiWings),
+            "{}: the restored section codes differently",
+            scenario.name
+        );
+        println!(
+            "{}: the AI wings section is {} bytes, {} bytes of shared records",
+            scenario.name,
+            held.body(&bytes, Section::AiWings).map_or(0, <[u8]>::len),
+            held.records_bytes
+        );
+    }
+}
