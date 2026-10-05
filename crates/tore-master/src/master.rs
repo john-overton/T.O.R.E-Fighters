@@ -21,7 +21,7 @@ use std::time::Duration;
 use tore_net::master::candidate::canonical;
 use tore_net::master::packet::{MAX_MASTER_DATAGRAM, peek_kind};
 use tore_net::master::{
-    CandidateKind, Challenge, CookieKey, Details, Heartbeat, HeartbeatAck, Keep, Listed,
+    CandidateKind, Challenge, CookieKey, Details, Heartbeat, HeartbeatAck, Introduce, Keep, Listed,
     ListingDetails, MasterDecodeError, MasterKind, MasterPacket, Probe, ProbeAnswer, ProbePort,
     Register, RelayFrame, Report, SUPPORTED_VERSIONS, UnknownListing, Unregister, Unsupported,
 };
@@ -208,7 +208,7 @@ impl Master {
             answers: Bucket::default(),
             listings: Listings::default(),
             tests: MappingTests::default(),
-            introductions: Introductions::default(),
+            introductions: Introductions::new(entropy),
             relays: Relays::default(),
             telemetry: Telemetry::new(day, entropy),
             counters: Counters::default(),
@@ -272,13 +272,29 @@ impl Master {
         self.log.pop_front()
     }
 
-    /// Timers: listings that expire.
+    /// Timers: listings that expire, Meets due again, introductions to
+    /// forget.
     pub fn update(&mut self, now: Duration) {
         for listing in self.listings.expire(now, self.settings.expiry) {
             self.unlisted(&listing, Gone::Expired);
         }
         self.introductions.update(now);
+        self.send_meets();
         self.relays.update(now);
+    }
+
+    /// Queues the Meets the introductions want sent, from the main port. A
+    /// Meet goes to a host whose address its listing proves, on behalf of a
+    /// player whose address its cookie proves, so it is not an answer and
+    /// is not fitted to a request (agent decision).
+    fn send_meets(&mut self) {
+        while let Some((to, datagram)) = self.introductions.poll_send() {
+            self.out.push_back(Outgoing {
+                port: MasterPort::Main,
+                to,
+                datagram,
+            });
+        }
     }
 
     /// Reads up to [`MAX_RECEIVE_BATCH`] waiting datagrams from the socket of
@@ -354,10 +370,10 @@ impl Master {
             (_, MasterPacket::Browse(request)) => self.browse(now, from, request, len),
             (_, MasterPacket::Details(request)) => self.details(now, from, request, len),
             (_, MasterPacket::Report(report)) => self.report(now, from, report),
-            (_, MasterPacket::Introduce(request)) => {
-                self.introductions.introduce(now, from, &request, len)
+            (_, MasterPacket::Introduce(request)) => self.introduce(now, from, request, len),
+            (_, MasterPacket::MeetAck(ack)) => {
+                self.introductions.meet_ack(now, from, &ack, &self.listings)
             }
-            (_, MasterPacket::MeetAck(ack)) => self.introductions.meet_ack(now, from, &ack),
             (_, MasterPacket::RelayRequest(request)) => self.relays.request(now, from, &request),
             (_, MasterPacket::RelayOpenAck(ack)) => self.relays.open_ack(now, from, &ack),
             (_, MasterPacket::RelayClose(close)) => self.relays.close(now, from, &close),
@@ -743,6 +759,32 @@ impl Master {
         });
         let version = tore_net::master::MASTER_VERSION;
         self.answer_in(now, port, from, version, &answer, len, quiet);
+    }
+
+    /// Introduce: the source's limit, the cookie (a Challenge of 23 bytes
+    /// for an unproven sender, never more), then the introduction and its
+    /// Meet.
+    fn introduce(&mut self, now: Duration, from: SocketAddr, request: Introduce, len: usize) {
+        let Some(quiet) = self.limit(now, from, Limit::Introduce) else {
+            return;
+        };
+        if !self.key.check(from, request.nonce, request.cookie, now) {
+            self.counters.challenges += 1;
+            let challenge = MasterPacket::Challenge(Challenge {
+                nonce: request.nonce,
+                cookie: self.key.cookie(from, request.nonce, now),
+            });
+            self.answer(now, from, &challenge, len, quiet);
+            return;
+        }
+        let introduction = self
+            .introductions
+            .introduce(now, from, &request, &self.listings);
+        if let Some(introduction) = introduction {
+            let packet = MasterPacket::Introduction(introduction);
+            self.answer(now, from, &packet, len, true);
+        }
+        self.send_meets();
     }
 
     fn report(&mut self, now: Duration, from: SocketAddr, report: Report) {

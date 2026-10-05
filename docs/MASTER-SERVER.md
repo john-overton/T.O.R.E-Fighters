@@ -13,8 +13,10 @@ the game's Internet Lobby. Design of 2026-10-05 for stages I and J of the
 [multiplayer plan](multiplayer-plan.md#stages). *Built (I2, 2026-10-05):* the
 program, its configuration, listings, browsing, the router test's probes,
 telemetry counts, the limits, the status line and files, and the `flood`
-tool. Introductions and the relay come with slices J2 and J3: until then the
-master reads their packets and drops them, counted. Every setting, default
+tool. *Built (J2, 2026-10-05):* introductions, the Meets to hosts and their
+retries ([as built](formats/master-protocol.md#introductions-as-built)). The
+relay comes with slice J3: until then the master reads its packets and
+drops them, counted. Every setting, default
 and number is an *agent proposal* unless it is credited to John; John
 approved the abuse limits, the ports, the relay cap and where it runs on
 2026-10-05 ([decisions](MULTIPLAYER.md#decisions)). How it works inside: [architecture](ARCHITECTURE.md#master-server-and-connectivity).
@@ -174,7 +176,7 @@ Numbers may be written with thousands commas (`100,000`).
 | `keep` | 5 to 60 seconds | 15 | How often hosts keep their router's mapping open |
 | `expiry` | 30 to 255 seconds, at least twice `heartbeat` | 90 | A listing not heard from for this long is dropped (255 at most because Listed tells hosts the expiry in one byte; agent decision, I2) |
 | `browse-rate` | 1 to 1,000 a second | 20 | Browse and details requests answered per source, with bursts of twice as many |
-| `introduce-rate` | 1 to 100 a second | 4 | Introductions per source (used from slice J2) |
+| `introduce-rate` | 1 to 100 a second | 4 | Introduce requests per source, before the cookie is checked. After it, 30 a minute per source and 10 a second per listing (fixed, agent decision, J2) |
 | `answer-rate` | 100 to 100,000 a second | 5,000 | Answers of every kind together |
 | `relay` | `on`, `off` | `on` | Whether to relay at all. The `relay-` settings are read and checked now and used from slice J3 |
 | `relay-channels` | 0 to 1,000 | 64 | Relayed pairs at once |
@@ -281,8 +283,9 @@ whenever the master falls silent.
   `invalid` (datagrams that are not a master packet this master answers:
   damaged, malformed, another version, or one of the master's own kinds) and
   `in`/`out` (bytes) are over the time since the previous line.
-  `introductions/min`, `punched`, `relayed`, `channels` and `relay-month`
-  stay 0 until slices J2 and J3. A listing's `reason` is `unregistered`,
+  `introductions/min` counts the introductions made (J2); `punched`,
+  `relayed`, `channels` and `relay-month` stay 0 until slice J3 and the
+  games' reports of their paths. A listing's `reason` is `unregistered`,
   `expired`, `replaced by a new registration` (the game restarted on the
   same port) or `another listing moved to its address`. The name is quoted
   with its quotes and control characters escaped.
@@ -379,16 +382,19 @@ target/debug/tore-master --config master.conf
 target/debug/tore-server --config server.conf --data-dir "$TORE_DATA_DIR"
 # The games it lists, headless:
 target/debug/tore-app --browse 5 --master 127.0.0.1:26911
-# A bot that joins it through an introduction, and one through the relay:
+# A bot that joins it through an introduction (slice J2), and one through the
+# relay (slice J3; until then the bot refuses --path relay):
 target/debug/tore-bot --master 127.0.0.1:26911 --listing "Friday night" --data-dir "$TORE_DATA_DIR"
 target/debug/tore-bot --master 127.0.0.1:26911 --listing "Friday night" --path relay --data-dir "$TORE_DATA_DIR"
 # The flood tool against the local master:
 target/debug/tore-master flood 127.0.0.1:26911 10
 ```
 
-The battery's net lane runs the last of these as `net-master-flood`
-([the lane](testing/lane-net.md)), and the Rust tests run the master on the
-network simulator (`cargo test --locked -p tore-master`).
+The battery's net lane runs the last of these as `net-master-flood`, and a
+master, a listed server and a bot joining through an introduction as
+`net-master-introduce` ([the lane](testing/lane-net.md)); the Rust tests run
+the master on the network simulator (`cargo test --locked -p tore-master`),
+the punching table among them (`tests/punch.rs`).
 
 In the game, set the master's address in the Internet Lobby's Options (or
 start it with `--master 127.0.0.1:26911`). On one machine every direct path

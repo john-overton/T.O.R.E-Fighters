@@ -886,7 +886,7 @@ fn reports_are_counted_without_answers_and_limited() {
 }
 
 #[test]
-fn introductions_and_the_relay_are_dropped_and_counted_until_stage_j() {
+fn an_introduce_is_challenged_and_the_relay_dropped_and_counted_until_slice_j3() {
     let mut rig = Rig::new(Settings::default());
     let mut player = rig.net.bind(a("192.0.2.50:40000")).unwrap();
     let introduce = MasterPacket::Introduce(Introduce {
@@ -907,8 +907,13 @@ fn introductions_and_the_relay_are_dropped_and_counted_until_stage_j() {
     .unwrap();
     player.send_datagram(a(MAIN_V4), &frame).unwrap();
     rig.turn();
-    assert!(received(&mut player).is_empty());
-    assert_eq!(rig.master.introductions().dropped_introduce, 1);
+    // Slice J2: the Introduce without a cookie gets the Challenge alone.
+    let got = received(&mut player);
+    assert!(
+        matches!(got[..], [(MasterPacket::Challenge(_), 23)]),
+        "{got:?}"
+    );
+    assert_eq!(rig.master.introductions().under_way(), 0);
     assert_eq!(rig.master.relays().dropped, 1);
 }
 
@@ -991,8 +996,9 @@ fn flood_allowance(kind: Flood, seconds: f64) -> f64 {
     match kind {
         Flood::Register => 10.0 + seconds / 6.0,
         Flood::Browse | Flood::Details | Flood::Keep | Flood::Heartbeat => 40.0 + 20.0 * seconds,
-        Flood::Probe => 4.0 + 4.0 * seconds,
-        Flood::Report | Flood::Introduce | Flood::Garbage => 0.0,
+        // An Introduce without a cookie gets its 23-byte Challenge (J2).
+        Flood::Probe | Flood::Introduce => 4.0 + 4.0 * seconds,
+        Flood::Report | Flood::Garbage => 0.0,
     }
 }
 

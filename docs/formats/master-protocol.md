@@ -14,8 +14,11 @@ the wire itself, every packet's encoder and bounded decoder, in `tore-net`'s
 `master` module; what the build settled is in
 [the wire as built](#the-wire-as-built). *Built (I2, 2026-10-05):* the
 master itself, `tore-master`, apart from introductions and the relay
-(slices J2 and J3), and the Internet Lobby's browse client. The game's side
-and the screens are not built yet. The
+(slices J2 and J3), and the Internet Lobby's browse client. *Built (J2,
+2026-10-05):* [introductions](#introductions): the master's side, a host's
+Meet, punches and Meet ack, and a joining player's mapping test,
+Introduce and race ([as built](#introductions-as-built)). The relay is slice
+J3's; the game's screens join through the master in slice J5. The
 [architecture guide](../ARCHITECTURE.md#master-server-and-connectivity)
 has the design and the slices that build it, and the
 [operations guide](../MASTER-SERVER.md) says how the master is run. Every
@@ -435,6 +438,44 @@ A host that receives a Meet sends a Punch to each of the player's candidates
 five times, 200 ms apart, and answers Connect requests as it always does.
 An introduction is forgotten by the master after 30 seconds.
 
+### Introductions as built
+
+*Built (J2, 2026-10-05):* the master's side in `tore-master`'s
+`introduce.rs`, a host's in `tore_net::master::meet` (driven by its
+rendezvous), a player's in `tore_net::master::join` (`Joiner`). Agent
+decisions beyond the sections above:
+
+- **The order of checks.** Introduce is limited per source (4 a second)
+  first, then its cookie is checked (a Challenge of 23 bytes to an unproven
+  sender, never more), then: 30 a minute per source, over which the answer
+  is result 4; the listing (result 1 when gone); the build, by the Internet
+  Lobby's rule (result 2); the summary's full flag (result 3); then 10 a
+  second per listing, over which the Introduce is dropped unanswered. At most
+  4,096 introductions are under way; past that an Introduce is dropped.
+  A refusal's text is the game's own words for its result ("That game is
+  full.").
+- **The same Introduce again** (the same address and nonce: the
+  Introduction was lost) gets the same Introduction, and no second Meet.
+- **A Meet is not an answer.** It goes to a host whose address its listing
+  proves, on behalf of a player whose address its cookie proves, so it is
+  not fitted to a request or charged to the answer rate. Its retries stop
+  at a Meet ack whose token is the listing's.
+- **The hint** is "the relay at once" when the player's mapping type is 3
+  and the host's listing is relay likely (type 3, no Mapped or Global IPv6
+  candidate), the Page's mark.
+- **A host** acts on at most 10 Meets in any second (one over it is not
+  acknowledged, so the master's next try may be), acknowledges a Meet
+  repeated for an introduction it met without punching again, and needs to
+  be listed (the ack carries its token).
+- **A player** binds one dual-stack socket and sends from it the mapping
+  test's two Probes (the same nonce) and then Introduce. Introduce waits for
+  both Probe answers, or for the first when it shows no translation, at most
+  a second; a missing answer's Probe is sent once more after 500 ms. An
+  unanswered Introduce is sent again every second, three times to an
+  address of the master, then to its next; after six the master is silent.
+  The Introduction's host candidates become the race's addresses, each once,
+  with the paths of the [net protocol](net-protocol.md#the-path-in-the-challenge-answer).
+
 ## Relay
 
 When the race finds no path within 3 seconds, or the hint says so at once,
@@ -556,7 +597,9 @@ master. What the protocol guards against:
 - **Stolen listings.** Changing or removing a listing needs its token.
 - **Punches as a weapon.** A host punches only addresses the master has seen
   a proven player send from (or that the player listed beside them), five
-  times each, for at most 10 introductions a second. A Punch is 13 bytes.
+  times each, for at most 10 introductions a second. A Punch is 13 bytes. A
+  player learns at most four addresses from punches, and only from punches
+  carrying its own introduction id.
 - **An open proxy.** The relay forwards only between the two ends of a
   channel it opened for an introduction, with the channel's key, within the
   channel's rate.
