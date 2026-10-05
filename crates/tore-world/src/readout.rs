@@ -84,6 +84,10 @@ pub struct CockpitReadout {
     pub target_window: Option<TargetBrief>,
     /// The situation music's inputs and the mission result.
     pub music: MusicReadout,
+    /// The seat's share of the flight data link. Empty (and with no radar,
+    /// so no cue is drawn) until the world fills it in
+    /// ([`crate::World::cockpit_readout`]); not yet on the wire (slice G7).
+    pub link: LinkReadout,
 }
 
 impl CockpitReadout {
@@ -377,6 +381,125 @@ pub struct MusicReadout {
     pub home: bool,
 }
 
+/// Link marks kept: one per target a flightmate has locked or been assigned.
+pub const MAX_LINK_MARKS: usize = 32;
+
+/// The seat's share of the flight data link, as the displays draw it
+/// (docs/DATALINK.md, "What the player sees"). It is worked out from the
+/// picture by [`crate::datalink::DataLink::readout`] and holds only what the
+/// seat's displays need.
+///
+/// `radar` is the aircraft's radar flag: an aircraft with no radar shows none
+/// of this, so every cue asks [`LinkReadout::shown`] first.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LinkReadout {
+    /// The plane's aircraft has a radar. Agent decision: it is the one gate
+    /// for every cue, on the scope, the target window and the HUD, because
+    /// John's rule of 2026-10-05 is that the player of an aircraft with no
+    /// radar does not see the link.
+    pub radar: bool,
+    /// The target the lead assigned to this plane.
+    pub assigned: Option<LinkAssigned>,
+    /// Hostile aircraft the side's members hold, nearest first, up to
+    /// [`crate::datalink::SEAT_TRACKS`].
+    pub tracks: Vec<LinkTrack>,
+    /// What flightmates have locked or been assigned, by target, in target
+    /// order. Worked out from the locks and assignments at once, not from
+    /// the tracks, which are published four times a second (agent decision).
+    pub marks: Vec<LinkMark>,
+    /// The state of the flightmates other than the plane.
+    pub mates: Vec<LinkMate>,
+}
+
+impl LinkReadout {
+    /// Whether the seat's displays show link cues at all.
+    pub fn shown(&self) -> bool {
+        self.radar
+    }
+    /// The marks on `target`, when the displays are to show any.
+    pub fn mark(&self, target: u32) -> Option<&LinkMark> {
+        if !self.shown() {
+            return None;
+        }
+        self.marks.iter().find(|mark| mark.target == target)
+    }
+    /// The flightmate `plane`, when the displays are to show it.
+    pub fn mate(&self, plane: u32) -> Option<&LinkMate> {
+        if !self.shown() {
+            return None;
+        }
+        self.mates.iter().find(|mate| mate.plane == plane)
+    }
+    /// The assignment the plane holds, when the displays are to show it.
+    pub fn assignment(&self) -> Option<&LinkAssigned> {
+        self.assigned.as_ref().filter(|_| self.shown())
+    }
+}
+
+/// The target the lead gave this plane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkAssigned {
+    pub target: u32,
+    /// The plane that gave it.
+    pub by: u32,
+    /// The plane has held a lock on the target since.
+    pub acknowledged: bool,
+}
+
+/// A hostile aircraft the side's members hold, with where it was.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LinkTrack {
+    pub target: u32,
+    pub position: Vector,
+    pub velocity: Vector,
+    /// Whose sensors hold it.
+    pub source: crate::datalink::TrackSource,
+}
+
+/// A flight member by flight and place: the flight's number and the member's
+/// number from zero ("Blue 1" is flight 1, member 0).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MemberRef {
+    pub flight: u8,
+    pub member: u8,
+}
+
+/// Who has locked a target or been given it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkMark {
+    pub target: u32,
+    /// The flightmates (not the plane) holding a lock on it, a bit for each
+    /// member number from zero.
+    pub lockers: u16,
+    /// A plane of another flight of the side holding a lock on it, the
+    /// lowest plane id: the lock reaches this plane over the battle net.
+    pub net_lock: Option<MemberRef>,
+    /// The flightmates (not the plane) the lead assigned it to, a bit for
+    /// each member number from zero.
+    pub assigned_to: u16,
+}
+
+impl LinkMark {
+    /// The members set in `mask`, as the numbers a pilot reads: from one.
+    pub fn numbers(mask: u16) -> Vec<u8> {
+        (0..16u8)
+            .filter(|bit| mask & (1 << bit) != 0)
+            .map(|bit| bit + 1)
+            .collect()
+    }
+}
+
+/// One flightmate's coarse state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkMate {
+    pub plane: u32,
+    /// Its place in the flight from zero.
+    pub member: u8,
+    pub fuel: crate::datalink::Fuel,
+    pub weapons: crate::datalink::Weapons,
+    pub damage: crate::datalink::Damage,
+}
+
 /// The nearest `keep` entries of `rows` by `distance`, in their own order.
 fn nearest<T>(rows: &mut Vec<T>, keep: usize, distance: impl Fn(&T) -> f64) {
     if rows.len() <= keep {
@@ -596,6 +719,7 @@ pub fn build(
             succeeded: status.as_ref().is_some_and(|status| status.succeeded),
             home: status.as_ref().is_some_and(|status| status.home),
         },
+        link: LinkReadout::default(),
     })
 }
 

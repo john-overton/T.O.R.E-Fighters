@@ -1152,6 +1152,8 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
             succeeded: false,
             home: false,
         },
+        // The link's share is not on the wire yet (slice G7).
+        link: Default::default(),
     }
 }
 

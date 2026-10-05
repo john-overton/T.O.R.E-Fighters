@@ -40,6 +40,7 @@ mod commands;
 mod crowd;
 #[cfg(test)]
 mod datalink_assign_tests;
+mod datalink_cues_tests;
 #[cfg(test)]
 mod datalink_checkpoint_tests;
 #[cfg(test)]
@@ -1028,6 +1029,11 @@ impl World {
                     }
                 }
             }
+        }
+        // Two flightmates have both locked one aircraft: the humans among
+        // them hear a beep and read a line (the data link's sort warning).
+        for warning in self.datalink.sort_warnings(&self.roster) {
+            out.cues.extend(warning.cues());
         }
         // The tick's picture: combat and the AI have both written their poses
         // for it. The mission recording reads the same picture, before the

@@ -2042,8 +2042,8 @@ combat, the AI bridge, the debrief and the recorder.
 
 Design for stage G of the [multiplayer plan](multiplayer-plan.md#stages),
 written on 2026-10-05. Slices G0 (the radar table and the picture), G1 (the
-engagement table), G3a (assignments and their calls) and G2 (humans in the
-table) are built; the AI reads the picture only for the humans' locked
+engagement table), G3a (assignments and their calls), G2 (humans in the
+table) and G6 (the cues) are built; the AI reads the picture only for the humans' locked
 targets so far, and the rest is not built ([the slice table](#how-stage-g-lands) marks each slice that is). What the player sees and
 hears, who shares what and the numbers are in the guide,
 [DATALINK.md](DATALINK.md); the bytes
@@ -2070,7 +2070,7 @@ In short:
   `has_radar`, pure data in `tore-sim` (`crates/tore-sim/src/datalink.rs`),
   keyed by `AircraftId::source()`, read by the world and the displays. An
   aircraft with no radar is still linked and its AI uses the picture as any
-  other; its player sees no link cues on displays it does not have (slice G6).
+  other; its player sees no link cues (slice G6).
   There are no pair rules and no "least capable member".
 - The AI's one read of other controllers in target choice, the wing attacker
   count, moves onto an engagement table kept in decision order, with

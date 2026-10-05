@@ -467,6 +467,15 @@ pub fn readout(
                 .find(|h| Some(h.profile.id) == target.aircraft)
                 .map(|h| h.profile.envelopes.clone())
         }),
+        target_link: ro
+            .targets
+            .display
+            .as_ref()
+            .map(|target| crate::instruments::TargetLink {
+                tag: crate::target_window::link_tag(&ro.link, target.id),
+                state: crate::target_window::mate_state(&ro.link, target.id),
+            })
+            .unwrap_or_default(),
         scope: crate::scope::scope(ro, s, controls),
         rcs: crate::scope::rcs(config, ro, s, rcs_scale),
         rwr_failed: ro.damage.rwr_failed,

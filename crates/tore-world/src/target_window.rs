@@ -2,7 +2,12 @@
 //! target, built from simulation state with no clock, camera or drawing. The
 //! refresh timer and the target camera are in `target_preview`. See
 //! docs/spec/target-window.md.
-use crate::{ai_wings::AiWings, readout::TargetRow};
+use crate::{
+    ai_wings::AiWings,
+    datalink::{Damage, Fuel, Weapons},
+    radio_calls::FLIGHTS,
+    readout::{LinkMark, LinkReadout, TargetRow},
+};
 use tore_sim::ai::controller::Activity;
 use tore_sim::flight::State;
 
@@ -58,6 +63,67 @@ impl TargetBrief {
             pilot,
         }
     }
+}
+
+/// The tag under the activity line that says what the flight's link knows of
+/// target `id` (docs/DATALINK.md, "What the player sees"), or nothing. One tag
+/// shows, the first that applies: the target the lead assigned to the player,
+/// one the flight was assigned, one flightmates have locked, one a plane of
+/// another flight has locked over the battle net. A readout with no radar
+/// has none.
+pub fn link_tag(link: &LinkReadout, id: u32) -> Option<String> {
+    if link.assignment().is_some_and(|given| given.target == id) {
+        return Some("ASSIGNED BY LEAD".into());
+    }
+    let mark = link.mark(id)?;
+    let numbers = |mask: u16| {
+        LinkMark::numbers(mask)
+            .iter()
+            .map(u8::to_string)
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    if mark.assigned_to != 0 {
+        Some(format!("ASSIGNED TO {}", numbers(mark.assigned_to)))
+    } else if mark.lockers != 0 {
+        Some(format!("{} LOCKED", numbers(mark.lockers)))
+    } else {
+        let by = mark.net_lock?;
+        let colour = FLIGHTS.get(usize::from(by.flight)).map_or_else(
+            || format!("FLIGHT {}", u32::from(by.flight) + 1),
+            |c| c.to_uppercase(),
+        );
+        Some(format!("LOCKED BY {colour} {}", u32::from(by.member) + 1))
+    }
+}
+
+/// What the link says of the state of `plane` when it is a flightmate of the
+/// player's: one short line for each thing that is not as it should be, in
+/// the order fuel, weapons, damage. Empty for anyone else and for a flightmate
+/// in good order.
+pub fn mate_state(link: &LinkReadout, plane: u32) -> Vec<String> {
+    let Some(mate) = link.mate(plane) else {
+        return Vec::new();
+    };
+    let mut lines = Vec::new();
+    match mate.fuel {
+        Fuel::Normal => {}
+        Fuel::Joker => lines.push("FUEL JOKER".into()),
+        Fuel::Bingo => lines.push("FUEL BINGO".into()),
+        Fuel::Fumes => lines.push("FUEL FUMES".into()),
+        Fuel::Out => lines.push("FUEL OUT".into()),
+    }
+    match mate.weapons {
+        Weapons::Missiles => {}
+        Weapons::GunsOnly => lines.push("GUNS ONLY".into()),
+        Weapons::Winchester => lines.push("WINCHESTER".into()),
+    }
+    match mate.damage {
+        Damage::None => {}
+        Damage::Light => lines.push("DAMAGED".into()),
+        Damage::Heavy => lines.push("HEAVILY DAMAGED".into()),
+    }
+    lines
 }
 
 pub struct Readout {
@@ -259,5 +325,122 @@ mod tests {
         for (hp, expected) in [(100, 0.), (75, 0.25), (0, 1.), (-1, 1.), (101, 0.)] {
             assert_eq!(damage_fraction(hp, 100), expected);
         }
+    }
+
+    fn link(radar: bool) -> LinkReadout {
+        use crate::readout::{LinkAssigned, LinkMate, MemberRef};
+        LinkReadout {
+            radar,
+            assigned: Some(LinkAssigned {
+                target: 10,
+                by: 0,
+                acknowledged: false,
+            }),
+            marks: vec![
+                // Assigned to the player and locked by member 2: the
+                // assignment wins.
+                LinkMark {
+                    target: 10,
+                    lockers: 0b10,
+                    net_lock: None,
+                    assigned_to: 0,
+                },
+                // Assigned to flightmates 2 and 3, and locked by 2 too.
+                LinkMark {
+                    target: 11,
+                    lockers: 0b10,
+                    net_lock: Some(MemberRef {
+                        flight: 1,
+                        member: 0,
+                    }),
+                    assigned_to: 0b110,
+                },
+                LinkMark {
+                    target: 12,
+                    lockers: 0b110,
+                    net_lock: Some(MemberRef {
+                        flight: 1,
+                        member: 0,
+                    }),
+                    assigned_to: 0,
+                },
+                LinkMark {
+                    target: 13,
+                    lockers: 0,
+                    net_lock: Some(MemberRef {
+                        flight: 1,
+                        member: 0,
+                    }),
+                    assigned_to: 0,
+                },
+                LinkMark {
+                    target: 14,
+                    lockers: 0,
+                    net_lock: Some(MemberRef {
+                        flight: 9,
+                        member: 1,
+                    }),
+                    assigned_to: 0,
+                },
+            ],
+            mates: vec![
+                LinkMate {
+                    plane: 1,
+                    member: 1,
+                    fuel: Fuel::Bingo,
+                    weapons: Weapons::GunsOnly,
+                    damage: Damage::Light,
+                },
+                LinkMate {
+                    plane: 2,
+                    member: 2,
+                    fuel: Fuel::Normal,
+                    weapons: Weapons::Missiles,
+                    damage: Damage::None,
+                },
+                LinkMate {
+                    plane: 3,
+                    member: 3,
+                    fuel: Fuel::Out,
+                    weapons: Weapons::Winchester,
+                    damage: Damage::Heavy,
+                },
+            ],
+            ..LinkReadout::default()
+        }
+    }
+
+    #[test]
+    fn the_tag_is_the_first_thing_that_applies() {
+        let link = link(true);
+        let tag = |id| link_tag(&link, id);
+        assert_eq!(tag(10).as_deref(), Some("ASSIGNED BY LEAD"));
+        assert_eq!(tag(11).as_deref(), Some("ASSIGNED TO 2 3"));
+        assert_eq!(tag(12).as_deref(), Some("2 3 LOCKED"));
+        assert_eq!(tag(13).as_deref(), Some("LOCKED BY BLUE 1"));
+        // Past the eighth colour a flight is named by number, as the radio does.
+        assert_eq!(tag(14).as_deref(), Some("LOCKED BY FLIGHT 10 2"));
+        assert_eq!(tag(99), None, "nothing is known of it");
+    }
+
+    #[test]
+    fn an_aircraft_with_no_radar_shows_no_tag_and_no_state() {
+        let link = link(false);
+        for id in [10, 11, 12, 13] {
+            assert_eq!(link_tag(&link, id), None, "target {id}");
+        }
+        assert!(mate_state(&link, 1).is_empty());
+    }
+
+    #[test]
+    fn a_flightmates_state_lists_only_what_is_wrong() {
+        let link = link(true);
+        assert_eq!(mate_state(&link, 1), ["FUEL BINGO", "GUNS ONLY", "DAMAGED"]);
+        assert!(mate_state(&link, 2).is_empty(), "in good order");
+        assert_eq!(
+            mate_state(&link, 3),
+            ["FUEL OUT", "WINCHESTER", "HEAVILY DAMAGED"]
+        );
+        assert!(mate_state(&link, 4).is_empty(), "not a flightmate");
     }
 }

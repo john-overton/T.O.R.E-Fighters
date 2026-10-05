@@ -9,7 +9,7 @@
 > <!-- tore-header v2 -->
 
 Stage G design of 2026-10-05, for the [multiplayer plan](multiplayer-plan.md#stages).
-Built so far: the radar table and the picture's bookkeeping (slice G0), the engagement table (G1), the assignments with their calls (G3a) and the player's locked target in the AI's engagement table (G2, 2026-10-05). Of this page a player today meets the assignment call and AI wingmen that spread away from the bandit the player has locked, and the rest waits for its slices. It is the guide for players and agents:
+Built so far: the radar table and the picture's bookkeeping (slice G0), the engagement table (G1), the assignments with their calls (G3a), the player's locked target in the AI's engagement table (G2) and the cues (G6, 2026-10-05). Of this page a player today meets the assignment call, AI wingmen that spread away from the bandit the player has locked, and the cues (the radar markers, the target window tags, the HUD brackets and the sort warning); the rest waits for its slices. It is the guide for players and agents:
 what a flight shares, who can share it, what the player sees and
 hears, and how the AI uses it. The code design and the slices that build it
 are in the [architecture guide](ARCHITECTURE.md#flight-data-link); the bytes on
@@ -119,10 +119,12 @@ An aircraft with no radar:
 - is a member like any other: its AI reads the picture, takes assignments
   and shares what it holds, and the other members see its locks, tracks and
   state;
-- gives its player no link cues on the displays the aircraft does not have.
-  The radar scope is the one that does not exist; whether the target window
-  and the HUD cues also stay away is a decision for slice G6, which reads the
-  flag (agent decision).
+- gives its player no link cues at all. Agent decision (slice G6): John's
+  words are that the player of an aircraft with no radar does not see the
+  link, so the radar flag is the one gate for every cue, on the scope, the
+  target window and the HUD, and for the sort warning. The aircraft still
+  receives the whole picture in its readout and the flag is one place to
+  change if John wants the target window or the HUD to keep some cues.
 
 ```mermaid
 flowchart LR
@@ -138,19 +140,18 @@ flowchart LR
 
 ## What the player sees
 
-Cues are about the members of the player's side. They are drawn only on the
-displays the player's aircraft has: an aircraft with no radar shows none on
-a scope it does not have (John, 2026-10-05).
+Cues are about the members of the player's side. An aircraft with no radar
+shows none of them (John, 2026-10-05; see [who shares it](#who-shares-it)).
 
 | Where | Cue |
 | --- | --- |
-| Radar | A contact a flightmate has locked carries that member's number to the right of its square (up to two numbers, then `+`). A contact the lead assigned to you has a diamond around it, blinking once a second until you lock it, then steady. A contact the player, as lead, assigned carries the wingman's number to its left. A track that only another member sees (your own radar does not) is a hollow square in peach, retail's colour for remote contacts |
-| Target window | A tag under the activity line: `ASSIGNED BY LEAD`, `ASSIGNED TO 2`, `2 LOCKED`, `2 3 LOCKED` or, over the battle net, `LOCKED BY BLUE 1`. When the displayed aircraft is a flightmate, its state: `FUEL BINGO  GUNS ONLY  DAMAGED` |
-| HUD | The assigned target wears four corner brackets, a different shape from the target box, blinking once a second until you lock it; the brackets go when you lock it |
-| Sort warning | When you and a flightmate lock the same aircraft, unless the lead assigned it to you both: the HUD line `Sort: Red two is locked on your target.` and a short beep (`^BEEP2`, the retail radar-link beep) |
+| Radar | A contact a flightmate has locked carries that member's number to the right of its square (up to two numbers, then `+`). A contact the lead assigned to you has a diamond around it, blinking once a second until you lock it, then steady. A contact assigned to a flightmate carries that member's number to its left (the lead sees its wingmen's, and so does every other member of the flight). A track that only another member sees (your own radar does not) is a hollow square in peach, retail's colour for remote contacts. Marks sit on remote tracks too |
+| Target window | A tag under the activity line, the first that applies: `ASSIGNED BY LEAD`, `ASSIGNED TO 2` (or `2 3`), `2 LOCKED` (or `2 3 LOCKED`) or, over the battle net, `LOCKED BY BLUE 1`. When the displayed aircraft is a flightmate, its state follows, a line for each thing not as it should be: `FUEL BINGO`, `GUNS ONLY` (or `WINCHESTER`), `DAMAGED` (or `HEAVILY DAMAGED`) |
+| HUD | The assigned target wears four corner brackets, a different shape from the target box, blinking once a second until you lock it; the brackets go when you lock it. They show only where the target is inside the HUD's view |
+| Sort warning | When you and a flightmate lock the same aircraft, unless the lead meant it (both of you were assigned it, or one of you assigned it to the other): the HUD line `Sort: Red two is locked on your target.` and a short beep (`^BEEP2`, the retail radar-link beep) |
 
-Every cue is an agent proposal. The colours, shapes and words follow the
-displays as they are: the radar's square contacts and bracket selection mark,
+Every cue is an agent proposal, built as written in slice G6. The colours,
+shapes and words follow the displays as they are: the radar's square contacts and bracket selection mark,
 the target window's upper-case lines, and the HUD's one-line messages
 ([radar](spec/radar.md), [target window](spec/target-window.md)).
 
@@ -321,7 +322,7 @@ before the merge. In order:
    flightmate's track holds, where today they refuse it.
 4. AI leads share and sort, and AI members move off a bandit when the
    sort warning fires.
-5. The cues are drawn.
+5. The cues are drawn (built, G6): the flightmates' lock numbers, the tags and the sort warning show in a flight with AI wingmen; the assignment cues wait for the lead's assignments (G3a).
 6. Recordings gain the `datalink` events.
 
 The new keys (Alt+A, Alt+N) change nothing until pressed, and the battle net
@@ -343,7 +344,7 @@ it says otherwise.
 | AI lead's sorts | At most one every 30 seconds per flight |
 | Sort warning | Once per pair of locks on one bandit; at most one every 10 seconds per seat |
 | Yield after a sort warning | 10 seconds away from that bandit |
-| Blinking cues | Once a second, half on, as the HUD's radar-ready diamond |
+| Blinking cues | Once a second, half a second on, as the warning receiver blinks (the HUD's radar-ready diamond blinks twice a second; agent decision, G6) |
 | Heavy damage | Hit points at half or less |
 
 ## Relation to Fighters Anthology

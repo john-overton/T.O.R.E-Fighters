@@ -25,6 +25,9 @@ const GREEN: [u8; 4] = [132, 193, 126, 255];
 const CRT_SCREEN: [u8; 4] = [4, 18, 6, 255];
 const DIM: [u8; 4] = [48, 83, 44, 255];
 const BRIGHT: [u8; 4] = [206, 240, 200, 255];
+/// Remote link tracks: a peach, as retail drew contacts a sentry aircraft
+/// gave the player. Fitted; no retail value is recorded.
+const PEACH: [u8; 4] = [236, 172, 132, 255];
 pub struct Raster {
     pub pixels: Vec<u8>,
     /// Window position of drawing coordinate (0, 0).
@@ -311,6 +314,56 @@ pub fn project(bearing_rad: f64, distance_ft: f64, range_nmi: f64) -> Option<(f6
     ))
 }
 
+/// The pixel width of `text` in `font`.
+fn text_width(font: &Font, text: &str) -> i32 {
+    text.glyph_codes()
+        .map(|ch| font.glyphs[ch as usize].advance as i32)
+        .sum()
+}
+
+/// The link's numbers for a contact: up to two, then a plus.
+fn link_numbers(numbers: &[u8]) -> String {
+    let mut text: String = numbers.iter().take(2).map(u8::to_string).collect();
+    if numbers.len() > 2 {
+        text.push('+');
+    }
+    text
+}
+
+/// Draws the flight data link's marks around the contact square at `(x, y)`:
+/// the numbers of the flightmates that locked it to its right, of the ones it
+/// was assigned to to its left, and a diamond when the lead assigned it to the
+/// player, blinking until the player has locked it.
+fn draw_link_marks(
+    r: &mut Raster,
+    font: &Font,
+    (x, y): (i32, i32),
+    marks: &scope::LinkMarks,
+    tick: u64,
+    colour: [u8; 4],
+) {
+    let top = y - font.height as i32 / 2;
+    if !marks.locked_by.is_empty() {
+        r.text(font, &link_numbers(&marks.locked_by), x + 9, top, colour);
+    }
+    if !marks.assigned_to.is_empty() {
+        let text = link_numbers(&marks.assigned_to);
+        r.text(font, &text, x - 8 - text_width(font, &text), top, colour);
+    }
+    if let Some(acknowledged) = marks.assigned
+        && (acknowledged || scope::link_blink_on(tick))
+    {
+        for (a, b) in [
+            ((0, -5), (5, 0)),
+            ((5, 0), (0, 5)),
+            ((0, 5), (-5, 0)),
+            ((-5, 0), (0, -5)),
+        ] {
+            r.line((x + a.0, y + a.1), (x + b.0, y + b.1), colour);
+        }
+    }
+}
+
 /// Deterministic display texture. It uses the simulation tick and an
 /// independent display seed, never the combat RNG, so noise cannot change
 /// detection or replay.
@@ -383,6 +436,16 @@ pub struct CombatReadout {
     pub rwr: scope::Rwr,
     pub rwr_failed: bool,
     pub envelope_target: Option<Vec<tore_formats::aircraft::Envelope>>,
+    /// What the flight data link says under the target window's activity line.
+    pub target_link: TargetLink,
+}
+
+/// The target window's link lines: a tag about the displayed target, and the
+/// state of the displayed target when it is a flightmate.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TargetLink {
+    pub tag: Option<String>,
+    pub state: Vec<String>,
 }
 pub struct Instruments {
     pub navigation: crate::navigation::Navigation,
@@ -1049,6 +1112,9 @@ impl Instruments {
                             }
                             let colour = if contact.selected { BRIGHT } else { GREEN };
                             r.rect(x - 2, y - 2, 5, 5, colour);
+                            if let Some(marks) = scope.marks_on(contact.id) {
+                                draw_link_marks(&mut r, f, (x, y), marks, scope.tick, colour);
+                            }
                             if scope.mode == Some("TWS")
                                 && let Some(heading) = contact.heading_rad
                             {
@@ -1065,6 +1131,21 @@ impl Instruments {
                                 for (dx, dy) in [(-4, -4), (4, -4), (-4, 4), (4, 4)] {
                                     r.rect(x + dx, y + dy, 1, 1, colour);
                                 }
+                            }
+                        }
+                        for track in &scope.remote {
+                            let Some((x, y)) = project(track.bearing_rad, track.distance_ft, range)
+                            else {
+                                continue;
+                            };
+                            let (x, y) = (x as i32, y as i32);
+                            // A hollow square: a track, not a return.
+                            r.rect(x - 2, y - 2, 5, 1, PEACH);
+                            r.rect(x - 2, y + 2, 5, 1, PEACH);
+                            r.rect(x - 2, y - 1, 1, 3, PEACH);
+                            r.rect(x + 2, y - 1, 1, 3, PEACH);
+                            if let Some(marks) = scope.marks_on(track.id) {
+                                draw_link_marks(&mut r, f, (x, y), marks, scope.tick, PEACH);
                             }
                         }
                         text(&mut r, scope.mode.unwrap_or(scope.channel), 6, 4);
@@ -1215,7 +1296,11 @@ impl Instruments {
                 self.combat.as_ref(),
             ),
             4 => {
-                if let Some(target) = self.combat.as_ref().and_then(|c| c.target.as_ref()) {
+                if let Some((target, link)) = self
+                    .combat
+                    .as_ref()
+                    .and_then(|c| c.target.as_ref().map(|target| (target, &c.target_link)))
+                {
                     r.rect(0, 0, SCREEN.2, SCREEN.3, [185, 185, 185, 255]);
                     if self.camera_target == Some(target.id)
                         && let Some(pixels) = self.cameras.get(&4)
@@ -1257,6 +1342,13 @@ impl Instruments {
                     r.text(f, &label, 1 + (119 - width(&label)) / 2, 3, ink);
                     let activity = fit(&target.activity, 119);
                     r.text(f, &activity, 1 + (119 - width(&activity)) / 2, 16, ink);
+                    // The flight data link's lines sit under the activity.
+                    let mut line = 28;
+                    for text in link.tag.iter().chain(&link.state) {
+                        let text = fit(text, 119);
+                        r.text(f, &text, 1 + (119 - width(&text)) / 2, line, ink);
+                        line += 11;
+                    }
                     r.text(f, target.goal, 124, 3, ink);
                     if target.player_goal {
                         r.rect(124, 13, 6, 1, ink);
@@ -1928,5 +2020,407 @@ mod input_selection_tests {
         i.pages.clear();
         assert!(!i.cycle_selection(1));
         assert!(!i.control(0, 0));
+    }
+}
+
+/// The flight data link's cues on the radar page and the target window,
+/// rendered through the page rasters (docs/DATALINK.md, "What the player
+/// sees"), headless like every page raster.
+#[cfg(test)]
+mod link_cue_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+    use tore_formats::font::Glyph;
+
+    fn airframe() -> Airframe {
+        let mut airframe = crate::combat_view::render_hash_tests::hornet_airframe(false);
+        // Every letter and digit is a solid 5x7 block with an advance of 6, so
+        // where a cue draws is easy to find.
+        airframe.font = Font {
+            height: 7,
+            glyphs: (0..256)
+                .map(|character| Glyph {
+                    advance: 6,
+                    pixels: if character == 32 {
+                        vec![]
+                    } else {
+                        (0..7).flat_map(|y| (0..5).map(move |x| (x, y))).collect()
+                    },
+                })
+                .collect(),
+        };
+        airframe.panel = Pic {
+            width: 81,
+            height: 80,
+            pixels: vec![0; 81 * 80],
+            mask: vec![true; 81 * 80],
+            palette: Vec::new(),
+            glyphs: Vec::new(),
+        };
+        airframe
+    }
+
+    fn marked_contact(id: u32) -> scope::Contact {
+        scope::Contact {
+            id,
+            bearing_rad: 0.,
+            distance_ft: 5. * tore_sim::sensors::FEET_PER_NAUTICAL_MILE,
+            heading_rad: None,
+            track_eligible: true,
+            destroyed: false,
+            selected: false,
+            acquired: false,
+            stale: false,
+            trail: vec![],
+        }
+    }
+
+    /// Where a 10-mile scope draws a contact at bearing 0 and 5 miles, in
+    /// window pixels.
+    fn contact_point() -> (i32, i32) {
+        let (x, y) = project(0., 5. * tore_sim::sensors::FEET_PER_NAUTICAL_MILE, 10.).unwrap();
+        (x as i32 + SCREEN.0, y as i32 + SCREEN.1)
+    }
+
+    fn render(page: u8, combat: CombatReadout) -> Raster {
+        let airframe = airframe();
+        let state = airframe.start(&tore_world::test_support::terrain());
+        let mut panels = Instruments::new(Layout::Large, None);
+        panels.palette = airframe.palette;
+        panels.combat = Some(combat);
+        panels.page(page, &airframe, &state)
+    }
+
+    fn scope_with(
+        tick: u64,
+        contacts: Vec<scope::Contact>,
+        marks: Vec<scope::LinkMarks>,
+        remote: Vec<scope::RemoteTrack>,
+    ) -> CombatReadout {
+        CombatReadout {
+            scope: scope::Scope {
+                tick,
+                channel: "RADAR",
+                range_nmi: 10.,
+                operating: true,
+                contacts,
+                marks,
+                remote,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    /// The window pixels where `a` differs from `b`.
+    fn differing(a: &Raster, b: &Raster) -> BTreeSet<(i32, i32)> {
+        a.pixels
+            .chunks_exact(4)
+            .zip(b.pixels.chunks_exact(4))
+            .enumerate()
+            .filter(|(_, (x, y))| x != y)
+            .map(|(i, _)| ((i % WIDTH) as i32, (i / WIDTH) as i32))
+            .collect()
+    }
+
+    fn marks() -> scope::LinkMarks {
+        scope::LinkMarks {
+            id: 1,
+            locked_by: vec![2, 3, 4],
+            assigned_to: vec![2],
+            assigned: Some(false),
+        }
+    }
+
+    #[test]
+    fn flightmates_numbers_sit_beside_the_contact_and_the_assignment_diamond_blinks() {
+        let (x, y) = contact_point();
+        let plain = render(9, scope_with(0, vec![marked_contact(1)], vec![], vec![]));
+        let lit = |tick: u64, assigned: Option<bool>| {
+            let marks = scope::LinkMarks {
+                assigned,
+                ..marks()
+            };
+            let drawn = render(
+                9,
+                scope_with(tick, vec![marked_contact(1)], vec![marks], vec![]),
+            );
+            differing(&drawn, &plain)
+        };
+        let on = lit(0, Some(false));
+        // The numbers: "23+" to the right (two numbers, then a plus), "2" to
+        // the left, each a solid block of seven rows centred on the square.
+        let right: Vec<i32> = on
+            .iter()
+            .filter(|(px, _)| *px >= x + 9)
+            .map(|(px, _)| *px)
+            .collect();
+        assert_eq!(
+            (right.iter().min(), right.iter().max()),
+            (Some(&(x + 9)), Some(&(x + 9 + 3 * 6 - 2))),
+            "three glyphs"
+        );
+        assert!(
+            on.iter()
+                .filter(|(px, _)| *px >= x + 9)
+                .all(|(_, py)| (y - 3..y + 4).contains(py))
+        );
+        let left: Vec<i32> = on
+            .iter()
+            .filter(|(px, _)| *px <= x - 8)
+            .map(|(px, _)| *px)
+            .collect();
+        assert_eq!(
+            (left.iter().min(), left.iter().max()),
+            (Some(&(x - 14)), Some(&(x - 10))),
+            "one glyph"
+        );
+        // The diamond is lit in the first half second and dark in the second,
+        // until the assignment is acknowledged, then it is steady.
+        let diamond = [(x + 5, y), (x - 5, y), (x, y - 5), (x, y + 5)];
+        for tick in [0, 59, 120] {
+            assert!(
+                diamond.iter().all(|p| lit(tick, Some(false)).contains(p)),
+                "tick {tick}"
+            );
+        }
+        for tick in [60, 119, 180] {
+            assert!(
+                diamond.iter().all(|p| !lit(tick, Some(false)).contains(p)),
+                "tick {tick}"
+            );
+        }
+        for tick in [0, 60, 119] {
+            assert!(
+                diamond.iter().all(|p| lit(tick, Some(true)).contains(p)),
+                "tick {tick}"
+            );
+        }
+        // A target nobody assigned to the player has no diamond.
+        assert!(diamond.iter().all(|p| !lit(0, None).contains(p)));
+    }
+
+    #[test]
+    fn a_remote_track_is_a_hollow_peach_square_with_its_marks() {
+        let (x, y) = contact_point();
+        let track = scope::RemoteTrack {
+            id: 9,
+            bearing_rad: 0.,
+            distance_ft: 5. * tore_sim::sensors::FEET_PER_NAUTICAL_MILE,
+        };
+        let plain = render(9, scope_with(0, vec![], vec![], vec![]));
+        let bare = render(9, scope_with(0, vec![], vec![], vec![track]));
+        let drawn = differing(&bare, &plain);
+        let square: BTreeSet<(i32, i32)> = (-2..=2)
+            .flat_map(|dx: i32| (-2..=2).map(move |dy: i32| (dx, dy)))
+            .filter(|(dx, dy): &(i32, i32)| dx.abs() == 2 || dy.abs() == 2)
+            .map(|(dx, dy)| (x + dx, y + dy))
+            .collect();
+        assert_eq!(drawn, square, "a hollow 5 by 5 square");
+        for (px, py) in &square {
+            assert_eq!(
+                bare.pixels[(*py as usize * WIDTH + *px as usize) * 4..][..4],
+                PEACH
+            );
+        }
+        // Its marks are peach too.
+        let mut with_marks = marks();
+        with_marks.id = 9;
+        with_marks.assigned = None;
+        let marked = render(9, scope_with(0, vec![], vec![with_marks], vec![track]));
+        let extra: Vec<(i32, i32)> = differing(&marked, &bare).into_iter().collect();
+        assert!(!extra.is_empty());
+        for (px, py) in extra {
+            assert_eq!(
+                marked.pixels[(py as usize * WIDTH + px as usize) * 4..][..4],
+                PEACH
+            );
+        }
+        // Past the scope's range it is not drawn.
+        let far = scope::RemoteTrack {
+            distance_ft: 11. * tore_sim::sensors::FEET_PER_NAUTICAL_MILE,
+            ..track
+        };
+        let beyond = render(9, scope_with(0, vec![], vec![], vec![far]));
+        assert!(differing(&beyond, &plain).is_empty());
+    }
+
+    fn window(tag: Option<&str>, state: &[&str]) -> CombatReadout {
+        CombatReadout {
+            target: Some(crate::target_window::Readout {
+                id: 7,
+                name: "F/A-18D HORNET".into(),
+                damage: 0.,
+                bearing: "12:00".into(),
+                metric: "10.0 NM".into(),
+                objective: None,
+                activity: "ENGAGE".into(),
+                goal: "A",
+                player_goal: false,
+                skill: None,
+            }),
+            target_link: TargetLink {
+                tag: tag.map(str::to_string),
+                state: state.iter().map(|line| line.to_string()).collect(),
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_target_window_gets_a_tag_and_a_state_under_the_activity() {
+        let plain = render(4, window(None, &[]));
+        // "ASSIGNED TO 2" is 13 glyphs, 78 pixels wide, centred under the
+        // activity line at row 28 of the screen.
+        let tagged = differing(&render(4, window(Some("ASSIGNED TO 2"), &[])), &plain);
+        let rows: BTreeSet<i32> = tagged.iter().map(|(_, y)| *y - SCREEN.1).collect();
+        assert_eq!(rows, (28..35).collect());
+        let columns: Vec<i32> = tagged.iter().map(|(x, _)| *x - SCREEN.0).collect();
+        // The space is blank, so the first and last glyph set the extent.
+        assert_eq!(*columns.iter().min().unwrap(), 1 + (119 - 78) / 2);
+        // A mate's state follows, a line each, eleven pixels apart.
+        let both = differing(
+            &render(4, window(Some("2 LOCKED"), &["FUEL BINGO", "GUNS ONLY"])),
+            &plain,
+        );
+        let rows: BTreeSet<i32> = both.iter().map(|(_, y)| *y - SCREEN.1).collect();
+        assert_eq!(rows, (28..35).chain(39..46).chain(50..57).collect());
+        // Nothing above the tag moves, and a window with no link lines is the
+        // window it was.
+        assert!(rows.iter().all(|row| *row >= 28));
+        assert!(differing(&render(4, window(None, &[])), &plain).is_empty());
+    }
+
+    /// The readout of a scene the player's radar holds one contact of, with
+    /// the link as given, through the same builder the flight screen uses.
+    fn scene(radar: bool, linked: bool) -> CombatReadout {
+        use tore_world::readout::{LinkAssigned, LinkMark, LinkMate, LinkReadout, LinkTrack};
+        let (combat, flight) = tore_world::combat::fixtures::loaded([1, 1]);
+        let mut ro = combat
+            .cockpit_readout(
+                combat.own_id(),
+                crate::combat::launcher(&flight),
+                None,
+                None,
+            )
+            .expect("the fixture's plane has an ownship");
+        ro.sensors.available = [true; 3];
+        ro.sensors.operating = [true; 3];
+        let ahead = [
+            flight.position[0],
+            flight.position[1],
+            flight.position[2] + 30_000.,
+        ];
+        let contact = tore_sim::sensors::Contact {
+            id: 1,
+            channel: tore_sim::sensors::Channel::Radar,
+            bearing_rad: 0.,
+            elevation_rad: 0.,
+            distance_ft: 30_000.,
+            position: ahead,
+            velocity: [0.; 3],
+            track_eligible: true,
+            destroyed: false,
+        };
+        ro.sensors.contacts = vec![contact];
+        ro.targets.display = Some(tore_world::readout::TargetRow {
+            id: 1,
+            aircraft: None,
+            position: ahead,
+            velocity: [0.; 3],
+            damage: tore_world::snapshot::Damage {
+                hp: 100,
+                initial_hp: 100,
+                sections: [0; 6],
+                structural: None,
+            },
+        });
+        if linked {
+            ro.link = LinkReadout {
+                radar,
+                assigned: Some(LinkAssigned {
+                    target: 1,
+                    by: 0,
+                    acknowledged: false,
+                }),
+                tracks: vec![LinkTrack {
+                    target: 2,
+                    position: [ahead[0] + 5_000., ahead[1], ahead[2] + 20_000.],
+                    velocity: [0.; 3],
+                    source: tore_world::datalink::TrackSource::Flight,
+                }],
+                marks: vec![LinkMark {
+                    target: 1,
+                    lockers: 0b10,
+                    net_lock: None,
+                    assigned_to: 0,
+                }],
+                mates: vec![LinkMate {
+                    plane: 1,
+                    member: 1,
+                    fuel: tore_world::datalink::Fuel::Normal,
+                    weapons: tore_world::datalink::Weapons::Missiles,
+                    damage: tore_world::datalink::Damage::None,
+                }],
+            };
+        }
+        crate::combat_view::readout(
+            &combat,
+            combat.state.own().configuration(),
+            &ro,
+            &flight,
+            flight.sensors,
+            1.,
+        )
+    }
+
+    #[test]
+    fn a_linked_scene_draws_its_cues_and_one_with_no_radar_draws_none() {
+        let pages = [9, 4];
+        let draw = |radar, linked| pages.map(|page| render(page, scene(radar, linked)));
+        let unlinked = draw(true, false);
+        let with_radar = draw(true, true);
+        let without_radar = draw(false, true);
+        // The radar page: a remote track and the flightmate's number. The
+        // target window: the tag.
+        for (page, (linked, plain)) in with_radar.iter().zip(&unlinked).enumerate() {
+            assert!(
+                !differing(linked, plain).is_empty(),
+                "page {} shows nothing of the link",
+                pages[page]
+            );
+        }
+        // An aircraft with no radar draws exactly what it drew with no link.
+        for (page, (bare, plain)) in without_radar.iter().zip(&unlinked).enumerate() {
+            assert!(
+                differing(bare, plain).is_empty(),
+                "page {} draws a cue with no radar",
+                pages[page]
+            );
+        }
+        if let Some(dir) = std::env::var_os("TORE_LINK_CAPTURE_DIR") {
+            // A look for the slice report: the raster of each page in each
+            // state, as PPMs.
+            for (name, set) in [
+                ("unlinked", &unlinked),
+                ("linked", &with_radar),
+                ("no-radar", &without_radar),
+            ] {
+                for (page, raster) in pages.iter().zip(set) {
+                    let mut ppm = format!("P6\n{WIDTH} {HEIGHT}\n255\n").into_bytes();
+                    ppm.extend(
+                        raster
+                            .pixels
+                            .chunks_exact(4)
+                            .flat_map(|p| [p[0], p[1], p[2]]),
+                    );
+                    std::fs::write(
+                        std::path::Path::new(&dir).join(format!("{name}-page{page}.ppm")),
+                        ppm,
+                    )
+                    .unwrap();
+                }
+            }
+        }
     }
 }

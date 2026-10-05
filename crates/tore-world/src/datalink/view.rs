@@ -13,6 +13,9 @@ use super::{
     DataLink, Engagement, FlightId, Lock, Member, MemberStatus, SEAT_TRACKS, Track, flight_key,
     squared_feet,
 };
+use crate::readout::{
+    LinkAssigned, LinkMark, LinkMate, LinkReadout, LinkTrack, MAX_LINK_MARKS, MemberRef,
+};
 use std::collections::BTreeMap;
 
 /// Where a track in a plane's view came from.
@@ -157,6 +160,91 @@ impl DataLink {
         });
         tracks.truncate(SEAT_TRACKS);
         tracks
+    }
+
+    /// `plane`'s share of the picture as its displays draw it, for the
+    /// cockpit readout (slice G6): its assignment, the tracks it receives,
+    /// what its flightmates and the side's other flights have locked and what
+    /// the flight has been assigned, and its flightmates' state. Empty, with
+    /// no radar, for a plane the picture does not know.
+    pub fn readout(&self, plane: u32) -> LinkReadout {
+        let Some(me) = self.member(plane).copied() else {
+            return LinkReadout::default();
+        };
+        let view = self.view(plane);
+        let bit = |member: u8| 1u16.checked_shl(u32::from(member)).unwrap_or(0);
+        let mut marks: BTreeMap<u32, LinkMark> = BTreeMap::new();
+        fn mark_of(marks: &mut BTreeMap<u32, LinkMark>, target: u32) -> &mut LinkMark {
+            marks.entry(target).or_insert(LinkMark {
+                target,
+                lockers: 0,
+                net_lock: None,
+                assigned_to: 0,
+            })
+        }
+        // Locks reach the plane at once. They come in plane id order, so the
+        // net lock kept is the lowest plane id's.
+        for (holder, lock) in &view.locks {
+            let Some(holder) = self.member(*holder) else {
+                continue;
+            };
+            let entry = mark_of(&mut marks, lock.target);
+            if holder.flight == me.flight {
+                entry.lockers |= bit(holder.member);
+            } else if entry.net_lock.is_none() {
+                entry.net_lock = Some(MemberRef {
+                    flight: holder.flight.index,
+                    member: holder.member,
+                });
+            }
+        }
+        // The flight sees the assignments of every flightmate but its own,
+        // which `assigned` carries.
+        for (receiver, assignment) in &self.assignments {
+            if *receiver == plane {
+                continue;
+            }
+            let Some(receiver) = self.member(*receiver) else {
+                continue;
+            };
+            if receiver.alive && receiver.flight == me.flight {
+                mark_of(&mut marks, assignment.target).assigned_to |= bit(receiver.member);
+            }
+        }
+        let mut marks: Vec<LinkMark> = marks.into_values().collect();
+        marks.truncate(MAX_LINK_MARKS);
+        LinkReadout {
+            radar: view.radar,
+            assigned: self.assignments.get(&plane).map(|assignment| LinkAssigned {
+                target: assignment.target,
+                by: assignment.by,
+                acknowledged: assignment.acknowledged,
+            }),
+            tracks: view
+                .tracks
+                .iter()
+                .map(|row| LinkTrack {
+                    target: row.track.target,
+                    position: row.track.position,
+                    velocity: row.track.velocity,
+                    source: row.source,
+                })
+                .collect(),
+            marks,
+            mates: view
+                .mates
+                .iter()
+                .filter_map(|status| {
+                    Some(LinkMate {
+                        plane: status.plane,
+                        member: self.member(status.plane)?.member,
+                        fuel: status.fuel,
+                        weapons: status.weapons,
+                        damage: status.damage,
+                    })
+                })
+                .collect(),
+        }
     }
 
     /// The flights of the mission, friendly first.
@@ -368,5 +456,128 @@ mod tests {
                 .windows(2)
                 .all(|pair| pair[0].track.position[0] <= pair[1].track.position[0])
         );
+    }
+
+    fn assignment(target: u32, by: u32, acknowledged: bool) -> crate::datalink::Assignment {
+        crate::datalink::Assignment {
+            target,
+            by,
+            tick: 7,
+            order: tore_sim::ai::wing::PlayerOrder::EngageMyTarget,
+            acknowledged,
+        }
+    }
+
+    #[test]
+    fn the_readout_marks_what_flightmates_and_other_flights_locked_at_once() {
+        let mut link = link();
+        // Plane 2 (Red three) also locks 11; plane 3 (Blue) locks 12 already.
+        link.locks.insert(
+            2,
+            Lock {
+                target: 11,
+                since: 6,
+            },
+        );
+        let readout = link.readout(0);
+        assert!(readout.radar);
+        let mark = |target: u32| readout.marks.iter().find(|m| m.target == target).copied();
+        // Flightmate 1 (member number one, bit one) locks 10.
+        let ten = mark(10).expect("locked by a flightmate");
+        assert_eq!(
+            (ten.lockers, ten.net_lock, ten.assigned_to),
+            (0b10, None, 0)
+        );
+        let eleven = mark(11).expect("locked by plane 2");
+        assert_eq!(eleven.lockers, 0b100);
+        // Blue one's lock reaches Red over the battle net, named by flight and
+        // member.
+        let twelve = mark(12).expect("locked over the net");
+        assert_eq!(twelve.lockers, 0);
+        assert_eq!(
+            twelve.net_lock,
+            Some(MemberRef {
+                flight: 1,
+                member: 3
+            })
+        );
+        // The enemy's lock is not shared with this side.
+        assert!(mark(20).is_none());
+        assert!(
+            readout
+                .marks
+                .windows(2)
+                .all(|pair| pair[0].target < pair[1].target)
+        );
+    }
+
+    #[test]
+    fn the_readout_carries_the_planes_assignment_and_the_flights() {
+        let mut link = link();
+        link.assignments.insert(1, assignment(10, 0, false));
+        link.assignments.insert(2, assignment(11, 0, true));
+        // The receiver sees its own as `assigned`, not as a mark; the flight's
+        // other assignments are marks with the receiver's member bit.
+        let own = link.readout(1);
+        assert_eq!(
+            own.assigned,
+            Some(LinkAssigned {
+                target: 10,
+                by: 0,
+                acknowledged: false
+            })
+        );
+        assert!(own.marks.iter().all(|m| m.assigned_to & 0b10 == 0));
+        let eleven = own.marks.iter().find(|m| m.target == 11).unwrap();
+        assert_eq!(eleven.assigned_to, 0b100);
+        // The lead sees both receivers' marks and no assignment of its own.
+        let lead = link.readout(0);
+        assert_eq!(lead.assigned, None);
+        let marks: Vec<(u32, u16)> = lead
+            .marks
+            .iter()
+            .map(|m| (m.target, m.assigned_to))
+            .collect();
+        assert!(marks.contains(&(10, 0b10)) && marks.contains(&(11, 0b100)));
+        // A dead receiver's assignment shows nowhere.
+        link.members[2].alive = false;
+        assert!(
+            link.readout(0)
+                .marks
+                .iter()
+                .all(|m| m.assigned_to & 0b100 == 0)
+        );
+        // Another flight's plane sees none of the flight's assignments.
+        assert!(link.readout(3).marks.iter().all(|m| m.assigned_to == 0));
+    }
+
+    #[test]
+    fn the_readout_carries_the_tracks_and_the_flightmates_state() {
+        let readout = link().readout(0);
+        let targets: Vec<(u32, TrackSource)> = readout
+            .tracks
+            .iter()
+            .map(|t| (t.target, t.source))
+            .collect();
+        assert_eq!(
+            targets,
+            [
+                (10, TrackSource::Own),
+                (11, TrackSource::Flight),
+                (12, TrackSource::Network)
+            ]
+        );
+        let mates: Vec<(u32, u8)> = readout.mates.iter().map(|m| (m.plane, m.member)).collect();
+        assert_eq!(mates, [(1, 1), (2, 2)]);
+    }
+
+    #[test]
+    fn a_plane_with_no_radar_still_gets_the_readout_with_the_flag_down() {
+        let readout = link().readout(2);
+        assert!(!readout.radar && !readout.shown());
+        assert_eq!(readout.tracks.len(), 3, "linked all the same");
+        assert!(readout.mark(10).is_none(), "but no display reads a mark");
+        assert!(readout.mate(1).is_none() && readout.assignment().is_none());
+        assert_eq!(link().readout(99), LinkReadout::default());
     }
 }

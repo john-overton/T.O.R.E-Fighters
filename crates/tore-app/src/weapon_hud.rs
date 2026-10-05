@@ -13,6 +13,7 @@ use tore_sim::{
         missiles::{self, Guidance, LaunchMode, seeker::Status},
     },
 };
+use tore_world::readout::CockpitReadout;
 
 /// Reserve the weapon readout area even for a safe gun, keeping flight text clear.
 pub fn active(frame: &FlightFrame) -> bool {
@@ -80,6 +81,7 @@ pub fn draw(
     if target_cue {
         draw_target(pixels, frame, color, zoom, target_friendly);
     }
+    draw_assigned(pixels, frame, color, zoom);
     if ro.airport.nav_mode {
         Paint {
             pixels,
@@ -377,6 +379,83 @@ pub(crate) fn replay_target(
         }
     }
 }
+/// The target to wear the assignment brackets now: the one the lead assigned
+/// to the plane, while the plane has not locked it and the blink is lit.
+/// Nothing for an aircraft with no radar. Locking it ends the brackets; the
+/// sensors know a tick before the picture marks the assignment acknowledged.
+fn bracketed(readout: &CockpitReadout) -> Option<u32> {
+    let given = readout.link.assignment()?;
+    let locked = given.acknowledged || readout.sensors.acquired == Some(given.target);
+    (!locked && crate::scope::link_blink_on(readout.sensors.tick)).then_some(given.target)
+}
+
+/// Where the bracketed target is: the displayed target's row when it is the
+/// one, else the plane's own observation of it, else the link's track.
+fn assigned_position(readout: &CockpitReadout, target: u32) -> Option<Vector> {
+    readout
+        .targets
+        .display
+        .as_ref()
+        .filter(|row| row.id == target)
+        .map(|row| row.position)
+        .or_else(|| readout.observation(target).map(|contact| contact.position))
+        .or_else(|| {
+            readout
+                .link
+                .tracks
+                .iter()
+                .find(|track| track.target == target)
+                .map(|track| track.position)
+        })
+}
+
+/// Four corner brackets round the target the lead assigned, bigger than the
+/// target box and open at the sides' middles, so the two shapes never read
+/// alike. Blinks once a second until the plane locks the target.
+fn draw_assigned(pixels: &mut [u8], frame: &FlightFrame, color: [u8; 3], zoom: f64) {
+    let readout = &frame.readout;
+    let Some(target) = bracketed(readout) else {
+        return;
+    };
+    let Some(position) = assigned_position(readout, target) else {
+        return;
+    };
+    let s = frame.presented();
+    let Some(TargetCue::Square(point)) = target_cue(
+        missiles::sub(position, s.position),
+        Basis::new(s.yaw, s.pitch, s.bank),
+        zoom,
+    ) else {
+        return;
+    };
+    let mut paint = Paint {
+        pixels,
+        clip: (174, 96, 292, hud::AIM_BOTTOM - 96),
+        color: [color[0], color[1], color[2], 255],
+    };
+    for (a, b) in bracket_lines(point) {
+        paint.line(a, b);
+    }
+}
+
+/// The eight strokes of the assignment brackets about `(x, y)`: a corner at
+/// each of (+-11, +-11), with two arms of five pixels reaching inward along
+/// the sides.
+fn bracket_lines((x, y): (f64, f64)) -> [((f64, f64), (f64, f64)); 8] {
+    const HALF: f64 = 11.;
+    const ARM: f64 = 5.;
+    let mut lines = [((0., 0.), (0., 0.)); 8];
+    for (index, (sx, sy)) in [(-1., -1.), (1., -1.), (1., 1.), (-1., 1.)]
+        .into_iter()
+        .enumerate()
+    {
+        let corner = (x + sx * HALF, y + sy * HALF);
+        lines[index * 2] = (corner, (corner.0 - sx * ARM, corner.1));
+        lines[index * 2 + 1] = (corner, (corner.0, corner.1 - sy * ARM));
+    }
+    lines
+}
+
 fn draw_target_box(paint: &mut Paint<'_>, (x, y): (f64, f64), friendly: bool) {
     for (a, b) in [
         ((-7., -7.), (7., -7.)),
@@ -759,5 +838,147 @@ mod tests {
         }
         let at = |z| hud::project(0., 0., 3f64.to_radians(), 0., z).unwrap().0 - 320.;
         assert!((at(2.) - 2. * at(1.)).abs() < 1e-9);
+    }
+
+    type Stroke = ((f64, f64), (f64, f64));
+
+    /// A fixture readout whose link has the lead's assignment of target 7.
+    fn assigned_readout(radar: bool, acknowledged: bool) -> CockpitReadout {
+        let (combat, flight) = tore_world::combat::fixtures::loaded([1, 1]);
+        let mut readout = combat
+            .cockpit_readout(
+                combat.own_id(),
+                crate::combat::launcher(&flight),
+                None,
+                None,
+            )
+            .expect("the fixture's plane has an ownship");
+        readout.link = tore_world::readout::LinkReadout {
+            radar,
+            assigned: Some(tore_world::readout::LinkAssigned {
+                target: 7,
+                by: 0,
+                acknowledged,
+            }),
+            tracks: vec![tore_world::readout::LinkTrack {
+                target: 7,
+                position: [10., 20., 30.],
+                velocity: [0.; 3],
+                source: tore_world::datalink::TrackSource::Flight,
+            }],
+            ..Default::default()
+        };
+        readout
+    }
+
+    #[test]
+    fn the_brackets_blink_once_a_second_until_the_plane_locks_the_target() {
+        let mut readout = assigned_readout(true, false);
+        let lit = |readout: &mut CockpitReadout, tick: u64| {
+            readout.sensors.tick = tick;
+            bracketed(readout)
+        };
+        // Half a second on, half a second off, at 120 ticks a second.
+        assert_eq!(lit(&mut readout, 0), Some(7));
+        assert_eq!(lit(&mut readout, 59), Some(7));
+        assert_eq!(lit(&mut readout, 60), None);
+        assert_eq!(lit(&mut readout, 119), None);
+        assert_eq!(lit(&mut readout, 120), Some(7));
+        // The plane's own lock ends them at once, before the picture catches up.
+        readout.sensors.acquired = Some(7);
+        assert_eq!(lit(&mut readout, 0), None);
+        // A lock on something else does not.
+        readout.sensors.acquired = Some(8);
+        assert_eq!(lit(&mut readout, 0), Some(7));
+        // The picture's acknowledgement ends them too, and so does having none.
+        readout.sensors.acquired = None;
+        readout.link.assigned.as_mut().unwrap().acknowledged = true;
+        assert_eq!(lit(&mut readout, 0), None);
+        readout.link.assigned = None;
+        assert_eq!(lit(&mut readout, 0), None);
+    }
+
+    #[test]
+    fn an_aircraft_with_no_radar_draws_no_brackets() {
+        let mut readout = assigned_readout(false, false);
+        readout.sensors.tick = 0;
+        assert_eq!(bracketed(&readout), None);
+    }
+
+    #[test]
+    fn the_brackets_find_the_target_where_the_plane_or_the_link_has_it() {
+        let mut readout = assigned_readout(true, false);
+        // Only the link's track holds it.
+        assert_eq!(assigned_position(&readout, 7), Some([10., 20., 30.]));
+        // The plane's own observation is better than the link's.
+        let mut contact = tore_sim::sensors::Contact {
+            id: 7,
+            channel: tore_sim::sensors::Channel::Radar,
+            bearing_rad: 0.,
+            elevation_rad: 0.,
+            distance_ft: 1.,
+            position: [1., 2., 3.],
+            velocity: [0.; 3],
+            track_eligible: true,
+            destroyed: false,
+        };
+        readout.sensors.contacts = vec![contact];
+        assert_eq!(assigned_position(&readout, 7), Some([1., 2., 3.]));
+        contact.id = 8;
+        readout.sensors.contacts = vec![contact];
+        readout.link.tracks.clear();
+        assert_eq!(assigned_position(&readout, 7), None);
+    }
+
+    #[test]
+    fn the_brackets_are_not_the_target_box() {
+        let render = |lines: &[Stroke]| {
+            let mut pixels = vec![0; 640 * 480 * 4];
+            let mut paint = Paint {
+                pixels: &mut pixels,
+                clip: hud::HUD_CLIP,
+                color: [0, 255, 0, 255],
+            };
+            for (a, b) in lines {
+                paint.line(*a, *b);
+            }
+            pixels
+                .chunks_exact(4)
+                .enumerate()
+                .filter(|(_, px)| px[3] != 0)
+                .map(|(i, _)| (i % 640, i / 640))
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        let brackets = render(&bracket_lines((320., 240.)));
+        let mut pixels = vec![0; 640 * 480 * 4];
+        draw_target_box(
+            &mut Paint {
+                pixels: &mut pixels,
+                clip: hud::HUD_CLIP,
+                color: [0, 255, 0, 255],
+            },
+            (320., 240.),
+            false,
+        );
+        let boxed: std::collections::BTreeSet<(usize, usize)> = pixels
+            .chunks_exact(4)
+            .enumerate()
+            .filter(|(_, px)| px[3] != 0)
+            .map(|(i, _)| (i % 640, i / 640))
+            .collect();
+        assert!(brackets.is_disjoint(&boxed), "the shapes touch");
+        // Four corners, each of two arms; the middle of each side is open.
+        for (x, y) in [(320, 229), (320, 251), (309, 240), (331, 240)] {
+            assert!(!brackets.contains(&(x, y)), "({x}, {y}) is open");
+        }
+        for (x, y) in [(309, 229), (331, 229), (331, 251), (309, 251)] {
+            assert!(brackets.contains(&(x, y)), "({x}, {y}) is a corner");
+        }
+        let extent = |axis: fn(&(usize, usize)) -> usize| {
+            let values: Vec<usize> = brackets.iter().map(axis).collect();
+            (*values.iter().min().unwrap(), *values.iter().max().unwrap())
+        };
+        assert_eq!(extent(|p| p.0), (309, 331));
+        assert_eq!(extent(|p| p.1), (229, 251));
     }
 }

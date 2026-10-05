@@ -25,7 +25,7 @@ use crate::seats::{Pilot, PlaneId, Roster, SeatId};
 pub const FLIGHTS: [&str; 8] = [
     "Red", "Blue", "Green", "Black", "White", "Orange", "Purple", "Yellow",
 ];
-const POSITIONS: [&str; 12] = [
+pub(crate) const POSITIONS: [&str; 12] = [
     "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",
     "twelve",
 ];

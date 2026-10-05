@@ -13,7 +13,7 @@ use crate::{
     readout::CockpitReadout,
     seats::{PlaneId, SeatId},
     snapshot::RenderSnapshot,
-    world::{Cue, World},
+    world::{Cockpit, Cue, World},
 };
 use std::{borrow::Cow, cell::OnceCell};
 use tore_sim::{
@@ -203,12 +203,20 @@ impl World {
     /// snapshot from the tick's flight.
     pub fn cockpit_readout(&self, seat: SeatId, launcher: Launcher) -> Option<CockpitReadout> {
         let cockpit = &self.cockpits[self.cockpit_of(seat)?];
-        self.combat.cockpit_readout(
+        self.readout_of(cockpit, launcher)
+    }
+
+    /// The readout of `cockpit`'s plane: combat's, with the plane's share of
+    /// the flight data link ([`crate::datalink::DataLink::readout`]).
+    fn readout_of(&self, cockpit: &Cockpit, launcher: Launcher) -> Option<CockpitReadout> {
+        let mut readout = self.combat.cockpit_readout(
             cockpit.plane.0,
             launcher,
             self.ai_wings.as_ref(),
             Some(cockpit),
-        )
+        )?;
+        readout.link = self.datalink.readout(cockpit.plane.0);
+        Some(readout)
     }
 
     /// The flight frame of `seat`, or `None` when it flies no plane.
@@ -254,7 +262,6 @@ impl World {
         let config = self.combat.state.ownship(cockpit.plane.0)?.configuration();
         let launcher = combat_launcher(presented.as_ref().unwrap_or(&cockpit.flight));
         let presented = presented.map_or(Cow::Borrowed(&cockpit.flight), Cow::Owned);
-        let plane = cockpit.plane.0;
         Some(FlightFrame {
             seat,
             plane: cockpit.plane,
@@ -266,8 +273,7 @@ impl World {
             devices: &self.combat.state.devices,
             config,
             readout: ReadoutSlot::lazy(shared, move || {
-                self.combat
-                    .cockpit_readout(plane, launcher, self.ai_wings.as_ref(), Some(cockpit))
+                self.readout_of(cockpit, launcher)
                     .expect("the seat's plane has an ownship")
             }),
             tick_cues: cues,

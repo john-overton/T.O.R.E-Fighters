@@ -8,8 +8,9 @@
 //! ([`DataLink::after_ai`]) and never changes either. Locks and engagements
 //! follow the tick they happen. The tracks and each member's coarse state are
 //! published every [`PUBLISH_TICKS`] ticks, so between publishing ticks the
-//! picture's tracks do not move. In this slice (G0) nothing consumes the
-//! picture: later slices let the AI, the radio and the displays read it.
+//! picture's tracks do not move. The displays read it (slice G6: the cockpit
+//! readout's [`LinkReadout`](crate::readout::LinkReadout) and the sort
+//! warning); later slices let the AI and the radio read it too.
 //!
 //! What a member receives is worked out from the picture, never stored per
 //! member: [`DataLink::view`] for a seat's readout and [`DataLink::ai_input`]
@@ -29,6 +30,7 @@ mod checkpoint;
 mod journal;
 mod picture;
 mod view;
+mod warning;
 
 pub use ai_input::{AiInput, FlightFeed};
 pub use assign::ClearReason;
@@ -38,6 +40,7 @@ pub use picture::{
     MemberStatus, PUBLISH_TICKS, SEAT_TRACKS, Source, Track, Weapons, flight_key,
 };
 pub use view::{LinkView, TrackSource, ViewTrack};
+pub use warning::{SORT_BEEP, SORT_COOLDOWN_TICKS, SortWarning};
 
 use crate::{
     ai_wings::{AiWings, ENEMY_SIDE, FRIENDLY_SIDE},
@@ -380,12 +383,12 @@ impl DataLink {
         &self.assignments
     }
 
-    /// Lock pairs already warned of. Empty until slice G6.
+    /// Lock pairs already warned of (slice G6).
     pub fn warned(&self) -> &BTreeSet<(u32, u32, u32)> {
         &self.warned
     }
 
-    /// The tick of each seat's last sort warning. Empty until slice G6.
+    /// The tick of each seat's last sort warning (slice G6).
     pub fn seat_warned(&self) -> &BTreeMap<SeatId, u64> {
         &self.seat_warned
     }

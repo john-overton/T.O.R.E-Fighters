@@ -1310,6 +1310,8 @@ impl QReadout {
             airport,
             target_window,
             music,
+            // The link's share is not on the wire yet (slice G7).
+            link: Default::default(),
         })
     }
 

@@ -64,7 +64,7 @@ fn arm_the_ai(world: &mut World) {
 /// friendly wing, whose members are the player (plane 0), a second human
 /// (plane 1) and two AI aircraft. The wing led by a human joins a fight only
 /// when ordered, so the AI aircraft that choose targets here are the enemy's.
-fn fight_mission() -> World {
+pub(super) fn fight_mission() -> World {
     let mut world = ai_mission();
     arm_the_ai(&mut world);
     world.take_plane(SeatId(1), F_HUMAN).unwrap();
@@ -72,7 +72,7 @@ fn fight_mission() -> World {
 }
 
 /// Steps the mission one tick with the script.
-fn step(world: &mut World, tick: usize, out: &mut TickOutput) {
+pub(super) fn step(world: &mut World, tick: usize, out: &mut TickOutput) {
     let step_inputs = inputs(world, |seat| script(world, seat, tick));
     world.step(&step_inputs, out).unwrap();
 }
