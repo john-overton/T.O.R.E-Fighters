@@ -31,7 +31,7 @@ How much to run depends on the moment. Three tiers, from cheapest to most thorou
 | --- | --- | --- | --- |
 | Per change | While you work, after each edit worth checking | `python3 tools/quick_check.py` | 5 minutes |
 | Before merge | Before you finish, and what the pre-push hook runs | The [AGENTS.md](../../AGENTS.md) check list, and the full single-player baseline where it exists | The list, plus about 5 minutes for the baseline |
-| Before a release | Ad hoc, by hand, before tagging | The whole battery with `TORE_AI_FUZZ=all`, and the lane pages' human checks; once multiplayer ships, also the [network matrix](#the-network-matrix) at five minutes a cell | About 85 minutes of wall clock at 6 to 8 jobs, and about 2 minutes more for the matrix |
+| Before a release | Ad hoc, by hand, before tagging | The whole battery with `TORE_AI_FUZZ=all` (every lane, the [net lane](lane-net.md) among them), the lane pages' human checks, and the [network tests outside the battery](#network-tests-outside-the-battery) | About 85 minutes of wall clock at 6 to 8 jobs for the battery, plus about 90 seconds for the net lane and about 15 minutes for the network tests |
 
 The pre-push hook stays as it is. The full battery and the seeded fuzz games are not
 part of any routine: run them when a release is near, or when you change something
@@ -118,38 +118,49 @@ in about half a minute.
 
 ### Before a release
 
-Run the whole battery by hand, with the seeded AI fuzz games on:
+Run the whole battery by hand, with the seeded AI fuzz games on. It includes the `net`
+lane, which needs `tore-server` and `tore-bot` built beside the game (see
+[lane-net](lane-net.md)):
 
 ```sh
+cargo build --locked -p tore-app -p tore-server -p tore-session
 TORE_AI_FUZZ=all python3 tools/battery.py --jobs 8
 ```
 
-Then read the lane pages' lists of things that need a human eye or ear. Record the
+Then run the [network tests outside the battery](#network-tests-outside-the-battery),
+and read the lane pages' lists of things that need a human eye or ear. Record the
 result as a pass in [`docs/baselines/`](../baselines/) (see "Reports").
 
-### The network matrix
+### Network tests outside the battery
 
-The network code has its own matrix, a test rather than a battery lane: a host and two
-bots fly a scripted fight on the network simulator for each round trip (50, 150 and
-300 ms) and each loss (0, 2 and 5 percent each way, with 1 percent duplicates), and every
-limit of the [netcode acceptance table](../MULTIPLAYER.md#netcode-numbers) is measured
-and asserted. It uses the synthetic fixtures, so it needs no import and runs anywhere.
+The `net` lane covers the real programs on one machine. The network code also has Rust
+tests that the battery does not run: some are in the normal `cargo test --workspace`, and
+the slow or data-reading ones are `#[ignore]`d. The full run before a release includes
+all of them. Build in release for the ones marked so, run them one at a time on a quiet
+machine, and keep `TORE_DATA_DIR` pointed at an imported data folder for the ones that
+read the real import.
 
-```sh
-cargo test --locked -p tore-session --lib matrix_tests                      # 60 simulated seconds a cell, in the normal suite
-cargo test --locked -p tore-session --lib matrix_tests::full -- --ignored --nocapture   # five minutes a cell, before a release
-```
+| Test | What it measures or proves | Command |
+| --- | --- | --- |
+| The matrix, short form | Every cell of the [netcode acceptance table](../MULTIPLAYER.md#netcode-numbers) over 60 simulated seconds: a host and two bots on the network simulator at 50, 150 and 300 ms and 0, 2 and 5 percent loss each way with 1 percent duplicates; synthetic data. In the normal suite (about 12 s) | `cargo test --locked -p tore-session --lib matrix_tests` |
+| **The matrix, five minutes a cell** (ignored) | The same nine cells over five simulated minutes each: the acceptance itself; about 2 min 15 s at four cells at a time; one line of figures per bot | `cargo test --locked -p tore-session --lib matrix_tests::full -- --ignored --nocapture` |
+| The five-minute prediction (ignored) | A joined client's prediction equals the host's at every snapshot for 300 simulated seconds | `cargo test --locked -p tore-session --lib the_prediction_equals_the_host_for_five_minutes -- --ignored --nocapture` |
+| The five-minute fight (ignored) | Two bots fight for 300 simulated seconds at 150 ms and 2 percent loss | `cargo test --locked -p tore-session --lib two_bots_fight_for_five_minutes -- --ignored --nocapture` |
+| A bot over real UDP (ignored) | One bot flies a minute of real time over a real socket on this machine | `cargo test --locked -p tore-session --lib a_bot_flies_a_minute_over_real_udp -- --ignored --nocapture` |
+| Loopback | A host and two real `tore-bot` processes over real UDP; synthetic data. CI's job `Network loopback` runs it on Linux, Windows and macOS with 20 seconds of flight; the default is 6 | `TORE_LOOPBACK_SECONDS=20 cargo test --locked -p tore-session --test loopback -- --nocapture` |
+| The strict real-time tests (ignored) | The game's hosting thread: no correction of the hosting player's plane, a 2 second window stall stalls nobody, an 8 second stall drops nobody and the King still reigns, each to the strict limits. CI's `strict-real-time` job runs them on Linux; the normal suite runs forms a starved runner meets ([why](../ARCHITECTURE.md#real-time-tests-on-shared-runners-ef-y)). Needs a machine whose sleeps are accurate: nothing else heavy running | `cargo test --locked -p tore-app --bin tore-app -- --ignored --exact --test-threads=1 --nocapture net::hosting::tests::a_hosted_mission_flies_with_no_correction_at_all net::hosting::tests::a_two_second_window_stall_stalls_nobody_strictly net::hosting::tests::an_eight_second_window_stall_drops_nobody_and_the_king_still_reigns_strictly` |
+| The name lookup (ignored) | A name the system's resolver cannot resolve fails (it asks the system's resolver, so it needs a normal network setup) | `cargo test --locked -p tore-app --bin tore-app -- --ignored --exact net::lookup::tests::a_name_the_system_cannot_resolve_fails` |
+| The local search (ignored) | `find_games_on_this_machine` looks at the real network | `cargo test --locked -p tore-app --bin tore-app -- --ignored --exact net::search::tests::find_games_on_this_machine --nocapture` |
+| Host cost and bandwidth with real data (ignored) | The host's time per tick and per human, and bytes each way per player, with 0, 2, 8, 15 or 30 bots on a 15 against 15 mission; release, one count at a time; the figures and commands are in [the baseline](../baselines/net-2026-09-30.md) | `TORE_DATA_DIR=$PWD/.local/DATA TORE_MEASURE_BOTS=15 cargo test --release --locked -p tore-session --test host_players -- --ignored --nocapture` (`TORE_MEASURE_OPEN=all` above 15 bots) |
+| The host's empty cost (ignored) | A 15 against 15 mission with nobody connected against the 20 percent of one core budget, and the same mission stepped alone for comparison; ten simulated minutes; release | `TORE_DATA_DIR=$PWD/.local/DATA cargo test --release --locked -p tore-session --test host_load -- --ignored --nocapture` |
+| Bytes per snapshot (ignored) | Bytes per snapshot on a 15 against 15 mission, against the plan's bandwidth budget; release | `TORE_DATA_DIR=$PWD/.local/DATA cargo test --release --locked -p tore-session --test bandwidth -- --ignored --nocapture` |
 
-The short form is part of `cargo test --workspace` (about 12 seconds on a quiet
-machine); the full form takes about 2 minutes 15 seconds at four cells at a time and
-prints one line of figures per bot. The CI job `Network loopback`
-(`.github/workflows/network.yml`) runs a host and two real `tore-bot` processes over
-loopback UDP on Linux, Windows and macOS, and its `strict-real-time` job runs the strict
-forms of the game's real-time hosting tests on Linux, which the normal suite runs in forms a
-starved runner meets ([real-time tests on shared runners](../ARCHITECTURE.md#real-time-tests-on-shared-runners-ef-y)).
-The measurements with real data, which need an
-import, are the ignored `host_players` test; see [the baseline](../baselines/net-2026-09-30.md)
-for the commands and results.
+The matrix uses the synthetic fixtures, so it needs no import and runs anywhere; its
+short form is part of `cargo test --workspace`. The measurements with real data need
+an import. `tore-app`'s other `#[ignore]`d tests (the timing and mock-screen render ones in
+`widgets/mock_screen.rs`, `net/chat.rs`, `net/lobby_chat.rs`, `direct_screen/tests.rs` and
+`lobby_screen/tests.rs`) are developer tools that write pictures or print timings and
+assert nothing about the network, so the full run leaves them out.
 
 ## Running it
 
@@ -178,7 +189,8 @@ at once (default 3).
 ## Lanes
 
 A lane is a family of scenarios with one file each under
-`tools/battery_scenarios/`, and one page here.
+`tools/battery_scenarios/`, and one page here. A scenario is one run of the game, or, in the
+`net` lane, a Python driver that starts and feeds several programs ([lane-net](lane-net.md#how-a-scenario-works)).
 
 | Lane | Covers | Scenario files | Page |
 | --- | --- | --- | --- |
@@ -186,12 +198,13 @@ A lane is a family of scenarios with one file each under
 | `flight` | Ground start, takeoff, landing, every aircraft's flight, weapons, jettison, countermeasures, damage, ejection, environment | `flight.py` | [lane-flight](lane-flight.md) |
 | `ai` | One against one up to fifteen against fifteen, every theater, missions, skills, damage, wing orders, invariants on every tick | `ai.py` | [lane-ai](lane-ai.md) |
 | `replay` | Recording, playback, the Replays screen, radio and crew comms, audio start-up, input, hand-flown and mouse scripts, cheats, import errors | `replay.py` and `_replay_*.py` | [lane-replay](lane-replay.md) |
+| `net` | Multiplayer on one machine over real UDP: the dedicated server (`--check`, a flown fight, chat, the console), the local-network search, a joined game that stalls, a hosted game. Each scenario runs several programs (`tore-server`, `tore-bot`, `tore-app`) from a Python driver | `net.py` | [lane-net](lane-net.md) |
 
 Each lane page lists what the lane covers, how long it takes, every bug found and
 fixed, the known failures, the behaviours that need a decision and the things
 that need a human eye or ear. Run one lane with `python3 tools/battery.py --lane
-NAME --jobs 6`; a full pass of all four takes roughly two hours on a 24-thread
-machine with a debug build.
+NAME --jobs 6`; a full pass of all five takes roughly two hours on a 24-thread
+machine with a debug build (the `net` lane is about 80 seconds of it).
 
 Some tools the lanes added are worth knowing on their own:
 
@@ -223,7 +236,8 @@ hit points", "the ordnance page and the aircraft disagree").
 
 ## Adding a scenario
 
-Add a `Scenario(...)` to the lane's file, run it alone with
+Add a `Scenario(...)` to the lane's file (a multiplayer scenario goes in `net.py` as a driver,
+see [lane-net](lane-net.md#how-a-scenario-works)), run it alone with
 `python3 tools/battery.py --scenario NAME`, and check its log. A scenario that
 found a bug should stay in the battery as its regression check, next to a unit
 test in the crate that owns the fix where one is practical. Scenario names are

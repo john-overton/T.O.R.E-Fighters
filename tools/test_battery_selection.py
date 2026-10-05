@@ -77,6 +77,29 @@ class MapTests(unittest.TestCase):
         self.assertFalse(bs.rule_for("crates/tore-sim/src/flight.rs").windowed)
         self.assertFalse(bs.rule_for("crates/tore-world/src/ai_wings.rs").windowed)
 
+    def test_network_crates_select_the_net_lane(self):
+        for path in ("crates/tore-net/src/connection.rs", "crates/tore-session/src/host/mod.rs", "crates/tore-codec/src/lib.rs"):
+            self.assertIn("net-fly", self.families(path), path)
+        self.assertEqual(
+            set(self.families("crates/tore-server/src/run.rs")), {"net-check", "net-fly", "net-discovery"},
+        )
+        self.assertIn("net-window", self.families("crates/tore-session/src/client/mod.rs"))
+        self.assertIn("net-discovery", self.families("crates/tore-net/src/reach.rs"))
+        for path in (
+            "crates/tore-app/src/net/hosting.rs", "crates/tore-app/src/net/session.rs", "crates/tore-app/src/net/play.rs",
+            "crates/tore-app/src/direct_screen/mod.rs", "crates/tore-app/src/lobby_screen/mod.rs", "crates/tore-app/src/widgets/button.rs",
+        ):
+            self.assertIn("net-window", self.families(path), path)
+            self.assertTrue(bs.rule_for(path).windowed, path)
+        self.assertIn("net-discovery", self.families("crates/tore-app/src/net/search.rs"))
+        self.assertEqual(self.families("crates/tore-app/src/net/hosting_tests.rs"), set())
+
+    def test_net_scenario_files_select_their_unit_tests_and_cheap_scenarios(self):
+        rule = bs.rule_for("tools/battery_scenarios/net.py")
+        self.assertIn("test_battery_net", rule.unit_tests)
+        self.assertEqual(set(rule.families), {"net-check", "net-discovery"})
+        self.assertIn("test_battery_net", bs.rule_for("tools/battery.py").unit_tests)
+
     def test_cargo_files_select_everything(self):
         self.assertEqual(set(bs.rule_for("Cargo.lock").families), set(bs.ALL_FAMILIES))
         self.assertEqual(set(bs.rule_for("crates/tore-sim/Cargo.toml").families), set(bs.ALL_FAMILIES))
@@ -188,6 +211,39 @@ class PlanTests(unittest.TestCase):
         many = [sc(f"flight-cheat-{chr(97 + i)}-f18") for i in range(20)]  # twenty different kinds
         p = plan(["crates/tore-sim/src/ejection.rs"], many, {}, budget=1000, per_family=5)
         self.assertEqual(len(p.picks), 5)
+
+
+class NetPlanTests(unittest.TestCase):
+    def setUp(self):
+        self.scenarios = [
+            sc("net-server-check", lane="net"), sc("net-server-fight", lane="net"), sc("net-server-chat", lane="net"),
+            sc("net-server-kick", lane="net"), sc("net-discovery", lane="net"),
+            sc("net-window-stall", window=True, lane="net"), sc("net-window-host", window=True, lane="net"),
+        ]
+        self.durations = {
+            "net-server-check": 1.0, "net-server-fight": 80.0, "net-server-chat": 25.0, "net-server-kick": 8.0,
+            "net-discovery": 6.0, "net-window-stall": 18.0, "net-window-host": 25.0,
+        }
+
+    def test_a_session_change_runs_the_cheapest_flying_scenario_and_asks_for_a_window(self):
+        p = plan(["crates/tore-session/src/host/mod.rs"], self.scenarios, self.durations)
+        names = {s.name for s in p.scenarios}
+        self.assertIn("net-server-kick", names)  # the cheapest of the flying family
+        self.assertNotIn("net-server-fight", names)  # 80 s is over a third of the budget
+        self.assertFalse(any(s.window for s in p.scenarios))
+        self.assertEqual(p.needs_window, ["net-window"])
+
+    def test_a_game_side_change_opens_the_window_scenarios(self):
+        p = plan(["crates/tore-app/src/net/hosting.rs"], self.scenarios, self.durations)
+        self.assertTrue(p.windows_used)
+        self.assertTrue(any(s.name.startswith("net-window-") for s in p.scenarios))
+        self.assertFalse(any(s.name.startswith("net-server-") for s in p.scenarios))
+
+    def test_a_server_change_alone_runs_headless(self):
+        p = plan(["crates/tore-server/src/config.rs"], self.scenarios, self.durations)
+        names = {s.name for s in p.scenarios}
+        self.assertTrue({"net-server-check", "net-discovery"} <= names)
+        self.assertFalse(any(s.window for s in p.scenarios))
 
 
 class VariantTests(unittest.TestCase):

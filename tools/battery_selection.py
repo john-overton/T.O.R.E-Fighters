@@ -174,6 +174,17 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "settings files, import errors, diagnostics",
         ("replay-settings-*", "replay-import-*", "replay-diag-*"),
     ),
+    # Net lane: real UDP on this machine, a driver per scenario.
+    "net-check": ("the dedicated server's start-up and --check", ("net-server-check",)),
+    "net-fly": (
+        "a server and bots over UDP: join, fly, chat, console, debrief, clean exit",
+        ("net-server-fight", "net-server-chat", "net-server-kick"),
+    ),
+    "net-discovery": ("finding games on the local network", ("net-discovery",)),
+    "net-window": (
+        "the game itself over the network: a joined game that stalls, a hosted game",
+        ("net-window-*",),
+    ),
 }
 
 def family_matches(family: str, name: str) -> bool:
@@ -190,6 +201,7 @@ LANE_SMOKE = {
     "ai": ("ai-fights", "ai-regression"),
     "menus": ("menus-screens", "menus-validate"),
     "replay": ("replay-recording", "replay-cli"),
+    "net": ("net-check", "net-discovery"),
 }
 
 ALL_FAMILIES = tuple(FAMILIES)
@@ -218,6 +230,7 @@ MAIN_FAMILIES = (
     "replay-cli", "menus-creator", "flight-maneuvers", "flight-takeoff", "flight-landing", "ai-fights",
     "ai-airfield", "ai-lead", "ai-orders", "ai-regression",
 )
+NET_FAMILIES = ("net-fly", "net-window")
 RENDER_FAMILIES = ("windowed-menus", "flight-views", "instruments")
 MENU_FAMILIES = ("menus-screens", "menus-creator", "menus-validate")
 
@@ -343,10 +356,10 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-extract/*", ("replay-settings", "menus-validate"), "extractor"),
     # Stage D crates. Until networked scenarios exist, only the import reaches a battery scenario.
     _r("crates/tore-import/*", ("menus-validate", "replay-settings"), "importer and data folder"),
-    _r("crates/tore-codec/*", (), "network encoding; no single-player scenario uses it yet"),
-    _r("crates/tore-net/*", (), "network transport; no scenario yet"),
-    _r("crates/tore-session/*", (), "network sessions; no scenario yet"),
-    _r("crates/tore-server/*", (), "dedicated server; no scenario yet"),
+    _r("crates/tore-codec/*", NET_FAMILIES, "network encoding"),
+    _r("crates/tore-net/*", NET_FAMILIES + ("net-discovery",), "network transport"),
+    _r("crates/tore-session/*", NET_FAMILIES + ("net-discovery",), "network sessions, the host and tore-bot"),
+    _r("crates/tore-server/*", ("net-check", "net-fly", "net-discovery"), "dedicated server"),
     _r("crates/tore-realtime-native/*", ALL_FAMILIES, "host and shared-worker scheduling on macOS", windowed=True),
     # tore-app: rendering (windowed).
     _r("crates/tore-app/src/*.wgsl", RENDER_FAMILIES, "shaders", windowed=True),
@@ -419,15 +432,16 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/diagnostics.rs", ("replay-settings",), "diagnostics"),
     _r("crates/tore-app/src/performance.rs", ("flight-maneuvers",), "performance counters"),
     _r("crates/tore-app/src/replay/*", ("replay-recording", "ai-regression", "replay-live"), "recording and replay screens"),
-    _r("crates/tore-app/src/net/hosting*", (), "the game's host thread; only --host reaches it; no scenario yet"),
-    _r("crates/tore-app/src/net/keepalive_tests.rs", (), "the joined game's keepalive tests (real time, cargo test only); no scenario"),
-    _r("crates/tore-app/src/widgets/*", ("menus-screens",), "the multiplayer widget kit; the Direct Connection screen draws it (menus-snap-direct*)", windowed=True),
-    _r("crates/tore-app/src/direct_screen/*", ("menus-screens",), "the Direct Connection screen; its snapshot states are menus-snap-direct*", windowed=True),
-    _r("crates/tore-app/src/lobby_screen/*", ("menus-screens",), "the lobby screen; its snapshot states are menus-snap-lobby*", windowed=True),
-    _r("crates/tore-app/src/net/lobby_chat.rs", ("menus-screens",), "the lobby's chat box and line; the lobby screen draws it (menus-snap-lobby*)", windowed=True),
-    _r("crates/tore-app/src/net/search.rs", (), "the local-network game search; only the Direct Connection screen and --find-games reach it; no scenario yet"),
-    _r("crates/tore-app/src/net/lookup.rs", (), "the typed-address lookup thread; only the Direct Connection screen reaches it; no scenario yet"),
-    _r("crates/tore-app/src/net/settings.rs", (), "the remembered multiplayer settings; the Direct Connection screen, --connect and --host reach it; no scenario yet"),
+    _r("crates/tore-app/src/net/hosting*", ("net-window",), "the game's host thread; the hosted-game scenario reaches it", windowed=True),
+    _r("crates/tore-app/src/net/keepalive_tests.rs", (), "the joined game's keepalive tests (real time, cargo test only)"),
+    _r("crates/tore-app/src/widgets/*", ("menus-screens", "net-window"), "the multiplayer widget kit; the Direct Connection screen draws it (menus-snap-direct*)", windowed=True),
+    _r("crates/tore-app/src/direct_screen/*", ("menus-screens", "net-window"), "the Direct Connection screen; its snapshot states are menus-snap-direct*", windowed=True),
+    _r("crates/tore-app/src/lobby_screen/*", ("menus-screens", "net-window"), "the lobby screen; its snapshot states are menus-snap-lobby*", windowed=True),
+    _r("crates/tore-app/src/net/lobby_chat.rs", ("menus-screens", "net-window"), "the lobby's chat box and line; the lobby screen draws it (menus-snap-lobby*)", windowed=True),
+    _r("crates/tore-app/src/net/search.rs", ("net-discovery",), "the local-network game search; --find-games, which net-discovery runs, and the Direct Connection screen use it"),
+    _r("crates/tore-app/src/net/lookup.rs", ("net-window",), "the typed-address lookup thread; the Direct Connection screen reaches it", windowed=True),
+    _r("crates/tore-app/src/net/settings.rs", ("net-window",), "the remembered multiplayer settings; --connect and --host reach them", windowed=True),
+    _r("crates/tore-app/src/net/*", ("net-window",), "the game's network play: joining, hosting, chat, debrief, files", windowed=True),
     # main.rs holds the command line and the probes, including the AI probe's scripted pilot, so it reaches
     # every kind of headless run.
     _r("crates/tore-app/src/main.rs", MAIN_FAMILIES, "command line, probes and start-up wiring"),
@@ -437,7 +451,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/test_battery_selection.py", (), "the selection map's tests", unit_tests=("test_battery_selection",)),
     _r("tools/quick_check.py", (), "the quick check", unit_tests=("test_quick_check",)),
     _r("tools/test_quick_check.py", (), "the quick check's tests", unit_tests=("test_quick_check",)),
-    _r("tools/battery.py", ("flight-maneuvers",), "the battery runner (one cheap scenario runs end to end)", unit_tests=("test_battery", "test_battery_selection")),
+    _r("tools/battery.py", ("flight-maneuvers", "net-check"), "the battery runner (one cheap scenario of each kind runs end to end)", unit_tests=("test_battery", "test_battery_selection", "test_battery_net")),
     _r("tools/test_battery.py", (), "the battery runner's tests", unit_tests=("test_battery",)),
     _r("tools/battery_scenarios/flight.py", LANE_SMOKE["flight"], "flight scenarios", unit_tests=("test_battery_flight",)),
     _r("tools/test_battery_flight.py", (), "flight scenario tests", unit_tests=("test_battery_flight",)),
@@ -453,6 +467,8 @@ RULES: tuple[Rule, ...] = (
     _r("tools/battery_scenarios/_replay_*.py", LANE_SMOKE["replay"], "replay scenarios", unit_tests=("test_replay_checks",)),
     _r("tools/battery_scenarios/replay.py", LANE_SMOKE["replay"], "replay scenarios", unit_tests=("test_replay_checks",)),
     _r("tools/test_replay_checks.py", (), "replay check tests", unit_tests=("test_replay_checks",)),
+    _r("tools/battery_scenarios/net.py", LANE_SMOKE["net"], "net scenarios", unit_tests=("test_battery_net",)),
+    _r("tools/test_battery_net.py", (), "net scenario tests", unit_tests=("test_battery_net",)),
     _r("tools/battery_scenarios/*", ALL_FAMILIES, "battery scenarios, unmapped file", unit_tests=("test_battery",)),
     _r("tools/agent-run.sh", ("windowed-menus",), "the windowed-run wrapper", windowed=True),
     _r("tools/calibrate_theaters.py", ("replay-cli",), "Tacview geography calibration", unit_tests=("test_calibrate_theaters",)),
