@@ -37,6 +37,8 @@ mod crowd;
 #[cfg(test)]
 mod datalink_tests;
 #[cfg(test)]
+mod engagement_tests;
+#[cfg(test)]
 mod fight_tests;
 #[cfg(test)]
 mod frame_tests;
