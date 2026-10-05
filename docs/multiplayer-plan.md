@@ -541,7 +541,8 @@ For stage D, asked and answered on 2026-09-30 (the answers are in the guide's
 - **Relevance bands** (D6): 30 updates a second for what is near or tracked,
   twice a second for the rest, smoothed so it never jitters.
 - **Recordings of networked flights** (D8): a capture and a diagnostics log in
-  stage D; captures convert to smoothed replays in stage E.
+  stage D; captures convert to smoothed replays in stage E (built: [network
+  flights](REPLAYS.md#network-flights)).
 - **The LAN acceptance** (D11): agents smoke-test on the development machine,
   then John tests on three machines, macOS, Linux and Windows (done on
   2026-10-05: it works).

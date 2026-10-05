@@ -348,6 +348,77 @@ weapon aims at surface targets, which changes the sound of an infrared
 lock. The music's inputs are journaled only when the flight has sound; a
 headless probe has none.
 
+## Network flights
+
+A networked flight is not recorded live: the game on a client does not run the
+host's AI and combat, which the recorder reads. Instead each networked session
+keeps a **capture** beside the replays (`2026-10-05_1540_NET_HOST.tore-capture`,
+[format](formats/net-protocol.md#captures)): everything the network brought,
+so the client can be run again offline. When the flight ends the game
+**converts the capture into a replay** in the background, with the same name
+pattern as any recording (`2026-10-05_1540_UKR_F18.tore-replay`), and it shows
+in the Replays screen the next time that opens. John asked for this on
+2026-09-30; the details are agent decisions and the
+[design](ARCHITECTURE.md#converting-a-capture-into-a-replay) has the reasoning.
+
+```sh
+tore-app --convert-capture replays/2026-10-05_1540_NET_HOST.tore-capture
+tore-app --convert-capture CAPTURE --out MINE.tore-replay
+```
+
+The command needs the import the capture was made with, since it runs the
+client again. It prints the replay's path, and says so when the capture is cut
+short.
+
+What the replay is:
+
+- **Smooth, with hindsight.** Every other aircraft, missile, debris piece and
+  ejected pilot follows a smooth curve through every update the client
+  received, drawn between the two updates around each tick. What the player
+  saw live had guesses ahead of the newest update and, for aircraft far away
+  (sent twice a second), a whole interval of delay; the replay has neither.
+  It never shows anything past the last update of an entity, and does not draw
+  across a silence of more than two seconds, so an aircraft can appear a
+  moment after the player first saw it live.
+- **The own aircraft follows the host.** At each of the host's exact states
+  of your plane (about once a second) the replay is exactly the host's state;
+  between them it is what your game predicted, with any error it made spread
+  back so nothing jumps.
+- **Events come from the host.** HUD lines, the radio, crew and tower lines
+  you heard (with their voices), launches, chaff and flares, explosions, hits,
+  craters, crash-site fires, destroyed ground objects, wingmen ejecting and gun
+  bursts, on the ticks the host gave.
+- **You are plane 0.** The viewer looks for the player under id 0, so the
+  replay gives your plane that id and plane 0 yours (the header's
+  `net.player_plane` names the plane you flew). With plane 0 as your plane
+  nothing differs.
+- **Diagnostics.** The replay carries the network figures the client logged:
+  a `net.stats` event every second (round trip, loss, snapshot loss and spread,
+  input margin, interpolation delay, corrections, mismatches, bytes each way),
+  a `net.event` for each join, seating, refusal and drop, the connection in
+  the header (`net.server`, `net.callsign`, `net.build`, `net.capture`,
+  `net.flight`) and the flight's means in the footer (`net.rtt_ms_mean`,
+  `net.loss_percent_mean` and the rest). The Replays screen shows the server
+  and the mean round trip and loss on a **Network** row, and the debug log and
+  summary list the events.
+
+What is not in it, known limits:
+
+- No smoke trails, contrails or gun rounds: the host does not send them and the
+  conversion does not draw them yet.
+- No cockpit readout, radar or HUD, and no AI thinking trees, reasons or state
+  checksums (the client does not have the host's AI).
+- Other aircraft carry no fuel, G or stick (they read 0 lb, 1 G and idle),
+  and their airspeed is the speed device or the ground speed.
+- A weapon's name and shape come from the host; its class is the mission's own
+  weapon record when the mission knows it.
+- The first moments before the first update are not in the replay; it starts at
+  the first host tick a snapshot showed after you were seated.
+
+A capture that was cut short (the game crashed or was closed) converts up to
+its last whole record; the footer says `end=cut` and the byte it stopped at.
+Converting a capture twice gives the same bytes.
+
 ## File format
 
 ### Layout
@@ -514,6 +585,9 @@ beyond them.
   placeholder.
 - A jump in ticks, for example if the recorder falls behind, starts a new
   chunk and reads back as a gap.
+- Replays converted from a network capture are version 1 files too: their
+  `net.*` events, header entries and result entries and `weapon.gun_burst`
+  events are new names, which a reader that does not know them ignores.
 - New kinds of data arrive as new entries, fields and flag bits within the
   version: released chaff and flares (`combat.countermeasure`), the
   `flame` flag and the player's view target (`player.view_target`) came
@@ -1612,7 +1686,8 @@ newest and counts the rest as lost.
 
 ## Command line
 
-These commands read recordings of what happened and need no game media.
+These commands read recordings of what happened and need no game media,
+except `--convert-capture`, which runs a client again and needs the import.
 They are unrelated to `--record-input`, `--replay-input`, `--record-combat`
 and `--replay-combat`, which store controls or combat inputs and simulate
 them again.
@@ -1623,6 +1698,7 @@ them again.
 | `--recording-log FILE [--out DIR] [--from S] [--to S] [--ids 0,7] [--rate HZ]` | Writes `log.jsonl` and `summary.txt` to DIR (default: a `-log` folder beside the recording). `--from` and `--to` are mission seconds, `--ids` limits the log to those aircraft, `--rate` sets aircraft samples per second (default 1) |
 | `--recording-acmi FILE [--out FILE] [--rate HZ] [--guns]` | Writes a Tacview file (default: `.txt.acmi` beside the recording), 10 samples a second by default; `--guns` adds gun rounds |
 | `--recording-diff A B` | Prints how two recordings differ: header, identities, the first second their checksums differ, the first tick any aircraft's state differs, and event counts by family |
+| `--convert-capture CAPTURE [--out REPLAY]` | Turns a networked flight's capture into a replay, beside the capture (or at REPLAY, which must not exist), one for each flight in it; needs the import the capture was made with. See [Network flights](#network-flights) |
 | `--watch-replay FILE` | Opens the [viewer](#viewer) on a recording (this one needs the game media and a display); with `--capture-replay OUT.ppm --replay-tick N` it writes one frame and exits, see [captures](#captures-and-timing) |
 | `--ai-probe-ticks N --record-mission PATH [--verify-render]` | Records a headless AI probe to PATH (never overwritten) without changing its output. `--verify-render` then rebuilds every tick from the file, compares it with the picture the probe drew, and prints one line: `AI probe verify-render: PASS ticks=... missing=0 differing=0 device_ticks=...`, or the first difference; `device_ticks` counts the ticks with chaff or flares in the air, each checked against the devices the probe flew |
 
@@ -1663,6 +1739,10 @@ headless workflow.
   shared references; draining the two write-only journals is its one
   change, and a test flies the same synthetic mission with and without
   recording and finds the same flight, decision and weapon state.
+- A network capture converts with `tore_session::client::convert` (`observe`,
+  then `Conversion::write`); the game's `replay/net_convert.rs` names the file and
+  builds the header's world, and `tore_session::fixture::bot_fight` (feature
+  `test-support`) makes a synthetic capture for tests.
 - Export with `tore_replay::export` (`write_jsonl`, `write_summary`,
   `detect`, `write_acmi`, `compare`, `write_diff`).
 - Event kinds, field names, tree channels, well-known tree labels, units

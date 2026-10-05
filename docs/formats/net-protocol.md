@@ -1802,8 +1802,10 @@ the same, feeds it every Receive, Update, Frame, Leave, Disconnect, Request
 and Leave game at its time with no network, and hands back each frame. The replayed client writes a
 capture of its own, which equals the original byte for byte when it behaved
 the same: same inputs sent, same frames. A capture holds what the client knew
-and nothing of the host, so it needs the same import to replay; converting one
-to a replay is stage E.
+and nothing of the host, so it needs the same import to replay. The game
+converts a capture into a replay ([Network
+flights](../REPLAYS.md#network-flights), `--convert-capture`) by running it
+again with an observer; the capture format did not change for it.
 
 ## Versions
 

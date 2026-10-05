@@ -163,6 +163,10 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
             "replay-panels",
         ),
     ),
+    "replay-net-convert": (
+        "a networked flight's capture converted into a replay (needs tore-server and tore-bot built)",
+        ("replay-net-*",),
+    ),
     "replay-input": (
         "keys, mouse and scripted hand flying, input profiles",
         ("replay-input-*", "replay-keys-*", "replay-script-*"),
@@ -396,7 +400,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-input/src/recording.rs", ("replay-input", "replay-recording"), "input recording"),
     _r("crates/tore-input/*", ("replay-input", "flight-maneuvers"), "input bindings", windowed=True),
     _r("crates/tore-input-native/*", ("replay-input", "replay-settings"), "input devices", windowed=True),
-    _r("crates/tore-replay/*", ("replay-recording", "ai-regression"), "replay format"),
+    _r("crates/tore-replay/*", ("replay-recording", "ai-regression", "replay-net-convert"), "replay format"),
     _r("crates/tore-diagnostics-native/*", ("replay-settings",), "diagnostics"),
     _r("crates/tore-extract/*", ("replay-settings", "menus-validate"), "extractor"),
     # Stage D crates. Until networked scenarios exist, only the import reaches a battery scenario.
@@ -430,6 +434,12 @@ RULES: tuple[Rule, ...] = (
         NET_FAMILIES + ("net-discovery",),
         "the King's lobby: the crown, settings, slot locks, visibility (tore-bot --king)",
     ),
+    _r("crates/tore-session/src/client/convert*", ("replay-net-convert",), "capture conversion"),
+    _r("crates/tore-session/src/client/seen.rs", ("replay-net-convert",), "capture conversion"),
+    _r("crates/tore-session/src/client/capture.rs", ("replay-net-convert",), "captures"),
+    _r("crates/tore-session/src/client/prediction.rs", ("replay-net-convert",), "the own plane's prediction, which the conversion traces"),
+    _r("crates/tore-session/src/fixture.rs", ("replay-net-convert",), "the synthetic fight other crates' tests convert"),
+    _r("crates/tore-session/src/bin/tore-bot.rs", NET_FAMILIES + ("replay-net-convert",), "the bot, which keeps the capture the scenario converts"),
     _r(
         "crates/tore-session/*",
         NET_FAMILIES + ("net-discovery", "net-introduce", "net-relay"),
@@ -509,6 +519,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/ils_survey.rs", ("airports", "flight-landing", "ai-airfield"), "ILS survey"),
     _r("crates/tore-app/src/diagnostics.rs", ("replay-settings",), "diagnostics"),
     _r("crates/tore-app/src/performance.rs", ("flight-maneuvers",), "performance counters"),
+    _r("crates/tore-app/src/replay/net_convert.rs", ("replay-net-convert",), "converting a capture into a replay"),
     _r("crates/tore-app/src/replay/*", ("replay-recording", "ai-regression", "replay-live"), "recording and replay screens"),
     _r("crates/tore-app/src/net/hosting*", ("net-window",), "the game's host thread; the hosted-game scenario reaches it", windowed=True),
     _r("crates/tore-app/src/net/keepalive_tests.rs", (), "the joined game's keepalive tests (real time, cargo test only)"),
