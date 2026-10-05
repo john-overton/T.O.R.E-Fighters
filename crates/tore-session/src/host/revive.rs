@@ -278,7 +278,20 @@ impl Host {
         }
         let pending = match self.settings.respawn() {
             Respawn::None => return Err(NO_REVIVAL.into()),
-            Respawn::Revive => Pending::Revive { seat },
+            Respawn::Revive => {
+                // The new plane flies in the lost one's wing: lock sides
+                // allows it whenever it allowed the lost plane.
+                let lost = self
+                    .world
+                    .roster
+                    .seat(seat)
+                    .and_then(|s| s.plane)
+                    .ok_or("You have lost no aircraft; press Join to fly.")?;
+                if let Some(why) = self.sides_refusal(connection, lost) {
+                    return Err(why);
+                }
+                Pending::Revive { seat }
+            }
             Respawn::AiSlot => Pending::AiSlot {
                 seat,
                 plane: self.free_ai_plane(connection, seat).ok_or(NO_AI_SLOT)?,
@@ -290,7 +303,9 @@ impl Host {
 
     /// The `ai-slot` rule's aircraft for `connection`, whose lost plane
     /// `seat` holds: a free AI aircraft of its side, its own wing first, then
-    /// the side's other wings, lowest id first, that is open to players and
+    /// the side's other wings, lowest id first, that is open to players,
+    /// that the slot locks and lock sides allow it (slice F2-1's rules; join
+    /// in progress is not asked, as a revival is no new pilot), and that
     /// nobody else holds or takes.
     fn free_ai_plane(&self, connection: ConnectionId, seat: SeatId) -> Option<PlaneId> {
         let lost = self.world.roster.seat(seat)?.plane?;
@@ -299,6 +314,8 @@ impl Host {
             plane.pilot == Pilot::Ai
                 && plane.slot.wing.side == wing.side
                 && self.open(plane.id)
+                && self.lock_refusal(connection, plane.id.0).is_none()
+                && self.sides_refusal(connection, plane.id).is_none()
                 && !self.reserved(plane.id)
                 && self.holder(plane.id, connection).is_none()
                 && !self.revival.pending.values().any(

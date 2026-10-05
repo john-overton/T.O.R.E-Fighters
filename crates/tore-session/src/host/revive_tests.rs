@@ -323,16 +323,22 @@ fn the_ai_slot_rule_takes_a_free_ai_aircraft_of_the_side_with_the_weapons_rule()
             (number::REVIVE_WEAPONS, RevivalWeapons::Guns.value()),
         ],
     );
-    // Friendly planes 0 to 2, enemy planes 3 and 4.
+    // Friendly planes 0 to 2, enemy planes 3 and 4. The King has closed
+    // plane 1's slot (slice F2-1): the AI keeps it.
     assert_eq!(plane_of(&rig, cobra), 3);
+    let king = *rig.host.peers.keys().next().unwrap();
+    rig.host
+        .lock_slot(king, 1, &crate::wire::messages::Lock::Closed)
+        .unwrap();
     lose(&mut rig, viper);
     revive(&mut rig, viper);
     assert!(reseated(&mut rig, viper, 0));
-    // Its own wing's free aircraft, lowest id first, on its own side.
-    assert_eq!(plane_of(&rig, viper), 1);
+    // Its own wing's free aircraft, lowest open id first, on its own side.
+    assert_eq!(plane_of(&rig, viper), 2);
     assert_eq!(pilot(&rig, 0), Pilot::Lost);
+    assert_eq!(pilot(&rig, 1), Pilot::Ai);
     // Guns only: every station but the gun empty.
-    let own = rig.host.world().combat.state.ownship(1).unwrap();
+    let own = rig.host.world().combat.state.ownship(2).unwrap();
     for (station, ammo) in own.configuration().stations.iter().zip(&own.ammo) {
         let carried = ammo & 0x7fff;
         if tore_sim::combat::live::is_gun(&station.weapon) {
