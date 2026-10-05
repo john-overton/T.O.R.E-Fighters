@@ -33,6 +33,31 @@ pub fn focus_mark(canvas: &mut Canvas, (x, y, w, h): Rect) {
     }
 }
 
+/// How much brighter ghosted text (an empty field's hint, a disabled label, a
+/// dimmed row) is drawn than the dim levels the first widgets used (John,
+/// 2026-10-05, *opinionated*, requested). He asked for 50 percent brighter,
+/// saw it, and asked for it 15 percent darker: 1.5 * 0.85, about 28 percent
+/// brighter than the first widgets drew it.
+pub const GHOST_GAIN: f32 = 1.5 * 0.85;
+
+/// A grey tint for ghosted text: `level` made [`GHOST_GAIN`] brighter.
+pub fn ghost(level: u8) -> [u8; 3] {
+    [(f32::from(level) * GHOST_GAIN).round().min(255.0) as u8; 3]
+}
+
+/// `sprite` with its colours `gain` times brighter, none past `ceiling`,
+/// alpha untouched: the kit's dim button fonts are made [`GHOST_GAIN`]
+/// brighter this way when it is built.
+pub fn brighten(sprite: &mut Sprite, gain: f32, ceiling: u8) {
+    for pixel in sprite.rgba.chunks_exact_mut(4) {
+        for channel in &mut pixel[..3] {
+            let lifted = (f32::from(*channel) * gain).round().min(f32::from(ceiling));
+            // Never darken a pixel that is already past the ceiling.
+            *channel = (lifted as u8).max(*channel);
+        }
+    }
+}
+
 /// Blends `rgba` (a source pixel with coverage in its alpha) over the canvas
 /// pixel at `at`, exactly as `Canvas::blit` does, with the colour scaled by
 /// `gain` and optionally multiplied by `tint`.
@@ -166,4 +191,35 @@ pub fn fit(font: &Sprite, text: &str, width: i32) -> String {
     }
     out.push('~');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ghost_greys_are_brighter_by_the_gain_up_to_white() {
+        assert_eq!(ghost(150), [191; 3]);
+        assert_eq!(ghost(120), [153; 3]);
+        assert_eq!(ghost(118), [150; 3]);
+        assert_eq!(ghost(220), [255; 3]);
+    }
+
+    #[test]
+    fn brightening_a_font_scales_its_colours_and_keeps_its_alpha() {
+        let mut sprite = Sprite {
+            width: 3,
+            height: 1,
+            rgba: vec![100, 60, 20, 255, 200, 200, 200, 255, 90, 90, 90, 0],
+            glyphs: Vec::new(),
+        };
+        brighten(&mut sprite, GHOST_GAIN, 220);
+        assert_eq!(
+            sprite.rgba,
+            [128, 77, 26, 255, 220, 220, 220, 255, 115, 115, 115, 0]
+        );
+        // A pixel already past the ceiling stays as it was.
+        brighten(&mut sprite, GHOST_GAIN, 100);
+        assert_eq!(sprite.rgba[..4], [128, 98, 33, 255]);
+    }
 }

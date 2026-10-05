@@ -44,6 +44,21 @@ Either source may be left out; only the named atlas is rewritten. Only
 regeneration needs ImageMagick and the source fonts. Runtime uses the
 committed atlases consistently on Linux, Windows and macOS.
 
+## Sharp UI text atlas
+
+`ui-text.bin` holds **Noto Sans Medium** (the same source font and SHA-256 as
+`menu-font-large.bin`, copyright 2022 The Noto Project Authors, SIL Open Font
+License 1.1 in `OFL-NotoSans.txt`) rendered at 48 px to the em, so the
+multiplayer screens can draw their text at the window's resolution instead of
+stretching the retail bitmap fonts. It contains no retail game data. The file
+layout is documented in `tools/build_ui_text_atlas.py`; the app lays the
+glyphs out in the retail fonts' sizes and places (`docs/formats/menu.md`,
+"Sharp text"). Regeneration needs Python and ImageMagick 7:
+
+```sh
+python3 tools/build_ui_text_atlas.py /path/to/NotoSans-Medium.ttf
+```
+
 ## Application icon
 
 `icon/tore-*.png`, `icon/tore.ico` and `icon/tore-64.rgba` are downscales of

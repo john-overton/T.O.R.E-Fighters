@@ -3,6 +3,7 @@
 //! (slice EF7). Built of the widget kit and drawn over the screen, which stops
 //! listening while it is up.
 use crate::menu::{Canvas, text_width};
+use crate::ui_text;
 use crate::widgets::{
     Button, Filter, Focus, Kit, MessageBox, Outcome, Point, Rect, Route, TextField, Widget,
     draw_panel, tone,
@@ -265,29 +266,39 @@ impl OptionsPanel {
         let font = kit.sprite("PANELFNT");
         let dim = kit.sprite("PANELFND");
         let title = "Options";
-        canvas.text(
+        let text = ui_text::text;
+        text(
+            canvas,
+            kit,
             font,
             title,
-            PANEL.0 + (PANEL.2 - text_width(font, title)) / 2,
-            PANEL.1 + 7,
+            (
+                PANEL.0 + (PANEL.2 - text_width(font, title)) / 2,
+                PANEL.1 + 7,
+            ),
+            None,
             None,
         );
         canvas.outline((100, 120, 440, 320), [174, 174, 174, 255]);
-        canvas.text(font, "Port:", LABEL_X, 142, None);
-        canvas.text(font, "Password:", LABEL_X, 172, None);
-        canvas.text(font, "Game name:", LABEL_X, 202, None);
-        canvas.text(
+        text(canvas, kit, font, "Port:", (LABEL_X, 142), None, None);
+        text(canvas, kit, font, "Password:", (LABEL_X, 172), None, None);
+        text(canvas, kit, font, "Game name:", (LABEL_X, 202), None, None);
+        text(
+            canvas,
+            kit,
             dim,
             "The password is sent when you join and used when you host. It is never saved.",
-            LABEL_X,
-            230,
+            (LABEL_X, 230),
+            None,
             None,
         );
-        canvas.text(
+        text(
+            canvas,
+            kit,
             font,
             "Quick messages (read only): F1 to F12 while typing a message in flight",
-            LABEL_X,
-            248,
+            (LABEL_X, 248),
+            None,
             None,
         );
         let marked = |id: Id| self.focus.marked(id);
@@ -296,7 +307,15 @@ impl OptionsPanel {
         self.name.draw(canvas, kit, self.focus.is(Id::Name));
         self.quick.draw(canvas, kit, marked(Id::Quick));
         if let Some(error) = self.error {
-            canvas.text(font, error, LABEL_X, 396, Some(tone::ENEMY));
+            text(
+                canvas,
+                kit,
+                font,
+                error,
+                (LABEL_X, 396),
+                None,
+                Some(tone::ENEMY),
+            );
         }
         self.ok.draw(canvas, kit, marked(Id::Ok));
         self.cancel.draw(canvas, kit, marked(Id::Cancel));

@@ -58,11 +58,13 @@ mod button;
 mod check_box;
 mod draw;
 mod focus;
+mod header;
 mod icons;
 mod kit;
 mod list;
 mod message_box;
 mod panel;
+mod png_read;
 mod text_field;
 
 #[cfg(test)]
@@ -72,13 +74,13 @@ pub(crate) mod test_kit;
 
 pub use button::Button;
 pub use check_box::CheckBox;
-pub use draw::fit;
+pub use draw::{fit, text_clipped};
 pub use focus::{Focus, Route};
 pub use icons::Icon;
 pub use kit::{Kit, KitSource};
 pub use list::{Align, Cell, Column, List, Pager, Row};
 pub use message_box::{MessageBox, tone};
-pub use panel::{Background, draw_panel};
+pub use panel::{Backdrop, Background, draw_panel};
 pub use text_field::{Filter, TextField, parse_address};
 
 /// A rectangle on the 640 by 480 canvas: x, y, width, height.

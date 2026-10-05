@@ -1,11 +1,8 @@
 //! The scrolling message box: wrapped, coloured lines, newest at the bottom,
 //! with a way back through what scrolled off.
-use super::{
-    Kit, Outcome, Point, Rect, Widget,
-    draw::{focus_mark, text_clipped},
-    inside,
-};
+use super::{Kit, Outcome, Point, Rect, Widget, draw::focus_mark, inside};
 use crate::menu::{Canvas, text_width};
+use crate::ui_text;
 use std::collections::VecDeque;
 use tore_formats::text::GlyphCodes;
 
@@ -220,12 +217,13 @@ impl MessageBox {
         let font = kit.sprite("PANELFNT");
         let clip = (x + 1, y + 1, w - 2, h - 2);
         for (i, (text, colour)) in self.view().into_iter().enumerate() {
-            text_clipped(
+            ui_text::text(
                 canvas,
+                kit,
                 font,
                 text,
                 (x + PAD, y + PAD + i as i32 * LINE),
-                clip,
+                Some(clip),
                 Some(colour),
             );
         }

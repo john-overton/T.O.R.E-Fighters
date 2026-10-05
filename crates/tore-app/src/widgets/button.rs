@@ -1,13 +1,35 @@
-//! Retail buttons: the green action button, the blue default button with its
-//! striped cap, and their grey disabled copies.
+//! Retail buttons: the green action button, the blue default button, and
+//! their grey disabled copies.
 use super::{Kit, Outcome, Point, Rect, Widget, draw::focus_mark, inside};
 use crate::menu::{Canvas, text_width};
+use crate::ui_text;
+
+/// The cap's columns the default button uses, from its left (a navy outline
+/// line, a grey border, and two clear columns that carry the top and bottom
+/// lines across), and from its right (the face's own left rim: a grey border
+/// and a dark navy line). The columns between hold the striped box and are
+/// not drawn.
+const CAP_OUTER: usize = 4;
+const CAP_RIM: usize = 2;
+const CAP_WIDTH: usize = 20;
+/// How far left of the default button's face its outline reaches: the outer
+/// columns run up to the face's rim, so the navy line stands six pixels from the
+/// face, four from the rim's edge, about as far as the top line's end is
+/// beyond the shadow on the right.
+const OUTLINE_LEFT: i32 = (CAP_OUTER + CAP_RIM) as i32;
 
 /// A button placed where its dialog places it: `at` is the dialog's position
 /// plus the origin (NEWNET's New is at (106, 419)) and `width` the dialog's
 /// width (85 on NEWNET), shadow included, as `Canvas::action_button` takes
-/// them. The default button is drawn three pixels higher with the 20 pixel
-/// striped cap to its left, exactly as `action_button` draws it.
+/// them. The default button is drawn three pixels higher, with the navy
+/// outline its pieces carry on top, as `action_button` draws it. Retail adds a
+/// 20 pixel cap to its left, a striped box in a frame; here only the cap's
+/// outer columns ([`CAP_OUTER`], the outline's left side) and its last two (the
+/// face's left rim) are drawn, the outline reaching [`OUTLINE_LEFT`] pixels
+/// left of the face, and the striped box is gone (John, 2026-10-05,
+/// *opinionated*, requested). He had the outline taken out as well, and had it
+/// put back the same day, then asked for the rim and for the outline to stand
+/// three or four pixels off the button.
 ///
 /// Reuses `Canvas::button_style` for the pieces. The label is set in the
 /// retail button fonts (`FONTACT` on the green face, `FONTDFT` on the blue
@@ -116,7 +138,7 @@ impl Button {
         }
     }
 
-    /// The rectangle of the face as drawn, without the cap.
+    /// The rectangle of the face as drawn.
     fn face(&self) -> Rect {
         let up = if self.default { 3 } else { 0 };
         (self.at.0, self.at.1 - up, self.width - 5, 27)
@@ -137,7 +159,15 @@ impl Button {
         };
         if self.default {
             let cap = kit.sprite(if self.enabled { "ACTDFLT" } else { "ACTDFLD" });
-            canvas.blit(cap, (x - cap.width as i32, top), 0, cap.width, 1.0);
+            let left = x + shift - OUTLINE_LEFT;
+            canvas.blit(cap, (left, top + shift), 0, CAP_OUTER, 1.0);
+            canvas.blit(
+                cap,
+                (x + shift - CAP_RIM as i32, top + shift),
+                CAP_WIDTH - CAP_RIM,
+                CAP_RIM,
+                1.0,
+            );
         }
         let prefix = match (self.default, self.enabled) {
             (false, true) => "ACTION0",
@@ -165,20 +195,27 @@ impl Button {
         let tw = text_width(font, &self.label);
         let lx = x + (self.width - 12 - tw) / 2 - i32::from(self.default);
         let ly = top + if self.default { 10 } else { 6 };
-        canvas.text(font, &self.label, lx + shift, ly + shift, None);
+        ui_text::text(
+            canvas,
+            kit,
+            font,
+            &self.label,
+            (lx + shift, ly + shift),
+            None,
+            None,
+        );
         if focused && self.enabled {
             let (fx, fy, fw, fh) = self.face();
-            let marker = if self.default { 20 } else { 0 };
+            let marker = if self.default { OUTLINE_LEFT } else { 0 };
             focus_mark(canvas, (fx - 2 - marker, fy - 2, fw + marker - 2, fh - 2));
         }
     }
 }
 
 impl Widget for Button {
-    /// The same hit rectangle `Canvas::action_button` returns: the face and,
-    /// for the default button, its cap.
+    /// The face and, for the default button, its outline to the left.
     fn bounds(&self) -> Rect {
-        let marker = if self.default { 20 } else { 0 };
+        let marker = if self.default { OUTLINE_LEFT } else { 0 };
         (
             self.at.0 - marker,
             self.at.1 - 3,
@@ -254,11 +291,11 @@ mod tests {
     }
 
     #[test]
-    fn the_default_buttons_hit_area_includes_its_cap() {
-        // The same rectangle Canvas::action_button reports.
-        assert_eq!(new().bounds(), (106 - 20, 419 - 3, 85 + 20 - 5, 27));
+    fn the_default_buttons_hit_area_includes_its_outline() {
+        assert_eq!(new().bounds(), (106 - 6, 419 - 3, 85 + 6 - 5, 27));
         assert_eq!(join().bounds(), (229, 419 - 3, 80, 27));
-        assert!(new().hit((90, 425)));
+        assert!(new().hit((101, 425)));
+        assert!(!new().hit((90, 425)), "where the striped cap was");
         assert!(!join().hit((225, 425)));
     }
 
@@ -278,16 +315,58 @@ mod tests {
         b.set_enabled(false);
         assert_eq!(face(&b, 229 + 53, 419 + 15), tone_of(&kit, "ACTIOD0M"));
         let mut d = new();
-        // The default face is drawn 3 higher.
+        // The default button is drawn 3 higher.
         assert_eq!(face(&d, 106 + 53, 416 + 15), tone_of(&kit, "ACTDFT0M"));
-        let cap = at(&drawn(&d, false), 100, 416 + 5);
-        assert_eq!(cap, tone_of(&kit, "ACTDFLT"));
         d.set_enabled(false);
         assert_eq!(face(&d, 106 + 53, 416 + 15), tone_of(&kit, "ACTDFD0M"));
-        assert_eq!(
-            at(&drawn(&d, false), 100, 416 + 5),
-            tone_of(&kit, "ACTDFLD")
-        );
+    }
+
+    #[test]
+    fn the_default_button_has_its_outline_all_round_and_no_striped_box() {
+        let kit = kit();
+        for (enabled, cap, piece) in [
+            (true, "ACTDFLT", "ACTDFT0M"),
+            (false, "ACTDFLD", "ACTDFD0M"),
+        ] {
+            let mut d = new();
+            d.set_enabled(enabled);
+            let pixels = drawn(&d, false);
+            // The pieces' own top rows, the outline, are drawn: the first
+            // row is 3 above where a plain button's face starts.
+            for x in 106 + 24..106 + 85 - 29 {
+                assert_eq!(at(&pixels, x, 416), tone_of(&kit, piece), "row at {x}");
+            }
+            // The cap's four outer columns, 6 pixels left of the face down to
+            // 3, and its last two, the face's rim, 2 pixels left of it: one
+            // run up to the face.
+            for x in 106 - 6..106 {
+                assert_eq!(
+                    at(&pixels, x, 416 + 5),
+                    tone_of(&kit, cap),
+                    "cap column at {x}"
+                );
+            }
+            // Beyond them, where the striped box is, the canvas shows.
+            for x in 106 - 20..106 - 6 {
+                for y in 416..443 {
+                    assert_eq!(at(&pixels, x, y), [0; 3], "stray pixel at {x}, {y}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_default_button_is_drawn_whole_three_pixels_higher() {
+        // 33 rows of pieces from 3 above a plain button's top.
+        let (plain, default) = (drawn(&join(), false), drawn(&new(), false));
+        let rows = |pixels: &[u8], x: i32| {
+            let lit = |y: &i32| at(pixels, x, *y) != [0; 3];
+            let first = (0..crate::menu::HEIGHT as i32).find(lit);
+            let last = (0..crate::menu::HEIGHT as i32).rev().find(lit);
+            (first, last)
+        };
+        assert_eq!(rows(&plain, 229 + 53), (Some(419), Some(419 + 29)));
+        assert_eq!(rows(&default, 106 + 53), (Some(416), Some(416 + 32)));
     }
 
     #[test]
@@ -298,12 +377,11 @@ mod tests {
         let pixels = drawn(&b, false);
         assert_eq!(at(&pixels, 229 + 22, 419 + 6), [255; 3]);
         assert_ne!(at(&pixels, 229 + 21, 419 + 6), [255; 3]);
-        // The default button's label is a pixel further left and 10 below
-        // its (raised) face top.
+        // The default button's label is a pixel further left and one lower.
         let pixels = drawn(&new(), false);
         let x = 106 + (85 - 12 - 21) / 2 - 1;
-        assert_eq!(at(&pixels, x, 416 + 10), [255; 3]);
-        assert_ne!(at(&pixels, x - 1, 416 + 10), [255; 3]);
+        assert_eq!(at(&pixels, x, 419 + 7), [255; 3]);
+        assert_ne!(at(&pixels, x - 1, 419 + 7), [255; 3]);
     }
 
     #[test]

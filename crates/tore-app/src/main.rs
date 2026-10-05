@@ -80,6 +80,8 @@ mod static_art;
 mod surface_lighting;
 mod tape_file;
 mod target_preview;
+mod ui_text;
+mod ui_text_renderer;
 mod version;
 mod view_compass;
 mod weapon_hud;
@@ -3401,6 +3403,9 @@ impl ApplicationHandler for App {
                     // Explicit bounded benchmark only: desktop automation may steal focus.
                     self.flight_ui.paused = false;
                 }
+                // The text the multiplayer screens drew this frame, for the
+                // renderer to draw sharp over the canvas.
+                let mut menu_text: Option<ui_text::Layer> = None;
                 let mut animating = match self.screen {
                     Screen::Main => {
                         // The Replays screen covers the menu, so a menu
@@ -3414,11 +3419,14 @@ impl ApplicationHandler for App {
                         }
                         // Direct Connection covers the whole menu; it draws its
                         // own background, so the menu is not drawn under it.
-                        let mut animating = if direct_screen::app::draw_screen(
+                        ui_text::begin();
+                        let drawn = direct_screen::app::draw_screen(
                             &self.lobby,
                             &self.direct,
                             &mut menu::Canvas(&mut self.menu.pixels),
-                        ) {
+                        );
+                        menu_text = ui_text::finish().filter(|_| drawn);
+                        let mut animating = if drawn {
                             true
                         } else {
                             self.menu.render() || self.direct.is_building()
@@ -4317,6 +4325,8 @@ impl ApplicationHandler for App {
                 }
                 let compose_ms = frame_start.elapsed().as_secs_f64() * 1000. - simulation_ms;
                 let present_start = Instant::now();
+                renderer.set_menu_text(menu_text.as_ref());
+                renderer.show_menu_text(menu_text.is_some());
                 match renderer.draw(
                     if self.screen == Screen::Flight {
                         &self.flight_canvas.pixels

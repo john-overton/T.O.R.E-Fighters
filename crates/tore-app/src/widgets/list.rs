@@ -2,11 +2,12 @@
 //! icons, the PREV/NEXT rocker and the "PAGE n of m" box.
 use super::{
     Icon, Kit, Outcome, Point, Rect, Widget,
-    draw::{bar, blit_part, fit, focus_mark},
+    draw::{bar, blit_part, fit, focus_mark, ghost},
     inside,
 };
 use crate::menu::{Canvas, text_width};
 use crate::rocker::Rocker;
+use crate::ui_text;
 use std::time::{Duration, Instant};
 
 /// A second press on the same row this soon after the first is a
@@ -406,11 +407,7 @@ impl List {
                     1.0,
                 );
             }
-            let tint = if row.dim {
-                Some([118, 118, 118])
-            } else {
-                row.tint
-            };
+            let tint = if row.dim { Some(ghost(118)) } else { row.tint };
             let origin = x + TEXT_ORIGIN;
             for (column, cell) in self.columns.iter().zip(&row.cells) {
                 match cell {
@@ -432,7 +429,15 @@ impl List {
                             Align::Centre => (column.width - tw) / 2,
                             Align::Right => column.width - tw,
                         };
-                        canvas.text(font, &text, origin + column.x + tx, y + 1, tint);
+                        ui_text::text(
+                            canvas,
+                            kit,
+                            font,
+                            &text,
+                            (origin + column.x + tx, y + 1),
+                            None,
+                            tint,
+                        );
                     }
                 }
             }
@@ -456,23 +461,28 @@ impl List {
         // when), or when the whole list is disabled.
         let can_prev = self.enabled && (pages == 0 || self.page > 0);
         let can_next = self.enabled && (pages == 0 || self.page + 1 < pages);
-        canvas.text(
+        let text = ui_text::text;
+        text(
+            canvas,
+            kit,
             if can_prev { bright } else { dim },
             "PREV",
-            pager.prev.0,
-            pager.prev.1,
+            pager.prev,
+            None,
             None,
         );
-        canvas.text(
+        text(
+            canvas,
+            kit,
             if can_next { bright } else { dim },
             "NEXT",
-            pager.next.0,
-            pager.next.1,
+            pager.next,
+            None,
             None,
         );
         let rocker = kit.sprite(&self.rocker.sprite());
         canvas.blit(rocker, pager.rocker, 0, rocker.width, 1.0);
-        canvas.text(bright, "PAGE", pager.page_label.0, pager.page_label.1, None);
+        text(canvas, kit, bright, "PAGE", pager.page_label, None, None);
         let page_box = kit.sprite("PAGEBOX");
         canvas.blit(page_box, pager.counter_box, 0, page_box.width, 1.0);
         // EF0: the string starts at the counter's x + 15 minus the width of
@@ -481,11 +491,13 @@ impl List {
         let font = kit.sprite("SMLFONT");
         let (left, right) = self.counter_parts();
         let x = pager.counter_box.0 + 1 + 15 - text_width(font, &left);
-        canvas.text(
+        text(
+            canvas,
+            kit,
             font,
             &format!("{left}{right}"),
-            x,
-            pager.counter_box.1 + 3,
+            (x, pager.counter_box.1 + 3),
+            None,
             None,
         );
     }

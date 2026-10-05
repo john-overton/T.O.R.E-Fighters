@@ -32,9 +32,11 @@ use crate::net::{
     search::{Compat, Game, Own, Search, SearchEvent},
     settings::Remembered,
 };
+use crate::ui_text;
 use crate::widgets::{
-    Align, Background, Button, Cell, CheckBox, Column, Filter, Focus, Icon, Kit, List, MessageBox,
-    Outcome as Wo, Pager, Point, Route, Row, TextField, Widget as _, draw_panel, fit, tone,
+    Align, Backdrop, Background, Button, Cell, CheckBox, Column, Filter, Focus, Icon, Kit, List,
+    MessageBox, Outcome as Wo, Pager, Point, Route, Row, TextField, Widget as _, draw_panel, fit,
+    tone,
 };
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -163,7 +165,7 @@ pub struct DirectScreen {
     /// The port and outcome the search last said in Messages.
     search_said: Option<(u16, bool)>,
     /// The backdrop, drawn the first time the screen is.
-    backdrop: std::cell::OnceCell<Vec<u8>>,
+    backdrop: std::cell::RefCell<Option<Backdrop>>,
     /// The screen's own frame cost, logged every 300 frames when
     /// `TORE_DIRECT_TIMING` is set.
     timing: Option<Timing>,
@@ -269,7 +271,7 @@ impl DirectScreen {
             pointer: None,
             searched_port: 0,
             search_said: None,
-            backdrop: std::cell::OnceCell::new(),
+            backdrop: Default::default(),
             timing: std::env::var_os("TORE_DIRECT_TIMING")
                 .map(|_| Timing::new("Direct Connection")),
         };
@@ -1192,11 +1194,13 @@ impl DirectScreen {
         draw_panel(canvas, kit, (10, 80, 619, 395));
         let font = kit.sprite("PANELFNT");
         let title = "TCP/IP Network connection";
-        canvas.text(
+        ui_text::text(
+            canvas,
+            kit,
             font,
             title,
-            10 + (619 - text_width(font, title)) / 2,
-            87,
+            (10 + (619 - text_width(font, title)) / 2, 87),
+            None,
             None,
         );
         canvas.outline((30, 100, 579, 355), LINE);
@@ -1207,7 +1211,7 @@ impl DirectScreen {
             ("Players", 340, 165),
             ("Messages", 45, 304),
         ] {
-            canvas.text(font, label, x, y, None);
+            ui_text::text(canvas, kit, font, label, (x, y), None, None);
         }
         canvas.outline((45, 180, 269, 105), LINE);
         canvas.rect((341, 181, 252, 103), [81, 81, 81, 255]);
@@ -1225,16 +1229,19 @@ impl DirectScreen {
 
     fn draw_frame(&self, canvas: &mut Canvas) {
         let kit = &*self.kit;
-        let backdrop = self.backdrop.get_or_init(|| {
-            let mut pixels = vec![0u8; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
-            self.draw_backdrop(&mut Canvas(&mut pixels));
-            pixels
-        });
-        canvas.0[..backdrop.len()].copy_from_slice(backdrop);
+        {
+            let mut cached = self.backdrop.borrow_mut();
+            if !cached.as_ref().is_some_and(Backdrop::is_for_now) {
+                *cached = Some(Backdrop::new(|canvas| self.draw_backdrop(canvas)));
+            }
+            if let Some(backdrop) = cached.as_ref() {
+                backdrop.put(canvas);
+            }
+        }
         let font = kit.sprite("PANELFNT");
         if let Some(line) = self.selection_line() {
             let line = fit(font, &line, 549);
-            canvas.text(font, &line, 45, 290, None);
+            ui_text::text(canvas, kit, font, &line, (45, 290), None, None);
         }
         let marked = |id| self.focus.marked(id);
         self.callsign.draw(canvas, kit, self.focus.is(Id::Callsign));

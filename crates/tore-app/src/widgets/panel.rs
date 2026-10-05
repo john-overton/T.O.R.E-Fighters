@@ -9,6 +9,9 @@ use crate::menu::{Canvas, HEIGHT, WIDTH};
 /// are 295 to 620 wide, always inside `PANEL`'s 640 by 480; a bigger one tiles
 /// the fill (*agent decision*: retail's behaviour is unknown, U).
 pub fn draw_panel(canvas: &mut Canvas, kit: &Kit, (x, y, w, h): Rect) {
+    // Text recorded to be drawn sharp stays on top of the canvas, so it must
+    // be told what this panel covers.
+    crate::ui_text::occlude((x, y, w, h));
     let clip = (x, y, w, h);
     let fill = kit.sprite("PANEL");
     let mut ty = 0;
@@ -74,54 +77,78 @@ pub fn draw_panel(canvas: &mut Canvas, kit: &Kit, (x, y, w, h): Rect) {
 /// pictures, EF8).
 pub const TITLE_BAR_ROWS: i32 = 77;
 
-/// A background of one retail picture with a rectangle of another laid over
-/// it, each in its own palette: John's approved look for Direct Connection is
-/// `MODEM3`'s red photograph with `NETIPX3`'s title bar over its top
-/// [`TITLE_BAR_ROWS`] rows, so the screen reads NETWORK CONNECTION
-/// (2026-10-01).
+/// A background of one retail picture, with the player's own title bar over
+/// its top rows when the kit holds one ([`super::header`]).
+///
+/// John's look for the connection screens, from 2026-10-05, is `NETIPX3`
+/// alone: its grey photograph under its own title bar, which a player can
+/// reword. (On 2026-10-01 he approved `MODEM3`'s red photograph under
+/// `NETIPX3`'s bar; the red is no longer drawn.)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Background {
     base: &'static str,
-    over: Option<(&'static str, Rect)>,
+    header: bool,
 }
 
 impl Background {
-    /// One whole picture, as NETWORK CONNECTION is retail's `NETIPX3`.
+    /// One whole picture, as retail's NETWORK CONNECTION is `NETIPX3`.
     #[cfg(test)]
     pub fn single(base: &'static str) -> Self {
-        Self { base, over: None }
-    }
-    /// `base` with the rectangle `rect` of `over` laid over the same place.
-    pub fn composed(base: &'static str, over: &'static str, rect: Rect) -> Self {
         Self {
             base,
-            over: Some((over, rect)),
+            header: false,
         }
     }
-    /// `MODEM3` under `NETIPX3`'s title bar: its top 77 rows, the chrome with
-    /// the badge and the help bar. Below them `MODEM3`'s red photograph
-    /// shows everywhere, up to the panel at y 80 (John, 2026-10-01: the three
-    /// rows `NETIPX3`'s own photograph took, and the blue they showed, are
-    /// gone).
+    /// `NETIPX3`, with the player's title bar over its bar when there is one.
     pub fn direct_connection() -> Self {
-        Self::composed("MODEM3", "NETIPX3", (0, 0, 640, TITLE_BAR_ROWS))
+        Self {
+            base: "NETIPX3",
+            header: true,
+        }
     }
     pub fn draw(&self, canvas: &mut Canvas, kit: &Kit) {
         let base = kit.sprite(self.base);
         canvas.0[..WIDTH * HEIGHT * 4].copy_from_slice(&base.rgba[..WIDTH * HEIGHT * 4]);
-        if let Some((name, (x, y, w, h))) = self.over {
-            let over = kit.sprite(name);
-            let (x0, y0) = (x.clamp(0, WIDTH as i32), y.clamp(0, HEIGHT as i32));
-            let (x1, y1) = (
-                (x + w).clamp(0, WIDTH as i32),
-                (y + h).clamp(0, HEIGHT as i32),
-            );
-            for row in y0..y1 {
-                let a = (row as usize * WIDTH + x0 as usize) * 4;
-                let b = (row as usize * WIDTH + x1 as usize) * 4;
-                canvas.0[a..b].copy_from_slice(&over.rgba[a..b]);
-            }
+        if let Some(header) = kit.header().filter(|_| self.header) {
+            canvas.blit(header, (0, 0), 0, header.width, 1.0);
         }
+    }
+}
+
+/// The part of a screen that never changes, drawn once and kept: its pixels,
+/// and its text when that is recorded to be drawn sharp (`crate::ui_text`)
+/// rather than baked into the pixels.
+pub struct Backdrop {
+    pixels: Vec<u8>,
+    text: Option<crate::ui_text::Layer>,
+    /// Whether the text was recorded: the cache is made again if that changes.
+    sharp: bool,
+}
+
+impl Backdrop {
+    /// Draws the screen's backdrop with `draw`.
+    pub fn new(draw: impl FnOnce(&mut Canvas)) -> Self {
+        let sharp = crate::ui_text::recording();
+        let mut pixels = vec![0u8; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
+        let ((), text) = crate::ui_text::capture(|| draw(&mut Canvas(&mut pixels)));
+        Self {
+            pixels,
+            text,
+            sharp,
+        }
+    }
+
+    /// Puts the backdrop on `canvas` and its text, if recorded, in the layer
+    /// being recorded.
+    pub fn put(&self, canvas: &mut Canvas) {
+        canvas.0[..self.pixels.len()].copy_from_slice(&self.pixels);
+        if let Some(text) = &self.text {
+            crate::ui_text::replay(text);
+        }
+    }
+
+    pub fn is_for_now(&self) -> bool {
+        self.sharp == crate::ui_text::recording()
     }
 }
 
@@ -218,27 +245,50 @@ mod tests {
     }
 
     #[test]
-    fn the_composed_background_lays_one_picture_over_another() {
+    fn the_background_is_netipx3_whole_with_the_players_bar_over_it() {
         let kit = kit();
         let mut pixels = blank();
-        let background = Background::direct_connection();
-        background.draw(&mut Canvas(&mut pixels), &kit);
-        // The title bar is NETIPX3's, the rest MODEM3's.
-        assert_eq!(at(&pixels, 320, 40), tone_of(&kit, "NETIPX3"));
-        assert_eq!(at(&pixels, 639, 76), tone_of(&kit, "NETIPX3"));
-        // MODEM3's red shows everywhere under the bar, up to the panel.
-        assert_eq!(at(&pixels, 320, 77), tone_of(&kit, "MODEM3"));
-        assert_eq!(at(&pixels, 639, 79), tone_of(&kit, "MODEM3"));
-        assert_eq!(at(&pixels, 320, 80), tone_of(&kit, "MODEM3"));
-        assert_eq!(at(&pixels, 0, 479), tone_of(&kit, "MODEM3"));
-        // One whole picture.
+        Background::direct_connection().draw(&mut Canvas(&mut pixels), &kit);
+        // No red: every row is NETIPX3's, the bar and the photograph.
+        for (x, y) in [(320, 40), (639, 76), (320, 77), (320, 300), (0, 479)] {
+            assert_eq!(at(&pixels, x, y), tone_of(&kit, "NETIPX3"), "{x}, {y}");
+        }
+        // The player's bar replaces the bar's rows where it is opaque, shows
+        // the retail bar through where it is clear and blends in between,
+        // and stops at row 77.
+        let (width, rows) = (640usize, 77usize);
+        let mut rgba = Vec::new();
+        for _y in 0..rows {
+            for x in 0..width {
+                let alpha = match x {
+                    0..=99 => 255,
+                    100..=199 => 0,
+                    _ => 128,
+                };
+                rgba.extend_from_slice(&[200, 100, 50, alpha]);
+            }
+        }
+        let bar = Sprite {
+            width,
+            height: rows,
+            rgba,
+            glyphs: Vec::new(),
+        };
+        let kit = kit.with_header(bar);
+        let mut pixels = blank();
+        Background::direct_connection().draw(&mut Canvas(&mut pixels), &kit);
+        let retail = tone_of(&kit, "NETIPX3");
+        assert_eq!(at(&pixels, 50, 10), [200, 100, 50]);
+        assert_eq!(at(&pixels, 150, 10), retail);
+        let blended = at(&pixels, 400, 10);
+        assert!(blended[0] > retail[0].min(200) || blended[0] < retail[0].max(200));
+        assert_ne!(blended, [200, 100, 50]);
+        assert_ne!(blended, retail);
+        assert_eq!(at(&pixels, 50, 77), retail, "the photograph is not covered");
+        // A whole single picture takes no bar.
+        let mut pixels = blank();
         Background::single("NETIPX3").draw(&mut Canvas(&mut pixels), &kit);
-        assert_eq!(at(&pixels, 320, 300), tone_of(&kit, "NETIPX3"));
-        // A rectangle off the edge is clipped, not a panic.
-        Background::composed("MODEM3", "NETIPX3", (600, 460, 100, 100))
-            .draw(&mut Canvas(&mut pixels), &kit);
-        assert_eq!(at(&pixels, 639, 479), tone_of(&kit, "NETIPX3"));
-        assert_eq!(at(&pixels, 599, 479), tone_of(&kit, "MODEM3"));
+        assert_eq!(at(&pixels, 50, 10), retail);
     }
 
     use crate::menu::Canvas;

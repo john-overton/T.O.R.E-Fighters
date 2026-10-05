@@ -34,9 +34,14 @@ fn size(name: &str) -> (usize, usize) {
         "EDGETR" | "EDGEBL" => (30, 35),
         "EDGETB" => (47, 4),
         "EDGELR" => (4, 26),
-        "ACTION0L" | "ACTIOD0L" | "ACTDFT0L" | "ACTDFD0L" => (24, 30),
-        "ACTION0M" | "ACTIOD0M" | "ACTDFT0M" | "ACTDFD0M" => (8, 30),
-        "ACTION0R" | "ACTIOD0R" | "ACTDFT0R" | "ACTDFD0R" => (29, 30),
+        "ACTION0L" | "ACTIOD0L" => (24, 30),
+        "ACTION0M" | "ACTIOD0M" => (8, 30),
+        "ACTION0R" | "ACTIOD0R" => (29, 30),
+        // The default buttons' pieces carry three more rows on top: the
+        // outline, and the cap is 27 high.
+        "ACTDFT0L" | "ACTDFD0L" => (24, 33),
+        "ACTDFT0M" | "ACTDFD0M" => (8, 33),
+        "ACTDFT0R" | "ACTDFD0R" => (29, 33),
         "ACTDFLT" | "ACTDFLD" => (20, 27),
         "LISTLFT" | "LISTRT" => (30, 17),
         "LISTMID" => (20, 17),

@@ -78,6 +78,10 @@ pub struct Renderer {
     veil: wgpu::Buffer,
     veil_levels: [f32; 2],
     pipeline: wgpu::RenderPipeline,
+    /// Sharp text drawn over the menu canvas (`ui_text`), and whether the
+    /// screen up wants it drawn.
+    ui_text: crate::ui_text_renderer::UiTextRenderer,
+    menu_text_visible: bool,
     sim: crate::sim_renderer::SimRenderer,
     cockpit: crate::cockpit_renderer::CockpitRenderer,
     mirror_camera: crate::camera::Camera,
@@ -400,6 +404,7 @@ impl Renderer {
             samples,
         );
         let cockpit = crate::cockpit_renderer::CockpitRenderer::new(&device, config.format);
+        let ui_text = crate::ui_text_renderer::UiTextRenderer::new(&device, &queue, config.format);
         crate::diagnostics::stage_done();
         Ok(Self {
             first_frame: Default::default(),
@@ -410,6 +415,8 @@ impl Renderer {
             graphics,
             sample_counts,
             cockpit,
+            ui_text,
+            menu_text_visible: false,
             previews: Default::default(),
             sim,
             window,
@@ -648,6 +655,16 @@ impl Renderer {
             .collect();
         self.queue.write_buffer(&self.veil, 0, &bytes);
     }
+    /// The sharp text to draw over the menu canvas from now on (none for no
+    /// text), and whether it is shown: the app turns it on only while a screen
+    /// that records its text is up.
+    pub fn set_menu_text(&mut self, layer: Option<&crate::ui_text::Layer>) {
+        let quads = layer.map_or_else(Vec::new, |layer| layer.quads(self.ui_text.linear()));
+        self.ui_text.set(&self.device, &self.queue, &quads);
+    }
+    pub fn show_menu_text(&mut self, visible: bool) {
+        self.menu_text_visible = visible;
+    }
     pub fn flight_size(&self) -> [u32; 2] {
         let s = self.window.inner_size();
         let scale = (1920. / s.width.max(1) as f64)
@@ -810,6 +827,9 @@ impl Renderer {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.draw(0..3, 0..1);
+            if flight_size.is_none() && self.menu_text_visible {
+                self.ui_text.draw(&mut pass);
+            }
         }
         self.queue.submit([encoder.finish()]);
         // Wayland frame callbacks throttle redraw requests to compositor refresh.

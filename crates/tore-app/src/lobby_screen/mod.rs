@@ -46,9 +46,10 @@ mod tests;
 
 use crate::menu::{Canvas, text_width};
 use crate::net::lobby_chat::LobbyChat;
+use crate::ui_text;
 use crate::widgets::{
-    Align, Background, Button, Column, Focus, Kit, List, Outcome as Wo, Pager, Point, Route,
-    Widget, draw_panel, fit, inside,
+    Align, Backdrop, Background, Button, Column, Focus, Kit, List, Outcome as Wo, Pager, Point,
+    Route, Widget, draw_panel, fit, inside,
 };
 use facts::{Buttons, DefaultButton, Facts, FlyAs, SlotClick};
 use modal::{Answer, Modal, Purpose};
@@ -145,7 +146,7 @@ pub struct LobbyScreen {
     pointer: Option<Point>,
     /// A button that cannot be pressed was pressed on: its release says why.
     blocked: Option<Id>,
-    backdrop: std::cell::OnceCell<Vec<u8>>,
+    backdrop: std::cell::RefCell<Option<Backdrop>>,
     /// The screen's own frame cost, logged every 300 frames when
     /// `TORE_DIRECT_TIMING` is set (the Direct Connection screen's switch).
     timing: Option<crate::direct_screen::Timing>,
@@ -253,7 +254,7 @@ impl LobbyScreen {
             default: None,
             pointer: None,
             blocked: None,
-            backdrop: std::cell::OnceCell::new(),
+            backdrop: Default::default(),
             timing: std::env::var_os("TORE_DIRECT_TIMING")
                 .map(|_| crate::direct_screen::Timing::new("Lobby")),
         };
@@ -808,11 +809,13 @@ impl LobbyScreen {
         draw_panel(canvas, kit, (10, 80, 619, 395));
         let font = kit.sprite("PANELFNT");
         let title = "Lobby";
-        canvas.text(
+        ui_text::text(
+            canvas,
+            kit,
             font,
             title,
-            10 + (619 - text_width(font, title)) / 2,
-            87,
+            (10 + (619 - text_width(font, title)) / 2, 87),
+            None,
             None,
         );
         canvas.outline((30, 100, 579, 355), LINE);
@@ -821,7 +824,7 @@ impl LobbyScreen {
             ("Players", 400, 152),
             ("Messages", 45, 282),
         ] {
-            canvas.text(font, label, x, y, None);
+            ui_text::text(canvas, kit, font, label, (x, y), None, None);
         }
         canvas.outline((40, 164, 355, 97), LINE);
         canvas.rect((400, 165, 194, 95), [81, 81, 81, 255]);
@@ -839,23 +842,54 @@ impl LobbyScreen {
 
     fn draw_frame(&self, canvas: &mut Canvas) {
         let kit = &*self.kit;
-        let backdrop = self.backdrop.get_or_init(|| {
-            let mut pixels = vec![0u8; crate::menu::WIDTH * crate::menu::HEIGHT * 4];
-            self.draw_backdrop(&mut Canvas(&mut pixels));
-            pixels
-        });
-        canvas.0[..backdrop.len()].copy_from_slice(backdrop);
+        {
+            let mut cached = self.backdrop.borrow_mut();
+            if !cached.as_ref().is_some_and(Backdrop::is_for_now) {
+                *cached = Some(Backdrop::new(|canvas| self.draw_backdrop(canvas)));
+            }
+            if let Some(backdrop) = cached.as_ref() {
+                backdrop.put(canvas);
+            }
+        }
         let font = kit.sprite("PANELFNT");
         let dim = kit.sprite("PANELFND");
+        let text = ui_text::text;
         let game = format!("Game: {}", self.game_name());
-        canvas.text(font, &fit(font, &game, 549), 45, 106, None);
+        text(
+            canvas,
+            kit,
+            font,
+            &fit(font, &game, 549),
+            (45, 106),
+            None,
+            None,
+        );
         match &self.state {
             Some(state) => {
                 let mission = format!("Mission: {}", state.summary);
-                canvas.text(font, &fit(font, &mission, 549), 45, 120, None);
-                canvas.text(dim, &fit(dim, &facts::rule_text(state), 549), 45, 134, None);
+                text(
+                    canvas,
+                    kit,
+                    font,
+                    &fit(font, &mission, 549),
+                    (45, 120),
+                    None,
+                    None,
+                );
+                let rule = fit(dim, &facts::rule_text(state), 549);
+                text(canvas, kit, dim, &rule, (45, 134), None, None);
             }
-            None => canvas.text(dim, "Waiting for the game's lobby...", 45, 120, None),
+            None => {
+                text(
+                    canvas,
+                    kit,
+                    dim,
+                    "Waiting for the game's lobby...",
+                    (45, 120),
+                    None,
+                    None,
+                );
+            }
         }
         let hint = self
             .state
@@ -863,7 +897,15 @@ impl LobbyScreen {
             .zip(self.players.selected_row())
             .and_then(|(state, row)| facts::player_detail(state, row.key.parse().ok()?))
             .unwrap_or_else(|| facts::hint(&self.facts));
-        canvas.text(font, &fit(font, &hint, 549), 45, 266, None);
+        text(
+            canvas,
+            kit,
+            font,
+            &fit(font, &hint, 549),
+            (45, 266),
+            None,
+            None,
+        );
         let marked = |id| self.focus.marked(id);
         self.slots.draw(canvas, kit, marked(Id::Slots));
         self.players.draw(canvas, kit, marked(Id::Players));

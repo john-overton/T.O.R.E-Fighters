@@ -1,6 +1,8 @@
 //! The kit's pieces: every retail picture the widgets draw, decoded once.
+use super::draw::{GHOST_GAIN, brighten};
 use crate::AppResult;
 use crate::menu::Sprite;
+use crate::ui_text::Style;
 use std::collections::BTreeMap;
 use tore_formats::Pic;
 
@@ -15,7 +17,8 @@ pub const BACKGROUNDS: [&str; 2] = ["MODEM3", "NETIPX3"];
 pub const PIECES: &[&str] = &[
     // The panel.
     "PANEL", "EDGETL", "EDGETR", "EDGEBL", "EDGEBR", "EDGETB", "EDGELR",
-    // Buttons: green, grey, blue default, grey default, and the default caps.
+    // Buttons: green, grey, blue default, grey default, and the default
+    // caps (only their outline columns are drawn, see `Button`).
     "ACTION0L", "ACTION0M", "ACTION0R", "ACTIOD0L", "ACTIOD0M", "ACTIOD0R", "ACTDFT0L", "ACTDFT0M",
     "ACTDFT0R", "ACTDFD0L", "ACTDFD0M", "ACTDFD0R", "ACTDFLT", "ACTDFLD",
     // Fonts: panel text (typed text too), its dim copy, list text, button
@@ -28,6 +31,18 @@ pub const PIECES: &[&str] = &[
     // The PREV/NEXT rocker.
     "ROCKER00", "ROCKER01", "ROCKER02", "ROCKER03", "ROCKER04",
 ];
+
+/// The two buttons' dim fonts, for disabled labels. The kit makes them
+/// [`GHOST_GAIN`] brighter than the retail pictures, but no brighter than the
+/// live labels' body (`GHOST_CEILING`, the grey `FONTACT` and `FONTDFT` are
+/// mostly drawn in), so a disabled button never outshines an enabled one.
+///
+/// The panel's dim font (`PANELFND`: the dim PREV and NEXT, disabled check box
+/// labels, notes) is left as retail has it: its body already reaches about
+/// 70 percent of the live font's, and 50 percent more would make dimmed text
+/// brighter than live text (*agent decision*).
+const GHOST_FONTS: [&str; 2] = ["FONTACD", "FONTDFD"];
+const GHOST_CEILING: u8 = 206;
 
 /// What a screen needs to build a [`Kit`] when it opens, kept for the life of
 /// the game (*agent decision*, EF7). `Menu::new` consumes the imported
@@ -77,9 +92,14 @@ impl KitSource {
         }
     }
 
-    /// The kit in the palette of `primary` (see [`Kit::new`]).
+    /// The kit in the palette of `primary` (see [`Kit::new`]), with the title
+    /// bar picture from the data folder when it holds one.
     pub fn build(&self, primary: &str) -> AppResult<Kit> {
-        Kit::new(&self.pics, &self.multiplayer, primary)
+        let mut kit = Kit::new(&self.pics, &self.multiplayer, primary)?;
+        if let Ok(dir) = crate::assets::data_directory() {
+            kit.header = super::header::load(&dir);
+        }
+        Ok(kit)
     }
 
     /// The retail quick messages (`CHAT.TXT`, F1 to F12 while typing a
@@ -96,7 +116,17 @@ impl KitSource {
 /// maps are, so `Canvas::button_style` can draw from [`Kit::sprites`] as it is.
 pub struct Kit {
     pub(crate) sprites: BTreeMap<String, Sprite>,
+    /// The player's own title bar picture (`super::header`), when there is one.
+    header: Option<Sprite>,
+    /// How each retail font is drawn sharp (`crate::ui_text`), made on first
+    /// use.
+    text_styles: std::sync::OnceLock<Vec<(&'static str, Option<Style>)>>,
 }
+
+/// The retail fonts the multiplayer screens draw text in.
+const TEXT_FONTS: [&str; 7] = [
+    "PANELFNT", "PANELFND", "SMLFONT", "FONTACT", "FONTACD", "FONTDFT", "FONTDFD",
+];
 
 /// A picture found in one of the two maps.
 enum Source<'a> {
@@ -166,15 +196,63 @@ impl Kit {
             sprites.insert(format!("{name}.PIC"), decode(pic, &palette_of(pic)));
         }
         for name in PIECES {
-            sprites.insert(format!("{name}.PIC"), decode(&*find(name)?, &palette));
+            let mut sprite = decode(&*find(name)?, &palette);
+            if GHOST_FONTS.contains(name) {
+                brighten(&mut sprite, GHOST_GAIN, GHOST_CEILING);
+            }
+            sprites.insert(format!("{name}.PIC"), sprite);
         }
-        Ok(Self { sprites })
+        Ok(Self {
+            sprites,
+            header: None,
+            text_styles: Default::default(),
+        })
     }
 
     /// A kit from sprites already made, for tests and previews.
     #[cfg(test)]
     pub fn from_sprites(sprites: BTreeMap<String, Sprite>) -> Self {
-        Self { sprites }
+        Self {
+            sprites,
+            header: None,
+            text_styles: Default::default(),
+        }
+    }
+
+    /// The kit with `header` as the player's title bar picture.
+    #[cfg(test)]
+    pub fn with_header(mut self, header: Sprite) -> Self {
+        self.header = Some(header);
+        self
+    }
+
+    /// The player's title bar picture, drawn over `NETIPX3`'s bar.
+    pub fn header(&self) -> Option<&Sprite> {
+        self.header.as_ref()
+    }
+
+    /// How `font`, one of the kit's own text fonts, is drawn sharp; none for
+    /// any other sprite.
+    pub fn text_style(&self, font: &Sprite) -> Option<Style> {
+        let styles = self.text_styles.get_or_init(|| {
+            TEXT_FONTS
+                .iter()
+                .map(|name| {
+                    (
+                        *name,
+                        self.sprites.get(&format!("{name}.PIC")).and_then(Style::of),
+                    )
+                })
+                .collect()
+        });
+        styles
+            .iter()
+            .find(|(name, _)| {
+                self.sprites
+                    .get(&format!("{name}.PIC"))
+                    .is_some_and(|sprite| std::ptr::eq(sprite, font))
+            })
+            .and_then(|(_, style)| *style)
     }
 
     /// One piece by retail name, with or without `.PIC`.

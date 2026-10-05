@@ -2,10 +2,11 @@
 //! maximum length, a hint when empty and sideways scrolling.
 use super::{
     Kit, Outcome, Point, Rect, Widget,
-    draw::{focus_mark, text_clipped},
+    draw::{focus_mark, ghost},
     inside,
 };
 use crate::menu::Canvas;
+use crate::ui_text;
 use std::cell::Cell;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use tore_formats::text::GlyphCodes;
@@ -262,7 +263,15 @@ impl TextField {
         let (caret_top, caret_height) = (top - 1, 12);
         if self.text.is_empty() {
             if !self.hint.is_empty() {
-                text_clipped(canvas, font, &self.hint, (left, top), clip, Some([150; 3]));
+                ui_text::text(
+                    canvas,
+                    kit,
+                    font,
+                    &self.hint,
+                    (left, top),
+                    Some(clip),
+                    Some(ghost(150)),
+                );
             }
         } else {
             let shown: String = if self.masked {
@@ -270,8 +279,8 @@ impl TextField {
             } else {
                 self.text.chars().skip(first).collect()
             };
-            let tint = (!self.enabled).then_some([120; 3]);
-            text_clipped(canvas, font, &shown, (left, top), clip, tint);
+            let tint = (!self.enabled).then(|| ghost(120));
+            ui_text::text_cells(canvas, kit, font, &shown, (left, top), Some(clip), tint);
         }
         if focused && self.enabled {
             let before: i32 = widths[first.min(self.caret)..self.caret].iter().sum();
@@ -563,8 +572,9 @@ mod tests {
         let mut f = edit(Filter::Text).with_hint("host");
         let mut pixels = blank();
         f.draw(&mut Canvas(&mut pixels), &kit, false);
-        // The hint is the font's white in the hint grey, on the field.
-        assert_eq!(at(&pixels, 105, 106), [150; 3]);
+        // The hint is the font's white in the ghost grey (150 made brighter
+        // by the ghost gain), on the field.
+        assert_eq!(at(&pixels, 105, 106), [191; 3]);
         let mut pixels = blank();
         type_in(&mut f, "ab");
         f.draw(&mut Canvas(&mut pixels), &kit, true);
@@ -575,6 +585,21 @@ mod tests {
         // A plain grey box, not the retail edit control (the box is 18 high).
         assert_eq!(at(&pixels, 101, 112), [97; 3]);
         assert_eq!(at(&pixels, 101, 117), [97; 3]);
+    }
+
+    #[test]
+    fn a_disabled_fields_text_is_ghosted() {
+        let kit = kit();
+        let mut f = edit(Filter::Text);
+        type_in(&mut f, "ab");
+        f.set_enabled(false);
+        let mut pixels = blank();
+        f.draw(&mut Canvas(&mut pixels), &kit, false);
+        assert_eq!(
+            at(&pixels, 105, 106),
+            [153; 3],
+            "120 made brighter by the ghost gain"
+        );
     }
 
     #[test]

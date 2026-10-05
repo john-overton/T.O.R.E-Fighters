@@ -3,6 +3,7 @@
 use super::{Kit, Outcome, Point, Rect, Widget, draw::focus_mark, inside};
 use crate::menu::Canvas;
 use crate::rocker::Rocker;
+use crate::ui_text;
 use std::time::Instant;
 
 /// The box's hit size: the DLG's 19 by 19 (the art is 28 to 33 square with
@@ -136,7 +137,15 @@ impl CheckBox {
             } else {
                 kit.sprite("PANELFND")
             };
-            canvas.text(font, &self.label, self.at.0 + HIT + 10, self.at.1 + 5, None);
+            ui_text::text(
+                canvas,
+                kit,
+                font,
+                &self.label,
+                (self.at.0 + HIT + 10, self.at.1 + 5),
+                None,
+                None,
+            );
         }
         if focused && self.enabled {
             let (x, y, w, h) = self.bounds();

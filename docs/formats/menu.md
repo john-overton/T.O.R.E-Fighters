@@ -331,7 +331,7 @@ text is where its glyph strip starts.
 | Players box | outline (340, 180) to (593, 284), 254 by 105 | Filled flat grey 81 (nearest palette entry 109) (M) |
 | "Messages" | `PANELFNT` at (45, 304) | The retail heading line also holds a Send Message button (the string `Messages` + 25 spaces + `.button Send Message ..button`, S); it is not on the screenshot, taken before any connection (U when it shows) |
 | Messages area | outline (45, 319) to (593, 406), 549 by 88, flat grey 81 | Eight lines of `PANELFNT` at its line height of 10 pixels plus 8 (S, `0x47f100`: height = 8 lines + 8); x = dialog x + 35, width = dialog width - 70 |
-| Buttons | New face (106, 416) with the default cap `ACTDFLT` (20 by 27) at (86, 416); Join (229, 419), Options (352, 419), Cancel (475, 419); 85 wide | The DLG positions plus the origin; the default button is drawn three pixels higher with its cap to the left, exactly as `Menu::action_button` does today |
+| Buttons | New face (106, 416) with the default cap `ACTDFLT` (20 by 27) at (86, 416); Join (229, 419), Options (352, 419), Cancel (475, 419); 85 wide | The DLG positions plus the origin. Retail and `Menu::action_button` draw the default button three pixels higher with its cap to the left; the multiplayer screens draw its face and the outline rows on top of its pieces where retail does, but of the cap only its first four columns (the outline's left side) 6 pixels left of the face and its last two (the face's own left rim) 2 pixels left of it, so the outline closes round the button about four pixels off its edge and the striped box is gone (*opinionated*, John, 2026-10-05) |
 | Button labels | New in `FONTDFT` (bluish glyphs, brightest pixel about 223), the others in `FONTACT` (greenish, about 215) | Centred in the face: x = button x + (73 - text width) / 2 rounded down (the default button's label 1 pixel further left); glyph strip top at y + 6 (default: face y + 10) (M, fit; the two fonts score 24.2 and 24.4 against the next best 27 to 30, and the glyph colours settle it) |
 
 A render of the whole screen made only from these numbers, beside the
@@ -377,7 +377,25 @@ screenshot, is kept with the lead's notes (`.local/mp-notes/stage-ef/ef0/`).
 - **Buttons** `ACTION0L/M/R` green, `ACTDFT0L/M/R` blue default,
   `ACTIOD0L/M/R` and `ACTDFD0L/M/R` the disabled copies, `ACTDFLT`/`ACTDFLD` the
   20 by 27 cap. The disabled default pieces are needed wherever Start or Call
-  can be unavailable.
+  can be unavailable. The default pieces are 33 rows tall: the top three are a
+  navy outline and a grey gap above the face. The widget kit draws them, and of
+  the cap (a frame round a striped box) only its first four columns (a navy
+  line, a grey border and two clear columns that carry the top and bottom lines
+  across) 6 pixels left of the face, and its last two (a grey border and a dark
+  navy line, the face's left rim) 2 pixels left of it. The outline stands about
+  four pixels off the button's edge, as the top line's end does beyond the
+  shadow on the right. The striped box in between is not drawn (*opinionated*,
+  John, 2026-10-05; he had the outline taken out, put back, then asked for the
+  rim and the spacing).
+- **Ghosted text** is drawn 1.275 times as bright as the first widgets drew it
+  (*opinionated*, John, 2026-10-05: first 50 percent brighter, then 15 percent
+  darker than that): an empty field's hint (tint 150 to 191), a disabled
+  field's text (120 to 153), a dimmed list row (118 to 150) and the disabled
+  button labels (`FONTACD`, `FONTDFD`, lifted by the same factor but no
+  brighter than the live labels' body, 206). `PANELFND` (dim PREV and NEXT,
+  disabled check box labels, notes) is left as retail has it: its body is
+  already about 70 percent of the live font's, so more would put dimmed text
+  above live text.
 
 ### What the import keeps for these screens (EF1, 2026-10-01)
 
@@ -421,9 +439,8 @@ Agent decisions, 2026-10-01:
   `NETIPX`, the latter left over from the earlier game), `NETDIR`, `FORTAIRB`
   (Airbase Assault, phase 2 at the earliest), the horizontal rocker `ROCKERH0`
   to `4` (no screen of ours uses it, EF0) and `CHECK320` (the 320 by 200
-  mode's check box). `MODEM3` is kept for the modem background even though the
-  modem itself is not built, because it is the second background the lobby may
-  use.
+  mode's check box). `MODEM3` is kept because the widget kit decodes its pieces in `MODEM3`'s
+  palette, though the screens no longer draw its red photograph (2026-10-05).
 
 The game keeps these resources in `Assets::multiplayer_resources`, apart from
 `theater_resources` (*agent decision*). The combat tapes fingerprint every
@@ -490,8 +507,7 @@ with lines (*agent decision*; retail's handling is unknown).
 Implementation mode, from the rectangles above. The screen is
 `crates/tore-app/src/direct_screen/`; its behaviour is in
 [the architecture notes](../ARCHITECTURE.md#the-direct-connection-screen-as-built-ef7).
-Everything on it is made of the widget kit at NEWNET's rectangles on `MODEM3`
-under `NETIPX3`'s title bar, its top 77 rows (John's approved look, corrected the same day: the pictures are identical through row 76 apart from the title text and palettes, and `NETIPX3`'s photograph starts at row 77, so `MODEM3`'s red shows everywhere below the bar, up to the panel at y 80), with these placements
+Everything on it is made of the widget kit at NEWNET's rectangles on `NETIPX3`: its grey photograph under its own title bar, its top 77 rows (John, 2026-10-05; from 2026-10-01 to then the screens drew `MODEM3`'s red photograph under `NETIPX3`'s bar, which the pictures' identical rows 0 to 76 allowed). A player can reword the bar: the top 77 rows of `DirectNetworkConnection.png` in the data folder, a 640 pixel wide PNG of any height from 77 (a whole 640 by 480 picture is fine), are drawn over them with their transparency honoured, and a missing or unusable file leaves the retail bar (the log says why). The file is the player's own and never part of the repository or a package. The widgets' pieces keep `MODEM3`'s palette. With these placements
 (agent decisions where the table above has no retail counterpart):
 
 | Item | Rectangle or position | Notes |
@@ -504,7 +520,7 @@ under `NETIPX3`'s title bar, its top 77 rows (John's approved look, corrected th
 | Mission line | `PANELFNT` at (45, 290), up to 549 wide | The selected game's mission summary, or why the game cannot be joined; between the Games box (ends y 285) and the Messages heading (y 304) |
 | Players | list at (346, 185), 242 wide, five rows, no pager | Crown, then the callsign |
 | Messages | NEWNET's box, (45, 319), 549 by 88 | Grey system lines in the kit's colours |
-| Buttons | New, Join, Options, Cancel at NEWNET's positions | The blue default face with the striped cap is on Join once a game is selected or an address typed, on New otherwise; Cancel reads *Leave* while a session runs |
+| Buttons | New, Join, Options, Cancel at NEWNET's positions | The blue default face (its outline kept all round, the striped box removed, John 2026-10-05) is on Join once a game is selected or an address typed, on New otherwise; Cancel reads *Leave* while a session runs |
 | Options panel | panel (80, 100), 480 by 360; grey fields at (240, 139) 60 wide (port), (240, 169) and (240, 199) 216 wide, all 18 high; quick messages box (115, 262), 410 by 128; OK (190, 408) and Cancel (330, 408) | Port (five digits), password (asterisks), game name; the box shows `F1  text  (to all)` lines |
 
 Headless renders, `--snapshot-state` `direct` (empty, searching), `direct-games`
@@ -513,12 +529,51 @@ Headless renders, `--snapshot-state` `direct` (empty, searching), `direct-games`
 `direct-options`, are in the lead's notes (`.local/mp-notes/stage-ef/ef7/`),
 beside EF2's mock.
 
+### Sharp text (2026-10-05)
+
+The menu is a 640 by 480 canvas the renderer stretches to the window with
+nearest pixels, so the retail bitmap fonts (capitals 8 to 9 pixels tall) break
+into uneven blocks at full screen. While the game draws a multiplayer screen
+for its window, the screen's text calls (`ui_text::text`) are recorded, not
+drawn into the canvas, and the renderer draws the glyphs at the window's own
+resolution over the stretched canvas, in the same render pass
+(`ui_text_renderer.rs`, `ui_text.wgsl`). Headless snapshots, the previews and
+the tests do not record, so they still show the retail fonts. John asked for
+this on 2026-10-05: easier to read, the same size, not fuzzy (*opinionated*).
+
+- **Shapes.** Noto Sans Medium, open licensed and not retail, rendered at 48
+  pixels to the em into `crates/tore-app/assets/ui-text.bin` by
+  `tools/build_ui_text_atlas.py` (138 glyphs, ASCII and the CP437 letters
+  above 0x7F). The GPU keeps three mipmap levels.
+- **Size and place.** Each retail font the screens use (`PANELFNT`,
+  `PANELFND`, `SMLFONT`, the four button fonts) is measured on its capital H:
+  the sharp capitals are that tall on that baseline, narrowed to the retail
+  letters' narrowness (about 0.76 for `PANELFNT`), in the font's brightest
+  colour times 0.94, times the call's tint. A run starts where the retail text
+  would and ends where it would: the face's own letter spacing is spread (at
+  most 1 pixel tighter or 1.5 looser a letter) so the retail widths, which the
+  screens centre, align and cut off with, still hold. The retail letters sit in
+  near fixed width cells that look gappy in another face. Typed text
+  (`text_cells`) keeps every glyph in its retail cell so the caret, which a
+  field places from the retail widths, stays between the letters.
+- **Pop-ups.** The text is on top of the canvas, so a panel drawn over earlier
+  text (Options, Kick, Leave) records its rectangle (`draw_panel`) and the
+  earlier glyphs are cut to what shows round it. A screen's backdrop is drawn
+  once and kept, so its text is kept and replayed with it.
+- **Checks.** `ui_text_renderer::tests` (ignored, needs a GPU adapter) draws
+  recorded text through the real pipeline into an offscreen target and compares
+  it with `ui_text::composite`, the CPU stand-in that the review pictures use:
+  `cargo test -p tore-app --locked ui_text -- --ignored --nocapture`.
+  `TORE_DATA_DIR=... TORE_MOCK_OUT=... cargo test -p tore-app --locked
+  ui_text::tests::render_review_pictures -- --ignored` writes every screen at
+  3 times size, sharp and as before.
+
 ### The lobby screen as built (EF8, 2026-10-01)
 
 Implementation mode. The screen is `crates/tore-app/src/lobby_screen/`; its
 behaviour, who may press which button and what was measured are in
 [the architecture notes](../ARCHITECTURE.md#the-lobby-screen-as-built-ef8). It
-reuses Direct Connection's background (`MODEM3` under `NETIPX3`'s top 77 rows),
+reuses Direct Connection's background (`NETIPX3` and the player's title bar picture, if any),
 panel (10, 80, 619 by 395), frame lines and grey text fields, with these
 placements (all agent decisions; retail's `NETNEW` is a reference, not a
 template):

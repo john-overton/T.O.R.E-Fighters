@@ -3,6 +3,7 @@
 //! before it ends the game for everyone. One panel serves both: a title,
 //! some lines of words, an optional edit line, and two buttons.
 use crate::menu::{Canvas, text_width};
+use crate::ui_text;
 use crate::widgets::{
     Button, Filter, Focus, Kit, Outcome, Point, Rect, Route, TextField, Widget, draw_panel, fit,
 };
@@ -183,11 +184,16 @@ impl Modal {
     pub fn draw(&self, canvas: &mut Canvas, kit: &Kit) {
         draw_panel(canvas, kit, PANEL);
         let font = kit.sprite("PANELFNT");
-        canvas.text(
+        ui_text::text(
+            canvas,
+            kit,
             font,
             &self.title,
-            PANEL.0 + (PANEL.2 - text_width(font, &self.title)) / 2,
-            PANEL.1 + 7,
+            (
+                PANEL.0 + (PANEL.2 - text_width(font, &self.title)) / 2,
+                PANEL.1 + 7,
+            ),
+            None,
             None,
         );
         canvas.outline(
@@ -197,7 +203,7 @@ impl Modal {
         let mut y = PANEL.1 + 38;
         for line in &self.lines {
             let line = fit(font, line, PANEL.2 - 48);
-            canvas.text(font, &line, PANEL.0 + 22, y, None);
+            ui_text::text(canvas, kit, font, &line, (PANEL.0 + 22, y), None, None);
             y += 18;
         }
         if let Some(field) = &self.reason {
