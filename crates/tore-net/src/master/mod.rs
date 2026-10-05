@@ -72,6 +72,7 @@ macro_rules! codes {
     };
 }
 
+pub mod browse;
 pub mod candidate;
 pub mod packet;
 
