@@ -178,11 +178,19 @@ compile without a section (see [keeping it complete](#keeping-it-complete)):
 | 6 | Comms | Radio channels, cooldowns, the radio random stream | New value |
 | 7 | Wing status | The AI wingmen's airfield report memory | New value |
 | 8 | Radio | The radio call memory (hits by shooter and victim) | New value |
+| 9 | Data link | The flight data link's picture: members, each flight's published tracks and member status with their publish ticks, locks, engagements, assignments, the two warning tables, the planes already announced | New value |
+| 10 | Score | Whether the host has scoring on and, if so, the targets whose end is recorded and the score facts waiting for the host, with their tick | New value |
 
 Not coded at `World` level: `setup`, `phrases` and every terrain field but
-the weather (mission setup). Stage G adds the data link's picture and the
-radio frequencies: each new `World` field gets the next free id; state added
-inside an existing holder joins that holder's section.
+the weather (mission setup). Stage G added the data link's picture (section 9)
+and stage F phase 2 the score recorder (section 10); each new `World` field gets
+the next free id, and state added inside an existing holder joins that
+holder's section. A G slice that adds state to `DataLink` codes it in
+`datalink_checkpoint.rs`, whose field list will not compile until it does. The
+data link's journal is a why-record and is not coded. The score recorder's
+waiting facts are coded although the host drains them after every step
+(*agent decision*): a checkpoint taken at any other point of the host's loop is
+then exact too.
 
 ### Shared records
 
@@ -312,11 +320,11 @@ macOS); every scenario is built from synthetic fixtures, never retail data.
 
 | Scenario | Fixture | At tick N the test asserts | N, M |
 | --- | --- | --- | --- |
-| Single player | The full-tick fingerprint mission (`world/tick_tests.rs`) with its script and drones. *Built (H0, asserted H8)* | A turbulence event begun, the airport selected and the tower's reply held, the player flying fast | 600; 600 |
-| Dogfight with rounds in flight | The crowd fixture (`world/crowd.rs`): four against four at 10,000 ft, four human seats. *Built (H0, asserted H8)* | Gun rounds in flight, every ownship holding radar contacts | 600; 600 |
+| Single player | The full-tick fingerprint mission (`world/tick_tests.rs`) with its script and drones. *Built (H0, asserted H8)* | A turbulence event begun, the airport selected and the tower's reply held, the player flying fast; the data link's pictures published with every roster plane a member (*H10*) | 600; 600 |
+| Dogfight with rounds in flight | The crowd fixture (`world/crowd.rs`): four against four at 10,000 ft, four human seats. *Built (H0, asserted H8)* | Gun rounds in flight, every ownship holding radar contacts; both wings' pictures published and holding tracks (*H10*) | 600; 600 |
 | Handoffs in the open mission | `World::new` with `Seating::Open` from the synthetic import, three against three; seats take planes at steps 60 and 61, one gives its plane back at 500, another takes one at 640. *Built (H0, asserted H8)* | Restored into a world fresh from `World::new`, so the structure (cockpits, ownships, actors) differs from the fresh world's; the plane given back is the AI's again | 700; 600 |
-| Damaged aircraft | The crowd fixture with Realistic damage; the damage command on a human's aircraft at steps 800 to 802, one AI aircraft shot down at 840 (its row emptied, its pilot ejected by hand) and another hurt at 850. *Built (H8)* | An ownship with hit points lost and a system fault, a wreck falling, a pilot under canopy, a hurt AI aircraft flying | 900; 600 |
-| Handoffs in the fight | The crowd fixture; seat 1 gives its plane back at step 500 and takes an AI plane at 560. *Built (H8)* | The roster, cockpits and AI actors as the handoffs left them, the leaders holding a designated contact | 700; 600 |
+| Damaged aircraft | The crowd fixture with Realistic damage and the host's scoring on (*H10*); the damage command on a human's aircraft at steps 800 to 802, one AI aircraft shot down at 840 (its row emptied, its pilot ejected by hand) and another hurt at 850. *Built (H8)* | An ownship with hit points lost and a system fault, a wreck falling, a pilot under canopy, a hurt AI aircraft flying; scoring on with the lost aircraft recorded and its kill waiting, the link showing it dead (*H10*) | 900; 600 |
+| Handoffs in the fight | The crowd fixture; seat 1 gives its plane back at step 500 and takes an AI plane at 560. *Built (H8)* | The roster, cockpits and AI actors as the handoffs left them, the leaders holding a designated contact, the data link holding those locks and engagements (*H10*) | 700; 600 |
 | Missile duel | `World::new` open mission, one against one at 5 nautical miles, two seats; seat 1 fires its guns at step 1,400 and seat 0 a guided missile when in range. *Built (H8)* | A guided missile in flight, a missile warning held by a threat service, gun rounds in flight, both aircraft alive; they meet 400 ticks after the checkpoint | 1,700; 1,100 |
 | Radio calls pending | The single-player fingerprint mission with three calls (delays of 5, 9 and 14 seconds) and two cooldowns put into the player's channel at step 570. *Built (H8)* | Both cooldowns running, the Comms section differing from the same mission's without the calls | 600; 900 |
 | AI landing | `World::new` over the synthetic import with an airport, airborne, the wing ordered to land at step 20; the two wingmen start at the first approach gate and 16,000 ft behind it. *Built (H8)* | One wingman in the rollout on the runway, the other holding or approaching; after the run the first has cleared the runway and the second is on approach | 12,500; 1,600 |
@@ -388,11 +396,12 @@ drift; the coders, not this table, are the record.
 | AI controller | `Controller` and its manoeuvre, intents, gunnery, formation guidance, weapon service | 40 | about 20 KB | Already `Clone + PartialEq`, with traces and draw logs outside equality |
 | AI wings | `AiWings`, its reports, chatter watch, result trackers | 12 | a few KB, plus configurations as shared records | Two random streams; `ai_shots` grows with every AI round in the default rules: code it, measure it |
 | Radio | `Comms`, `Radio`, `WingStatus`, `AirfieldRadio`, `CrewVoice` | 16 | under 1 KB idle | One random stream; seven `&'static str` cooldown keys |
+| Data link and score | `DataLink`, `score::Recorder` | 20 | under 1 KB | No random stream. The link is rebuilt from the world every tick except the pictures (every 30th tick), the locks' first-held ticks and the assignments, so it is coded whole. The wing, side and player-order types belong to `tore-sim`, so their coders are functions |
 
 The skip list the surveys support, with the class of each: why-records:
 `AiMission::journal`, `AiActor::trace` and `journal_memory`, `Controller::trace`,
 every `DecisionRandom`'s draw log, `Comms::journal`, `Channel::recent`,
-`Call::origin`, `AirfieldRadio::notes`, `CrewVoice::gate`,
+`Call::origin`, `AirfieldRadio::notes`, `CrewVoice::gate`, `DataLink::journal`,
 `AiWings::{last_output, decoy_rolls, formation_trace, threat_reports}`,
 `Reports::{notes, queued, activity}` (journal entries only),
 `live::State::decoy_log`, `Ledger::outcomes`. Scratch:
