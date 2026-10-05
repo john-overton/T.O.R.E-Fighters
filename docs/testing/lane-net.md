@@ -61,6 +61,7 @@ game's own network code (see "Choosing scenarios by change").
 | `net-discovery` | 5 | `tore-app --find-games` against a running server, then on a free port | The server's line (this build, name, mission, `0/6 players`, `lobby`, `king -`, `open`, `not full`) is printed on its port. A port with nothing prints `No games found.` and exits 0. The console's `quit` stops the server with exit 0 |
 | `net-window-stall` | 17 | A game joins the server and its script blocks the whole main loop for 4 seconds in flight | The server logs "game stalled, flying neutral" and "game back after 4.0 s" (the keepalive held the seat), then a clean leave. The game wrote `logs/net-DATE.tsv` (header, join, mission, seating and once-a-second figures with the right columns) and a capture in `replays/` |
 | `net-master-flood` | 11 | A `tore-master` on 127.0.0.1 (its probe port the main port + 1, status every 2 seconds), then `tore-master flood` at it for 10 seconds; the console's `status`, `listings` and `quit` | The flood exits 0 with "limits held": no port answered with more bytes than it sent, and every browse from 127.0.0.2 during the flood answered (at least 8). The master printed both ports, a `limit source=127.0.0.1` line, a status line with `dropped(limit)` above 0, `listings=0` (the flood made no listing) and `Stopped`; its `state/telemetry/DATE.tsv` counted none of the flood's reports |
+| `net-master-listing` | 2 | A `tore-master` on 127.0.0.1 and a `tore-server` with `broadcast on` and `master 127.0.0.1:PORT`; the server's console `status`, `broadcast off`, `broadcast on` and `quit`; the master's `listings` and `quit` (slice I3). Slice I4 adds `tore-app --browse 5`, which lists the game the way a player's Internet Lobby does | Judged from the master's own output: a `listed` line from the server's game port with its name, the master's `listings` showing it at `players=0/`, an `unlisted ... reason=unregistered` line after `broadcast off`, a second `listed` after `broadcast on`, a second `unlisted` at `quit`, `listings=0` at the end and no listing left to expire. The server printed its `Broadcast: on` start line, `Broadcasting: listed`, the listing at the end of its status line and both console lines, its log holds the listing, and no network problem or silent master anywhere |
 | `net-window-host` | 41 | `tore-app --host` flies the example mission; the driver waits for it to listen, searches, joins a bot, and the host's script leaves after 20 seconds of flight | The search finds the hosted game by name with its King. The bot joins, is seated, flies, hears "Mission ended: the host left the game.", gets its debrief and exits 0. The host exits 0 and wrote the same net log and a `HOSTED` capture |
 
 All of the lane's output is checked for the same general problems as every other
@@ -99,7 +100,7 @@ unit tests in `tools/test_battery_net.py`; the runner's driver support is tested
 
 ## Choosing scenarios by change
 
-`python3 tools/battery.py --changed` maps the network crates to five families (the
+`python3 tools/battery.py --changed` maps the network crates to six families (the
 map is in `tools/battery_selection.py`):
 
 | Family | Scenarios | Chosen when these change |
@@ -109,6 +110,7 @@ map is in `tools/battery_selection.py`):
 | `net-discovery` | `net-discovery` | `tore-net`, `tore-session`, `tore-server`, the app's `net/search.rs` |
 | `net-window` | both `net-window-*` | `tore-codec`, `tore-net`, `tore-session`, and in the app `net/`, `direct_screen/`, `lobby_screen/` and `widgets/` |
 | `net-master` | `net-master-*` | `tore-master`, and `tore-net`'s `master/` module |
+| `net-listing` | `net-master-listing` | `tore-server` |
 
 A change under the app's `net/` or its screens counts as touching windowed code, so
 the quick check opens a window for it. A change to a crate only (`tore-session`, say)

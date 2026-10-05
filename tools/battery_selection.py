@@ -182,7 +182,11 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe"),
     ),
     "net-discovery": ("finding games on the local network", ("net-discovery",)),
-    "net-master": ("the master server on this machine: its limits under the flood tool", ("net-master-*",)),
+    "net-master": (
+        "the master server on this machine: its limits under the flood tool, a server listing itself",
+        ("net-master-*",),
+    ),
+    "net-listing": ("a dedicated server broadcasting itself on a master on this machine", ("net-master-listing",)),
     "net-window": (
         "the game itself over the network: a joined game that stalls, a hosted game",
         ("net-window-*",),
@@ -376,7 +380,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-net/*", NET_FAMILIES + ("net-discovery",), "network transport"),
     _r("crates/tore-session/src/settings.rs", NET_FAMILIES + ("net-discovery",), "the King's settings registry"),
     _r("crates/tore-session/*", NET_FAMILIES + ("net-discovery",), "network sessions, the host and tore-bot"),
-    _r("crates/tore-server/*", ("net-check", "net-fly", "net-discovery"), "dedicated server"),
+    _r("crates/tore-server/*", ("net-check", "net-fly", "net-discovery", "net-listing"), "dedicated server"),
     _r("crates/tore-master/*", ("net-master",), "the master server, its configuration and its flood tool"),
     _r("crates/tore-realtime-native/*", ALL_FAMILIES, "host and shared-worker scheduling on macOS", windowed=True),
     # tore-app: rendering (windowed).

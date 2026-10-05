@@ -8,6 +8,8 @@ mod config;
 mod console;
 mod host;
 mod importing;
+#[cfg(test)]
+mod listing_test;
 mod log;
 mod options;
 mod prepare;

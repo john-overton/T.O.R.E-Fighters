@@ -482,6 +482,60 @@ def drive_master_flood(d: Drive) -> None:
         d.problem(f"the flood's reports were counted: {days[-1].read_text()[:200]!r}")
 
 
+def wait_count(d: Drive, proc: Proc, pattern: str, count: int, seconds: float) -> bool:
+    """True once `proc` has printed `count` lines matching `pattern`; False when it exits or time runs out."""
+    end = time.time() + seconds * d.scale
+    while len(re.findall(pattern, proc.text(), re.M)) < count:
+        if not proc.alive() or time.time() > end:
+            return len(re.findall(pattern, proc.text(), re.M)) >= count
+        d.sleep(0.1)
+    return True
+
+
+def drive_master_listing(d: Drive) -> None:
+    """A `tore-server` with `broadcast on` lists itself on a `tore-master` on this machine (slice I3), judged from
+    the master's own output: the listing appears from the server's game port, the console's `broadcast off` and
+    `broadcast on` take it off and back, and `quit` takes it off before the server stops. Slice I4 extends this
+    with `tore-app --browse 5`, which lists the game the way a player's Internet Lobby does."""
+    master, mport = start_master(d)
+    port = d.port()
+    server = start_server(d, port, broadcast="on", master=f"{LOCALHOST}:{mport}")
+    listed = rf'^listed id=[0-9a-f]{{16}} from=127\.0\.0\.1:{port} name="T\.O\.R\.E server" listings=1$'
+    unlisted = rf'^unlisted id=[0-9a-f]{{16}} from=127\.0\.0\.1:{port} name="T\.O\.R\.E server" reason=unregistered'
+    if not wait_count(d, master, listed, 1, 10):
+        d.problem("the master never listed the server")
+    if not server.wait_for(r"Broadcasting: listed on the Internet Lobby", 10):
+        d.problem("the server never said it was listed")
+    master.send("listings")
+    if not master.wait_for(r'^listing id=[0-9a-f]{16} from=127\.0\.0\.1:\d+ name="T\.O\.R\.E server" players=0/', 5):
+        d.problem("the master's `listings` does not show the server")
+    server.send("status")
+    if not server.wait_for(rf"broadcast: listed, seen at 127\.0\.0\.1:{port}$", 5):
+        d.problem("the status line does not show the listing")
+    server.send("broadcast off")
+    if not wait_count(d, master, unlisted, 1, 5):
+        d.problem("`broadcast off` did not take the server off the master's list")
+    server.send("broadcast on")
+    if not wait_count(d, master, listed, 2, 10):
+        d.problem("`broadcast on` did not list the server again")
+    stop_server(d, server)
+    if not wait_count(d, master, unlisted, 2, 5):
+        d.problem("quitting the server did not take it off the master's list")
+    master.send("listings")
+    master.send("quit")
+    master.finish(20, 0)
+    master.expect(r"^listings=0$", "an empty list once the server quit")
+    master.forbid(r"reason=expired", "a listing left to expire")
+    server.expect(rf"^Broadcast: on, to the Internet Lobby at 127\.0\.0\.1:{mport}; anonymous statistics on", "the start line")
+    server.expect(r"^console: broadcast off: taking the server off", "the console's broadcast off")
+    server.expect(r"^Broadcasting stopped: off the Internet Lobby$", "the unlisting")
+    server.expect(r"^console: broadcast on: listing the server", "the console's broadcast on")
+    server.forbid(NET_BAD, "a network problem")
+    server.forbid(r"does not answer|cannot find the Internet Lobby", "a silent master")
+    log = server_log(d)
+    log_must(d, log, r"Broadcasting: listed on the Internet Lobby", r"console: quit", forbid=NET_BAD)
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -519,5 +573,10 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-master-flood", lane="net", args=[], driver=drive_master_flood, timeout=120,
             notes="tore-master and its flood tool for 10 s: the limits hold and a browse during the flood is answered",
+        ),
+        Scenario(
+            name="net-master-listing", lane="net", args=[], driver=drive_master_listing, uses=("server",), timeout=120,
+            notes="a tore-server with `broadcast on` lists itself on a tore-master on this machine; `broadcast off`, "
+            "`broadcast on` and `quit` take it off and back",
         ),
     ]

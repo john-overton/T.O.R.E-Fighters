@@ -81,8 +81,10 @@ class MapTests(unittest.TestCase):
         for path in ("crates/tore-net/src/connection.rs", "crates/tore-session/src/host/mod.rs", "crates/tore-codec/src/lib.rs"):
             self.assertIn("net-fly", self.families(path), path)
         self.assertEqual(
-            set(self.families("crates/tore-server/src/run.rs")), {"net-check", "net-fly", "net-discovery"},
+            set(self.families("crates/tore-server/src/run.rs")), {"net-check", "net-fly", "net-discovery", "net-listing"},
         )
+        # The host's side of the master (slice I3) runs the master's scenarios, the listing among them.
+        self.assertEqual(self.families("crates/tore-net/src/master/rendezvous.rs"), {"net-master"})
         self.assertIn("net-window", self.families("crates/tore-session/src/client/mod.rs"))
         self.assertIn("net-discovery", self.families("crates/tore-net/src/reach.rs"))
         for path in (
