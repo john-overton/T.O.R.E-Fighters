@@ -12,6 +12,9 @@
 # just runs in place.
 set -u
 
+# An agent's hosted game never asks a real router to forward its port.
+export TORE_NO_PORT_MAPPING=1
+
 if [ "$#" -eq 0 ]; then
     echo "usage: tools/agent-run.sh COMMAND [ARGS...]" >&2
     exit 2

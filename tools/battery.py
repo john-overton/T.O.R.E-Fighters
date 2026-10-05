@@ -510,6 +510,8 @@ def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: 
         cmd = [str(ROOT / "tools" / "agent-run.sh"), *cmd]
     env = dict(os.environ)
     env.update({"TORE_DATA_DIR": str(data), "TORE_NO_ERROR_DIALOG": "1", "RUST_BACKTRACE": "1"})
+    # A battery run never asks a real router to forward a port (a hosting game does by default).
+    env["TORE_NO_PORT_MAPPING"] = "1"
     env.update({k: v.replace("{work}", str(work)) for k, v in s.env.items()})
     timeout = s.timeout * opts.timeout_scale
     started = time.time()

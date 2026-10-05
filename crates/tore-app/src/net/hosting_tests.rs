@@ -1113,6 +1113,8 @@ fn the_search_and_the_host_share_the_game_port_one_after_the_other() {
 struct LoopbackMaster {
     address: SocketAddr,
     kinds: Arc<std::sync::Mutex<Vec<tore_net::master::MasterKind>>>,
+    /// The candidates of every Register and Heartbeat, oldest first.
+    candidates: Arc<std::sync::Mutex<Vec<Vec<tore_net::master::Candidate>>>>,
     stop: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
 }
@@ -1123,9 +1125,11 @@ impl LoopbackMaster {
         let socket = bind_udp("127.0.0.1:0".parse().unwrap()).unwrap();
         let address = socket.local_addr().unwrap();
         let kinds = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let candidates = Arc::new(std::sync::Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
         let handle = thread::spawn({
             let kinds = Arc::clone(&kinds);
+            let candidates = Arc::clone(&candidates);
             let stop = Arc::clone(&stop);
             move || {
                 let key = CookieKey::new(tore_net::Entropy::System);
@@ -1140,6 +1144,15 @@ impl LoopbackMaster {
                         continue;
                     };
                     kinds.lock().unwrap().push(packet.kind());
+                    match &packet {
+                        MasterPacket::Register(r) => {
+                            candidates.lock().unwrap().push(r.candidates.clone());
+                        }
+                        MasterPacket::Heartbeat(h) => {
+                            candidates.lock().unwrap().push(h.candidates.clone());
+                        }
+                        _ => {}
+                    }
                     let now = clock.now();
                     let answer = match packet {
                         MasterPacket::Register(r) if key.check(from, r.nonce, r.cookie, now) => {
@@ -1166,9 +1179,19 @@ impl LoopbackMaster {
         Self {
             address,
             kinds,
+            candidates,
             stop,
             handle: Some(handle),
         }
+    }
+
+    /// Whether any Register or Heartbeat so far carried `candidate`.
+    fn saw_candidate(&self, candidate: tore_net::master::Candidate) -> bool {
+        self.candidates
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|list| list.contains(&candidate))
     }
 
     fn count(&self, kind: tore_net::master::MasterKind) -> usize {
@@ -1396,5 +1419,150 @@ fn the_kings_visibility_lists_the_game_and_takes_it_off() {
         thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(master.count(MasterKind::Unregister), 3);
+    assert!(thread.stop(JOIN_LIMIT));
+}
+
+/// Slice J4b: a hosting game with port mapping on asks the router (here the
+/// fakes on loopback, never a real one) from the moment its socket is bound,
+/// tells the game what the router did, gives the listing the Mapped
+/// candidate, and removes the mapping before it reports its end; with
+/// mapping off, the router hears nothing.
+#[test]
+fn a_hosting_game_maps_its_port_lists_the_mapped_candidate_and_removes_it_on_stop() {
+    use tore_net::master::{Candidate, CandidateKind, ListingState};
+    use tore_net::portmap::MapperConfig;
+    use tore_net::portmap::fake::{FakeGateway, FakeGatewayConfig};
+    let router = FakeGateway::start("127.0.0.1:0".parse().unwrap(), FakeGatewayConfig::default())
+        .expect("a fake router");
+    let master = LoopbackMaster::start();
+    let mapper = MapperConfig {
+        upnp: false,
+        gateway: Some(router.address()),
+        gateway_v6: Some("[::1]:9".parse().unwrap()),
+        entropy: tore_net::Entropy::Seeded(5),
+        ..MapperConfig::new(0)
+    };
+    let (mut thread, _link) = HostThread::start_forwarded(
+        HostSetup {
+            spec: spec(),
+            resources: import(),
+            config: hosted_config(),
+            listen: loopback(),
+            port: 0,
+        },
+        Some(Listing::listed(Some(&master.address.to_string()))),
+        Some(Forward::with_config(mapper)),
+    )
+    .expect("the host starts");
+    let game_port = thread.addresses()[0].port();
+    let outside = SocketAddr::new("203.0.113.5".parse().unwrap(), game_port);
+    let mut reports = Vec::new();
+    // The game is told, in plain words, and the lobby's lines wait for it.
+    assert!(
+        wait_for_reports(&mut thread, &mut reports, Duration::from_secs(10), |r| r
+            .iter()
+            .any(|r| matches!(r, Report::Forward(_)))),
+        "{reports:?}"
+    );
+    assert_eq!(
+        thread.take_notes(),
+        [format!(
+            "Your router forwards UDP port {game_port} (PCP). Friends can join at {outside}."
+        )]
+    );
+    assert!(thread.take_notes().is_empty());
+    let held = router.mappings();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].internal_port, game_port);
+    // The master's listing carries the Mapped candidate (the Register or a
+    // Heartbeat within the change delay).
+    let mapped = Candidate::new(CandidateKind::Mapped, outside);
+    let started = Instant::now();
+    while !master.saw_candidate(mapped) && started.elapsed() < Duration::from_secs(12) {
+        reports.extend(thread.poll());
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        master.saw_candidate(mapped),
+        "{:?} {reports:?}",
+        master.candidates.lock().unwrap()
+    );
+    assert!(wait_for_reports(
+        &mut thread,
+        &mut reports,
+        Duration::from_secs(10),
+        |r| r
+            .iter()
+            .any(|r| matches!(r, Report::Listing(ListingState::Listed { .. })))
+    ));
+    // Stopping removes the mapping before the thread reports its end.
+    assert!(thread.stop(JOIN_LIMIT));
+    assert!(router.mappings().is_empty());
+    assert_eq!(thread.end(), Some(&End::Stopped));
+
+    // Switched off: the router hears nothing.
+    let silent = FakeGateway::start("127.0.0.1:0".parse().unwrap(), FakeGatewayConfig::default())
+        .expect("a fake router");
+    let (mut thread, _link, _) = start_host(0);
+    let mut reports = Vec::new();
+    wait_for_reports(
+        &mut thread,
+        &mut reports,
+        Duration::from_millis(700),
+        |_| false,
+    );
+    assert!(!reports.iter().any(|r| matches!(r, Report::Forward(_))));
+    assert_eq!(silent.pcp_requests() + silent.natpmp_requests(), 0);
+    assert!(thread.take_notes().is_empty());
+}
+
+/// A game that could not open the port says so plainly and lists no Mapped
+/// candidate; the host keeps running.
+#[test]
+fn a_router_that_refuses_is_told_to_the_game_and_the_host_runs_on() {
+    use tore_net::portmap::MapperConfig;
+    use tore_net::portmap::fake::{FakeGateway, FakeGatewayConfig};
+    let router = FakeGateway::start(
+        "127.0.0.1:0".parse().unwrap(),
+        FakeGatewayConfig {
+            refuse: Some(2),
+            ..FakeGatewayConfig::default()
+        },
+    )
+    .expect("a fake router");
+    let mapper = MapperConfig {
+        upnp: false,
+        gateway: Some(router.address()),
+        gateway_v6: Some("[::1]:9".parse().unwrap()),
+        entropy: tore_net::Entropy::Seeded(5),
+        ..MapperConfig::new(0)
+    };
+    let (mut thread, _link) = HostThread::start_forwarded(
+        HostSetup {
+            spec: spec(),
+            resources: import(),
+            config: hosted_config(),
+            listen: loopback(),
+            port: 0,
+        },
+        None,
+        Some(Forward::with_config(mapper)),
+    )
+    .expect("the host starts");
+    let mut reports = Vec::new();
+    assert!(wait_for_reports(
+        &mut thread,
+        &mut reports,
+        Duration::from_secs(10),
+        |r| r.iter().any(|r| matches!(r, Report::Forward(_)))
+    ));
+    let notes = thread.take_notes();
+    assert_eq!(notes.len(), 1);
+    assert!(
+        notes[0].starts_with("Your router refused to forward the port"),
+        "{notes:?}"
+    );
+    assert!(notes[0].ends_with("may need the relay."), "{notes:?}");
+    assert!(reports.iter().any(|r| matches!(r, Report::Started { .. })));
     assert!(thread.stop(JOIN_LIMIT));
 }

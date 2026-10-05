@@ -59,10 +59,23 @@
 //!   the statistics wait for the Internet Lobby's notice). Only a change
 //!   counts, so a game started listed while its setting says local stays
 //!   listed until the King or the screen says otherwise.
+//! - **Port mapping** (stage J, slice J4b). A game started with a
+//!   [`Forward`] ([`HostThread::start_forwarded`]) asks the router to
+//!   forward the game port on a thread of its own ([`forward::Forwarder`]),
+//!   from the moment the socket is bound. The thread's news reaches the
+//!   host thread's loop, which gives the listing the Mapped candidate
+//!   (`HostListing::set_mapped`), keeps the telemetry value for the Report
+//!   and tells the game ([`Report::Forward`], whose lines the lobby shows).
+//!   When the host stops, the mapping is removed before the thread reports
+//!   its end, in at most [`forward::REMOVE_WAIT`]; the removal starts as
+//!   soon as the stop is asked for, so it runs while the players are told.
+pub mod forward;
+
 use crate::net::{
     options::HostOptions,
     session::{Join, NetSession, Transport, build_id},
 };
+use forward::{Forward, Forwarder, News};
 use std::{
     any::Any,
     collections::BTreeMap,
@@ -76,8 +89,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tore_net::master::{
-    Build, HostListing, HostRendezvous, HostTally, ListingState, RendezvousEvent, Role,
-    rendezvous::state_text,
+    Build, HostListing, HostRendezvous, HostTally, ListingState, PortMapping, RendezvousEvent,
+    Role, rendezvous::state_text,
 };
 use tore_net::{
     LINK_ADDRESS, LinkEnd, Linked, Listen, MAX_NAP, Platform, RealClock, SPIN_MARGIN, ServerSocket,
@@ -174,6 +187,9 @@ pub enum Report {
     /// Where the game's listing on the Internet Lobby stands, when it
     /// changes (a game started with a [`Listing`]).
     Listing(ListingState),
+    /// What the router did about the game port (a game started with a
+    /// [`Forward`]): the lines for the player, and the Mapped candidate.
+    Forward(News),
     /// The thread has ended, and why. Nothing follows.
     Ended(End),
 }
@@ -210,6 +226,8 @@ pub struct HostThread {
     handle: Option<JoinHandle<()>>,
     addresses: Vec<SocketAddr>,
     end: Option<End>,
+    /// Lines for the hosting player, not yet taken ([`HostThread::take_notes`]).
+    notes: Vec<String>,
 }
 
 impl HostThread {
@@ -227,6 +245,16 @@ impl HostThread {
     pub fn start_listed(
         setup: HostSetup,
         listing: Option<Listing>,
+    ) -> Result<(Self, LinkEnd), String> {
+        Self::start_forwarded(setup, listing, None)
+    }
+
+    /// [`HostThread::start_listed`], with the router asked to forward the
+    /// game port as `forward` says (slice J4b): `None` asks nothing.
+    pub fn start_forwarded(
+        setup: HostSetup,
+        listing: Option<Listing>,
+        forward: Option<Forward>,
     ) -> Result<(Self, LinkEnd), String> {
         let HostSetup {
             spec,
@@ -257,6 +285,8 @@ impl HostThread {
             }
             None => None,
         };
+        // After the checks above: a refused start asks the router nothing.
+        let forwarder = forward.map(|forward| Forwarder::start(forward, port));
         let (host_end, game_end) = tore_net::link::pair();
         let (command_sender, commands) = mpsc::channel();
         let (report_sender, reports) = mpsc::channel();
@@ -270,7 +300,13 @@ impl HostThread {
                     resources,
                     config,
                     transport,
-                    Listings { listing, port },
+                    Listings {
+                        listing,
+                        port,
+                        forwarder,
+                        mapped: None,
+                        port_mapping: PortMapping::NotTried,
+                    },
                     commands,
                     report_sender,
                 )
@@ -283,6 +319,7 @@ impl HostThread {
                 handle: Some(handle),
                 addresses,
                 end: None,
+                notes: Vec::new(),
             },
             game_end,
         ))
@@ -309,6 +346,9 @@ impl HostThread {
             match self.reports.try_recv() {
                 Ok(report) => {
                     log_report(&report);
+                    if let Report::Forward(news) = &report {
+                        self.notes.extend(news.lines().iter().cloned());
+                    }
                     if let Report::Ended(end) = &report {
                         self.end = Some(end.clone());
                     }
@@ -330,6 +370,12 @@ impl HostThread {
             }
         }
         reports
+    }
+
+    /// The lines about the router's port forward since the last call, for
+    /// the lobby's Messages.
+    pub fn take_notes(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.notes)
     }
 
     /// Why the thread ended, once it has said.
@@ -375,6 +421,54 @@ impl Drop for HostThread {
 struct Listings {
     listing: Option<HostListing>,
     port: u16,
+    /// The router's port mapping, when the game asked for one.
+    forwarder: Option<Forwarder>,
+    /// The Mapped candidate the router gave, which a listing made later
+    /// starts with.
+    mapped: Option<SocketAddr>,
+    /// What the mapping came to, for the telemetry Report.
+    port_mapping: PortMapping,
+}
+
+impl Listings {
+    /// Takes in what the mapper thread has to say: the candidate to the
+    /// listing, and the lines to the game.
+    fn take_news(&mut self, now: Duration, reports: &Sender<Report>) {
+        let Some(forwarder) = &self.forwarder else {
+            return;
+        };
+        for news in forwarder.poll() {
+            self.absorb(&news, now);
+            let _ = reports.send(Report::Forward(news));
+        }
+    }
+
+    fn absorb(&mut self, news: &News, now: Duration) {
+        if let News::Mapped {
+            outside,
+            port_mapping,
+            ..
+        } = news
+        {
+            self.mapped = *outside;
+            self.port_mapping = *port_mapping;
+            if let Some(listing) = self.listing.as_mut() {
+                listing.set_mapped(*outside, now);
+            }
+        }
+    }
+
+    /// Removes the mapping, waiting for it at most
+    /// [`forward::REMOVE_WAIT`], and passes on what it says.
+    fn finish_forward(&mut self, now: Duration, reports: &Sender<Report>) {
+        if let Some(mut forwarder) = self.forwarder.take() {
+            forwarder.finish(forward::REMOVE_WAIT);
+            for news in forwarder.poll() {
+                self.absorb(&news, now);
+                let _ = reports.send(Report::Forward(news));
+            }
+        }
+    }
 }
 
 /// A listing of the game on `master` from the game port `port`, as the
@@ -427,6 +521,7 @@ fn follow_visibility(host: &Host, listings: &mut Listings, applied: &mut bool, n
             now,
         ) {
             Ok(mut listing) => {
+                listing.set_mapped(listings.mapped, now);
                 listing.set_listed(true, now);
                 listings.listing = Some(listing);
             }
@@ -480,6 +575,9 @@ fn run(
             let _ = listing.transmit(&mut transport);
         }));
     }
+    // The router's mapping goes too (it was asked to when the stop began,
+    // so this waits only for the last of it).
+    listings.finish_forward(Duration::ZERO, &reports);
     // The port is free before the game hears the end.
     drop(host);
     drop(transport);
@@ -576,6 +674,7 @@ fn report_session(
     host: &Host,
     listing: &mut Option<HostListing>,
     tally: &HostTally,
+    port_mapping: PortMapping,
     now: Duration,
 ) {
     let Some(listing) = listing.as_mut() else {
@@ -585,13 +684,15 @@ fn report_session(
         return;
     }
     let mapping = listing.rendezvous().mapping();
-    let report = tally.report(
+    let mut report = tally.report(
         now,
         Role::HostingGame,
         &host.config().build.version,
         Platform::current().code(),
         mapping,
     );
+    // What the router did about the port, when the game asked it to.
+    report.port_mapping = port_mapping;
     listing.rendezvous_mut().report(report);
 }
 
@@ -645,6 +746,7 @@ fn serve(
     let mut public = host.settings().visibility() == Visibility::Public;
     loop {
         let now = clock.now();
+        listings.take_news(now, reports);
         follow_visibility(host, listings, &mut public, now);
         let listing = &mut listings.listing;
         turn(host, transport, listing, now, reports);
@@ -665,7 +767,7 @@ fn serve(
             report_at = now + Duration::from_secs(1);
         }
         if host.phase() == Phase::Stopped {
-            report_session(host, listing, &tally, now);
+            report_session(host, listing, &tally, listings.port_mapping, now);
             if let Some(listing) = listing.as_mut() {
                 listing.stop(now);
             }
@@ -698,6 +800,10 @@ fn serve(
             }
         }
         if stop && stop_by.is_none() {
+            // The mapping comes off while the players are told.
+            if let Some(forwarder) = listings.forwarder.as_mut() {
+                forwarder.begin_stop();
+            }
             host.host_left();
             stop_by = Some(now + STOP_GRACE);
             let _ = host.transmit(transport);
@@ -705,7 +811,7 @@ fn serve(
         }
         if stop_by.is_some_and(|by| now >= by) {
             host.stop();
-            report_session(host, listing, &tally, now);
+            report_session(host, listing, &tally, listings.port_mapping, now);
             if let Some(listing) = listing.as_mut() {
                 listing.stop(now);
             }
@@ -782,6 +888,11 @@ fn log_report(report: &Report) {
         Report::Phase(phase) => log::info!("Host: phase {phase:?}"),
         Report::Note(text) => log::warn!("Host: {text}"),
         Report::Listing(state) => log::info!("Host: {}", state_text(state)),
+        Report::Forward(news) => {
+            for line in news.lines() {
+                log::info!("Host: {line}");
+            }
+        }
         Report::Ended(end) => match end {
             End::Stopped => log::info!("Host: stopped"),
             End::Finished => log::info!("Host: the mission ended; the host has stopped"),
@@ -914,7 +1025,9 @@ impl crate::App {
         };
         crate::net::settings::remember_host(&data, &options);
         let resources = Arc::clone(&self.theater_resources);
-        let (thread, link) = HostThread::start_listed(
+        // Port mapping is on while hosting unless Options turned it off.
+        let forward = forward::choose(crate::net::settings::Remembered::load(&data).port_forward);
+        let (thread, link) = HostThread::start_forwarded(
             HostSetup {
                 spec: options.spec.clone(),
                 resources: Arc::clone(&resources),
@@ -923,6 +1036,7 @@ impl crate::App {
                 port: options.port,
             },
             options.listing.clone(),
+            forward,
         )?;
         let listening: Vec<String> = thread.addresses().iter().map(ToString::to_string).collect();
         log::info!(
