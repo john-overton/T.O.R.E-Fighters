@@ -1172,6 +1172,56 @@ def drive_internet_relay(d: Drive) -> None:
     log_must(d, server_log(d), r"joined as Viper", r"Viper took the slot of plane 0", forbid=NET_BAD)
 
 
+def drive_convert(d: Drive) -> None:
+    """A bot's capture of a real flight converts into a replay (`--convert-capture`): the replay reads back through
+    the exports, converting twice gives the same bytes, and a copy cut short still converts and says so."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(separation_nm=5))
+    replays = d.work / "replays"
+    replays.mkdir(exist_ok=True)
+    capture = replays / "2026-10-05_1500_NET_127001.tore-capture"
+    bots = start_bots(d, port, "bot", 25, "--callsign", "Viper", "--capture", capture)
+    bots.finish(90, 0)
+    server.finish(40, 0)
+    bots.forbid(NET_BAD, "a network problem")
+    if not capture.exists() or capture.stat().st_size < 100_000:
+        raise DriveError("the bot wrote no capture of a flight")
+    run = d.run("convert", [d.app, "--convert-capture", capture], timeout=120)
+    run.expect(r"^Replay: .*_UKR_F18\.tore-replay \(\d+ frames, \d+\.\d s, 12 aircraft\)$", "the replay's line")
+    replay = next(replays.glob("*_UKR_F18.tore-replay"), None)
+    if replay is None:
+        raise DriveError("the conversion wrote no replay beside the capture")
+    info = d.run("info", [d.app, "--recording-info", replay], timeout=60)
+    info.expect(r"^State +finished normally", "a finished replay")
+    info.expect(r"^Mission +Network flight", "the network flight")
+    info.expect(r"^Setting +net\.callsign = Viper", "the callsign")
+    info.expect(r"^Aircraft +0 +You +F/A-18D", "the player as You")
+    info.expect(r"^\s+\d+ net\.stats$", "the network figures")
+    info.expect(r"^Result +end=end flight, net\.seconds=", "the footer's figures")
+    info.forbid(r"INCOMPLETE|^Problem", "damage")
+    log = d.run("log", [d.app, "--recording-log", replay, "--out", d.work / "log"], timeout=60)
+    log.expect(r"^Recording log: ", "the debug log")
+    acmi = d.run("acmi", [d.app, "--recording-acmi", replay, "--out", d.work / "net.txt.acmi"], timeout=60)
+    acmi.expect(r"^Tacview file: ", "the Tacview file")
+    for path in (d.work / "log" / "summary.txt", d.work / "log" / "log.jsonl", d.work / "net.txt.acmi"):
+        if not path.exists() or path.stat().st_size == 0:
+            d.problem(f"{path.name} was not written")
+    twice = []
+    for name in ("a", "b"):
+        out = d.work / f"{name}.tore-replay"
+        d.run(f"convert-{name}", [d.app, "--convert-capture", capture, "--out", out], timeout=120)
+        twice.append(out.read_bytes() if out.exists() else b"")
+    if not twice[0] or twice[0] != twice[1]:
+        d.problem("converting the same capture twice did not give the same bytes")
+    cut = d.work / "cut.tore-capture"
+    data = capture.read_bytes()
+    cut.write_bytes(data[: len(data) * 60 // 100])
+    short = d.run("convert-cut", [d.app, "--convert-capture", cut, "--out", d.work / "cut.tore-replay"], timeout=120)
+    short.expect(r"is cut short: converted up to its last whole record", "the cut report")
+    cut_info = d.run("info-cut", [d.app, "--recording-info", d.work / "cut.tore-replay"], timeout=60)
+    cut_info.expect(r"^Result +end=cut, capture=cut short at byte", "the footer's note")
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -1222,6 +1272,10 @@ def scenarios() -> list[Scenario]:
             name="net-server-away", lane="net", args=[], driver=drive_away, uses=("server", "bot"), timeout=200,
             notes="a bot's game is away: the AI flies its plane, kept for it, until it is back and flies on in it "
             "(slice F2-A)",
+        ),
+        Scenario(
+            name="net-convert-capture", lane="net", args=[], driver=drive_convert, uses=("server", "bot"), timeout=360,
+            notes="a bot's capture of a real flight converts into a replay: read back, the same bytes twice, a cut copy",
         ),
         Scenario(
             name="net-discovery", lane="net", args=[], driver=drive_discovery, uses=("server",), timeout=120,

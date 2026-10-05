@@ -631,7 +631,7 @@ the bot and the game at one commit: a build must match to join.
 
 `tore-bot --capture FILE` keeps the bot's capture (`FILE-1`, `FILE-2` with `--count`), and
 `tore-app --convert-capture FILE` turns it into a replay
-([network flights](REPLAYS.md#network-flights)); the battery scenario `replay-net-convert-capture`
+([network flights](REPLAYS.md#network-flights)); the battery scenario `net-convert-capture`
 does both against a real server.
 
 `Down` is nose up and `Up` nose down, as in the game. Set `TORE_RECORD_MISSIONS=1` to record the

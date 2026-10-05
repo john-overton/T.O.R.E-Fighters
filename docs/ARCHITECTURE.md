@@ -4076,8 +4076,8 @@ spread back exactly, and the host's events become the replay's. `replay/net_conv
 (the game): the names, `--out`, a refusal to overwrite, the cut report, the
 viewer's own `Playback` drawing the converted replay's player and the three
 others at every tested tick, the debug log and Tacview export, and the
-session's mapping of an aircraft against the game recorder's. Battery:
-`replay-net-convert-capture` flies a real `tore-server` with `tore-bot
+session's mapping of an aircraft against the game recorder's. Battery (the `net` lane):
+`net-convert-capture` flies a real `tore-server` with `tore-bot
 --capture`, converts, reads the replay back, converts twice for the same bytes
 and converts a cut copy.
 
