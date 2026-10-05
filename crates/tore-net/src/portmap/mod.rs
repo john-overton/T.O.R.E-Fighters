@@ -19,6 +19,7 @@
 pub mod gateway;
 mod http;
 mod igd;
+pub mod keeper;
 mod natpmp;
 mod pcp;
 mod ssdp;
