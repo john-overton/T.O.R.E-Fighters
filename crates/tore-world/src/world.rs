@@ -330,6 +330,9 @@ impl World {
         if !open && self.combat.uses_normal_startup_defaults() {
             self.combat.apply_startup_weapons();
         }
+        if !open && self.setup.ground_start.is_none() {
+            lead.initialize_airborne_hover();
+        }
         let ground_airport = match self.setup.ground_start {
             Some(object) => Some(match &parked {
                 Some(ground) => {

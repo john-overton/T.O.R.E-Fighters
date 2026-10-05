@@ -197,6 +197,13 @@ pub struct StationLoad {
     pub quantity: u16,
 }
 
+/// An accepted tank quantity at one original source hardpoint.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TankLoad {
+    pub hardpoint: u8,
+    pub tank: String,
+    pub quantity: u16,
+}
 /// The loadout of plane 0 when a player flies it from the start, as the
 /// creator's Load Ordnance page leaves it. `None` in a spec means the
 /// aircraft's standard load. A server does not use it: a networked plane
@@ -208,12 +215,29 @@ pub struct LoadoutSpec {
     pub cheat: bool,
     /// One per station of the aircraft, in its station order.
     pub stations: Vec<StationLoad>,
+    /// None preserves source defaults in older saved missions; Some(empty)
+    /// explicitly removes every tank. New accepted loadouts always use Some.
+    pub tanks: Option<Vec<TankLoad>>,
 }
 
 impl LoadoutSpec {
     /// What a loadout holds, by name.
     pub fn of(load: &Loadout) -> Self {
         Self {
+            tanks: Some(
+                load.configuration
+                    .tanks
+                    .iter()
+                    .filter(|s| s.quantity > 0)
+                    .filter_map(|s| {
+                        s.store.as_ref().map(|store| TankLoad {
+                            hardpoint: s.hardpoint as u8,
+                            tank: store.source.clone(),
+                            quantity: s.quantity,
+                        })
+                    })
+                    .collect(),
+            ),
             fuel_lbs: load.fuel_lbs,
             cheat: load.cheat,
             stations: load
@@ -267,6 +291,28 @@ impl LoadoutSpec {
             station.count = load.count;
             base.quantities[index] = load.quantity;
         }
+        if let Some(tanks) = &self.tanks {
+            base.clear_tanks()?;
+            let mut seen = std::collections::BTreeSet::new();
+            for tank in tanks {
+                if !seen.insert(tank.hardpoint) {
+                    return Err("duplicate tank hardpoint".into());
+                }
+                let station = base
+                    .configuration
+                    .tanks
+                    .iter_mut()
+                    .find(|s| s.hardpoint == usize::from(tank.hardpoint))
+                    .ok_or("the selected hardpoint cannot carry a tank")?;
+                let bytes = resources
+                    .get(&tank.tank)
+                    .ok_or_else(|| format!("missing tank resource {}", tank.tank))?;
+                station.store = Some(tore_sim::combat::live::TankStore::parse(&tank.tank, bytes)?);
+                station.quantity = tank.quantity;
+            }
+            base.configuration.refresh_tanks()?;
+        }
+        base.refresh_equipment()?;
         Ok(base)
     }
 }
@@ -331,7 +377,7 @@ impl LoadoutSpec {
                 .stations
                 .iter()
                 .zip(&load.quantities)
-                .any(|(s, n)| s.weapon.source != load.aircraft.gun() && *n > 0)
+                .any(|(s, n)| !load.aircraft.guns().contains(&s.weapon.source.as_str()) && *n > 0)
         {
             return Err("Guns only is selected. Unload other weapons or return to setup and change the restriction.".into());
         }
@@ -656,6 +702,16 @@ impl MissionSpec {
         for load in self.loadout.iter().chain(self.plane_loadouts.values()) {
             if !load.fuel_lbs.is_finite() || load.fuel_lbs < 0. {
                 return refuse(format!("{} is not a fuel load", load.fuel_lbs));
+            }
+            if let Some(tanks) = &load.tanks
+                && (tanks.len() > 9
+                    || tanks.iter().any(|tank| {
+                        tank.hardpoint >= 9
+                            || !resource_name(&tank.tank)
+                            || !tank.tank.ends_with(".GAS")
+                    }))
+            {
+                return refuse("a tank load requires at most nine valid source hardpoints and GAS resource names".into());
             }
             if load.stations.len() > MAX_STATIONS {
                 return refuse(format!(
@@ -1072,11 +1128,15 @@ struct LoadParts {
     fuel: Option<f64>,
     cheat: Option<bool>,
     stations: Vec<Option<StationLoad>>,
+    tanks: Option<Vec<TankLoad>>,
 }
 
 impl LoadParts {
     fn is_empty(&self) -> bool {
-        self.fuel.is_none() && self.cheat.is_none() && self.stations.is_empty()
+        self.fuel.is_none()
+            && self.cheat.is_none()
+            && self.stations.is_empty()
+            && self.tanks.is_none()
     }
 
     /// Reads `fuel POUNDS`, `cheat yes/no` or `station N WEAPON COUNT
@@ -1105,6 +1165,40 @@ impl LoadParts {
                     &format!("`{key} cheat`"),
                     yes_no_word(value, &format!("{key} cheat"))?,
                 )
+            }
+            Some("tanks") => {
+                if words != ["tanks", "explicit"] {
+                    return refuse(format!("expected `{key} tanks explicit`"));
+                }
+                if self.tanks.is_some() {
+                    return refuse(format!("duplicate `{key} tanks`"));
+                }
+                self.tanks = Some(Vec::new());
+                Ok(())
+            }
+            Some("tank") => {
+                let [hardpoint, tank, quantity] =
+                    arguments(words, 3, &format!("{key} tank HARDPOINT GAS QUANTITY"))?
+                else {
+                    unreachable!("three arguments")
+                };
+                let hardpoint = u8::try_from(whole(hardpoint, "the tank hardpoint")?)
+                    .or_else(|_| refuse("tank hardpoint is 0 to 8".into()))?;
+                if hardpoint >= 9 || !resource_name(tank) || !tank.ends_with(".GAS") {
+                    return refuse("invalid tank hardpoint or GAS resource".into());
+                }
+                let quantity = u16::try_from(whole(quantity, "the tank quantity")?)
+                    .or_else(|_| refuse("tank quantity exceeds 65535".into()))?;
+                let tanks = self.tanks.get_or_insert_with(Vec::new);
+                if tanks.iter().any(|row| row.hardpoint == hardpoint) {
+                    return refuse(format!("duplicate tank hardpoint {hardpoint}"));
+                }
+                tanks.push(TankLoad {
+                    hardpoint,
+                    tank: (*tank).to_owned(),
+                    quantity,
+                });
+                Ok(())
             }
             Some("station") => {
                 let [index, weapon, count, quantity] =
@@ -1156,6 +1250,7 @@ impl LoadParts {
             stations.push(station);
         }
         Ok(LoadoutSpec {
+            tanks: self.tanks,
             fuel_lbs,
             cheat: self.cheat.unwrap_or(false),
             stations,
@@ -1169,6 +1264,15 @@ fn load_lines(load: &LoadoutSpec) -> Vec<String> {
         format!("fuel {}", load.fuel_lbs),
         format!("cheat {}", yes_no(load.cheat)),
     ];
+    if let Some(tanks) = &load.tanks {
+        lines.push("tanks explicit".into());
+        for tank in tanks {
+            lines.push(format!(
+                "tank {} {} {}",
+                tank.hardpoint, tank.tank, tank.quantity
+            ));
+        }
+    }
     for (index, station) in load.stations.iter().enumerate() {
         lines.push(format!(
             "station {index} {} {} {}",
@@ -1628,6 +1732,31 @@ mod tests {
     }
 
     #[test]
+    fn tank_selections_round_trip_and_old_missions_keep_source_defaults() {
+        for tanks in [
+            None,
+            Some(vec![]),
+            Some(vec![TankLoad {
+                hardpoint: 5,
+                tank: "SYNTHETIC.GAS".into(),
+                quantity: 2,
+            }]),
+        ] {
+            let mut spec = MissionSpec::from_text(&guide_example()).unwrap();
+            spec.loadout = Some(LoadoutSpec {
+                fuel_lbs: 1000.,
+                cheat: false,
+                stations: vec![],
+                tanks: tanks.clone(),
+            });
+            let text = spec.to_text();
+            assert_eq!(text.contains("loadout tanks explicit"), tanks.is_some());
+            let parsed = MissionSpec::from_text(&text).unwrap();
+            assert_eq!(parsed.loadout.unwrap().tanks, tanks);
+        }
+    }
+
+    #[test]
     fn the_guides_example_parses() {
         let spec = MissionSpec::from_text(&guide_example()).unwrap();
         assert_eq!(spec.theater, "UKR");
@@ -1758,6 +1887,7 @@ mod tests {
         spec.enemy_skill = Some(EnemySkillOverride::AllNovice);
         spec.fixture_wings = true;
         spec.loadout = Some(LoadoutSpec {
+            tanks: None,
             fuel_lbs: 4_500.5,
             cheat: true,
             stations: vec![

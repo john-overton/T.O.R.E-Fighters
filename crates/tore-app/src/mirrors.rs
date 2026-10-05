@@ -12,6 +12,11 @@ pub fn masks(source: &Sprite, id: AircraftId) -> Option<Masks> {
     if [source.width, source.height] != [1280, 490] {
         return None;
     }
+    let id = match id.cockpit_stem() {
+        "F4" => AircraftId::A4E,
+        "AV8" => AircraftId::Su27,
+        _ => id,
+    };
     if matches!(id, AircraftId::Su27 | AircraftId::Su35) {
         return flood(source, [[640, 40]]);
     }
@@ -30,6 +35,7 @@ pub fn masks(source: &Sprite, id: AircraftId) -> Option<Masks> {
         | AircraftId::F22n
         | AircraftId::Faxx => return None,
         AircraftId::Rafale => [[640, 40], [190, 360], [1090, 360]],
+        _ => return None,
     };
     flood(source, seeds)
 }

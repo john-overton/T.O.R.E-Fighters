@@ -289,7 +289,7 @@ pub struct Frame {
 }
 
 /// Number of animated device slots.
-pub const DEVICE_COUNT: usize = 11;
+pub const DEVICE_COUNT: usize = 22;
 
 /// Device slot indices for [`AircraftState::devices`].
 pub mod device {
@@ -315,10 +315,42 @@ pub mod device {
     pub const SPEED: usize = 9;
     /// Throttle, 0 to 1.
     pub const THROTTLE: usize = 10;
+    /// Actual thrust-vectoring pitch, forward 0 to vertical 1.
+    pub const VECTOR_PITCH: usize = 11;
+    /// Actual signed thrust-vectoring yaw, -1 to 1.
+    pub const VECTOR_YAW: usize = 12;
+    /// Actual tiltrotor conversion, airplane 0 to helicopter 1.
+    pub const CONVERSION: usize = 13;
+    /// Actual rotor collective, 0 to 1.
+    pub const COLLECTIVE: usize = 14;
+    /// Signed gun mount heading/elevation, normalized by PI and PI/2.
+    pub const GUN_AIM: usize = 15;
+    /// Discrete linked gun membership, bits 0..2.
+    pub const GUN_GROUP: usize = 21;
     /// Slot names in slot order.
     pub const NAMES: [&str; super::DEVICE_COUNT] = [
-        "gear", "flaps", "brake", "hook", "bay", "exhaust", "elevator", "aileron", "rudder",
-        "speed", "throttle",
+        "gear",
+        "flaps",
+        "brake",
+        "hook",
+        "bay",
+        "exhaust",
+        "elevator",
+        "aileron",
+        "rudder",
+        "speed",
+        "throttle",
+        "vector_pitch",
+        "vector_yaw",
+        "conversion",
+        "collective",
+        "gun_25_heading",
+        "gun_25_elevation",
+        "gun_40_heading",
+        "gun_40_elevation",
+        "gun_105_heading",
+        "gun_105_elevation",
+        "gun_group",
     ];
 }
 

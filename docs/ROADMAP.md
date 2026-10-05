@@ -1068,6 +1068,34 @@ lead from a lost human searches and then returns to base; the whole battery
 passing, its checks updated for these decisions; the single-player baseline
 differences explained as planned changes; the specs and lane pages updated.
 
+### Aircraft variety import
+
+Requested by John on 2026-10-05. The `import-variety` branch started from
+multiplayer at `7d25975b`. The [23-aircraft matrix](spec/aircraft-variety.md)
+covers transports, a gunship, airborne radar aircraft, VTOL jets, a tiltrotor,
+helicopters, fighters including all four retail F-4s, and two airliners. Exact
+variant choices are recorded as agent choices; 20 was not a hard limit.
+
+Initial ports are implemented: reviewed source imports, aircraft-owned hybrid
+configurations, fitted powered-lift forces, playable controls, cockpits and
+initial device rigs. AC-130 selected-target tracking and linked gun groups are
+connected to simulation, rendering and recordings. The
+[flight baseline](baselines/variety-flight.md) distinguishes tested behavior
+from the remaining animation and wider systems acceptance. No new AI pilot
+behavior or new-family AI acceptance is claimed.
+
+[Selectable external tanks](spec/external-fuel-tanks.md) now separate installed
+quantities, shell mass and fuel. The F-14 source probe validates zero, one and
+two tanks through accepted-load restoration. The F-4J gun pod likewise keeps
+installed hardware separate from its ammunition. Source-specific capacity and
+ammunition fits are documented rather than presented as recovered retail laws.
+
+The [import guide](aircraft-import.md#worked-variety-import-examples) now has
+worked transport, F-4 family and powered-lift/system examples. Next: human
+handling review, remaining moving surfaces and cockpit mirrors, fuller AWACS
+sharing/operator behavior, tank visuals/jettison and wider platform/controller
+acceptance. Keep per-aircraft status and evidence in the matrix.
+
 ## Milestone 2: Multiplayer
 
 **Goal:** players create and fly Quick Missions together through the existing

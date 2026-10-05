@@ -53,7 +53,11 @@ fn check_aircraft(truth: &AircraftState, read: &AircraftState, worst: &mut Worst
     for slot in 0..DEVICE_COUNT {
         let e = (truth.devices[slot] - read.devices[slot]).abs();
         let (bound, cell) = match slot {
-            device::ELEVATOR | device::AILERON | device::RUDDER => (SIGNED / 2., &mut worst.signed),
+            device::ELEVATOR | device::AILERON | device::RUDDER | device::VECTOR_YAW => {
+                (SIGNED / 2., &mut worst.signed)
+            }
+            15..=20 => (SIGNED / 2., &mut worst.signed),
+            device::GUN_GROUP => (0., &mut worst.unit),
             device::SPEED => (SPEED_FPS / 2., &mut worst.speed),
             _ => (UNIT / 2., &mut worst.unit),
         };
@@ -494,7 +498,7 @@ fn unknown_sections_and_chunk_kinds_are_skipped() {
 fn newer_versions_and_foreign_files_are_refused_clearly() {
     let dir = temp_dir("version");
     let (mut bytes, _) = small_file(&dir, true);
-    bytes[8] = 2;
+    bytes[8..10].copy_from_slice(&(FORMAT_VERSION + 1).to_le_bytes());
     match Recording::from_bytes(bytes.clone()) {
         Err(Error::Unsupported(message)) => assert!(message.contains("newer")),
         other => panic!("expected unsupported, got {other:?}"),

@@ -837,7 +837,11 @@ impl QuickMission {
                 );
             }
             "lobby-ordnance" | "lobby-ordnance-refused" | "lobby-ordnance-cheat" => {}
-            "ordnance-empty" | "ordnance-drag" | "ordnance-message" | "ordnance-message-long" => {
+            "ordnance-tanks"
+            | "ordnance-empty"
+            | "ordnance-drag"
+            | "ordnance-message"
+            | "ordnance-message-long" => {
                 if let Some(ordnance) = &mut self.ordnance {
                     ordnance.preview(name);
                 }

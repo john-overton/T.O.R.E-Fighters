@@ -549,8 +549,14 @@ fn validate(frame: &Frame) -> Result<usize> {
             )));
         }
     }
+    for aircraft in &frame.aircraft {
+        let group = aircraft.devices[crate::device::GUN_GROUP];
+        if !group.is_finite() || group.fract() != 0. || !(0. ..=7.).contains(&group) {
+            return Err(invalid("gun group must be an integer from 0 to 7"));
+        }
+    }
     let mut bound = 64;
-    bound += frame.aircraft.len() * 420;
+    bound += frame.aircraft.len() * 512;
     bound += frame.projectiles.len() * 220;
     bound += frame.debris.len() * 80;
     bound += frame.escapees.len() * 70;

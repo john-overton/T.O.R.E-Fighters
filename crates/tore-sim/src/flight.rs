@@ -1,10 +1,11 @@
 //! Deterministic 120 Hz free-flight adapter. PT facts are recovered; integration is authored.
 pub mod exact;
+pub mod powered;
 pub mod trace;
 use crate::attitude::{Basis, cross, dot, unit};
 use crate::models::{Conditions, FlightModel};
 use tore_formats::aircraft::Aircraft;
-pub use tore_input::{PilotCommand, PilotInput, Switch};
+pub use tore_input::{FlightAxis, PilotCommand, PilotInput, Switch};
 pub use trace::FlightTrace;
 pub const DT: f64 = 1.0 / 120.0;
 /// The message shown when the gear key is pressed with weight on the wheels.
@@ -119,6 +120,11 @@ pub struct State {
     pub maneuver: crate::telemetry::Maneuver,
     lift_g: f64,
     pub throttle: f64,
+    pub lift_controls: powered::Controls,
+    /// Display-only gun mount heading/PI and elevation/(PI/2), populated in draw clones.
+    pub gun_aim: [[f64; 2]; 3],
+    /// Display-only linked gun membership, bits 0..2.
+    pub gun_group: u8,
     pub fuel: f64,
     pub systems: crate::aircraft_systems::Systems,
     pub payload_lbs: f64,
@@ -198,6 +204,14 @@ impl State {
         {
             return None;
         }
+        if self.research.is_some()
+            && self.model.powered_lift().is_some_and(|lift| {
+                lift.kind == crate::models::variety::LiftKind::Helicopter
+                    || self.lift_controls.hover_fraction(lift.kind) > 0.5
+            })
+        {
+            return None;
+        }
         let mode = if let Some(n) = &self.native {
             n.state.as_ref().map(|s| s.departure.departure.mode)?
         } else if let Some(r) = &self.research {
@@ -229,6 +243,35 @@ impl State {
     /// Configure a model before constructing a flight; live fuel/payload remain state.
     pub fn from_model(model: crate::models::AircraftModel, position: [f64; 3]) -> Self {
         let fuel = model.configuration().mass.internal_fuel_lbs;
+        let lift = model.powered_lift();
+        let mut lift_controls = powered::Controls::default();
+        let mut throttle = 0.7;
+        let mut speed = 450. * 1.68781;
+        if let crate::models::AircraftModel::Variety(_) = &model
+            && let Some((stall, top)) = model
+                .configuration()
+                .aerodynamics
+                .envelopes
+                .iter()
+                .find(|e| e.g == 1)
+                .and_then(|e| e.speeds(position[1]))
+        {
+            speed = (top * 0.65).max(stall * 1.3).min(top * 0.95);
+        }
+        if let Some(lift) = lift
+            && lift.kind != crate::models::variety::LiftKind::VectorJet
+        {
+            speed = 0.;
+            throttle = 1.;
+            lift_controls.conversion = 1.;
+            lift_controls.conversion_actual = 1.;
+            let capacity = model.configuration().propulsion.military_thrust_lbf * lift.efficiency;
+            let lapse = (-position[1].max(0.) / model.tuning().thrust_lapse_feet).exp();
+            lift_controls.collective =
+                ((model.configuration().mass.empty_lbs + fuel) / (capacity * lapse)).clamp(0., 1.);
+            lift_controls.collective_actual = lift_controls.collective;
+            lift_controls.thrust_lbf = capacity * lift_controls.collective * lapse;
+        }
         Self {
             model,
             research: None,
@@ -239,8 +282,8 @@ impl State {
             yaw: 0.3,
             pitch: 0.,
             bank: 0.,
-            speed: 450. * 1.68781,
-            velocity: Basis::new(0.3, 0., 0.).forward.map(|v| v * 450. * 1.68781),
+            speed,
+            velocity: Basis::new(0.3, 0., 0.).forward.map(|v| v * speed),
             roll_rate: 0.,
             pitch_rate: 0.,
             auxiliary_rates: [0.; 3],
@@ -248,7 +291,10 @@ impl State {
             g: 1.,
             lift_g: 1.,
             maneuver: crate::telemetry::Maneuver::default(),
-            throttle: 0.7,
+            throttle,
+            lift_controls,
+            gun_aim: [[0.; 2]; 3],
+            gun_group: 0,
             fuel,
             systems: Default::default(),
             payload_lbs: 0.,
@@ -320,6 +366,7 @@ impl State {
         self.pitch_rate = 0.;
         self.auxiliary_rates = [0.; 3];
         self.throttle = 0.;
+        self.lift_controls.reset_ground();
         self.engine = true;
         self.burner = false;
         self.exhaust = 0.;
@@ -369,6 +416,22 @@ impl State {
         result.hook = lerp(previous.hook, self.hook);
         result.bay = lerp(previous.bay, self.bay);
         result.exhaust = lerp(previous.exhaust, self.exhaust);
+        result.lift_controls.vector_pitch_actual = lerp(
+            previous.lift_controls.vector_pitch_actual,
+            self.lift_controls.vector_pitch_actual,
+        );
+        result.lift_controls.vector_yaw_actual = lerp(
+            previous.lift_controls.vector_yaw_actual,
+            self.lift_controls.vector_yaw_actual,
+        );
+        result.lift_controls.conversion_actual = lerp(
+            previous.lift_controls.conversion_actual,
+            self.lift_controls.conversion_actual,
+        );
+        result.lift_controls.collective_actual = lerp(
+            previous.lift_controls.collective_actual,
+            self.lift_controls.collective_actual,
+        );
         result.rudder = lerp(previous.rudder, self.rudder);
         result.elevator = lerp(previous.elevator, self.elevator);
         result.aileron = lerp(previous.aileron, self.aileron);
@@ -450,8 +513,17 @@ impl State {
             self.systems.kill_pilot("Pilot killed in ground impact");
         }
     }
+    fn vectoring_blocks_afterburner(&self) -> bool {
+        self.research.is_some()
+            && self
+                .model
+                .powered_lift()
+                .is_some_and(|lift| lift.kind == crate::models::variety::LiftKind::VectorJet)
+            && self.lift_controls.vector_pitch_actual >= 0.2
+    }
     pub fn afterburner_active(&self) -> bool {
-        self.engine
+        !self.vectoring_blocks_afterburner()
+            && self.engine
             && !self.systems.has(8)
             && self.systems.power_available() > 0.
             && self.model.configuration().propulsion.afterburner_thrust_lbf > 0.
@@ -479,6 +551,8 @@ impl State {
             Some(NoFuel)
         } else if self.throttle <= c.equipment.afterburner_throttle {
             Some(ThrottleLow)
+        } else if self.vectoring_blocks_afterburner() {
+            Some(Vectoring)
         } else {
             None
         }
@@ -516,6 +590,24 @@ impl State {
             PilotCommand::AdjustThrottle(value) => {
                 if value.is_finite() && self.systems.controls.throttle_lock.is_none() {
                     self.throttle = (self.throttle + value).clamp(0., 1.);
+                }
+                return;
+            }
+            PilotCommand::SetAxis(axis, value) => {
+                self.command_lift_axis(axis, value, false);
+                return;
+            }
+            PilotCommand::AdjustAxis(axis, value) => {
+                self.command_lift_axis(axis, value, true);
+                return;
+            }
+            PilotCommand::NeutralVector => {
+                if self.research.is_some() && self.native.is_none() {
+                    self.lift_controls.vector_pitch = 0.;
+                    self.lift_controls.vector_yaw = 0.;
+                    if self.flight_axis_available(FlightAxis::Conversion) {
+                        self.lift_controls.conversion = 0.;
+                    }
                 }
                 return;
             }
@@ -1169,6 +1261,7 @@ impl State {
         for command in &input.commands {
             self.command(*command);
         }
+        self.update_lift_demands(&input);
         let model = self.model.clone();
         let c = model.configuration();
         if self.crashed {
@@ -1292,7 +1385,13 @@ impl State {
             self.engine = false;
             self.burner = false;
         }
-        let ab = self.afterburner_active() && c.propulsion.afterburner_thrust_lbf > 0.;
+        let ab = self.afterburner_active()
+            && c.propulsion.afterburner_thrust_lbf > 0.
+            && !(self.research.is_some()
+                && model
+                    .powered_lift()
+                    .is_some_and(|lift| lift.kind == crate::models::variety::LiftKind::VectorJet)
+                && self.lift_controls.vector_pitch_actual >= 0.2);
         let burner_blocked = if ab { None } else { self.burner_block() };
         let target = f64::from(ab);
         self.exhaust = (self.exhaust
@@ -1313,6 +1412,22 @@ impl State {
         };
         if self.engine {
             self.consume_fuel(rate * DT);
+        }
+        if self.research.is_some()
+            && let Some(lift) = model.powered_lift()
+        {
+            self.step_powered(
+                lift,
+                c,
+                aero,
+                initial_surface,
+                runway_wind_fraction,
+                t,
+                &ground,
+                ab,
+                rate,
+            );
+            return;
         }
         let env = c.aerodynamics.envelopes.iter().find(|e| e.g == 1).unwrap();
         let stall_scale = self.envelope_scale;

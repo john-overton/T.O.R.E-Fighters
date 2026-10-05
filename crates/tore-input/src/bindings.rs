@@ -1,4 +1,4 @@
-use crate::{PilotCommand, PilotInput, Switch};
+use crate::{FlightAxis, PilotCommand, PilotInput, Switch};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -8,6 +8,14 @@ pub enum Axis {
     Yaw,
     Throttle,
     ThrottleRate,
+    VectorPitch,
+    VectorPitchRate,
+    VectorYaw,
+    VectorYawRate,
+    Conversion,
+    ConversionRate,
+    Collective,
+    CollectiveRate,
     LookX,
     LookY,
     /// Absolute head-tracker yaw: -1..1 maps to -180..180 degrees before scaling.
@@ -59,6 +67,14 @@ impl Action {
             "yaw" => Some(Axis::Yaw),
             "throttle" => Some(Axis::Throttle),
             "throttle-rate" => Some(Axis::ThrottleRate),
+            "vector-pitch" => Some(Axis::VectorPitch),
+            "vector-pitch-rate" => Some(Axis::VectorPitchRate),
+            "vector-yaw" => Some(Axis::VectorYaw),
+            "vector-yaw-rate" => Some(Axis::VectorYawRate),
+            "conversion" => Some(Axis::Conversion),
+            "conversion-rate" => Some(Axis::ConversionRate),
+            "collective" => Some(Axis::Collective),
+            "collective-rate" => Some(Axis::CollectiveRate),
             "look-x" => Some(Axis::LookX),
             "look-y" => Some(Axis::LookY),
             "head-yaw" => Some(Axis::HeadYaw),
@@ -67,6 +83,34 @@ impl Action {
         };
         if let Some(axis) = axis {
             return Ok(Self::Axis(axis));
+        }
+        if s == "neutral-vector" {
+            return Ok(Self::Pilot(PilotCommand::NeutralVector));
+        }
+        for (name, axis) in [
+            ("vector-pitch", FlightAxis::VectorPitch),
+            ("vector-yaw", FlightAxis::VectorYaw),
+            ("conversion", FlightAxis::Conversion),
+            ("collective", FlightAxis::Collective),
+        ] {
+            for (prefix, adjust) in [(format!("{name}="), false), (format!("{name}-step="), true)] {
+                if let Some(value) = s.strip_prefix(&prefix) {
+                    let value: f64 = value.parse().map_err(|_| "invalid lift control")?;
+                    let low = if adjust || axis == FlightAxis::VectorYaw {
+                        -1.
+                    } else {
+                        0.
+                    };
+                    if !value.is_finite() || !(low..=1.).contains(&value) {
+                        return Err("invalid lift control".into());
+                    }
+                    return Ok(Self::Pilot(if adjust {
+                        PilotCommand::AdjustAxis(axis, value)
+                    } else {
+                        PilotCommand::SetAxis(axis, value)
+                    }));
+                }
+            }
         }
         if s == "eject" {
             return Ok(Self::Pilot(PilotCommand::Eject));
@@ -113,6 +157,8 @@ impl Action {
                 | "drone-slower"
                 | "weapon-seeker-mode"
                 | "weapon-next"
+                | "weapon-group-next"
+                | "weapon-group-toggle"
                 | "weapon-previous"
                 | "designate"
                 | "designate-previous"
@@ -517,7 +563,15 @@ impl Profile {
                             Mode::Axis | Mode::Hold(_) | Mode::Trigger(_) => {
                                 matches!(action, Action::Axis(a) if a != Axis::Throttle)
                             }
-                            Mode::Unit => action == Action::Axis(Axis::Throttle),
+                            Mode::Unit => matches!(
+                                action,
+                                Action::Axis(
+                                    Axis::Throttle
+                                        | Axis::VectorPitch
+                                        | Axis::Conversion
+                                        | Axis::Collective
+                                )
+                            ),
                             Mode::HoldState if matches!(&action, Action::Ui(name) if name == "fire" || matches!(name.as_str(), "drone-forward" | "drone-backward" | "drone-left" | "drone-right" | "drone-up" | "drone-down" | "drone-boost" | "drone-look")) => {
                                 true
                             }
@@ -568,6 +622,7 @@ struct Contribution {
     seen: bool,
     pickup: bool,
     previous: f64,
+    override_at: Option<f64>,
 }
 /// Physical baseline events initialize state without producing synthetic presses.
 #[derive(Clone, Debug)]
@@ -580,6 +635,7 @@ pub struct Event {
 #[derive(Default)]
 pub struct Resolver {
     pub profile: Profile,
+    blocked_bindings: BTreeSet<usize>,
     states: BTreeMap<(usize, String), Contribution>,
     owners: BTreeMap<Axis, (usize, String)>,
     events: VecDeque<(String, Action)>,
@@ -601,11 +657,32 @@ impl Resolver {
             ..Self::default()
         }
     }
-    pub fn bound(&self, device: &str, control: &str) -> bool {
-        self.profile
+    /// Enable a runtime subset without changing the saved/edited profile.
+    /// Context changes release old contributions and require fresh baselines.
+    pub fn filter_bindings(&mut self, enabled: impl Fn(&Binding) -> bool) -> bool {
+        let blocked: BTreeSet<_> = self
+            .profile
             .bindings
             .iter()
-            .any(|b| self.matches(b, device) && b.control == control)
+            .enumerate()
+            .filter_map(|(i, b)| (!enabled(b)).then_some(i))
+            .collect();
+        if blocked == self.blocked_bindings {
+            return false;
+        }
+        self.blocked_bindings = blocked;
+        self.states.clear();
+        self.owners.clear();
+        self.events.clear();
+        self.physical.clear();
+        self.layers.clear();
+        self.held_switches.clear();
+        true
+    }
+    pub fn bound(&self, device: &str, control: &str) -> bool {
+        self.profile.bindings.iter().enumerate().any(|(i, b)| {
+            !self.blocked_bindings.contains(&i) && self.matches(b, device) && b.control == control
+        })
     }
     fn matches(&self, binding: &Binding, device: &str) -> bool {
         self.matches_device(&binding.device, device)
@@ -636,8 +713,9 @@ impl Resolver {
     }
     /// Feedback eligibility includes assigned controls at rest, excluding UI-only boxes.
     pub fn flight_bound(&self, device: &str, control: &str) -> bool {
-        self.profile.bindings.iter().any(|b| {
-            self.matches(b, device)
+        self.profile.bindings.iter().enumerate().any(|(i, b)| {
+            !self.blocked_bindings.contains(&i)
+                && self.matches(b, device)
                 && b.control.rsplit('+').next().map(token_base) == Some(control)
                 && (matches!(
                     b.action,
@@ -648,6 +726,14 @@ impl Resolver {
                                 | Axis::Yaw
                                 | Axis::Throttle
                                 | Axis::ThrottleRate
+                                | Axis::VectorPitch
+                                | Axis::VectorPitchRate
+                                | Axis::VectorYaw
+                                | Axis::VectorYawRate
+                                | Axis::Conversion
+                                | Axis::ConversionRate
+                                | Axis::Collective
+                                | Axis::CollectiveRate
                         )
                 ) || b.action == Action::Ui("fire".into()))
         })
@@ -677,6 +763,10 @@ impl Resolver {
             } else {
                 0.
             };
+            if s.override_at.is_some() {
+                s.armed = false;
+                s.value = 0.;
+            }
             s.previous = s.value;
             s.pickup = false;
         }
@@ -695,8 +785,9 @@ impl Resolver {
             .profile
             .bindings
             .iter()
-            .filter(|b| self.matches(b, &event.device))
-            .flat_map(|b| b.control.split('+'))
+            .enumerate()
+            .filter(|(i, b)| !self.blocked_bindings.contains(i) && self.matches(b, &event.device))
+            .flat_map(|(_, b)| b.control.split('+'))
             .chain(
                 self.profile
                     .modifiers
@@ -727,8 +818,13 @@ impl Resolver {
             .profile
             .bindings
             .iter()
-            .filter(|b| b.control.contains('+') && self.matches(b, device))
-            .map(|b| {
+            .enumerate()
+            .filter(|(i, b)| {
+                !self.blocked_bindings.contains(i)
+                    && b.control.contains('+')
+                    && self.matches(b, device)
+            })
+            .map(|(_, b)| {
                 let (mods, base) = chord_parts(&b.control);
                 (
                     mods.into_iter().map(str::to_owned).collect(),
@@ -822,6 +918,9 @@ impl Resolver {
             return;
         }
         for index in 0..self.profile.bindings.len() {
+            if self.blocked_bindings.contains(&index) {
+                continue;
+            }
             let b = &self.profile.bindings[index];
             if !self.matches(b, &event.device)
                 || b.control != event.control
@@ -861,6 +960,23 @@ impl Resolver {
                 }
                 Mode::Axis | Mode::Unit => {
                     let v = b.calibration.apply(event.value, b.mode == Mode::Unit);
+                    if let Some(previous) = s.override_at {
+                        let span = if b.action == Action::Axis(Axis::VectorYaw) {
+                            2.
+                        } else {
+                            1.
+                        };
+                        if !allowed
+                            || initial
+                            || (v - previous).abs() < 0.02 * span * b.calibration.scale.abs() - 1e-9
+                        {
+                            s.value = 0.;
+                            s.armed = false;
+                            continue;
+                        }
+                        s.override_at = None;
+                        s.armed = true;
+                    }
                     s.previous = if initial { v } else { s.value };
                     if initial {
                         s.armed = b.mode == Mode::Unit || v.abs() <= 0.02;
@@ -967,7 +1083,22 @@ impl Resolver {
     }
     pub fn disconnect(&mut self, device: &str) -> bool {
         let primary = self.owners.iter().any(|(axis, (_, d))| {
-            d == device && matches!(axis, Axis::Pitch | Axis::Roll | Axis::Yaw | Axis::Throttle)
+            d == device
+                && matches!(
+                    axis,
+                    Axis::Pitch
+                        | Axis::Roll
+                        | Axis::Yaw
+                        | Axis::Throttle
+                        | Axis::VectorPitch
+                        | Axis::VectorYaw
+                        | Axis::Conversion
+                        | Axis::Collective
+                        | Axis::VectorPitchRate
+                        | Axis::VectorYawRate
+                        | Axis::ConversionRate
+                        | Axis::CollectiveRate
+                )
         });
         self.physical.retain(|(d, _), _| d != device);
         self.layers.retain(|(d, _), _| d != device);
@@ -975,6 +1106,28 @@ impl Resolver {
         self.owners.retain(|_, (_, d)| d != device);
         self.events.retain(|(d, _)| d != device);
         primary
+    }
+    /// A digital lift command holds priority until the absolute lever moves
+    /// two percent of its calibrated range. Keep this latch across focus loss.
+    pub fn override_lift_axes(&mut self, axes: &[Axis]) {
+        for axis in axes {
+            self.owners.remove(axis);
+        }
+        for ((index, _), state) in &mut self.states {
+            let binding = &self.profile.bindings[*index];
+            if let Action::Axis(axis) = binding.action
+                && axes.contains(&axis)
+                && matches!(binding.mode, Mode::Axis | Mode::Unit)
+            {
+                state.override_at = Some(
+                    binding
+                        .calibration
+                        .apply(state.raw, binding.mode == Mode::Unit),
+                );
+                state.value = 0.;
+                state.armed = false;
+            }
+        }
     }
     pub fn override_throttle(&mut self) {
         self.owners.remove(&Axis::Throttle);
@@ -1011,7 +1164,11 @@ impl Resolver {
                 if !s.pickup {
                     continue;
                 }
-            } else if s.value.abs() <= 0.001 {
+            } else if !matches!(
+                axis,
+                Axis::VectorPitch | Axis::VectorYaw | Axis::Conversion | Axis::Collective
+            ) && s.value.abs() <= 0.001
+            {
                 continue;
             }
             candidates.push((b.priority, key.clone(), s.value));
@@ -1035,6 +1192,12 @@ impl Resolver {
             self.owners.remove(&axis);
             if axis == Axis::Throttle { throttle } else { 0. }
         }
+    }
+    /// The profile row currently supplying an axis, when it has an owner.
+    pub fn owned_binding(&self, axis: Axis) -> Option<&Binding> {
+        self.owners
+            .get(&axis)
+            .and_then(|(index, _)| self.profile.bindings.get(*index))
     }
     pub fn frame(&mut self, throttle: f64) -> (PilotInput, [f32; 2]) {
         if self.paused || !self.focused {
@@ -1083,6 +1246,28 @@ impl Resolver {
             yaw: self.axis(Axis::Yaw, throttle),
             throttle_rate,
             throttle: self.owners.contains_key(&Axis::Throttle).then_some(t),
+            vector_pitch_rate: self.axis(Axis::VectorPitchRate, 0.),
+            vector_pitch: {
+                let value = self.axis(Axis::VectorPitch, 0.);
+                self.owners
+                    .contains_key(&Axis::VectorPitch)
+                    .then_some(value)
+            },
+            vector_yaw_rate: self.axis(Axis::VectorYawRate, 0.),
+            vector_yaw: {
+                let value = self.axis(Axis::VectorYaw, 0.);
+                self.owners.contains_key(&Axis::VectorYaw).then_some(value)
+            },
+            conversion_rate: self.axis(Axis::ConversionRate, 0.),
+            conversion: {
+                let value = self.axis(Axis::Conversion, 0.);
+                self.owners.contains_key(&Axis::Conversion).then_some(value)
+            },
+            collective_rate: self.axis(Axis::CollectiveRate, 0.),
+            collective: {
+                let value = self.axis(Axis::Collective, 0.);
+                self.owners.contains_key(&Axis::Collective).then_some(value)
+            },
             commands,
         };
         let look = self.look();

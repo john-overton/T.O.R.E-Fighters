@@ -77,6 +77,17 @@ pub fn commands() -> Vec<Command> {
         Command::Pilot(PilotCommand::Set(Switch::WaypointAutopilot, true)),
         Command::Pilot(PilotCommand::Throttle(0.5)),
         Command::Pilot(PilotCommand::AdjustThrottle(-0.05)),
+        Command::Pilot(PilotCommand::SetAxis(
+            tore_input::pilot::FlightAxis::Collective,
+            0.6,
+        )),
+        Command::Pilot(PilotCommand::AdjustAxis(
+            tore_input::pilot::FlightAxis::Conversion,
+            -0.1,
+        )),
+        Command::Pilot(PilotCommand::NeutralVector),
+        Command::Seat(S::Combat(live::Command::NextGunGroup)),
+        Command::Seat(S::Combat(live::Command::ToggleGunGroup)),
     ]
 }
 
@@ -90,6 +101,10 @@ pub fn inputs() -> InputsSection {
         throttle: Some(40_000),
         trigger: false,
         sensors: Controls::default(),
+        powered_lift: super::inputs::PoweredLiftInput {
+            rates: [1, -2, 3, -4],
+            positions: [Some(12345), Some(-23456), Some(0), Some(32767)],
+        },
     };
     let mut frames = vec![first];
     let mut next = first;
@@ -155,6 +170,10 @@ pub fn entities() -> Vec<Entity> {
                     surfaces: [-127, 0, 127],
                     speed: 3_200,
                     throttle: 230,
+                    lift_levels: [12, 127, 254],
+                    vector_yaw: -45,
+                    gun_aim: [-64, 0, -70, 10, -80, -30],
+                    gun_group: 5,
                 }),
                 engine: EngineState {
                     lit: true,
@@ -508,6 +527,7 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
             tick: 7_200,
             exact,
             loadout: LoadoutSpec {
+                tanks: None,
                 fuel_lbs: 10_860.5,
                 cheat: false,
                 stations: vec![
@@ -570,6 +590,7 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
             mission: 7,
             plane: 2,
             loadout: Some(LoadoutSpec {
+                tanks: None,
                 fuel_lbs: 6_000.,
                 cheat: false,
                 stations: vec![StationLoad {
@@ -606,6 +627,7 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
             loadouts: vec![(
                 2,
                 LoadoutSpec {
+                    tanks: None,
                     fuel_lbs: 6_000.,
                     cheat: false,
                     stations: vec![StationLoad {
@@ -775,6 +797,8 @@ pub fn readout() -> tore_world::readout::CockpitReadout {
             launch_mode: LaunchMode::Boresight,
             ammo: vec![578, 2, 0x8001, 4],
             loaded: 0b1111,
+            gun_aim: [-0.5, 0., -0.4, 0.2, -0.6, -0.3],
+            gun_group: 5,
         },
         seeker: SeekerReadout {
             status: seeker::Status::Locked,

@@ -84,7 +84,10 @@ pub fn target_glows<'a>(
 }
 
 /// A target drawn with its own model, over the model's start state.
-fn model_pose(mut s: flight::State, pose: &AircraftPose) -> flight::State {
+fn model_pose(mut s: flight::State, pose: &AircraftPose, tick: u64) -> flight::State {
+    s.ticks = tick;
+    s.engine = pose.engine.lit;
+    s.burner = pose.engine.afterburner;
     s.position = pose.position;
     s.damage_fraction = pose.damage.fraction();
     s.damage_variant = pose.damage.variant();
@@ -211,7 +214,7 @@ fn aircraft_batches_with<'a>(
         let model = selected[*batch];
         match job {
             AircraftJob::Target(target) => {
-                let pose = model_pose(model.start(world), target);
+                let pose = model_pose(model.start(world), target, snapshot.tick);
                 model.vertices(&pose, camera, world, scenery)
             }
             AircraftJob::Debris(piece) => {
@@ -274,7 +277,7 @@ fn aircraft_batches_serial<'a>(
                 .iter()
                 .filter(|t| t.draw == draw && t.airborne && Some(t.id) != camera.hidden_target)
             {
-                let pose = model_pose(model.start(world), target);
+                let pose = model_pose(model.start(world), target, snapshot.tick);
                 let first = vertices.len() / 10;
                 vertices.extend(model.vertices(&pose, camera, world, scenery));
                 contacts.extend(Contact::new(
@@ -597,8 +600,10 @@ mod tests {
                 draw: Draw::Model(id),
                 position: [50. * i as f64, 5000. + i as f64, 1000. + 31. * i as f64],
                 attitude: [0.07 * i as f64, -0.01 * i as f64, 0.1 * i as f64],
-                devices: (i % 3 != 0)
-                    .then_some([1., 0.6, 0.1, 0.4, 0.3, 0.6, 0.2, -0.3, 0.1, 670., 0.75]),
+                devices: (i % 3 != 0).then_some([
+                    1., 0.6, 0.1, 0.4, 0.3, 0.6, 0.2, -0.3, 0.1, 670., 0.75, 0., 0., 0., 0., 0.,
+                    0., 0., 0., 0., 0., 0.,
+                ]),
                 damage: crate::snapshot::Damage {
                     hp: if i % 7 == 0 { 0 } else { 85 },
                     initial_hp: 100,

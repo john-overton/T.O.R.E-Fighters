@@ -80,6 +80,8 @@ mod static_art;
 mod surface_lighting;
 mod tape_file;
 mod target_preview;
+mod variety_animation;
+mod variety_rotors;
 mod version;
 mod view_compass;
 mod weapon_hud;
@@ -1201,6 +1203,10 @@ impl App {
         }
         let command = match name.as_str() {
             "weapon-next" => Command::NextWeapon,
+            "weapon-group-next" => Command::Combat(tore_sim::combat::live::Command::NextGunGroup),
+            "weapon-group-toggle" => {
+                Command::Combat(tore_sim::combat::live::Command::ToggleGunGroup)
+            }
             "weapon-previous" => Command::PreviousWeapon,
             "weapon-seeker-mode" => {
                 Command::Combat(tore_sim::combat::live::Command::ToggleSeekerMode)
@@ -1447,6 +1453,59 @@ impl App {
             }
             Command::Combat(command) => {
                 use tore_sim::combat::live::Command as Live;
+                if matches!(command, Live::NextGunGroup | Live::ToggleGunGroup) {
+                    let Some(own) = self
+                        .world
+                        .combat
+                        .state
+                        .ownship(self.world.cockpits[OWN].plane.0)
+                    else {
+                        return Action::None;
+                    };
+                    let Some(mut group) = own.gunship.clone() else {
+                        return Action::None;
+                    };
+                    let mut selected = own.selected;
+                    if let Some(readout) = self
+                        .net_flight
+                        .as_ref()
+                        .and_then(|flight| flight.frame.as_ref())
+                        .and_then(|frame| frame.readout.as_ref())
+                    {
+                        group.included =
+                            std::array::from_fn(|slot| readout.stores.gun_group & (1 << slot) != 0);
+                        selected = readout.stores.selected();
+                    }
+                    if command == Live::NextGunGroup {
+                        let stations: Vec<_> = group.stations.iter().flatten().copied().collect();
+                        if stations.is_empty() {
+                            return Action::None;
+                        }
+                        let next = stations
+                            .iter()
+                            .position(|station| *station == selected)
+                            .map_or(0, |i| (i + 1) % stations.len());
+                        selected = stations[next];
+                    } else {
+                        group.toggle(selected);
+                    }
+                    let names: Vec<_> = tore_sim::combat::gunship::NAMES
+                        .into_iter()
+                        .zip(group.included)
+                        .filter_map(|(name, on)| on.then_some(name))
+                        .collect();
+                    let candidate = group
+                        .slot(selected)
+                        .map_or("NONE", |slot| tore_sim::combat::gunship::NAMES[slot]);
+                    self.flight_ui.message(format!(
+                        "Gun group: {}. Candidate: {candidate}",
+                        if names.is_empty() {
+                            "EMPTY".into()
+                        } else {
+                            names.join("+")
+                        }
+                    ));
+                }
                 if self.flight_ui.session
                     && matches!(
                         command,
@@ -2220,6 +2279,9 @@ impl App {
                     {
                         if choice == "none" {
                             o.loadout.quantities.fill(0);
+                            if let Err(error) = o.loadout.clear_tanks() {
+                                o.message = Some(error.to_string());
+                            }
                         } else {
                             o.loadout.restrict_to_guns();
                         }
@@ -2675,6 +2737,8 @@ impl App {
         if self.screen == Screen::Flight
             && !(event.pressed
                 && self.flight_ui.map.open
+                && !self.modifiers.control_key()
+                && !self.modifiers.alt_key()
                 && matches!(
                     name.as_str(),
                     "m" | "Escape"
@@ -3648,9 +3712,9 @@ impl ApplicationHandler for App {
                                 self.performance.network_tick(client.tick);
                             }
                             let readout = &*frame.readout;
-                            let weapon = &frame.config.stations[readout.stores.selected()].weapon;
+                            let weapon = frame.config.stations.get(readout.stores.selected());
                             self.performance.weapon(
-                                &weapon.source,
+                                weapon.map_or("UNARMED", |station| station.weapon.source.as_str()),
                                 readout.targets.designated.is_some(),
                                 readout.estimates.max_range.is_some(),
                             );
@@ -4424,6 +4488,22 @@ impl ApplicationHandler for App {
         }
         let paused = self.screen != Screen::Flight || self.flight_ui.frozen();
         self.input.context(paused, self.focused);
+        let cockpit = self
+            .world
+            .cockpits
+            .get(OWN)
+            .filter(|_| self.screen == Screen::Flight);
+        let available =
+            |axis| cockpit.is_some_and(|cockpit| cockpit.flight.flight_axis_available(axis));
+        let gunship = cockpit
+            .and_then(|cockpit| self.world.combat.state.ownship(cockpit.plane.0))
+            .is_some_and(|own| own.gunship.is_some());
+        self.input.aircraft_controls(
+            available(tore_input::FlightAxis::VectorPitch),
+            available(tore_input::FlightAxis::Conversion),
+            available(tore_input::FlightAxis::Collective),
+            gunship,
+        );
         if Instant::now() >= self.input.next_poll {
             let (actions, lost, warnings) = self.input.poll();
             let mut changed = lost || !actions.is_empty();
@@ -4573,6 +4653,7 @@ fn build_combat(
     })?;
     if choice == "none" {
         load.quantities.fill(0);
+        load.clear_tanks()?;
     } else {
         load.restrict_to_guns();
     }
@@ -7713,6 +7794,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut panel_snapshot = None;
     let mut systems_preview: Vec<usize> = Vec::new();
     let mut validate_creator = false;
+    let mut validate_tanks = false;
     let mut sensor_summary = false;
     let mut validate_weather = false;
     let mut validate_maps = false;
@@ -8539,6 +8621,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--import-only" => import_only = true,
             "--validate-creator" => validate_creator = true,
+            "--validate-tanks" => validate_tanks = true,
             "--sensor-summary" => sensor_summary = true,
             "--sensor-channel" => {
                 sensor_channel = Some(
@@ -8597,7 +8680,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "Mission recordings: every flight records what happened into replays/ in the data folder; Ctrl+B marks a moment (TORE_RECORD_MISSIONS=0 turns recording off for a run). These are not the --record-input/--replay-input or --record-combat/--replay-combat tapes, which store inputs and simulate them again. --recording-info FILE describes a recording. --recording-log FILE [--out DIR] [--from SECONDS] [--to SECONDS] [--ids 0,7] [--rate HZ] writes log.jsonl and summary.txt. --recording-acmi FILE [--out FILE] [--rate HZ] [--guns] writes a Tacview .txt.acmi file. --recording-diff A B compares two recordings. --ai-probe-ticks N --record-mission NEW_PATH records a headless probe without changing its output; --verify-render then checks every recorded tick redraws the picture the probe drew. See docs/REPLAYS.md."
                 );
                 println!(
-                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display. --validate-ils checks the ILS alignment at every airport.
+                    "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters and the 36 reviewed retail aircraft into platform application data. See docs/spec/aircraft-variety.md for the expanded roster.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft ID selects a reviewed aircraft (default f18), including c130, ac130, e3, il76, e2, av8, yak141, v22, ah64, mi24, ch47, mig17, f4b, f4j, f4e, f4g, a7, f15, f16c, f104, a10, b747 and a310. Existing identities and faxx remain available.\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display. --validate-ils checks the ILS alignment at every airport.
 Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --retail-stall-speeds turns the weight-scaled stall speed off, so the imported envelope's slow edges apply at every weight (developer switch). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, airports, ground-targets-unavailable, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
@@ -8921,6 +9004,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         && !combat_smoke
         && !native_flight_report
         && !validate_creator
+        && !validate_tanks
         && !validate_weather
         && !validate_maps
         && !validate_ils
@@ -9027,6 +9111,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     };
     diagnostics::stage_done();
     if import_only {
+        return Ok(Outcome::Done);
+    }
+    if validate_tanks {
+        ordnance::validate_tanks(&assets.theater_resources)?;
         return Ok(Outcome::Done);
     }
     if validate_text {
@@ -10070,6 +10158,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             if matches!(
                 snapshot_state.as_str(),
                 "ordnance"
+                    | "ordnance-tanks"
                     | "ordnance-empty"
                     | "ordnance-drag"
                     | "ordnance-message"
@@ -11694,7 +11783,7 @@ mod encounter_probe_tests {
                 }
             }
         }
-        assert_eq!(names.len(), 1008);
+        assert_eq!(names.len(), 3 * AircraftId::SELECTABLE.len() * 4 * 3 * 2);
         assert!(names.contains("FAXX-SU27-skill2-Rear-researched"));
         assert!(names.contains("F22N-SU27-skill2-Rear-researched"));
     }

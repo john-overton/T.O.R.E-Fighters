@@ -10,6 +10,7 @@ use super::entity::{EntityKey, EntityKind};
 use super::{WireError, WireResult, bits, limits};
 use tore_codec::quant::{SIGNED_UNIT_I8_STEPS, SIGNED_UNIT_I16_STEPS, UNIT_U16_STEPS};
 use tore_codec::{BitReader, BitWriter, CodecError};
+use tore_input::pilot::FlightAxis;
 use tore_sim::ai::wing::{Formation, PlayerApproach, PlayerBreak, PlayerOrder};
 use tore_sim::airport;
 use tore_sim::combat::live;
@@ -31,6 +32,30 @@ pub struct InputFrame {
     pub trigger: bool,
     /// The scope controls: channel, range step and contact history.
     pub sensors: Controls,
+    pub powered_lift: PoweredLiftInput,
+}
+
+/// Vector pitch/yaw, nacelle conversion and collective, in that order.
+/// Idle fixed-wing input needs only the absent bit on the wire.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PoweredLiftInput {
+    pub rates: [i8; 4],
+    pub positions: [Option<i16>; 4],
+}
+const FLIGHT_AXES: [FlightAxis; 4] = [
+    FlightAxis::VectorPitch,
+    FlightAxis::VectorYaw,
+    FlightAxis::Conversion,
+    FlightAxis::Collective,
+];
+fn axis_position(axis: FlightAxis, value: f64) -> Option<i16> {
+    value.is_finite().then(|| {
+        stick(if axis == FlightAxis::VectorYaw {
+            value
+        } else {
+            value.clamp(0., 1.)
+        })
+    })
 }
 
 fn stick(value: f64) -> i16 {
@@ -66,6 +91,24 @@ impl InputFrame {
             throttle: pilot.throttle.and_then(throttle_position),
             trigger,
             sensors,
+            powered_lift: PoweredLiftInput {
+                rates: [
+                    pilot.vector_pitch_rate,
+                    pilot.vector_yaw_rate,
+                    pilot.conversion_rate,
+                    pilot.collective_rate,
+                ]
+                .map(throttle_rate),
+                positions: std::array::from_fn(|index| {
+                    [
+                        pilot.vector_pitch,
+                        pilot.vector_yaw,
+                        pilot.conversion,
+                        pilot.collective,
+                    ][index]
+                        .and_then(|value| axis_position(FLIGHT_AXES[index], value))
+                }),
+            },
         }
     }
 
@@ -80,6 +123,18 @@ impl InputFrame {
                 .throttle
                 .map(|q| f64::from(q) / f64::from(UNIT_U16_STEPS)),
             commands: Vec::new(),
+            vector_pitch_rate: f64::from(self.powered_lift.rates[0])
+                / f64::from(SIGNED_UNIT_I8_STEPS),
+            vector_yaw_rate: f64::from(self.powered_lift.rates[1])
+                / f64::from(SIGNED_UNIT_I8_STEPS),
+            conversion_rate: f64::from(self.powered_lift.rates[2])
+                / f64::from(SIGNED_UNIT_I8_STEPS),
+            collective_rate: f64::from(self.powered_lift.rates[3])
+                / f64::from(SIGNED_UNIT_I8_STEPS),
+            vector_pitch: self.powered_lift.positions[0].map(stick_value),
+            vector_yaw: self.powered_lift.positions[1].map(stick_value),
+            conversion: self.powered_lift.positions[2].map(stick_value),
+            collective: self.powered_lift.positions[3].map(stick_value),
         }
     }
 
@@ -136,6 +191,13 @@ pub fn quantize_command(command: PilotCommand) -> PilotCommand {
         ),
         PilotCommand::AdjustThrottle(value) => {
             PilotCommand::AdjustThrottle(stick_value(stick(value)))
+        }
+        PilotCommand::SetAxis(axis, value) => PilotCommand::SetAxis(
+            axis,
+            axis_position(axis, value).map_or(f64::NAN, stick_value),
+        ),
+        PilotCommand::AdjustAxis(axis, value) => {
+            PilotCommand::AdjustAxis(axis, stick_value(stick(value)))
         }
         other => other,
     }
@@ -369,6 +431,7 @@ fn write_frame(
             let _ = w.write_bits(u64::from(q), 16);
         });
         w.write_bool(frame.trigger);
+        write_powered_lift(w, frame.powered_lift);
         return write_sensors(w, &frame.sensors);
     };
     if frame == previous {
@@ -384,6 +447,7 @@ fn write_frame(
         frame.throttle != previous.throttle,
         frame.trigger != previous.trigger,
         frame.sensors != previous.sensors,
+        frame.powered_lift != previous.powered_lift,
     ];
     for flag in changed {
         w.write_bool(flag);
@@ -409,6 +473,9 @@ fn write_frame(
     if changed[6] {
         write_sensors(w, &frame.sensors)?;
     }
+    if changed[7] {
+        write_powered_lift(w, frame.powered_lift);
+    }
     Ok(())
 }
 
@@ -428,6 +495,40 @@ fn read_rate(r: &mut BitReader<'_>) -> WireResult<i8> {
     Ok(q as i8)
 }
 
+pub(crate) fn write_powered_lift(w: &mut BitWriter, input: PoweredLiftInput) {
+    let present = input != PoweredLiftInput::default();
+    w.write_bool(present);
+    if present {
+        for rate in input.rates {
+            let _ = w.write_signed(i64::from(rate), 8);
+        }
+        for position in input.positions {
+            bits::write_option(w, position, |w, value| {
+                let _ = w.write_signed(i64::from(value), 16);
+            });
+        }
+    }
+}
+pub(crate) fn read_powered_lift(r: &mut BitReader<'_>) -> WireResult<PoweredLiftInput> {
+    if !r.read_bool()? {
+        return Ok(PoweredLiftInput::default());
+    }
+    let mut input = PoweredLiftInput::default();
+    for rate in &mut input.rates {
+        *rate = read_rate(r)?;
+    }
+    for (index, position) in input.positions.iter_mut().enumerate() {
+        *position = bits::read_option(r, read_stick)?;
+        if index != 1 && position.is_some_and(|value| value < 0) {
+            return Err(WireError::Invalid("powered-lift position"));
+        }
+    }
+    if input == PoweredLiftInput::default() {
+        return Err(CodecError::NonCanonical.into());
+    }
+    Ok(input)
+}
+
 fn read_frame(r: &mut BitReader<'_>, previous: Option<&InputFrame>) -> WireResult<InputFrame> {
     let Some(previous) = previous else {
         return Ok(InputFrame {
@@ -437,13 +538,14 @@ fn read_frame(r: &mut BitReader<'_>, previous: Option<&InputFrame>) -> WireResul
             throttle_rate: read_rate(r)?,
             throttle: bits::read_option(r, |r| Ok(r.read_bits(16)? as u16))?,
             trigger: r.read_bool()?,
+            powered_lift: read_powered_lift(r)?,
             sensors: read_sensors(r)?,
         });
     };
     if r.read_bool()? {
         return Ok(*previous);
     }
-    let mut changed = [false; 7];
+    let mut changed = [false; 8];
     for flag in &mut changed {
         *flag = r.read_bool()?;
     }
@@ -478,9 +580,13 @@ fn read_frame(r: &mut BitReader<'_>, previous: Option<&InputFrame>) -> WireResul
     if changed[6] {
         frame.sensors = read_sensors(r)?;
     }
+    if changed[7] {
+        frame.powered_lift = read_powered_lift(r)?;
+    }
     if (changed[3] && frame.throttle_rate == previous.throttle_rate)
         || (changed[4] && frame.throttle == previous.throttle)
         || (changed[6] && frame.sensors == previous.sensors)
+        || (changed[7] && frame.powered_lift == previous.powered_lift)
     {
         return Err(CodecError::NonCanonical.into());
     }
@@ -500,6 +606,9 @@ const RANGE_RESET: u64 = 8;
 const RELEASE_CHAFF: u64 = 9;
 const RELEASE_FLARE: u64 = 10;
 const RELEASE_TRIGGER: u64 = 11;
+const SET_FLIGHT_AXIS: u64 = 22;
+const ADJUST_FLIGHT_AXIS: u64 = 23;
+const NEUTRAL_VECTOR: u64 = 24;
 const RADIO_SILENCE: u64 = 12;
 const WING_RECIPIENT: u64 = 13;
 const WING_ORDER: u64 = 14;
@@ -590,6 +699,19 @@ pub(crate) fn write_command(w: &mut BitWriter, command: &Command) {
                 code(ADJUST_THROTTLE);
                 let _ = w.write_signed(i64::from(stick(value)), 16);
             }
+            PilotCommand::SetAxis(axis, value) => {
+                code(SET_FLIGHT_AXIS);
+                let _ = w.write_bits(flight_axis_code(axis), 2);
+                bits::write_option(w, axis_position(axis, value), |w, q| {
+                    let _ = w.write_signed(i64::from(q), 16);
+                });
+            }
+            PilotCommand::AdjustAxis(axis, value) => {
+                code(ADJUST_FLIGHT_AXIS);
+                let _ = w.write_bits(flight_axis_code(axis), 2);
+                let _ = w.write_signed(i64::from(stick(value)), 16);
+            }
+            PilotCommand::NeutralVector => code(NEUTRAL_VECTOR),
         },
     }
 }
@@ -646,7 +768,35 @@ pub(crate) fn read_command(r: &mut BitReader<'_>) -> WireResult<Command> {
         ADJUST_THROTTLE => Ok(Command::Pilot(PilotCommand::AdjustThrottle(stick_value(
             read_stick(r)?,
         )))),
+        SET_FLIGHT_AXIS => {
+            let axis = FLIGHT_AXES[r.read_bits(2)? as usize];
+            let value = bits::read_option(r, read_stick)?;
+            if axis != FlightAxis::VectorYaw && value.is_some_and(|v| v < 0) {
+                return Err(WireError::Invalid("flight axis position"));
+            }
+            Ok(Command::Pilot(PilotCommand::SetAxis(
+                axis,
+                value.map_or(f64::NAN, stick_value),
+            )))
+        }
+        ADJUST_FLIGHT_AXIS => {
+            let axis = FLIGHT_AXES[r.read_bits(2)? as usize];
+            Ok(Command::Pilot(PilotCommand::AdjustAxis(
+                axis,
+                stick_value(read_stick(r)?),
+            )))
+        }
+        NEUTRAL_VECTOR => Ok(Command::Pilot(PilotCommand::NeutralVector)),
         _ => Err(WireError::Invalid("command")),
+    }
+}
+
+fn flight_axis_code(axis: FlightAxis) -> u64 {
+    match axis {
+        FlightAxis::VectorPitch => 0,
+        FlightAxis::VectorYaw => 1,
+        FlightAxis::Conversion => 2,
+        FlightAxis::Collective => 3,
     }
 }
 
@@ -719,6 +869,8 @@ const LIVE: [live::Command; 23] = [
 const TARGET_HEAT: u64 = 23;
 const TARGET_DISTANCE: u64 = 24;
 const DESIGNATE_TARGET: u64 = 25;
+const NEXT_GUN_GROUP: u64 = 26;
+const TOGGLE_GUN_GROUP: u64 = 27;
 
 /// A combat command's code, exhaustively, so a new command cannot go
 /// uncoded.
@@ -751,6 +903,8 @@ fn live_code(command: live::Command) -> u64 {
         C::TargetHeat(_) => TARGET_HEAT,
         C::TargetDistance(_) => TARGET_DISTANCE,
         C::DesignateTarget(_) => DESIGNATE_TARGET,
+        C::NextGunGroup => NEXT_GUN_GROUP,
+        C::ToggleGunGroup => TOGGLE_GUN_GROUP,
     }
 }
 
@@ -771,6 +925,8 @@ fn read_live(r: &mut BitReader<'_>) -> WireResult<live::Command> {
         TARGET_HEAT => live::Command::TargetHeat(r.read_bits(8)? as u8),
         TARGET_DISTANCE => live::Command::TargetDistance(read_u32(r)?),
         DESIGNATE_TARGET => live::Command::DesignateTarget(read_u32(r)?),
+        NEXT_GUN_GROUP => live::Command::NextGunGroup,
+        TOGGLE_GUN_GROUP => live::Command::ToggleGunGroup,
         code => *LIVE
             .get(code as usize)
             .ok_or(WireError::Invalid("combat command"))?,
@@ -854,6 +1010,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn powered_lift_positions_and_releases_survive_delta_frames() {
+        let neutral = InputFrame::default();
+        let active = InputFrame::of(
+            &PilotInput {
+                vector_pitch: Some(0.9),
+                vector_yaw: Some(-0.7),
+                conversion: Some(0.3),
+                collective: Some(0.),
+                vector_pitch_rate: 0.5,
+                vector_yaw_rate: -0.5,
+                conversion_rate: 1.,
+                collective_rate: -1.,
+                ..PilotInput::default()
+            },
+            false,
+            Controls::default(),
+        );
+        let frames = [neutral, active, active, neutral];
+        let mut writer = BitWriter::new();
+        let mut previous = None;
+        for frame in &frames {
+            write_frame(&mut writer, frame, previous).unwrap();
+            previous = Some(frame);
+        }
+        let bytes = writer.finish();
+        let mut reader = BitReader::new(&bytes);
+        let mut previous = None;
+        for expected in frames {
+            let decoded = read_frame(&mut reader, previous.as_ref()).unwrap();
+            assert_eq!(decoded, expected);
+            previous = Some(decoded);
+        }
+        assert_eq!(active.pilot().collective, Some(0.));
+        assert_eq!(neutral.pilot().collective, None);
+    }
+
+    #[test]
+    fn powered_lift_decoder_rejects_invalid_unsigned_positions() {
+        let bad = PoweredLiftInput {
+            positions: [Some(-1), None, None, None],
+            ..Default::default()
+        };
+        let mut writer = BitWriter::new();
+        write_powered_lift(&mut writer, bad);
+        assert!(read_powered_lift(&mut BitReader::new(&writer.finish())).is_err());
+    }
+
+    #[test]
     fn quantized_controls_are_what_the_host_steps() {
         let pilot = PilotInput {
             pitch: 0.123_456_789,
@@ -865,7 +1069,15 @@ mod tests {
                 PilotCommand::Throttle(0.777_777),
                 PilotCommand::AdjustThrottle(0.05),
                 PilotCommand::Toggle(Switch::Gear),
+                PilotCommand::SetAxis(FlightAxis::Collective, 0.625),
+                PilotCommand::AdjustAxis(FlightAxis::Conversion, 0.1),
+                PilotCommand::NeutralVector,
             ],
+            vector_pitch: Some(0.75),
+            vector_yaw: Some(-0.6),
+            conversion_rate: 0.2,
+            collective_rate: -0.4,
+            ..PilotInput::default()
         };
         let q = quantize_pilot(&pilot);
         assert_eq!(q.roll, -1.);

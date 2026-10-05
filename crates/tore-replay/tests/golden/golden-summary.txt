@@ -1,7 +1,7 @@
 T.O.R.E mission summary
 =======================
 
-Recording   format 1, game 0.1.0 (golden), recorded 2026-09-26T15:40:00Z
+Recording   format 2, game 0.1.0 (golden), recorded 2026-09-26T15:40:00Z
 Mission     Quick Mission in Ukraine (UKR), layout UKR.MM
 Conditions  clear (weather 1), starts 12:00:00 local, wind 12.5 ft/s toward 180 deg (from 000)
 Clouds      DAY2.LAY, no scattered deck

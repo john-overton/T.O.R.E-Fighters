@@ -16,6 +16,17 @@ bind keyboard flight-roll roll axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-yaw yaw axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-look-x look-x axis -1 0 1 0 1 1 100\n\
 bind keyboard flight-look-y look-y axis -1 0 1 0 1 1 100\n\
+bind keyboard Ctrl-ArrowUp vector-pitch-rate negative\n\
+bind keyboard Ctrl-ArrowDown vector-pitch-rate positive\n\
+bind keyboard Ctrl-ArrowLeft vector-yaw-rate negative\n\
+bind keyboard Ctrl-ArrowRight vector-yaw-rate positive\n\
+bind keyboard Ctrl-PageUp conversion-rate negative\n\
+bind keyboard Ctrl-PageDown conversion-rate positive\n\
+bind keyboard Ctrl-End collective-rate negative\n\
+bind keyboard Ctrl-Home collective-rate positive\n\
+bind keyboard 0 neutral-vector press\n\
+bind keyboard Ctrl-7 weapon-group-next press\n\
+bind keyboard Ctrl-8 weapon-group-toggle press\n\
 bind keyboard Shift-e eject press\n\
 bind keyboard n airport-nav press\n\
 bind keyboard Shift-n airport-next press\n\
@@ -69,9 +80,54 @@ fn is_stock(binding: &tore_input::Binding) -> bool {
                 && d.mode == binding.mode
         })
 }
+pub const AUTO_GAMEPAD_PREFIX: &str = "auto-gamepad:";
+
+fn gamepad_binding_enabled(binding: &tore_input::Binding, roles: [bool; 4]) -> bool {
+    let [vectoring, conversion, collective, gunship] = roles;
+    let powered = vectoring || conversion || collective;
+    if !binding.device.starts_with(AUTO_GAMEPAD_PREFIX)
+        || !binding.control.starts_with("button:314+")
+    {
+        return true;
+    }
+    match &binding.action {
+        Action::Axis(tore_input::Axis::VectorPitchRate) => vectoring,
+        // The gun gesture owns the same raw stick so it does not pan the camera.
+        Action::Axis(tore_input::Axis::VectorYawRate) => vectoring || gunship,
+        Action::Axis(tore_input::Axis::ConversionRate) => conversion,
+        Action::Axis(tore_input::Axis::CollectiveRate) => collective,
+        Action::Pilot(PilotCommand::NeutralVector) => vectoring || conversion,
+        Action::Pilot(PilotCommand::Toggle(tore_input::Switch::Engine))
+            if binding.control == "button:314+button:315" =>
+        {
+            powered
+        }
+        Action::Ui(name)
+            if matches!(name.as_str(), "weapon-group-next" | "weapon-group-toggle") =>
+        {
+            gunship
+        }
+        Action::Ui(name)
+            if name == "target-jammer" && binding.control == "button:314+button:315" =>
+        {
+            !powered
+        }
+        Action::Ui(name)
+            if name == "range-target"
+                && binding.control == "button:314+axis:17"
+                && binding.mode == tore_input::Mode::Position(-1) =>
+        {
+            !(vectoring || conversion)
+        }
+        _ => true,
+    }
+}
+
 pub struct Input {
     pub resolver: Resolver,
     automatic: bool,
+    gamepad_roles: [bool; 4],
+    filter_signature: Option<([bool; 4], usize)>,
     pub observed: Vec<Event>,
     profile_path: Option<std::path::PathBuf>,
     pub devices: BTreeMap<String, Device>,
@@ -142,6 +198,8 @@ impl Input {
         Ok(Self {
             resolver,
             automatic,
+            gamepad_roles: [false; 4],
+            filter_signature: None,
             observed: vec![],
             profile_path: path.map(Path::to_path_buf),
             devices: BTreeMap::new(),
@@ -190,6 +248,7 @@ impl Input {
         self.stop();
         let port = self.resolver.profile.head_port;
         self.resolver = Resolver::new(complete(profile).expect("validated profile"));
+        self.filter_signature = None;
         self.resolver.context(self.context.0, self.context.1);
         if port != profile.head_port {
             self.head = HeadTracker::disabled();
@@ -253,6 +312,22 @@ impl Input {
             PilotCommand::Throttle(_) | PilotCommand::AdjustThrottle(_)
         ) {
             self.resolver.override_throttle();
+        }
+        match command {
+            PilotCommand::NeutralVector => self.resolver.override_lift_axes(&[
+                tore_input::Axis::VectorPitch,
+                tore_input::Axis::VectorYaw,
+                tore_input::Axis::Conversion,
+            ]),
+            PilotCommand::SetAxis(axis, _) | PilotCommand::AdjustAxis(axis, _) => {
+                self.resolver.override_lift_axes(&[match axis {
+                    tore_input::FlightAxis::VectorPitch => tore_input::Axis::VectorPitch,
+                    tore_input::FlightAxis::VectorYaw => tore_input::Axis::VectorYaw,
+                    tore_input::FlightAxis::Conversion => tore_input::Axis::Conversion,
+                    tore_input::FlightAxis::Collective => tore_input::Axis::Collective,
+                }])
+            }
+            _ => {}
         }
         if self.commands.len() < 256 {
             self.commands.push(command);
@@ -420,6 +495,76 @@ impl Input {
             });
         }
     }
+    /// Added standard gamepad commands apply only to aircraft that use them.
+    /// Other aircraft retain their original modifier look/rudder/fixture map.
+    pub fn aircraft_controls(
+        &mut self,
+        vectoring: bool,
+        conversion: bool,
+        collective: bool,
+        gunship: bool,
+    ) {
+        self.gamepad_roles = [vectoring, conversion, collective, gunship];
+        let roles = self.gamepad_roles;
+        let signature = (roles, self.resolver.profile.bindings.len());
+        if self.filter_signature == Some(signature) {
+            return;
+        }
+        self.filter_signature = Some(signature);
+        let aliases = self.resolver.profile.aliases.clone();
+        let explicit: Vec<_> = self
+            .resolver
+            .profile
+            .bindings
+            .iter()
+            .filter(|b| !b.device.starts_with(AUTO_GAMEPAD_PREFIX))
+            .map(|b| {
+                (
+                    aliases.get(&b.device).unwrap_or(&b.device).clone(),
+                    b.control.clone(),
+                    b.mode,
+                )
+            })
+            .collect();
+        let changed = self.resolver.filter_bindings(|binding| {
+            if binding.device.starts_with(AUTO_GAMEPAD_PREFIX) {
+                let device = aliases.get(&binding.device).unwrap_or(&binding.device);
+                let (mods, base) = tore_input::chord_parts(&binding.control);
+                if explicit.iter().any(|(reference, control, mode)| {
+                    if reference != "*" && reference != device { return false; }
+                    let (other_mods, other_base) = tore_input::chord_parts(control);
+                    if mods != other_mods || tore_input::token_base(base) != tore_input::token_base(other_base) { return false; }
+                    !matches!((*mode, binding.mode), (tore_input::Mode::Position(a), tore_input::Mode::Position(b)) if a != b)
+                }) { return false; }
+            }
+            gamepad_binding_enabled(binding, roles)
+        });
+        if changed {
+            self.key_claims.clear();
+            self.key_values.clear();
+            for control in FLIGHT_KEYS {
+                self.resolver.event(Event {
+                    device: "keyboard".into(),
+                    control: control.into(),
+                    value: 0.,
+                    baseline: true,
+                });
+            }
+            for device in self.devices.values() {
+                for control in &device.controls {
+                    self.resolver.event(normalize(
+                        device,
+                        Event {
+                            device: device.id.clone(),
+                            control: control.id.clone(),
+                            value: control.value,
+                            baseline: true,
+                        },
+                    ));
+                }
+            }
+        }
+    }
     pub fn poll(&mut self) -> (Vec<Action>, bool, Vec<String>) {
         self.observed.clear();
         self.next_poll = Instant::now() + Duration::from_millis(8);
@@ -434,7 +579,7 @@ impl Input {
                             .profile
                             .bindings
                             .iter()
-                            .any(|b| b.device == d.id)
+                            .any(|b| self.resolver.matches_device(&b.device, &d.id))
                     {
                         let defaults = gamepad_defaults(&d);
                         if self.resolver.profile.bindings.len() + defaults.bindings.len() <= 1024 {
@@ -443,6 +588,7 @@ impl Input {
                                     "Input: standard Linux gamepad bindings enabled; see docs/INPUT.md"
                                 );
                             }
+                            self.resolver.profile.aliases.extend(defaults.aliases);
                             self.resolver.profile.bindings.extend(defaults.bindings);
                             for modifier in defaults.modifiers {
                                 if !self.resolver.profile.modifiers.contains(&modifier) {
@@ -454,6 +600,8 @@ impl Input {
                     if self.devices.contains_key(&d.id) {
                         lost |= self.resolver.disconnect(&d.id);
                     }
+                    let [vectoring, conversion, collective, gunship] = self.gamepad_roles;
+                    self.aircraft_controls(vectoring, conversion, collective, gunship);
                     for c in &d.controls {
                         self.resolver.event(normalize(
                             &d,
@@ -549,6 +697,14 @@ impl Input {
                 _ => value,
             });
         let (mut frame, look) = self.resolver.frame(target);
+        if self.gamepad_roles[3]
+            && self
+                .resolver
+                .owned_binding(tore_input::Axis::VectorYawRate)
+                .is_some_and(|binding| binding.device.starts_with(AUTO_GAMEPAD_PREFIX))
+        {
+            frame.vector_yaw_rate = 0.;
+        }
         let mut commands = std::mem::take(&mut self.commands);
         commands.append(&mut frame.commands);
         frame.commands = commands;
@@ -861,19 +1017,28 @@ pub fn gamepad_text(device: &Device) -> String {
         ("button:304", "menu-accept", "press", 1.),
         ("button:305", "menu-back", "press", 1.),
     ];
-    let mut text = String::from("tore-input 1\n");
+    let default_ref = format!("{AUTO_GAMEPAD_PREFIX}{}", device.id);
+    let mut text = format!("tore-input 1\nalias {default_ref} {}\n", device.id);
     for (control, action, mode, scale) in defaults {
         if device.controls.iter().any(|c| c.id == control) {
             text.push_str(&format!(
                 "bind {} {control} {action} {mode} -1 0 1 0.1 1 {scale} 10\n",
-                device.id
+                default_ref
             ));
         }
     }
     if device.controls.iter().any(|c| c.id == "button:314") {
-        text.push_str(&format!("modifier {} button:314\n", device.id));
+        text.push_str(&format!("modifier {default_ref} button:314\n"));
     }
     for (control, action, mode) in [
+        ("axis:3", "vector-yaw-rate", "axis"),
+        ("axis:3>0.5", "weapon-group-next", "press"),
+        ("axis:3<-0.5", "weapon-group-toggle", "press"),
+        ("axis:4", "vector-pitch-rate", "axis"),
+        ("axis:3", "conversion-rate", "axis"),
+        ("axis:4", "collective-rate", "axis"),
+        ("axis:17", "neutral-vector", "position=-1"),
+        ("button:315", "engine", "press"),
         ("button:311", "fire", "hold"),
         ("button:310", "weapon-next", "press"),
         ("button:304", "designate", "press"),
@@ -890,11 +1055,15 @@ pub fn gamepad_text(device: &Device) -> String {
         ("button:316", "incoming", "press"),
     ] {
         if device.controls.iter().any(|c| c.id == "button:314")
-            && device.controls.iter().any(|c| c.id == control)
+            && device
+                .controls
+                .iter()
+                .any(|c| c.id == tore_input::token_base(control))
         {
             text.push_str(&format!(
-                "bind {} button:314+{control} {action} {mode}\n",
-                device.id
+                "bind {} button:314+{control} {action} {mode} -1 0 1 0.1 1 {} 10\n",
+                default_ref,
+                if action == "collective-rate" { -1. } else { 1. }
             ));
         }
     }
@@ -1262,6 +1431,218 @@ mod tests {
         assert_eq!(i.frame(&BTreeSet::new(), 0.1).0.throttle, None);
     }
     #[test]
+    fn aircraft_context_keeps_old_look_rudder_and_scopes_added_engine_neutral_commands() {
+        let device = crate::controls_editor::preview_device();
+        let mut i = input("");
+        i.resolver = Resolver::new(gamepad_defaults(&device));
+        i.devices.insert(device.id.clone(), device.clone());
+        let event = |i: &mut Input, control: &str, value: f64| {
+            i.resolver.event(Event {
+                device: device.id.clone(),
+                control: control.into(),
+                value,
+                baseline: false,
+            })
+        };
+        i.aircraft_controls(false, false, false, false);
+        event(&mut i, "button:314", 1.);
+        event(&mut i, "axis:4", -0.5);
+        event(&mut i, "axis:5", 1.);
+        let (pilot, look) = i.frame(&BTreeSet::new(), 0.5);
+        assert!(look[1] > 0.);
+        assert!(pilot.yaw > 0.);
+        assert_eq!(pilot.collective_rate, 0.);
+        assert!(i.resolver.drain().is_empty());
+        event(&mut i, "button:315", 1.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("target-jammer".into()))]
+        );
+        i.aircraft_controls(false, false, true, false);
+        event(&mut i, "button:314", 1.);
+        event(&mut i, "axis:4", -0.5);
+        event(&mut i, "axis:5", 1.);
+        let (pilot, look) = i.frame(&BTreeSet::new(), 0.5);
+        assert!(pilot.collective_rate > 0.);
+        assert!(pilot.yaw > 0.);
+        assert_eq!(look[1], 0.);
+        assert!(i.resolver.drain().is_empty());
+        event(&mut i, "button:315", 1.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(
+                device.id.clone(),
+                Action::Pilot(PilotCommand::Toggle(tore_input::Switch::Engine))
+            )]
+        );
+        i.aircraft_controls(true, false, false, false);
+        event(&mut i, "button:314", 1.);
+        event(&mut i, "axis:17", -1.);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(
+                device.id.clone(),
+                Action::Pilot(PilotCommand::NeutralVector)
+            )]
+        );
+        i.aircraft_controls(false, false, false, true);
+        event(&mut i, "button:314", 1.);
+        event(&mut i, "axis:3", 0.75);
+        assert_eq!(
+            i.resolver.drain(),
+            vec![(device.id.clone(), Action::Ui("weapon-group-next".into()))]
+        );
+        let (pilot, look) = i.frame(&BTreeSet::new(), 0.5);
+        assert_eq!(pilot.vector_yaw_rate, 0.);
+        assert_eq!(look[0], 0.);
+    }
+    #[test]
+    fn explicit_engine_and_target_jammer_bindings_override_contextual_gamepad_defaults() {
+        let device = crate::controls_editor::preview_device();
+        for (roles, action, expected) in [
+            (
+                [false; 4],
+                "engine",
+                Action::Pilot(PilotCommand::Toggle(tore_input::Switch::Engine)),
+            ),
+            (
+                [false, false, true, false],
+                "target-jammer",
+                Action::Ui("target-jammer".into()),
+            ),
+        ] {
+            let mut profile = gamepad_defaults(&device);
+            let custom = Profile::parse(&format!(
+                "tore-input 1\nbind {} button:314+button:315 {action} press",
+                device.id
+            ))
+            .unwrap();
+            profile.bindings.extend(custom.bindings);
+            // Canonical persistence must keep automatic origins distinct from custom rows.
+            let text = profile.to_text().unwrap();
+            let mut i = input("");
+            i.resolver = Resolver::new(Profile::parse(&text).unwrap());
+            i.devices.insert(device.id.clone(), device.clone());
+            i.aircraft_controls(roles[0], roles[1], roles[2], roles[3]);
+            for control in ["button:314", "button:315"] {
+                i.resolver.event(Event {
+                    device: device.id.clone(),
+                    control: control.into(),
+                    value: 1.,
+                    baseline: false,
+                });
+            }
+            assert_eq!(i.resolver.drain(), vec![(device.id.clone(), expected)]);
+        }
+    }
+    #[test]
+    fn queued_neutral_command_temporarily_releases_bound_absolute_lift_levers() {
+        let mut i =
+            input("bind stick nozzle vector-pitch unit\nbind stick nacelle conversion unit");
+        for control in ["nozzle", "nacelle"] {
+            i.resolver.event(Event {
+                device: "stick".into(),
+                control: control.into(),
+                value: -0.2,
+                baseline: true,
+            });
+        }
+        let pilot = i.frame(&BTreeSet::new(), 0.5).0;
+        assert_eq!(pilot.vector_pitch, Some(0.4));
+        assert_eq!(pilot.conversion, Some(0.4));
+        i.queue(PilotCommand::NeutralVector);
+        let pilot = i.frame(&BTreeSet::new(), 0.5).0;
+        assert_eq!(pilot.commands, vec![PilotCommand::NeutralVector]);
+        assert_eq!(pilot.vector_pitch, None);
+        assert_eq!(pilot.conversion, None);
+        assert_eq!(i.frame(&BTreeSet::new(), 0.5).0.vector_pitch, None);
+        i.resolver.event(Event {
+            device: "stick".into(),
+            control: "nacelle".into(),
+            value: -0.1,
+            baseline: false,
+        });
+        assert_eq!(i.frame(&BTreeSet::new(), 0.5).0.conversion, Some(0.45));
+    }
+    #[test]
+    fn powered_lift_stock_keys_release_remap_and_obey_modifiers() {
+        let mut i = input("");
+        i.context(false, true);
+        assert!(i.key("ArrowDown", true, M::CONTROL));
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.vector_pitch_rate, 1.);
+        assert!(i.key("ArrowDown", false, M::empty()));
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.vector_pitch_rate, 0.);
+        assert!(i.key("Home", true, M::CONTROL));
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.collective_rate, 1.);
+        i.context(false, false);
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.collective_rate, 0.);
+        i.context(false, true);
+        i.key("Home", false, M::empty());
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.collective_rate, 0.);
+        assert!(!i.key("Home", true, M::SHIFT));
+        let mut i = input("");
+        let p = Profile::parse(
+            "tore-input 1\ndisable keyboard Ctrl-Home\nbind keyboard w collective-rate positive",
+        )
+        .unwrap();
+        i.save_settings_to(&p, None);
+        i.context(false, true);
+        assert!(i.key("Home", true, M::CONTROL));
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.collective_rate, 0.);
+        assert!(i.key("w", true, M::empty()));
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.collective_rate, 1.);
+        i.release_keys();
+        assert_eq!(i.frame(&BTreeSet::new(), 0.7).0.collective_rate, 0.);
+    }
+    #[test]
+    fn powered_lift_gamepad_layer_preserves_combat_buttons() {
+        let p = gamepad_defaults(&crate::controls_editor::preview_device());
+        for (control, action) in [
+            ("button:314+axis:3", "vector-yaw-rate"),
+            ("button:314+axis:4", "vector-pitch-rate"),
+            ("button:314+axis:3", "conversion-rate"),
+            ("button:314+axis:4", "collective-rate"),
+            ("button:314+button:311", "fire"),
+            ("button:314+button:310", "weapon-next"),
+        ] {
+            assert!(
+                p.bindings
+                    .iter()
+                    .any(|b| b.control == control && b.action == Action::parse(action).unwrap())
+            );
+        }
+        for control in ["button:314+axis:3", "button:314+axis:4"] {
+            assert_eq!(
+                p.bindings.iter().filter(|b| b.control == control).count(),
+                2
+            );
+        }
+        assert!(!p.bindings.iter().any(|b| matches!(
+            b.control.as_str(),
+            "button:314+axis:0" | "button:314+axis:1"
+        )));
+        let mut r = Resolver::new(p);
+        for control in ["axis:0", "axis:1", "axis:3", "axis:4", "button:314"] {
+            r.event(Event {
+                device: crate::controls_editor::preview_device().id,
+                control: control.into(),
+                value: 0.,
+                baseline: true,
+            });
+        }
+        for (control, value) in [("button:314", 1.), ("axis:1", 0.5), ("axis:4", -0.5)] {
+            r.event(Event {
+                device: crate::controls_editor::preview_device().id,
+                control: control.into(),
+                value,
+                baseline: false,
+            });
+        }
+        let pilot = r.frame(0.7).0;
+        assert!(pilot.pitch > 0.);
+        assert!(pilot.collective_rate > 0.);
+    }
+    #[test]
     fn keyboard_pitch_and_look_keep_original_signs() {
         let mut i = input("");
         let keys = BTreeSet::from(["ArrowDown".into(), "LookArrowLeft".into()]);
@@ -1316,53 +1697,66 @@ mod tests {
                 .collect(),
         };
         let profile = Profile::parse(&gamepad_text(&d)).unwrap();
-        let chords: Vec<_> = profile
-            .bindings
-            .iter()
-            .filter(|b| b.control.contains('+'))
-            .cloned()
-            .collect();
-        assert_eq!(chords.len(), 14);
-        for binding in chords {
-            let mut r = Resolver::new(profile.clone());
-            for id in ids {
+        for roles in [
+            [false; 4],
+            [true, false, false, false],
+            [false, true, true, false],
+            [false, false, true, false],
+            [false, false, false, true],
+        ] {
+            let chords: Vec<_> = profile
+                .bindings
+                .iter()
+                .filter(|b| {
+                    b.control.contains('+')
+                        && !matches!(b.action, Action::Axis(_))
+                        && gamepad_binding_enabled(b, roles)
+                })
+                .cloned()
+                .collect();
+            assert_eq!(chords.len(), 14 + if roles[3] { 2 } else { 0 });
+            for binding in chords {
+                let mut r = Resolver::new(profile.clone());
+                r.filter_bindings(|binding| gamepad_binding_enabled(binding, roles));
+                for id in ids {
+                    r.event(Event {
+                        device: d.id.clone(),
+                        control: id.into(),
+                        value: 0.,
+                        baseline: true,
+                    });
+                }
                 r.event(Event {
                     device: d.id.clone(),
-                    control: id.into(),
-                    value: 0.,
-                    baseline: true,
+                    control: "button:314".into(),
+                    value: 1.,
+                    baseline: false,
                 });
-            }
-            r.event(Event {
-                device: d.id.clone(),
-                control: "button:314".into(),
-                value: 1.,
-                baseline: false,
-            });
-            let (_, control) = binding.control.split_once('+').unwrap();
-            r.event(Event {
-                device: d.id.clone(),
-                control: control.into(),
-                value: if let tore_input::Mode::Position(n) = binding.mode {
-                    f64::from(n)
+                let (_, control) = binding.control.split_once('+').unwrap();
+                r.event(Event {
+                    device: d.id.clone(),
+                    control: control.into(),
+                    value: if let tore_input::Mode::Position(n) = binding.mode {
+                        f64::from(n)
+                    } else {
+                        1.
+                    },
+                    baseline: false,
+                });
+                let actions = r.drain();
+                if binding.action == Action::Ui("fire".into()) {
+                    assert!(r.held("fire"));
+                    assert!(actions.is_empty());
                 } else {
-                    1.
-                },
-                baseline: false,
-            });
-            let actions = r.drain();
-            if binding.action == Action::Ui("fire".into()) {
-                assert!(r.held("fire"));
-                assert!(actions.is_empty());
-            } else {
-                assert_eq!(
-                    actions,
-                    vec![(d.id.clone(), binding.action.clone())],
-                    "{}",
-                    binding.control
-                );
+                    assert_eq!(
+                        actions,
+                        vec![(d.id.clone(), binding.action.clone())],
+                        "{}",
+                        binding.control
+                    );
+                }
+                assert_eq!(r.frame(0.5).0.throttle_rate, 0.);
             }
-            assert_eq!(r.frame(0.5).0.throttle_rate, 0.);
         }
     }
 }

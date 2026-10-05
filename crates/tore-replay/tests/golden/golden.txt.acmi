@@ -5,7 +5,7 @@ FileVersion=2.2
 0,ReferenceLongitude=31.4703712
 0,ReferenceLatitude=46.6279629
 0,DataSource=T.O.R.E-Fighters 0.1.0
-0,DataRecorder=tore-replay format 1
+0,DataRecorder=tore-replay format 2
 0,Title=Quick Mission in Ukraine
 0,Comments=Game map centered on a calibrated center in Ukraine. Geographic spacing fitted to airport references (baseline RMS 27.3 km). Source map distortions remain. Native coordinates retain game distances.
 #0

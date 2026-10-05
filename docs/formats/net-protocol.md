@@ -713,11 +713,25 @@ an escape to a varint; strings are a length byte and UTF-8.
 | Interpolation delay | 6, 0 to 63 |
 | View subject | 1, then kind 2 and id varint |
 | Mismatch | 32 |
-| First tick | pitch, roll, yaw 16 signed each (-32,767 to 32,767); throttle rate 8 signed (-127 to 127); throttle 1, then 16; trigger 1; scope channel 2 (radar, infrared, visual), range step 4 (0 to 5, the scope's six ranges), history 1 |
-| Each later tick | 1 bit "same as the tick before"; else 7 change bits (pitch, roll, yaw, throttle rate, throttle, trigger, scope), then each changed value: a stick as its difference from the tick before (bucketed, 4, 8 or 17 bits), the rest as in the first tick; a changed trigger flips and needs no value |
+| First tick | pitch, roll, yaw 16 signed each (-32,767 to 32,767); throttle rate 8 signed (-127 to 127); throttle 1, then 16; trigger 1; powered-lift block (below); scope channel 2 (radar, infrared, visual), range step 4 (0 to 5, the scope's six ranges), history 1 |
+| Each later tick | 1 bit "same as the tick before"; else 8 change bits (pitch, roll, yaw, throttle rate, throttle, trigger, scope, powered lift), then each changed value: a stick as its difference from the tick before (bucketed, 4, 8 or 17 bits), the rest as in the first tick; a changed trigger flips and needs no value |
 | Command count | 7, 0 to 64 |
 | First command number | 16, when there are commands; the rest follow one by one |
 | Each command | ticks before the newest (varint), a 5-bit code and its fields |
+
+Protocol 7 adds a powered-lift block: one present bit, then four signed rate
+bytes (-127 through 127) and four optional signed 16-bit positions (-32,767
+through 32,767). Axis order is vector pitch, vector yaw, conversion, collective.
+Only vector yaw permits negative positions; other positions cover 0 through
+32,767. An absent block means zero rates and no absolute positions.
+The cockpit stores readout also carries the authoritative six gun angles
+and linked mask for the predicting player, whose remote entity is excluded.
+Combat command codes 26 and 27 select a gun-group candidate and toggle its
+membership. Device mask interpolation is discrete.
+
+Set-axis and adjust-axis commands carry a two-bit axis code plus an optional
+position or signed step; neutral-vector is a separate command. Ordinary
+fixed-wing input pays only the absent bit on the first tick.
 
 The command codes cover every `SeatCommand` (a combat command has its own
 5-bit code, with a heat byte, a distance or a target id where it has one; a
@@ -754,12 +768,14 @@ its records in id order.
 | Body against a baseline | 1 bit "moved"; if set, the position residuals after the prediction, the velocity, angle and speed differences, each bucketed (position and velocity 3, 6, 10, 14 or 20 bits; angles 3, 6, 9, 12 or 17; speed 3, 6, 10 or 16); then for each group of slow fields a changed bit, and in a changed group a bit per field and each new value |
 
 The identity fields (full records only): an aircraft's type as 1 bit and its
-place among the fourteen selectable aircraft (4 bits); a projectile's owner
+place among the 37 selectable aircraft (6 bits); a projectile's owner
 (varint), weapon (12-bit name index), shape (1 and 12), target (1 and a
 varint) and whether it is aimed at this player; a debris piece's owner, the
-aircraft whose model draws it (1 and 4) and its damage variant (1 and 3); a
+aircraft whose model draws it (1 and 6) and its damage variant (1 and 3); a
 pilot's aircraft. An aircraft's slow groups are its devices (present, six
-levels at 1/255, three control surfaces at 1/127, the throttle at 1/255; an
+levels at 1/255, three control surfaces at 1/127, the throttle at 1/255, actual vector pitch/conversion/collective at 1/255
+and actual vector yaw at 1/127, six normalized gun-mount angles at 1/127 and
+a three-bit linked-gun mask; an
 aircraft without devices sends only the present bit), its engine (lit,
 afterburner, flame, three rates as signed varints), its damage (hit points,
 initial hit points and six sections as signed varints, the structural
@@ -1076,7 +1092,7 @@ number changes on its own.
 
 The file starts with 12 bytes: the 8-byte magic `TORE-CAP`
 (`tore_session::capture::MAGIC`, which a game's pruner checks so that it only
-ever deletes captures), the capture format's version (16 bits, 2 since EF4) and the
+ever deletes captures), the capture format's version (16 bits, 3 since powered-lift controls) and the
 protocol version (16 bits); a reader refuses another of either. Records follow, each a kind (8 bits), a body length (32 bits) and the
 body; a capture cut short ends at its last whole record. Numbers are least
 significant byte first, times are nanoseconds of the client's clock (64 bits),
@@ -1086,7 +1102,7 @@ and strings are a 16-bit length and UTF-8.
 | --- | --- | --- |
 | 1 | Start | The time the join started, the seed of its randomness (64 bits: the nonce comes from it), the server's address, the callsign, the game version and commit, a release-build byte, the plane asked for (a byte, then 32 bits when 1), and whether the client readies by itself (a byte, format 2). Never the password |
 | 2 | Receive | The time, the sender's address, then the datagram as it arrived |
-| 3 | Update | The time, then the controls as the client rounded them, bit packed: pitch, roll and yaw (16 bits each), the throttle rate (8), the throttle position (1, then 16), the trigger (1), the scope's channel (2), range step (4) and history (1), the view subject (1, then its kind in 2 bits and its id as a varint), and the commands (a varint count, then each in its Inputs coding) |
+| 3 | Update | The time, then the controls as the client rounded them, bit packed: pitch, roll and yaw (16 bits each), the throttle rate (8), the throttle position (1, then 16), the trigger (1), the scope's channel (2), range step (4) and history (1), the powered-lift block in Inputs coding, the view subject (1, then its kind in 2 bits and its id as a varint), and the commands (a varint count, then each in its Inputs coding) |
 | 4 | Frame | The time a frame was drawn |
 | 5 | Leave | The time the player ended the mission |
 | 6 | Disconnect | The time the player quit |

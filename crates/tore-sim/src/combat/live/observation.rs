@@ -77,7 +77,12 @@ pub(super) fn observe_ownship(
     );
     own.bore_observation = None;
     let index = own.selected;
-    let w = &own.config.stations[index].weapon;
+    let Some(station) = own.config.stations.get(index) else {
+        own.mounted = Seeker::default();
+        own.range_estimate = None;
+        return;
+    };
+    let w = &station.weapon;
     if let Some(profile) =
         missiles::Profile::for_weapon(w).filter(|_| context.weapon_rules == Rules::Spec)
     {

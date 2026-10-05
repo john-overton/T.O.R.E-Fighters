@@ -4729,6 +4729,7 @@ mod tests {
             AircraftId::Mig23 => "MiG-23",
             AircraftId::Su35 => "Su-35",
             AircraftId::F22 | AircraftId::F22n | AircraftId::Faxx => "F-22",
+            _ => id.reviewed_names().expect("reviewed variety identity").0,
         }
         .into();
         profile.shape = format!("{}.SH", id.stem());
@@ -4943,7 +4944,24 @@ mod tests {
 
     #[test]
     fn anonymous_hit_defends_without_target_at_every_skill_and_in_both_flight_models() {
-        for aircraft in AircraftId::SELECTABLE {
+        // This is the established AI roster. The variety batch adds player
+        // flight families without adding an AI calibration or acceptance claim.
+        for aircraft in [
+            AircraftId::F18,
+            AircraftId::Rafale,
+            AircraftId::F14,
+            AircraftId::A4E,
+            AircraftId::X31,
+            AircraftId::Mig29,
+            AircraftId::Su27,
+            AircraftId::Mig21,
+            AircraftId::Su25,
+            AircraftId::Mig23,
+            AircraftId::Su35,
+            AircraftId::F22,
+            AircraftId::F22n,
+            AircraftId::Faxx,
+        ] {
             for skill in Experience::ALL {
                 for hybrid in [false, true] {
                     let mut start = setup(1, 1, 0, [0., 5000., 0.], 0.);

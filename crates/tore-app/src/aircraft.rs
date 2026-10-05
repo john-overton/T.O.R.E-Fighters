@@ -83,39 +83,19 @@ impl Airframe {
         let mut cockpit_palette = palette;
         cockpit_palette[..frame.palette.len()].copy_from_slice(&frame.palette);
         let mut sprites = BTreeMap::new();
-        let cockpit_art = [
-            id.cockpit().to_string(),
-            format!("~{}_LH.PIC", id.cockpit_stem()),
-            format!("~{}_CH.PIC", id.cockpit_stem()),
-            format!("~{}_RH.PIC", id.cockpit_stem()),
-        ];
-        for name in cockpit_art.iter().map(String::as_str) {
-            {
-                use tore_formats::aircraft::AircraftId;
-                let absent_overlay = matches!(
-                    id,
-                    AircraftId::X31
-                        | AircraftId::Mig21
-                        | AircraftId::F22
-                        | AircraftId::F22n
-                        | AircraftId::Faxx
-                ) && cockpit_art[1..].iter().any(|n| n == name)
-                    || matches!(id, AircraftId::Mig29 | AircraftId::Mig23 | AircraftId::Su25)
-                        && name == cockpit_art[2];
-                if absent_overlay {
-                    continue;
-                }
-                let p = Pic::parse(get(name)?)?;
-                sprites.insert(
-                    name.into(),
-                    Sprite {
-                        width: p.width,
-                        height: p.height,
-                        rgba: p.rgba(&cockpit_palette),
-                        glyphs: p.glyphs,
-                    },
-                );
-            }
+        for name in std::iter::once(id.cockpit().to_string())
+            .chain(id.cockpit_overlays().into_iter().flatten())
+        {
+            let p = Pic::parse(get(&name)?)?;
+            sprites.insert(
+                name,
+                Sprite {
+                    width: p.width,
+                    height: p.height,
+                    rgba: p.rgba(&cockpit_palette),
+                    glyphs: p.glyphs,
+                },
+            );
         }
         let hud = tore_formats::hud::Hud::parse(get(id.hud())?)?;
         let panel_name = hud.panel_resource();
@@ -245,7 +225,12 @@ impl Airframe {
             }
         }
         let damage_art = crate::damage_art::DamageArt::load(id, data, &mut atlas, &poses)?;
-        kind.contrail_offsets = contrail_offsets(id, &poses[0], rig.as_ref());
+        kind.contrail_offsets = contrail_offsets(
+            id,
+            &poses[0],
+            rig.as_ref(),
+            profile.fields["engines"].number()? as usize,
+        );
         Ok(Self {
             kind: Arc::new(kind),
             engine_material,
@@ -701,12 +686,8 @@ fn contrail_offsets(
     id: tore_formats::aircraft::AircraftId,
     neutral: &Shape,
     rig: Option<&crate::additional_animation::Rig>,
+    count: usize,
 ) -> Vec<[f64; 3]> {
-    use tore_formats::aircraft::AircraftId;
-    let count = match id {
-        AircraftId::A4E | AircraftId::X31 | AircraftId::Mig21 | AircraftId::Mig23 => 1,
-        _ => 2,
-    };
     let scale = f64::from(rig.map_or(1. / 3., |r| r.scale()));
     (0..count)
         .map(|group| {
@@ -748,7 +729,7 @@ fn contrail_offsets(
                 let lateral = if count == 1 {
                     0.
                 } else {
-                    span * 0.15 * if group == 0 { -1. } else { 1. }
+                    span * 0.15 * (2. * group as f64 - (count - 1) as f64)
                 };
                 [lateral, 0., aft - 2.]
             }
@@ -804,7 +785,14 @@ impl Airframe {
             height: 1,
             glyphs: Vec::new(),
         };
-        let contrail_offsets = contrail_offsets(id, &poses[0], rig.as_ref());
+        let engines = match id {
+            tore_formats::aircraft::AircraftId::A4E
+            | tore_formats::aircraft::AircraftId::X31
+            | tore_formats::aircraft::AircraftId::Mig21
+            | tore_formats::aircraft::AircraftId::Mig23 => 1,
+            _ => 2,
+        };
+        let contrail_offsets = contrail_offsets(id, &poses[0], rig.as_ref(), engines);
         Self {
             kind: Arc::new(AircraftType::synthetic(id, contrail_offsets)),
             nozzle_bounds: nozzle_bounds(id, &poses[0]),

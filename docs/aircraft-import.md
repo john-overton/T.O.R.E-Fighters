@@ -14,10 +14,18 @@ from Quick Mission. Since 2026-09-22 it uses the validated F-22N import
 media. See the [variant contract](spec/fa-xx.md) for split flaps, the stowed
 hook and handling limits.
 
-Updated 2026-09-16. Start here when adding an aircraft. This guide joins the
+Updated 2026-10-05. Start here when adding an aircraft. This guide joins the
 existing extraction, format, simulation, presentation and systems contracts;
 linked research remains authoritative for byte layouts and native behavior.
 “Imported” is not synonymous with “fully implemented” or “retail validated.”
+
+The [23-aircraft variety matrix](spec/aircraft-variety.md) now tracks the initial
+ports of transports, gunship, airborne radar aircraft, powered-lift aircraft,
+helicopters, fighters including all four F-4s, and airliners. There are 36 retail
+import identities plus F/A-XX. Source roots are [reviewed](formats/aircraft-variety.md);
+[flight validation](baselines/variety-flight.md) separates source configuration,
+fitted handling and remaining visual/systems work. Milestones live in the
+[roadmap](ROADMAP.md#aircraft-variety-import).
 
 ## Scheduled aircraft and execution order
 
@@ -200,7 +208,100 @@ Record unavailable checks; do not collapse these into a single “complete”
 checkbox. Update this guide,
 `formats/coverage.md`, `FLIGHT-MODEL.md` and `parity-plan.md` with actual results.
 
+## Worked variety import examples
+
+These examples describe the implemented initial ports. Use the linked specs
+and validation, not real-aircraft assumptions, when importing the next type.
+
+### C-130 and other unarmed transports
+
+1. Review the exact PT identity and schema, source quantities and full
+   dependency closure. C130.PT names AC130.HUD and C130.SH; its missing PTS
+   and cockpit overlays are explicit exceptions in
+   [the source inventory](formats/aircraft-variety.md).
+2. Register the identity in `tore-formats::aircraft::AircraftId`, including
+   exact PT/HUD/shape/cockpit names and installed gun/radar lists. An empty
+   gun list and absent radar are supported states. Do not add a placeholder
+   weapon or radar to satisfy old callers.
+3. Add its independently owned configuration through
+   `tore-sim::models::variety`. Reuse the shared integration and response laws,
+   retain the aircraft's own source fields, and document every tuning choice
+   in the [flight contract](spec/variety-flight.md). Derive ground clearance
+   from its deployed geometry at the host scale.
+4. Review the shape layout and device branches with the bounded
+   `shape_inspect` example. The app's `variety_animation` descriptor checks
+   those measurements before animating. Propeller/rotor phase selection and
+   fitted hinges live in `variety_rotors`; do not copy another shape's offsets.
+   [Animation contract](spec/variety-animation.md).
+5. Check source HUD and panel names, transparency, equipment indications and
+   exterior/deployed captures. A shared cockpit supplies art, not another
+   aircraft's sensors. No-radar instruments must report absent equipment.
+6. Run the source-backed flight probe, application headless flight, source
+   capability summary and wrapped rendering checks. Add the identity to the
+   appropriate battery family and record the evidence.
+
+For an already reviewed and extracted C-130, from the repository root:
+
+```sh
+cargo run --locked -p tore-sim --example variety_flight -- .local/aircraft-variety/FA_2.LIB/C130.PT
+TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --aircraft c130 --headless-flight 1200 --no-audio --no-controllers
+TORE_DATA_DIR=.local/dev-profile tools/agent-run.sh cargo run --locked -p tore-app -- --aircraft c130 --free-flight --flight-view 2 --flight-devices 1,1,1,0,0 --capture-flight .local/c130.ppm --no-audio
+```
+
+The C-130 capture sets the hook fraction to zero because it has no hook.
+The application profile must already be imported; CLI extraction remains
+research data, not an alternate runtime pack. The
+[headless setup guide](DEVELOPMENT.md#headless-development) explains isolated
+profiles and runtime import.
+
+### F-4 variants and stores
+
+Keep all four exact identities. B/J can share reviewed shape and handling
+algorithms, while E/G retain their own shape and differing configuration.
+Compare values as in the [F-4 source review](formats/aircraft.md#f-4-variant-comparison),
+then test each profile. Identical G envelopes do not justify replacing mass,
+fuel, rudder, departure, radar or weapon data with the newest variant's values.
+
+Treat installed hardware and ammunition separately. The F-4J's source SUU16
+is a gun pod, not an internal gun or a single expendable bullet. The same
+distinction governs [external tanks](spec/external-fuel-tanks.md): selected
+count, empty equipment mass and fuel/ammunition are different quantities.
+Accepted empty selections must survive mission creation, restart and network
+loadout serialization.
+
+### Powered lift and special systems
+
+The [powered-flight contract](spec/variety-flight.md) supplies the initial
+VTOL, tiltrotor and helicopter laws and all fitted constants. Use source
+limits where reviewed and fit missing values explicitly. Hover initialization
+uses final mission altitude, fuel and payload; it is not an automatic pilot.
+The source probe exercises hover, landing, lift-off and applicable conversion.
+
+New controls must be available in the in-game editor, saved profiles, input
+tapes and network input. Put actual device positions into snapshots and
+recordings so remote and replay animation follows the same state. Update the
+[master controls](CONTROLS.md) and [keyboard map](tore-keyboard-map.html)
+only from implemented defaults.
+
+For a new system family, follow the [AC-130 contract](spec/ac130-linked-guns.md):
+source gun records, explicit fitted aiming limits, individual ammunition and
+cadence, shared simulation/render muzzle transforms, and tests for blocked
+fire as well as successful firing. Importing references alone does not
+implement a special capability such as AWACS contact sharing.
+
 ## Commands and implementation entry points
+
+For an aircraft with selectable external tanks, review its exact GAS record and
+the original hardpoint's compatibility/count fields. The shared loadout keeps
+tank identity and installed quantity separate from weapon ammunition. Review
+internal fuel, external fuel, empty shell mass and total mass independently.
+Use the Tanks page to remove or reload a tank. New accepted loads record an
+explicit empty tank list when all tanks are removed; missing tank lists in older
+saved missions preserve source defaults. `cargo run --locked -p tore-app --
+--validate-tanks --aircraft f14 --no-audio` is a headless worked regression for
+zero, one and two F250 tanks and accepted-load restoration. See the
+[tank contract](spec/external-fuel-tanks.md) and
+[validation](baselines/external-fuel-tanks.md) for source values and limits.
 
 Supported extraction/flight validation commands:
 

@@ -108,15 +108,20 @@ pub struct Stores {
     pub ammo: Vec<u16>,
     /// Which stations held something at the start of the mission, a bit each.
     pub loaded: u32,
+    /// Authoritative normalized heading/elevation pairs for the gunship's mounts.
+    pub gun_aim: [f64; 6],
+    pub gun_group: u8,
 }
 impl Stores {
     /// The rounds at `station`.
     pub fn rounds(&self, station: usize) -> u16 {
-        self.ammo[station] & 0x7fff
+        self.ammo.get(station).copied().unwrap_or(0) & 0x7fff
     }
     /// Whether `station` has failed.
     pub fn failed(&self, station: usize) -> bool {
-        self.ammo[station] & 0x8000 != 0
+        self.ammo
+            .get(station)
+            .is_some_and(|ammo| ammo & 0x8000 != 0)
     }
     /// Whether `station` was loaded at the start of the mission, whatever it
     /// holds now.
@@ -543,6 +548,11 @@ pub fn build(
             loaded: (0..own.ammo.len())
                 .filter(|station| own.was_loaded(*station))
                 .fold(0, |mask, station| mask | 1 << station),
+            gun_aim: own
+                .gunship
+                .as_ref()
+                .map_or([0.; 6], |guns| guns.normalized_devices()),
+            gun_group: own.gunship.as_ref().map_or(0, |guns| guns.mask()),
         },
         seeker: SeekerReadout {
             status: own.mounted.status,

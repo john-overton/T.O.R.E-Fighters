@@ -9,6 +9,13 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
     if source.rgba.len() != out.len().saturating_mul(4) {
         return out;
     }
+    // Shared artwork uses the same reviewed glass, never the donor's physics.
+    let id = match id.cockpit_stem() {
+        "F4" => AircraftId::A4E,
+        "AV8" => AircraftId::Su27,
+        "SU33" => AircraftId::Mig29,
+        _ => id,
+    };
     let (expected, polygon): ((usize, usize), &[Point]) = match id {
         AircraftId::F18 => (
             (1280, 490),
@@ -112,6 +119,76 @@ pub fn mask(source: &Sprite, id: AircraftId) -> Vec<u8> {
                 (310, 190),
             ],
         ),
+        // Fitted apertures reviewed against the imported high-resolution art.
+        AircraftId::A7 => (
+            (1280, 490),
+            &[(484, 137), (800, 137), (722, 410), (555, 410)],
+        ),
+        AircraftId::F104 | AircraftId::A10 => (
+            (1280, 490),
+            &[
+                (579, 158),
+                (701, 158),
+                (779, 210),
+                (749, 434),
+                (531, 434),
+                (501, 210),
+            ],
+        ),
+        AircraftId::F16C => (
+            (1280, 490),
+            &[
+                (472, 99),
+                (505, 74),
+                (640, 60),
+                (775, 74),
+                (808, 99),
+                (774, 366),
+                (505, 366),
+            ],
+        ),
+        AircraftId::Yak141 => (
+            (1280, 490),
+            &[
+                (607, 83),
+                (668, 83),
+                (723, 113),
+                (772, 206),
+                (799, 401),
+                (478, 401),
+                (504, 206),
+                (556, 113),
+            ],
+        ),
+        AircraftId::Mig17 => (
+            (1280, 490),
+            &[
+                (544, 161),
+                (552, 147),
+                (728, 147),
+                (736, 161),
+                (732, 335),
+                (548, 335),
+            ],
+        ),
+        AircraftId::C130
+        | AircraftId::Ac130
+        | AircraftId::E3
+        | AircraftId::Il76
+        | AircraftId::E2
+        | AircraftId::V22
+        | AircraftId::Ah64
+        | AircraftId::Ch47
+        | AircraftId::B747
+        | AircraftId::A310 => ((1280, 490), &[(0, 0), (1279, 0), (1279, 489), (0, 489)]),
+        // The cockpit aliases above exhaust these identities.
+        AircraftId::Av8
+        | AircraftId::Mi24
+        | AircraftId::F4B
+        | AircraftId::F4J
+        | AircraftId::F4E
+        | AircraftId::F4G
+        | AircraftId::F15 => unreachable!("resolved cockpit alias"),
     };
     if (source.width, source.height) != expected {
         return out;

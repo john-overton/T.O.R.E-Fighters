@@ -36,6 +36,16 @@ weapons return only after their flight behaviour is implemented and validated,
 following the [weapon update passes](../ROADMAP.md#weapon-catalog-update-passes).
 Validation is recorded in the [catalog baseline](../baselines/ordnance-catalog.md).
 
+The Tanks button adds a separate compatible-tank catalog and station view.
+Tank quantities are installed equipment, not ammunition. The original action
+button pieces and card outlines are reused; an imported tank icon is used when
+available, without inventing a silhouette. Cards show the source tank name and
+full mass. External fuel and tank-shell mass appear separately above the station
+area. Existing plus/minus and right-click gestures change one installed tank.
+The internal-fuel rocker keeps its 500 lb step. Unload All and toggling Cheat
+clear both kinds of equipment. Rules, persistence and geometry limits live in
+the [tank specification](external-fuel-tanks.md).
+
 ## Presentation
 
 The original ORD_AIR3 background, thumbnail images, dial, rocker and button

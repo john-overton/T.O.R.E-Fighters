@@ -341,6 +341,7 @@ impl ControlAdapter {
                 limits,
             )?),
             commands: vec![PilotCommand::Set(Switch::Burner, intent.afterburner)],
+            ..PilotInput::default()
         }
         .bounded();
 

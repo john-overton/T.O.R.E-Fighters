@@ -612,9 +612,9 @@ fn configuration(stations: Vec<(Weapon, u16, bool)>) -> Configuration {
         damage_capacity: 60,
         afterburner_available: true,
         hardpoint_slots: (0..slots).map(Some).chain([None, None, None]).collect(),
-        radar_hardpoint: slots,
+        radar_hardpoint: Some(slots),
         visual_hardpoint: slots + 2,
-        ecm_hardpoint: slots + 1,
+        ecm_hardpoint: Some(slots + 1),
         aircraft: AircraftId::F18,
         stations: stations
             .into_iter()
@@ -627,6 +627,9 @@ fn configuration(stations: Vec<(Weapon, u16, bool)>) -> Configuration {
             .collect(),
         hit_points: 20,
         target_category: 0x80,
+        fixed_external_equipment_lbs: 0,
+        tanks: vec![],
+        gun_pods: vec![],
         external_equipment_lbs: 0,
         external_fuel_lbs: [0.; 9],
         engines: 1,

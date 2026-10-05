@@ -150,6 +150,13 @@ pub struct Devices {
     pub surfaces: [i8; 3],
     pub speed: i32,
     pub throttle: u8,
+    /// Actual vector pitch, conversion and collective, in 1/255 units.
+    pub lift_levels: [u8; 3],
+    /// Actual vector yaw, in signed 1/127 units.
+    pub vector_yaw: i8,
+    /// Interleaved normalized gun heading/elevation for the three AC-130 guns.
+    pub gun_aim: [i8; 6],
+    pub gun_group: u8,
 }
 
 /// Nozzle and flame inputs.
@@ -305,7 +312,7 @@ fn section_code(section: Option<DamageSection>) -> i64 {
     section.map_or(0, |s| s as i64 + 1)
 }
 
-/// An aircraft identity's 4-bit code: its place among the selectable ones.
+/// An aircraft identity's 6-bit code: its place among the selectable ones.
 fn aircraft_code(id: AircraftId) -> u64 {
     AircraftId::SELECTABLE
         .iter()
@@ -315,14 +322,14 @@ fn aircraft_code(id: AircraftId) -> u64 {
 
 fn write_aircraft_id(w: &mut BitWriter, id: Option<AircraftId>) {
     bits::write_option(w, id, |w, id| {
-        let _ = w.write_bits(aircraft_code(id), 4);
+        let _ = w.write_bits(aircraft_code(id), 6);
     });
 }
 
 fn read_aircraft_id(r: &mut BitReader<'_>) -> WireResult<Option<AircraftId>> {
     bits::read_option(r, |r| {
         AircraftId::SELECTABLE
-            .get(r.read_bits(4)? as usize)
+            .get(r.read_bits(6)? as usize)
             .copied()
             .ok_or(WireError::Invalid("aircraft"))
     })
@@ -378,7 +385,28 @@ const LEVEL: Field = Field::Unsigned(8, 255);
 const SURFACE: Field = Field::Signed(8, -127);
 
 const DEVICES: &[Field] = &[
-    BIT, LEVEL, LEVEL, LEVEL, LEVEL, LEVEL, LEVEL, SURFACE, SURFACE, SURFACE, LEVEL,
+    BIT,
+    LEVEL,
+    LEVEL,
+    LEVEL,
+    LEVEL,
+    LEVEL,
+    LEVEL,
+    SURFACE,
+    SURFACE,
+    SURFACE,
+    LEVEL,
+    LEVEL,
+    LEVEL,
+    LEVEL,
+    SURFACE,
+    SURFACE,
+    SURFACE,
+    SURFACE,
+    SURFACE,
+    SURFACE,
+    SURFACE,
+    Field::Unsigned(3, 7),
 ];
 const ENGINE: &[Field] = &[BIT, BIT, BIT, Field::Int32, Field::Int32, Field::Int32];
 const DAMAGE: &[Field] = &[
@@ -595,6 +623,10 @@ impl EntityState {
                 devices.extend(d.levels.iter().map(|&v| i64::from(v)));
                 devices.extend(d.surfaces.iter().map(|&v| i64::from(v)));
                 devices.push(i64::from(d.throttle));
+                devices.extend(d.lift_levels.iter().map(|&v| i64::from(v)));
+                devices.push(i64::from(d.vector_yaw));
+                devices.extend(d.gun_aim.iter().map(|&v| i64::from(v)));
+                devices.push(i64::from(d.gun_group));
                 let e = s.engine;
                 let engine = vec![
                     flag(e.lit),
@@ -652,6 +684,10 @@ impl EntityState {
                     surfaces: std::array::from_fn(|i| g(0, 7 + i) as i8),
                     speed: flat.fast[0] as i32,
                     throttle: g(0, 10) as u8,
+                    lift_levels: std::array::from_fn(|i| g(0, 11 + i) as u8),
+                    vector_yaw: g(0, 14) as i8,
+                    gun_aim: std::array::from_fn(|i| g(0, 15 + i) as i8),
+                    gun_group: g(0, 21) as u8,
                 });
                 if devices.is_none()
                     && (flat.groups[0][1..].iter().any(|&v| v != 0) || flat.fast[0] != 0)
@@ -737,7 +773,10 @@ impl EntityState {
         }
         if let Self::Aircraft(a) = self
             && let Some(d) = a.devices
-            && d.surfaces.contains(&i8::MIN)
+            && (d.surfaces.contains(&i8::MIN)
+                || d.vector_yaw == i8::MIN
+                || d.gun_aim.contains(&i8::MIN)
+                || d.gun_group > 7)
         {
             return Err(WireError::Invalid("control surface"));
         }

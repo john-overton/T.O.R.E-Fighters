@@ -16,8 +16,12 @@ use tore_sim::{
 };
 
 /// Animated devices in snapshot order: gear, flaps, brake, hook, bay,
-/// exhaust, elevator, aileron, rudder, speed (feet per second) and throttle.
-pub const DEVICES: usize = 11;
+/// exhaust, elevator, aileron, rudder, speed (feet per second), throttle,
+/// actual nozzle pitch/yaw, actual nacelle conversion and actual collective.
+pub const DEVICES: usize = 22;
+/// Six signed gun mount coordinates, followed by discrete group membership.
+pub const GUN_AIM: usize = 15;
+pub const GUN_GROUP: usize = 21;
 
 /// Everything combat draws after one simulation tick.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -221,15 +225,77 @@ pub struct PilotPose {
 
 pub fn devices(s: &flight::State) -> [f64; DEVICES] {
     [
-        s.gear, s.flaps, s.brake, s.hook, s.bay, s.exhaust, s.elevator, s.aileron, s.rudder,
-        s.speed, s.throttle,
+        s.gear,
+        s.flaps,
+        s.brake,
+        s.hook,
+        s.bay,
+        s.exhaust,
+        s.elevator,
+        s.aileron,
+        s.rudder,
+        s.speed,
+        s.throttle,
+        s.lift_controls.vector_pitch_actual,
+        s.lift_controls.vector_yaw_actual,
+        s.lift_controls.conversion_actual,
+        s.lift_controls.collective_actual,
+        s.gun_aim[0][0],
+        s.gun_aim[0][1],
+        s.gun_aim[1][0],
+        s.gun_aim[1][1],
+        s.gun_aim[2][0],
+        s.gun_aim[2][1],
+        f64::from(s.gun_group),
     ]
 }
 pub fn set_devices(s: &mut flight::State, devices: [f64; DEVICES]) {
+    let group;
     [
-        s.gear, s.flaps, s.brake, s.hook, s.bay, s.exhaust, s.elevator, s.aileron, s.rudder,
-        s.speed, s.throttle,
+        s.gear,
+        s.flaps,
+        s.brake,
+        s.hook,
+        s.bay,
+        s.exhaust,
+        s.elevator,
+        s.aileron,
+        s.rudder,
+        s.speed,
+        s.throttle,
+        s.lift_controls.vector_pitch_actual,
+        s.lift_controls.vector_yaw_actual,
+        s.lift_controls.conversion_actual,
+        s.lift_controls.collective_actual,
+        s.gun_aim[0][0],
+        s.gun_aim[0][1],
+        s.gun_aim[1][0],
+        s.gun_aim[1][1],
+        s.gun_aim[2][0],
+        s.gun_aim[2][1],
+        group,
     ] = devices;
+    s.gun_group = if group.is_finite() && group.fract() == 0. && (0. ..=7.).contains(&group) {
+        group as u8
+    } else {
+        0
+    };
+}
+
+/// Apply combat-owned mount poses only to a display clone, leaving flight devices alone.
+pub fn set_gun_devices(s: &mut flight::State, devices: &[f64; DEVICES]) {
+    s.gun_aim = std::array::from_fn(|mount| {
+        [
+            devices[GUN_AIM + mount * 2],
+            devices[GUN_AIM + mount * 2 + 1],
+        ]
+    });
+    let group = devices[GUN_GROUP];
+    s.gun_group = if group.is_finite() && group.fract() == 0. && (0. ..=7.).contains(&group) {
+        group as u8
+    } else {
+        0
+    };
 }
 
 /// The picture between two consecutive snapshots at tick fraction `alpha`.
@@ -291,7 +357,11 @@ pub fn blend(previous: Option<&AircraftPose>, current: &AircraftPose, alpha: f64
     if let Some(after) = current.devices {
         let before = previous.and_then(|pose| pose.devices).unwrap_or(after);
         pose.devices = Some(std::array::from_fn(|i| {
-            before[i] + (after[i] - before[i]) * alpha
+            if i == GUN_GROUP {
+                after[i]
+            } else {
+                before[i] + (after[i] - before[i]) * alpha
+            }
         }));
     }
     pose
@@ -314,8 +384,10 @@ fn presented_player(previous: &AircraftPose, current: &AircraftPose, alpha: f64)
         .angles();
     pose.velocity = std::array::from_fn(|i| lerp(previous.velocity[i], current.velocity[i]));
     if let (Some(before), Some(mut after)) = (previous.devices, current.devices) {
-        for (value, before) in after.iter_mut().zip(before).take(DEVICES - 1) {
-            *value = lerp(before, *value);
+        for (slot, (value, before)) in after.iter_mut().zip(before).enumerate() {
+            if slot != 10 && slot != GUN_GROUP {
+                *value = lerp(before, *value);
+            }
         }
         pose.devices = Some(after);
     }
@@ -340,7 +412,15 @@ pub fn pose_state(template: &flight::State, pose: &AircraftPose) -> flight::Stat
     s.velocity = pose.velocity;
     match pose.devices {
         Some(devices) => set_devices(&mut s, devices),
-        None => [s.gear, s.flaps, s.exhaust, s.bay] = [0.; 4],
+        None => {
+            [s.gear, s.flaps, s.exhaust, s.bay] = [0.; 4];
+            s.lift_controls.vector_pitch_actual = 0.;
+            s.lift_controls.vector_yaw_actual = 0.;
+            s.lift_controls.conversion_actual = 0.;
+            s.lift_controls.collective_actual = 0.;
+            s.gun_aim = [[0.; 2]; 3];
+            s.gun_group = 0;
+        }
     }
     s.engine = pose.engine.lit;
     s.burner = pose.engine.afterburner;
@@ -370,9 +450,14 @@ mod tests {
     #[test]
     fn devices_follow_the_tick_fraction() {
         let mut previous = pose(1, [0.; 3], [0.; 3]);
-        previous.devices = Some([1., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0.]);
+        previous.devices = Some([
+            1., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+        ]);
         let mut current = previous.clone();
-        current.devices = Some([0., 0., 1., 1., 1., 1., 0.4, -0.4, 0.2, 400., 1.]);
+        current.devices = Some([
+            0., 0., 1., 1., 1., 1., 0.4, -0.4, 0.2, 400., 1., 0.8, -0.6, 0.4, 0.2, 0., 0., 0., 0.,
+            0., 0., 0.,
+        ]);
         let at = |alpha| blend(Some(&previous), &current, alpha).devices.unwrap();
         assert_eq!(at(0.)[..2], [1., 1.]);
         let quarter = at(0.25);
@@ -381,6 +466,7 @@ mod tests {
             [0.75, 0.75, 0.25, 100.]
         );
         assert_eq!(quarter[6..9], [0.1, -0.1, 0.05]);
+        assert_eq!(quarter[11..15], [0.2, -0.15, 0.1, 0.05]);
         assert_eq!(at(1.)[..2], [0., 0.]);
         // First seen this tick: drawn as simulated.
         assert_eq!(blend(None, &current, 0.5).devices, current.devices);
@@ -433,8 +519,15 @@ mod tests {
         let mid = interpolate(Some(&snapshot(&previous)), &snapshot(&current), 0.5).player;
         assert_eq!(mid.position, [50., 0., 0.]);
         let devices = mid.devices.unwrap();
-        assert!(devices[..DEVICES - 1].iter().all(|v| *v == 0.5));
-        assert_eq!(devices[DEVICES - 1], 1.);
+        assert!(
+            devices
+                .iter()
+                .enumerate()
+                .filter(|(slot, _)| *slot != 10 && *slot != GUN_GROUP)
+                .all(|(_, v)| *v == 0.5)
+        );
+        assert_eq!(devices[10], 1.);
+        assert_eq!(devices[GUN_GROUP], 1.);
         current.crashed = true;
         current.wreck = Some(wreck::Phase::Grounded);
         let held = interpolate(Some(&snapshot(&previous)), &snapshot(&current), 0.5).player;

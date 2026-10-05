@@ -23,6 +23,33 @@ Steering turns the nosewheel and steerable strut, leaving separate braces fixed.
 Nosewheel steering has 90-degree authority through 10 mph, fading
 linearly to zero at 25 mph ground speed. [Rules and fitted constants](spec/lateral-flight.md).
 
+## AC-130 directed guns
+
+Select an observed target, then use Ctrl+7 to choose a gun candidate and Ctrl+8
+to include or remove it from the firing group. Hold Fire to release eligible
+linked guns. The Weapons instrument's LINK row shows membership and its ordinary
+arrow identifies the current candidate. Each gun has its own ammo, cadence,
+source-informed arc and fitted tracking slew. A gun that cannot bear, is empty
+or has lost its target does not fire. These are player-directed controls;
+[limits and gamepad defaults](INPUT.md#ac-130-directed-gun-groups).
+
+## VTOL, tiltrotors and helicopters
+
+Use the ordinary arrow stick, End/Page Down rudder, E engine switch and 1-8
+power controls. Ctrl+Up/Down moves VTOL nozzles toward forward/vertical thrust;
+Ctrl+Left/Right requests nozzle yaw. **0** returns nozzles and V-22 nacelles to
+forward neutral. V-22 conversion uses Ctrl+Page Up for airplane mode and
+Ctrl+Page Down for helicopter mode. Ctrl+Home increases collective and Ctrl+End
+reduces it on rotorcraft. Rate controls retain the position when released.
+
+Set power independently of collective. In helicopter mode the collective
+controls lift and pitch/roll tilts the lift direction. The controls editor
+exposes all four added demands as bindable absolute axes, rate axes and button
+alternatives. The [input guide](INPUT.md#vtol-tiltrotor-and-helicopter-controls)
+lists gamepad defaults, axis calibration and modifier behaviour. Source evidence,
+fitted rates and aircraft applicability belong in the
+[flight variety behaviour spec](spec/variety-flight.md).
+
 ## Working flight commands
 
 | Key | Action | Evidence/status |

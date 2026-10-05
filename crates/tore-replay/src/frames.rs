@@ -247,7 +247,7 @@ impl FrameCoder {
     }
 
     /// Reads one frame's states into `frame`.
-    pub fn get(&mut self, input: &mut In, frame: &mut Frame) -> Result<()> {
+    pub fn get(&mut self, input: &mut In, frame: &mut Frame, version: u16) -> Result<()> {
         let flags = input.uv()?;
         if flags & !FRAME_SURFACE != 0 {
             return Err(corrupt("a frame has unknown flags"));
@@ -256,7 +256,7 @@ impl FrameCoder {
         let keys = get_list(input, &self.aircraft_keys, MAX_AIRCRAFT, "aircraft", true)?;
         let mut next = HashMap::with_capacity(keys.len());
         for id in &keys {
-            let pred = get_aircraft(input, self.aircraft.remove(id))?;
+            let pred = get_aircraft(input, self.aircraft.remove(id), version)?;
             frame.aircraft.push(pred.state(*id));
             next.insert(*id, pred);
         }

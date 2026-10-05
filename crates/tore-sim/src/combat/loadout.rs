@@ -16,15 +16,35 @@ pub struct Loadout {
     pub empty_lbs: f64,
     pub maximum_lbs: f64,
     pub hardpoints: Vec<Hardpoint>,
+    /// Original source hardpoints corresponding to the explicit tank station rows.
+    pub tank_hardpoints: Vec<Hardpoint>,
     /// Loadout screen Cheat: any store on any station, up to its capacity.
     pub cheat: bool,
 }
 impl Loadout {
+    pub fn ammunition(&self) -> Result<Vec<u16>> {
+        self.configuration.ammunition(&self.quantities)
+    }
+    pub fn refresh_equipment(&mut self) -> Result<()> {
+        for pod in &mut self.configuration.gun_pods {
+            pod.quantity = if self.configuration.stations[pod.station].weapon.source == "SUU16.JT" {
+                self.quantities[pod.station]
+            } else {
+                0
+            };
+        }
+        self.configuration.refresh_tanks()
+    }
     pub fn new(a: &Aircraft, read: impl FnMut(&str) -> Result<Vec<u8>>) -> Result<Self> {
         let configuration = live::Configuration::from_source(a, read)?;
         Ok(Self {
             aircraft: a.id,
             quantities: configuration.stations.iter().map(|s| s.count).collect(),
+            tank_hardpoints: configuration
+                .tanks
+                .iter()
+                .map(|s| a.hardpoints[s.hardpoint].clone())
+                .collect(),
             configuration,
             fuel_lbs: a.fields["internalFuel"].number()? as f64,
             internal_capacity_lbs: a.fields["internalFuel"].number()? as f64,
@@ -39,7 +59,110 @@ impl Loadout {
             cheat: false,
         })
     }
+    pub fn tank_capacity(&self, slot: usize, tank: &live::TankStore) -> i32 {
+        self.tank_hardpoints
+            .get(slot)
+            .and_then(|h| {
+                loading::Station::from_source(h).ok().map(|s| {
+                    let matches_default = h.store.as_deref() == Some(tank.source.as_str());
+                    // Preserve reviewed source-default quantities. The generic
+                    // full-tank weight cap disagrees with A4E/F104 defaults;
+                    // paired/weight consumer semantics remain unresolved.
+                    if matches_default {
+                        return h.count;
+                    }
+                    let store = loading::Store::tank(tank.tank);
+                    if self.cheat {
+                        s.cheat_count(store, matches_default, h.store.is_some())
+                    } else {
+                        s.allowed_count(store, matches_default)
+                    }
+                })
+            })
+            .unwrap_or(0)
+            .clamp(0, 32766)
+    }
+    /// Tanks start full. Filling an installed empty tank is a later UI feature.
+    pub fn select_tank(&mut self, slot: usize, tank: live::TankStore) -> Result<()> {
+        let capacity = self.tank_capacity(slot, &tank);
+        if capacity <= 0 {
+            return Err(super::invalid(
+                "This tank cannot be loaded at this station.",
+            ));
+        }
+        let mut configuration = self.configuration.clone();
+        let station = configuration
+            .tanks
+            .get_mut(slot)
+            .ok_or_else(|| super::invalid("Invalid tank station."))?;
+        let hardpoint = station.hardpoint;
+        station.store = Some(tank);
+        station.quantity = capacity as u16;
+        configuration.refresh_tanks()?;
+        self.configuration = configuration;
+        if let Some(Some(weapon)) = self.configuration.hardpoint_slots.get(hardpoint) {
+            self.quantities[*weapon] = 0;
+        }
+        self.refresh_equipment()
+    }
+    pub fn change_tank(&mut self, slot: usize, direction: i32) -> Result<()> {
+        let Some(station) = self.configuration.tanks.get(slot) else {
+            return Ok(());
+        };
+        let Some(store) = &station.store else {
+            return Ok(());
+        };
+        let capacity = self.tank_capacity(slot, store);
+        let quantity = (i32::from(station.quantity) + direction.signum()).clamp(0, capacity) as u16;
+        let hardpoint = station.hardpoint;
+        self.configuration.tanks[slot].quantity = quantity;
+        if quantity > 0
+            && let Some(Some(weapon)) = self.configuration.hardpoint_slots.get(hardpoint)
+        {
+            self.quantities[*weapon] = 0;
+        }
+        self.refresh_equipment()
+    }
+    pub fn clear_tanks(&mut self) -> Result<()> {
+        for station in &mut self.configuration.tanks {
+            station.quantity = 0;
+        }
+        self.refresh_equipment()
+    }
+    pub fn external_fuel_lbs(&self) -> f64 {
+        self.configuration.external_fuel_lbs.iter().sum()
+    }
+    pub fn tank_shell_lbs(&self) -> f64 {
+        self.configuration
+            .tanks
+            .iter()
+            .filter_map(|s| {
+                s.store
+                    .as_ref()
+                    .map(|store| f64::from(s.quantity) * f64::from(store.tank.empty_weight))
+            })
+            .sum()
+    }
+    fn clear_tank_on_weapon_slot(&mut self, slot: usize) -> Result<()> {
+        for tank in &mut self.configuration.tanks {
+            if self.configuration.hardpoint_slots.get(tank.hardpoint) == Some(&Some(slot)) {
+                tank.quantity = 0;
+            }
+        }
+        self.refresh_equipment()
+    }
     pub fn capacity(&self, slot: usize, w: &Weapon) -> i32 {
+        // The reviewed pod contract is limited to source-installed gun-pod
+        // stations. Unrelated rocket launchers keep their existing semantics.
+        if w.source == "SUU16.JT"
+            && !self
+                .configuration
+                .gun_pods
+                .iter()
+                .any(|pod| pod.station == slot)
+        {
+            return 0;
+        }
         self.hardpoints
             .get(slot)
             .and_then(|h| {
@@ -66,7 +189,7 @@ impl Loadout {
         self.configuration.stations[slot].weapon = w;
         self.configuration.stations[slot].count = capacity as u16;
         self.quantities[slot] = capacity as u16;
-        Ok(())
+        self.clear_tank_on_weapon_slot(slot)
     }
     pub fn change(&mut self, slot: usize, direction: i32) {
         if let Some(s) = self.configuration.stations.get(slot) {
@@ -74,6 +197,11 @@ impl Loadout {
             let step = quantity_step(cap);
             self.quantities[slot] =
                 (i32::from(self.quantities[slot]) + direction.signum() * step).clamp(0, cap) as u16;
+            if self.quantities[slot] > 0 {
+                let _ = self.clear_tank_on_weapon_slot(slot);
+            } else {
+                let _ = self.refresh_equipment();
+            }
         }
     }
     /// Move one quantity step, preserving both loads if the destination rejects it.
@@ -101,15 +229,21 @@ impl Loadout {
             self.configuration.stations[target].count = capacity as u16;
             self.quantities[target] = existing as u16 + moved;
             self.quantities[source] -= moved;
+            self.clear_tank_on_weapon_slot(target)?;
         }
         Ok(())
     }
     pub fn restrict_to_guns(&mut self) {
         for (station, count) in self.configuration.stations.iter().zip(&mut self.quantities) {
-            if station.weapon.source != self.aircraft.gun() {
+            if !self
+                .aircraft
+                .guns()
+                .contains(&station.weapon.source.as_str())
+            {
                 *count = 0;
             }
         }
+        let _ = self.refresh_equipment();
     }
     pub fn fuel(&mut self, up: bool) {
         self.fuel_lbs =
@@ -124,11 +258,12 @@ impl Loadout {
                 .stations
                 .iter()
                 .zip(&self.quantities)
-                .filter(|(s, _)| !s.internal)
+                .filter(|(s, _)| !s.internal && s.weapon.source != "SUU16.JT")
                 .map(|(s, n)| f64::from(s.weapon.weight) * f64::from(*n))
                 .sum::<f64>()
     }
     pub fn validate(&self) -> Result<()> {
+        self.ammunition()?;
         if self.quantities.len() != self.configuration.stations.len()
             || !self.fuel_lbs.is_finite()
             || !(0. ..=self.internal_capacity_lbs).contains(&self.fuel_lbs)
@@ -150,6 +285,43 @@ impl Loadout {
                     "This store is available for setup only; its flight behavior is not implemented yet.",
                 ));
             }
+        }
+        if self.configuration.tanks.len() != self.tank_hardpoints.len() {
+            return Err(super::invalid("Invalid tank station state."));
+        }
+        for (index, tank) in self.configuration.tanks.iter().enumerate() {
+            if tank.quantity > 0 {
+                let store = tank
+                    .store
+                    .as_ref()
+                    .ok_or_else(|| super::invalid("Tank quantity has no selected type."))?;
+                if i32::from(tank.quantity) > self.tank_capacity(index, store) {
+                    return Err(super::invalid("Tank quantity exceeds station capacity."));
+                }
+                if let Some(Some(slot)) = self.configuration.hardpoint_slots.get(tank.hardpoint)
+                    && self.quantities[*slot] > 0
+                {
+                    return Err(super::invalid(
+                        "A weapon and a tank cannot share the same station.",
+                    ));
+                }
+            }
+        }
+        let mut derived = self.configuration.clone();
+        for pod in &mut derived.gun_pods {
+            pod.quantity = if derived.stations[pod.station].weapon.source == "SUU16.JT" {
+                self.quantities[pod.station]
+            } else {
+                0
+            };
+        }
+        derived.refresh_tanks()?;
+        if derived.external_equipment_lbs != self.configuration.external_equipment_lbs
+            || derived.external_fuel_lbs != self.configuration.external_fuel_lbs
+        {
+            return Err(super::invalid(
+                "Tank fuel and mass disagree with installed quantities.",
+            ));
         }
         if self.total_lbs() > self.maximum_lbs {
             return Err(super::invalid(
@@ -197,6 +369,21 @@ pub fn supported(name: &str) -> bool {
         "MICA.JT",
         "R530.JT",
         "R550.JT",
+        "AA10.JT",
+        "AGM88.JT",
+        "AIM7.JT",
+        "AIM7E.JT",
+        "AIM9B.JT",
+        "AT2.JT",
+        "C_105.JT",
+        "C_25.JT",
+        "C_40.JT",
+        "GAU12.JT",
+        "GAU8.JT",
+        "GSH30.JT",
+        "SUU16.JT",
+        "T12_4.JT",
+        "T30_1.JT",
     ]
     .contains(&name)
 }

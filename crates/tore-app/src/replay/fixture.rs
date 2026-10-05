@@ -96,7 +96,10 @@ fn aircraft(id: u32, tick: u64) -> AircraftState {
         airspeed: horizontal,
         // The player pulls hard enough for wing vapor.
         g: if id == 0 { 6.5 } else { 2. },
-        devices: [0., 0., 0., 0., 0., 0.3, 0.1, -0.1, 0., horizontal, 0.9],
+        devices: [
+            0., 0., 0., 0., 0., 0.3, 0.1, -0.1, 0., horizontal, 0.9, 0., 0., 0., 0., 0., 0., 0.,
+            0., 0., 0., 0.,
+        ],
         heat: 0.9,
         flags: AircraftFlags {
             engine_on: true,

@@ -358,7 +358,7 @@ impl Combat {
             h,
             false,
             load.configuration.clone(),
-            Some(load.quantities.clone()),
+            Some(load.ammunition()?),
         )
     }
     /// Combat for an open mission: no ownship and no host's aircraft. The
@@ -477,6 +477,14 @@ impl Combat {
                 .copied()
                 .or_else(|| self.render.current_target(id).and_then(|pose| pose.devices))
         };
+        let gun_devices = |mut devices: [f64; crate::snapshot::DEVICES], own: &live::Ownship| {
+            if let Some(gunship) = &own.gunship {
+                devices[crate::snapshot::GUN_AIM..crate::snapshot::GUN_GROUP]
+                    .copy_from_slice(&gunship.normalized_devices());
+                devices[crate::snapshot::GUN_GROUP] = f64::from(gunship.mask());
+            }
+            devices
+        };
         let config = own.configuration();
         let capacity = config.damage_capacity;
         let player_engine = Engine {
@@ -515,7 +523,7 @@ impl Combat {
                 position: player.position,
                 attitude: [player.yaw, player.pitch, player.bank],
                 velocity: player.velocity,
-                devices: Some(crate::snapshot::devices(player)),
+                devices: Some(gun_devices(crate::snapshot::devices(player), own)),
                 engine: player_engine,
                 damage: Damage {
                     hp: own.hp,
@@ -568,7 +576,7 @@ impl Combat {
                     position: pose.position,
                     attitude: pose.attitude,
                     velocity: pose.velocity,
-                    devices: Some(pose.devices),
+                    devices: Some(gun_devices(pose.devices, own)),
                     engine: Engine {
                         flame: pose.engine.flame && own.hp > 0,
                         ..pose.engine
@@ -1721,7 +1729,7 @@ pub mod fixtures {
     pub fn loaded(ammo: [u16; 2]) -> (Combat, flight::State) {
         let mut c = combat(vec![], vec![]);
         let mut config = c.state.own().configuration().clone();
-        config.stations[0].weapon.source = AircraftId::F18.gun().into();
+        config.stations[0].weapon.source = AircraftId::F18.gun().unwrap().into();
         c.state = live::State::new(config, true).unwrap();
         c.initial_ammo = Some(ammo.to_vec());
         let mut f = flight::State::new(&crate::test_support::profile(), [0.; 3]).unwrap();
@@ -1869,7 +1877,11 @@ pub mod fixtures {
     pub struct Scene {
         pub previous: Vec<live::Target>,
         pub current: Vec<live::Target>,
-        pub devices: Vec<(u32, [f64; 11], [f64; 11])>,
+        pub devices: Vec<(
+            u32,
+            [f64; crate::snapshot::DEVICES],
+            [f64; crate::snapshot::DEVICES],
+        )>,
         pub projectiles: Vec<live::Projectile>,
         pub effects: Vec<live::Effect>,
         pub debris: Vec<Piece>,
@@ -1983,23 +1995,47 @@ pub mod fixtures {
         let devices = vec![
             (
                 1,
-                [1., 0.5, 0., 0., 0., 0.2, 0.1, -0.3, 0.05, 700., 0.6],
-                [0.8, 0.4, 0.3, 0.1, 0., 0.6, -0.2, 0.2, -0.1, 720., 0.9],
+                [
+                    1., 0.5, 0., 0., 0., 0.2, 0.1, -0.3, 0.05, 700., 0.6, 0., 0., 0., 0., 0., 0.,
+                    0., 0., 0., 0., 0.,
+                ],
+                [
+                    0.8, 0.4, 0.3, 0.1, 0., 0.6, -0.2, 0.2, -0.1, 720., 0.9, 0., 0., 0., 0., 0.,
+                    0., 0., 0., 0., 0., 0.,
+                ],
             ),
             (
                 2,
-                [0.3, 0.2, 0.5, 0., 0., 1., 0.2, 0.1, 0.3, 600., 0.8],
-                [0.2, 0.25, 0.6, 0., 0., 0.9, 0.15, 0.2, 0.25, 610., 0.85],
+                [
+                    0.3, 0.2, 0.5, 0., 0., 1., 0.2, 0.1, 0.3, 600., 0.8, 0., 0., 0., 0., 0., 0.,
+                    0., 0., 0., 0., 0.,
+                ],
+                [
+                    0.2, 0.25, 0.6, 0., 0., 0.9, 0.15, 0.2, 0.25, 610., 0.85, 0., 0., 0., 0., 0.,
+                    0., 0., 0., 0., 0., 0.,
+                ],
             ),
             (
                 3,
-                [0., 0.2, 0.4, 1., 0., 0.5, 0.3, -0.2, 0.2, 800., 0.5],
-                [0.5, 0.1, 0.3, 1., 0., 0.7, 0.25, -0.1, 0.25, 860., 0.55],
+                [
+                    0., 0.2, 0.4, 1., 0., 0.5, 0.3, -0.2, 0.2, 800., 0.5, 0., 0., 0., 0., 0., 0.,
+                    0., 0., 0., 0., 0.,
+                ],
+                [
+                    0.5, 0.1, 0.3, 1., 0., 0.7, 0.25, -0.1, 0.25, 860., 0.55, 0., 0., 0., 0., 0.,
+                    0., 0., 0., 0., 0., 0.,
+                ],
             ),
             (
                 5,
-                [0., 0., 0., 0., 0., 0.4, 0.2, 0.2, 0.1, 500., 0.4],
-                [0., 0., 0., 0., 0., 0.3, 0.1, 0.25, 0.15, 480., 0.3],
+                [
+                    0., 0., 0., 0., 0., 0.4, 0.2, 0.2, 0.1, 500., 0.4, 0., 0., 0., 0., 0., 0., 0.,
+                    0., 0., 0., 0.,
+                ],
+                [
+                    0., 0., 0., 0., 0., 0.3, 0.1, 0.25, 0.15, 480., 0.3, 0., 0., 0., 0., 0., 0.,
+                    0., 0., 0., 0., 0.,
+                ],
             ),
         ];
         let weapon = |source: &str, shape: Option<&str>| {
@@ -2196,6 +2232,43 @@ pub mod fixtures {
             }
         }
         [previous, current]
+    }
+
+    #[test]
+    fn gun_mounts_and_membership_pass_from_combat_to_draw_clones() {
+        let player = player();
+        let mut combat = combat(types(), vec![]);
+        let gunship = tore_sim::combat::gunship::State {
+            stations: [Some(0), Some(1), None],
+            included: [true, false, true],
+            headings: [-std::f64::consts::FRAC_PI_2, -1.2, -1.8],
+            elevations: [0.1, -0.2, 0.3],
+            target: Some(99),
+            status: [live::Readiness::Ready; 3],
+        };
+        let expected = gunship.normalized_devices();
+        combat.state.ownship_mut(0).unwrap().gunship = Some(gunship);
+        let picture = combat.snapshot(0, &player, None);
+        let devices = picture.player.devices.unwrap();
+        assert_eq!(
+            &devices[crate::snapshot::GUN_AIM..crate::snapshot::GUN_GROUP],
+            &expected
+        );
+        assert_eq!(devices[crate::snapshot::GUN_GROUP], 5.);
+        let mut drawn = player.clone();
+        crate::snapshot::set_gun_devices(&mut drawn, &devices);
+        assert_eq!(drawn.gun_aim.concat(), expected);
+        assert_eq!(drawn.gun_group, 5);
+        assert_eq!(drawn.throttle, player.throttle);
+        assert_eq!(drawn.lift_controls, player.lift_controls);
+        assert_eq!(player.gun_aim, [[0.; 2]; 3]);
+        let mut previous = picture.clone();
+        previous.player.devices.as_mut().unwrap()[crate::snapshot::GUN_GROUP] = 1.;
+        let blended = crate::snapshot::interpolate(Some(&previous), &picture, 0.5);
+        assert_eq!(
+            blended.player.devices.unwrap()[crate::snapshot::GUN_GROUP],
+            5.
+        );
     }
 
     #[test]

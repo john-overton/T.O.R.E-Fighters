@@ -90,7 +90,7 @@ separate proposed profile setting, never inferred from these motor numbers.
 
 | Record (source label) | Type | Availability | Launch envelope nmi | Ignition s | Burn s | Removal s | Seeker max nmi | Seeker H/V half-angle deg | Active-on distance nmi (fitted) | Uncued search H/V deg (fitted) |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |
-| AA10.JT (AA-10T) | S* | Catalog | 1.97 to 19.75 | 0 | 53 | 106 | 19.75 | 45/45 | N/A | N/A |
+| AA10.JT (AA-10T) | S* | Live | 1.97 to 19.75 | 0 | 53 | 106 | 19.75 | 45/45 | N/A | N/A |
 | AA11.JT (AA-11) | I* | Live | 0.33 to 9.87 | 0 | 26 | 52 | 9.87 | 80/80 | N/A | 5/5 |
 | AA11B.JT (AA-11B) | I* | Live | 0.25 to 9.87 | 0 | 26 | 52 | 9.87 | wide*/90 | N/A | 5/5 |
 | AA12.JT (AA-12) | A* | Live | 1.97 to 24.69 | 0 | 66 | 132 | 24.69 | 60/60 | 5 | 5/5 |
@@ -105,12 +105,12 @@ separate proposed profile setting, never inferred from these motor numbers.
 | AGM65G.JT (AGM-65) | I* | Live | 0.08 to 9.87 | 1 | 9 | 40 | 9.87 | 45/45 | N/A | N/A |
 | AGM84A.JT (AGM-84A) | A* | Catalog | 0.08 to 59.25 | 2 | 118 | 120 | 59.25 | 45/45 | 8 | N/A |
 | AGM84E.JT (AGM-84E) | I* | Catalog | 0.08 to 49.37 | 2 | 118 | 120 | 49.37 | 45/45 | N/A | 5/5 |
-| AGM88.JT (AGM-88) | E* | Catalog | 0.08 to 32.92 | 0 | 25 | 40 | 32.92 | 45/45 | N/A | N/A |
+| AGM88.JT (AGM-88) | E* | Live | 0.08 to 32.92 | 0 | 25 | 40 | 32.92 | 45/45 | N/A | N/A |
 | AIM120.JT (AIM-120) | A* | Live | 1.97 to 23.70 | 0 | 66 | 132 | 23.70 | 45/45 | 5 | 5/5 |
 | AIM54C.JT (AIM-54) | A* | Live | 4.94 to 98.75 | 2 | 139 | 283 | 98.75 | 45/45 | 10 | 5/5 |
-| AIM7.JT (AIM-7) | S* | Catalog | 1.32 to 19.75 | 2 | 51 | 106 | 19.75 | 45/45 | N/A | N/A |
-| AIM7E.JT (AIM-7E) | S* | Catalog | 0.49 to 16.46 | 1 | 11 | 60 | 16.46 | 45/45 | N/A | N/A |
-| AIM9B.JT (AIM-9B) | I* | Catalog | 0.66 to 3.95 | 0 | 3 | 20 | 8.23 | 45/45 | N/A | 5/5 |
+| AIM7.JT (AIM-7) | S* | Live | 1.32 to 19.75 | 2 | 51 | 106 | 19.75 | 45/45 | N/A | N/A |
+| AIM7E.JT (AIM-7E) | S* | Live | 0.49 to 16.46 | 1 | 11 | 60 | 16.46 | 45/45 | N/A | N/A |
+| AIM9B.JT (AIM-9B) | I* | Live | 0.66 to 3.95 | 0 | 3 | 20 | 8.23 | 45/45 | N/A | 5/5 |
 | AIM9M.JT (AIM-9M) | I* | Live | 0.66 to 3.95 | 0 | 11 | 22 | 8.23 | 45/45 | N/A | 5/5 |
 | AIM9X.JT (AIM-9X) | I* | Live | 0.49 to 3.95 | 0 | 15 | 24 | 8.23 | 75/75 | N/A | 5/5 |
 | AM39.JT (AM-39) | A* | Catalog | 0.08 to 59.25 | 2 | 64 | 132 | 59.25 | 45/45 | 8 | N/A |
@@ -121,7 +121,7 @@ separate proposed profile setting, never inferred from these motor numbers.
 | AS7.JT (AS-7) | S* | Live | 0.08 to 4.94 | 1 | 9 | 30 | 8.23 | 45/45 | N/A | N/A |
 | ASROC.JT (ASROC) | Hold: radar role | Catalog | 0.08 to 12.34 | 2 | 20 | 40 | 16.46 | wide*/90 | TBD | TBD |
 | AT12.JT (AT-12) | Hold: designator | Catalog | 0.16 to 4.28 | 3 | 97 | 180 | 4.28 | 45/45 | TBD | TBD |
-| AT2.JT (AT-2) | Hold: no seeker | Catalog | 0.08 to 2.96 | 1 | 9 | 30 | 3.29 | 45/45 | TBD | TBD |
+| AT2.JT (AT-2) | Unguided fitted host adapter | Live | 0.08 to 2.96 | 1 | 9 | 30 | 3.29 | 45/45 | TBD | TBD |
 | FIM92.JT (FIM-92) | I* | Catalog | 1.23 to 8.89 | 0 | 4 | 20 | 16.46 | wide*/90 | N/A | 5/5 |
 | HQ2J.JT (HQ-2J) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
 | HQ61.JT (HQ-61) | S* | Catalog | 1.23 to 8.89 | 2 | 21 | 40 | 16.46 | wide*/90 | N/A | N/A |
@@ -161,6 +161,33 @@ the 0x7fff source value, whose wide-angle handling needs review, not a normal
 range or completed seeker behavior. The uncued-search column contains agent-fitted
 half-angle caps, separately from the imported seeker envelope. Each axis uses
 the smaller of its fitted cap and its usable source limit.
+
+## Variety-default weapon extension
+
+Implementation choice, 2026-10-05. The source-reviewed AA10, AIM7 and AIM7E
+records use the existing supported-radar family: source signature 3 and support
+flag 0x200. AIM9B uses the existing infrared family: source signature 2. Their
+own source ranges, cones, motor timers and steering limits remain binding.
+Guidance lifetime uses each source `removeT * 30` at 120 Hz and the existing
+240-tick fitted memory interval. These classifications follow the inventory
+candidates above; exact retail homing behavior is still unvalidated.
+
+AGM88 uses the existing passive emitter profile on a manually designated
+surface radar emitter. It accepts actual enabled radar emissions and no jammer
+homing. Emission shutdown stops observations, preserving only the last observed
+intercept under the existing memory/search rules. Source ground-object systems
+and target categories determine whether a compatible surface emitter is present;
+an airborne fighter's radar is not a compatible substitute.
+
+AT2 has source signature 0. Its original command-guidance behavior is unknown.
+The host now allows the Mi24 default AT2 store as an explicitly **fitted unguided
+forward weapon**, using its own source launch/motor/coast/removal and damage
+records through the shared unguided path. It receives no invented IR, radar or
+emitter seeker, no designation lock, and no automatic steering. Source ignition
+is 1 second, powered duration 9 seconds, removal 30 seconds under the shared
+4-source-units-per-second conversion. This is a known difference from a possible
+original guided mode. The next research step is to recover the original AT2
+player command-guidance control contract before adding that mode.
 
 ## Activation and independent acquisition
 

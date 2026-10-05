@@ -123,7 +123,7 @@ impl World {
                 .stations
                 .iter()
                 .zip(&load.quantities)
-                .any(|(s, n)| s.weapon.source != load.aircraft.gun() && *n > 0)
+                .any(|(s, n)| !load.aircraft.guns().contains(&s.weapon.source.as_str()) && *n > 0)
         {
             return Err("Guns only is selected. Unload other weapons or return to setup and change the restriction.".into());
         }

@@ -46,6 +46,8 @@ pub fn command_name(c: Command) -> String {
     }
     match c {
         Command::NextWeapon => "next",
+        Command::NextGunGroup => "gun-group-next",
+        Command::ToggleGunGroup => "gun-group-toggle",
         Command::NextSelection => "selection-next",
         Command::PreviousSelection => "selection-previous",
         Command::SelectNav => "selection-nav",
@@ -93,6 +95,8 @@ pub fn command(s: &str) -> Option<Command> {
     }
     [
         Command::NextWeapon,
+        Command::NextGunGroup,
+        Command::ToggleGunGroup,
         Command::NextSelection,
         Command::PreviousSelection,
         Command::SelectNav,
@@ -148,6 +152,8 @@ mod tests {
     #[test]
     fn countermeasure_commands_have_stable_names() {
         for (command, name) in [
+            (Command::NextGunGroup, "gun-group-next"),
+            (Command::ToggleGunGroup, "gun-group-toggle"),
             (Command::ReleaseChaff, "chaff"),
             (Command::ReleaseFlare, "flare"),
         ] {

@@ -2619,6 +2619,7 @@ impl Host {
             .state
             .ownship(plane.0)
             .map(|own| LoadoutSpec {
+                tanks: None,
                 fuel_lbs: cockpit.flight.fuel,
                 cheat: false,
                 stations: own
@@ -2634,6 +2635,7 @@ impl Host {
                     .collect(),
             })
             .unwrap_or(LoadoutSpec {
+                tanks: None,
                 fuel_lbs: cockpit.flight.fuel,
                 cheat: false,
                 stations: Vec::new(),

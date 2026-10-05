@@ -76,9 +76,11 @@ impl Profile {
             "AIM54C.JT" => (Guidance::Active, Some(10.)),
             "AEMP1.JT" => (Guidance::Active, Some(3.)),
             "AS16.JT" => (Guidance::Active, Some(2.)),
-            "R530.JT" | "AS7.JT" => (Guidance::Supported, None),
+            "R530.JT" | "AS7.JT" | "AA10.JT" | "AIM7.JT" | "AIM7E.JT" => {
+                (Guidance::Supported, None)
+            }
             "AA11.JT" | "AA11B.JT" | "AA2.JT" | "AA8.JT" | "AIM9M.JT" | "AIM9X.JT" | "R550.JT"
-            | "AGM65G.JT" => (Guidance::Infrared, None),
+            | "AGM65G.JT" | "AIM9B.JT" => (Guidance::Infrared, None),
             "AGM45.JT" | "AGM88.JT" => (Guidance::Emitter, None),
             _ => return None,
         })

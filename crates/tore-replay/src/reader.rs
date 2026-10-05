@@ -644,7 +644,13 @@ impl Recording {
     pub fn decode_chunk(&self, index: usize) -> Result<Vec<Frame>> {
         let (info, body) = self.chunk_body(index)?;
         let sections = read_sections(&body)?;
-        decode_frames(&sections, info.first_tick, info.frames, &self.strings)
+        decode_frames(
+            &sections,
+            info.first_tick,
+            info.frames,
+            &self.strings,
+            self.header.format_version,
+        )
     }
 
     /// The frame at `tick`, if one was recorded.

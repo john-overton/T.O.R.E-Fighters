@@ -139,7 +139,7 @@ fn header_line(recording: &Recording) -> String {
         )
         .str(
             "devices",
-            "0 to 1, except elevator, aileron and rudder (-1 to 1) and speed (feet per second)",
+            "0 to 1, except elevator, aileron, rudder and vector yaw and gun mount coordinates (-1 to 1), speed (feet per second) and gun group (integer 0 to 7)",
         )
         .str("controls", "pitch, roll and yaw -1 to 1, throttle 0 to 1")
         .finish();

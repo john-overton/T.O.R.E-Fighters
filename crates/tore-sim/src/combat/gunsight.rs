@@ -395,9 +395,13 @@ pub(crate) mod tests {
     fn every_selectable_aircraft_gun_uses_the_same_bounded_solver() {
         let launcher = launcher();
         let mut baseline = None;
-        for id in AircraftId::ALL.into_iter().chain([AircraftId::Faxx]) {
+        for id in AircraftId::ALL
+            .into_iter()
+            .chain([AircraftId::Faxx])
+            .filter(|id| id.gun().is_some())
+        {
             let mut gun = weapon();
-            gun.source = id.gun().into();
+            gun.source = id.gun().unwrap().into();
             let solution = solve(&gun, &launcher, [0.; 3], None).unwrap().unwrap();
             assert!(solution.seconds <= 10. && solution.range_ft <= 1000.);
             if let Some(expected) = baseline {

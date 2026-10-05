@@ -17,9 +17,21 @@ enum Part {
 pub struct Rig {
     id: AircraftId,
     parts: BTreeMap<usize, Part>,
+    variety: Option<crate::variety_animation::Rig>,
 }
 impl Rig {
     pub fn load(id: AircraftId, bytes: &[u8]) -> Result<(Self, Shape), Box<dyn std::error::Error>> {
+        if crate::variety_animation::supported(id) {
+            let (variety, shape) = crate::variety_animation::Rig::load(id, bytes)?;
+            return Ok((
+                Self {
+                    id,
+                    parts: BTreeMap::new(),
+                    variety: Some(variety),
+                },
+                shape,
+            ));
+        }
         let (size, neutral_count, words, branches): (_, _, &[usize], &[(usize, Part, usize)]) =
             match id {
                 AircraftId::F14 => (
@@ -178,7 +190,14 @@ impl Rig {
         if id == AircraftId::Faxx {
             concept_colors(&mut shape.faces);
         }
-        Ok((Self { id, parts }, shape))
+        Ok((
+            Self {
+                id,
+                parts,
+                variety: None,
+            },
+            shape,
+        ))
     }
     /// A rig over synthetic face addresses, for drawing tests without retail shapes.
     #[cfg(test)]
@@ -198,15 +217,25 @@ impl Rig {
         .into_iter()
         .flat_map(|(addresses, part)| addresses.iter().map(move |address| (*address, part)))
         .collect();
-        Self { id, parts }
+        Self {
+            id,
+            parts,
+            variety: None,
+        }
     }
     pub fn scale(&self) -> f32 {
+        if let Some(rig) = &self.variety {
+            return rig.scale();
+        }
         // FA F14 has header exponent 10; A4/F31 have 8. Retain the host's
         // fitted one-third-foot scale, applying the source exponent difference.
         tore_sim::combat::debris::scale(self.id) as f32
     }
     pub fn flame(&self, address: usize) -> bool {
-        self.parts.get(&address) == Some(&Part::Flame)
+        self.variety.as_ref().map_or_else(
+            || self.parts.get(&address) == Some(&Part::Flame),
+            |rig| rig.flame(address),
+        )
     }
     pub fn cold_nozzle(&self, address: usize) -> bool {
         match self.id {
@@ -216,6 +245,9 @@ impl Rig {
         }
     }
     pub fn faces(&self, f: &Face, s: &State) -> Vec<Face> {
+        if self.variety.is_some() {
+            return vec![f.clone()];
+        }
         if self.parts.get(&f.address) == Some(&Part::Bay) {
             return crate::roster_animation::bay_lining(self.id.source(), f);
         }
@@ -248,6 +280,9 @@ impl Rig {
         )
     }
     pub fn animate(&self, source: &Face, s: &State) -> Option<Face> {
+        if let Some(rig) = &self.variety {
+            return rig.animate(source, s);
+        }
         let mut f = source.clone();
         let part = self.parts.get(&f.address).copied();
         if let Some(flame_root) = roster_flame_root(self.id) {
@@ -545,6 +580,7 @@ pub(crate) fn steerable_nose(id: AircraftId, address: usize) -> bool {
         F22 => matches!(address, 0x41fd | 0x421c),
         F22n => matches!(address, 0x42f5 | 0x4314),
         Faxx => unreachable!("source resolves the concept donor"),
+        _ => false,
     }
 }
 pub(crate) fn turn(f: &mut Face, pivot: [f32; 3], axis: [f32; 3], angle: f64) {
@@ -691,6 +727,7 @@ mod tests {
             for address in [0x40a1, 0x40c0] {
                 let source = native_hook(address);
                 let rig = Rig {
+                    variety: None,
                     id,
                     parts: [(address, Part::Hook)].into(),
                 };
@@ -770,6 +807,7 @@ mod tests {
                 continue;
             };
             let rig = Rig {
+                variety: None,
                 id,
                 parts: [(7, Part::Gear), (8, Part::Flame), (9, Part::Brake)].into(),
             };
@@ -829,6 +867,7 @@ mod tests {
     #[test]
     fn device_endpoints_keep_source_geometry_and_hide_retracted_parts() {
         let rig = Rig {
+            variety: None,
             id: AircraftId::F14,
             parts: [(7, Part::Gear), (8, Part::Flame)].into(),
         };
@@ -848,6 +887,7 @@ mod tests {
     #[test]
     fn a4_elevator_crosses_mesh_diagonals_without_moving_forward_stabilizer() {
         let rig = Rig {
+            variety: None,
             id: AircraftId::A4E,
             parts: BTreeMap::new(),
         };
@@ -877,6 +917,7 @@ mod tests {
     #[test]
     fn paddles_share_plume_demand_preserve_hinges_and_move_without_burner() {
         let rig = Rig {
+            variety: None,
             id: AircraftId::X31,
             parts: BTreeMap::new(),
         };
@@ -919,6 +960,7 @@ mod tests {
     #[test]
     fn x31_vector_plume_follows_live_rates_and_keeps_its_root() {
         let rig = Rig {
+            variety: None,
             id: AircraftId::X31,
             parts: [(8, Part::Flame)].into(),
         };

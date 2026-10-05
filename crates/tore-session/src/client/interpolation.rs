@@ -393,6 +393,17 @@ pub fn devices_of(state: &AircraftState) -> Option<[f64; tore_world::snapshot::D
             s[2],
             f64::from(d.speed) * SPEED_STEP,
             f64::from(d.throttle) / 255.,
+            f64::from(d.lift_levels[0]) / 255.,
+            f64::from(d.vector_yaw) / 127.,
+            f64::from(d.lift_levels[1]) / 255.,
+            f64::from(d.lift_levels[2]) / 255.,
+            f64::from(d.gun_aim[0]) / 127.,
+            f64::from(d.gun_aim[1]) / 127.,
+            f64::from(d.gun_aim[2]) / 127.,
+            f64::from(d.gun_aim[3]) / 127.,
+            f64::from(d.gun_aim[4]) / 127.,
+            f64::from(d.gun_aim[5]) / 127.,
+            f64::from(d.gun_group),
         ]
     })
 }
@@ -406,7 +417,13 @@ fn between(a: &EntityState, b: &EntityState, h: f64, s: f64) -> Sample {
     match (a, b) {
         (EntityState::Aircraft(x), EntityState::Aircraft(y)) => {
             let devices = match (devices_of(x), devices_of(y)) {
-                (Some(d0), Some(d1)) => Some(std::array::from_fn(|i| d0[i] + (d1[i] - d0[i]) * s)),
+                (Some(d0), Some(d1)) => Some(std::array::from_fn(|i| {
+                    if i == 21 {
+                        if s < 1. { d0[i] } else { d1[i] }
+                    } else {
+                        d0[i] + (d1[i] - d0[i]) * s
+                    }
+                })),
                 (d0, _) => d0,
             };
             Sample::Aircraft(aircraft_pose(

@@ -446,6 +446,21 @@ pub fn readout(
             .filter(|(_, _, count, selected, loaded)| *count > 0 || *selected || *loaded)
             .map(|(_, name, count, selected, _)| (name, count, selected))
             .collect(),
+        gun_group: (config.aircraft == AircraftId::Ac130).then(|| {
+            let names: Vec<_> = ["25", "40", "105"]
+                .into_iter()
+                .enumerate()
+                .filter_map(|(slot, name)| (ro.stores.gun_group & (1 << slot) != 0).then_some(name))
+                .collect();
+            format!(
+                "LINK {}",
+                if names.is_empty() {
+                    "EMPTY".into()
+                } else {
+                    names.join("+")
+                }
+            )
+        }),
         chaff: ro.countermeasures.chaff,
         flares: ro.countermeasures.flares,
         target: ro.targets.display.as_ref().map(|target| {
@@ -564,7 +579,7 @@ pub fn equipment_damage_report(config: &live::Configuration, ro: &CockpitReadout
                 format!("External tank {} damaged", hardpoint + 1)
             } else if let Some(Some(slot)) = config.hardpoint_slots.get(hardpoint) {
                 format!("{} station failed", config.stations[*slot].weapon.hud_name)
-            } else if hardpoint == config.radar_hardpoint {
+            } else if Some(hardpoint) == config.radar_hardpoint {
                 "Radar failed".into()
             } else if hardpoint == config.visual_hardpoint {
                 "Visual sensor failed".into()
@@ -572,7 +587,7 @@ pub fn equipment_damage_report(config: &live::Configuration, ro: &CockpitReadout
                 "Infrared sensor failed".into()
             } else if Some(hardpoint) == config.rwr_hardpoint {
                 "RWR failed".into()
-            } else if hardpoint == config.ecm_hardpoint {
+            } else if Some(hardpoint) == config.ecm_hardpoint {
                 format!(
                     "Countermeasures: jammer {}, chaff {}, flares {}",
                     if ro.damage.ecm_failed {
@@ -612,7 +627,12 @@ pub fn status(
                             .ground_name(id)
                             .map_or_else(|| format!("T{id}"), str::to_owned),
                         t.hp,
-                        if config.stations[i].weapon.seeker.signature == 0 {
+                        if config.stations.get(i).is_none_or(|station| station
+                            .weapon
+                            .seeker
+                            .signature
+                            == 0)
+                        {
                             "VISUAL"
                         } else if ro.estimates.can_lock {
                             "LOCK"
@@ -626,7 +646,10 @@ pub fn status(
     let scope = crate::scope::scope(ro, s, s.sensors);
     format!(
         "{} {} {}  {} C{} HIT {} | HP {} SYS {} ECM {} T-JAM {} IN {} | {} {} {:.0}NM {} CONTACTS{}{}",
-        config.stations[i].weapon.name,
+        config
+            .stations
+            .get(i)
+            .map_or("UNARMED", |station| station.weapon.name.as_str()),
         ro.stores.rounds(i),
         ro.estimates.readiness.label(),
         target,

@@ -124,6 +124,7 @@ impl Ownship {
         own.subsystem_counts = row.faults.counts;
         own.localized_damage = scaled_damage(&row.localized_damage, row.initial_hp, capacity);
         own.fragment_released = row.fragment_released;
+        let default_ammo = own.ammo.clone();
         for (index, ammo) in own.ammo.iter_mut().enumerate() {
             let Some(spec) = stores
                 .stations
@@ -134,7 +135,7 @@ impl Ownship {
             };
             let rounds = match spec.store.rounds {
                 Rounds::Finite(n) => n.min(u32::from(ROUNDS)) as u16,
-                Rounds::Unlimited => own.config.stations[index].count.min(ROUNDS),
+                Rounds::Unlimited => default_ammo[index].min(ROUNDS),
             };
             *ammo = rounds;
             // A station out of action stays so; an empty one has nothing to
@@ -171,7 +172,15 @@ impl Ownship {
     /// gives it back, with the same fractions under the AI's rule. The row is
     /// placed at `pose`; the host puts its stores and dispensers into the new
     /// actor.
-    pub fn into_ai(self, pose: AiPose) -> AiHandback {
+    pub fn into_ai(mut self, pose: AiPose) -> AiHandback {
+        for pod in &mut self.config.gun_pods {
+            if !self.ever_loaded.get(pod.station).copied().unwrap_or(false) {
+                pod.quantity = 0;
+            }
+        }
+        self.config
+            .refresh_tanks()
+            .expect("validated handback equipment");
         let config = &self.config;
         let capacity = config.damage_capacity;
         let initial = config.hit_points;
@@ -512,7 +521,7 @@ mod tests {
     #[test]
     fn given_back_rounds_fly_on_and_combat_steps_with_no_ownship() {
         let mut state = fixture(false);
-        let gun = tore_formats::aircraft::AircraftId::F18.gun();
+        let gun = tore_formats::aircraft::AircraftId::F18.gun().unwrap();
         let mut config = state.own().configuration().clone();
         config.stations[0].weapon.source = gun.into();
         state.own_mut().config.stations[0].weapon.source = gun.into();

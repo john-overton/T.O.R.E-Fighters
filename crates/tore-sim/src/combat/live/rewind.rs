@@ -191,7 +191,7 @@ mod hit_tests {
     /// A state whose ownship 0 carries a gun.
     fn gunship() -> State {
         let mut s = fixture(false);
-        s.own_mut().config.stations[0].weapon.source = AircraftId::F18.gun().into();
+        s.own_mut().config.stations[0].weapon.source = AircraftId::F18.gun().unwrap().into();
         s
     }
 

@@ -59,6 +59,82 @@ need a custom profile; no universal button-index layout is assumed.
 keyboard controls and any custom keyboard bindings. It also allows deterministic
 bridge tests without touching hardware.
 
+## VTOL, tiltrotor and helicopter controls
+
+Ctrl+arrows operate thrust vectoring and **0** returns nozzles and nacelles to
+forward neutral. The retail key assignments are confirmed in the
+[keyboard spec](spec/keyboard.md); the directional interpretation and rates are
+fitted choices described in the [flight variety spec](spec/variety-flight.md).
+The extra collective/conversion keys and gamepad layer are agent decisions
+made on 2026-10-05 after checking the existing defaults for conflicts.
+
+| Control | Keyboard default | Standard Linux gamepad default |
+| --- | --- | --- |
+| Nozzle pitch, forward / vertical | Ctrl+Up / Ctrl+Down | Hold Select, right stick forward / back |
+| Nozzle yaw, left / right | Ctrl+Left / Ctrl+Right | Hold Select, right stick left / right |
+| V-22 conversion, airplane / helicopter | Ctrl+Page Up / Ctrl+Page Down | Hold Select, right stick left / right |
+| Collective, increase / decrease | Ctrl+Home / Ctrl+End | Hold Select, right stick up / down |
+| Nozzles/nacelles forward neutral | 0 | Hold Select, D-pad up |
+| Engine on/off | E | Hold Select, Start |
+| Engine power | Existing 1-8 throttle presets/steps | Existing shoulder buttons |
+
+Power and collective are independent: throttle controls available engine power,
+while collective requests rotor lift. Pitch/roll and rudder keep their ordinary
+arrows and End/Page Down assignments. The right-stick additions use the selected
+aircraft's modifier map.
+Combat shoulder, face, countermeasure and click bindings retain their actions.
+Powered-lift engine and forward-neutral commands use the contextual Start and
+D-pad Up alternatives below. The left stick stays live during collective
+adjustments. Shared right-stick axes act according to aircraft capability.
+Added modifier mappings apply only to aircraft with the relevant controls.
+Other aircraft retain their ordinary look, rudder and modifier bindings.
+Automatic gamepad rows use an `auto-gamepad:` device alias so this distinction
+survives profile saves. Explicit user bindings use ordinary device identities or
+user aliases and always override automatic rows on the same control.
+On powered-lift aircraft Select+Start toggles the engine; on vectoring jets and
+tiltrotors Select+D-pad Up returns nozzles/nacelles forward. These contextual
+bindings replace the developer fixture alternatives on those aircraft.
+Center a stick after changing the modifier layer;
+focus loss or pause requires release before controls become active again.
+
+**Flight controls** lists separate absolute lever, rate-axis and decrease/increase
+rows for nozzle pitch, nozzle yaw, V-22 conversion and collective. Absolute
+lever positions use 0..1, except signed nozzle yaw, which uses -1..1. Axis rows
+support the editor's deadzone, sensitivity, inversion and response curves;
+min/center/max calibration remains a profile-file setting. The tokens are
+`vector-pitch`, `vector-yaw`, `conversion`, `collective` and their `-rate`
+forms. Unsupported aircraft ignore the added demands. Releasing a rate input
+holds its last requested position. Neutral resets conversion and both nozzle
+axes, and leaves collective and power unchanged. Digital position/reset commands
+release an absolute lever's ownership until it moves at least 2% of calibrated
+travel. This fitted host rule prevents a stationary HOTAS lever from immediately
+undoing the command, including after pause or focus loss. Defaults and limits reset
+with the aircraft state on restart or seat handoff.
+
+The [VTOL / Helicopters keyboard sheet](tore-keyboard-map.html#lift) shows these
+controls together with ordinary attitude, engine, gear and brake keys. Pilot
+input tapes now write version 2 to retain lift controls; version 1 tapes remain
+readable.
+
+## AC-130 directed gun groups
+
+Ctrl+7 selects the next gun candidate; Ctrl+8 links or unlinks it. Hold Select
+and push the gamepad right stick right/left past half travel for the same actions.
+These gestures act on AC-130 only. The Weapons instrument shows the authoritative
+`LINK` membership and marks the current candidate with its ordinary selection
+arrow. Fire releases ready members together, each retaining its own ammunition
+and cadence. Empty or blocked members do not stop the others. An empty group
+reports GROUP EMPTY. Bracket selection retains ordinary single-gun operation
+until multiple guns are linked; NAV suspends group fire.
+
+A designated observed target is required. Mounts track at 30 degrees/second and
+shots use their actual barrel directions and muzzle positions. NO TARGET,
+CANNOT BEAR, SLEWING and NO LINE OF FIRE explain why a gun cannot release.
+The [gunship contract](spec/ac130-linked-guns.md) records source arcs, fitted
+articulation/clearance, limits and shared host/client/replay state. These controls
+and the linked firing capability are authored choices, not recovered retail
+key assignments or original linked fire behaviour.
+
 ## In-game controls and saved preferences
 
 **Alt-Enter** switches between native borderless fullscreen and the previous
@@ -301,7 +377,6 @@ Deliberate differences from FA:
 | Shift+B | Afterburner switch, alongside 6 | Unused | Gamepad Y uses the same switch |
 | Backslash | Reset range target (test) | IR/laser designation, only with advanced targeting on | Moves when that targeting exists |
 | Tab | Nothing | Fire the gun | Not wired yet |
-| Ctrl + arrows | Nothing | Thrust vectoring | Not implemented |
 | V | Save the view to Other View and open it | The same, then return the main view to the front | The main view stays |
 
 ## Profiles and calibration
@@ -731,8 +806,9 @@ strength and comfort still require physical controller acceptance.
 ## Additional aircraft capabilities
 
 F-14D, A-4E and X-31 EFM use the existing input bindings. Device commands respect
-capabilities: A-4E has no burner, and X-31 has no hook. No thrust-vectoring input
-is implemented. See [aircraft behavior](spec/additional-aircraft.md) and
+capabilities: A-4E has no burner, and X-31 has no hook. The added powered-lift
+controls apply to AV-8B, Yak-141, V-22 and helicopters in the researched adapter;
+X-31 keeps its existing fitted aerodynamic model. See [aircraft behavior](spec/additional-aircraft.md) and
 [validation](baselines/aircraft-fa-expansion.md).
 
 `--flight-throttle 0..1` sets the initial throttle for engine-material captures;

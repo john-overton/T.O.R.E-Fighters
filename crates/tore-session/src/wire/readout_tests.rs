@@ -25,7 +25,12 @@ fn the_numbers_stand_for_the_readout() {
     assert_eq!(QReadout::of(&back, 400), q);
     assert_eq!(back.plane, 3);
     assert_eq!(back.tick, 401);
-    assert_eq!(back.stores, readout.stores);
+    let mut expected_stores = readout.stores.clone();
+    for (actual, expected) in back.stores.gun_aim.iter().zip(expected_stores.gun_aim) {
+        assert!((actual - expected).abs() <= 0.5 / 127. + 1e-12);
+    }
+    expected_stores.gun_aim = back.stores.gun_aim;
+    assert_eq!(back.stores, expected_stores);
     assert_eq!(back.damage, readout.damage);
     assert_eq!(back.targets, readout.targets);
     assert_eq!(back.seeker, readout.seeker);
