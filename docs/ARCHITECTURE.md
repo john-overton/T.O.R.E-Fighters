@@ -6525,3 +6525,183 @@ and stays on `performance` for John's review before a merge.
 A separate render thread, parallel GPU encoding, mission-load workers and
 threaded projectiles are outside this pass. GPU-side work remains a separate
 decision; no pixel-changing shortcut is implied by a CPU speed-up.
+
+## Exact checkpoints
+
+Design for stage H of the [multiplayer plan](multiplayer-plan.md#stages),
+written on 2026-10-05 by a design agent for the lead. The format, coding
+rules, coverage rule and scenarios are in the
+[checkpoint format](formats/checkpoint.md); this section is how the code is
+shaped and how the work is split. John's decision is that host migration is
+exact (2026-09-28); every other choice is an agent decision. The slice table
+below marks each slice that is built.
+
+In short:
+
+- `World::checkpoint()` writes every piece of mutable mission state between
+  two ticks; `World::restore(bytes)` loads it over a fresh `World` built from
+  the same mission, which then steps on bit for bit. Mission setup (terrain,
+  aircraft types, phrases, the layout) comes from the fresh world; the
+  structure that handoffs change (cockpits, ownships, AI actors, radio
+  channels) comes from the bytes.
+- One trait, `tore_sim::checkpoint::Checkpoint`, codes each type exactly, with
+  every field named so a forgotten one fails to compile. It reuses
+  `tore-codec`'s exact float coding and the wire's exact flight coder, and
+  changes no byte of the wire.
+- Each module's coders sit beside it in a `<module>_checkpoint.rs` child
+  module, so the encoders read private fields without opening them up and
+  without editing simulation code. That also lets several agents code
+  different modules at the same time.
+- An equivalence test restores scenarios mid-fight, mid-landing, on the ground
+  and with handoffs into fresh worlds and steps both copies on, on every CI
+  platform.
+
+### What the surveys found
+
+Six read-only surveys at `884f9916` walked every type reachable from `World`
+(the summary by area is in the
+[format](formats/checkpoint.md#the-state-by-area)). What shaped the design:
+
+- **Deterministic already.** No `HashMap`, `Rc`, `RefCell`, stored closure or
+  thread-local in mission state; every map is a `BTreeMap`; every random
+  stream is seeded from the mission and holds one or two integers. Worker
+  results are never stored between ticks. The one process switch that changes
+  results is the retail stall speeds.
+- **Private everywhere.** Almost every state type keeps its fields private, so
+  coders must live in a child module of the type's own module.
+- **Structure changes mid-flight.** Handoffs insert and remove AI actors,
+  ownships, cockpits, AI slots, configurations and radio channels. A restore
+  cannot assume the fresh world's lists.
+- **Copies of imported records.** Ownship and AI configurations, weapon
+  records on stations and on missiles, sensor profiles and runway views (up to
+  four per AI actor) are copied into state. They never change, but they are
+  not derivable from the setup alone after a handoff, so they are coded once
+  each as shared records.
+- **Not everything called a cache is one.** Several fields documented as
+  caches or presentation are read back by a later tick; the
+  [scratch rule](formats/checkpoint.md#what-it-holds-and-what-it-leaves-out)
+  keeps them coded.
+- **Write-only explanations are large.** The AI journal, traces, draw logs and
+  the radio journal's causes would double the number of types for text no
+  standby needs; they are the "why-records" the checkpoint leaves out.
+- **`World::tick` is combat's tick.** There is no separate world counter.
+
+### The pieces
+
+| Piece | Where | What |
+| --- | --- | --- |
+| `Checkpoint`, `Restore` | `tore-sim/src/checkpoint.rs` | The traits: `save(&self, s, base)` and `load(l, base)`, or `restore(&mut self, l)` for holders that keep setup fields |
+| `Saver`, `Loader` | same | A `BitWriter` with the shared-record table; a `BitReader` with the shared records and the fresh world's `Imports` |
+| `Imports` | same (trait); `tore-world/src/checkpoint.rs` (the table) | The flight model of each aircraft identity, from the fresh world |
+| Macros | same, exported | `checkpoint_struct!` (with `skip field = rebuild`), `checkpoint_enum!`, `checkpoint_tuple!`, `checkpoint_via_exact!` |
+| Standard impls | same | Integers, floats, `bool`, `String`, `Option`, `Box`, arrays, tuples, `Vec`, `VecDeque`, `BTreeMap`, `BTreeSet`; the flight state's helpers (`save_flight`, `load_flight`) |
+| Leaf types shared by slices | `tore-sim/src/checkpoint_shared.rs` | `AircraftId`, `Side`, `Activity`, `SeekerClass`, `Experience` and its resolution, `DecisionRandom` (through `ai/checkpoint.rs`), `ApproachEnd`, airfield `Phase`, and the `Exact` types reused |
+| The container | `tore-world/src/checkpoint.rs` | Header, section framing, shared-record table, CRC-32, mission identity, `World::checkpoint`, `World::restore`, and for tests `World::restore_sections` (the twin restore) |
+| Section coders | each slice's `*_checkpoint.rs` | One function pair per section, called by the container |
+| The harness | `tore-world/src/world/checkpoint_tests.rs`, `world/checkpoint_scenarios.rs` | Scenario builders, twin restore per section, the whole-world equivalence, round trips, damaged bytes |
+| Measurement | `tore-session/tests/checkpoint_cost.rs` | Size by section, encode and restore time and catch-up on real data, ignored |
+
+```mermaid
+flowchart TD
+  world["World::checkpoint()"] --> container["Container<br/>tore-world/src/checkpoint.rs"]
+  container --> s1["Roster, Cockpits<br/>world shell coders"]
+  container --> s2["Combat<br/>combat coders"]
+  container --> s3["AI wings<br/>AI coders"]
+  container --> s4["Weather"]
+  container --> s5["Comms, Wing status, Radio<br/>radio coders"]
+  s1 --> trait["tore_sim::checkpoint<br/>Checkpoint, Saver, Loader"]
+  s2 --> trait
+  s3 --> trait
+  s4 --> trait
+  s5 --> trait
+  trait --> exact["flight::exact<br/>(the wire's coder)"]
+  trait --> codec["tore-codec<br/>bits, exact floats, CRC-32"]
+  exact --> codec
+```
+
+The new public surface is small: `World::checkpoint`, `World::restore`, the
+error type, and the trait module (`tore_sim::checkpoint`) that `tore-world`
+needs across the crate boundary. Coders are private child modules.
+
+### Restoring, in order
+
+`World::restore` checks the whole container first (magic, version, switches,
+mission identity, CRC-32, section framing), then builds `Imports` from the
+fresh world, decodes the shared records, and restores the sections in id
+order. Each section's coder replaces its part of the world; a section never
+reads another section's decoded values, only ids, so the order is a choice,
+not a dependency. On an error the world is to be discarded.
+
+### How stage H lands
+
+Slices, each on its own `mp/h-<topic>` branch and worktree, merged by the
+lead with the quick check per change. Every coding slice only adds files named
+`*_checkpoint.rs` and fills the stubs H0 left for it; H0 adds every
+`mod checkpoint` line the slices need, so no two slices edit the same file.
+A coder never changes simulation code: if one needs a constructor or an
+accessor, it lives in its own `*_checkpoint.rs` child module, which can see
+the private fields. A slice that finds it must edit a simulation file stops
+and asks the lead.
+
+H0 leaves a stub coder that returns `NotCovered` for every type that one
+slice codes and another slice's coder calls (listed in each slice's row), so
+every slice compiles and tests on its own. A slice's acceptance is its own
+round trips: values taken from stepped fixture worlds code to bytes, decode
+to an equal value (by `PartialEq` where the type has it, otherwise by coding
+again to the same bytes), and step on identically where the type can be
+stepped alone. The **twin restore** of a whole section passes when every
+slice under it has merged; the lead runs it at each merge.
+
+| Slice | Model | After | Owns | Work | Acceptance |
+| --- | --- | --- | --- | --- | --- |
+| H0 Scaffolding | Opus | | `tore-sim/src/checkpoint.rs` and `checkpoint_shared.rs`, `tore-sim/src/ai/checkpoint.rs`, `tore-world/src/checkpoint.rs`, `world/checkpoint_tests.rs`, `world/checkpoint_scenarios.rs`, `tore-session/tests/checkpoint_cost.rs`, the stub files, the `mod checkpoint` lines, `tools/battery_selection.py` rules | The traits, `Saver`, `Loader`, `Imports`, macros, standard impls, flight helpers, shared leaf types; the container with versioning, identity and CRC; `World::checkpoint`, `restore`, `restore_sections`; stubs; the harness with the scenarios the fixtures allow today, the twin restore and the whole-world test ignored until every section is covered; the measurement test | Unit tests of every standard impl, the macros' skip and rebuild, shared records, the container's refusals (magic, version, switch, identity, CRC, framing, trailing bits) and 10,000 damaged or random inputs without a panic; the harness runs and reports `NotCovered` sections by name; single-player quick guard unchanged; the wire golden test unchanged |
+| H1 Records and sensors | Sonnet | H0 | `checkpoint_records.rs` (tore-sim), `sensors/track_checkpoint.rs`, `sensors/profile_checkpoint.rs`, `sensors/signature_checkpoint.rs`, `sensors/passive_checkpoint.rs`, `combat/threats_checkpoint.rs`, `attitude_checkpoint.rs` | `Weapon` and its parts, `live::Configuration` and `Station`, `SensorProfiles` and the profile types, `SignatureProfile`, `JammerProfile`, `Sensors` with contacts, strobes, plots and trails, `passive::Emitter`, `ThreatService` and its records, `RunwayView` and `AirfieldAnchors`, `Basis`; shared records for the big copies | Round trips of the crowd fixture's configurations, every ownship's and actor's sensors and threat services at ticks 300, 600 and 900; a weapon record carried by many stations codes once; sensors restored into a stepped copy step on identically for 600 ticks |
+| H2 World shell | Sonnet | H0 | `tore-world/src/seats_checkpoint.rs`, `world_checkpoint.rs` (`Cockpit` and the roster, cockpits and weather sections), `tore-sim/src/airport_checkpoint.rs`, `environment_checkpoint.rs` | `Roster` and seats; `Cockpit` with its flight through `save_flight`, turbulence, stream, NAV mode and clocks; `airport::Service` with clearance and replies; `Environment`'s clock, ticks, fog stream, selection and tints, with a restore constructor that draws nothing | Round trips; the twin restore of roster and weather on the tick mission and the crowd fixture; the cockpits' twin once H6 and H7 merge |
+| H3a Combat core | Sonnet | H0 | `combat/live_checkpoint.rs`, `combat/live/rewind_checkpoint.rs`, `combat/missiles_checkpoint.rs`, `combat/missiles/seeker_checkpoint.rs`, `combat/ledger_checkpoint.rs`, `combat_checkpoint.rs` (tore-sim) | `live::State` with ownships, targets, ownship rows, projectiles, effects, the ledger, actor support, marks' list, rewinds and the rewind history (each frame against the one before), random streams, counters, the tick; missile `Flight`, `Seeker`, `Motion`, `Cruise`, `Profile`; `PlayerTrigger`, `FallState`. Calls H1's and H3b's types | Round trips of `live::State` at crowd fixture ticks with missiles guiding and rounds in flight; the rewind history's size against one second at 30 aircraft printed; the combat section's twin once H1 and H3b merge |
+| H3b Combat effects and wrapper | Sonnet | H0 | `combat/smoke_checkpoint.rs`, `countermeasures_checkpoint.rs`, `debris_checkpoint.rs`, `blast_checkpoint.rs` (tore-sim); `tore-world/src/combat_checkpoint.rs`, `snapshot_checkpoint.rs` | `Smoke`, `Devices` with flares and chaff (the `f32` opacity), `Piece`, `Mark`, blast `Rolls`; the `Combat` wrapper restored in place, `Trigger`, `FireInput`, `Pose`, `RenderHistory` and the picture types | Round trips; smoke and countermeasures restored into a copy evolve identically for 600 ticks |
+| H4 AI mission | Sonnet | H0 | `ai/mission_checkpoint.rs`, `ai/airfield_checkpoint.rs`, `awareness_checkpoint.rs`, `incoming_fire_checkpoint.rs`, `defense_checkpoint.rs`, `engagement_checkpoint.rs`, `opportunity_checkpoint.rs`, `damage_checkpoint.rs`, `route_checkpoint.rs`, `ejection_checkpoint.rs` (tore-sim) | `AiMission` and `AiActor` with every field coded or skipped by class, the airfield `Sequence` and orders, `Memory`, `Lookout`, defense, incoming fire, assignments, opportunities, route types, the escape monitor. Calls H1's and H5's types | Round trips of `AiMission` in the tore-sim AI golden fixtures (airfield, landing, defense) by the existing debug-and-flight-bytes oracle; a restored mission steps on identically for 600 ticks there |
+| H5 AI controller | Sonnet | H0 | `ai/controller_checkpoint.rs`, `motion_checkpoint.rs`, `steering_checkpoint.rs`, `gunnery_checkpoint.rs`, `wing_checkpoint.rs`, `formation_checkpoint.rs`, `weapon_service_checkpoint.rs`, `pursuit_checkpoint.rs`, `threat_checkpoint.rs` (tore-sim) | `Controller` and everything it owns: the manoeuvre and intents, the last intent batch, gunnery cycles and views, formation guidance and variation, recipient state, weapon service and stores, searches, defense motion, pending warnings, frame events, threat reports | Every controller of the AI golden fixtures at three ticks round-trips equal (`Controller` is `PartialEq`) |
+| H6 AI wings | Sonnet | H0 | `tore-world/src/ai_wings_checkpoint.rs`, `ai_wings/reports_checkpoint.rs`, `chatter_checkpoint.rs`, `outcome_checkpoint.rs` | `AiWings` restored in place (slots, humans, configurations as shared records, damaged stations, handed-over skills, the two streams, pending guns, last hit points, activities, the projectile counter, HUD line state, `ai_shots`); reports, chatter watch, result tracker | Round trips in the crowd fixture; the AI wings section's twin once H1, H4 and H5 merge |
+| H7 Radio | Sonnet | H0 | `tore-world/src/comms_checkpoint.rs`, `radio_calls_checkpoint.rs`, `airfield_radio_checkpoint.rs`, `crew_voice_checkpoint.rs` | `Comms` with channels, pending calls, cooldown keys by table, the stream; `Radio`; `WingStatus`; `AirfieldRadio`; `CrewVoice` | Round trips; the comms, wing status and radio sections' twins on the tick mission with calls pending |
+| H8 Scenarios | Sonnet | H0 | `world/checkpoint_scenarios.rs`, `tore-world/src/test_support/resources.rs` | A synthetic import with an airport so `World::new` builds a ground start; the tick mission's wing ordered to land; a weather configuration that reselects inside the run; each scenario's state assertions at tick N | Each scenario builds twice identically and reaches its asserted state; nothing in the existing tests changes |
+| H9 Integration and measurement | lead (Opus) | all | the harness's ignore markers, docs, baseline | Un-ignore the whole-world equivalence; run every scenario; measure sizes, encode, restore and catch-up on the synthetic crowd and on the 15 against 15 mission with real data; delta-code against the previous checkpoint only if the size needs it; fold the results into the budget and a `docs/baselines/` entry | Every scenario passes bit for bit on every CI platform; a field added without coding fails to compile (shown once, by hand); the measured figures recorded against the budget |
+
+```mermaid
+flowchart TD
+  H0["H0 Scaffolding"] --> H1["H1 Records and sensors"]
+  H0 --> H2["H2 World shell"]
+  H0 --> H3a["H3a Combat core"]
+  H0 --> H3b["H3b Combat effects"]
+  H0 --> H4["H4 AI mission"]
+  H0 --> H5["H5 AI controller"]
+  H0 --> H6["H6 AI wings"]
+  H0 --> H7["H7 Radio"]
+  H0 --> H8["H8 Scenarios"]
+  H1 --> H9["H9 Integration<br/>and measurement"]
+  H2 --> H9
+  H3a --> H9
+  H3b --> H9
+  H4 --> H9
+  H5 --> H9
+  H6 --> H9
+  H7 --> H9
+  H8 --> H9
+```
+
+Every slice from H1 to H8 can run at the same time: their files are
+disjoint and the stubs make each compile alone. With four or five agents at
+once, *agent proposal:* a first wave of H1, H5, H2, H7 and H8 (the types the
+others call, and the fixtures), then H3a, H3b, H4 and H6. The merge order
+that completes sections soonest is H1, H5, H4, H6 (the AI wings section),
+then H3b, H3a (combat), then H7, H2 (the rest).
+
+**Single player.** No slice changes simulation behaviour: coders only read,
+and restore runs only in tests until stage K. Each slice runs the quick check
+(battery-free for `*_checkpoint.rs` files, which the battery map routes to no
+scenario) and the single-player quick guard. The full single-player baseline
+is needed only if a slice must touch a simulation file, which it should not.
+
+**Stage G.** The data link adds a shared picture and radio frequencies. If
+they become new `World` fields, each gets a section id and a coder in its own
+`*_checkpoint.rs`; if they live inside `AiWings` or `Comms`, they join that
+section's coder, whose field list will not compile until they are named.
