@@ -38,7 +38,7 @@ tests run on every CI platform.
 
 | What | Command |
 | --- | --- |
-| The whole-world equivalence, eleven scenarios, in the normal suite | `cargo test --locked -p tore-world --lib a_whole_world_restores -- --nocapture` |
+| The whole-world equivalence, twelve scenarios, in the normal suite | `cargo test --locked -p tore-world --lib a_whole_world_restores -- --nocapture` |
 | The twin restore of each section, and each scenario's asserted state | `cargo test --locked -p tore-world --lib checkpoint` |
 | The AI golden missions restored mid-flight | `cargo test --locked -p tore-sim --lib golden_tests::ai` |
 | Size, time and catch-up on real data, four times in a row | `TORE_DATA_DIR=$PWD/.local/mpb-data-h9-integrate cargo test --release --locked -p tore-session --test checkpoint_cost -- --ignored --nocapture` |
@@ -55,28 +55,30 @@ steps each scenario to its tick N, writes a checkpoint, restores it into a
 world fresh from the same build, and steps both copies M more ticks with the
 same inputs. Every tick's output must match, and every 30 ticks and at the end
 the two worlds must code to the same bytes. It runs in the normal suite: about
-6 to 8 seconds for all eleven scenarios in a debug build here. The eleventh
-scenario, a human lead's order, was added by this slice so the data link holds
-assignments at the checkpoint (one acknowledged, two not yet).
+6 to 8 seconds for all twelve scenarios in a debug build here. This slice
+added "a human lead's order", so the data link holds assignments at the
+checkpoint (one acknowledged, two not yet); slice F2-V added "revivals and
+wrecks" and the revival section (11), which every scenario now codes.
 
 Sizes of the synthetic scenarios at tick N, in bytes:
 
 | Scenario | Whole | Shared records | Combat | AI wings | Cockpits | Data link |
 | --- | --- | --- | --- | --- | --- | --- |
-| Single player | 28,998 | 577 | 23,520 | 3,865 | 656 | 210 |
-| Crowd fight (8 aircraft) | 87,086 | 723 | 61,219 | 22,604 | 1,498 | 845 |
-| Open mission with handoffs | 51,499 | 797 | 40,385 | 8,205 | 843 | 655 |
-| Damaged aircraft | 83,168 | 723 | 59,612 | 20,290 | 1,514 | 782 |
-| Crowd fight with handoffs | 86,860 | 723 | 61,464 | 22,067 | 1,511 | 859 |
-| Missile duel | 14,883 | 797 | 12,403 | 91 | 806 | 224 |
-| Radio calls pending | 29,144 | 577 | 23,520 | 3,865 | 656 | 210 |
-| AI landing | 26,038 | 1,069 | 20,342 | 3,501 | 368 | 177 |
-| Ground start | 33,665 | 1,069 | 23,104 | 7,820 | 633 | 437 |
-| Changing weather | 26,031 | 577 | 20,111 | 3,699 | 705 | 207 |
-| A human lead's order | 88,647 | 723 | 56,937 | 29,214 | 680 | 898 |
+| Single player | 29,003 | 577 | 23,520 | 3,865 | 656 | 210 |
+| Crowd fight (8 aircraft) | 87,091 | 723 | 61,219 | 22,604 | 1,498 | 845 |
+| Open mission with handoffs | 51,504 | 797 | 40,385 | 8,205 | 843 | 655 |
+| Damaged aircraft | 83,173 | 723 | 59,612 | 20,290 | 1,514 | 782 |
+| Crowd fight with handoffs | 86,865 | 723 | 61,464 | 22,067 | 1,511 | 859 |
+| Missile duel | 14,888 | 797 | 12,403 | 91 | 806 | 224 |
+| Radio calls pending | 29,149 | 577 | 23,520 | 3,865 | 656 | 210 |
+| AI landing | 26,043 | 1,069 | 20,342 | 3,501 | 368 | 177 |
+| Ground start | 33,670 | 1,069 | 23,104 | 7,820 | 633 | 437 |
+| Changing weather | 26,036 | 577 | 20,111 | 3,699 | 705 | 207 |
+| Revivals and wrecks | 58,483 | 797 | 47,192 | 8,069 | 1,421 | 377 |
+| A human lead's order | 88,652 | 723 | 56,937 | 29,214 | 680 | 898 |
 
-The other sections (roster, weather, comms, wing status, radio, score) are
-under 650 bytes each.
+The other sections (roster, weather, comms, wing status, radio, score,
+revival) are under 650 bytes each.
 
 **The AI golden missions.** `golden_tests::ai::restoring_the_ai_missions_mid_flight_changes_no_behaviour`
 replaces the engagement and airfield missions of the AI fingerprint tests with
