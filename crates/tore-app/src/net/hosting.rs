@@ -543,6 +543,7 @@ pub fn log_line(entry: &HostLog) -> String {
                 EndReason::ServerStopping => "the host is stopping",
                 EndReason::EndedByServer => "ended by the host",
                 EndReason::HostLeft => "the host left the game",
+                EndReason::KillLimit => "the kill limit",
             }
         ),
         HostLog::MissionRestarted { .. } => "mission restarted".to_owned(),

@@ -12,7 +12,7 @@ use tore_sim::{ai::wing::PlayerOrder, cheats::Cheats, combat::live::Command as L
 /// A change to the mission itself, applied at the start of the tick before
 /// any seat's commands. In single player the player gives them, from the
 /// cheats menu; in a hosted game only the host's would count.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum MissionCommand {
     /// New settings in force.
     Settings(Settings),
@@ -24,6 +24,18 @@ pub enum MissionCommand {
     /// kicked ([`World::give_back_plane`]). The seat sends no input for this
     /// tick.
     GiveBack { seat: SeatId },
+    /// Stage F phase 2: frees `seat` from its lost plane, whose pilot
+    /// becomes [`crate::seats::Pilot::Lost`] (docs/ARCHITECTURE.md, "Death,
+    /// revival and lives"). The seat sends no input for this tick. Refused by
+    /// the step until slice F2-V builds it.
+    Abandon { seat: SeatId },
+    /// Stage F phase 2: abandons `seat`'s lost plane and seats it in a new
+    /// plane of the same aircraft at `spawn`. The seat sends input for this
+    /// tick. Refused by the step until slice F2-V builds it.
+    Revive {
+        seat: SeatId,
+        spawn: Box<super::revive::Spawn>,
+    },
 }
 
 /// What became of a wing order the step applied.
@@ -76,6 +88,14 @@ impl World {
             }
             MissionCommand::Take { seat, plane } => self.take_plane(*seat, *plane)?,
             MissionCommand::GiveBack { seat } => self.give_back_plane(*seat)?,
+            // Slice F2-V builds these; no host sends them before it.
+            MissionCommand::Abandon { seat } | MissionCommand::Revive { seat, .. } => {
+                return Err(format!(
+                    "seat {}: abandoning and reviving a plane are not built yet",
+                    seat.0
+                )
+                .into());
+            }
         }
         Ok(())
     }
@@ -142,6 +162,8 @@ impl World {
                     .trigger(plane.0)
                     .input
                     .space(down, repeat, blocked),
+                // The call to the flight is slice F2-R's.
+                SeatCommand::WingReply(_) => {}
             }
         }
     }

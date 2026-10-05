@@ -332,6 +332,12 @@ impl App {
                 }
             }
             ClientEvent::Goodbye(_) => {}
+            // Stage F phase 2: the slices that build each part show them.
+            ClientEvent::Revival(_)
+            | ClientEvent::Spawned(_)
+            | ClientEvent::Scores(_)
+            | ClientEvent::Results(_)
+            | ClientEvent::Observing(_) => {}
             ClientEvent::Closed(reason) => {
                 let left = self.net.as_ref().is_some_and(|s| s.left_at.is_some());
                 let text = self

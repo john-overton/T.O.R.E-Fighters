@@ -12,6 +12,11 @@
 //! delivered line ([`super::chat`]).
 //!
 //! Protocol 7 adds each lobby player's platform ([`Platform`]).
+//!
+//! Protocol 8 (slice F2-0) adds stage F phase 2's: the King's crown,
+//! settings and slot locks, revival, scores, results, observers and the idle
+//! aircraft's Away and Back, and the lobby state's settings, locks and
+//! players' observing and away marks.
 
 use super::bits::{
     self, read_count, read_long_str, read_str, read_u32, write_count, write_long_str, write_str,
@@ -19,6 +24,7 @@ use super::bits::{
 use super::chat::{ChatLine, ChatSend};
 use super::names::ReceivedNames;
 use super::{Platform, WireError, WireResult, limits};
+use crate::settings::{Fight, KillOwner, Respawn, ScoreTally};
 use tore_codec::{BitReader, BitWriter};
 use tore_formats::aircraft::AircraftId;
 use tore_sim::ai::launch::{Side, WingId};
@@ -27,6 +33,7 @@ use tore_sim::models::AircraftModel;
 use tore_world::mission::{LoadoutSpec, MissionSpec, StationLoad};
 use tore_world::resources::{Manifest, ManifestEntry};
 use tore_world::world::plane::ExactState;
+use tore_world::world::revive::Spawn;
 
 /// Message kinds, the transport's kind byte.
 pub mod kind {
@@ -54,11 +61,26 @@ pub mod kind {
     pub const REFUSED: u8 = 20;
     pub const GOODBYE: u8 = 21;
     pub const FLIGHT_LOADOUTS: u8 = 22;
-    // Kept for the phase 2 lobby, not sent yet: the King passes the crown
-    // (23) and changes the lobby's settings (24).
+    // Protocol 8, stage F phase 2 (F2-0): the King passes the crown and
+    // changes the lobby's settings (player to host).
+    pub const PASS_CROWN: u8 = 23;
+    pub const SETTINGS: u8 = 24;
     // Protocol 4, chat (EF6). Player to host, then host to player:
     pub const CHAT_SEND: u8 = 25;
     pub const CHAT_LINE: u8 = 26;
+    // Protocol 8, stage F phase 2 (F2-0). Player to host:
+    pub const SLOT_LOCK: u8 = 27;
+    pub const REVIVE: u8 = 28;
+    // Host to player:
+    pub const REVIVAL: u8 = 29;
+    pub const SPAWNED: u8 = 30;
+    pub const SCORES: u8 = 31;
+    pub const RESULTS: u8 = 32;
+    // Player to host, host to player, then player to host:
+    pub const OBSERVE: u8 = 33;
+    pub const OBSERVING: u8 = 34;
+    pub const AWAY: u8 = 35;
+    pub const BACK: u8 = 36;
 }
 
 /// Entries of a content manifest or a refusal's list.
@@ -73,12 +95,20 @@ const DESTROYED_LIMIT: usize = 8_192;
 const PLAYERS_LIMIT: usize = 64;
 /// Slots in a lobby: the planes of a mission.
 const SLOTS_LIMIT: usize = 64;
-/// Settings in a lobby state (phase 2).
+/// Settings in a lobby state, and in one King's change (phase 2).
 const SETTINGS_LIMIT: usize = 64;
 /// Loadouts at a flight's start: one a plane.
 const LOADOUTS_LIMIT: usize = 64;
 /// Objectives in a debrief.
 const OBJECTIVES_LIMIT: usize = 64;
+/// Players in a Scores message (phase 2).
+const SCORE_PLAYERS_LIMIT: usize = 64;
+/// Rows in a Results message: every plane a mission had (phase 2).
+const RESULT_ROWS_LIMIT: usize = 1_024;
+/// The most lives a Revival message says are left; more are unlimited.
+const LIVES_LIMIT: u8 = 10;
+/// Thousandths of a result row's damage: a whole aircraft.
+const DAMAGE_WHOLE: u16 = 1_000;
 
 /// The mission a joining client loads from its own import (host to client).
 #[derive(Clone, Debug, PartialEq)]
@@ -216,6 +246,12 @@ pub struct LobbyPlayer {
     pub loadout: bool,
     /// The player flies the mission now.
     pub flying: bool,
+    /// The player watches the flying mission with no plane of its own
+    /// (protocol 8).
+    pub observing: bool,
+    /// The AI flies the player's plane while the player is away
+    /// (protocol 8).
+    pub away: bool,
     /// Why the player's import cannot play the mission, when it cannot.
     pub unable: Option<String>,
     /// The operating system the player's game runs on, as its game said
@@ -225,7 +261,7 @@ pub struct LobbyPlayer {
 
 /// One slot: a friendly plane of the co-op mission (or whatever the host's
 /// open planes are) and who holds it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LobbySlot {
     pub plane: u32,
     pub wing: WingId,
@@ -233,6 +269,216 @@ pub struct LobbySlot {
     pub aircraft: AircraftId,
     /// The id of the player holding it.
     pub holder: Option<u8>,
+    /// The King's lock on it (protocol 8).
+    pub lock: Lock,
+}
+
+/// A slot's lock, which only the King sets (protocol 8).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Lock {
+    /// Any player may take it.
+    #[default]
+    Open,
+    /// The AI flies it; nobody takes it.
+    Closed,
+    /// Only the player with this callsign takes it.
+    Reserved(String),
+}
+
+/// The King locks, closes or reserves a slot (client to host, kind 27).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SlotLock {
+    /// The mission's number.
+    pub mission: u32,
+    pub plane: u32,
+    pub lock: Lock,
+}
+
+/// The King's change of settings (client to host, kind 24), applied all or
+/// none.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SettingsChange {
+    /// Settings by number and value ([`crate::settings`]); none when only
+    /// the name or the password changes.
+    pub values: Vec<(u8, u32)>,
+    /// The game's new name.
+    pub name: Option<String>,
+    /// The password's change.
+    pub password: Option<PasswordChange>,
+}
+
+/// A change of the game's password.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PasswordChange {
+    Clear,
+    /// Set it: 1 to 255 bytes.
+    Set(String),
+}
+
+/// The seat's plane is lost (host to client, kind 29): whether and when the
+/// player may fly again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Revival {
+    /// The respawn rule in force.
+    pub rule: Respawn,
+    /// Revivals left this mission, 0 to 10; `None` for unlimited.
+    pub lives: Option<u8>,
+    /// Seconds until the player may fly again.
+    pub wait_seconds: u32,
+    /// Why it waits or cannot, in words ("No lives left.").
+    pub why: Option<String>,
+}
+
+/// A revival's new plane (host to every player, kind 30), which every
+/// client adds to its copy of the mission.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Spawned {
+    pub plane: u32,
+    /// The tick it appears at.
+    pub tick: u32,
+    pub wing: WingId,
+    pub member: u8,
+    pub aircraft: AircraftId,
+    /// Where and how it appears, with its stores.
+    pub spawn: Spawn,
+}
+
+/// One player's score.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlayerScore {
+    /// The player's lobby id.
+    pub id: u8,
+    pub callsign: String,
+    /// The side it flies for, when it has flown.
+    pub side: Option<Side>,
+    pub kills: u32,
+    pub losses: u32,
+    /// Damage to opponents, in thousandths of an aircraft.
+    pub damage: u32,
+}
+
+/// One side's score.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SideScore {
+    pub kills: u32,
+    pub losses: u32,
+    /// Thousandths of an aircraft.
+    pub damage: u32,
+}
+
+/// Who has won.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Winner {
+    #[default]
+    NoneYet,
+    Side(Side),
+    /// The player with this lobby id.
+    Player(u8),
+    Draw,
+}
+
+/// The scores (host to client, kind 31).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Scores {
+    pub tally: ScoreTally,
+    pub fight: Fight,
+    /// Seconds left of the time limit, when there is one.
+    pub seconds_left: Option<u32>,
+    /// The kill limit, 0 for none (at most 15).
+    pub kill_limit: u8,
+    pub kill_owner: KillOwner,
+    /// At most 64.
+    pub players: Vec<PlayerScore>,
+    /// The friendly side's, then the enemy side's.
+    pub sides: [SideScore; 2],
+    pub winner: Winner,
+}
+
+/// A result row's status at the end.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ResultStatus {
+    #[default]
+    Alive,
+    Ejected,
+    Dead,
+    /// Taken out of the mission to make room for a revival.
+    Retired,
+}
+
+/// Shots fired and hits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Shots {
+    pub launched: u32,
+    pub hit: u32,
+}
+
+/// One plane's row of the results.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResultRow {
+    pub plane: u32,
+    pub wing: WingId,
+    pub member: u8,
+    pub aircraft: AircraftId,
+    /// The callsign of its last human pilot; `None` when only the AI flew
+    /// it.
+    pub callsign: Option<String>,
+    pub status: ResultStatus,
+    /// Airframe damage in thousandths, 0 to 1,000.
+    pub damage: u16,
+    pub aircraft_kills: u32,
+    pub other_kills: u32,
+    pub friendly_fire: u32,
+    pub air_to_air: Shots,
+    pub gun: Shots,
+    pub air_to_ground: Shots,
+}
+
+/// Every plane's results at the mission's end (host to client, kind 32).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Results {
+    pub reason: EndReason,
+    /// At most 1,024.
+    pub rows: Vec<ResultRow>,
+    /// The final scores, in PvP.
+    pub scores: Option<Scores>,
+}
+
+/// What an observer's camera follows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Subject {
+    None,
+    /// An aircraft, by its plane id.
+    Aircraft(u32),
+    /// A point, whole feet.
+    Point([i32; 3]),
+}
+
+/// Start or stop watching (client to host, kind 33).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Observe {
+    Stop,
+    Watch(Subject),
+}
+
+/// An observer flight's start (inside [`Observing::Started`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ObserverFlight {
+    /// The connection's new flight.
+    pub flight: u8,
+    /// The delay in seconds.
+    pub delay_seconds: u8,
+    /// The tick the first snapshot will show.
+    pub tick: u32,
+    pub roster: Roster,
+    /// The ground objects destroyed by that tick.
+    pub destroyed: Vec<u32>,
+}
+
+/// The observer flight starts or ends (host to client, kind 34).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Observing {
+    Ended,
+    Started(ObserverFlight),
 }
 
 /// The lobby as the host has it (host to client, whenever it changes).
@@ -431,6 +677,8 @@ pub enum EndReason {
     EndedByServer,
     /// The player who hosts the game left it (protocol 3).
     HostLeft,
+    /// The kill limit was reached (protocol 8, stage F phase 2).
+    KillLimit,
 }
 
 /// The host ended the mission (host to client).
@@ -493,6 +741,37 @@ pub enum Message {
     /// A chat line the host delivers (host to client, protocol 4): another
     /// player's, the reader's own sent back, or the host's words to it.
     ChatLine(ChatLine),
+    // Protocol 8, stage F phase 2 (docs/formats/net-protocol.md, "Phase 2").
+    /// The King gives the crown to the player with this lobby id (client to
+    /// host).
+    PassCrown(u8),
+    /// The King changes the lobby's settings (client to host).
+    Settings(Box<SettingsChange>),
+    /// The King locks, closes or reserves a slot (client to host).
+    SlotLock(Box<SlotLock>),
+    /// Fly again after a loss, by the respawn rule (client to host): the
+    /// mission's number. Answered by a Seated message or a Refused.
+    Revive {
+        mission: u32,
+    },
+    /// The seat's plane is lost (host to client).
+    Revival(Box<Revival>),
+    /// A revival's new plane (host to every player).
+    Spawned(Box<Spawned>),
+    /// The scores (host to client).
+    Scores(Box<Scores>),
+    /// Every plane's results at the mission's end (host to client).
+    Results(Box<Results>),
+    /// Start or stop watching (client to host).
+    Observe(Observe),
+    /// The observer flight starts or ends (host to client).
+    Observing(Box<Observing>),
+    /// The game has been away for the `idle-ai` setting's seconds (client
+    /// to host).
+    Away,
+    /// The player touched the flight controls: take the plane back (client
+    /// to host). Answered by a Seated message or a Refused.
+    Back,
 }
 
 /// A flight's loadouts and what they add to the content check.
@@ -721,6 +1000,8 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
             ready,
             loadout,
             flying,
+            observing,
+            away,
             unable,
             platform,
         } = player;
@@ -730,6 +1011,8 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         w.write_bool(*ready);
         w.write_bool(*loadout);
         w.write_bool(*flying);
+        w.write_bool(*observing);
+        w.write_bool(*away);
         bits::write_option(w, unable.as_deref(), write_str);
         let _ = w.write_bits(u64::from(platform.code()), PLATFORM_BITS);
     }
@@ -742,6 +1025,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         bits::write_option(w, slot.holder, |w, id| {
             let _ = w.write_bits(u64::from(id), 8);
         });
+        write_lock(w, &slot.lock);
     }
     write_count(w, settings.len());
     for (key, value) in settings {
@@ -792,6 +1076,8 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
             ready: r.read_bool()?,
             loadout: r.read_bool()?,
             flying: r.read_bool()?,
+            observing: r.read_bool()?,
+            away: r.read_bool()?,
             unable: bits::read_option(r, read_str)?,
             platform: read_platform(r)?,
         });
@@ -805,6 +1091,7 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
             member: r.read_bits(8)? as u8,
             aircraft: read_aircraft(r)?,
             holder: bits::read_option(r, read_id)?,
+            lock: read_lock(r)?,
         });
     }
     let count = read_count(r, SETTINGS_LIMIT, "settings")?;
@@ -952,6 +1239,498 @@ fn read_strings(
     (0..count).map(|_| read_str(r)).collect()
 }
 
+// ----- Protocol 8: stage F phase 2 -------------------------------------
+
+fn write_end_reason(w: &mut BitWriter, reason: EndReason) {
+    let reason = match reason {
+        EndReason::EveryoneLeft => 0,
+        EndReason::TimeLimit => 1,
+        EndReason::ServerStopping => 2,
+        EndReason::EndedByServer => 3,
+        EndReason::HostLeft => 4,
+        EndReason::KillLimit => 5,
+    };
+    let _ = w.write_bits(reason, 3);
+}
+
+fn read_end_reason(r: &mut BitReader<'_>) -> WireResult<EndReason> {
+    Ok(match r.read_bits(3)? {
+        0 => EndReason::EveryoneLeft,
+        1 => EndReason::TimeLimit,
+        2 => EndReason::ServerStopping,
+        3 => EndReason::EndedByServer,
+        4 => EndReason::HostLeft,
+        5 => EndReason::KillLimit,
+        _ => return Err(WireError::Invalid("end reason")),
+    })
+}
+
+fn write_lock(w: &mut BitWriter, lock: &Lock) {
+    match lock {
+        Lock::Open => {
+            let _ = w.write_bits(0, 2);
+        }
+        Lock::Closed => {
+            let _ = w.write_bits(1, 2);
+        }
+        Lock::Reserved(callsign) => {
+            let _ = w.write_bits(2, 2);
+            write_str(w, callsign);
+        }
+    }
+}
+
+fn read_lock(r: &mut BitReader<'_>) -> WireResult<Lock> {
+    Ok(match r.read_bits(2)? {
+        0 => Lock::Open,
+        1 => Lock::Closed,
+        2 => Lock::Reserved(read_str(r)?),
+        _ => return Err(WireError::Invalid("slot lock")),
+    })
+}
+
+fn write_side(w: &mut BitWriter, side: Side) {
+    w.write_bool(side == Side::Enemy);
+}
+
+fn read_side(r: &mut BitReader<'_>) -> WireResult<Side> {
+    Ok(if r.read_bool()? {
+        Side::Enemy
+    } else {
+        Side::Friendly
+    })
+}
+
+/// A choice of `bits` bits, refused when the code names none.
+fn read_choice<T>(
+    r: &mut BitReader<'_>,
+    bits: u32,
+    what: &'static str,
+    from: impl FnOnce(u32) -> Option<T>,
+) -> WireResult<T> {
+    from(r.read_bits(bits)? as u32).ok_or(WireError::Invalid(what))
+}
+
+fn write_settings_change(w: &mut BitWriter, change: &SettingsChange) -> WireResult<()> {
+    if change.values.len() > SETTINGS_LIMIT {
+        return Err(WireError::TooMany {
+            what: "settings",
+            limit: SETTINGS_LIMIT,
+        });
+    }
+    write_count(w, change.values.len());
+    for (number, value) in &change.values {
+        let _ = w.write_bits(u64::from(*number), 8);
+        w.write_varint(u64::from(*value));
+    }
+    bits::write_option(w, change.name.as_deref(), write_str);
+    match &change.password {
+        None => w.write_bool(false),
+        Some(PasswordChange::Clear) => {
+            w.write_bool(true);
+            w.write_bool(false);
+        }
+        Some(PasswordChange::Set(password)) => {
+            if password.is_empty() {
+                return Err(WireError::Invalid("password"));
+            }
+            w.write_bool(true);
+            w.write_bool(true);
+            write_str(w, password);
+        }
+    }
+    Ok(())
+}
+
+fn read_settings_change(r: &mut BitReader<'_>) -> WireResult<SettingsChange> {
+    let count = read_count(r, SETTINGS_LIMIT, "settings")?;
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        values.push((read_id(r)?, read_u32(r)?));
+    }
+    let name = bits::read_option(r, read_str)?;
+    let password = bits::read_option(r, |r| {
+        if !r.read_bool()? {
+            return Ok(PasswordChange::Clear);
+        }
+        let password = read_str(r)?;
+        if password.is_empty() {
+            return Err(WireError::Invalid("password"));
+        }
+        Ok(PasswordChange::Set(password))
+    })?;
+    Ok(SettingsChange {
+        values,
+        name,
+        password,
+    })
+}
+
+fn write_revival(w: &mut BitWriter, revival: &Revival) -> WireResult<()> {
+    let _ = w.write_bits(u64::from(revival.rule.value()), 2);
+    match revival.lives {
+        None => w.write_bool(true),
+        Some(lives) if lives <= LIVES_LIMIT => {
+            w.write_bool(false);
+            let _ = w.write_bits(u64::from(lives), 4);
+        }
+        Some(_) => return Err(WireError::Invalid("lives")),
+    }
+    w.write_varint(u64::from(revival.wait_seconds));
+    bits::write_option(w, revival.why.as_deref(), write_str);
+    Ok(())
+}
+
+fn read_revival(r: &mut BitReader<'_>) -> WireResult<Revival> {
+    let rule = read_choice(r, 2, "respawn rule", Respawn::from_value)?;
+    let lives = if r.read_bool()? {
+        None
+    } else {
+        let lives = r.read_bits(4)? as u8;
+        if lives > LIVES_LIMIT {
+            return Err(WireError::Invalid("lives"));
+        }
+        Some(lives)
+    };
+    Ok(Revival {
+        rule,
+        lives,
+        wait_seconds: read_u32(r)?,
+        why: bits::read_option(r, read_str)?,
+    })
+}
+
+fn write_spawned(w: &mut BitWriter, spawned: &Spawned) -> WireResult<()> {
+    w.write_varint(u64::from(spawned.plane));
+    let _ = w.write_bits(u64::from(spawned.tick), 32);
+    write_wing(w, spawned.wing);
+    let _ = w.write_bits(u64::from(spawned.member), 8);
+    let _ = w.write_bits(aircraft_code(spawned.aircraft), 4);
+    let spawn = &spawned.spawn;
+    for value in spawn
+        .position
+        .iter()
+        .chain([&spawn.heading_rad, &spawn.speed_fps])
+    {
+        let _ = w.write_bits(value.to_bits(), 64);
+    }
+    write_loadout(w, &spawn.loadout)
+}
+
+fn read_spawned(r: &mut BitReader<'_>) -> WireResult<Spawned> {
+    let plane = read_u32(r)?;
+    let tick = r.read_bits(32)? as u32;
+    let wing = read_wing(r)?;
+    let member = r.read_bits(8)? as u8;
+    let aircraft = read_aircraft(r)?;
+    let mut float = || -> WireResult<f64> { Ok(f64::from_bits(r.read_bits(64)?)) };
+    let position = [float()?, float()?, float()?];
+    let heading_rad = float()?;
+    let speed_fps = float()?;
+    Ok(Spawned {
+        plane,
+        tick,
+        wing,
+        member,
+        aircraft,
+        spawn: Spawn {
+            position,
+            heading_rad,
+            speed_fps,
+            loadout: read_loadout(r)?,
+        },
+    })
+}
+
+fn write_scores(w: &mut BitWriter, scores: &Scores) -> WireResult<()> {
+    let Scores {
+        tally,
+        fight,
+        seconds_left,
+        kill_limit,
+        kill_owner,
+        players,
+        sides,
+        winner,
+    } = scores;
+    if players.len() > SCORE_PLAYERS_LIMIT {
+        return Err(WireError::TooMany {
+            what: "score players",
+            limit: SCORE_PLAYERS_LIMIT,
+        });
+    }
+    if *kill_limit > 15 {
+        return Err(WireError::Invalid("kill limit"));
+    }
+    let _ = w.write_bits(u64::from(tally.value()), 2);
+    let _ = w.write_bits(u64::from(fight.value()), 1);
+    bits::write_option(w, *seconds_left, |w, s| w.write_varint(u64::from(s)));
+    let _ = w.write_bits(u64::from(*kill_limit), 4);
+    let _ = w.write_bits(u64::from(kill_owner.value()), 2);
+    write_count(w, players.len());
+    for player in players {
+        let _ = w.write_bits(u64::from(player.id), 8);
+        write_str(w, &player.callsign);
+        bits::write_option(w, player.side, write_side);
+        for value in [player.kills, player.losses, player.damage] {
+            w.write_varint(u64::from(value));
+        }
+    }
+    for side in sides {
+        for value in [side.kills, side.losses, side.damage] {
+            w.write_varint(u64::from(value));
+        }
+    }
+    match winner {
+        Winner::NoneYet => {
+            let _ = w.write_bits(0, 2);
+        }
+        Winner::Side(side) => {
+            let _ = w.write_bits(1, 2);
+            write_side(w, *side);
+        }
+        Winner::Player(id) => {
+            let _ = w.write_bits(2, 2);
+            let _ = w.write_bits(u64::from(*id), 8);
+        }
+        Winner::Draw => {
+            let _ = w.write_bits(3, 2);
+        }
+    }
+    Ok(())
+}
+
+fn read_scores(r: &mut BitReader<'_>) -> WireResult<Scores> {
+    let tally = read_choice(r, 2, "tally", ScoreTally::from_value)?;
+    let fight = read_choice(r, 1, "fight", Fight::from_value)?;
+    let seconds_left = bits::read_option(r, read_u32)?;
+    let kill_limit = r.read_bits(4)? as u8;
+    let kill_owner = read_choice(r, 2, "kill owner", KillOwner::from_value)?;
+    let count = read_count(r, SCORE_PLAYERS_LIMIT, "score players")?;
+    let mut players = Vec::with_capacity(count);
+    for _ in 0..count {
+        players.push(PlayerScore {
+            id: read_id(r)?,
+            callsign: read_str(r)?,
+            side: bits::read_option(r, read_side)?,
+            kills: read_u32(r)?,
+            losses: read_u32(r)?,
+            damage: read_u32(r)?,
+        });
+    }
+    let mut sides = [SideScore::default(); 2];
+    for side in &mut sides {
+        *side = SideScore {
+            kills: read_u32(r)?,
+            losses: read_u32(r)?,
+            damage: read_u32(r)?,
+        };
+    }
+    let winner = match r.read_bits(2)? {
+        0 => Winner::NoneYet,
+        1 => Winner::Side(read_side(r)?),
+        2 => Winner::Player(read_id(r)?),
+        _ => Winner::Draw,
+    };
+    Ok(Scores {
+        tally,
+        fight,
+        seconds_left,
+        kill_limit,
+        kill_owner,
+        players,
+        sides,
+        winner,
+    })
+}
+
+fn write_results(w: &mut BitWriter, results: &Results) -> WireResult<()> {
+    if results.rows.len() > RESULT_ROWS_LIMIT {
+        return Err(WireError::TooMany {
+            what: "result rows",
+            limit: RESULT_ROWS_LIMIT,
+        });
+    }
+    write_end_reason(w, results.reason);
+    write_count(w, results.rows.len());
+    for row in &results.rows {
+        if row.damage > DAMAGE_WHOLE {
+            return Err(WireError::Invalid("result damage"));
+        }
+        w.write_varint(u64::from(row.plane));
+        write_wing(w, row.wing);
+        let _ = w.write_bits(u64::from(row.member), 8);
+        let _ = w.write_bits(aircraft_code(row.aircraft), 4);
+        bits::write_option(w, row.callsign.as_deref(), write_str);
+        let status = match row.status {
+            ResultStatus::Alive => 0,
+            ResultStatus::Ejected => 1,
+            ResultStatus::Dead => 2,
+            ResultStatus::Retired => 3,
+        };
+        let _ = w.write_bits(status, 2);
+        let _ = w.write_bits(u64::from(row.damage), 10);
+        for value in [
+            row.aircraft_kills,
+            row.other_kills,
+            row.friendly_fire,
+            row.air_to_air.launched,
+            row.air_to_air.hit,
+            row.gun.launched,
+            row.gun.hit,
+            row.air_to_ground.launched,
+            row.air_to_ground.hit,
+        ] {
+            w.write_varint(u64::from(value));
+        }
+    }
+    w.write_bool(results.scores.is_some());
+    if let Some(scores) = &results.scores {
+        write_scores(w, scores)?;
+    }
+    Ok(())
+}
+
+fn read_shots(r: &mut BitReader<'_>) -> WireResult<Shots> {
+    Ok(Shots {
+        launched: read_u32(r)?,
+        hit: read_u32(r)?,
+    })
+}
+
+fn read_results(r: &mut BitReader<'_>) -> WireResult<Results> {
+    let reason = read_end_reason(r)?;
+    let count = read_count(r, RESULT_ROWS_LIMIT, "result rows")?;
+    // Each row takes at least 36 bits.
+    if count > r.bits_remaining() / 36 {
+        return Err(tore_codec::CodecError::UnexpectedEnd.into());
+    }
+    let mut rows = Vec::with_capacity(count);
+    for _ in 0..count {
+        let plane = read_u32(r)?;
+        let wing = read_wing(r)?;
+        let member = r.read_bits(8)? as u8;
+        let aircraft = read_aircraft(r)?;
+        let callsign = bits::read_option(r, read_str)?;
+        let status = match r.read_bits(2)? {
+            0 => ResultStatus::Alive,
+            1 => ResultStatus::Ejected,
+            2 => ResultStatus::Dead,
+            _ => ResultStatus::Retired,
+        };
+        let damage = r.read_bits(10)? as u16;
+        if damage > DAMAGE_WHOLE {
+            return Err(WireError::Invalid("result damage"));
+        }
+        rows.push(ResultRow {
+            plane,
+            wing,
+            member,
+            aircraft,
+            callsign,
+            status,
+            damage,
+            aircraft_kills: read_u32(r)?,
+            other_kills: read_u32(r)?,
+            friendly_fire: read_u32(r)?,
+            air_to_air: read_shots(r)?,
+            gun: read_shots(r)?,
+            air_to_ground: read_shots(r)?,
+        });
+    }
+    Ok(Results {
+        reason,
+        rows,
+        scores: bits::read_option(r, read_scores)?,
+    })
+}
+
+fn write_observe(w: &mut BitWriter, observe: Observe) {
+    match observe {
+        Observe::Stop => w.write_bool(false),
+        Observe::Watch(subject) => {
+            w.write_bool(true);
+            match subject {
+                Subject::None => {
+                    let _ = w.write_bits(0, 2);
+                }
+                Subject::Aircraft(plane) => {
+                    let _ = w.write_bits(1, 2);
+                    w.write_varint(u64::from(plane));
+                }
+                Subject::Point(point) => {
+                    let _ = w.write_bits(2, 2);
+                    for value in point {
+                        w.write_varint_signed(i64::from(value));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn read_observe(r: &mut BitReader<'_>) -> WireResult<Observe> {
+    if !r.read_bool()? {
+        return Ok(Observe::Stop);
+    }
+    Ok(Observe::Watch(match r.read_bits(2)? {
+        0 => Subject::None,
+        1 => Subject::Aircraft(read_u32(r)?),
+        2 => Subject::Point([bits::read_i32(r)?, bits::read_i32(r)?, bits::read_i32(r)?]),
+        _ => return Err(WireError::Invalid("observer subject")),
+    }))
+}
+
+fn write_destroyed(w: &mut BitWriter, destroyed: &[u32]) -> WireResult<()> {
+    if destroyed.len() > DESTROYED_LIMIT {
+        return Err(WireError::TooMany {
+            what: "destroyed objects",
+            limit: DESTROYED_LIMIT,
+        });
+    }
+    write_count(w, destroyed.len());
+    for id in destroyed {
+        w.write_varint(u64::from(*id));
+    }
+    Ok(())
+}
+
+fn read_destroyed(r: &mut BitReader<'_>) -> WireResult<Vec<u32>> {
+    let count = read_count(r, DESTROYED_LIMIT, "destroyed objects")?;
+    if count > r.bits_remaining() / 8 {
+        return Err(tore_codec::CodecError::UnexpectedEnd.into());
+    }
+    (0..count).map(|_| read_u32(r)).collect()
+}
+
+fn write_observing(w: &mut BitWriter, observing: &Observing) -> WireResult<()> {
+    match observing {
+        Observing::Ended => w.write_bool(false),
+        Observing::Started(start) => {
+            w.write_bool(true);
+            let _ = w.write_bits(u64::from(start.flight), 8);
+            let _ = w.write_bits(u64::from(start.delay_seconds), 8);
+            let _ = w.write_bits(u64::from(start.tick), 32);
+            write_roster(w, &start.roster)?;
+            write_destroyed(w, &start.destroyed)?;
+        }
+    }
+    Ok(())
+}
+
+fn read_observing(r: &mut BitReader<'_>) -> WireResult<Observing> {
+    if !r.read_bool()? {
+        return Ok(Observing::Ended);
+    }
+    Ok(Observing::Started(ObserverFlight {
+        flight: r.read_bits(8)? as u8,
+        delay_seconds: r.read_bits(8)? as u8,
+        tick: r.read_bits(32)? as u32,
+        roster: read_roster(r)?,
+        destroyed: read_destroyed(r)?,
+    }))
+}
+
 impl Message {
     /// The transport's kind byte.
     pub fn kind(&self) -> u8 {
@@ -980,6 +1759,18 @@ impl Message {
             Self::FlightLoadouts(_) => kind::FLIGHT_LOADOUTS,
             Self::ChatSend(_) => kind::CHAT_SEND,
             Self::ChatLine(_) => kind::CHAT_LINE,
+            Self::PassCrown(_) => kind::PASS_CROWN,
+            Self::Settings(_) => kind::SETTINGS,
+            Self::SlotLock(_) => kind::SLOT_LOCK,
+            Self::Revive { .. } => kind::REVIVE,
+            Self::Revival(_) => kind::REVIVAL,
+            Self::Spawned(_) => kind::SPAWNED,
+            Self::Scores(_) => kind::SCORES,
+            Self::Results(_) => kind::RESULTS,
+            Self::Observe(_) => kind::OBSERVE,
+            Self::Observing(_) => kind::OBSERVING,
+            Self::Away => kind::AWAY,
+            Self::Back => kind::BACK,
         }
     }
 
@@ -999,6 +1790,13 @@ impl Message {
                 | Self::Kick(_)
                 | Self::EndMission
                 | Self::ChatSend(_)
+                | Self::PassCrown(_)
+                | Self::Settings(_)
+                | Self::SlotLock(_)
+                | Self::Revive { .. }
+                | Self::Observe(_)
+                | Self::Away
+                | Self::Back
         )
     }
 
@@ -1075,14 +1873,7 @@ impl Message {
                 bits::write_option(&mut w, d.wingman.as_ref(), write_pilot);
             }
             Self::MissionEnded(m) => {
-                let reason = match m.reason {
-                    EndReason::EveryoneLeft => 0,
-                    EndReason::TimeLimit => 1,
-                    EndReason::ServerStopping => 2,
-                    EndReason::EndedByServer => 3,
-                    EndReason::HostLeft => 4,
-                };
-                let _ = w.write_bits(reason, 3);
+                write_end_reason(&mut w, m.reason);
                 bits::write_option(&mut w, m.next_in_seconds, |w, s| {
                     w.write_varint(u64::from(s))
                 });
@@ -1150,6 +1941,23 @@ impl Message {
             }
             Self::ChatSend(send) => send.write(&mut w),
             Self::ChatLine(line) => line.write(&mut w),
+            Self::PassCrown(player) => {
+                let _ = w.write_bits(u64::from(*player), 8);
+            }
+            Self::Settings(change) => write_settings_change(&mut w, change)?,
+            Self::SlotLock(lock) => {
+                w.write_varint(u64::from(lock.mission));
+                w.write_varint(u64::from(lock.plane));
+                write_lock(&mut w, &lock.lock);
+            }
+            Self::Revive { mission } => w.write_varint(u64::from(*mission)),
+            Self::Revival(revival) => write_revival(&mut w, revival)?,
+            Self::Spawned(spawned) => write_spawned(&mut w, spawned)?,
+            Self::Scores(scores) => write_scores(&mut w, scores)?,
+            Self::Results(results) => write_results(&mut w, results)?,
+            Self::Observe(observe) => write_observe(&mut w, *observe),
+            Self::Observing(observing) => write_observing(&mut w, observing)?,
+            Self::Away | Self::Back => {}
         }
         let bytes = bits::finish(w);
         if bytes.len() > limits::MESSAGE {
@@ -1266,14 +2074,7 @@ impl Message {
                 }))
             }
             kind::MISSION_ENDED => {
-                let reason = match r.read_bits(3)? {
-                    0 => EndReason::EveryoneLeft,
-                    1 => EndReason::TimeLimit,
-                    2 => EndReason::ServerStopping,
-                    3 => EndReason::EndedByServer,
-                    4 => EndReason::HostLeft,
-                    _ => return Err(WireError::Invalid("end reason")),
-                };
+                let reason = read_end_reason(r)?;
                 Self::MissionEnded(MissionEnded {
                     reason,
                     next_in_seconds: bits::read_option(r, read_u32)?,
@@ -1330,6 +2131,24 @@ impl Message {
                 1 => Goodbye::HostLeft,
                 _ => return Err(WireError::Invalid("goodbye")),
             }),
+            kind::PASS_CROWN => Self::PassCrown(read_id(r)?),
+            kind::SETTINGS => Self::Settings(Box::new(read_settings_change(r)?)),
+            kind::SLOT_LOCK => Self::SlotLock(Box::new(SlotLock {
+                mission: read_u32(r)?,
+                plane: read_u32(r)?,
+                lock: read_lock(r)?,
+            })),
+            kind::REVIVE => Self::Revive {
+                mission: read_u32(r)?,
+            },
+            kind::REVIVAL => Self::Revival(Box::new(read_revival(r)?)),
+            kind::SPAWNED => Self::Spawned(Box::new(read_spawned(r)?)),
+            kind::SCORES => Self::Scores(Box::new(read_scores(r)?)),
+            kind::RESULTS => Self::Results(Box::new(read_results(r)?)),
+            kind::OBSERVE => Self::Observe(read_observe(r)?),
+            kind::OBSERVING => Self::Observing(Box::new(read_observing(r)?)),
+            kind::AWAY => Self::Away,
+            kind::BACK => Self::Back,
             _ => return Err(WireError::Invalid("message kind")),
         };
         bits::end(r)?;

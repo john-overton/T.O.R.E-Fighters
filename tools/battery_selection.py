@@ -318,6 +318,10 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-world/src/resources.rs", ("ai-missions", "menus-creator", "airports"), "mission resource reads"),
     _r("crates/tore-world/src/target_window.rs", ("instruments",), "target window"),
     _r("crates/tore-world/src/aircraft_type.rs", ("ai-fights", "menus-creator"), "aircraft types"),
+    # Stage F phase 2's shared types (F2-0); single player never uses them.
+    _r("crates/tore-world/src/score.rs", NET_FAMILIES, "score facts (networked games)"),
+    _r("crates/tore-world/src/world/revive.rs", NET_FAMILIES + ("ai-lead",), "revival (networked games)"),
+    _r("crates/tore-world/src/world/replies.rs", NET_FAMILIES + ("radio",), "wingmen's replies"),
     _r("crates/tore-world/src/world.rs", AI_CORE + ("replay-recording",), "mission world"),
     _r("crates/tore-world/src/world/*", AI_CORE + ("replay-recording",), "mission world"),
     _r("crates/tore-world/*", AI_CORE + ("replay-recording",), "tore-world, unmapped file"),
@@ -363,6 +367,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-import/*", ("menus-validate", "replay-settings"), "importer and data folder"),
     _r("crates/tore-codec/*", NET_FAMILIES, "network encoding"),
     _r("crates/tore-net/*", NET_FAMILIES + ("net-discovery",), "network transport"),
+    _r("crates/tore-session/src/settings.rs", NET_FAMILIES + ("net-discovery",), "the King's settings registry"),
     _r("crates/tore-session/*", NET_FAMILIES + ("net-discovery",), "network sessions, the host and tore-bot"),
     _r("crates/tore-server/*", ("net-check", "net-fly", "net-discovery"), "dedicated server"),
     _r("crates/tore-realtime-native/*", ALL_FAMILIES, "host and shared-worker scheduling on macOS", windowed=True),

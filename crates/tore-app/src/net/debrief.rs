@@ -45,6 +45,7 @@ pub fn ending(debrief: &Debrief, cause: Cause, lobby: Option<&LobbyState>) -> Op
         Cause::Host(EndReason::ServerStopping) if king => "The host is stopping the game.",
         Cause::Host(EndReason::ServerStopping) => "The server is stopping.",
         Cause::Host(EndReason::HostLeft) => "The host left the game.",
+        Cause::Host(EndReason::KillLimit) => "The kill limit ended the mission.",
     };
     Some(Ended {
         title: "MISSION ENDED".into(),

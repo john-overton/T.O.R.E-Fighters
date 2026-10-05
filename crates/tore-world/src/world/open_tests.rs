@@ -125,7 +125,9 @@ fn assert_consistent(world: &World) {
             .any(|t| t.id == plane.id.0);
         match plane.pilot {
             Pilot::Ai => assert!(actor && row, "AI plane {}", plane.id.0),
-            Pilot::Human(_) => assert!(!actor && !row, "human plane {}", plane.id.0),
+            Pilot::Human(_) | Pilot::Lost => {
+                assert!(!actor && !row, "human or lost plane {}", plane.id.0)
+            }
         }
     }
     assert_eq!(

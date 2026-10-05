@@ -87,6 +87,7 @@ fn end_text(reason: tore_session::wire::messages::EndReason) -> &'static str {
         EndReason::ServerStopping => "the server is stopping",
         EndReason::EndedByServer => "ended from the console",
         EndReason::HostLeft => "the host left the game",
+        EndReason::KillLimit => "the kill limit",
     }
 }
 

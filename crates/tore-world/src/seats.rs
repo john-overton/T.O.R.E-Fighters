@@ -6,7 +6,10 @@
 //! seat is one human. Every plane has one pilot, the AI or a seat, and a seat
 //! flies at most one plane. Single player is seat 0 flying plane 0.
 
-use crate::{comms, world::AirportInput};
+use crate::{
+    comms,
+    world::{AirportInput, replies::Reply},
+};
 use tore_sim::{
     ai::launch::{Side, WingId},
     ai::wing::PlayerOrder,
@@ -53,6 +56,13 @@ pub enum Pilot {
     Ai,
     /// A human, from this seat.
     Human(SeatId),
+    /// Nobody: a human's plane that was lost (destroyed, its pilot dead or
+    /// ejected) and abandoned to the mission
+    /// ([`crate::world::MissionCommand::Abandon`], stage F phase 2). Its
+    /// cockpit steps on with neutral controls (the wreck falling, the
+    /// escape), and nobody can take it. Nothing makes a plane lost until
+    /// slice F2-V.
+    Lost,
 }
 
 /// One plane of the mission and who flies it.
@@ -267,7 +277,7 @@ impl Roster {
     pub fn seat_of(&self, plane: PlaneId) -> Option<SeatId> {
         match self.plane(plane)?.pilot {
             Pilot::Human(seat) => Some(seat),
-            Pilot::Ai => None,
+            Pilot::Ai | Pilot::Lost => None,
         }
     }
 }
@@ -355,6 +365,10 @@ pub enum SeatCommand {
         repeat: bool,
         blocked: bool,
     },
+    /// A wingman's reply or request to its flight (Alt+Shift+E, W, B or H;
+    /// stage F phase 2). The step does nothing with it until slice F2-R
+    /// builds the call.
+    WingReply(Reply),
 }
 
 #[cfg(test)]

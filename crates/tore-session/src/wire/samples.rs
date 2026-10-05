@@ -11,13 +11,16 @@ use super::events::{EventsSection, Rumble, SectionEvent, WireEvent};
 use super::inputs::{Command, InputFrame, InputsSection, NumberedCommand};
 use super::messages::{
     ContentRefused, Debrief, DebriefObjective, DebriefPilot, EndReason, Goodbye, Kick, Loadout,
-    LobbyPhase, LobbyPlayer, LobbySlot, LobbyState, Message, Mission, MissionEnded, Names,
-    PilotStatus, Roster, RosterPilot, RosterPlane, Seated, SetReady, Slot, SlotRequest, StartRule,
-    TakePlane,
+    LobbyPhase, LobbyPlayer, LobbySlot, LobbyState, Lock, Message, Mission, MissionEnded, Names,
+    Observe, ObserverFlight, Observing, PasswordChange, PilotStatus, PlayerScore, ResultRow,
+    ResultStatus, Results, Revival, Roster, RosterPilot, RosterPlane, Scores, Seated, SetReady,
+    SettingsChange, Shots, SideScore, Slot, SlotLock, SlotRequest, Spawned, StartRule, Subject,
+    TakePlane, Winner,
 };
 use super::names::NameIndex;
 use super::priority::Relevance;
 use super::snapshot::{EntitySender, SnapshotHeader};
+use crate::settings::{Fight, KillOwner, Respawn, ScoreTally};
 use tore_formats::aircraft::AircraftId;
 use tore_sim::acoustics;
 use tore_sim::ai::launch::{Side, WingId};
@@ -32,6 +35,8 @@ use tore_world::comms::Route;
 use tore_world::mission::{LoadoutSpec, StationLoad};
 use tore_world::resources::{Manifest, ManifestEntry};
 use tore_world::seats::SeatCommand;
+use tore_world::world::replies::Reply;
+use tore_world::world::revive::Spawn;
 use tore_world::world::{AirportInput, OrderOutcome};
 
 /// Every kind of command, seat and pilot.
@@ -73,6 +78,11 @@ pub fn commands() -> Vec<Command> {
             repeat: false,
             blocked: true,
         }),
+        // Protocol 8: every wing reply.
+        Command::Seat(S::WingReply(Reply::Engaging)),
+        Command::Seat(S::WingReply(Reply::Winchester)),
+        Command::Seat(S::WingReply(Reply::BingoFuel)),
+        Command::Seat(S::WingReply(Reply::NeedHelp)),
         Command::Pilot(PilotCommand::Eject),
         Command::Pilot(PilotCommand::Toggle(Switch::Gear)),
         Command::Pilot(PilotCommand::Set(Switch::WaypointAutopilot, true)),
@@ -657,10 +667,214 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
         }),
         Message::ChatLine(ChatLine::system("No one hears you.")),
     ]
+    .into_iter()
+    .chain(phase_two_messages())
+    .collect()
+}
+
+/// Scores with a player of each side, one with no side yet, and a winner.
+pub fn scores() -> Scores {
+    Scores {
+        tally: ScoreTally::Ratio,
+        fight: Fight::Sides,
+        seconds_left: Some(312),
+        kill_limit: 5,
+        kill_owner: KillOwner::Side,
+        players: vec![
+            PlayerScore {
+                id: 0,
+                callsign: "Viper".into(),
+                side: Some(Side::Friendly),
+                kills: 3,
+                losses: 1,
+                damage: 2_750,
+            },
+            PlayerScore {
+                id: 3,
+                callsign: "Hawk".into(),
+                side: Some(Side::Enemy),
+                kills: 2,
+                losses: 2,
+                damage: 1_400,
+            },
+            PlayerScore {
+                id: 4,
+                callsign: "Lynx".into(),
+                side: None,
+                kills: 0,
+                losses: 0,
+                damage: 0,
+            },
+        ],
+        sides: [
+            SideScore {
+                kills: 3,
+                losses: 1,
+                damage: 2_750,
+            },
+            SideScore {
+                kills: 2,
+                losses: 2,
+                damage: 1_400,
+            },
+        ],
+        winner: Winner::Side(Side::Friendly),
+    }
+}
+
+/// One message of every phase 2 kind (protocol 8), each variant of its
+/// choices at least once.
+pub fn phase_two_messages() -> Vec<Message> {
+    let row = |plane: u32, status: ResultStatus, callsign: Option<&str>| ResultRow {
+        plane,
+        wing: WingId::new(Side::Enemy, 1).unwrap(),
+        member: 2,
+        aircraft: AircraftId::Su35,
+        callsign: callsign.map(str::to_owned),
+        status,
+        damage: if status == ResultStatus::Alive {
+            125
+        } else {
+            1_000
+        },
+        aircraft_kills: plane % 3,
+        other_kills: 1,
+        friendly_fire: 0,
+        air_to_air: Shots {
+            launched: 4,
+            hit: 2,
+        },
+        gun: Shots {
+            launched: 320,
+            hit: 41,
+        },
+        air_to_ground: Shots::default(),
+    };
+    let mut free_for_all = scores();
+    free_for_all.fight = Fight::FreeForAll;
+    free_for_all.tally = ScoreTally::Damage;
+    free_for_all.kill_owner = KillOwner::Player;
+    free_for_all.seconds_left = None;
+    free_for_all.winner = Winner::Player(3);
+    let mut draw = scores();
+    draw.tally = ScoreTally::Kills;
+    draw.kill_owner = KillOwner::Total;
+    draw.kill_limit = 0;
+    draw.winner = Winner::Draw;
+    let mut none_yet = scores();
+    none_yet.winner = Winner::NoneYet;
+    vec![
+        Message::PassCrown(3),
+        Message::Settings(Box::new(SettingsChange {
+            values: vec![(1, 1), (10, 255), (16, 600)],
+            name: Some("Viper's PvP".into()),
+            password: Some(PasswordChange::Set("hunter2".into())),
+        })),
+        Message::Settings(Box::new(SettingsChange {
+            values: Vec::new(),
+            name: None,
+            password: Some(PasswordChange::Clear),
+        })),
+        Message::Settings(Box::default()),
+        Message::SlotLock(Box::new(SlotLock {
+            mission: 7,
+            plane: 4,
+            lock: Lock::Reserved("Hawk".into()),
+        })),
+        Message::SlotLock(Box::new(SlotLock {
+            mission: 7,
+            plane: 5,
+            lock: Lock::Closed,
+        })),
+        Message::SlotLock(Box::new(SlotLock {
+            mission: 7,
+            plane: 5,
+            lock: Lock::Open,
+        })),
+        Message::Revive { mission: 7 },
+        Message::Revival(Box::new(Revival {
+            rule: Respawn::Revive,
+            lives: Some(2),
+            wait_seconds: 45,
+            why: None,
+        })),
+        Message::Revival(Box::new(Revival {
+            rule: Respawn::AiSlot,
+            lives: None,
+            wait_seconds: 0,
+            why: Some("Waiting for room for another aircraft.".into()),
+        })),
+        Message::Revival(Box::new(Revival {
+            rule: Respawn::None,
+            lives: Some(0),
+            wait_seconds: 0,
+            why: Some("No lives left.".into()),
+        })),
+        Message::Spawned(Box::new(Spawned {
+            plane: 40,
+            tick: 86_400,
+            wing: WingId::new(Side::Enemy, 2).unwrap(),
+            member: 4,
+            aircraft: AircraftId::Su35,
+            spawn: Spawn {
+                position: [-60_761.25, 20_000., 121_522.5],
+                heading_rad: -2.356_194_490_192_345,
+                speed_fps: 760.5,
+                loadout: LoadoutSpec {
+                    fuel_lbs: 20_700.,
+                    cheat: false,
+                    stations: vec![StationLoad {
+                        weapon: "GSH301.JT".into(),
+                        count: 1,
+                        quantity: 75,
+                    }],
+                },
+            },
+        })),
+        Message::Scores(Box::new(scores())),
+        Message::Scores(Box::new(free_for_all)),
+        Message::Scores(Box::new(draw)),
+        Message::Scores(Box::new(none_yet)),
+        Message::Results(Box::new(Results {
+            reason: EndReason::KillLimit,
+            rows: vec![
+                row(0, ResultStatus::Alive, Some("Viper")),
+                row(7, ResultStatus::Ejected, None),
+                row(9, ResultStatus::Dead, Some("Hawk")),
+                row(40, ResultStatus::Retired, Some("Hawk")),
+            ],
+            scores: Some(scores()),
+        })),
+        Message::Results(Box::new(Results {
+            reason: EndReason::TimeLimit,
+            rows: Vec::new(),
+            scores: None,
+        })),
+        Message::Observe(Observe::Stop),
+        Message::Observe(Observe::Watch(Subject::None)),
+        Message::Observe(Observe::Watch(Subject::Aircraft(16))),
+        Message::Observe(Observe::Watch(Subject::Point([-120_000, 15_000, 98_765]))),
+        Message::Observing(Box::new(Observing::Started(ObserverFlight {
+            flight: 4,
+            delay_seconds: 30,
+            tick: 72_000,
+            roster: roster(),
+            destroyed: vec![1_000_001],
+        }))),
+        Message::Observing(Box::new(Observing::Ended)),
+        Message::Away,
+        Message::Back,
+        Message::MissionEnded(MissionEnded {
+            reason: EndReason::KillLimit,
+            next_in_seconds: None,
+        }),
+    ]
 }
 
 /// A lobby with a King, a player flying, one unable, one more waiting, and
-/// three slots: the four players cover every platform.
+/// three slots: the four players cover every platform, the slots every lock,
+/// the players every observing and away mark, and the settings are PvP's
+/// defaults (protocol 8).
 pub fn lobby() -> LobbyState {
     LobbyState {
         name: "Viper's game".into(),
@@ -679,6 +893,8 @@ pub fn lobby() -> LobbyState {
                 ready: true,
                 loadout: true,
                 flying: true,
+                observing: false,
+                away: false,
                 unable: None,
                 platform: Platform::Linux,
             },
@@ -689,6 +905,8 @@ pub fn lobby() -> LobbyState {
                 ready: false,
                 loadout: false,
                 flying: false,
+                observing: true,
+                away: false,
                 unable: None,
                 platform: Platform::Windows,
             },
@@ -699,6 +917,8 @@ pub fn lobby() -> LobbyState {
                 ready: false,
                 loadout: false,
                 flying: false,
+                observing: false,
+                away: true,
                 unable: Some("Your game data differs".into()),
                 platform: Platform::MacOs,
             },
@@ -709,6 +929,8 @@ pub fn lobby() -> LobbyState {
                 ready: false,
                 loadout: false,
                 flying: false,
+                observing: true,
+                away: true,
                 unable: None,
                 platform: Platform::Unknown,
             },
@@ -720,6 +942,7 @@ pub fn lobby() -> LobbyState {
                 member: 0,
                 aircraft: AircraftId::F18,
                 holder: Some(0),
+                lock: Lock::Open,
             },
             LobbySlot {
                 plane: 1,
@@ -727,6 +950,7 @@ pub fn lobby() -> LobbyState {
                 member: 1,
                 aircraft: AircraftId::F18,
                 holder: Some(1),
+                lock: Lock::Reserved("Cobra".into()),
             },
             LobbySlot {
                 plane: 4,
@@ -734,9 +958,10 @@ pub fn lobby() -> LobbyState {
                 member: 0,
                 aircraft: AircraftId::F14,
                 holder: None,
+                lock: Lock::Closed,
             },
         ],
-        settings: Vec::new(),
+        settings: crate::settings::Store::defaults(crate::settings::Mode::Pvp).lobby_list(),
     }
 }
 

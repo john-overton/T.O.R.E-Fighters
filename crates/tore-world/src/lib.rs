@@ -21,6 +21,7 @@ pub mod mission_layout;
 pub mod radio_calls;
 pub mod readout;
 pub mod resources;
+pub mod score;
 pub mod seats;
 pub mod situation;
 pub mod snapshot;

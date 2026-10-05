@@ -4767,7 +4767,7 @@ fn recorded_humans(
             seats::Pilot::Human(who) => {
                 others.push(human(plane, format!("Seat {}", u16::from(who.0) + 1)))
             }
-            seats::Pilot::Ai => {}
+            seats::Pilot::Ai | seats::Pilot::Lost => {}
         }
     }
     (

@@ -1124,6 +1124,8 @@ pub fn members(
             position: plane.slot.member,
             alive: match plane.pilot {
                 Pilot::Human(_) => human_alive(plane.id),
+                // A lost plane's pilot is dead or out of it (phase 2).
+                Pilot::Lost => false,
                 Pilot::Ai => wings
                     .and_then(|w| w.mission().actor(plane.id.0))
                     .is_some_and(|actor| actor.alive()),

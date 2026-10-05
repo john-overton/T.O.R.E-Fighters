@@ -17,6 +17,7 @@ use tore_sim::flight::{PilotCommand, PilotInput, Switch};
 use tore_sim::sensors::{Channel, Controls, RANGE_LADDER_NMI};
 use tore_world::seats::{SeatCommand, SeatId, SeatInput, SeatView};
 use tore_world::world::AirportInput;
+use tore_world::world::replies::Reply;
 
 /// One tick's continuous controls as the wire carries them: sticks at
 /// 1/32,767, the throttle rate at 1/127, the throttle position at 1/65,535.
@@ -510,6 +511,8 @@ const TOGGLE: u64 = 18;
 const SET: u64 = 19;
 const THROTTLE: u64 = 20;
 const ADJUST_THROTTLE: u64 = 21;
+/// Protocol 8 (stage F phase 2): a wingman's reply, then its kind in 2 bits.
+const WING_REPLY: u64 = 22;
 const COMMAND_BITS: u32 = 5;
 
 /// Writes one command.
@@ -566,6 +569,10 @@ pub(crate) fn write_command(w: &mut BitWriter, command: &Command) {
                 w.write_bool(down);
                 w.write_bool(repeat);
                 w.write_bool(blocked);
+            }
+            SeatCommand::WingReply(reply) => {
+                code(WING_REPLY);
+                let _ = w.write_bits(reply_code(reply), 2);
             }
         },
         Command::Pilot(pilot) => match quantize_command(pilot) {
@@ -631,6 +638,7 @@ pub(crate) fn read_command(r: &mut BitReader<'_>) -> WireResult<Command> {
             repeat: r.read_bool()?,
             blocked: r.read_bool()?,
         }),
+        WING_REPLY => seat(SeatCommand::WingReply(Reply::ALL[r.read_bits(2)? as usize])),
         EJECT => Ok(Command::Pilot(PilotCommand::Eject)),
         TOGGLE => Ok(Command::Pilot(PilotCommand::Toggle(read_switch(r)?))),
         SET => {
@@ -647,6 +655,17 @@ pub(crate) fn read_command(r: &mut BitReader<'_>) -> WireResult<Command> {
             read_stick(r)?,
         )))),
         _ => Err(WireError::Invalid("command")),
+    }
+}
+
+/// A wingman's reply's code: its place in [`Reply::ALL`]. The match is
+/// exhaustive so a new kind cannot go uncoded.
+fn reply_code(reply: Reply) -> u64 {
+    match reply {
+        Reply::Engaging => 0,
+        Reply::Winchester => 1,
+        Reply::BingoFuel => 2,
+        Reply::NeedHelp => 3,
     }
 }
 

@@ -19,10 +19,14 @@
 //! in the past, and hands the game a frame each render, with a diagnostics
 //! log and a capture that replays offline. [`bot`] flies it with a scripted
 //! pilot, as the `tore-bot` program does.
+//!
+//! [`settings`] is the King's settings' registry and the host's store of
+//! their values (stage F phase 2).
 
 pub mod bot;
 pub mod client;
 pub mod host;
+pub mod settings;
 pub mod wire;
 
 pub use client::capture;

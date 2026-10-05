@@ -56,6 +56,8 @@ mod golden_tests;
 #[cfg(test)]
 mod lossy_tests;
 #[cfg(test)]
+mod phase2_tests;
+#[cfg(test)]
 mod readout_tests;
 #[cfg(test)]
 mod round_trip_tests;
@@ -76,8 +78,9 @@ pub use tore_net::Platform;
 /// lobby (EF4), 4 since chat (EF6), 5 since the transport's Keepalive packet
 /// (EF-K), 6 since the exact flight state's overspeed countdown and failure
 /// random stream, 7 since each player's platform (the Challenge answer and
-/// the lobby's player list).
-pub const PROTOCOL_VERSION: u16 = 7;
+/// the lobby's player list), 8 since stage F phase 2's messages, settings,
+/// slot locks and wing replies (F2-0).
+pub const PROTOCOL_VERSION: u16 = 8;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

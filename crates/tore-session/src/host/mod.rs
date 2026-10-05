@@ -23,12 +23,26 @@
 //! a player hosts) changes the mission, starts it, ends it and kicks; a
 //! dedicated server starts as its `start` setting says. Every player is sent
 //! the lobby's state whenever it changes.
+//!
+//! Stage F phase 2 (docs/ARCHITECTURE.md, "Phase 2: the rest of stage F")
+//! adds the King's settings ([`crate::settings`]), the crown, revival,
+//! scoring, the results, observers and the idle aircraft, each in a module
+//! of its own (`king`, `revive`, `score`, `results`, `observe`, `away`) that
+//! this one calls.
 
+// Stage F phase 2's parts (slice F2-0 adds them as hooks; each slice in
+// docs/ARCHITECTURE.md, "Phase 2 slices", fills its own).
+mod away;
 mod chat;
 pub mod config;
 mod discover;
 pub mod inputs;
+mod king;
 mod lobby;
+mod observe;
+mod results;
+mod revive;
+mod score;
 mod sorting;
 #[cfg(test)]
 mod tests;
@@ -104,6 +118,8 @@ pub const LOBBY_REQUESTS_PER_SECOND: u32 = 20;
 /// out together.
 pub const LOBBY_INTERVAL: Duration = Duration::from_millis(250);
 pub const LOBBY_INTERVAL_FLYING: Duration = Duration::from_secs(1);
+/// The refusal of a phase 2 request whose slice is not built yet.
+pub const NOT_AVAILABLE: &str = "Not available yet.";
 
 /// The time from tick 0 to tick `ticks` of a clock at 120 a second, to the
 /// nanosecond (rounded up, so a tick is never due early).
@@ -470,6 +486,9 @@ struct Costs {
 /// The host session. See the module documentation.
 pub struct Host {
     config: HostConfig,
+    /// The King's settings in force (stage F phase 2): the configuration's
+    /// to start with.
+    settings: crate::settings::Store,
     /// The lobby's mission: the King's or the mission file's, with no
     /// player's loadout in it.
     spec: MissionSpec,
@@ -756,6 +775,7 @@ impl Host {
             #[cfg(test)]
             snapshot_executor: None,
             out: TickOutput::default(),
+            settings: crate::settings::Store::from_config(&config),
             config,
         };
         if host.config.start == StartMode::Now {
@@ -1402,6 +1422,8 @@ impl Host {
             Message::Slot(m) => Some(m.mission),
             Message::Loadout(m) => Some(m.mission),
             Message::SetReady(m) => Some(m.mission),
+            Message::SlotLock(m) => Some(m.mission),
+            Message::Revive { mission } => Some(*mission),
             _ => None,
         };
         if mission.is_some_and(|number| number != self.number) {
@@ -1415,7 +1437,13 @@ impl Host {
         }
         let king_only = matches!(
             message,
-            Message::ChangeMission(_) | Message::Start | Message::Kick(_) | Message::EndMission
+            Message::ChangeMission(_)
+                | Message::Start
+                | Message::Kick(_)
+                | Message::EndMission
+                | Message::PassCrown(_)
+                | Message::Settings(_)
+                | Message::SlotLock(_)
         );
         if king_only && !king {
             self.refuse(
@@ -1470,6 +1498,35 @@ impl Host {
                 };
                 self.answer(connection, kind::END_MISSION, "the end", result);
             }
+            // Stage F phase 2: each slice's module answers its own.
+            Message::PassCrown(player) => {
+                let result = self.pass_crown(connection, player);
+                self.answer(connection, kind::PASS_CROWN, "the crown", result);
+            }
+            Message::Settings(change) => {
+                let result = self.change_settings(connection, &change);
+                self.answer(connection, kind::SETTINGS, "the settings", result);
+            }
+            Message::SlotLock(lock) => {
+                let result = self.lock_slot(connection, lock.plane, &lock.lock);
+                self.answer(connection, kind::SLOT_LOCK, "a slot lock", result);
+            }
+            Message::Revive { .. } => {
+                let result = self.revive_request(connection);
+                self.answer(connection, kind::REVIVE, "a revival", result);
+            }
+            Message::Observe(observe) => {
+                let result = self.observe_request(connection, observe);
+                self.answer(connection, kind::OBSERVE, "watching", result);
+            }
+            Message::Away => {
+                let result = self.away_request(connection);
+                self.answer(connection, kind::AWAY, "away", result);
+            }
+            Message::Back => {
+                let result = self.back_request(connection);
+                self.answer(connection, kind::BACK, "back", result);
+            }
             _ => {}
         }
     }
@@ -1500,6 +1557,13 @@ impl Host {
             kind::START => "the start",
             kind::KICK => "a kick",
             kind::END_MISSION => "the end",
+            kind::PASS_CROWN => "the crown",
+            kind::SETTINGS => "the settings",
+            kind::SLOT_LOCK => "a slot lock",
+            kind::REVIVE => "a revival",
+            kind::OBSERVE => "watching",
+            kind::AWAY => "away",
+            kind::BACK => "back",
             _ => "a request",
         };
         self.log_refusal(connection, what, reason);
@@ -1658,6 +1722,13 @@ impl Host {
                 "{} holds plane {}.",
                 self.peers[&other].callsign, plane.0
             ));
+        }
+        // Stage F phase 2: the King's rules, then the revival rules.
+        if let Some(why) = self
+            .king_take_refusal(connection, plane)
+            .or_else(|| self.revive_take_refusal(connection, plane))
+        {
+            return Some(why);
         }
         self.world
             .can_take(seat, plane)
@@ -2218,7 +2289,9 @@ impl Host {
                         member: plane.slot.member,
                         aircraft: aircraft_of(&self.world, plane.id)?,
                         pilot: match plane.pilot {
-                            Pilot::Ai => RosterPilot::Ai,
+                            // A lost plane (phase 2) has no human; the
+                            // roster names no pilot for it.
+                            Pilot::Ai | Pilot::Lost => RosterPilot::Ai,
                             Pilot::Human(seat) => RosterPilot::Human {
                                 seat: seat.0,
                                 callsign: callsign(seat),
@@ -2262,7 +2335,7 @@ impl Host {
             .find(|peer| peer.king)
             .map(|peer| peer.lobby.id);
         LobbyState {
-            name: self.config.name.clone(),
+            name: self.settings.name().to_owned(),
             summary: self.spec.summary(),
             mission: self.number,
             phase: match self.life {
@@ -2288,6 +2361,9 @@ impl Host {
                     ready: peer.lobby.ready,
                     loadout: peer.lobby.loadout.is_some(),
                     flying: Self::in_flight(peer),
+                    // Observers and away players are slices F2-O1 and F2-A.
+                    observing: false,
+                    away: false,
                     unable: peer.lobby.unable.clone(),
                     platform: peer.platform,
                 })
@@ -2301,9 +2377,11 @@ impl Host {
                     member: slot.member,
                     aircraft: slot.aircraft,
                     holder: holder(slot.id),
+                    // Slot locks are slice F2-1's.
+                    lock: messages::Lock::Open,
                 })
                 .collect(),
-            settings: Vec::new(),
+            settings: self.settings.lobby_list(),
         }
     }
 
@@ -2526,6 +2604,11 @@ impl Host {
             }
         }
 
+        // Stage F phase 2: handoffs for away and returning players, then
+        // revivals and abandoned planes.
+        self.away_commands(tick, &mut commands);
+        self.revive_commands(tick, &mut commands);
+
         // Every flying seat's input.
         let mut inputs: Vec<SeatInput> = Vec::new();
         for peer in self.peers.values_mut() {
@@ -2588,10 +2671,13 @@ impl Host {
             self.seated(connection, seat, plane, tick, &out);
         }
         self.sort_seats(tick, &out, &wide);
+        // Stage F phase 2: the tick's score facts.
+        self.score_tick(tick, &out);
         if std::mem::take(&mut self.roster_dirty) {
             self.broadcast_roster();
         }
         self.snapshots(tick, now, &out);
+        self.observe_tick(tick, now);
         self.out = out;
         let cost = started.elapsed();
         self.costs.ticks += 1;
@@ -2991,6 +3077,8 @@ impl Host {
             return;
         }
         let now = self.now;
+        // Stage F phase 2: every plane's results, before Mission ended.
+        self.send_results(reason);
         let ended = Message::MissionEnded(MissionEnded {
             reason,
             next_in_seconds: next.map(|d| d.as_secs().min(u64::from(u32::MAX)) as u32),

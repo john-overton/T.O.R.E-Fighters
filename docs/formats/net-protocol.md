@@ -1071,10 +1071,10 @@ client keeps its last 64.
 ### Messages as built
 
 Kind bytes 1 to 11 in the table's order (Mission to Mission ended), then the
-lobby's 12 to 22 in theirs (Slot to Flight loadouts); 23 and 24 are kept for
-the phase 2 lobby (passing the crown, the King's settings), which
-[phase 2](#phase-2-the-kings-settings-revival-scores-and-observers) designs
-with kinds 27 to 36. The
+lobby's 12 to 22 in theirs (Slot to Flight loadouts); 23 and 24 (passing the
+crown, the King's settings) and 27 to 36 are
+[phase 2's](#phase-2-the-kings-settings-revival-scores-and-observers),
+protocol 8. The
 spec text and the exact state are long byte strings (a varint length); the
 exact state in Seated is coded with no baseline and the client decodes it with
 its plane's aircraft model. A loadout is the fuel as a 64-bit float, the
@@ -1202,14 +1202,15 @@ Seated message of the next, so the name table never mixes two flights.
 
 ## Phase 2: the King's settings, revival, scores and observers
 
-*Designed 2026-10-05, not built*: the wire of stage F's phase 2
-([architecture](../ARCHITECTURE.md#phase-2-the-rest-of-stage-f)). Slice F2-0
-builds all of it at once under **the next protocol version**, which the lead
-hands out at merge, so the slices after it never change the bytes. Every
-choice is an agent proposal. Codings follow [what the game's sections
+*Designed 2026-10-05; built (F2-0) under **protocol 8**, all of it at once*:
+the wire of stage F's phase 2
+([architecture](../ARCHITECTURE.md#phase-2-the-rest-of-stage-f)), so the
+slices after F2-0 never change the bytes. Every choice is an agent proposal.
+Codings follow [what the game's sections
 settled](#what-the-games-sections-settled): varints are `tore-codec`'s,
 strings a length byte and UTF-8, "a presence bit" a 1 then the value or a 0
-alone.
+alone. The messages are `tore_session::wire::messages`, the settings'
+registry `tore_session::settings`.
 
 ### New messages
 
@@ -1220,7 +1221,7 @@ Refused (kind 20) with its words.
 | Kind | Name | Direction | Body |
 | --- | --- | --- | --- |
 | 23 | Pass crown | the King to host | The player's lobby id (8 bits) |
-| 24 | Settings | the King to host | A count (varint, 1 to 64), then each setting's number (8 bits) and value (varint); a presence bit and the game's name (a string); a presence bit and the password: 1 bit (0 clear it, 1 set it, then a string of 1 to 255 bytes). The host applies all or none: the first that fails refuses the whole message |
+| 24 | Settings | the King to host | A count (varint, 0 to 64), then each setting's number (8 bits) and value (varint); a presence bit and the game's name (a string); a presence bit and the password: 1 bit (0 clear it, 1 set it, then a string of 1 to 255 bytes). The host applies all or none: the first that fails refuses the whole message |
 | 27 | Slot lock | the King to host | The mission's number (varint), the plane (varint), the lock (2 bits: 0 open, 1 closed, 2 reserved) and, when reserved, the callsign (a string) |
 | 28 | Revive | client to host | The mission's number (varint): fly again after a loss, by the respawn rule |
 | 29 | Revival | host to client | The seat's plane is lost: the rule (2 bits: 0 none, 1 AI slot, 2 revive), the lives left (1 bit unlimited, else 4 bits, 0 to 10), the seconds until it may fly again (varint), and a presence bit and a line of why it waits or cannot ("No lives left.", "Waiting for room for another aircraft.") |
@@ -1234,7 +1235,33 @@ Refused (kind 20) with its words.
 
 A Pass crown, Settings or Slot lock from anyone but the King is refused "Only
 the King may do that." Revive and Back are answered by a Seated message (a new
-flight) or a Refused.
+flight) or a Refused. A Slot lock or a Revive that names an earlier mission is
+refused "The mission has changed; choose again.", as the lobby's requests are.
+
+*Built (F2-0), each an agent decision:*
+
+- **Not built yet.** Until the slice that builds a request lands, the host
+  answers it with a Refused "Not available yet." (the King's three after the
+  King check), and a client passes each new host message on as an event
+  without acting on it.
+- **Settings.** The count may be 0, for a change of only the name or the
+  password (the design said 1 to 64). An empty password is refused by the
+  writer and the reader. Setting 5 is refused by number: the password has its
+  own field.
+- **Revival.** Lives over 10 are refused by the writer and the reader (4 bits
+  would hold 15); the rule's code 3 is invalid.
+- **Spawned.** The aircraft is the roster's 4-bit code; the floats are the
+  world's own (`tore_world::world::revive::Spawn`): position x, y, z in feet,
+  then heading and speed.
+- **Scores.** The sides are the friendly side's three varints, then the
+  enemy side's. The kill limit's 4 bits hold 0 to 15; the registry's values
+  are 0 to 10. A code 3 for the tally or the kill owner is invalid.
+- **Results.** Damage over 1,000 thousandths is refused by the writer and the
+  reader. A row's three shot tallies are air-to-air, then gun, then
+  air-to-ground, launched before hit. The largest message (1,024 rows and 64
+  scored players) fits a reliable message.
+- **Observe.** A subject's code 3 is invalid; a point's coordinates are
+  signed varints that must fit 32 bits.
 
 ### Changed messages
 
@@ -1242,10 +1269,15 @@ flight) or a Refused.
   setting of the [registry](../ARCHITECTURE.md#the-kings-settings) by number
   (the password as setting 5, 1 when one is set; the password itself never).
   The house id (the field the lobby state calls the host's) and the King's id
-  now differ when the crown has passed. Each slot gains its lock (2 bits) and,
-  when reserved, the callsign (a string). Each player gains two bits after
-  flying: observing (it watches the flying mission) and away (the AI flies its
-  plane while it is away).
+  now differ when the crown has passed. Each slot gains its lock (2 bits, after
+  the holder: 0 open, 1 closed, 2 reserved, 3 invalid) and, when reserved, the
+  callsign (a string). Each player gains two bits after flying: observing (it
+  watches the flying mission) and away (the AI flies its plane while it is
+  away). *Built (F2-0):* the host sends all twenty settings in number order
+  from its store, which starts at co-op's defaults with the configuration's
+  name, password, player limit and time limit (a dedicated server's time limit
+  as its file gives it, which may lie outside the King's list); every slot is
+  open and nobody observes or is away until slices F2-1, F2-O1 and F2-A.
 - **Mission ended** (kind 11) and Results: reason 5 is the kill limit (3 bits
   already).
 - **Inputs**: command code 22 is a **wing reply**, followed by its kind in 2
@@ -1322,7 +1354,7 @@ Decoders check every count and length against these before reading on.
 | Chat line (protocol 4) | 80 characters of printable ASCII, 5 lines in 5 seconds a player, a quick message's sound 12 characters |
 | Keepalive (protocol 5) | 1 a second from a stalled game, for at most 60 seconds of stall |
 | Punch (stage J) | 5 to each of at most 8 addresses for each introduction, at most 10 introductions a second |
-| Phase 2 (designed) | Settings in one message 64; players in Scores 64; rows in Results 1,024; a password 255 bytes; Observe at most twice a second from one connection |
+| Phase 2 (protocol 8) | Settings in one message 64; players in Scores 64; rows in Results 1,024; a password 255 bytes; Observe at most twice a second from one connection |
 
 ## Captures
 
@@ -1368,9 +1400,9 @@ to a replay is stage E.
   EF4, 4 since chat, EF6, 5 since the transport's [Keepalive](#keepalive),
   EF-K, 6 since the exact flight state added the overspeed countdown and legacy
   failure RNG, 7 since each player's platform, in the Challenge answer and
-  the lobby's player list; the next, designed, for
-  [phase 2](#phase-2-the-kings-settings-revival-scores-and-observers)). Any
-  change to the bytes raises it. A test
+  the lobby's player list, 8 since
+  [phase 2](#phase-2-the-kings-settings-revival-scores-and-observers), F2-0).
+  Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
   protocol 5 it holds one transport packet too, the Keepalive, sealed for the

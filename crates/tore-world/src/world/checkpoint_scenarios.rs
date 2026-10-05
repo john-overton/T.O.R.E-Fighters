@@ -143,7 +143,9 @@ pub(super) fn open_handoffs() -> Scenario {
             match *command {
                 MissionCommand::Take { seat, .. } => flying.push(seat),
                 MissionCommand::GiveBack { seat } => flying.retain(|s| *s != seat),
-                MissionCommand::Settings(_) => {}
+                MissionCommand::Settings(_)
+                | MissionCommand::Abandon { .. }
+                | MissionCommand::Revive { .. } => {}
             }
         }
         let tick = world.tick();

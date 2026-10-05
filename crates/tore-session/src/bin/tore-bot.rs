@@ -423,6 +423,13 @@ fn main() -> ExitCode {
                         r.closed = Some(reason);
                     }
                     ClientEvent::Roster => {}
+                    // Stage F phase 2: each slice's bot option reports its
+                    // own.
+                    ClientEvent::Revival(_)
+                    | ClientEvent::Spawned(_)
+                    | ClientEvent::Scores(_)
+                    | ClientEvent::Results(_)
+                    | ClientEvent::Observing(_) => {}
                 }
             }
         }

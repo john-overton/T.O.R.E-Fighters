@@ -33,6 +33,8 @@ pub(crate) fn player(id: u8, name: &str, slot: Option<u32>) -> LobbyPlayer {
         ready: false,
         loadout: false,
         flying: false,
+        observing: false,
+        away: false,
         unable: None,
         platform: match id % 3 {
             1 => Platform::Linux,
@@ -61,6 +63,7 @@ pub(crate) fn slots(holders: &[(u32, u8)]) -> Vec<LobbySlot> {
             member,
             aircraft,
             holder: holders.iter().find(|(p, _)| *p == plane).map(|(_, id)| *id),
+            lock: Default::default(),
         });
     }
     slots

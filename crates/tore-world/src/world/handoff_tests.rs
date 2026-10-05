@@ -160,6 +160,7 @@ fn assert_consistent(world: &World) {
                 );
                 assert_eq!(world.roster.seat(seat).unwrap().plane, Some(plane.id));
             }
+            Pilot::Lost => assert!(!has_actor && !has_row, "lost plane {}", plane.id.0),
         }
     }
     for seat in world.roster.seats() {
@@ -485,26 +486,26 @@ fn handoff_commands_apply_first_in_the_tick() {
     let mut world = armed_mission();
     fly(&mut world, &[0], 5);
     let mut out = TickOutput::default();
-    let take = MissionCommand::Take {
+    let take = [MissionCommand::Take {
         seat: SeatId(1),
         plane: WING_LEAD,
-    };
+    }];
     // The seat that takes a plane sends input for that tick; without it the
     // tick is refused.
-    assert!(tick(&mut world, &[take], &[0], false, &mut out).is_err());
+    assert!(tick(&mut world, &take, &[0], false, &mut out).is_err());
     let tick_before = world.tick();
-    tick(&mut world, &[take], &[0, 1], false, &mut out).unwrap();
+    tick(&mut world, &take, &[0, 1], false, &mut out).unwrap();
     assert_eq!(world.tick(), tick_before + 1);
     assert_eq!(world.roster.seat_of(WING_LEAD), Some(SeatId(1)));
     assert_consistent(&world);
     // A seat that gave its plane back sends none.
-    let give = MissionCommand::GiveBack { seat: SeatId(1) };
-    assert!(tick(&mut world, &[give], &[0, 1], false, &mut out).is_err());
-    tick(&mut world, &[give], &[0], false, &mut out).unwrap();
+    let give = [MissionCommand::GiveBack { seat: SeatId(1) }];
+    assert!(tick(&mut world, &give, &[0, 1], false, &mut out).is_err());
+    tick(&mut world, &give, &[0], false, &mut out).unwrap();
     assert!(world.roster.seat_of(WING_LEAD).is_none());
     assert_consistent(&world);
     // A refused handoff is an error the host sees.
-    assert!(tick(&mut world, &[give], &[0], false, &mut out).is_err());
+    assert!(tick(&mut world, &give, &[0], false, &mut out).is_err());
 }
 
 /// A wing leader a human takes leads its wing, and its AI wingman flies

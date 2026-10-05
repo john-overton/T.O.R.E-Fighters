@@ -45,6 +45,8 @@ pub mod interpolation;
 mod lobby_tests;
 #[cfg(test)]
 mod matrix_tests;
+#[cfg(test)]
+mod phase2_seams_tests;
 pub mod prediction;
 #[cfg(test)]
 mod stall_tests;
@@ -59,8 +61,9 @@ use crate::wire::entity::EntityKey;
 use crate::wire::events::{ReceivedEvent, WireEvent};
 use crate::wire::inputs::{Command, InputFrame, InputsSection, NumberedCommand, quantize_command};
 use crate::wire::messages::{
-    ContentRefused, Debrief, Goodbye, Kick, LobbyPhase, LobbyState, Message, Mission, MissionEnded,
-    Roster, Seated, SetReady, Slot, SlotRequest, TakePlane,
+    ContentRefused, Debrief, Goodbye, Kick, LobbyPhase, LobbyState, Lock, Message, Mission,
+    MissionEnded, Observe, Observing, Results, Revival, Roster, Scores, Seated, SetReady,
+    SettingsChange, Slot, SlotLock, SlotRequest, Spawned, TakePlane,
 };
 use crate::wire::names::NameIndex;
 use crate::wire::own_state::OwnStateHeader;
@@ -313,6 +316,20 @@ pub enum ClientEvent {
     MissionEnded(MissionEnded),
     /// The connection ended; nothing follows.
     Closed(CloseReason),
+    // Stage F phase 2 (protocol 8). The client passes these on; the slices
+    // that build each part act on them.
+    /// The player's plane is lost: whether and when it may fly again
+    /// ([`Client::revive`]; slice F2-V).
+    Revival(Box<Revival>),
+    /// A revival's new plane, which the mission's copy is to add (slice
+    /// F2-V).
+    Spawned(Box<Spawned>),
+    /// The scores changed (slice F2-S).
+    Scores(Box<Scores>),
+    /// Every plane's results at the mission's end (slice F2-D).
+    Results(Box<Results>),
+    /// The observer flight starts or ends (slice F2-O1).
+    Observing(Box<Observing>),
 }
 
 /// The plain words for a mission's end, for the player.
@@ -324,6 +341,7 @@ pub fn ended_text(ended: &MissionEnded) -> String {
         EndReason::ServerStopping => "Mission ended: the server is stopping",
         EndReason::EndedByServer => "Mission ended by the host",
         EndReason::HostLeft => "Mission ended: the host left the game",
+        EndReason::KillLimit => "Mission ended: the kill limit",
     };
     match ended.next_in_seconds {
         Some(0) | None => format!("{why}."),
@@ -1069,6 +1087,65 @@ impl Client {
         self.request(now, Message::EndMission);
     }
 
+    // ----- Stage F phase 2 (protocol 8) ---------------------------------
+
+    /// The King gives the crown to the player with lobby id `player`.
+    pub fn pass_crown(&mut self, player: u8) {
+        let now = self.now;
+        self.request(now, Message::PassCrown(player));
+    }
+
+    /// The King changes the lobby's settings, all or none
+    /// ([`crate::settings`]).
+    pub fn change_settings(&mut self, change: SettingsChange) {
+        let now = self.now;
+        self.request(now, Message::Settings(Box::new(change)));
+    }
+
+    /// The King opens, closes or reserves `plane`'s slot.
+    pub fn lock_slot(&mut self, plane: u32, lock: Lock) {
+        let now = self.now;
+        self.request(
+            now,
+            Message::SlotLock(Box::new(SlotLock {
+                mission: self.number.unwrap_or(0),
+                plane,
+                lock,
+            })),
+        );
+    }
+
+    /// Fly again after a loss, by the respawn rule: the answer is a
+    /// [`ClientEvent::Seated`] or a [`ClientEvent::Refused`].
+    pub fn revive(&mut self) {
+        let now = self.now;
+        self.request(
+            now,
+            Message::Revive {
+                mission: self.number.unwrap_or(0),
+            },
+        );
+    }
+
+    /// Start or stop watching the flying mission, or move the camera.
+    pub fn observe(&mut self, observe: Observe) {
+        let now = self.now;
+        self.request(now, Message::Observe(observe));
+    }
+
+    /// The game has been away for the `idle-ai` setting's seconds.
+    pub fn away(&mut self) {
+        let now = self.now;
+        self.request(now, Message::Away);
+    }
+
+    /// The player is back at the controls: the answer is a
+    /// [`ClientEvent::Seated`] or a [`ClientEvent::Refused`].
+    pub fn back(&mut self) {
+        let now = self.now;
+        self.request(now, Message::Back);
+    }
+
     /// Sends a lobby request (any message a player's game sends but Leave),
     /// recorded in the capture so a replay sends it again.
     pub fn request(&mut self, now: Duration, message: Message) {
@@ -1570,6 +1647,25 @@ impl Client {
                 self.event(ClientEvent::Goodbye(goodbye));
             }
             Message::FlightLoadouts(loadouts) => self.flight_loadouts(loadouts),
+            // Stage F phase 2: passed on for the slices that act on them.
+            Message::Revival(revival) => {
+                self.log("revival", &[&format!("{:?}", revival.rule)]);
+                self.event(ClientEvent::Revival(revival));
+            }
+            Message::Spawned(spawned) => {
+                self.log("spawned", &[&spawned.plane.to_string()]);
+                self.event(ClientEvent::Spawned(spawned));
+            }
+            Message::Scores(scores) => self.event(ClientEvent::Scores(scores)),
+            Message::Results(results) => {
+                self.log("results", &[&results.rows.len().to_string()]);
+                self.event(ClientEvent::Results(results));
+            }
+            Message::Observing(observing) => {
+                let started = matches!(*observing, Observing::Started(_));
+                self.log("observing", &[if started { "start" } else { "end" }]);
+                self.event(ClientEvent::Observing(observing));
+            }
             // Client-to-host messages from the host break the protocol.
             _ => self.net.disconnect(DisconnectReason::ProtocolError),
         }

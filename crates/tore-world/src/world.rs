@@ -54,6 +54,10 @@ mod plane_tests;
 mod readout_tests;
 pub use commands::{MissionCommand, OrderOutcome, OrderReply, Settings};
 #[cfg(test)]
+mod phase2_seams_tests;
+pub mod replies;
+pub mod revive;
+#[cfg(test)]
 mod succession_tests;
 #[cfg(test)]
 mod tick_tests;
