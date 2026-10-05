@@ -25,6 +25,10 @@ use crate::world::World;
 use std::collections::BTreeSet;
 use tore_sim::combat::{live::Strike, missiles::TargetRole};
 
+// Exact checkpoints (docs/formats/checkpoint.md): the score section.
+#[path = "score_checkpoint.rs"]
+mod checkpoint;
+
 /// Facts kept between drains; the oldest go first, so a driver that never
 /// drains them still uses bounded memory.
 pub const MAX_FACTS: usize = 1024;

@@ -41,11 +41,13 @@ pub enum Section {
     Comms,
     WingStatus,
     Radio,
+    DataLink,
+    Score,
 }
 
 impl Section {
     /// Every section, in id order.
-    pub const ALL: [Section; 8] = [
+    pub const ALL: [Section; 10] = [
         Section::Roster,
         Section::Combat,
         Section::AiWings,
@@ -54,6 +56,8 @@ impl Section {
         Section::Comms,
         Section::WingStatus,
         Section::Radio,
+        Section::DataLink,
+        Section::Score,
     ];
 
     pub fn id(self) -> u8 {
@@ -66,6 +70,8 @@ impl Section {
             Section::Comms => 6,
             Section::WingStatus => 7,
             Section::Radio => 8,
+            Section::DataLink => 9,
+            Section::Score => 10,
         }
     }
 
@@ -83,6 +89,8 @@ impl Section {
             Section::Comms => "comms",
             Section::WingStatus => "wing status",
             Section::Radio => "radio",
+            Section::DataLink => "data link",
+            Section::Score => "score",
         }
     }
 }
@@ -409,14 +417,11 @@ impl World {
             radio,
             // Imported phrase text: mission setup.
             phrases: _,
-            // Stage G's data link (G0): mutable state not coded yet. Slice
-            // H10 adds its section; until then a restored world rebuilds an
-            // empty picture and republishes it on the next 30th tick.
-            datalink: _,
-            // Stage F phase 2's score facts (F2-S): the recorded targets are
-            // mutable state not coded yet; stage H adds its section. The
-            // pending facts are drained every tick and are not state.
-            score: _,
+            // Stage G's data link (G0), the data link section (H10).
+            datalink,
+            // Stage F phase 2's score recorder (F2-S), the score section
+            // (H10): present only while the host has scoring on.
+            score,
         } = self;
         match section {
             Section::Roster => roster.save(s, None),
@@ -433,6 +438,14 @@ impl World {
             Section::Comms => comms.save(s, None),
             Section::WingStatus => wing_status.save(s, None),
             Section::Radio => radio.save(s, None),
+            Section::DataLink => datalink.save(s, None),
+            Section::Score => {
+                s.writer().write_bool(score.is_some());
+                match score {
+                    Some(recorder) => recorder.save(s, None),
+                    None => Ok(()),
+                }
+            }
         }
     }
 
@@ -457,6 +470,14 @@ impl World {
             Section::Comms => self.comms = Checkpoint::load(l, None)?,
             Section::WingStatus => self.wing_status = Checkpoint::load(l, None)?,
             Section::Radio => self.radio = Checkpoint::load(l, None)?,
+            Section::DataLink => self.datalink = Checkpoint::load(l, None)?,
+            Section::Score => {
+                self.score = if l.reader().read_bool()? {
+                    Some(Checkpoint::load(l, None)?)
+                } else {
+                    None
+                }
+            }
         }
         Ok(())
     }

@@ -112,6 +112,9 @@ pub(super) fn single_player() -> Scenario {
         // The drone placed before the first burst was hit, and the player
         // flew on (the gear, the flaps and the throttle moved).
         assert!(cockpit.flight.speed > 100.);
+        // The data link published its pictures and names every plane (the
+        // drones are no members: they are not on the roster).
+        assert_link_published(world, world.roster.planes().len());
         String::new()
     }
     Scenario {
@@ -161,7 +164,18 @@ pub(super) fn crowd_fight() -> Scenario {
                 .all(|own| !own.sensors.contacts().is_empty()),
             "an ownship sees nothing"
         );
-        format!("{rounds} rounds")
+        // Both wings' pictures were published and hold radar tracks of the
+        // other side.
+        let tracks = assert_link_published(world, 8);
+        assert!(
+            world
+                .datalink
+                .pictures()
+                .iter()
+                .all(|picture| !picture.tracks.is_empty()),
+            "a flight holds no track"
+        );
+        format!("{rounds} rounds, {tracks} tracks")
     }
     Scenario {
         name: "crowd fight",
@@ -172,6 +186,23 @@ pub(super) fn crowd_fight() -> Scenario {
         expect,
         after: None,
     }
+}
+
+/// What the data link section must hold at a checkpoint (stage H slice H10):
+/// every flight's picture was published on the last publishing tick, and the
+/// members are the roster's. Returns the number of tracks the pictures hold.
+fn assert_link_published(world: &World, members: usize) -> usize {
+    let link = &world.datalink;
+    assert_eq!(link.members().len(), members, "members");
+    assert_eq!(link.tick(), world.tick(), "the link saw the last step");
+    let pictures = link.pictures();
+    assert!(!pictures.is_empty(), "no picture was published");
+    for picture in pictures {
+        assert!(picture.tick > 0 && picture.tick % crate::datalink::PUBLISH_TICKS == 0);
+        assert!(world.tick() - picture.tick <= crate::datalink::PUBLISH_TICKS);
+        assert!(!picture.status.is_empty() || picture.tracks.is_empty());
+    }
+    pictures.iter().map(|picture| picture.tracks.len()).sum()
 }
 
 /// The gun rounds in flight: an AI round carries its weapon, a human's is the
@@ -377,6 +408,9 @@ pub(super) fn damaged_aircraft() -> Scenario {
         let mut world = crowd::crowded_mission();
         // Realistic damage, so a hit faults systems as well as taking hit points.
         world.combat.state.cheats.damage = tore_sim::cheats::Damage::Realistic;
+        // The host's scoring is on and nobody drains the facts, so the
+        // recorder holds the kill and the facts waiting at the checkpoint.
+        world.set_scoring(true);
         world
     }
     fn drive(world: &mut World, step: u64) -> Step {
@@ -444,6 +478,20 @@ pub(super) fn damaged_aircraft() -> Scenario {
             hurt_ai.hp,
             hurt_ai.initial_hp
         );
+        // The score recorder holds the lost aircraft as recorded, with its
+        // kill waiting to be drained; the data link saw it die.
+        let recorder = world.score.as_ref().expect("scoring is on");
+        assert_eq!(recorder.recorded().collect::<Vec<_>>(), [7]);
+        let facts = recorder.clone().take();
+        assert!(
+            facts.facts.iter().any(|fact| matches!(
+                fact,
+                crate::score::Fact::Kill { victim, .. } if victim.target == 7
+            )),
+            "the kill of 7 is not waiting"
+        );
+        assert!(!world.datalink.member(7).unwrap().alive);
+        assert_link_published(world, 8);
         format!("{} faults, wreck {}", faults, wreck.id)
     }
     Scenario {
@@ -496,6 +544,13 @@ pub(super) fn crowd_handoffs() -> Scenario {
         let state = &world.combat.state;
         let locks = state.ownships().iter().filter(|o| o.designated().is_some());
         assert!(locks.count() >= 2, "no lock held");
+        // The data link holds those locks and the engagements that follow
+        // them, from the ticks they were first held.
+        let link = &world.datalink;
+        assert!(link.locks().len() >= 2, "the link holds no lock");
+        assert!(link.locks().values().all(|lock| lock.since > 0));
+        assert_eq!(link.engagements().len(), link.locks().len());
+        assert_link_published(world, 8);
         String::new()
     }
     Scenario {

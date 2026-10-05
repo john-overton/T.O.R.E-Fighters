@@ -41,6 +41,8 @@ mod crowd;
 #[cfg(test)]
 mod datalink_assign_tests;
 #[cfg(test)]
+mod datalink_checkpoint_tests;
+#[cfg(test)]
 mod datalink_tests;
 #[cfg(test)]
 mod engagement_tests;

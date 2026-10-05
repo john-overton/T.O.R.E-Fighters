@@ -23,6 +23,9 @@
 mod ai_input;
 mod assign;
 pub mod calls;
+// Exact checkpoints (docs/formats/checkpoint.md): the data link section.
+#[path = "datalink_checkpoint.rs"]
+mod checkpoint;
 mod journal;
 mod picture;
 mod view;
