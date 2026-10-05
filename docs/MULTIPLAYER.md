@@ -476,34 +476,88 @@ flowchart TB
 
 ### Master server
 
-A small service, planned for the existing jroverton.com server. Hosts send a
-heartbeat about every 30 seconds with mission, theater, open slots, player count,
-build version and a summary of their content. The master also introduces peers
-for hole punching and runs the relay. Its protocol is versioned from day one.
+A small service, planned for jroverton.com, that lists games, introduces
+players to hosts and relays the traffic of those who cannot connect any
+other way. Its protocol is versioned from day one. *Designed 2026-10-05, not
+built; every item below is an agent proposal awaiting John's review unless
+credited:* the [architecture](ARCHITECTURE.md#master-server-and-connectivity),
+the [master's wire](formats/master-protocol.md) and
+[running it](MASTER-SERVER.md).
+
+- **The Internet Lobby.** Choose Activity's Multi menu, *Internet
+  Lobby...*, opens a screen in Direct Connection's look whose title reads
+  INTERNET LOBBY. It lists the games on the master, refreshed every 15
+  seconds: a lock for a password, the name, players over capacity, *Lobby*
+  or *Flying*, and a small mark when the master expects the relay. Games of
+  another build are hidden unless "Show other versions" is ticked, and then
+  shown dimmed, as Direct Connection shows them. Selecting a game shows its
+  mission and players. **Join** joins it ([connection path](#connection-path)),
+  **New** hosts a game that is listed, **Refresh** asks again, **Options**
+  holds the port, password and game name (shared with Direct Connection),
+  the master's address, "Forward the game port on my router" and "Send
+  anonymous statistics".
+- **What is listed.** A game hosted from the Internet Lobby is listed; one
+  hosted from Direct Connection is not. Once the King's Visibility setting
+  exists (stage F phase 2), *public* lists, *private* does not and
+  *password* lists with the lock. A dedicated server lists itself when its
+  configuration says `list on`, off by default. The lobby's Messages say
+  whether the game is listed and, when the router lets players in, the
+  address they reach.
+- **Heartbeats.** A listed game sends its summary (name, mission, players,
+  King, password, lobby or flying, build) every 30 seconds and 5 seconds
+  after a change, and a small packet every 15 seconds that keeps the router's
+  port open. A listing not heard from for 90 seconds disappears; a host that
+  stops removes it at once.
+- **Abuse limits** (the [open question](#open-questions)'s proposal, now
+  designed): a host proves its address before it is listed; every request
+  is limited per IPv4 address or IPv6 /64 network; at most 8 listings from
+  one; the master never answers an unproven sender with more bytes than it
+  sent; the relay carries only pairs it introduced, at most 64 KB/s each way
+  per pair and within a monthly allowance ([numbers](formats/master-protocol.md#limits)).
+- **When it is down,** the Internet Lobby is empty. Local games, Direct
+  Connection and joining by address never use the master.
 
 ### Connection path
 
-Tried in order:
+A player joining from the Internet Lobby reaches the host the first way that
+works:
 
-1. **UPnP** port mapping, when the router allows it. *Agent proposal:* also try
-   NAT-PMP and PCP, the simpler protocols many routers support.
+1. **Port mapping** by the host. *Agent proposal, designed:* a hosting game
+   asks its router to forward the game port by UPnP, NAT-PMP or PCP, whichever
+   the router speaks, on by default with a switch in Options; the lobby's
+   Messages say whether it worked and the address friends can join at. It
+   also helps a friend joining a Direct Connection game by address.
 2. **Direct IPv6**, *agent proposal*. Many CGNAT providers, including Starlink
    and T-Mobile Home Internet, give customers public IPv6 addresses, so two IPv6
    players can often connect directly without the relay.
-3. **NAT hole punching**, with the master introducing both peers.
+3. **NAT hole punching**, with the master introducing both peers: each starts
+   sending to the other at the same moment, which opens both routers.
 4. **Relay** through the master for everything else, including CGNAT without
    IPv6. Flight sim state is small, so relay cost stays low.
 
+*Designed 2026-10-05:* the first three are tried at once, every address of
+the host together, and the relay is asked for when none answers within 3
+seconds, or at once when the master's router test shows punching cannot
+work. A join through the relay takes about 4 seconds; most take well under
+one.
+
 ```mermaid
 flowchart LR
-  join["A player joins"] --> mapped{"Port<br/>mapping?"}
-  mapped -->|"no"| v6{"Direct<br/>IPv6?"}
-  v6 -->|"no"| punch{"Hole<br/>punch?"}
-  punch -->|"no"| relay["Relay through<br/>the master"]
-  mapped -->|"yes"| direct["Direct connection"]
-  v6 -->|"yes"| direct
-  punch -->|"yes"| direct
+  join["A player joins from<br/>the Internet Lobby"] --> race{"One of the host's<br/>addresses answers<br/>within 3 seconds?"}
+  race -->|"its mapped port"| direct["Direct connection"]
+  race -->|"its IPv6 address"| direct
+  race -->|"a punched hole"| direct
+  race -->|"none"| relay["Relay through<br/>the master"]
 ```
+
+**Shown and reported.** *Agent proposal:* the join's last line says how the
+player connected ("Connected directly (IPv6).", "Connected through the
+relay."), the lobby marks a relayed player beside the platform mark, and the
+path is in the network log, the dedicated server's log and the anonymous
+statistics. The paths: local network, by address, mapped port, IPv6,
+punched, relay. A port forwarded by hand reads "punched", since the game
+cannot tell the two apart. A relayed player is never the calculated host
+(John, 2026-09-28).
 
 Direct connect by address stays available for dedicated servers and LAN, and
 skips the master entirely. *Built (EF7):* the game's Direct Connection screen
@@ -670,6 +724,29 @@ This measures real use and sizes the relay before it becomes a problem.
 *Agent proposal:* a Pref switch turns telemetry off, and the README says what is
 sent.
 
+*Designed 2026-10-05 (agent proposals; the default and the contents are
+John's to decide):*
+
+- **Who sends.** Only games that use the master: a game hosting or joining
+  through the Internet Lobby, and a listed dedicated server. Direct
+  Connection and single player send nothing.
+- **What.** One report when such a session ends: the install id, whether the
+  game played, hosted or served, its version and platform, the session's
+  minutes and most humans, how the player connected and how long it took,
+  how the router maps the game port, which port-mapping method worked,
+  bytes through the relay, a host's players counted by path, and (stage K)
+  host migrations and how many failed. A listed game's registration carries
+  the install id beside the listing. The bytes are the master's
+  [Report](formats/master-protocol.md#reports).
+- **The switch.** "Send anonymous statistics" in the Internet Lobby's
+  Options, on by default, with one line in Messages the first time the
+  screen opens; a dedicated server's `telemetry` setting. Turning it off
+  deletes the install id, and turning it on again draws a new one.
+- **What the master keeps.** Counts per day, never an address with them;
+  distinct installs are counted with a salt drawn each day and never written
+  down ([details](MASTER-SERVER.md#what-the-master-keeps)).
+- The README says all of this in plain words.
+
 ## Relation to Fighters Anthology
 
 Fighters Anthology had multiplayer: up to eight players over LAN or TCP/IP, two
@@ -789,6 +866,31 @@ John on 2026-09-28 (see [decisions](#decisions)).
   heartbeats and queries are rate-limited per address; listings expire after
   90 seconds without a heartbeat; the master never answers an unverified sender
   with more bytes than it received.
+  *Designed 2026-10-05* on that proposal, with numbers
+  ([master server](#master-server), [limits](formats/master-protocol.md#limits)),
+  awaiting John's review.
+
+Raised by the stage I and J design (2026-10-05), each with the agent
+proposal the design is built on:
+
+- **Where the master runs.** A new Linode 2 GB machine (the plan John chose
+  for the relay on 2026-09-28) or the existing jroverton.com server; which
+  region; the name; the ports. *Agent proposal:* its own Linode, in the region
+  nearest most players, `master.jroverton.com`, UDP 26901 and 26902
+  ([deploying](MASTER-SERVER.md#deploying-at-jrovertoncom)).
+- **Telemetry's default and contents.** *Agent proposal:* on by default, with
+  the switch and a one-time notice, sending only the list in
+  [telemetry](#replay-and-telemetry).
+- **A dedicated server listing itself.** *Agent proposal:* off unless its
+  configuration says `list on`.
+- **Port mapping by default.** The game changing the player's router
+  settings while hosting. *Agent proposal:* on, with the switch, removed when
+  hosting stops, and said in Messages.
+- **The relay's monthly cap.** *Agent proposal:* the relay stops taking new
+  pairs at 95 percent of 800 GB a month, so the plan is never exceeded.
+- **The Internet Lobby's title.** *Agent proposal:* INTERNET LOBBY lettered
+  the way DIRECT NETWORK CONNECTION is (Liberation Sans with its shadow,
+  shipped), with a player's own `InternetLobby.png` taking its place.
 
 Raised while planning (2026-09-28):
 

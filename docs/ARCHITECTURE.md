@@ -5119,6 +5119,585 @@ flowchart TD
 EF0 and EF3 start together. EF7 and EF8 both edit the menus and `main.rs`, so
 they run one after the other.
 
+## Master server and connectivity
+
+Design for stages I and J of the [multiplayer plan](multiplayer-plan.md#stages),
+taken together because a public list of games helps only hosts with an open
+port until players can also reach each other through their routers. Written
+by a design agent for the lead on 2026-10-05 from a survey of the
+`multiplayer` branch at `884f9916`; not built, not yet reviewed by John.
+Every choice is an *agent proposal* unless it is credited to John; John's
+questions are collected by the lead. The specs that go with it:
+
+- the master's wire: [master-protocol.md](formats/master-protocol.md);
+- what the game's own transport adds: [net-protocol.md, through the master](formats/net-protocol.md#through-the-master-stages-i-and-j);
+- running the master: [MASTER-SERVER.md](MASTER-SERVER.md);
+- what players see and what is reported: the guide's
+  [master server](MULTIPLAYER.md#master-server),
+  [connection path](MULTIPLAYER.md#connection-path) and
+  [telemetry](MULTIPLAYER.md#replay-and-telemetry).
+
+In short:
+
+- A new program, **`tore-master`**, standard library only, keeps the list of
+  listed games, answers the game's **Internet Lobby** screen, introduces a
+  joining player to a host, measures how each router maps the game port,
+  relays the traffic of a pair that cannot reach each other, and counts
+  anonymous telemetry. It runs as a systemd service on one small Linux
+  machine (John, 2026-09-28: a Linode shared 2 GB plan, 1 TB a month).
+- A host talks to the master **from its game port**, and a joining player
+  from the socket it joins with, so the master learns the outside address of
+  the very socket the game uses. A small router in front of the transport,
+  `tore_net::master::Rendezvous`, takes the master's datagrams out of the
+  game port's stream and wraps relayed traffic; the transport, the session
+  and the game's screens are unchanged by it.
+- A joining player tries every address it is given for the host at once
+  (local, mapped, IPv6, as the master saw it), while the host punches back.
+  After 3 seconds without an answer it asks the master for the relay, through
+  which the same handshake and session run.
+- A hosting game asks its router to forward the game port (UPnP, NAT-PMP or
+  PCP), so most hosts are reachable without any of the rest.
+- Direct Connection does not change: it never talks to the master.
+- Single player does not change.
+
+### Surveys behind the design
+
+A read-only survey of the code at `884f9916`, line numbers indicative:
+
+- **The transport knows a peer by its address.** `tore_net::Server` keeps
+  its connections in `entries: BTreeMap<SocketAddr, Entry>` (`server.rs`)
+  and its cookies and rate limits key on the address too. Every relayed
+  player would arrive from the master's one address, so a relayed player
+  needs an address of its own: the in-process link already solved this with
+  a reserved address no UDP sender can have, `LINK_ADDRESS` (`link.rs`).
+- **Everything reads through one trait.** `Host::receive_from`,
+  `Client::receive_from` and the transport's own helpers take
+  `&mut impl Datagrams` (`datagram.rs`), and the hosting game already wraps
+  its socket in a decorator, `Linked<ServerSocket>` (`link.rs`), which reads
+  the link first and drops datagrams that claim the link's address. A router
+  for the master's datagrams and the relay is one more decorator of the same
+  kind.
+- **The host's port is dual-stack.** `ServerSocket::bind(Listen::Any, port)`
+  (`socket.rs`) gives one IPv6 socket that takes IPv4 on Linux and macOS and
+  two on Windows, on one port. The dedicated server holds one in
+  `crates/tore-server/src/wiring.rs`; the hosting game's thread
+  (`crates/tore-app/src/net/hosting.rs`, `serve`) holds a
+  `Linked<ServerSocket>`. Both loops are receive, update, transmit, wait.
+- **A joining game binds one family.** `Join::to` (`net/session.rs`) binds
+  `0.0.0.0:0` or `[::]:0` by the server's family; `reach::probe` uses a
+  socket of its own; `net::lookup::Lookup` tries a name's addresses one after
+  another, three seconds each. An introduction must try several addresses of
+  both families at once, from the socket the session then uses.
+- **The summary exists.** `Host::discover_answer` (`tore-session`'s
+  `host/discover.rs`) builds the game's name, mission, players, King,
+  capacity, password flag and phase for discovery, and
+  `DiscoverAnswer::fit` (`tore-net`'s `packet.rs`) cuts it to a length. A
+  listing is the same facts.
+- **The keepalive thread sends a ready datagram.** `Keepalive::start`
+  (`keepalive.rs`) takes a clone of the game's socket, the host's address and
+  the bytes to send; a relayed game gives it a socket wrapper that frames
+  for the relay instead.
+- **The simulator routes by address only.** `sim::SimNetwork` (`sim.rs`)
+  delivers a datagram to the inbox bound at its destination; there is no
+  translation, so routers must be added to it.
+- **The screen is a stub.** The Multi menu's second row, *Internet Lobby...*,
+  answers "coming soon" (`menu.rs`, the toast branch for bar 2). The Direct
+  Connection screen (`direct_screen/`), its search loop (`net/search.rs`,
+  `Search`, `GameList`, `Compat`), the widget kit (`widgets/`) and the title
+  bar with a player's own lettering (`widgets/header.rs`) are all reusable.
+- **No interface list.** The standard library cannot list a machine's
+  addresses. EF5 found its own network address by pointing an unconnected UDP
+  socket at a far address and reading the address the system chose
+  (`net/search.rs`, `own_network_address`); the same works for IPv6.
+- **No HTTP.** UPnP needs HTTP/1.1 and XML over TCP. `std::net::TcpStream`
+  with bounded reads is enough for the few requests a router answers.
+
+### Crates and modules
+
+One new crate. Everything is standard library only; no new dependency.
+
+| Where | Kind | Holds | Depends on |
+| --- | --- | --- | --- |
+| `tore-master` (new) | binary, with a library for its tests | The master: `Master`, a state machine that, like the transport, never reads a clock or touches a socket; its listings, browse, probes, introductions, relay and telemetry; the configuration, the run loop on two UDP ports, logs, statistics and the `flood` load tool | tore-net, tore-codec |
+| `tore-net`, module `master` (new) | library | The master's packets (`packet.rs`), addresses and candidates (`candidate.rs`), the `Rendezvous` and its router (`rendezvous.rs`, `routed.rs`), the game's own addresses (`local.rs`), a host's side of introductions and relays (`meet.rs`, `relay.rs`), a player's side (`join.rs`) and the browse client (`browse.rs`) | tore-codec |
+| `tore-net`, module `portmap` (new) | library | UPnP (SSDP and IGD over HTTP), NAT-PMP and PCP; blocking, for a thread of its own | std only |
+| `tore-net`, module `sim` | library | Gains routers (`sim/nat.rs`): address translation, filtering, nesting, IPv6 firewalls, static forwards | |
+| `tore-net`, the transport | library | The Punch packet, `Client::connect_any`, `Server::punch`, the path in the Challenge answer | |
+| `tore-session` | library | The next protocol versions; the lobby's player list carries the path; the bot joins through the master | |
+| `tore-server` | binary | Settings `list`, `master`, `telemetry`, `port-mapping`; the console's `list on` and `list off` | |
+| `tore-app` | binary | The Internet Lobby screen (`internet_screen/`), its browse loop (`net/browse.rs`), telemetry (`net/telemetry.rs`), the hosting thread's rendezvous and port mapping, the joined session's rendezvous | |
+
+```mermaid
+flowchart TD
+  app["tore-app<br/>the game"]
+  server["tore-server<br/>dedicated server"]
+  master["tore-master (new)<br/>master server and relay"]
+  session["tore-session<br/>host, client, wire"]
+  net["tore-net<br/>transport, master module,<br/>port mapping, simulator"]
+  codec["tore-codec<br/>bits and hashes"]
+  app --> session
+  app --> net
+  server --> session
+  server --> net
+  session --> net
+  master --> net
+  master --> codec
+  net --> codec
+```
+
+`tore-master` depends on nothing of the game's simulation or data: it never
+reads the import, so the machine that runs it needs no copy of Fighters
+Anthology, and nothing derived from retail media ever reaches it.
+
+### The master
+
+`tore-master` is one process on one thread. Its loop reads at most 1,024
+datagrams from each of its two ports, hands each to `Master::receive(now,
+port, from, bytes)`, calls `Master::update(now)` for its timers (expiry,
+retries, relay idle, statistics), sends what `Master::poll_transmit` gives,
+and sleeps a millisecond when there was nothing to do (agent decision: a
+portable loop, measured in I2; a relay frame waits at most that long). Its
+two ports are `ServerSocket`s on `Listen::Any`, so it serves IPv4 and IPv6 on
+each.
+
+| Module | Holds |
+| --- | --- |
+| `master.rs` | `Master`: the dispatch of every packet kind, the cookie key, the queue out |
+| `listings.rs` | Listings by id and by token, their summaries, sources, expiry; the page order |
+| `limits.rs` | Token buckets per source (an IPv4 address or an IPv6 /64) and in all, the table of sources with its bound, the answer-size rule |
+| `browse.rs` | Browse pages and details |
+| `probe.rs` | Probe answers on both ports |
+| `introduce.rs` | Introductions, Meets and their retries, hints |
+| `relay.rs` | Channels, keys, rates, idle, the monthly allowance and its file |
+| `telemetry.rs` | Reports into daily counts, with a salt for distinct installs that is drawn each day and never written down |
+| `stats.rs`, `log.rs` | A status line every minute and a daily table of counts ([operations](MASTER-SERVER.md#logs-and-statistics)) |
+| `config.rs` | The configuration file, refused line by line as the server's is |
+| `run.rs`, `main.rs` | The real loop, `--config`, `--check-config`, `flood` |
+| `flood.rs` | `tore-master flood TARGET SECONDS`: a load tool that sends every kind of request from many source ports and reports what came back, so an operator can see the limits hold |
+
+Bounds: at most 2,000 listings, 65,536 remembered sources, 64 relay
+channels, a few thousand introductions under way (each forgotten after 30
+seconds). With every table full it holds a few tens of megabytes.
+
+### One socket, two protocols
+
+A host's game port carries its players' traffic and the master's; a joining
+player's socket carries the host's and the master's. The game keeps one
+`Rendezvous` per socket that talks to the master, and reads and writes the
+socket through it:
+
+```rust
+// tore_net::master (sketch; names are proposals)
+pub struct Rendezvous { /* role, master addresses, listing or introduction, channels */ }
+
+impl Rendezvous {
+    pub fn host(config: HostRendezvous, now: Duration) -> Self;
+    pub fn joiner(config: JoinRendezvous, now: Duration) -> Self;
+    /// The socket as the transport should see it, for one receive or transmit.
+    pub fn over<'a, D: Datagrams>(&'a mut self, socket: &'a mut D, now: Duration) -> Routed<'a, D>;
+    /// Timers: heartbeats, keeps, retries, the race, relay idle.
+    pub fn update(&mut self, now: Duration);
+    /// The master's datagrams this side wants to send.
+    pub fn transmit<D: Datagrams>(&mut self, socket: &mut D) -> io::Result<()>;
+    pub fn poll_event(&mut self) -> Option<RendezvousEvent>;
+    // A host's: set_summary, set_mapped, set_listed, report.
+    // A player's: candidates, choose_relay, path.
+}
+```
+
+What `Routed` does:
+
+| Datagram | Goes to |
+| --- | --- |
+| Received from one of the master's addresses (either port, either family), not a Relay frame | The rendezvous, never the transport |
+| Received from the master, a Relay frame of an open channel | The transport, as a datagram from the channel's relayed address ([net-protocol](formats/net-protocol.md#relayed-addresses)) |
+| Received from a real socket claiming an address in `100::/64` | Dropped and counted, as `Linked` drops a claim of `LINK_ADDRESS` |
+| Anything else received | The transport, unchanged |
+| Sent by the transport to a relayed address | A Relay frame to the master |
+| Sent by the transport to anything else | The socket, unchanged |
+
+The hosting game's thread reads `Linked<ServerSocket>` through it, so the
+link is still read first and a flood on the socket never holds back the
+local player. Both host loops change by a line each:
+
+```rust
+host.receive_from(now, &mut rendezvous.over(&mut transport, now))?;
+host.update(now);
+rendezvous.set_summary_if_changed(|| host.discover_answer(0));
+rendezvous.update(now);
+host.transmit(&mut rendezvous.over(&mut transport, now))?;
+rendezvous.transmit(&mut transport)?;
+```
+
+The master's address is looked up by name on a thread (the master may have
+both an A and an AAAA record), again every 10 minutes and after the master
+falls silent; until it is known the rendezvous sends nothing.
+
+### Addresses and candidates
+
+What each end tells the master about itself ([candidates](formats/master-protocol.md#common-fields)):
+
+- **Local:** its own IPv4 address on the network that leads to the master,
+  found by pointing an unconnected UDP socket at the master's IPv4 address
+  and reading the address the system chose (no packet is sent), as
+  `own_network_address` does toward a documentation address today. With the
+  game port for a host, the socket's port for a player.
+- **Global IPv6:** the same toward the master's IPv6 address, kept when it is
+  in `2000::/3`. Taken this way it is the address the system will also send
+  from, which matters when the system uses temporary privacy addresses: a
+  host's firewall opens for the address it sends from.
+- **Mapped:** the outside address a router's port mapping gave
+  ([port mapping](#port-mapping)).
+- **Seen:** the master fills in where it saw the packet come from.
+
+A joining player's socket is a `ServerSocket::bind(Listen::Any, 0)` (stage J,
+agent decision): one port, both families on every system, so its IPv4 and
+IPv6 candidates and its Connect requests all leave from the same port.
+
+### Listing a game
+
+A host lists when it is told to: the Internet Lobby's **New** (stage I), a
+dedicated server with `list on`, `tore-app --host FILE --list`, and later the
+King's Visibility setting (stage F phase 2: *public* lists, *private* does
+not, *password* lists with the lock). The hosting thread takes
+`Command::SetListed(bool)` so the lobby can change it while the game runs.
+
+1. The rendezvous looks up the master and runs the
+   [mapping test](formats/master-protocol.md#mapping-test).
+2. It registers, answers the Challenge, and is Listed: the game reads
+   "Listed on the Internet Lobby as 'Friday night'." and, for a host whose
+   port is reachable, the address the master saw.
+3. Every 30 seconds a Heartbeat carries `Host::discover_answer`, and 5
+   seconds after a lobby change one more, at most one every 5 seconds; every
+   15 seconds a Keep holds the router's mapping open.
+4. An Unknown listing (the master restarted) means register again at once.
+   No answer to anything for 10 seconds means the master is silent: the game
+   reads "The Internet Lobby does not answer, so the game is not listed.
+   Players can still join by address." and tries again after 2, 4, 8 and up
+   to 60 seconds.
+5. Stopping, or unlisting, sends Unregister three times.
+
+The rendezvous reports to the hosting thread, which passes it to the game as
+`Report::Listing(state)` (listed with the seen address, unlisted with why,
+master silent) and to its log; `tore-server` prints it on its start and
+status lines and in its log.
+
+### The Internet Lobby screen
+
+*Internet Lobby...* on the Multi menu opens it. It is the Direct Connection
+screen's sibling: the same `NETIPX3` background, panel, widgets and
+rectangles, with the title bar's lettering reading INTERNET LOBBY (a shipped
+`assets/internet-lobby-title.png`, made the way the Direct Connection
+lettering is, or the player's own `InternetLobby.png` in the data folder).
+
+| Element | What it does |
+| --- | --- |
+| Callsign | Shared with Direct Connection |
+| Games | The listings, paged with PREV/NEXT and "PAGE n of m": the lock, the name, players over capacity, *Lobby*, *Flying* or *Closed*, and a small relay mark when the master expects the relay; another build dimmed with its version, not joinable |
+| Players | The selected game's players, with the King's crown, from its details |
+| Mission line | The selected game's mission summary |
+| Show full games, Show other versions | Check boxes; the first is shared with Direct Connection |
+| Messages | What the screen is doing: asking, how many games, the join's steps, refusals |
+| New | Host a listed game from the Quick Mission creator's mission, as Direct Connection's New does, and open the lobby |
+| Join | Join the selected game ([joining through the master](#joining-through-the-master)) |
+| Refresh | Ask for the list again now |
+| Options | Port, password, game name (shared with Direct Connection), the master's address, "Forward the game port on my router" and "Send anonymous statistics" |
+| Cancel | Back to Choose Activity |
+
+- The list is asked for when the screen opens and every 15 seconds while it
+  is open; the selected game's details every 5 seconds. Asking is a
+  `net::browse::Browse` like the search's `Search`: a socket of its own, the
+  `tore_net::master::Browser` state machine, `update(now)` every frame,
+  events for added, changed and dropped games. It never blocks a frame.
+- The first time the screen opens it writes one line about telemetry in
+  Messages: "This game sends anonymous statistics to the Internet Lobby. Turn
+  them off in Options." (if John keeps telemetry on by default).
+- When the master cannot be reached the list stays empty and Messages says
+  so; Direct Connection still works.
+- `tore-app --browse SECONDS [--master ADDRESS]` lists the games headlessly,
+  as `--find-games` does for the local network.
+- Snapshot states for the menus lane: `internet`, `internet-games`,
+  `internet-joining`, `internet-options`, `internet-unreachable`.
+
+In stage I, Join goes straight to the address the master saw for the host
+(a game whose host has an open or mapped port works); stage J's slice J5
+replaces it with the introduction.
+
+### Joining through the master
+
+```mermaid
+flowchart TD
+  join["Join on a listed game"] --> probe["Mapping test<br/>on both master ports"]
+  probe --> intro["Introduce, with the cookie"]
+  intro --> race["Race: Connect requests to every<br/>host address, every 250 ms"]
+  intro -.->|"at the same moment"| meet["The host gets a Meet<br/>and punches every player address"]
+  meet -.-> race
+  race -->|"a Challenge comes back"| hand["The handshake carries on<br/>with that address"]
+  race -->|"nothing in 3 s,<br/>or the hint says relay"| ask["Relay request"]
+  ask --> offer{"Relay offer"}
+  offer -->|"open"| relayed["The handshake runs<br/>through the relay"]
+  offer -->|"refused"| fail["A plain line in Messages"]
+  hand --> lobby["The lobby"]
+  relayed --> lobby
+```
+
+- The joined session's transport becomes `Transport::Internet`: the
+  dual-stack socket and a joiner `Rendezvous`. `tore_session::Client` is
+  started with every candidate through `Client::connect_any`
+  ([net-protocol](formats/net-protocol.md#joining-from-several-addresses-at-once)).
+- Messages, one line per step: "Asking the Internet Lobby to introduce you
+  to 'Friday night'...", "Trying 3 addresses...", "Connected directly (IPv6)."
+  or "No direct path; asking for the relay...", "Connected through the
+  relay.", or the refusal's own text.
+- The whole join gives up after 15 seconds, the relay's three included.
+- `tore-bot --master ADDRESS --listing NAME [--path auto|direct|relay]` joins
+  the same way headlessly; `--path relay` asks for the relay at once (for
+  tests on one machine, where every direct path works).
+
+### Hole punching
+
+On a Meet the host's rendezvous asks the transport to send a
+[Punch](formats/net-protocol.md#punch) (`Server::punch(to, introduction)`) to
+each of the player's candidates, five times 200 ms apart, and acknowledges
+the Meet. At most 10 Meets a second are acted on. Leaving the host's router,
+the punches open its mapping for the player's addresses; leaving the
+player's router, the Connect requests open its mapping for the host's. Which
+pairs of routers can meet this way, in the terms of RFC 4787 (how a router
+maps a socket's outside port, and which senders it lets in), is what the J2
+tests assert on the [simulator](#the-nat-simulator):
+
+| Host's router | Player's router | Expected path |
+| --- | --- | --- |
+| None, or a forwarded or mapped port | Any | Punched (or mapped) |
+| One port for every destination, any filtering | One port for every destination, any filtering | Punched |
+| One port for every destination, filtering by address only, or none | A new port for each destination | Punched: the host's punches open its router to the player's address, whatever port the player's router chose |
+| One port for every destination, filtering by address and port | A new port for each destination | Relay |
+| A new port for each destination | One port for every destination, filtering by address only, or none | Punched: the player learns the host's new port from its punch |
+| A new port for each destination | One port for every destination, filtering by address and port | Relay |
+| A new port for each destination | A new port for each destination | Relay, at once by the hint |
+| Two routers, each one port for every destination | Any row above that punches | Punched |
+| The same router as the player (both at home) | | Local: the local address answers first |
+| A carrier's router that maps per destination, and no IPv6 | A router filtering by address and port | Relay |
+| No NAT, IPv6 with a stateful firewall | No NAT, IPv6 with a stateful firewall | IPv6, punched through both firewalls |
+
+### The relay
+
+When the player asks, the master opens a channel, the host acknowledges it,
+and the player gets the channel and its key. From then on:
+
+- The player's transport sends to the channel's relayed address; `Routed`
+  wraps each datagram in a Relay frame to the master; the master checks the
+  key and the sender and forwards the frame to the host; the host's `Routed`
+  unwraps it into a datagram from the same relayed address. The way back is
+  the same.
+- The player's keepalive thread (EF-K) gets a socket clone wrapped so that
+  its Keepalive goes out as a frame (`ServerSocket::try_clone`, new, and a
+  framing `Datagrams` wrapper in `master/relay.rs`).
+- When the game connection ends, each end closes the channel; the master
+  closes channels idle for 30 seconds, over their rate, or when the month's
+  allowance is spent ([channel rules](formats/master-protocol.md#relay)).
+- A relayed player's round trip is the player to the master to the host:
+  where the master is matters, which is a question for John (the region).
+- Cost, from the [plan's budget](multiplayer-plan.md#bandwidth-budget): about
+  13 KB/s down and 2.6 KB/s up for a player in a full mission, about 60 MB
+  an hour leaving the master, so 800 GB a month is about 13,000 relayed
+  player-hours.
+
+### Port mapping
+
+`tore_net::portmap::PortMapper` asks the router to forward the game port. It
+blocks, for at most 5 seconds in all, so the hosting game runs it on a thread
+of its own; the dedicated server runs it on start when `port-mapping on`.
+
+- **Three protocols at once.** UPnP: an SSDP search (`M-SEARCH` to
+  239.255.255.250:1900 for an InternetGatewayDevice, 2 seconds), the
+  device's description over HTTP, then `GetExternalIPAddress` and
+  `AddPortMapping` (UDP, the same outside port as the game port, a one-hour
+  lease, or a lease of 0 for an old device that refuses others; on a
+  conflict the next four ports are tried) on its `WANIPConnection` or
+  `WANPPPConnection` service. NAT-PMP (RFC 6886) and PCP (RFC 6887) to the
+  gateway on UDP 5351: PCP's MAP first, NAT-PMP when the gateway answers that
+  it does not speak PCP. The first to succeed is used.
+- **The gateway's address.** The SSDP answer's address, else on Linux the
+  default route in `/proc/net/route`, on macOS and Windows the system's
+  `route` command's answer (read with `std::process::Command`), else the
+  local address with its last byte 1.
+- **Behind a second router.** An outside address that is itself private or
+  in the carriers' 100.64/10 means the mapping is on an inner router: it is
+  removed, and the game says "Your router is behind another one, so the
+  port could not be opened to the internet."
+- **IPv6.** PCP's MAP for the host's global IPv6 address opens the router's
+  IPv6 firewall where the router allows it. UPnP's IPv6 firewall control is
+  not tried.
+- **Renewing and removing.** Renewed at half the lease; removed when hosting
+  stops. A game that dies leaves a mapping that lapses within the hour.
+- **Bounded.** HTTP bodies at most 64 KB, a minimal reader for the XML
+  elements it needs, every read with a timeout; the parsers are fuzzed.
+- **What the player sees.** In the lobby's Messages: "Your router forwards
+  UDP port 26900 (UPnP). Friends can join at 203.0.113.5:26900.", or why not.
+  The address is the game's Mapped candidate.
+- **Settings.** The game: "Forward the game port on my router" in both
+  screens' Options, on by default (a question for John); it applies to every
+  game the player hosts, from either screen, since a friend joining a Direct
+  Connection game by address needs it as much. `tore-server`: `port-mapping`,
+  off by default, since a server's port is normally forwarded by its owner.
+  `tore-app --map-port SECONDS` maps, prints the result, waits and removes
+  the mapping.
+
+### The connection path, shown and reported
+
+Every player's game knows how it reached the host
+([path codes](formats/net-protocol.md#the-path-in-the-challenge-answer)):
+local network, by address, mapped port, IPv6, punched, relay.
+
+- **Shown:** the join's last line in Messages names it; the lobby's player
+  list draws a small mark beside the platform mark for a relayed player and
+  shows the path in the selected player's line (stage J's last slice, with
+  the lobby state's next protocol version); the net diagnostics log's
+  `connect` line gains the path.
+- **Reported:** in the player's telemetry report, and the host's report
+  counts its players by path. `tore-server`'s per-player log lines name it.
+- **Used:** stage K's host selection never calculates a relayed host, and
+  scores how open each candidate's router is from its mapping type and
+  mapped port.
+
+### Telemetry
+
+What is sent, when, and the switch are in the guide's
+[replay and telemetry](MULTIPLAYER.md#replay-and-telemetry); the bytes are
+the master's [Report](formats/master-protocol.md#reports). The code:
+
+- **The install id.** A random 64-bit number the game draws the first time it
+  sends anything with telemetry on, kept in `network-v1.conf` as
+  `install-id`. Turning telemetry off deletes it; turning it on again draws a
+  new one, so the old and new cannot be linked. A dedicated server keeps its
+  own in its data folder.
+- **What sends.** Only games that use the master: a game hosting or joining
+  through the Internet Lobby, and a listed dedicated server. Direct
+  Connection never contacts the master.
+- **The game:** `net/telemetry.rs` builds the player's or host's report from
+  the session (length, most humans, path, time to connect, mapping results,
+  relayed bytes) and sends it on the session's socket as it closes.
+- **The master** turns reports into daily counts and never stores an
+  address with them ([operations](MASTER-SERVER.md#what-the-master-keeps)).
+
+### The NAT simulator
+
+`tore_net::sim` gains routers (`sim/nat.rs`), so every path above is tested
+in-process, deterministically, on the virtual clock:
+
+- `SimNetwork::add_router(RouterConfig)`: the router's outside address, the
+  inside addresses (a prefix), how it maps (one outside port for every
+  destination; one per destination address; one per destination address and
+  port), how it filters (anyone; only addresses it has sent to; only
+  addresses and ports it has sent to), how it picks outside ports (keep the
+  inside port when free, the next free one, or seeded random), how long an
+  idle mapping lasts (refreshed by outgoing traffic only), whether it loops
+  back a datagram for its own outside address (hairpinning), and static
+  forwards (a mapped or hand-forwarded port).
+- A router's outside address may be inside another router: a home router
+  behind a carrier's (CGNAT) or behind a second home router.
+- An IPv6 firewall is a router that translates nothing and filters by what
+  was sent out.
+- Each datagram is translated on its way out and on its way in, and the
+  link's latency and loss apply as before; drops are counted per router and
+  cause (no mapping, filtered, expired).
+- Every existing use of the simulator, with no router added, behaves exactly
+  as before.
+
+### Testing on one machine
+
+Everything can be run on the development machine without the public master
+([operations](MASTER-SERVER.md#testing-on-one-machine)):
+
+- `tore-master --config` with `listen 127.0.0.1`, `port 26911` and
+  `probe-port 26912` (other ports than the public ones, so a test never
+  collides with a master John runs).
+- The game with `--master 127.0.0.1:26911` (or the Options field), a
+  `tore-server` with `list on` and `master 127.0.0.1:26911`, and `tore-bot
+  --master 127.0.0.1:26911 --listing NAME`.
+- On one machine every direct path works, so the relay is tested with
+  `--path relay`, and punching through routers only on the simulator.
+- Port mapping is tested against a fake router on loopback (an SSDP
+  responder and an HTTP device, a NAT-PMP and PCP responder), never the real
+  router: mapping a port on John's router is his manual test.
+- Rust tests cover the protocol, the master, the rendezvous and the race on
+  the simulator; the net lane's `net-master-*` scenarios run the real
+  binaries on loopback; the menus lane's `menus-snap-internet*` scenarios
+  render the screen.
+
+### How stages I and J land
+
+Slices, each on its own `mp/<topic>` branch and worktree, merged by the lead
+with the quick check per change and the check list at merge. "Opus" slices
+are networking, concurrency or risky refactors, as John asked; the rest are
+Sonnet. Each slice adds its tests to the full suite: Rust tests in the
+crates it touches, and a battery scenario for anything done through a binary
+(the net lane's `net-master-*`, the menus lane's `menus-snap-internet*`),
+with slow tests ignored and named for the full run. No slice changes single
+player; the quick single-player guard is enough for each, and none needs the
+full baseline. The game's protocol version rises twice (J2 and J6), the
+lead handing out the numbers; the master protocol starts at 1 and does not
+change in these stages.
+
+| Slice | Model | After | Owns | Work | Acceptance |
+| --- | --- | --- | --- | --- | --- |
+| I1 Master wire | Opus | | `tore-net/src/master/{mod,packet,candidate}.rs`, `tore-net/master-golden.txt`, one `pub mod master;` line in `tore-net/src/lib.rs` | Every packet of [master-protocol.md](formats/master-protocol.md): encode, bounded decode, padding, fitting answers to requests; addresses, candidates, mapping types; the summary coded as a discovery answer without its nonce; the constants (ports, version, the default master address as a placeholder until John names it); `CookieKey` made public for the master | Seeded round trips of every kind; 100,000 fuzzed datagrams never panic; the golden file; for every request an unproven sender may make, the largest possible answer is no longer than the request; a summary with every text at its limit and 30 callsigns fits Register, Heartbeat and Listing details, cut and flagged |
+| J1 NAT simulator | Opus | | `tore-net/src/sim.rs` moved to `sim/mod.rs`, new `sim/nat.rs` | [The NAT simulator](#the-nat-simulator) | One test per mapping, filtering and port-choice behaviour; mapping expiry refreshed by outgoing traffic only; hairpinning on and off; a router behind a router; an IPv6 firewall; static forwards; the same seed gives the same trace; every existing test that uses the simulator passes unchanged |
+| J4 Port mapping library | Opus | | `tore-net/src/portmap/{mod,ssdp,http,xml,igd,natpmp,pcp,gateway}.rs`, one `pub mod portmap;` line in `tore-net/src/lib.rs` | [Port mapping](#port-mapping): the three protocols at once, the gateway, renewing, removing, the second-router check | Against fakes on loopback: SSDP and the device description (both IGD versions, chunked bodies), `AddPortMapping`, the conflict code and the next port, a device that takes only a lease of 0, `DeletePortMapping`; NAT-PMP and PCP answers, PCP's version refusal falling back to NAT-PMP, nonces checked; a private outside address reported as a second router; every call ends within its time with a silent fake; the HTTP, XML and packet parsers fuzzed |
+| I2 Master server | Opus | I1 | The new crate `crates/tore-master/` (every file), `tore-net/src/master/browse.rs`, the workspace `Cargo.toml` member and `Cargo.lock`, a `crates/tore-master/*` rule in `tools/battery_selection.py`, the net lane's `net-master-*` scenario file, `docs/MASTER-SERVER.md` | [The master](#the-master): proving addresses, listings, heartbeats, keeps, expiry, Unknown listing, unregister, browse pages and details, probes on both ports, reports into daily counts, limits, the status line and daily table, the configuration and `--check-config`, the `flood` tool; the browse client. `introduce.rs` and `relay.rs` exist with their dispatch and drop their packets, counted, until J2 and J3 | On the simulator with a scripted host and browser: no listing without a cookie, and a forged source gets nothing but a 23-byte Challenge; a listing appears in the next Browse; a missing heartbeat drops it at 90 seconds (virtual clock), an Unregister at once; pages list every match once, filtered by build and fullness, in order; under a seeded flood from 1,000 sources the bytes answered to every unproven source are at most the bytes it sent, every limit holds, and a proper browser is still answered; IPv6 sources count by /64. Real sockets on 127.0.0.1: register and browse. Battery: `net-master-flood` (the master and its flood tool for 10 s; the status line shows the limits held and a browse during the flood answered) |
+| I3 Listing from hosts | Opus | I1; its end-to-end commit after I2 | `tore-net/src/master/{rendezvous,routed,local}.rs`, `meet.rs` and `relay.rs` as dispatch stubs, `crates/tore-server/src/{config,wiring,run,console,options}.rs` and its tests, `docs/DEDICATED-SERVER.md`, `crates/tore-app/src/net/{hosting,hosting_tests,options}.rs` | The host's `Rendezvous` and `Routed` ([one socket](#one-socket-two-protocols), [listing](#listing-a-game)): lookup, mapping test, register, heartbeats with the summary, change heartbeats, keeps, register again, back-off, unregister; the install id in Register; the host's or server's Report at the session's end. `tore-server`: `list` (off by default), `master`, `telemetry`, the console's `list on` and `list off`, the start and status lines. The game: `HostSetup.listing`, `Command::SetListed`, `Report::Listing`, `--host FILE --list [--master ADDRESS]` | On the simulator against `tore_master::Master` (a dev-dependency): a host is browsable within its first exchange and its summary's changes within 5 seconds; a vanished host is gone within 90 seconds; a master restart is healed within one heartbeat; a silent master is asked with back-off, never more than once a second; game datagrams pass `Routed` unchanged and no master datagram reaches the transport; a claim of `100::/64` from the socket is dropped. A hosting thread with `listing` registers to an in-test master and unregisters on stop. Battery: `net-master-listing` (a master, a `tore-server` with `list on`, `tore-app --browse 5` lists it; quitting the server removes it) |
+| I4 Internet Lobby screen | Sonnet | I2; New after I3 | `crates/tore-app/src/internet_screen/*`, `net/{browse,telemetry,settings}.rs`, `menu.rs`, `main.rs` (routing, `--browse`, snapshot states), `widgets/header.rs`, `assets/internet-lobby-title.png`, the `internet_screen/*` rule in `tools/battery_selection.py`, the menus lane's `menus-snap-internet*` scenarios, `README.md`'s telemetry section | [The screen](#the-internet-lobby-screen); Join straight to the seen address; New hosting a listed game; Options (the master's address, port forwarding and statistics switches, kept in `network-v1.conf`); the install id; the player's Report | Screen tests (paging, filters, sorting, selection, keys, the shared callsign and port); headless renders of the five snapshot states; `--browse` against a scripted master; a windowed run through `tools/agent-run.sh`: open the Internet Lobby with a loopback master and a listed `tore-server`, join, fly 30 seconds, leave, and New lists a hosted game that a second `--browse` sees |
+| J2 Introductions and punching | Opus | I2, I3, J1 | `crates/tore-master/src/introduce.rs`, `tore-net/src/master/{meet,join}.rs`, `tore-net/src/{client,server,packet}.rs`, `tore-session/src/client/` (joining through candidates), `tore-session/src/{bot.rs,bin/tore-bot.rs}`, the protocol version and `wire-golden.txt` | [Joining through the master](#joining-through-the-master) up to the race, and [hole punching](#hole-punching): Introduce with its cookie, Introduction and Meet with retries and hints on the master; Meet, punches and the ack on the host; the player's rendezvous; `Client::connect_any` with candidates learned from punches; the path byte in the Challenge answer and `ConnectDetails::path`; `tore-bot --master --listing --path`. The next protocol version | On the simulator, every row of the [punching table](#hole-punching) gives its expected path, at a 100 ms round trip within 1.5 seconds where it punches; a forged Introduce gets only a Challenge; a host sends at most five punches per address per Meet and acts on at most 10 Meets a second; a Punch with another id is only counted; the wire golden file. Battery: `net-master-introduce` (a master, a listed `tore-server`, `tore-bot --listing` joins through an introduction and flies 30 seconds) |
+| J3 Relay | Opus | J2 | `crates/tore-master/src/relay.rs`, `tore-net/src/master/relay.rs`, `tore-net/src/master/routed.rs` (relayed addresses), `tore-net/src/socket.rs` (`try_clone`), the bot's `--path relay` | [The relay](#the-relay): channels, keys, the host's ack, rates, idle, the allowance and its file, closing; relayed addresses; the framing wrapper for the keepalive thread | On the simulator: the two relay rows of the punching table connect through the relay; a host with two relayed bots and one direct flies 60 seconds with the stage D matrix's limits for the direct and relayed bots alike (the relay adds only its delay); a frame from a third address or with a wrong key is dropped; a channel flooded at 200 KB/s passes 64 KB/s; idle channels close at 30 seconds; a spent allowance refuses new channels with its text and survives a master restart; a relayed bot stalled 15 seconds stays connected through its framed keepalives. Battery: `net-master-relay` (`tore-bot --path relay` against a listed `tore-server` through a loopback master, 30 seconds, no drop, the master's status counts the bytes) |
+| J4b Port mapping in hosts | Sonnet | J4, I3, I4 | `crates/tore-app/src/net/{hosting,options}.rs`, `direct_screen/options.rs`, `internet_screen/options.rs`, `crates/tore-server/src/{config,wiring}.rs`, `docs/DEDICATED-SERVER.md` | A hosting game's mapper thread, its messages and the Mapped candidate; the switch in both Options panels; `tore-server`'s `port-mapping`; `tore-app --map-port` | Against the loopback fakes: hosting maps the port, shows the address, gives the rendezvous the Mapped candidate and removes the mapping when hosting stops; the switch off maps nothing; a second router is reported. No battery scenario (a real one would change John's router); the manual test is in IJ7 |
+| J5 Joining through the master in the game | Opus | J2, I4; its relay commit after J3 | `crates/tore-app/src/net/{session,play}.rs`, `internet_screen/{mod,app}.rs`, a new `net/join_tests.rs` | `Transport::Internet`; Join on a listing runs the mapping test, the introduction, the race and the relay; the Messages lines; the framed keepalive for a relayed session; the path in the net log and the player's report | In-process: a hosting thread with a rendezvous, a master core and a game session joined by listing, once direct and once with `--path relay`, each seated and flying; the Messages lines in order; a refused introduction is a plain line. A windowed run joins a listed `tore-server` through a loopback master with the relay forced |
+| J6 Path in the lobby | Sonnet | J5, J3 | `tore-session/src/wire/messages.rs` and `host/lobby.rs` (the player's path in 3 bits), `wire-golden.txt`, `crates/tore-app/src/lobby_screen/*`, `widgets/icons.rs` (the relay mark), `tore-server`'s per-player log lines | [Shown and reported](#the-connection-path-shown-and-reported); the next protocol version | Lobby state round trip with every path; the lobby screen's snapshot with a relayed player; the wire golden file |
+| IJ7 Deployment and acceptance | lead, then John | all | `docs/baselines/master-<date>.md`, the default master address | John sets up the master as [the operations guide](MASTER-SERVER.md#deploying-at-jrovertoncom) says; the lead sets the default address and smoke-tests on this machine (a loopback master, a listed hosting game, a bot joining direct and relayed); then John's tests on real networks | The plan's acceptance for I and J: a session hosted on one machine appears in another's browser within one heartbeat and is gone within 90 seconds of its host vanishing; the flood test holds; connections succeed on a home router, through double NAT, over a phone hotspot (CGNAT) through the relay, and directly over IPv6 |
+
+```mermaid
+flowchart TD
+  I1["I1 Master wire"] --> I2["I2 Master server"]
+  I1 --> I3["I3 Listing from hosts"]
+  I2 -.->|"end-to-end tests"| I3
+  I2 --> I4["I4 Internet Lobby screen"]
+  I3 -.->|"New"| I4
+  J1["J1 NAT simulator"] --> J2["J2 Introductions<br/>and punching"]
+  I2 --> J2
+  I3 --> J2
+  J2 --> J3["J3 Relay"]
+  J4["J4 Port mapping library"] --> J4b["J4b Port mapping in hosts"]
+  I3 --> J4b
+  I4 --> J4b
+  J2 --> J5["J5 Joining through<br/>the master in the game"]
+  I4 --> J5
+  J3 -.->|"relay"| J5
+  J5 --> J6["J6 Path in the lobby"]
+  J3 --> J6
+  J6 --> IJ7["IJ7 Deployment<br/>and acceptance"]
+  J4b --> IJ7
+```
+
+What can run at the same time (their files are disjoint):
+
+1. **I1, J1 and J4** start together. Each adds one `pub mod` line to
+   `tore-net/src/lib.rs` at its alphabetical place; J1 adds none (the `sim`
+   module keeps its name).
+2. **I2 and I3** once I1 is in. I3 builds against a scripted master in its
+   tests and rebases on I2 for its last commit, the end-to-end tests against
+   the real `Master`.
+3. **I4 and J2** once I2 (and, for J2, I3 and J1) are in: I4 is the game's
+   screens, J2 the transport, the master and the session.
+4. **J3 and J4b** together: J3 is `tore-master` and `tore-net`, J4b the
+   game's hosting and `tore-server`.
+5. **J5**, then **J6**, then **IJ7**.
+
+Other stages' slices touch some of the same files, which the lead
+sequences: J6 and stage F phase 2 both change the lobby's wire and the lobby
+screen; J5 and stage E's capture conversion both touch `net/session.rs`;
+J2, J6 and any other slice that raises the protocol version need their
+numbers handed out in merge order.
+
 ## Performance and threads
 
 Implementation mode, on `performance`. John authorized plan revisions and

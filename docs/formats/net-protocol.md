@@ -29,6 +29,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Connecting](#connecting)
 - [Keepalive](#keepalive)
 - [Discovery](#discovery)
+- [Through the master (stages I and J)](#through-the-master-stages-i-and-j)
 - [Acknowledgements and round trip](#acknowledgements-and-round-trip)
 - [Reliable messages](#reliable-messages)
 - [What the transport settled](#what-the-transport-settled)
@@ -48,7 +49,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - **UDP, one port.** A server listens on one UDP port, 26900 by default (a
   setting; not checked against the IANA registry). IPv4 and IPv6 both work
   when the address is given; finding each other across the internet is
-  stage J.
+  stages I and J ([through the master](#through-the-master-stages-i-and-j)).
 - **Small packets.** Every datagram carries at most 1,200 bytes, under the
   smallest common path limits, so nothing is ever fragmented by the network.
 - **Every packet stands alone.** A snapshot is coded against states the
@@ -91,6 +92,7 @@ version.
 | 8 | Discover query | anyone to a host | `TORE-HELLO` |
 | 9 | Discover answer | host to the asker | `TORE-HELLO` |
 | 10 | [Keepalive](#keepalive) (protocol 5) | client to host | versioned |
+| 11 | [Punch](#punch) (design, stage J) | host to client | versioned |
 
 A **Payload** packet, the only kind once connected, continues:
 
@@ -322,6 +324,101 @@ interface never reached its own sockets, and a Windows firewall asks on first
 run
 ([the dedicated server's note](../DEDICATED-SERVER.md#discovery-and-the-firewall)).
 Join by address always works without it.
+
+## Through the master (stages I and J)
+
+*Design of 2026-10-05 for stages I and J, not built; agent proposals awaiting
+John's review.* What the game's own transport needs so that players can find
+and reach each other across the internet. What is said to the master itself
+is its own protocol, [master-protocol.md](master-protocol.md); how the pieces
+fit together is in the
+[architecture guide](../ARCHITECTURE.md#master-server-and-connectivity).
+
+**Master packets never reach the transport.** A host's game port, and the
+socket a player joins from, also talk to the master. The game routes every
+datagram from the master's addresses to its master code before the
+transport reads anything, and sends the master code's datagrams on the same
+socket. Were one to reach the transport it would fail the checksum (its id
+is `TORE-MASTER`) and be counted as invalid, nothing more.
+
+### Punch
+
+| Field | Size | Meaning |
+| --- | --- | --- |
+| Checksum | 32 bits | As every packet, under the versioned id |
+| Kind | 8 bits | 11 |
+| Introduction id | 64 bits | The id the master gave the introduction |
+
+Thirteen bytes, sent by a host to each address of a player the master
+introduced, five times 200 ms apart. Its job is to leave the host's router:
+going out, it opens the router's mapping for the player's address, so the
+player's Connect requests get in. A player's game that is connecting with
+that introduction id and receives a Punch from an address it was not told
+about adds that address to the ones it tries (the host's router chose
+another outside port for the player than for the master). Any other Punch is
+counted as unexpected. It is under the versioned id: the master introduces a
+player only to a host of the same build.
+
+### Joining from several addresses at once
+
+A player's game told several addresses for one host (its address as the
+master saw it, a port its router mapped, its IPv6 address, its local network
+address) tries them all at once. `Client::connect` takes one address; stage J
+adds `Client::connect_any`, which sends the same Connect request, same nonce,
+to every address every 250 ms. The first Challenge or Refuse that carries
+the nonce chooses the address, and from then on the client is the ordinary
+client of that one address; datagrams from the others are counted as from an
+unknown address. The host is unchanged: each request gets a stateless
+Challenge, and only the Challenge answer the client sends to the chosen
+address starts a connection. Four addresses cost at most 16 KB/s of
+requests. The client still gives up after 10 seconds; the game asks the
+master for the relay after 3 seconds with no answer
+([master protocol](master-protocol.md#relay)).
+
+### Relayed addresses
+
+Through the relay, each end's transport sees the other at a reserved address
+that stands for the relay channel, as the in-process link's peer is
+`LINK_ADDRESS`, `[100::]:0` ([the link](../ARCHITECTURE.md#the-host-inside-the-game-stage-e)):
+`[100::1:HHHH:LLLL]:0`, where `HHHH:LLLL` is the 32-bit channel number. The
+whole `100::/64` prefix is reserved: it is in the IPv6 discard-only prefix
+and uses port 0, which no UDP sender can have, and a datagram from a real
+socket that claims any address in it is dropped and counted.
+
+- A datagram the transport sends to a relayed address goes to the master as
+  a Relay frame of that channel; a Relay frame from the master comes back as
+  a datagram from that address. The game's datagram is unchanged inside the
+  frame and stays at most 1,200 bytes.
+- The handshake, its cookies and rate limits, the reliable messages, the
+  5-second timeout and the [Keepalive](#keepalive) work as with any address.
+  A stalled relayed game's keepalive thread sends through a wrapper that
+  frames for the channel, so the host hears it from the channel's address.
+- A host knows a relayed player by the address. Stage K never calculates a
+  relayed host (John, 2026-09-28: relayed peers are never the calculated
+  host).
+
+### The path in the Challenge answer
+
+*The next protocol version (stage J).* One byte after the platform byte: how
+the player reached the host, the codes the master's
+[reports](master-protocol.md#reports) use: 0 local network, 1 by address, 2
+mapped port, 3 IPv6, 4 punched, 5 relay. Any other code makes the answer
+malformed. The host keeps it with the player, and a later protocol version
+puts it in the lobby's player list (3 bits) so every player sees it. A host
+takes a relayed address as relay whatever the byte says.
+
+| The address the race chose | Path |
+| --- | --- |
+| A private address (10/8, 172.16/12, 192.168/16, a link-local address, an IPv6 ULA; the carriers' 100.64/10 is not one), from the Direct Connection list, typed, or the host's Local candidate | 0 local network |
+| Typed on Direct Connection, or `--connect`, not on the local network | 1 by address |
+| The host's Mapped candidate | 2 mapped port |
+| The host's Global IPv6 candidate | 3 IPv6 |
+| The host's address as the master saw it | 4 punched: the game cannot tell a punched hole from a port the host forwarded by hand, so both read "punched" |
+| A relayed address | 5 relay |
+
+**Discovery stays IPv4.** *Agent proposal:* local networks carry IPv4
+broadcast, and the master covers the internet, so the game does not look for
+games on IPv6 multicast.
 
 ## Acknowledgements and round trip
 
@@ -1124,6 +1221,7 @@ Decoders check every count and length against these before reading on.
 | Players and slots in a lobby state, settings, loadouts at a flight's start | 64 each |
 | Chat line (protocol 4) | 80 characters of printable ASCII, 5 lines in 5 seconds a player, a quick message's sound 12 characters |
 | Keepalive (protocol 5) | 1 a second from a stalled game, for at most 60 seconds of stall |
+| Punch (stage J) | 5 to each of at most 8 addresses for each introduction, at most 10 introductions a second |
 
 ## Captures
 
@@ -1215,3 +1313,8 @@ watch the network can read it. What the protocol does guard against:
 - **Reflection by discovery.** A discover answer is never longer than the query
   it answers, queries are rate-limited per address and in total apart from
   joins, and an old host drops the kind without a word.
+- **Punches and the relay** (stage J). A host punches only the addresses the
+  master gives it for a player whose address the master has proven, 13 bytes
+  five times each; a relayed address cannot be claimed from a real socket
+  ([relayed addresses](#relayed-addresses)). The master's own guards are in
+  [its protocol](master-protocol.md#security).
