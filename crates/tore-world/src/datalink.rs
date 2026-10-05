@@ -44,9 +44,10 @@ use tore_sim::{
     ai::{
         awareness::Snapshot,
         launch::Side,
+        link,
         mission::AiActor,
         route::{self, FuelState},
-        weapon_service::{self, Phase, Rounds, TargetClass},
+        weapon_service::{self, Rounds, TargetClass},
     },
     combat::{
         live::{self, NO_SIDE},
@@ -402,18 +403,11 @@ fn human_lock(state: &live::State, plane: u32) -> Option<u32> {
     state.ownship(plane)?.sensors.acquired()
 }
 
-/// An AI actor's target, and the lock it holds on it: its weapon service is
-/// tracking or firing, the rule the warning receiver reads
-/// ([`AiWings::locks_on`]).
+/// An AI actor's target, and the lock it holds on it: the AI's one engagement
+/// and lock rule ([`link::engagement_of`], [`link::lock_of`]), which the
+/// warning receiver also reads ([`AiWings::locks_on`]).
 fn ai_target(actor: &AiActor) -> (Option<u32>, Option<u32>) {
-    let target = actor.controller().target();
-    let lock = target.filter(|_| {
-        matches!(
-            actor.controller().weapon_phase(),
-            Phase::Tracking | Phase::Fire
-        )
-    });
-    (target, lock)
+    (link::engagement_of(actor), link::lock_of(actor))
 }
 
 /// The hostile aircraft a human's radar, infrared sensor and eyes hold, in
