@@ -965,6 +965,8 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | Checkpoints and presentation | John, 2026-10-05: smoke, contrail and flare puffs are coded exactly in a checkpoint; revisited only if the measured size is over the budget |
 | Explanations after a migration | John, 2026-10-05: accepted that the replay's and debug panels' explanations of calls and decisions begun before the checkpoint can be missing on the new host; nothing in play changes |
 | Checkpoints are not saves | John, 2026-10-05: a checkpoint is read only by the same build, is never a save file, and gives no quick save |
+| The order call's change in single player | John, 2026-10-05: approved the baseline of slice G3a: only the attack orders' recording stems change (an assignment's call with its geometry, "Attack bandits" for Attack on contact); no motion, kill or text changes |
+| Bearings in calls | John, 2026-10-05: real-world brevity, three digits spoken one by one ("bearing zero one six", "two seven zero", north "three six zero") |
 
 ## Open questions
 
