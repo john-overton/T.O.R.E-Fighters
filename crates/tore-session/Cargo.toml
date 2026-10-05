@@ -22,6 +22,8 @@ tore-world = { path = "../tore-world" }
 tore-workers = { path = "../tore-workers" }
 
 [dev-dependencies]
+# The relay's tests run the real master on the network simulator (slice J3).
+tore-master = { path = "../tore-master" }
 tore-world = { path = "../tore-world", features = ["test-support"] }
 tore-workers = { path = "../tore-workers", features = ["test-support"] }
 

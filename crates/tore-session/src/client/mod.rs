@@ -54,6 +54,8 @@ pub mod prediction;
 pub mod revival;
 #[cfg(test)]
 mod revival_tests;
+#[cfg(test)]
+mod relay_tests;
 pub mod scores;
 #[cfg(test)]
 mod stall_tests;

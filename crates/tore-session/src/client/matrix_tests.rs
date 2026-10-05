@@ -43,10 +43,10 @@ const BANDWIDTH_SLACK: f64 = 2.;
 
 /// One cell of the matrix.
 #[derive(Clone, Copy, Debug)]
-struct Cell {
-    round_trip_ms: u64,
+pub(super) struct Cell {
+    pub round_trip_ms: u64,
     /// Percent lost each way.
-    loss_percent: u64,
+    pub loss_percent: u64,
 }
 
 impl Cell {
@@ -94,7 +94,7 @@ fn limits(loss_percent: u64) -> Limits {
 
 /// What one bot measured.
 #[derive(Debug, Default)]
-struct Figures {
+pub(super) struct Figures {
     // Own aircraft.
     snapshots: u64,
     hashes: u64,
@@ -137,7 +137,8 @@ struct Figures {
     up_mean: f64,
     down_max: u64,
     up_max: u64,
-    round_trip: Duration,
+    /// The bot's round trip as it left.
+    pub round_trip: Duration,
 }
 
 fn pct(n: u64, of: u64) -> f64 {
@@ -193,23 +194,57 @@ fn run(cell: Cell, seconds: u64) -> Vec<Figures> {
     rig.watch = true;
     let a = rig.join(|c| c.callsign = "Alpha".into(), bot_script());
     let b = rig.join(|c| c.callsign = "Bravo".into(), bot_script());
-    let bots = [a, b];
+    fly(&mut rig, &[a, b], cell, seconds, &mut Rig::step)
+}
+
+/// Steps `rig` with `step` until `done` or `limit` has passed.
+fn until(
+    rig: &mut Rig,
+    step: &mut dyn FnMut(&mut Rig),
+    limit: Duration,
+    done: impl Fn(&Rig) -> bool,
+) -> bool {
+    let end = rig.net.now() + limit;
+    while rig.net.now() < end {
+        step(rig);
+        if done(rig) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Seats the `bots` already joined to `rig`, flies them `seconds` with
+/// `step` (the rig's own, or one that routes some through the relay, slice
+/// J3), lets them leave and measures each. `cell` names the run and its
+/// loss chooses the limits.
+pub(super) fn fly(
+    rig: &mut Rig,
+    bots: &[usize],
+    cell: Cell,
+    seconds: u64,
+    step: &mut dyn FnMut(&mut Rig),
+) -> Vec<Figures> {
     assert!(
-        rig.run_until(Duration::from_secs(12), |r| r.seated(a) && r.seated(b)),
-        "{cell:?}: both bots were seated: {:?} {:?}",
-        rig.players[a].events,
-        rig.players[b].events
+        until(rig, step, Duration::from_secs(12), |r| bots
+            .iter()
+            .all(|&i| r.seated(i))),
+        "{cell:?}: every bot was seated: {:?}",
+        bots.iter()
+            .map(|&i| &rig.players[i].events)
+            .collect::<Vec<_>>()
     );
+    let n = bots.len();
     let flying_from = rig.net.now();
     let end = flying_from + Duration::from_secs(seconds);
     let mut figures: Vec<Figures> = bots.iter().map(|_| Figures::default()).collect();
-    let mut counted = [0usize; 2];
+    let mut counted = vec![0usize; n];
     let mut next_second = flying_from + Duration::from_secs(1);
     let mut seconds_sampled = 0u64;
-    let mut after_settle: Option<[u64; 2]> = None;
-    let mut sums = [(0u64, 0u64); 2];
+    let mut after_settle: Option<Vec<u64>> = None;
+    let mut sums = vec![(0u64, 0u64); n];
     while rig.net.now() < end {
-        rig.step();
+        step(rig);
         let now = rig.net.now();
         // Each seat's bytes in the host's one-second windows.
         if now >= next_second {
@@ -227,7 +262,11 @@ fn run(cell: Cell, seconds: u64) -> Vec<Figures> {
             }
         }
         if after_settle.is_none() && now >= flying_from + SETTLE {
-            after_settle = Some(bots.map(|i| rig.players[i].client.clone_stats().inputs_repeated));
+            after_settle = Some(
+                bots.iter()
+                    .map(|&i| rig.players[i].client.clone_stats().inputs_repeated)
+                    .collect(),
+            );
         }
         for (i, f) in figures.iter_mut().enumerate() {
             let player = &rig.players[bots[i]];
@@ -274,13 +313,15 @@ fn run(cell: Cell, seconds: u64) -> Vec<Figures> {
     let neutral: u64 = rig.host.players().iter().map(|p| p.inputs_neutral).sum();
     assert_eq!(neutral, 0, "{cell:?}: ticks flown neutral as stalled");
     // Leave cleanly: a refusal or a drop would show here.
-    for &i in &bots {
+    for &i in bots {
         let now = rig.net.now();
         rig.players[i].client.leave_game(now);
     }
     assert!(
-        rig.run_until(Duration::from_secs(12), |r| r.closed(a) && r.closed(b)),
-        "{cell:?}: both bots left"
+        until(rig, step, Duration::from_secs(12), |r| bots
+            .iter()
+            .all(|&i| r.closed(i))),
+        "{cell:?}: every bot left"
     );
     for (n, &i) in bots.iter().enumerate() {
         let p = &rig.players[i];
@@ -361,7 +402,7 @@ fn run(cell: Cell, seconds: u64) -> Vec<Figures> {
         f.repeated_all = stats.inputs_repeated;
         f.repeated_judged = stats
             .inputs_repeated
-            .saturating_sub(after_settle.expect("settled")[n]);
+            .saturating_sub(after_settle.as_ref().expect("settled")[n]);
         f.round_trip = stats.round_trip;
         f.down_mean = sums[n].0 as f64 / seconds_sampled.max(1) as f64;
         f.up_mean = sums[n].1 as f64 / seconds_sampled.max(1) as f64;
@@ -385,8 +426,8 @@ fn run(cell: Cell, seconds: u64) -> Vec<Figures> {
     figures
 }
 
-/// Asserts every limit of the acceptance table for both bots.
-fn check(cell: Cell, figures: &[Figures]) {
+/// Asserts every limit of the acceptance table for every bot.
+pub(super) fn check(cell: Cell, figures: &[Figures]) {
     let limit = limits(cell.loss_percent);
     for (n, f) in figures.iter().enumerate() {
         let who = format!("{cell:?} bot {n}");

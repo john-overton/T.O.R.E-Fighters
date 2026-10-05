@@ -2095,6 +2095,7 @@ dependencies = [
  "tore-formats",
  "tore-import",
  "tore-input",
+ "tore-master",
  "tore-net",
  "tore-sim",
  "tore-workers",
