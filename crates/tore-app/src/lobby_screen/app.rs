@@ -113,12 +113,21 @@ impl App {
         if self.lobby.screen.is_none() {
             return;
         }
-        let Some(session) = &self.net else {
+        let Some(session) = &mut self.net else {
             self.close_lobby();
             return;
         };
+        // What the router did about the game port (slice J4b), in Messages.
+        let notes = session
+            .hosting
+            .as_mut()
+            .map(|hosting| hosting.take_notes())
+            .unwrap_or_default();
         let client = &session.client;
         if let Some(screen) = &mut self.lobby.screen {
+            for note in &notes {
+                screen.say(note);
+            }
             screen.update(client.lobby(), client.unable());
         }
         // The pages are the only reason to look further.
