@@ -1,7 +1,7 @@
 //! The checkpoint harness (docs/formats/checkpoint.md, "The equivalence
 //! scenarios"): the container's refusals, the twin restore of the sections
-//! coded so far, and the whole-world equivalence, which stays ignored until
-//! every section is coded (stage H slice H9 un-ignores it).
+//! coded so far, and the whole-world equivalence, which runs in the normal
+//! suite on every platform since every section is coded (slice H9).
 
 use super::checkpoint_scenarios::{self, Scenario};
 use super::{Cue, TickOutput, World};
@@ -148,7 +148,6 @@ fn the_covered_sections_restore_into_a_twin_and_fly_on_identically() {
 /// The whole-world equivalence: tick N checkpointed, restored into a world
 /// fresh from the same build, and both flown on bit for bit.
 #[test]
-#[ignore = "stage H: needs every section coded; slice H9 un-ignores it"]
 fn a_whole_world_restores_into_a_fresh_one_and_flies_on_identically() {
     for scenario in checkpoint_scenarios::all() {
         let mut a = flown(&scenario, scenario.at);
@@ -166,21 +165,18 @@ fn a_whole_world_restores_into_a_fresh_one_and_flies_on_identically() {
     }
 }
 
-/// Until every section is coded, a whole checkpoint names the first
-/// section's missing coder, never another error.
+/// Every section is coded: each checkpoints alone, and a whole checkpoint
+/// holds them all in order.
 #[test]
-fn a_checkpoint_names_what_is_not_coded_yet() {
+fn every_section_is_coded() {
     let world = flown(&checkpoint_scenarios::single_player(), 120);
     let (covered, missing) = coverage(&world);
-    match world.checkpoint() {
-        Ok(bytes) => {
-            assert!(missing.is_empty());
-            assert_eq!(covered.len(), Section::ALL.len());
-            assert!(checkpoint::layout(&bytes).is_ok());
-        }
-        Err(CheckpointError::NotCovered(what)) => assert!(missing.contains(&what), "{what}"),
-        Err(error) => panic!("{error}"),
-    }
+    assert!(missing.is_empty(), "not coded: {missing:?}");
+    assert_eq!(covered, Section::ALL);
+    let bytes = world.checkpoint().unwrap();
+    let layout = checkpoint::layout(&bytes).unwrap();
+    let sections: Vec<Section> = layout.sections.iter().map(|(s, _)| *s).collect();
+    assert_eq!(sections, Section::ALL);
 }
 
 /// Rewrites a checkpoint's CRC after an edit, so the edit reaches the checks

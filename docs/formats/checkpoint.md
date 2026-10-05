@@ -335,6 +335,7 @@ macOS); every scenario is built from synthetic fixtures, never retail data.
 | Ground start | `World::new` over the synthetic import with an airport, `Start::Ground`, a wing of four, the player's takeoff at step 5. *Built (H8)* | A wingman parked, one lining up on the taxiway, the player rolling at over 100 ft/s | 2,000; 1,400 |
 | Changing weather | The single-player fingerprint mission with a weather configuration whose two layers both run the fog callback and whose first layer ends five seconds in. *Built (H8)* | The first layer active with a fog tint drawn; after the run the second layer is active | 300; 1,200 |
 | Revivals and wrecks | `World::new` open mission, three against three; seat 0's pilot killed at step 200 and revived at 201, seat 1's plane crashed at 300 and abandoned at 301, its wreck retired by hand at 400, seat 0's new plane lost at 500 and revived at 501. *Built (F2-V)* | Planes 0 and 6 abandoned (wrecks with cockpits nobody flies), plane 5 retired, planes 6 and 7 added by revivals and seat 0 in plane 7: a structure no fresh build has, restored into one | 700; 600 |
+| A human lead's order | The data link's assignment fight (`world/datalink_assign_tests.rs`): the crowd fixture's mission with a human lead (seat 0), a second human (seat 1) and two AI wingmen armed as a built mission arms them; the lead's radar on at step 10, an enemy AI aircraft designated at 40, "engage my target" at 60. *Built (H9)* | Three assignments of that target from the lead, one acknowledged by the wingman that locked it and two not yet; after the run the target is shot down and the assignments have ended | 1,000; 600 |
 
 The scenarios live in `world/checkpoint_scenarios.rs`. Each has an `expect`
 that asserts its state at tick N, and the test
@@ -344,8 +345,11 @@ them. The synthetic airport is `airport_resources()` in
 airport in the theater's layout, whose shape carries the contact boxes the
 AI's takeoff, landing and parking read.
 
-Until every section is coded, the whole-world test is ignored with its reason,
-and each slice runs the **twin restore** instead: build the scenario twice,
+The whole-world test (`a_whole_world_restores_into_a_fresh_one_and_flies_on_identically`)
+runs in the normal suite since every section is coded (slice H9); it takes
+about 8 seconds in a debug build on the development machine for all twelve
+scenarios. While sections were still being coded, each slice ran the **twin
+restore** instead, and it stays as a second test: build the scenario twice,
 step both to N, restore only the covered sections from one into the other, and
 step on. The uncovered sections are already equal in the twin, so any
 difference comes from the covered sections' coding. The harness finds the

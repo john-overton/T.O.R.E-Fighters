@@ -1,14 +1,5 @@
 //! The equivalence scenarios of docs/formats/checkpoint.md: missions built
 //! from synthetic fixtures, each with the inputs and fixture adjustments of
-//! every tick, the tick N to checkpoint at and the M ticks to step on.
-//!
-//! Stage H0 has the scenarios today's fixtures allow: the single-player tick
-//! mission, the crowd fixture's fight with four humans, and an open mission
-//! with handoffs. Slice H8 adds the ground start, the AI landing and the
-//! changing weather, and the state each scenario asserts at tick N.
-
-//! The equivalence scenarios of docs/formats/checkpoint.md: missions built
-//! from synthetic fixtures, each with the inputs and fixture adjustments of
 //! every tick, the tick N to checkpoint at, the M ticks to step on, and what
 //! the world must hold at tick N.
 //!
@@ -89,6 +80,7 @@ pub(super) fn all() -> Vec<Scenario> {
         ground_start(),
         changing_weather(),
         revivals(),
+        lead_order(),
     ]
 }
 
@@ -1036,6 +1028,89 @@ pub(super) fn revivals() -> Scenario {
         then: 600,
         expect,
         after: None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Slice H9's scenario.
+
+/// The data link's assignment tests' fight (`datalink_assign_tests`): the
+/// friendly wing is a human lead (seat 0), a second human and two AI
+/// wingmen, armed the way a real mission arms them. The lead turns its radar
+/// on, designates an enemy AI aircraft and orders its wing to engage it, so
+/// the link holds assignments at the checkpoint, one of them acknowledged by
+/// the wingman that locked the target (H10 found no other scenario holds
+/// any).
+pub(super) fn lead_order() -> Scenario {
+    fn build() -> World {
+        let mut world = crowd::ai_mission();
+        let wings = world.ai_wings.as_mut().unwrap();
+        for id in 1..=7 {
+            let stations = wings.mission_mut().actor_mut(id).unwrap().stations_mut();
+            stations[0].guided = false;
+            stations[0].capability = tore_sim::ai::weapon_service::StoreCapability::GUN;
+            stations[1].guided = true;
+            stations[1].capability =
+                tore_sim::ai::weapon_service::StoreCapability::AIR_TO_AIR_MISSILE;
+        }
+        world.take_plane(SeatId(1), crowd::F_HUMAN).unwrap();
+        world
+    }
+    fn drive(world: &mut World, step: u64) -> Step {
+        let inputs = crowd::inputs(world, |seat| {
+            let mut input = SeatInput::default();
+            if seat == SeatId(0) {
+                match step {
+                    10 => input
+                        .pilot
+                        .commands
+                        .push(PilotCommand::Set(Switch::Radar, true)),
+                    40 => input
+                        .commands
+                        .push(SeatCommand::Combat(Command::DesignateTarget(
+                            crowd::E_AI[0].0,
+                        ))),
+                    60 => input
+                        .commands
+                        .push(SeatCommand::WingOrder(PlayerOrder::EngageMyTarget)),
+                    _ => {}
+                }
+            }
+            input
+        });
+        (Vec::new(), inputs)
+    }
+    fn expect(world: &World) -> String {
+        let held = world.datalink.assignments();
+        // The lead's order assigned its target to the three wingmen at step
+        // 60; one has locked it and acknowledged, the others not yet.
+        assert_eq!(held.len(), 3, "{held:?}");
+        assert!(
+            held.values().all(|a| a.target == crowd::E_AI[0].0
+                && a.by == crowd::F_LEAD.0
+                && a.order == PlayerOrder::EngageMyTarget),
+            "{held:?}"
+        );
+        assert!(held.values().any(|a| a.acknowledged), "{held:?}");
+        assert!(held.values().any(|a| !a.acknowledged), "{held:?}");
+        assert!(world.datalink.member(crowd::E_AI[0].0).unwrap().alive);
+        assert_link_published(world, 8);
+        format!("{held:?}")
+    }
+    fn after(world: &World, _: &str) {
+        // The target was shot down after the checkpoint, which ended the
+        // assignments.
+        assert!(!world.datalink.member(crowd::E_AI[0].0).unwrap().alive);
+        assert!(world.datalink.assignments().is_empty());
+    }
+    Scenario {
+        name: "human lead's order",
+        build,
+        drive,
+        at: 1_000,
+        then: 600,
+        expect,
+        after: Some(after),
     }
 }
 
