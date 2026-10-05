@@ -991,9 +991,9 @@ fn refusals_reach_the_client_with_their_reason() {
     let (rig, client) = try_join(config(), |c| c.protocol_version = 7);
     let (reason, text) = refused(&rig, client);
     assert_eq!(reason, RefuseReason::ProtocolVersion);
-    assert_eq!(PROTOCOL_VERSION, 8);
+    assert_eq!(PROTOCOL_VERSION, 9);
     assert!(
-        text.contains("protocol version 8") && text.contains("uses version 7"),
+        text.contains("protocol version 9") && text.contains("uses version 7"),
         "{text}"
     );
     assert!(

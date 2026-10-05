@@ -93,7 +93,7 @@ version.
 | 8 | Discover query | anyone to a host | `TORE-HELLO` |
 | 9 | Discover answer | host to the asker | `TORE-HELLO` |
 | 10 | [Keepalive](#keepalive) (protocol 5) | client to host | versioned |
-| 11 | [Punch](#punch) (design, stage J) | host to client | versioned |
+| 11 | [Punch](#punch) (protocol 9) | host to client | versioned |
 
 A **Payload** packet, the only kind once connected, continues:
 
@@ -146,7 +146,7 @@ sequenceDiagram
 | --- | --- |
 | Connect request | protocol version (16), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
 | Challenge | client nonce (64), cookie (64); 21 bytes |
-| Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), platform (8, protocol 7), zero padding to 1,000 bytes |
+| Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), platform (8, protocol 7), [path](#the-path-in-the-challenge-answer) (8, protocol 9), zero padding to 1,000 bytes |
 | Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 4 by default), host tick now (32); 31 bytes |
 | Refuse | client nonce (64), reason (8), text (string, up to 200 bytes) |
 | Disconnect | connection id (32), reason (8); sent three times at once; 10 bytes |
@@ -328,9 +328,11 @@ Join by address always works without it.
 
 ## Through the master (stages I and J)
 
-*Design of 2026-10-05 for stages I and J, not built; agent proposals awaiting
-John's review.* What the game's own transport needs so that players can find
-and reach each other across the internet. What is said to the master itself
+*Design of 2026-10-05 for stages I and J; agent proposals awaiting John's
+review. Built (J2, 2026-10-05, protocol 9):* the Punch, joining from several
+addresses at once and the path byte; the relayed addresses are slice J3's.
+What the game's own transport needs so that players can find and reach each
+other across the internet. What is said to the master itself
 is its own protocol, [master-protocol.md](master-protocol.md); how the pieces
 fit together is in the
 [architecture guide](../ARCHITECTURE.md#master-server-and-connectivity).
@@ -360,6 +362,18 @@ another outside port for the player than for the master). Any other Punch is
 counted as unexpected. It is under the versioned id: the master introduces a
 player only to a host of the same build.
 
+*As built (J2, agent decisions):* the host's rendezvous sends the punches
+itself, on the game port beside its master datagrams: it knows the game's
+protocol version from the build it lists, so neither host loop changes and
+there is no `Server::punch`. A Meet repeated for an introduction already met
+is acknowledged again and never punched again, so an address gets at most
+five punches per introduction. Port 0, unspecified and relayed addresses are
+never punched. A joining client that receives a Punch with its introduction
+id from an address it already tries, or after its race has chosen, ignores
+it (the host's five punches outlast most races); one with another id, or to
+a join with no introduction, is counted as unexpected; a host counts any
+Punch it receives as unexpected.
+
 ### Joining from several addresses at once
 
 A player's game told several addresses for one host (its address as the
@@ -375,6 +389,16 @@ address starts a connection. Four addresses cost at most 16 KB/s of
 requests. The client still gives up after 10 seconds; the game asks the
 master for the relay after 3 seconds with no answer
 ([master protocol](master-protocol.md#relay)).
+
+*As built (J2):* `Client::connect_any(config, targets, introduction, now)`
+takes `Target`s, each an address and the [path](#the-path-in-the-challenge-answer)
+a join there takes; `Client::connect` is the race of one typed address. Agent
+decisions: a race tries at most 12 addresses, the master's (at most 8) and
+up to four learned from punches; an address given twice counts once; an
+IPv4 sender that a dual-stack socket reports as its IPv4-mapped IPv6 address
+is the same sender, here and once connected. Before the race chooses, a
+datagram from an address it does not try is counted as from an unknown
+address, as after.
 
 ### Relayed addresses
 
@@ -400,7 +424,7 @@ socket that claims any address in it is dropped and counted.
 
 ### The path in the Challenge answer
 
-*The next protocol version (stage J).* One byte after the platform byte: how
+*Protocol 9 (slice J2).* One byte after the platform byte: how
 the player reached the host, the codes the master's
 [reports](master-protocol.md#reports) use: 0 local network, 1 by address, 2
 mapped port, 3 IPv6, 4 punched, 5 relay. Any other code makes the answer
@@ -414,8 +438,15 @@ takes a relayed address as relay whatever the byte says.
 | Typed on Direct Connection, or `--connect`, not on the local network | 1 by address |
 | The host's Mapped candidate | 2 mapped port |
 | The host's Global IPv6 candidate | 3 IPv6 |
-| The host's address as the master saw it | 4 punched: the game cannot tell a punched hole from a port the host forwarded by hand, so both read "punched" |
+| The host's address as the master saw it | 4 punched: the game cannot tell a punched hole from a port the host forwarded by hand, so both read "punched". *Agent decision (J2):* a seen address that is also the host's own Mapped or Global IPv6 candidate reads as that one, 2 or 3 |
+| An address a Punch taught the race | 4 punched |
 | A relayed address | 5 relay |
+
+*As built (J2):* the host's transport puts the path in its join details
+(`ConnectDetails::path`), a relayed address as the relay whatever the byte
+says. Nothing shows it yet: the lobby's player list carries it from slice J6,
+and a host's Report still counts its players by their addresses
+(`rendezvous::path_of`) until the hosts keep each player's path.
 
 **Discovery stays IPv4.** *Agent proposal:* local networks carry IPv4
 broadcast, and the master covers the internet, so the game does not look for
@@ -1375,7 +1406,7 @@ Decoders check every count and length against these before reading on.
 | Players and slots in a lobby state, settings, loadouts at a flight's start | 64 each |
 | Chat line (protocol 4) | 80 characters of printable ASCII, 5 lines in 5 seconds a player, a quick message's sound 12 characters |
 | Keepalive (protocol 5) | 1 a second from a stalled game, for at most 60 seconds of stall |
-| Punch (stage J) | 5 to each of at most 8 addresses for each introduction, at most 10 introductions a second |
+| Punch (protocol 9) | 5 to each of at most 8 addresses for each introduction, at most 10 introductions a second; a race tries at most 12 addresses |
 | Phase 2 (protocol 8) | Settings in one message 64; players in Scores 64; rows in Results 1,024; a password 255 bytes; Observe at most twice a second from one connection |
 
 ## Captures
@@ -1406,6 +1437,7 @@ and strings are a 16-bit length and UTF-8.
 | 7 | Sent | The time, then an Inputs section the client sent |
 | 8 | Request | The time, then a lobby request the player made (its message kind and body), format 2; the automatic ready's own are not recorded, since the replayed client makes them again |
 | 9 | Leave game | The time the player left the game (its flight, then the connection once the debrief is in), format 2 |
+| 10 | Race | Right after the Start of a join through the master (protocol 9, J2): the introduction id (64 bits), a count (8 bits), then each address raced (a string) and its [path](#the-path-in-the-challenge-answer) code (a byte). The replay races the same addresses |
 
 A replay (`capture::replay`) starts a client from the Start record, seeded
 the same, feeds it every Receive, Update, Frame, Leave, Disconnect, Request
@@ -1423,13 +1455,16 @@ to a replay is stage E.
   EF-K, 6 since the exact flight state added the overspeed countdown and legacy
   failure RNG, 7 since each player's platform, in the Challenge answer and
   the lobby's player list, 8 since
-  [phase 2](#phase-2-the-kings-settings-revival-scores-and-observers), F2-0).
+  [phase 2](#phase-2-the-kings-settings-revival-scores-and-observers), F2-0,
+  9 since the transport's [Punch](#punch) and the
+  [path byte](#the-path-in-the-challenge-answer) of the Challenge answer,
+  J2).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
   protocol 5 it holds one transport packet too, the Keepalive, sealed for the
   version; since protocol 7 also the Challenge answer's bytes before its
-  padding); when
+  padding; since protocol 9 also a Punch); when
   they differ it fails and says to raise the version and refresh the copy
   (`TORE_UPDATE_WIRE_GOLDEN=1 cargo test --locked -p tore-session
   wire_golden`), the way the controls list test works. The copy records the

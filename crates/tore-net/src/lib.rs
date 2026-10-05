@@ -83,7 +83,9 @@ mod socket;
 mod track;
 mod wait;
 
-pub use client::{Client, ClientConfig, ClientEvent, ClientState, ConfigError, Welcome};
+pub use client::{
+    Client, ClientConfig, ClientEvent, ClientState, ConfigError, MAX_TARGETS, Target, Welcome,
+};
 pub use connection::{
     CloseReason, ConnectionId, DisconnectReason, Event, RefuseReason, SendError, Stats,
 };

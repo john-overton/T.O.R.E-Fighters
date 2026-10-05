@@ -9,6 +9,8 @@ use crate::connection::{
     CloseReason, Connection, ConnectionId, DisconnectReason, Event, RefuseReason, SendError, Stats,
 };
 use crate::entropy::{CookieKey, Entropy, Rng};
+use crate::master::Path;
+use crate::master::routed::is_relayed;
 use crate::packet::{
     self, Accepted, Challenge, Discover, DiscoverAnswer, MAX_DATAGRAM, MAX_REFUSE_TEXT, Packet,
     PacketKind, Refuse,
@@ -65,6 +67,9 @@ pub struct ConnectDetails {
     pub password: String,
     /// The operating system its game runs on, as it says.
     pub platform: Platform,
+    /// How it reached the host (protocol 9): what its Challenge answer says,
+    /// or the relay for a relayed address whatever the answer says.
+    pub path: Path,
 }
 
 /// What the host tells an accepted client, besides its connection id.
@@ -411,7 +416,8 @@ impl Server {
             PacketKind::Challenge
             | PacketKind::Accepted
             | PacketKind::Refuse
-            | PacketKind::DiscoverAnswer => {
+            | PacketKind::DiscoverAnswer
+            | PacketKind::Punch => {
                 self.counters.unexpected += 1;
             }
         }
@@ -540,6 +546,11 @@ impl Server {
             callsign: answer.callsign,
             password: answer.password,
             platform: answer.platform,
+            path: if is_relayed(from) {
+                Path::Relay
+            } else {
+                answer.path
+            },
         };
         let info = match gate.accept(&details) {
             Decision::Accept(info) => info,
@@ -901,6 +912,74 @@ mod tests {
         server.receive(Duration::ZERO, asker, &short, &mut accept_all);
         assert!(server.poll_event().is_none());
         assert_eq!(server.counters().invalid + server.counters().malformed, 1);
+    }
+
+    #[test]
+    fn the_path_is_the_answers_and_a_relayed_address_is_always_the_relay() {
+        let accept = |_: &ConnectDetails| {
+            Decision::Accept(AcceptInfo {
+                session_id: 1,
+                ticks_per_second: 120,
+                ticks_per_snapshot: 4,
+                host_tick: 0,
+            })
+        };
+        for (from, said, kept) in [
+            ("203.0.113.9:40000", Path::Punched, Path::Punched),
+            ("203.0.113.9:40001", Path::Ipv6, Path::Ipv6),
+            ("[100::1:0:7]:0", Path::LocalNetwork, Path::Relay),
+        ] {
+            let mut server = host();
+            let from: SocketAddr = from.parse().unwrap();
+            let now = Duration::from_secs(3);
+            let request = Packet::ConnectRequest(packet::ConnectRequest {
+                protocol_version: V,
+                nonce: 5,
+                game_version: String::new(),
+                game_commit: String::new(),
+            })
+            .encode(V)
+            .unwrap();
+            server.receive(now, from, &request, &mut accept.clone());
+            let Ok(Packet::Challenge(challenge)) =
+                Packet::decode(&server.poll_transmit().unwrap().datagram, V)
+            else {
+                panic!("no challenge")
+            };
+            let answer = Packet::ChallengeAnswer(packet::ChallengeAnswer {
+                nonce: 5,
+                cookie: challenge.cookie,
+                callsign: "Viper".into(),
+                password: String::new(),
+                game_version: String::new(),
+                game_commit: String::new(),
+                platform: Platform::Linux,
+                path: said,
+            })
+            .encode(V)
+            .unwrap();
+            server.receive(now, from, &answer, &mut accept.clone());
+            let Some(ServerEvent::Connected { details, .. }) = server.poll_event() else {
+                panic!("not connected")
+            };
+            assert_eq!(details.path, kept);
+        }
+    }
+
+    #[test]
+    fn a_host_counts_a_punch_as_unexpected() {
+        let mut server = host();
+        let punch = Packet::Punch(packet::Punch { introduction: 1 })
+            .encode(V)
+            .unwrap();
+        server.receive(
+            Duration::ZERO,
+            "203.0.113.9:1".parse().unwrap(),
+            &punch,
+            &mut accept_all,
+        );
+        assert_eq!(server.counters().unexpected, 1);
+        assert!(server.poll_transmit().is_none());
     }
 
     #[test]

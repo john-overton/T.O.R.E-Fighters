@@ -1,4 +1,13 @@
 //! The client's side: joining a host, then one connection.
+//!
+//! A join goes to one address ([`Client::connect`]) or races several
+//! ([`Client::connect_any`], stage J's slice J2): the same Connect request,
+//! same nonce, goes to every address the master gave for a host, every
+//! 250 ms, and the first Challenge or Refuse that carries the nonce chooses
+//! the address. From then on the client is the ordinary client of that one
+//! address. A host's Punch that carries the join's introduction id, from an
+//! address the client was not told about, adds that address to the race
+//! ("Joining from several addresses at once" in the net protocol).
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -10,6 +19,9 @@ use crate::connection::{
     CloseReason, Connection, ConnectionId, DisconnectReason, Event, RefuseReason, SendError, Stats,
 };
 use crate::entropy::{Entropy, Rng};
+use crate::master::Path;
+use crate::master::candidate::canonical;
+use crate::master::rendezvous::path_of;
 use crate::packet::{
     self, ChallengeAnswer, ConnectRequest, MAX_DATAGRAM, Packet, PacketKind, valid_callsign,
 };
@@ -62,6 +74,8 @@ pub enum ConfigError {
     BadCallsign,
     /// A version, commit or password over 255 bytes.
     StringTooLong,
+    /// No address to join, or more than [`MAX_TARGETS`].
+    BadTargets,
 }
 
 impl fmt::Display for ConfigError {
@@ -69,7 +83,39 @@ impl fmt::Display for ConfigError {
         f.write_str(match self {
             Self::BadCallsign => "a callsign is 1 to 15 printable ASCII characters",
             Self::StringTooLong => "a version, commit or password is over 255 bytes",
+            Self::BadTargets => "a join tries 1 to 12 addresses",
         })
+    }
+}
+
+/// The most addresses one join tries at once: the master's candidates (at
+/// most 8) and those learned from the host's punches (agent decision: four
+/// more, so a host behind a router that gives each destination a new port is
+/// still found, and a flood of forged punches cannot grow the race).
+pub const MAX_TARGETS: usize = 12;
+
+/// One address a join tries, and how reaching the host there reads (the
+/// path byte of the Challenge answer, "The path in the Challenge answer" in
+/// the net protocol).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Target {
+    /// The host's address.
+    pub address: SocketAddr,
+    /// The path a join that this address answers took.
+    pub path: Path,
+}
+
+impl Target {
+    /// A target with its path.
+    pub fn new(address: SocketAddr, path: Path) -> Self {
+        Self { address, path }
+    }
+
+    /// An address typed or found on the local network: the relay for a
+    /// relayed address, the local network for a private, link-local or
+    /// loopback one, else by address.
+    pub fn typed(address: SocketAddr) -> Self {
+        Self::new(address, path_of(address))
     }
 }
 
@@ -127,6 +173,15 @@ enum State {
 pub struct Client {
     config: ClientConfig,
     server: SocketAddr,
+    /// The addresses raced, until the first answer chooses one.
+    targets: Vec<Target>,
+    /// An address is chosen: `server` is the host.
+    chosen: bool,
+    /// The path the chosen address stands for.
+    path: Path,
+    /// The introduction the master made for this join, whose punches teach
+    /// the race new addresses.
+    introduction: Option<u64>,
     nonce: u64,
     started: Duration,
     request: Vec<u8>,
@@ -141,11 +196,43 @@ pub struct Client {
 impl Client {
     /// Starts joining `server` at `now`: the Connect request is queued at
     /// once and repeated every 250 ms, and the join gives up after 10 seconds.
+    /// The path is the address's own ([`Target::typed`]).
     pub fn connect(
         config: ClientConfig,
         server: SocketAddr,
         now: Duration,
     ) -> Result<Self, ConfigError> {
+        Self::connect_any(config, &[Target::typed(server)], None, now)
+    }
+
+    /// Starts joining one host at several addresses at once (stage J): the
+    /// same Connect request goes to every target every 250 ms, and the first
+    /// Challenge or Refuse with the join's nonce chooses its target. A
+    /// Punch carrying `introduction` from an address not among the targets
+    /// adds it, as [`Path::Punched`]. The join gives up after 10 seconds.
+    /// Targets repeated (by their canonical address) count once. One target
+    /// and no introduction is [`Client::connect`]: chosen from the start.
+    pub fn connect_any(
+        config: ClientConfig,
+        targets: &[Target],
+        introduction: Option<u64>,
+        now: Duration,
+    ) -> Result<Self, ConfigError> {
+        let mut unique: Vec<Target> = Vec::new();
+        for target in targets {
+            if !unique
+                .iter()
+                .any(|t| canonical(t.address) == canonical(target.address))
+            {
+                unique.push(*target);
+            }
+        }
+        let Some(first) = unique.first().copied() else {
+            return Err(ConfigError::BadTargets);
+        };
+        if unique.len() > MAX_TARGETS {
+            return Err(ConfigError::BadTargets);
+        }
         if !valid_callsign(&config.callsign) {
             return Err(ConfigError::BadCallsign);
         }
@@ -167,7 +254,11 @@ impl Client {
         .map_err(|_| ConfigError::StringTooLong)?;
         let mut client = Self {
             config,
-            server,
+            server: first.address,
+            chosen: unique.len() == 1 && introduction.is_none(),
+            path: first.path,
+            targets: unique,
+            introduction,
             nonce,
             started: now,
             request,
@@ -178,16 +269,48 @@ impl Client {
             events: VecDeque::new(),
             counters: Counters::default(),
         };
-        client.out.push_back(Transmit {
-            to: server,
-            datagram: client.request.clone(),
-        });
+        client.send_requests();
         Ok(client)
     }
 
-    /// The host's address.
+    /// The Connect request to the chosen address, or to every target while
+    /// none is chosen.
+    fn send_requests(&mut self) {
+        if self.chosen {
+            self.out.push_back(Transmit {
+                to: self.server,
+                datagram: self.request.clone(),
+            });
+            return;
+        }
+        for target in &self.targets {
+            self.out.push_back(Transmit {
+                to: target.address,
+                datagram: self.request.clone(),
+            });
+        }
+    }
+
+    /// The host's address: the chosen one, or while racing the first target.
     pub fn server(&self) -> SocketAddr {
         self.server
+    }
+
+    /// The path of the chosen address (while racing, the first target's).
+    pub fn path(&self) -> Path {
+        self.path
+    }
+
+    /// True once one address is the host's: given one, or chosen by the
+    /// race's first answer.
+    pub fn chosen(&self) -> bool {
+        self.chosen
+    }
+
+    /// The addresses the join tries or tried, those learned from punches
+    /// last.
+    pub fn targets(&self) -> &[Target] {
+        &self.targets
     }
 
     /// Where the join is.
@@ -317,10 +440,7 @@ impl Client {
             State::Requesting { last_sent } => {
                 if now.saturating_sub(*last_sent) >= HANDSHAKE_RETRY {
                     *last_sent = now;
-                    self.out.push_back(Transmit {
-                        to: self.server,
-                        datagram: self.request.clone(),
-                    });
+                    self.send_requests();
                 }
             }
             State::Answering { last_sent, sends } => {
@@ -339,7 +459,8 @@ impl Client {
         self.collect();
     }
 
-    /// Takes one datagram; anything not from the host is dropped.
+    /// Takes one datagram; anything not from the host (or, while racing,
+    /// from a target, or a Punch) is dropped.
     pub fn receive(&mut self, now: Duration, from: SocketAddr, datagram: &[u8]) {
         self.receive_checked(now, from, datagram, &mut |_, _| true);
     }
@@ -356,7 +477,10 @@ impl Client {
         datagram: &[u8],
         check: &mut dyn FnMut(u8, &[u8]) -> bool,
     ) {
-        if from != self.server {
+        // A dual-stack socket names an IPv4 sender by its IPv4-mapped IPv6
+        // address: both forms are the same sender.
+        let from = canonical(from);
+        if self.chosen && from != canonical(self.server) {
             self.counters.unknown_address += 1;
             return;
         }
@@ -367,24 +491,74 @@ impl Client {
                 return;
             }
         };
+        if kind == PacketKind::Punch {
+            self.on_punch(from, body);
+            return;
+        }
+        let target = self
+            .targets
+            .iter()
+            .position(|t| canonical(t.address) == from);
+        if !self.chosen && target.is_none() {
+            self.counters.unknown_address += 1;
+            return;
+        }
         match kind {
-            PacketKind::Challenge => self.on_challenge(now, body),
+            PacketKind::Challenge => self.on_challenge(now, body, target),
             PacketKind::Accepted => self.on_accepted(now, body),
-            PacketKind::Refuse => self.on_refuse(body),
+            PacketKind::Refuse => self.on_refuse(body, target),
             PacketKind::Payload => self.on_payload(now, datagram.len(), body, check),
             PacketKind::Disconnect => self.on_disconnect(body),
             PacketKind::ConnectRequest
             | PacketKind::ChallengeAnswer
             | PacketKind::Discover
             | PacketKind::DiscoverAnswer
-            | PacketKind::Keepalive => {
+            | PacketKind::Keepalive
+            | PacketKind::Punch => {
                 self.counters.unexpected += 1;
             }
         }
         self.collect();
     }
 
-    fn on_challenge(&mut self, now: Duration, body: &[u8]) {
+    /// The race's first answer with the nonce chooses its target.
+    fn choose(&mut self, target: Option<usize>) {
+        if self.chosen {
+            return;
+        }
+        if let Some(target) = target.and_then(|i| self.targets.get(i)) {
+            self.server = target.address;
+            self.path = target.path;
+            self.chosen = true;
+        }
+    }
+
+    /// A host's Punch: with this join's introduction id, from an address the
+    /// race does not try yet, it adds that address (the host's router gave
+    /// the player another outside port than the master). Punches are
+    /// expected while racing and for a moment after; one with another id,
+    /// or to a join with no introduction, is counted as unexpected.
+    fn on_punch(&mut self, from: SocketAddr, body: &[u8]) {
+        let Ok(punch) = packet::decode_punch(body) else {
+            self.counters.malformed += 1;
+            return;
+        };
+        if self.introduction != Some(punch.introduction) {
+            self.counters.unexpected += 1;
+            return;
+        }
+        let racing = !self.chosen && matches!(self.state, State::Requesting { .. });
+        let known = self.targets.iter().any(|t| canonical(t.address) == from);
+        if racing && !known && self.targets.len() < MAX_TARGETS {
+            self.targets.push(Target::new(from, Path::Punched));
+            self.out.push_back(Transmit {
+                to: from,
+                datagram: self.request.clone(),
+            });
+        }
+    }
+
+    fn on_challenge(&mut self, now: Duration, body: &[u8], target: Option<usize>) {
         let Ok(challenge) = packet::decode_challenge(body) else {
             self.counters.malformed += 1;
             return;
@@ -393,6 +567,7 @@ impl Client {
             self.counters.unexpected += 1;
             return;
         }
+        self.choose(target);
         let answer = Packet::ChallengeAnswer(ChallengeAnswer {
             nonce: self.nonce,
             cookie: challenge.cookie,
@@ -401,6 +576,7 @@ impl Client {
             game_version: self.config.game_version.clone(),
             game_commit: self.config.game_commit.clone(),
             platform: self.config.platform,
+            path: self.path,
         });
         let Ok(answer) = answer.encode(self.config.protocol_version) else {
             return;
@@ -451,7 +627,7 @@ impl Client {
         self.events.push_back(ClientEvent::Connected(welcome));
     }
 
-    fn on_refuse(&mut self, body: &[u8]) {
+    fn on_refuse(&mut self, body: &[u8], target: Option<usize>) {
         let Ok(refuse) = packet::decode_refuse(body) else {
             self.counters.malformed += 1;
             return;
@@ -464,6 +640,7 @@ impl Client {
             self.counters.unexpected += 1;
             return;
         }
+        self.choose(target);
         self.close(CloseReason::Refused {
             reason: RefuseReason::from_code(refuse.reason),
             text: refuse.text,
@@ -555,5 +732,175 @@ impl Client {
     /// returns the first error.
     pub fn transmit<D: Datagrams + ?Sized>(&mut self, socket: &mut D) -> io::Result<()> {
         crate::datagram::transmit_all(&mut self.out, socket)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::packet::Punch;
+    use crate::server::{AcceptInfo, ConnectDetails, Decision, Server, ServerConfig, ServerEvent};
+    use crate::sim::SimNetwork;
+
+    const V: u16 = 9;
+
+    fn a(text: &str) -> SocketAddr {
+        text.parse().unwrap()
+    }
+
+    fn config() -> ClientConfig {
+        ClientConfig {
+            entropy: Entropy::Seeded(5),
+            ..ClientConfig::new(V, "Viper")
+        }
+    }
+
+    fn accept(_: &ConnectDetails) -> Decision {
+        Decision::Accept(AcceptInfo {
+            session_id: 1,
+            ticks_per_second: 120,
+            ticks_per_snapshot: 4,
+            host_tick: 0,
+        })
+    }
+
+    #[test]
+    fn the_first_answer_chooses_the_address_and_its_path() {
+        let net = SimNetwork::new(3);
+        let host_address = a("198.51.100.7:26900");
+        let mut host_socket = net.bind(host_address).unwrap();
+        let mut socket = net.bind(a("203.0.113.9:40000")).unwrap();
+        let mut host = Server::new(ServerConfig {
+            entropy: Entropy::Seeded(4),
+            ..ServerConfig::new(V)
+        });
+        let targets = [
+            Target::new(a("10.9.9.9:26900"), Path::LocalNetwork),
+            Target::new(host_address, Path::Punched),
+            Target::new(a("[::ffff:198.51.100.7]:26900"), Path::ByAddress),
+        ];
+        let mut client = Client::connect_any(config(), &targets, Some(42), net.now()).unwrap();
+        // The repeated address counts once; the first is the server until
+        // the race chooses.
+        assert_eq!(client.targets().len(), 2);
+        assert!(!client.chosen());
+        let mut details = None;
+        for _ in 0..200 {
+            net.advance(Duration::from_millis(5));
+            let now = net.now();
+            host.receive_from(&mut host_socket, now, &mut accept)
+                .unwrap();
+            host.update(now);
+            host.transmit(&mut host_socket).unwrap();
+            while let Some(event) = host.poll_event() {
+                if let ServerEvent::Connected { details: d, .. } = event {
+                    details = Some(d);
+                }
+            }
+            client.receive_from(&mut socket, now).unwrap();
+            client.update(now);
+            client.transmit(&mut socket).unwrap();
+        }
+        assert_eq!(client.state(), ClientState::Connected);
+        assert!(client.chosen());
+        assert_eq!(
+            (client.server(), client.path()),
+            (host_address, Path::Punched)
+        );
+        assert_eq!(details.unwrap().path, Path::Punched);
+        // The first round of requests went to both targets.
+        assert!(
+            net.link_stats(a("203.0.113.9:40000"), a("10.9.9.9:26900"))
+                .sent
+                >= 1
+        );
+        // From now on another target is an unknown address.
+        let before = client.counters().unknown_address;
+        let stray = Packet::Challenge(packet::Challenge {
+            nonce: client.nonce,
+            cookie: 1,
+        })
+        .encode(V)
+        .unwrap();
+        client.receive(net.now(), a("10.9.9.9:26900"), &stray);
+        assert_eq!(client.counters().unknown_address, before + 1);
+    }
+
+    #[test]
+    fn a_punch_with_the_introduction_adds_its_address_and_others_are_counted() {
+        let now = Duration::from_secs(1);
+        let mut client = Client::connect_any(
+            config(),
+            &[Target::new(a("198.51.100.7:26900"), Path::Punched)],
+            Some(42),
+            now,
+        )
+        .unwrap();
+        while client.poll_transmit().is_some() {}
+        let punch = |id| Packet::Punch(Punch { introduction: id }).encode(V).unwrap();
+        // Another id: counted, nothing learned.
+        client.receive(now, a("198.51.100.7:31000"), &punch(41));
+        assert_eq!(client.counters().unexpected, 1);
+        assert_eq!(client.targets().len(), 1);
+        // The join's id from a new port: learned, asked at once; seen as an
+        // IPv4-mapped address it is the same sender.
+        client.receive(now, a("[::ffff:198.51.100.7]:31000"), &punch(42));
+        let learned = client.targets()[1];
+        assert_eq!(
+            (learned.address, learned.path),
+            (a("198.51.100.7:31000"), Path::Punched)
+        );
+        let sent = client
+            .poll_transmit()
+            .expect("a request to the new address");
+        assert_eq!(sent.to, a("198.51.100.7:31000"));
+        assert_eq!(sent.datagram.len(), packet::PADDED_LEN);
+        // Again from the same address: nothing new.
+        client.receive(now, a("198.51.100.7:31000"), &punch(42));
+        assert!(client.poll_transmit().is_none());
+        // Every retry goes to every address.
+        client.update(now + HANDSHAKE_RETRY);
+        let tos: Vec<SocketAddr> = std::iter::from_fn(|| client.poll_transmit())
+            .map(|t| t.to)
+            .collect();
+        assert_eq!(tos, [a("198.51.100.7:26900"), a("198.51.100.7:31000")]);
+        // The race grows to MAX_TARGETS at most.
+        for port in 0..20 {
+            client.receive(
+                now,
+                SocketAddr::new(a("198.51.100.9:1").ip(), 2000 + port),
+                &punch(42),
+            );
+        }
+        assert_eq!(client.targets().len(), MAX_TARGETS);
+        // A join with no introduction learns nothing from punches.
+        let mut plain = Client::connect(config(), a("198.51.100.7:26900"), now).unwrap();
+        plain.receive(now, a("198.51.100.7:26900"), &punch(42));
+        assert_eq!(plain.counters().unexpected, 1);
+        assert_eq!(plain.targets().len(), 1);
+    }
+
+    #[test]
+    fn a_join_tries_one_to_twelve_addresses() {
+        let now = Duration::ZERO;
+        assert_eq!(
+            Client::connect_any(config(), &[], None, now).err(),
+            Some(ConfigError::BadTargets)
+        );
+        let many: Vec<Target> = (0..13)
+            .map(|i| Target::typed(SocketAddr::new(a("198.51.100.1:1").ip(), 100 + i)))
+            .collect();
+        assert_eq!(
+            Client::connect_any(config(), &many, None, now).err(),
+            Some(ConfigError::BadTargets)
+        );
+        assert!(Client::connect_any(config(), &many[..12], None, now).is_ok());
+        // A typed address's path is its own.
+        assert_eq!(
+            Target::typed(a("192.168.1.5:26900")).path,
+            Path::LocalNetwork
+        );
+        assert_eq!(Target::typed(a("198.51.100.1:26900")).path, Path::ByAddress);
+        assert_eq!(Target::typed(a("[100::1:0:5]:0")).path, Path::Relay);
     }
 }

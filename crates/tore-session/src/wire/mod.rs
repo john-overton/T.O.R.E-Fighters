@@ -79,8 +79,9 @@ pub use tore_net::Platform;
 /// (EF-K), 6 since the exact flight state's overspeed countdown and failure
 /// random stream, 7 since each player's platform (the Challenge answer and
 /// the lobby's player list), 8 since stage F phase 2's messages, settings,
-/// slot locks and wing replies (F2-0).
-pub const PROTOCOL_VERSION: u16 = 8;
+/// slot locks and wing replies (F2-0), 9 since the transport's Punch packet
+/// and the path byte of the Challenge answer (stage J's slice J2).
+pub const PROTOCOL_VERSION: u16 = 9;
 
 /// Section kinds after the transport's own Messages (kind 1).
 /// The tick of each interval at which a seat's snapshots are built: ticks

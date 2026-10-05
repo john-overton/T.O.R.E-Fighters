@@ -1,4 +1,4 @@
-//! Packets: the header, the checksum and the ten kinds.
+//! Packets: the header, the checksum and the eleven kinds.
 //!
 //! Every packet starts with a CRC-32 checksum (4 bytes, least significant
 //! byte first) and a kind byte. The checksum covers a 10-byte protocol id that
@@ -18,6 +18,7 @@ use std::fmt;
 
 use tore_codec::{BitReader, BitWriter, CodecError, Crc32};
 
+use crate::master::Path;
 use crate::platform::Platform;
 
 /// The largest datagram either side sends or accepts.
@@ -58,7 +59,7 @@ pub const MAX_DISCOVER_NAME: usize = 64;
 /// The longest mission summary a discover answer carries, in bytes.
 pub const MAX_DISCOVER_SUMMARY: usize = 200;
 
-/// The ten packet kinds.
+/// The eleven packet kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum PacketKind {
@@ -88,6 +89,11 @@ pub enum PacketKind {
     /// thread while its own loop is held up; the host only notes that it
     /// heard from the connection.
     Keepalive = 10,
+    /// Host to a joining player, 13 bytes: the introduction id the master
+    /// gave (stage J, slice J2, protocol 9). Going out, it opens the host's
+    /// router for the player's address; a player that is joining with that
+    /// introduction adds the sender's address to the ones it tries.
+    Punch = 11,
 }
 
 impl PacketKind {
@@ -104,6 +110,7 @@ impl PacketKind {
             8 => Self::Discover,
             9 => Self::DiscoverAnswer,
             10 => Self::Keepalive,
+            11 => Self::Punch,
             _ => return None,
         })
     }
@@ -231,6 +238,10 @@ pub struct ChallengeAnswer {
     pub game_commit: String,
     /// The operating system the player's game runs on (protocol 7).
     pub platform: Platform,
+    /// How the player reached the host (protocol 9): the byte after the
+    /// platform, the master's path codes. A host takes a relayed address as
+    /// the relay whatever this says.
+    pub path: Path,
 }
 
 /// Accepted: the join succeeded. 31 bytes.
@@ -279,6 +290,14 @@ pub struct Keepalive {
     /// The connection id from Accepted: the same identity every Payload
     /// carries, accepted only from the connection's own address.
     pub connection: u32,
+}
+
+/// Punch: the host's packet to a player the master introduced (stage J,
+/// protocol 9). 13 bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Punch {
+    /// The introduction id the master gave both ends.
+    pub introduction: u64,
 }
 
 /// Discover query: "who is hosting here?" The protocol version and the nonce
@@ -462,6 +481,8 @@ pub enum Packet {
     DiscoverAnswer(DiscoverAnswer),
     /// Kind 10.
     Keepalive(Keepalive),
+    /// Kind 11.
+    Punch(Punch),
 }
 
 impl Packet {
@@ -478,6 +499,7 @@ impl Packet {
             Self::Discover(_) => PacketKind::Discover,
             Self::DiscoverAnswer(_) => PacketKind::DiscoverAnswer,
             Self::Keepalive(_) => PacketKind::Keepalive,
+            Self::Punch(_) => PacketKind::Punch,
         }
     }
 
@@ -518,6 +540,7 @@ impl Packet {
                 put_str(&mut w, &p.game_version)?;
                 put_str(&mut w, &p.game_commit)?;
                 w.write_bits(u64::from(p.platform.code()), 8).ok();
+                w.write_bits(u64::from(p.path.code()), 8).ok();
                 pad(&mut w)?;
             }
             Self::Accepted(p) => {
@@ -581,6 +604,9 @@ impl Packet {
             Self::Keepalive(p) => {
                 w.write_bits(u64::from(p.connection), 32).ok();
             }
+            Self::Punch(p) => {
+                w.write_bits(p.introduction, 64).ok();
+            }
         }
         seal(w.finish(), version)
     }
@@ -606,6 +632,7 @@ impl Packet {
             PacketKind::Discover => Self::Discover(decode_discover(datagram.len(), body, version)?),
             PacketKind::DiscoverAnswer => Self::DiscoverAnswer(decode_discover_answer(body)?),
             PacketKind::Keepalive => Self::Keepalive(decode_keepalive(body)?),
+            PacketKind::Punch => Self::Punch(decode_punch(body)?),
         })
     }
 }
@@ -817,8 +844,8 @@ pub fn decode_challenge(body: &[u8]) -> Result<Challenge, PacketError> {
 }
 
 /// Decodes a Challenge answer's body. `len` is the whole datagram's length,
-/// which must be exactly 1,000. A platform code the protocol does not name is
-/// malformed.
+/// which must be exactly 1,000. A platform or path code the protocol does not
+/// name is malformed.
 pub fn decode_challenge_answer(len: usize, body: &[u8]) -> Result<ChallengeAnswer, PacketError> {
     if len != PADDED_LEN {
         return Err(PacketError::Malformed);
@@ -834,6 +861,7 @@ pub fn decode_challenge_answer(len: usize, body: &[u8]) -> Result<ChallengeAnswe
     let game_version = r.read_str()?;
     let game_commit = r.read_str()?;
     let platform = Platform::from_code(u8_of(&mut r)?).ok_or(PacketError::Malformed)?;
+    let path = Path::from_code(u64::from(u8_of(&mut r)?)).ok_or(PacketError::Malformed)?;
     padding(&r)?;
     Ok(ChallengeAnswer {
         nonce,
@@ -843,6 +871,7 @@ pub fn decode_challenge_answer(len: usize, body: &[u8]) -> Result<ChallengeAnswe
         game_version,
         game_commit,
         platform,
+        path,
     })
 }
 
@@ -893,6 +922,14 @@ pub fn decode_keepalive(body: &[u8]) -> Result<Keepalive, PacketError> {
     let connection = u32_of(&mut r)?;
     end(&r)?;
     Ok(Keepalive { connection })
+}
+
+/// Decodes a Punch's body.
+pub fn decode_punch(body: &[u8]) -> Result<Punch, PacketError> {
+    let mut r = BitReader::new(body);
+    let introduction = r.read_bits(64)?;
+    end(&r)?;
+    Ok(Punch { introduction })
 }
 
 /// Decodes a Payload's fixed header; returns it and the section bytes.
@@ -993,6 +1030,7 @@ mod tests {
                 game_version: "0.1.3".into(),
                 game_commit: "fb9c2ec".into(),
                 platform: Platform::MacOs,
+                path: Path::Punched,
             }),
             Packet::Accepted(Accepted {
                 nonce: 4,
@@ -1037,6 +1075,9 @@ mod tests {
             Packet::DiscoverAnswer(answer(&["Viper", "Maverick 1"])),
             Packet::Keepalive(Keepalive {
                 connection: 0xDEAD_BEEF,
+            }),
+            Packet::Punch(Punch {
+                introduction: 0x0123_4567_89AB_CDEF,
             }),
         ]
     }
@@ -1092,6 +1133,8 @@ mod tests {
         // A keepalive is smaller than the empty Payload it stands in for.
         assert_eq!(sizes[9], 9);
         assert!(sizes[9] < PAYLOAD_HEADER_LEN);
+        // A punch is its header and the introduction id.
+        assert_eq!(sizes[10], 13);
     }
 
     #[test]
@@ -1352,6 +1395,7 @@ mod tests {
                 game_version: String::new(),
                 game_commit: String::new(),
                 platform: Platform::Unknown,
+                path: Path::ByAddress,
             });
             assert_eq!(answer.encode(V), Err(EncodeError::BadString));
         }
@@ -1376,5 +1420,53 @@ mod tests {
                 connection: 0xDEAD_BEEF
             })
         );
+        // A punch is exactly its introduction id.
+        assert_eq!(decode_punch(&[1; 7]), Err(PacketError::Malformed));
+        assert_eq!(decode_punch(&[1; 9]), Err(PacketError::Malformed));
+        assert_eq!(
+            decode_punch(&[1, 0, 0, 0, 0, 0, 0, 0]),
+            Ok(Punch { introduction: 1 })
+        );
+    }
+
+    #[test]
+    fn the_answer_carries_every_path_and_refuses_an_unknown_code() {
+        let Packet::ChallengeAnswer(base) = samples()[2].clone() else {
+            panic!("not an answer")
+        };
+        // The path byte follows the platform byte.
+        let at = 5
+            + 8
+            + 8
+            + [
+                &base.callsign,
+                &base.password,
+                &base.game_version,
+                &base.game_commit,
+            ]
+            .iter()
+            .map(|s| 1 + s.len())
+            .sum::<usize>()
+            + 1;
+        for path in Path::ALL {
+            let answer = ChallengeAnswer {
+                path: *path,
+                ..base.clone()
+            };
+            let bytes = Packet::ChallengeAnswer(answer.clone()).encode(V).unwrap();
+            assert_eq!(bytes.len(), PADDED_LEN);
+            assert_eq!(bytes[at], path.code());
+            assert_eq!(
+                Packet::decode(&bytes, V).unwrap(),
+                Packet::ChallengeAnswer(answer)
+            );
+        }
+        let mut bytes = samples()[2].encode(V).unwrap();
+        for code in [6, 7, u8::MAX] {
+            bytes[at] = code;
+            let crc = checksum(PacketKind::ChallengeAnswer, V, &bytes[4..]);
+            bytes[..4].copy_from_slice(&crc.to_le_bytes());
+            assert_eq!(Packet::decode(&bytes, V), Err(PacketError::Malformed));
+        }
     }
 }

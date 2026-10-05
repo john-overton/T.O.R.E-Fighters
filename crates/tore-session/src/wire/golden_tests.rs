@@ -70,7 +70,7 @@ fn lines(version: u16) -> Vec<(String, String)> {
         hex(&keepalive.encode(version).unwrap()),
     ));
     // The transport's Challenge answer, which carries the player's platform
-    // since protocol 7, sealed for the version. It is padded with zeros to
+    // since protocol 7 and the path since protocol 9, sealed for the version. It is padded with zeros to
     // 1,000 bytes; the line keeps the bytes before the padding (the checksum
     // covers it all).
     let answer = tore_net::packet::Packet::ChallengeAnswer(tore_net::packet::ChallengeAnswer {
@@ -81,6 +81,7 @@ fn lines(version: u16) -> Vec<(String, String)> {
         game_version: "0.1.3".into(),
         game_commit: "fb9c2ec".into(),
         platform: super::Platform::Linux,
+        path: tore_net::master::Path::Punched,
     })
     .encode(version)
     .unwrap();
@@ -89,6 +90,14 @@ fn lines(version: u16) -> Vec<(String, String)> {
     out.push((
         "transport-challenge-answer-head".into(),
         hex(&answer[..head]),
+    ));
+    // The host's Punch to a player the master introduced (protocol 9, J2).
+    let punch = tore_net::packet::Packet::Punch(tore_net::packet::Punch {
+        introduction: 0x0123_4567_89AB_CDEF,
+    });
+    out.push((
+        "transport-punch".into(),
+        hex(&punch.encode(version).unwrap()),
     ));
     out
 }
