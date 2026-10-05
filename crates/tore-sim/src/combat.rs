@@ -419,3 +419,7 @@ mod tests {
 }
 
 pub mod live;
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "combat_checkpoint.rs"]
+mod checkpoint;

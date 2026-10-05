@@ -346,3 +346,7 @@ mod tests {
         assert!(ledger.kills().is_empty());
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "ledger_checkpoint.rs"]
+mod checkpoint;

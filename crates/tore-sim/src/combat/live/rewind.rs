@@ -395,3 +395,7 @@ mod hit_tests {
         assert!(s.rewinds.is_empty());
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "rewind_checkpoint.rs"]
+mod checkpoint;

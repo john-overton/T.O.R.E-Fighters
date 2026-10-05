@@ -1124,3 +1124,7 @@ impl Flight {
         flight
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "missiles_checkpoint.rs"]
+mod checkpoint;

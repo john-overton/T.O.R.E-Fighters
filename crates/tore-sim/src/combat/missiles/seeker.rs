@@ -252,3 +252,7 @@ impl Seeker {
         }
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "seeker_checkpoint.rs"]
+mod checkpoint;
