@@ -28,7 +28,7 @@ mod view;
 pub use ai_input::{AiInput, FlightFeed};
 pub use journal::{CAPACITY as JOURNAL_CAPACITY, Entry, Journal};
 pub use picture::{
-    Assignment, Damage, Delivery, Engagement, FLIGHT_TRACKS, FlightId, FlightPicture, Fuel, Lock,
+    Assignment, Damage, Engagement, FLIGHT_TRACKS, FlightId, FlightPicture, Fuel, Lock,
     MemberStatus, PUBLISH_TICKS, SEAT_TRACKS, Source, Track, Weapons, flight_key,
 };
 pub use view::{LinkView, TrackSource, ViewTrack};
@@ -52,7 +52,7 @@ use tore_sim::{
         live::{self, NO_SIDE},
         missiles::{Profile, TargetRole},
     },
-    datalink::{LinkTier, tier},
+    datalink::has_radar,
     models::FlightModel,
     sensors::Channel,
 };
@@ -68,8 +68,9 @@ pub struct Member {
     pub member: u8,
     /// The aircraft type; `None` until combat holds one for the plane.
     pub aircraft: Option<AircraftId>,
-    /// From the aircraft type, and [`LinkTier::Voice`] while it is unknown.
-    pub tier: LinkTier,
+    /// The aircraft type has a radar (`false` while the type is unknown). It
+    /// changes what the member's player sees, never whether it is linked.
+    pub radar: bool,
     /// A human flies it.
     pub human: bool,
     pub alive: bool,
@@ -182,12 +183,12 @@ impl DataLink {
                     actor.map_or([0.; 3], |actor| actor.flight().position),
                 )
             };
-            let tier = aircraft.map_or(LinkTier::Voice, tier);
+            let radar = aircraft.is_some_and(has_radar);
             if self.announced.insert(plane.id.0) {
                 self.journal.push(Entry::Member {
                     tick: scene.tick,
                     plane: plane.id.0,
-                    tier,
+                    radar,
                 });
             }
             self.members.push(Member {
@@ -195,7 +196,7 @@ impl DataLink {
                 flight: plane.slot.wing,
                 member: plane.slot.member,
                 aircraft,
-                tier,
+                radar,
                 human,
                 alive,
                 position,
@@ -255,10 +256,8 @@ impl DataLink {
 
     fn publish_flight(&self, scene: &Scene<'_>, flight: FlightId) -> FlightPicture {
         let in_flight = || self.members.iter().filter(move |m| m.flight == flight);
-        // Only members that can share (the Flight tier or better) report.
-        let reporters: Vec<&Member> = in_flight()
-            .filter(|m| m.alive && m.tier >= LinkTier::Flight)
-            .collect();
+        // Every living member of the flight reports: every aircraft is linked.
+        let reporters: Vec<&Member> = in_flight().filter(|m| m.alive).collect();
         let mut best: BTreeMap<u32, Track> = BTreeMap::new();
         for reporter in &reporters {
             let held = if reporter.human {

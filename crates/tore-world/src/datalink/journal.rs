@@ -8,7 +8,6 @@
 //! [`Journal::lost`].
 
 use std::collections::VecDeque;
-use tore_sim::datalink::LinkTier;
 
 /// Entries kept between drains.
 pub const CAPACITY: usize = 1024;
@@ -17,12 +16,9 @@ pub const CAPACITY: usize = 1024;
 /// entries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Entry {
-    /// A plane joined the picture, with its tier (the first tick it is seen).
-    Member {
-        tick: u64,
-        plane: u32,
-        tier: LinkTier,
-    },
+    /// A plane joined the picture, with whether its aircraft has a radar (the
+    /// first tick it is seen).
+    Member { tick: u64, plane: u32, radar: bool },
     /// A member took a lock on a target.
     Lock { tick: u64, plane: u32, target: u32 },
     /// A member let go of a lock (the target, the member or the lock is gone).

@@ -109,15 +109,6 @@ pub struct Lock {
     pub since: u64,
 }
 
-/// How an assignment reaches its receiver.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Delivery {
-    /// By the link: the target itself.
-    Link,
-    /// By voice: the words only. Slice G3b adds the heard point.
-    Voice,
-}
-
 /// What the lead gave one member to attack. Written by the assignment slices
 /// (G3a onward); stage G0 only holds the table, empty.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,7 +118,6 @@ pub struct Assignment {
     pub by: u32,
     /// The combat tick it was given.
     pub tick: u64,
-    pub delivery: Delivery,
     /// The order that made it.
     pub order: PlayerOrder,
     /// The receiver has held a lock on the target since.

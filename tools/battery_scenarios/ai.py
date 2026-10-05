@@ -257,27 +257,27 @@ def checker(**kw) -> Callable[[str], list[str]]:
     return lambda output: probe_problems(output, **kw)
 
 
-DATALINK_LINE = re.compile(r"^t=(\d+) data link: (member|lock|unlock) plane=(\d+)(?: tier=(\S+)| target=(\d+))$", re.M)
+DATALINK_LINE = re.compile(r"^t=(\d+) data link: (member|lock|unlock) plane=(\d+)(?: radar=(true|false)| target=(\d+))$", re.M)
 
 
-def datalink_picture_check(planes: int, designated: int, player_tier: str) -> Callable[[str], list[str]]:
+def datalink_picture_check(planes: int, designated: int) -> Callable[[str], list[str]]:
     """The flight data link's picture, as the probe prints it (`data link:`
     lines, from `--probe-player-lock` and `--probe-data-link`): every plane is
-    announced once with its tier, locks and unlocks pair up per plane, the
+    announced once with its radar flag, locks and unlocks pair up per plane, the
     player's designation becomes a lock on the aircraft it named, and the
     probe's own checks still pass."""
 
     def check(output: str) -> list[str]:
         problems = probe_problems(output)
-        tiers: dict[int, str] = {}
+        radars: dict[int, str] = {}
         held: dict[int, int] = {}
         player_locked = False
-        for tick, kind, plane, tier, target in DATALINK_LINE.findall(output):
+        for tick, kind, plane, radar, target in DATALINK_LINE.findall(output):
             plane = int(plane)
             if kind == "member":
-                if plane in tiers:
+                if plane in radars:
                     problems.append(f"plane {plane} announced twice")
-                tiers[plane] = tier
+                radars[plane] = radar
             elif kind == "lock":
                 if plane in held:
                     problems.append(f"t={tick}: plane {plane} locked over a lock")
@@ -285,10 +285,12 @@ def datalink_picture_check(planes: int, designated: int, player_tier: str) -> Ca
                 player_locked |= plane == 0 and int(target) == designated
             elif held.pop(plane, None) != int(target):
                 problems.append(f"t={tick}: plane {plane} dropped a lock it did not hold")
-        if sorted(tiers) != list(range(planes)):
-            problems.append(f"members announced: {sorted(tiers)}, expected planes 0..{planes - 1}")
-        if tiers.get(0) != player_tier:
-            problems.append(f"the player's tier is {tiers.get(0)!r}, expected {player_tier!r}")
+        if sorted(radars) != list(range(planes)):
+            problems.append(f"members announced: {sorted(radars)}, expected planes 0..{planes - 1}")
+        # Every aircraft ported so far has a radar.
+        for plane, radar in sorted(radars.items()):
+            if radar != "true":
+                problems.append(f"plane {plane} reports no radar")
         if not player_locked:
             problems.append(f"the player never locked aircraft {designated}")
         return problems
@@ -543,14 +545,14 @@ def scenarios() -> list[Scenario]:
                                                            "--separation", "5", "--probe-attack", "600:10"], ticks=12000,
                              expect=[r"order=\S+ (reply|refused)"]))
 
-    # 9b. The flight data link's picture (stage G0): members and tiers, the
+    # 9b. The flight data link's picture (stage G0): members and their radar flag, the
     # player's lock from its designation, AI engagements, and a wing order to
     # one member (`@1`, the first wingman).
     out.append(probe("datalink-picture", ["--probe-wing-size", "2", "--separation", "5", "--probe-player-lock", "600:4",
                                           "--probe-wing-order", "700:engage-my-target@1"], ticks=2400,
-                     expect=[r"data link: member plane=0 tier=network", r"data link: lock plane=0 target=4",
+                     expect=[r"data link: member plane=0 radar=true", r"data link: lock plane=0 target=4",
                              r"order=EngageMyTarget reply"],
-                     check=datalink_picture_check(planes=6, designated=4, player_tier="network")))
+                     check=datalink_picture_check(planes=6, designated=4)))
 
     # 10. Ground starts: takeoff, formation, landing orders.
     for size in [1, 2, 3, 4, 5]:

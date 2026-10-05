@@ -2041,35 +2041,44 @@ combat, the AI bridge, the debrief and the recorder.
 ## Flight data link
 
 Design for stage G of the [multiplayer plan](multiplayer-plan.md#stages),
-written on 2026-10-05. Slice G0 (the tiers and the picture) is built; nothing
-reads the picture yet, and the rest is not built ([the slice
-table](#how-stage-g-lands) marks each slice that is). What the player sees and hears, the tier
-table and the numbers are in the guide, [DATALINK.md](DATALINK.md); the bytes
+written on 2026-10-05. Slice G0 (the radar table and the picture) is built;
+nothing reads the picture yet, and the rest is not built ([the slice
+table](#how-stage-g-lands) marks each slice that is). What the player sees and
+hears, who shares what and the numbers are in the guide,
+[DATALINK.md](DATALINK.md); the bytes
 are in the [wire protocol](formats/net-protocol.md#data-link-stage-g). Every
 choice here is an agent decision unless it is credited to John. John's rules
 (2026-09-28, [guide](MULTIPLAYER.md#flight-data-link)): one shared picture per
 flight that AI and humans read and write alike, also in single player; the
 tracks at 4 Hz, locks and assignments at once; assignments voiced with
-bearing and range from the receiver; era-gated, the least capable member
-deciding. Stage G is a **planned single-player change**: the slices that
+bearing and range from the receiver. John dropped the era gating on
+2026-10-05: all friendlies get the data link whatever their aircraft type, and
+the one thing the type decides is whether it has a radar (below). Stage G is a **planned single-player change**: the slices that
 change single player are listed in [the table](#how-stage-g-lands), each with
 its own baseline comparison.
 
 In short:
 
 - A new `DataLink` in `World` (`crates/tore-world/src/datalink.rs`) owns the
-  picture: the members and their tiers, the engagements, locks and
+  picture: the members and their radar flags, the engagements, locks and
   assignments (changed at once), and the tracks and member state (published
   every 30 ticks). It observes the human ownships after combat and the AI
   actors after the AI step, and never changes either.
-- The tier table is pure data in `tore-sim` (`crates/tore-sim/src/datalink.rs`),
-  keyed by `AircraftId::source()`, read by the world, the AI and the tests.
+- **No tiers (John, 2026-10-05).** Every aircraft of a side is a linked member,
+  in its flight and over the side's battle net. The aircraft table is one flag,
+  `has_radar`, pure data in `tore-sim` (`crates/tore-sim/src/datalink.rs`),
+  keyed by `AircraftId::source()`, read by the world and the displays. An
+  aircraft with no radar is still linked and its AI uses the picture as any
+  other; its player sees no link cues on displays it does not have (slice G6).
+  There are no pair rules and no "least capable member".
 - The AI's one read of other controllers in target choice, the wing attacker
   count, moves onto an engagement table kept in decision order, with
   identical results; later slices then let the picture change what the AI
   does, one rule at a time.
-- Orders become assignments: delivered by link (the target) or by voice (a
-  heard point to search), and always voiced, from the receiver's geometry.
+- Orders become assignments: delivered by link (the target), and always
+  voiced, from the receiver's geometry. The design's voice-only delivery to
+  older aircraft, with a heard point to search, was for the tiers and is
+  **dropped** by John's decision of 2026-10-05.
 - The seat's share of the picture rides in its cockpit readout; changes go as
   events at once.
 
@@ -2128,8 +2137,8 @@ Surveyed at `884f9916` on `multiplayer`. Line numbers are indicative.
 
 | Where | New or changed | Holds |
 | --- | --- | --- |
-| `tore-sim/src/datalink.rs` | new | `LinkTier` (`Voice`, `Flight`, `Network`), `tier(AircraftId)` (an exhaustive match on `id.source()`), `flight_linked(a, b)`, `net_linked(a, b)`; later `datalink/sort.rs`, the sort as pure geometry |
-| `tore-sim/src/ai/link.rs` | new | What the AI reads and writes: `Engagements` (the decision-order table), `LinkInput` (what the world hands the AI each tick), `HeardCue`, `lock_of(actor)` (the one lock rule), the AI's link outputs |
+| `tore-sim/src/datalink.rs` | new | `has_radar(AircraftId)` (an exhaustive match on `id.source()`); later `datalink/sort.rs`, the sort as pure geometry |
+| `tore-sim/src/ai/link.rs` | new | What the AI reads and writes: `Engagements` (the decision-order table), `LinkInput` (what the world hands the AI each tick), `lock_of(actor)` (the one lock rule), the AI's link outputs |
 | `tore-world/src/datalink.rs` and `datalink/` | new | `DataLink`: members, picture, locks, engagements, assignments, sort warnings; `before_ai` and `after_ai`; per-seat views; the AI's input; the assignment calls; a write-only journal |
 | `tore-world/src/world.rs` | changed | The `datalink` field and its two calls in `step_with` |
 | `tore-world/src/readout.rs` | changed | `CockpitReadout::link`, the seat's share |
@@ -2146,24 +2155,23 @@ sensors live in `combat.state`'s ownships). Neither depends on anything new.
 ```rust
 // tore-world/src/datalink.rs (sketch)
 pub struct DataLink {
-    members: Vec<Member>,             // every plane: id, side, wing, member, tier, alive
+    members: Vec<Member>,             // every plane: id, flight, member, aircraft, radar, human, alive, position
     pictures: Vec<FlightPicture>,     // one per flight, as last published
     locks: BTreeMap<u32, Lock>,       // plane -> { target, since }
     engaged: BTreeMap<u32, u32>,      // plane -> target it attacks
-    assignments: BTreeMap<u32, Assignment>, // receiver -> { target, by, tick, delivery, order, acknowledged }
+    assignments: BTreeMap<u32, Assignment>, // receiver -> { target, by, tick, order, acknowledged }
     warned: BTreeSet<(u32, u32, u32)>,       // lock pairs already warned: (plane, plane, target)
     seat_warned: BTreeMap<SeatId, u64>,      // last sort warning tick per seat
     journal: Journal,                 // write-only, drained by the recorder
 }
 pub struct FlightPicture { flight: WingId, tick: u64, tracks: Vec<Track>, status: Vec<MemberStatus> }
 pub struct Track { reporter: u32, target: u32, position: [f64; 3], velocity: [f64; 3], channel: Channel, observed: u64 }
-pub enum Delivery { Link, Voice(HeardCue) }
 ```
 
 Collections are `BTreeMap`, `BTreeSet` and `Vec` in id order, as every mission
 type is; nothing rolls a random number. A **member** is every plane of the
-roster (`seats::Roster`), AI or human; its tier comes from its aircraft type
-and never changes, and `alive` follows combat. **Engagements** are an AI's
+roster (`seats::Roster`), AI or human; its radar flag comes from its aircraft
+type and never changes, and `alive` follows combat. **Engagements** are an AI's
 `controller.target()` and a human's locked target (`Ownship::sensors.acquired()`).
 A **lock** is a human's acquired target, or an AI's target while its weapon
 service is tracking or firing (`ai::link::lock_of`, the rule `locks_on` uses
@@ -2176,9 +2184,10 @@ the lower reporter id.
 
 **What a member receives** is computed from the picture, never stored per
 member: `DataLink::view(plane)` for the readout, `DataLink::ai_input()` for the
-AI. Within a flight a pair is linked when `flight_linked(a, b)`; across flights
-of one side when `net_linked(a, b)`. Engagements are given to every member of
-the flight, linked or not ([why](DATALINK.md#what-a-flight-shares)).
+AI. Every living member of the side is linked: the locks and tracks of the whole
+side reach a plane, and its flight's engagements, assignments and member state.
+The radar flag is reported in the view for the displays and changes nothing it
+receives ([who shares it](DATALINK.md#who-shares-it)).
 
 ### One tick
 
@@ -2195,7 +2204,7 @@ sequenceDiagram
   W->>W: Commands: a lead's order becomes assignments (L), delivered to AI members (A)
   W->>C: Human flights, weather, combat: the ownships' sensors step
   W->>L: before_ai: members alive, human locks and engagements, publish every 30th tick
-  L->>A: set_link: human engagements, linked tracks, warnings, member state
+  L->>A: set_link: human engagements, tracks, warnings, member state
   W->>A: The AI step: engagements kept in decision order, AI leads may assign
   W->>L: after_ai: AI locks and engagements, AI assignments, acknowledgements, cleared assignments, sort warnings, calls
   W->>R: Radio: assignment and battle-net calls delivered when due
@@ -2203,8 +2212,7 @@ sequenceDiagram
 
 - **Commands** (step 1). `World::wing_order` asks `DataLink::assign` for the
   addressed members and the order's targets (the designation, or a sort), then
-  hands each AI member its delivery through `command_at`: `ConcreteTarget` when
-  linked to the lead, `TargetOrder::Heard(cue)` when not. The call is made here,
+  hands each AI member its target through `command_at` as `ConcreteTarget`. The call is made here,
   as the order voice is today.
 - **`before_ai`** runs after combat's events (step 10) and before the AI
   (step 11). It refreshes each member's `alive`, reads every ownship's lock and
@@ -2246,26 +2254,19 @@ link, and it was built that way on John's decision of 2026-09-30.
 | Read | Today | After stage G | Slice |
 | --- | --- | --- | --- |
 | Who else attacks a candidate | Same-wing AI controllers, live | The engagement table, with the flight's humans' locked targets added at the start of the step | G1 (same result), G2 (humans) |
-| An assigned target the wingman cannot see | Refused, "cannot see the target" | Linked: accepted, flown toward the freshest linked track until its own sensors hold it. Not linked: a heard point to search | G3b |
+| An assigned target the wingman cannot see | Refused, "cannot see the target" | Accepted, flown toward the freshest track in the picture until its own sensors hold it | G3b |
 | A lead's share | Not connected | B43's loose-control share, through the picture, voiced | G4 |
-| Several bandits at the merge | Each wingman ranks on its own | A linked AI lead sorts; linked AI members yield on a sort warning | G4 |
-| Wingmen's state | Not read | An AI lead skips Winchester, bingo and heavily damaged wingmen; a Voice lead knows only fuel calls it heard | G4 |
+| Several bandits at the merge | Each wingman ranks on its own | An AI lead sorts; AI members yield on a sort warning | G4 |
+| Wingmen's state | Not read | An AI lead skips Winchester, bingo and heavily damaged wingmen | G4 |
 
-**A heard point** (`HeardCue`): the spoken bearing, range and height (each
-rounded as said) turned back into a point from where the receiver was when it
-heard the call, a match radius (3 nm plus a tenth of the range, 5,000 ft in
-height) and a deadline (60 s). The controller holds it like a target order:
-each decision frame it takes the nearest hostile aircraft its awareness holds
-within the radius as `ConcreteTarget` and replies "Tally Ho"; until then it
-flies the approach toward the point with its lost-contact search
-(`MotionBranch::Search`, as the mission of opportunity flies its search
-point), and at the deadline it drops the cue and returns to formation. A
-cue never refills a Novice's memory: the target must still come from the
-actor's own sensors ([awareness](spec/ai-awareness.md)).
+*Dropped (John, 2026-10-05).* The design had a **heard point** for Voice-tier
+wingmen: the spoken bearing, range and height turned back into a point to
+search, with a match radius, a 60-second deadline and a "Tally Ho" reply. With
+no tiers every wingman takes the target, so nothing needs it.
 
-**A linked track pursuit**: the controller's target is the assigned id, and
+**A track pursuit**: the controller's target is the assigned id, and
 while its own awareness lacks that id the frame's target view is built from
-the freshest linked track in `LinkInput` (position, velocity, `observed`
+the freshest track in `LinkInput` (position, velocity, `observed`
 tick, flagged as a link track so weapons never fire on it: a launch still
 needs the actor's own lock).
 
@@ -2278,8 +2279,8 @@ needs the actor's own lock).
   human) or target (an AI), for each addressed member; refused as today when
   there is no living hostile target.
 - Sort (`PlayerOrder::Sort`, Alt+A): `tore_sim::datalink::sort` hands the
-  sender's known hostile aircraft within 40 nm (its own contacts, plus linked
-  tracks for a Flight or Network sender) to the addressed members in member
+  sender's known hostile aircraft within 40 nm (its own contacts, plus the
+  picture's tracks) to the addressed members in member
   order, nearest first, distinct while they last, then at most two on one
   bandit; known Winchester, bingo-or-worse and heavily damaged members are
   skipped. Pure geometry over plain rows, so the human's order and the AI
@@ -2288,18 +2289,17 @@ needs the actor's own lock).
   addressed members' assignments; so do the target's or receiver's loss, a new
   target order and a change of lead.
 
-Delivery is by pair: `flight_linked(sender tier, receiver tier)` gives
-`Delivery::Link` (the AI gets the target; a human gets the cues), otherwise
-`Delivery::Voice(cue)` (the AI gets a heard point; a human hears the call only).
-Every assignment is voiced either way.
+Delivery is always by link: the AI gets the target, a human gets the cues. Every
+assignment is also voiced. A blanket attack order that names no target is
+called "Attack bandits" and makes no assignment (John, 2026-10-05, slice G3a).
 
 **AI leads** (G4) write assignments through the mission output:
 `MissionOutput::link` gains `Assign { lead, receiver, target, order }` events
 and `Yield { actor, target }`. Under loose control a lead whose target changes
 shares it with formation wingmen up to the two-attacker allowance
 (`wing::share_targets`, connected at last), delivered after all actors decide
-as today's automatic requests are (`order_wing`). A lead with the Flight tier
-or better that commits with two or more known bandits sorts instead, at most
+as today's automatic requests are (`order_wing`). A lead that commits with two
+or more known bandits sorts instead, at most
 once every 30 seconds per flight (`AiMission::sort_clock`). `after_ai` records
 each assignment and voices it.
 
@@ -2325,7 +2325,7 @@ with the speaker's flight colour put in front of its words and its label
 (`Net Blue one`). The journal's `heard_by` lists them; a call no monitoring
 seat hears is journaled exactly as today (`OtherFlight`), so recordings
 without a monitoring seat are unchanged. The Network link itself needs no
-call: it is the `net_linked` rule over the published pictures.
+call: every living aircraft of the side sees the published pictures of the side's other flights.
 
 ### Cues and the readout
 
@@ -2335,13 +2335,15 @@ touched):
 
 | Field | Holds |
 | --- | --- |
-| `tier` | The plane's tier |
+| `radar` | The plane's aircraft has a radar: its displays show the cues only if it does |
 | `assigned` | The plane's assignment by link: target, assigner, acknowledged |
 | `sort` | The newest sort warning's target and other plane, for the cue's lifetime |
 | `tracks` | Up to 24 rows, nearest first: target id, position, velocity, source (own, flight, network), lockers (a mask of flight member numbers), locked over the battle net (a plane id), assigned to (a mask) |
-| `mates` | Linked flightmates: plane, member, fuel, weapons, damage |
+| `mates` | Flightmates: plane, member, fuel, weapons, damage |
 
-A Voice-tier plane's `link` is empty except its tier. The app reads it
+A plane whose aircraft has no radar still receives the whole `link`; the app
+draws the cues only on the displays that aircraft has (slice G6, agent
+decision). The app reads it
 (`combat_view::readout` to `scope::Contact` and `target_window::Readout`;
 `weapon_hud::draw` for the brackets); single player builds it with the rest of
 the readout every frame, a client receives it. The sort warning is also a
@@ -2367,8 +2369,8 @@ it is one protocol version, the next one the lead hands out.
 
 ### Replays
 
-`DataLink`'s journal holds `member` (each plane's tier, at the start),
-`assign` (receiver, target, assigner, delivery, order, and the call's words),
+`DataLink`'s journal holds `member` (each plane's radar flag, at the start),
+`assign` (receiver, target, assigner, order, and the call's words),
 `clear` (and why), `acknowledge`, `lock`, `unlock` and `sort_warning`. Like
 the communication journal it is write-only, bounded at 1,024 entries between
 drains, and draws no random number. The recorder drains it every tick into
@@ -2385,11 +2387,11 @@ can list it:
 
 | Owner | State |
 | --- | --- |
-| `tore_world::datalink::DataLink` | `members` (with `alive`), `pictures` (each flight's publish tick, tracks and member status), `locks`, `engaged`, `assignments` (with each `Delivery::Voice` cue), `warned`, `seat_warned`. The journal is write-only and local, like the communication journal: whatever H decides for that one applies |
+| `tore_world::datalink::DataLink` | `members` (with `alive`), `pictures` (each flight's publish tick, tracks and member status), `locks`, `engaged`, `assignments` `warned`, `seat_warned`. The journal is write-only and local, like the communication journal: whatever H decides for that one applies |
 | `tore_world::comms` | Each seat's `Channel::battle`; `Call::net` on every queued call |
 | `tore_sim::ai::AiMission` | `sort_clock` (each flight's last sort tick); the link input set at the start of the step (rebuilt by `before_ai` each tick, so H may rebuild it rather than code it) |
-| `tore_sim::ai` actor and controller | A controller's `TargetOrder::Heard` cue (point, radius, deadline, sender); the linked-track pursuit flag; each actor's yield list (target, until tick) |
-| Not state | The tier table (from the aircraft type); the engagement table (rebuilt from the controllers at the start of each decision loop); the per-seat views and the readout |
+| `tore_sim::ai` actor and controller | The track pursuit flag; each actor's yield list (target, until tick) |
+| Not state | The radar table (from the aircraft type); the engagement table (rebuilt from the controllers at the start of each decision loop); the per-seat views and the readout |
 
 No new random stream exists, so H has none to add.
 
@@ -2405,9 +2407,9 @@ the merge.
 | G0, G1, G3c, G7, G8 | None | SAME (G3c's key and G8's monitor change nothing until used) |
 | G2 | The AI counts a human's locked target | AI wingmen of the player's flight rank the player's locked bandit 10,000 ft lower (and 20,000 ft at the allowance): different targets and everything after, only in probes where the player locks |
 | G3a | The order voice says the assignment call | The order's journal entry and recording stems for Engage my target and Engage from formation; no motion changes |
-| G3b | Wingmen take assignments by tier | Probes with those orders: Flight and Network wingmen no longer refuse a target only a flightmate's track holds; Voice wingmen search a heard point instead of being given the target |
-| G4 | AI leads share and sort; linked AI yield | Every probe with an AI-led wing under loose control or linked AI wingmen: targets, launches and kills move; the radio journal gains AI assignment calls (heard only by the flight) |
-| G6 | Cues drawn | No recording changes; GPU captures change only where a linked flightmate locks or an assignment exists |
+| G3b | Wingmen take assignments by link | Probes with those orders: wingmen no longer refuse a target only a flightmate's track holds |
+| G4 | AI leads share and sort; AI yield | Every probe with an AI-led wing under loose control or AI wingmen: targets, launches and kills move; the radio journal gains AI assignment calls (heard only by the flight) |
+| G6 | Cues drawn | No recording changes; GPU captures change only where a flightmate locks or an assignment exists |
 | G9 | `datalink.*` events recorded | Recordings gain the new events and nothing else |
 
 ### Testing
@@ -2431,26 +2433,26 @@ are Sonnet.
 
 | Slice | Model | After | Files it owns | Work | Acceptance |
 | --- | --- | --- | --- | --- | --- |
-| G0 Tiers and picture | Sonnet | | `tore-sim/src/datalink.rs` (and its `lib.rs` line), `tore-world/src/datalink.rs`, `datalink/{picture,view,ai_input,journal}.rs` and tests, `world.rs` (field, `before_ai`, `after_ai`), read-only accessors in `ai_wings.rs`, the AI probe's options in `tore-app` (`--probe-player-lock`, the `@MEMBER` recipient, the `data link:` line), `tools/battery_selection.py` | The tier table; members, locks, engagements, publishing; `view` and `ai_input` skeletons; the journal; the probe options; nothing consumes the picture. **Built (G0, 2026-10-05):** `tore_sim::datalink` (`LinkTier`, `tier`, `flight_linked`, `net_linked`) and `tore_world::datalink` (`DataLink`, `Member`, `Scene`, `Journal`, `LinkView`, `AiInput`), with `World::datalink` read after combat's events (`before_ai`) and after the AI step (`after_ai`) and reset by a restart. Nothing consumes the picture, so the AI decides exactly as before. The build settled these, each an agent decision. The members are rebuilt from the roster every tick, the aircraft type being the ownship's or the actor's, and a plane that is dead holds no lock and no engagement. Only members of the Flight tier or better report tracks and member state, so a Voice member shares engagements only. A human's fuel reports Normal, Fumes or Out, because joker and bingo are judged against the home point the crew voice keeps; the AI's reports all five levels from its controller. Locks use the weapon phase test of `locks_on` until G1 adds `lock_of`. The assignment, warned and seat-warned tables exist and are empty, with `Delivery::Voice` carrying no cue yet, so G3a, G3b and G6 fill them without editing `datalink.rs`. The probe gains `--probe-player-lock TICK:ID` (a designation, so the lock follows when the sensors hold it), `TICK:ORDER@MEMBER` (member 1 is the first wingman) and `--probe-data-link`, and prints `t=T data link: member`, `lock` and `unlock` lines only when asked, so every other probe's output is unchanged. AI scenario `ai-datalink-picture` (family `ai-datalink`). Single player: SAME, see the baseline in the slice report. | Every `AircraftId::SELECTABLE` has a tier, F-22N and F/A-XX resolve to the F-22A; the pair rules; tracks change only on ticks divisible by 30; locks and engagements match the ownships and controllers on the crowd fixture; two runs equal; baseline SAME |
+| G0 Radar table and picture | Sonnet | | `tore-sim/src/datalink.rs` (and its `lib.rs` line), `tore-world/src/datalink.rs`, `datalink/{picture,view,ai_input,journal}.rs` and tests, `world.rs` (field, `before_ai`, `after_ai`), read-only accessors in `ai_wings.rs`, the AI probe's options in `tore-app` (`--probe-player-lock`, the `@MEMBER` recipient, the `data link:` line), `tools/battery_selection.py` | The radar table; members, locks, engagements, publishing; `view` and `ai_input` skeletons; the journal; the probe options; nothing consumes the picture. **Built (G0, 2026-10-05):** `tore_sim::datalink` (`has_radar`) and `tore_world::datalink` (`DataLink`, `Member`, `Scene`, `Journal`, `LinkView`, `AiInput`), with `World::datalink` read after combat's events (`before_ai`) and after the AI step (`after_ai`) and reset by a restart. Nothing consumes the picture, so the AI decides exactly as before. The build settled these, each an agent decision. The members are rebuilt from the roster every tick, the aircraft type being the ownship's or the actor's, and a plane that is dead holds no lock and no engagement. Every living member reports tracks and member state, the radar-less included. Built first with Voice, Flight and Network tiers and reworked on John's decision of 2026-10-05 to the radar flag. A human's fuel reports Normal, Fumes or Out, because joker and bingo are judged against the home point the crew voice keeps; the AI's reports all five levels from its controller. Locks use the weapon phase test of `locks_on` until G1 adds `lock_of`. The assignment, warned and seat-warned tables exist and are empty, so G3a, G3b and G6 fill them without editing `datalink.rs`. The probe gains `--probe-player-lock TICK:ID` (a designation, so the lock follows when the sensors hold it), `TICK:ORDER@MEMBER` (member 1 is the first wingman) and `--probe-data-link`, and prints `t=T data link: member`, `lock` and `unlock` lines only when asked, so every other probe's output is unchanged. AI scenario `ai-datalink-picture` (family `ai-datalink`). Single player: SAME, see the baseline in the slice report. | Every `AircraftId::SELECTABLE` has an entry, F-22N and F/A-XX resolve to the F-22A; a radar-less member is linked all the same; tracks change only on ticks divisible by 30; locks and engagements match the ownships and controllers on the crowd fixture; two runs equal; baseline SAME |
 | G1 Engagement table | Opus | G0 | `tore-sim/src/ai/link.rs` (new, and its `mod` line), `ai/mission.rs`, `ai/controller.rs`, `ai_wings.rs` | The decision-order engagement table; `wing_attackers` and `leader_view` read it; `lock_of` shared by `locks_on`, `aiming_at` and the picture | A test-only copy of the old scan equals the table for every actor of every tick over seeded fights (crowd, 15 against 15, with handoffs and deaths); baseline SAME |
-| G3a Assignments and calls | Sonnet | G0 | `datalink/{assign,calls}.rs`, `world/commands.rs`, `ai_wings/orders.rs` | `DataLink::assign`, its clearing rules, the call's words and hearers, the human order voice replaced; delivery to AI still `ConcreteTarget` | Words and stems for bearings 5, 90, 270, ranges 0.5, 1, 15, 20, 30 and heights 0 and 20,000 ft; per-hearer geometry; the call is important and keeps the channel hold; clearing on each rule; baseline differs only in order calls (explained) |
-| G6 Cues | Sonnet | G0 | `readout.rs`, `frame.rs`, `target_window.rs`, `datalink/{view,warning}.rs`, `tore-app` `scope.rs`, `instruments.rs`, `weapon_hud.rs`, `combat_view.rs`, `main.rs` (the HUD's assigned target), `flight_ui.rs` if needed, the `replay_target` call sites | `LinkReadout`; the sort warning; radar markers, target window tags and mate line, HUD brackets | Unit tests for each marker, the tag's priority, the brackets' blink and their end on lock, the warning's edge and cooldown; a headless capture of a linked scene; single-player recordings SAME |
+| G3a Assignments and calls | Sonnet | G0 | `datalink/{assign,calls}.rs`, `world/commands.rs`, `ai_wings/orders.rs` | `DataLink::assign`, its clearing rules, the call's words and hearers, the human order voice replaced; a blanket attack order that names no target says "Attack bandits" (John, 2026-10-05); delivery to AI still `ConcreteTarget` | Words and stems for bearings 5, 90, 270, ranges 0.5, 1, 15, 20, 30 and heights 0 and 20,000 ft; per-hearer geometry; the call is important and keeps the channel hold; clearing on each rule; baseline differs only in order calls (explained) |
+| G6 Cues | Sonnet | G0 | `readout.rs`, `frame.rs`, `target_window.rs`, `datalink/{view,warning}.rs`, `tore-app` `scope.rs`, `instruments.rs`, `weapon_hud.rs`, `combat_view.rs`, `main.rs` (the HUD's assigned target), `flight_ui.rs` if needed, the `replay_target` call sites | `LinkReadout`; the sort warning; radar markers, target window tags and mate line, HUD brackets | Unit tests for each marker, the tag's priority, the brackets' blink and their end on lock, the warning's edge and cooldown; a headless capture of a linked scene, and of one with a radar-less aircraft that shows no cue on the missing display; single-player recordings SAME |
 | G2 Humans in the table | Sonnet | G1 | `ai/mission.rs`, `ai/link.rs`, `datalink/ai_input.rs`, `ai_wings.rs` (`set_link`) | Human locked targets enter the engagement table; `AiWings::set_link` | A wingman ranks the player's locked bandit with the penalty; AI scenario `ai-datalink-player-lock`; baseline differences explained |
-| G3b Delivery by tier | Sonnet | G2, G3a | `ai/controller.rs`, `ai/wing.rs`, `ai/link.rs`, `ai/mission.rs`, `ai_wings/orders.rs`, `datalink/assign.rs` | `TargetOrder::Heard`; linked-track pursuit; "Tally Ho"; the refusal replaced | A linked wingman pursues a target only a flightmate tracks and fires only on its own lock; a Voice wingman finds the bandit within the radius, searches 60 s and gives up; a mixed flight (F-22A lead, A-4E wingman, built directly) gets voice; AI scenarios `ai-datalink-order-voice` (A-4E) and `ai-datalink-order-link` (F/A-18D); baseline differences explained |
+| G3b Assignments reach the AI | Sonnet | G2, G3a | `ai/controller.rs`, `ai/wing.rs`, `ai/link.rs`, `ai/mission.rs`, `ai_wings/orders.rs`, `datalink/assign.rs` | Track pursuit; the refusal replaced. `TargetOrder::Heard` and "Tally Ho" are **dropped** (John, 2026-10-05: no Voice tier) | A wingman pursues a target only a flightmate tracks and fires only on its own lock; AI scenario `ai-datalink-order-link` (F/A-18D); `ai-datalink-order-voice` is dropped; baseline differences explained |
 | G3c Sort order | Sonnet | G3b | `tore-sim/src/datalink/sort.rs`, `ai/wing.rs` (`PlayerOrder::Sort`), `datalink/assign.rs`, `input_catalog.rs`, `docs/CONTROLS.md`, `docs/tore-keyboard-map.html`, the probe's order names, `tools/battery_scenarios/ai.py` | Alt+A; the sort; calls 3.5 s apart | Sort tests (distinct, nearest, two at most, skipped members); the controls test; AI scenario `order-sort-wing4`; baseline SAME |
-| G4 AI leads | Sonnet | G3c | `ai/mission.rs`, `ai/link.rs`, `ai/controller.rs`, `ai_wings.rs`, `datalink/assign.rs` | Share, sort, yield, member state for AI leads; `MissionOutput::link` | Share caps at two under loose control and not under medium; a linked lead sorts once in 30 s; Voice leads share; yield by member number, never a human; AI scenario `ai-datalink-lead-sort`; baseline differences explained |
+| G4 AI leads | Sonnet | G3c | `ai/mission.rs`, `ai/link.rs`, `ai/controller.rs`, `ai_wings.rs`, `datalink/assign.rs` | Share, sort, yield, member state for AI leads; `MissionOutput::link` | Share caps at two under loose control and not under medium; a lead sorts once in 30 s; yield by member number, never a human; AI scenario `ai-datalink-lead-sort`; baseline differences explained |
 | G8 Nets | Sonnet | G3c | `comms.rs`, `comms/journal.rs`, `radio_calls.rs`, `world/commands.rs`, `input_catalog.rs`, `docs/CONTROLS.md`, `docs/tore-keyboard-map.html` | `Net`, `Channel::battle`, Alt+N, battle-net hearers with the colour | Only monitoring seats of the side outside the flight hear it, with the colour; the journal unchanged without them; the controls test; baseline SAME |
 | G9 Replay events | Sonnet | G3a | `tore-replay/src/vocab.rs`, `tore-app/src/replay/recorder*`, the replay exports and panels, `docs/REPLAYS.md` | `datalink.*` events, summary lines, the Comms panel | Recorded events round-trip; the summary counts them; a golden refreshed; baseline differs only by the new events |
 | G7 Wire | Opus | G6, G8, G3c, G9 | `tore-session/src/wire/*`, `wire-golden.txt`, `tore-session/src/client/*` as needed, the capture conversion's event mapping, `tore-app/src/net/play.rs`, `docs/formats/net-protocol.md` | The two readout parts, the `Link` event, `Sort` and `BattleNet`, the net bit, the converted replay's `datalink` events; the next protocol version | Round trips, lossy rebuild, fuzz; the golden; a seated bot's link readout equals the host's at every snapshot; link bytes measured on the 15 against 15 mission; a `net` lane scenario with a bot receiving an assignment; baseline SAME |
-| G10 Acceptance | lead, then John | all | docs | The plan's acceptance: a single-player flight with F/A-18D wingmen shows the cues and voices the assignments; a mixed flight test; John approves the differences | Evidence in the slice reports and a `docs/baselines/datalink-<date>.md` |
+| G10 Acceptance | lead, then John | all | docs | The plan's acceptance: a single-player flight with F/A-18D wingmen shows the cues and voices the assignments; a flight with a radar-less aircraft in it is linked all the same and its player sees no cue on the missing display; John approves the differences | Evidence in the slice reports and a `docs/baselines/datalink-<date>.md` |
 
 ```mermaid
 flowchart TD
-  G0["G0 Tiers and picture"] --> G1["G1 Engagement table"]
+  G0["G0 Radar table and picture"] --> G1["G1 Engagement table"]
   G0 --> G3a["G3a Assignments and calls"]
   G0 --> G6["G6 Cues"]
   G1 --> G2["G2 Humans in the table"]
-  G2 --> G3b["G3b Delivery by tier"]
+  G2 --> G3b["G3b Assignments reach the AI"]
   G3a --> G3b
   G3b --> G3c["G3c Sort order"]
   G3c --> G4["G4 AI leads"]

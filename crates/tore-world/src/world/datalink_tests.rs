@@ -1,5 +1,5 @@
 //! The data link's picture on the crowd fixture (docs/ARCHITECTURE.md, "Flight
-//! data link", slice G0): the members and their tiers, the engagements and
+//! data link", slice G0): the members and their radar flag, the engagements and
 //! locks against the ownships and controllers they come from, the publishing
 //! tick of the tracks, and that two runs agree. Nothing consumes the picture
 //! yet, so the single-player fingerprints do not move.
@@ -14,7 +14,7 @@ use tore_input::{PilotCommand, PilotInput, Switch};
 use tore_sim::{
     ai::weapon_service::{Phase, Rounds},
     combat::live::Command,
-    datalink::{LinkTier, tier},
+    datalink::has_radar,
 };
 
 /// The aircraft each human designates: an AI aircraft of the other side, which
@@ -82,7 +82,7 @@ fn pilot_flies(world: &World, plane: u32) -> bool {
 }
 
 #[test]
-fn every_plane_is_a_member_with_the_tier_of_its_aircraft() {
+fn every_plane_is_a_member_with_the_radar_flag_of_its_aircraft() {
     let mut world = crowded_mission();
     let mut out = TickOutput::default();
     step(&mut world, 0, &mut out);
@@ -91,14 +91,14 @@ fn every_plane_is_a_member_with_the_tier_of_its_aircraft() {
     assert_eq!(planes, [0, 1, 2, 3, 4, 5, 6, 7], "plane id order");
     for member in members {
         let aircraft = member.aircraft.expect("combat holds an aircraft for each");
-        assert_eq!(member.tier, tier(aircraft), "plane {}", member.plane);
+        assert_eq!(member.radar, has_radar(aircraft), "plane {}", member.plane);
         assert_eq!(member.human, pilot_flies(&world, member.plane));
         assert!(member.alive);
     }
-    // The fixture flies the F/A-18D everywhere: the Network tier.
+    // The fixture flies the F/A-18D everywhere, which has a radar.
     assert!(members.iter().all(|m| m.aircraft == Some(AircraftId::F18)));
-    assert!(members.iter().all(|m| m.tier == LinkTier::Network));
-    // Each plane is announced once, with its tier.
+    assert!(members.iter().all(|m| m.radar));
+    // Each plane is announced once, with its radar flag.
     let announced: Vec<Entry> = world
         .datalink
         .take_journal()
@@ -177,7 +177,7 @@ fn a_flight_keeps_its_nearest_tracks_one_per_target() {
                 world
                     .datalink
                     .member(track.reporter)
-                    .is_some_and(|m| { m.flight == picture.flight && m.tier >= LinkTier::Flight })
+                    .is_some_and(|m| m.flight == picture.flight)
             );
             assert!(track.observed <= picture.tick);
         }

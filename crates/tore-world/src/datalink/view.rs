@@ -1,18 +1,19 @@
 //! What one plane receives of the picture: its seat's share, which rides in
 //! the cockpit readout (slice G6) and the wire (slice G7).
 //!
-//! Worked out from the picture on demand and never stored per plane. A plane
-//! of the Voice tier receives only its flight's engagements; a Flight-tier
-//! plane also its linked flightmates' locks, the flight's tracks and the
-//! mates' state; a Network plane also the tracks and locks of the Network
-//! planes of its side's other flights.
+//! Worked out from the picture on demand and never stored per plane. Every
+//! aircraft of a side is linked with every other (John, 2026-10-05), so a
+//! plane receives its flight's engagements, the locks of every other living
+//! plane of its side, the tracks of its flight and of its side's other
+//! flights, and its flightmates' state. Whether the plane has a radar is only
+//! reported, for the displays to read: it never changes what the plane
+//! receives.
 
 use super::{
     DataLink, Engagement, FlightId, Lock, Member, MemberStatus, SEAT_TRACKS, Track, flight_key,
     squared_feet,
 };
 use std::collections::BTreeMap;
-use tore_sim::datalink::{LinkTier, flight_linked, net_linked};
 
 /// Where a track in a plane's view came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,15 +37,17 @@ pub struct ViewTrack {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LinkView {
     pub plane: u32,
-    pub tier: LinkTier,
-    /// What every member of the plane's flight attacks, whatever its tier.
+    /// The plane's aircraft has a radar: its displays show the link's cues
+    /// only if it does.
+    pub radar: bool,
+    /// What every member of the plane's flight attacks.
     pub engagements: Vec<Engagement>,
-    /// The locks of linked members other than the plane itself: the plane
-    /// number holding each, in plane id order.
+    /// The locks of the other living planes of the plane's side: the plane
+    /// holding each, in plane id order.
     pub locks: Vec<(u32, Lock)>,
     /// Up to [`SEAT_TRACKS`] tracks, nearest the plane first.
     pub tracks: Vec<ViewTrack>,
-    /// The state of linked flightmates other than the plane itself.
+    /// The state of the plane's flightmates other than itself.
     pub mates: Vec<MemberStatus>,
 }
 
@@ -52,7 +55,7 @@ impl LinkView {
     fn empty(plane: u32) -> Self {
         Self {
             plane,
-            tier: LinkTier::Voice,
+            radar: false,
             engagements: Vec::new(),
             locks: Vec::new(),
             tracks: Vec::new(),
@@ -62,14 +65,14 @@ impl LinkView {
 }
 
 impl DataLink {
-    /// What `plane` receives of the picture. Empty (a Voice tier) for a plane
-    /// the picture does not know.
+    /// What `plane` receives of the picture. Empty for a plane the picture
+    /// does not know.
     pub fn view(&self, plane: u32) -> LinkView {
         let Some(me) = self.member(plane).copied() else {
             return LinkView::empty(plane);
         };
         let mut view = LinkView::empty(plane);
-        view.tier = me.tier;
+        view.radar = me.radar;
         view.engagements = self
             .members
             .iter()
@@ -81,14 +84,11 @@ impl DataLink {
                 })
             })
             .collect();
-        if me.tier < LinkTier::Flight {
-            return view;
-        }
-        let linked = |other: &Member| self.linked(&me, other);
+        let allied = |other: &Member| other.flight.side == me.flight.side;
         view.locks = self
             .members
             .iter()
-            .filter(|m| m.alive && m.plane != plane && linked(m))
+            .filter(|m| m.alive && m.plane != plane && allied(m))
             .filter_map(|m| self.lock(m.plane).map(|lock| (m.plane, lock)))
             .collect();
         view.mates = self
@@ -100,7 +100,7 @@ impl DataLink {
                     .filter(|status| status.plane != plane)
                     .filter(|status| {
                         self.member(status.plane)
-                            .is_some_and(|m| m.alive && m.flight == me.flight && linked(m))
+                            .is_some_and(|m| m.alive && m.flight == me.flight)
                     })
                     .copied()
                     .collect()
@@ -108,16 +108,6 @@ impl DataLink {
             .unwrap_or_default();
         view.tracks = self.view_tracks(&me);
         view
-    }
-
-    /// Whether `other` shares with `me`: a linked flightmate, or over the
-    /// battle net a Network plane of another flight of the same side.
-    fn linked(&self, me: &Member, other: &Member) -> bool {
-        if other.flight == me.flight {
-            flight_linked(me.tier, other.tier)
-        } else {
-            other.flight.side == me.flight.side && net_linked(me.tier, other.tier)
-        }
     }
 
     fn view_tracks(&self, me: &Member) -> Vec<ViewTrack> {
@@ -135,7 +125,7 @@ impl DataLink {
                 let Some(reporter) = self.member(track.reporter) else {
                     continue;
                 };
-                if !reporter.alive || !self.linked(me, reporter) {
+                if !reporter.alive || reporter.flight.side != me.flight.side {
                     continue;
                 }
                 let source = if track.reporter == me.plane {
@@ -186,10 +176,8 @@ impl DataLink {
 mod tests {
     use super::*;
     use crate::datalink::{Damage, FlightPicture, Fuel, Weapons};
-    use tore_formats::aircraft::AircraftId;
     use tore_sim::{
         ai::launch::{Side, WingId},
-        datalink::tier,
         sensors::Channel,
     };
 
@@ -206,13 +194,13 @@ mod tests {
         index: 0,
     };
 
-    fn member(plane: u32, flight: WingId, aircraft: AircraftId, x: f64) -> Member {
+    fn member(plane: u32, flight: WingId, radar: bool, x: f64) -> Member {
         Member {
             plane,
             flight,
             member: plane as u8,
-            aircraft: Some(aircraft),
-            tier: tier(aircraft),
+            aircraft: None,
+            radar,
             human: false,
             alive: true,
             position: [x, 0., 0.],
@@ -239,17 +227,16 @@ mod tests {
         }
     }
 
-    /// Red: a Hornet (0), a Raptor (1) and a Skyhawk (2). Blue: a Tomcat (3).
-    /// The bandits: a Hornet (4). Planes 0, 1, 3 and 4 hold tracks and locks.
+    /// Red: planes 0, 1 and 2, the last with no radar. Blue: plane 3. The
+    /// bandits: plane 4. Planes 0, 1, 3 and 4 hold tracks and locks.
     fn link() -> DataLink {
-        use AircraftId::*;
         let mut link = DataLink {
             members: vec![
-                member(0, RED, F18, 0.),
-                member(1, RED, F22, 100.),
-                member(2, RED, A4E, 200.),
-                member(3, BLUE, F14, 300.),
-                member(4, BANDIT, F18, 400.),
+                member(0, RED, true, 0.),
+                member(1, RED, true, 100.),
+                member(2, RED, false, 200.),
+                member(3, BLUE, true, 300.),
+                member(4, BANDIT, true, 400.),
             ],
             ..DataLink::default()
         };
@@ -263,7 +250,7 @@ mod tests {
             picture(
                 RED,
                 vec![track(0, 10, 1000., 30), track(1, 11, 2000., 30)],
-                &[0, 1],
+                &[0, 1, 2],
             ),
             picture(BLUE, vec![track(3, 12, 3000., 30)], &[3]),
             picture(BANDIT, vec![track(4, 13, 4000., 30)], &[4]),
@@ -281,10 +268,13 @@ mod tests {
         view.tracks.iter().map(|t| t.track.target).collect()
     }
 
+    fn planes_of(view: &LinkView) -> Vec<u32> {
+        view.locks.iter().map(|(plane, _)| *plane).collect()
+    }
+
     #[test]
-    fn a_voice_plane_receives_only_its_flights_engagements() {
-        let view = link().view(2);
-        assert_eq!(view.tier, LinkTier::Voice);
+    fn a_plane_receives_its_flights_engagements_only() {
+        let view = link().view(1);
         let engaged: Vec<(u32, u32)> = view
             .engagements
             .iter()
@@ -293,41 +283,43 @@ mod tests {
         // Plane 1 is locked on 10 but engaged on nothing; 3 and 4 are other
         // flights.
         assert_eq!(engaged, [(0, 10), (2, 10)]);
-        assert!(view.locks.is_empty() && view.tracks.is_empty() && view.mates.is_empty());
     }
 
     #[test]
-    fn a_flight_plane_shares_inside_its_flight_with_linked_flightmates() {
-        let view = link().view(1);
-        assert_eq!(view.tier, LinkTier::Flight);
-        // The Hornet's lock only: the Skyhawk has the Voice tier, and the
-        // Tomcat's is on the battle net, which a Raptor is not on.
-        assert_eq!(view.locks, []);
-        assert_eq!(targets(&view), [10, 11]);
-        assert_eq!(view.tracks[0].source, TrackSource::Flight);
-        assert_eq!(view.tracks[1].source, TrackSource::Own);
-        assert_eq!(view.mates.iter().map(|m| m.plane).collect::<Vec<_>>(), [0]);
-    }
-
-    #[test]
-    fn a_network_plane_also_shares_with_network_planes_of_its_side() {
+    fn every_plane_of_the_side_is_linked_in_the_flight_and_over_the_net() {
         let view = link().view(0);
-        assert_eq!(view.tier, LinkTier::Network);
-        // The Raptor's lock inside the flight, the Tomcat's over the net; the
-        // bandit's is another side.
-        assert_eq!(
-            view.locks
-                .iter()
-                .map(|(plane, _)| *plane)
-                .collect::<Vec<_>>(),
-            [1, 3]
-        );
+        assert!(view.radar);
+        // The flightmate's lock and the other flight's, not the bandit's.
+        assert_eq!(planes_of(&view), [1, 3]);
         assert_eq!(targets(&view), [10, 11, 12]);
         assert_eq!(view.tracks[0].source, TrackSource::Own);
+        assert_eq!(view.tracks[1].source, TrackSource::Flight);
         assert_eq!(view.tracks[2].source, TrackSource::Network);
         assert!(!targets(&view).contains(&13), "an enemy's track");
-        // Flightmates' state only: the Skyhawk reports none.
-        assert_eq!(view.mates.iter().map(|m| m.plane).collect::<Vec<_>>(), [1]);
+        // Flightmates' state only, the radar-less one included.
+        assert_eq!(
+            view.mates.iter().map(|m| m.plane).collect::<Vec<_>>(),
+            [1, 2]
+        );
+    }
+
+    #[test]
+    fn a_plane_with_no_radar_is_linked_all_the_same() {
+        let link = link();
+        let view = link.view(2);
+        assert!(!view.radar, "the flag is reported for the displays");
+        assert_eq!(planes_of(&view), [1, 3]);
+        assert_eq!(targets(&view), [10, 11, 12]);
+        assert_eq!(view.mates.len(), 2);
+        // Its flightmates receive its state like any other plane's.
+        assert!(link.view(1).mates.iter().any(|m| m.plane == 2));
+    }
+
+    #[test]
+    fn the_other_side_shares_nothing_with_this_one() {
+        let view = link().view(4);
+        assert_eq!(targets(&view), [13]);
+        assert!(view.locks.is_empty() && view.mates.is_empty());
     }
 
     #[test]
@@ -343,13 +335,13 @@ mod tests {
         let view = link.view(0);
         assert!(view.locks.iter().all(|(plane, _)| *plane != 1));
         assert!(!targets(&view).contains(&11));
-        assert!(view.mates.is_empty());
+        assert!(view.mates.iter().all(|m| m.plane != 1));
     }
 
     #[test]
     fn the_freshest_report_of_a_target_wins() {
         let mut link = link();
-        // The Raptor saw target 10 later than the Hornet did.
+        // The second member saw target 10 later than the first did.
         link.pictures[0].tracks.push(track(1, 10, 1500., 31));
         let view = link.view(0);
         let ten = view.tracks.iter().find(|t| t.track.target == 10).unwrap();

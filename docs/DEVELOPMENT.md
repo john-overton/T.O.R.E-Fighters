@@ -1253,7 +1253,7 @@ For ground operations, combine it with `--ground-start AIRPORT`,
 to omit the other wings. Those two wing options also apply to
 `--launch-quick-mission` for matching creator captures. Schedule an order with
 `--probe-wing-order TICK:land-selected`, `TICK:bug-out`, `TICK:attack-on-contact`
-or `TICK:engage-my-target`, each with an optional `@MEMBER` (1 to 4, the first wingman is 1) to order one wingman; `--probe-player-lock TICK:ID` has the scripted leader designate aircraft `ID` at that tick, so the sensors lock it when they can; `--probe-data-link` and `--probe-player-lock` print a `t=T data link:` line for each plane's tier and each lock taken or dropped in the flight data link's picture; `--probe-trace SECONDS`
+or `TICK:engage-my-target`, each with an optional `@MEMBER` (1 to 4, the first wingman is 1) to order one wingman; `--probe-player-lock TICK:ID` has the scripted leader designate aircraft `ID` at that tick, so the sensors lock it when they can; `--probe-data-link` and `--probe-player-lock` print a `t=T data link:` line for each plane's radar flag and each lock taken or dropped in the flight data link's picture; `--probe-trace SECONDS`
 prints each wingman's airfield phase and position. `--probe-player-home FROM:UNTIL`
 flies the scripted leader gear down toward the field during that tick range.
 `--probe-lose-player TICK` crashes the scripted leader's aircraft at that tick, so that a probe can test the wing's new lead (test harness only).

@@ -218,12 +218,12 @@ class LandOrderTests(unittest.TestCase):
 
 
 class DataLinkPictureTests(unittest.TestCase):
-    MEMBERS = "".join(f"t=1 data link: member plane={n} tier=network\n" for n in range(3))
+    MEMBERS = "".join(f"t=1 data link: member plane={n} radar=true\n" for n in range(3))
     LOCKED = "t=660 data link: lock plane=0 target=2\n"
 
     def check(self, text, **kw):
         planes = kw.pop("planes", 3)
-        return ai.datalink_picture_check(planes=planes, designated=2, player_tier="network")(CLEAN + text)
+        return ai.datalink_picture_check(planes=planes, designated=2)(CLEAN + text)
 
     def test_a_full_picture_passes(self):
         text = self.MEMBERS + self.LOCKED + "t=900 data link: unlock plane=0 target=2\n"
@@ -234,9 +234,9 @@ class DataLinkPictureTests(unittest.TestCase):
         self.assertTrue(any("twice" in p for p in problems), problems)
         self.assertTrue(any("announced" in p for p in problems), problems)
 
-    def test_the_players_tier_is_checked(self):
-        problems = self.check(self.MEMBERS.replace("plane=0 tier=network", "plane=0 tier=voice") + self.LOCKED)
-        self.assertTrue(any("tier" in p for p in problems), problems)
+    def test_every_plane_reports_a_radar(self):
+        problems = self.check(self.MEMBERS.replace("plane=0 radar=true", "plane=0 radar=false") + self.LOCKED)
+        self.assertTrue(any("no radar" in p for p in problems), problems)
 
     def test_the_designation_must_become_a_lock(self):
         problems = self.check(self.MEMBERS)

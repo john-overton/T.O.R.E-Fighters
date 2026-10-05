@@ -317,14 +317,14 @@ the same in single player, which keeps AI wingmen honest.
 | HUD | The assigned target's box uses a distinct shape, or pulses until you lock it |
 | Sort warning | A short alert when two flight members lock the same bandit |
 
-**Era gating.** Data link capability is a per-aircraft component. Modern jets get
-the full link with shared tracks and cues. Older aircraft get assignments by
-voice only, with bearing and range, and the pilot finds the target on their own
-radar or by eye. A mixed flight shares what the least capable member can
-receive, per member. *Designed (stage G, 2026-10-05):* the
-[data link guide](DATALINK.md#which-aircraft-can-share-it) proposes three
-tiers (Voice, Flight, Network) and a row for each of the twelve ported
-aircraft, awaiting John's approval.
+**Who has it.** *John, 2026-09-28:* the link was gated by era, so that older
+aircraft got assignments by voice only and a mixed flight shared what its least
+capable member could receive. *John, 2026-10-05:* "All friendlies get data link
+regardless of aircraft type (unless radar isn't on the plane which then player
+doesn't see)." Every aircraft of a side is linked, in its flight and over the
+battle net; the aircraft type holds only a has-a-radar flag, and a player whose
+aircraft has no radar sees no link cues on the displays it does not have. The
+[data link guide](DATALINK.md#who-shares-it) has the detail.
 
 **Rates.** The shared track picture updates at 4 Hz. Locks and assignments are
 sent immediately.
@@ -335,13 +335,13 @@ Bearing and range are measured from the receiving aircraft. The order is heard
 even with a data link, lands in the replay's comms record, and behaves the same
 for human and AI wingmen. All data link events are recorded in the replay.
 
-*Designed (stage G, 2026-10-05); slice G0, the tiers and the picture, is built and nothing reads it yet:* the [data link guide](DATALINK.md)
-says what the player sees and hears, which aircraft share what, how the AI
+*Designed (stage G, 2026-10-05); slice G0, the radar flag and the picture, is built and nothing reads it yet:* the [data link guide](DATALINK.md)
+says what the player sees and hears, who shares what, how the AI
 uses the picture, the wing and battle nets, and what changes in single player;
 the code design and its slices are in the
 [architecture guide](ARCHITECTURE.md#flight-data-link) and the bytes in the
 [wire protocol](formats/net-protocol.md#data-link-stage-g). Its choices are agent
-proposals awaiting John's review: the tier table, the call's words ("Two,
+proposals awaiting John's review: the call's words ("Two,
 attack bandit, bearing 270, 15 miles, angels 20": there is no "engage"
 recording), the sort order (Alt+A), the battle net and its monitor key
 (Alt+N, off by default), and each single-player change.

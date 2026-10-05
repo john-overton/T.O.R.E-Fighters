@@ -280,8 +280,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/src/cheats.rs", ("flight-damage", "flight-maneuvers"), "cheats"),
     # tore-sim: AI.
     _r("crates/tore-sim/src/ai/*", AI_CORE + ("radio",), "AI"),
-    # tore-sim: the flight data link's tiers.
-    _r("crates/tore-sim/src/datalink.rs", ("ai-datalink", "ai-orders", "ai-fights"), "data link tiers"),
+    # tore-sim: the flight data link's radar table.
+    _r("crates/tore-sim/src/datalink.rs", ("ai-datalink", "ai-orders", "ai-fights"), "data link radar table"),
     # tore-sim: combat, systems, sensors.
     _r("crates/tore-sim/src/combat.rs", ("flight-combat", "flight-damage", "ai-fights", "ai-damage"), "combat"),
     _r("crates/tore-sim/src/combat/*", ("flight-combat", "flight-damage", "ai-fights", "ai-damage"), "combat"),

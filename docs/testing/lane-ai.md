@@ -49,7 +49,7 @@ minutes cost about 4 minutes.
 | Guns | `ai-guns-*` | guns-only player and AI |
 | Faults and threats | `ai-fault-00..44`, `ai-threat-*` | every system fault index, hit, gun and AAA threats, 64 hits in a row |
 | Wing orders | `ai-order-*` | bug out, land at selected airport, attack on contact, engage my target, wings of 2 and 5 |
-| Data link | `ai-datalink-*` | the flight data link's picture (stage G): `ai-datalink-picture` prints every plane's tier once, the player's designation becoming a lock, AI locks and unlocks in pairs, and a wing order to one wingman (`@1`) |
+| Data link | `ai-datalink-*` | the flight data link's picture (stage G): `ai-datalink-picture` prints every plane's radar flag once, the player's designation becoming a lock, AI locks and unlocks in pairs, and a wing order to one wingman (`@1`) |
 | Ground starts | `ai-ground-*` | takeoff with wings of 1 to 5, landing and bug-out orders, a fight after takeoff, an idle wing |
 | Long runs | `ai-long-*` | 30 simulated minutes (216,000 ticks) of 1 v 1, 5 v 5, 15 v 15, hold, guns and a ground landing |
 | Recordings | `ai-record-*` | `--record-mission --verify-render` must say PASS |
