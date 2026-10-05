@@ -19,7 +19,10 @@
 //! touches a socket. A host's side of listing (slice I3) is the
 //! [`Rendezvous`] state machine ([`rendezvous`]), the router that takes the
 //! master's datagrams out of the game port's stream ([`routed`]), and the
-//! host's own addresses and the master's lookup ([`local`]).
+//! host's own addresses and the master's lookup ([`local`]). A host's answer
+//! to an introduction is [`meet`] (slice J2), and a joining player's side,
+//! the mapping test, the introduction and the router of its socket, is
+//! [`join`].
 //!
 //! ```
 //! use tore_net::master::{Challenge, MasterPacket};
@@ -77,8 +80,9 @@ macro_rules! codes {
 
 pub mod browse;
 pub mod candidate;
+pub mod join;
 pub mod local;
-mod meet;
+pub mod meet;
 pub mod packet;
 mod relay;
 pub mod rendezvous;

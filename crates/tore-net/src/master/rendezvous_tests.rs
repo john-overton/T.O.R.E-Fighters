@@ -863,3 +863,83 @@ fn a_host_listing_looks_up_its_master_and_finds_its_own_address() {
     assert!(sent.contains(&(address("127.0.0.1:26911"), Some(MasterKind::Register))));
     assert!(sent.contains(&(address("127.0.0.1:26912"), Some(MasterKind::Probe))));
 }
+
+/// Slice J2: a listed host answers a Meet with five punches to each of the
+/// player's addresses, 200 ms apart, from its game port, and a Meet ack with
+/// its token; an unlisted host does nothing.
+#[test]
+fn a_meet_is_punched_and_acknowledged_only_while_listed() {
+    use crate::master::packet::Meet;
+    use crate::packet::Packet;
+    let mut rig = Rig::new(HOST);
+    let player_seen = address("192.0.2.9:40000");
+    let mut player = rig.net.bind(player_seen).unwrap();
+    let meet = |id| {
+        MasterPacket::Meet(Meet {
+            introduction_id: id,
+            mapping: MappingType::SamePort,
+            candidates: vec![
+                Candidate::new(CandidateKind::Seen, player_seen),
+                Candidate::new(CandidateKind::Local, address("10.0.0.9:40000")),
+            ],
+        })
+        .encode()
+        .unwrap()
+    };
+    // Not listed: no token for the ack, nothing punched.
+    let now = rig.net.now();
+    rig.rendezvous
+        .set_masters(vec![address(MASTER)], Vec::new(), now);
+    rig.net.inject(address(MASTER), address(HOST), &meet(1));
+    rig.run(1.0);
+    assert_eq!(rig.rendezvous.counters.meets_dropped, 1);
+    rig.list(HOST);
+    assert!(
+        rig.run_until(5.0, |r| matches!(
+            r.rendezvous.state(),
+            ListingState::Listed { .. }
+        ))
+        .is_some()
+    );
+    let mut buf = [0u8; 2048];
+    while player.recv_datagram(&mut buf).unwrap().is_some() {}
+    let start = rig.net.now();
+    rig.net.inject(address(MASTER), address(HOST), &meet(77));
+    let mut punches = Vec::new();
+    for _ in 0..200 {
+        rig.step(Duration::from_millis(10));
+        while let Some((length, from)) = player.recv_datagram(&mut buf).unwrap() {
+            assert_eq!(from, address(HOST));
+            let Ok(Packet::Punch(punch)) = Packet::decode(&buf[..length], 7) else {
+                panic!("not a punch of the game's version")
+            };
+            assert_eq!((punch.introduction, length), (77, 13));
+            punches.push(rig.net.now() - start);
+        }
+    }
+    // Five, 200 ms apart (sent on 10 ms steps, 20 ms on the way).
+    assert_eq!(punches.len(), 5, "{punches:?}");
+    for pair in punches.windows(2) {
+        assert_eq!(pair[1] - pair[0], Duration::from_millis(200));
+    }
+    let acks: Vec<_> = rig
+        .master
+        .log
+        .iter()
+        .filter_map(|(_, from, p)| match p {
+            MasterPacket::MeetAck(ack) => Some((*from, *ack)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(acks.len(), 1);
+    assert_eq!(acks[0].0, address(HOST));
+    assert_eq!(acks[0].1.introduction_id, 77);
+    assert_eq!(rig.rendezvous.counters.meets, 1);
+    assert_eq!(rig.rendezvous.counters.punches, 10);
+    // The same Meet again is acknowledged, never punched again.
+    rig.net.inject(address(MASTER), address(HOST), &meet(77));
+    rig.run(1.0);
+    assert_eq!(rig.rendezvous.counters.meets_again, 1);
+    assert_eq!(rig.rendezvous.counters.punches, 10);
+    assert_eq!(rig.master.count(MasterKind::MeetAck), 2);
+}

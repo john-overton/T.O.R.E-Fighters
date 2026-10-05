@@ -32,6 +32,9 @@
 //! 5. Unlisting, or stopping, sends Unregister three times at once (*agent
 //!    decision:* at once, since the socket may close right after).
 //!
+//! 6. A Meet (slice J2) is answered with punches to the player's addresses
+//!    from the game port and a Meet ack ([`meet`](super::meet)).
+//!
 //! The summary is the host's discovery answer without its nonce. The host's
 //! loop offers it through [`Rendezvous::wants_summary`] and
 //! [`Rendezvous::set_summary`], which the rendezvous asks for at most once a
@@ -46,16 +49,18 @@ use super::candidate::{Candidate, MappingType, canonical};
 use super::local::{
     MasterLookup, host_candidates, own_address_toward, parse_master, probe_address,
 };
+use super::meet::{MeetOutcome, Meets};
 use super::packet::{
-    Build, Heartbeat, Keep, ListingSummary, MasterPacket, Path, PortMapping, Probe, ProbePort,
-    Register, Report, Role, Unregister,
+    Build, Heartbeat, Keep, ListingSummary, MasterPacket, MeetAck, Path, PortMapping, Probe,
+    ProbePort, Register, Report, Role, Unregister,
 };
 use super::routed::{Routed, is_relayed};
 use super::{
     CHANGE_HEARTBEAT_DELAY, GOODBYE_COPIES, HEARTBEAT_INTERVAL, KEEP_INTERVAL,
-    MAPPING_TEST_INTERVAL, MASTER_SILENT, meet, relay,
+    MAPPING_TEST_INTERVAL, MASTER_SILENT, relay,
 };
 use crate::entropy::{Entropy, Rng};
+use crate::packet::{Packet, Punch};
 use crate::{Datagrams, LINK_ADDRESS, Transmit};
 
 /// An unanswered Register or Heartbeat is sent again this often while the
@@ -154,8 +159,16 @@ pub struct RendezvousCounters {
     /// Good packets this side does not take, or not now (an old nonce, a
     /// token not ours).
     pub unexpected: u64,
-    /// Meets and relay packets dropped until stage J (slices J2 and J3).
+    /// Relay packets dropped until slice J3.
     pub not_yet: u64,
+    /// Meets acted on: punched and acknowledged (slice J2).
+    pub meets: u64,
+    /// Meets repeated for an introduction already met: acknowledged again.
+    pub meets_again: u64,
+    /// Meets dropped: over 10 a second, or while the game is not listed.
+    pub meets_dropped: u64,
+    /// Punches sent.
+    pub punches: u64,
     /// Datagrams from a real socket claiming a relayed address, dropped.
     pub relayed_claims: u64,
     /// Sends by the transport to a relayed address, dropped (no channel
@@ -234,6 +247,7 @@ pub struct Rendezvous {
     backoff: Duration,
     refused: Option<String>,
     mapping: Mapping,
+    meets: Meets,
     out: VecDeque<Transmit>,
     events: VecDeque<RendezvousEvent>,
     /// What the rendezvous counted.
@@ -270,6 +284,7 @@ impl Rendezvous {
             backoff: FIRST_BACKOFF,
             refused: None,
             mapping: Mapping::new(MappingType::Unknown, now),
+            meets: Meets::default(),
             out: VecDeque::new(),
             events: VecDeque::new(),
             counters: RendezvousCounters::default(),
@@ -549,7 +564,7 @@ impl Rendezvous {
             }
             MasterPacket::Meet(meet) => {
                 self.heard(now, false);
-                meet::dispatch(&meet, &mut self.counters.not_yet);
+                self.meet(now, from, &meet);
             }
             packet @ (MasterPacket::RelayOpen(_)
             | MasterPacket::Relay(_)
@@ -561,9 +576,47 @@ impl Rendezvous {
         }
     }
 
+    /// A Meet: punches for the player's addresses and an ack to the master,
+    /// as [`Meets`] decides. Only a listed game has the token an ack needs.
+    fn meet(&mut self, now: Duration, from: SocketAddr, meet: &super::packet::Meet) {
+        let Some(listing) = self.listing.filter(|_| self.wanted) else {
+            self.counters.meets_dropped += 1;
+            return;
+        };
+        match self.meets.receive(now, meet) {
+            MeetOutcome::Punching => self.counters.meets += 1,
+            MeetOutcome::Again => self.counters.meets_again += 1,
+            MeetOutcome::OverLimit => {
+                self.counters.meets_dropped += 1;
+                return;
+            }
+        }
+        self.send_punches(now);
+        let ack = MasterPacket::MeetAck(MeetAck {
+            token: listing.token,
+            introduction_id: meet.introduction_id,
+        });
+        self.send(from, &ack);
+    }
+
+    /// The punches due: transport packets of the game's protocol version,
+    /// sent beside the master's datagrams on the game port.
+    fn send_punches(&mut self, now: Duration) {
+        let version = self.config.build.protocol_version;
+        for (to, introduction) in self.meets.due(now) {
+            if let Ok(datagram) = Packet::Punch(Punch { introduction }).encode(version) {
+                self.counters.punches += 1;
+                self.out.push_back(Transmit { to, datagram });
+            }
+        }
+    }
+
     /// Runs the timers: requests and their retries, heartbeats, keeps, the
-    /// mapping test, silence.
+    /// mapping test, silence, and a Meet's punches.
     pub fn update(&mut self, now: Duration) {
+        if self.meets.punching() {
+            self.send_punches(now);
+        }
         if !self.wanted || self.refused.is_some() || self.masters.is_empty() {
             return;
         }
