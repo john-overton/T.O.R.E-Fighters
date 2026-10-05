@@ -182,6 +182,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-server-fight", "net-server-chat", "net-server-kick"),
     ),
     "net-discovery": ("finding games on the local network", ("net-discovery",)),
+    "net-master": ("the master server on this machine: its limits under the flood tool", ("net-master-*",)),
     "net-window": (
         "the game itself over the network: a joined game that stalls, a hosted game",
         ("net-window-*",),
@@ -371,10 +372,12 @@ RULES: tuple[Rule, ...] = (
     # Stage D crates. Until networked scenarios exist, only the import reaches a battery scenario.
     _r("crates/tore-import/*", ("menus-validate", "replay-settings"), "importer and data folder"),
     _r("crates/tore-codec/*", NET_FAMILIES, "network encoding"),
+    _r("crates/tore-net/src/master/*", ("net-master",), "the master server's wire and the browse client"),
     _r("crates/tore-net/*", NET_FAMILIES + ("net-discovery",), "network transport"),
     _r("crates/tore-session/src/settings.rs", NET_FAMILIES + ("net-discovery",), "the King's settings registry"),
     _r("crates/tore-session/*", NET_FAMILIES + ("net-discovery",), "network sessions, the host and tore-bot"),
     _r("crates/tore-server/*", ("net-check", "net-fly", "net-discovery"), "dedicated server"),
+    _r("crates/tore-master/*", ("net-master",), "the master server, its configuration and its flood tool"),
     _r("crates/tore-realtime-native/*", ALL_FAMILIES, "host and shared-worker scheduling on macOS", windowed=True),
     # tore-app: rendering (windowed).
     _r("crates/tore-app/src/*.wgsl", RENDER_FAMILIES, "shaders", windowed=True),

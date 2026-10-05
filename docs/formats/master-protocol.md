@@ -12,8 +12,10 @@ Design of 2026-10-05 for stages I and J of the
 [multiplayer plan](../multiplayer-plan.md#stages). *Built (I1, 2026-10-05):*
 the wire itself, every packet's encoder and bounded decoder, in `tore-net`'s
 `master` module; what the build settled is in
-[the wire as built](#the-wire-as-built). The master, the game's side and the
-screens are not built yet. The
+[the wire as built](#the-wire-as-built). *Built (I2, 2026-10-05):* the
+master itself, `tore-master`, apart from introductions and the relay
+(slices J2 and J3), and the Internet Lobby's browse client. The game's side
+and the screens are not built yet. The
 [architecture guide](../ARCHITECTURE.md#master-server-and-connectivity)
 has the design and the slices that build it, and the
 [operations guide](../MASTER-SERVER.md) says how the master is run. Every
@@ -364,7 +366,11 @@ game finds out by sending a **Probe** to both master ports from its game
 port. The master answers each from the port it arrived at with the address
 it saw.
 
-**Probe** (kind 14), padded to 64 bytes: nonce (64).
+**Probe** (kind 14), padded to 64 bytes: nonce (64). A game sends the same
+nonce to both ports, the second Probe to the main port + 1: the master
+pairs the two by nonce and IP address to learn a host's mapping type, which
+Register does not carry (agent decision, I2; the Page's relay mark needs
+it).
 
 **Probe answer** (kind 15): nonce (64), which port (8: 0 the main port, 1 the
 second), the address seen. At most 43 bytes.

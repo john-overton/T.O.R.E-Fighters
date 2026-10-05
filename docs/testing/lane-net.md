@@ -10,8 +10,8 @@
 
 The net lane plays multiplayer the way a player or an operator does, on one
 machine, over real UDP on 127.0.0.1: a dedicated server with bots, the console,
-the local-network search, a joined game that freezes for a few seconds, and a
-game that hosts. It uses the same imported data as every other lane, so it needs
+the local-network search, a joined game that freezes for a few seconds, a
+game that hosts, and the master server under its flood tool. It uses the same imported data as every other lane, so it needs
 the game imported and the server and bot programs built. Its scenarios live in
 `tools/battery_scenarios/net.py`.
 
@@ -26,7 +26,7 @@ loopback test) are listed in
 ## Running it
 
 ```sh
-cargo build --locked -p tore-app -p tore-server -p tore-session   # tore-session builds tore-bot
+cargo build --locked -p tore-app -p tore-server -p tore-session -p tore-master   # tore-session builds tore-bot
 TORE_DATA_DIR=.local/bugbash-data target/debug/tore-app --import gameassets/fighters-anthology --import-only
 python3 tools/battery.py --lane net --jobs 7 --windows 1 --tag net
 python3 tools/battery.py --scenario 'net-server-*'              # headless only
@@ -36,7 +36,9 @@ python3 tools/battery.py --scenario net-window-stall --windows 1
 The runner finds `tore-server` and `tore-bot` beside the game binary given by
 `--bin` (by default `target/debug/`). `--server-bin PATH` and `--bot-bin PATH`
 name them when they are elsewhere, for example in a release build. A missing
-program is named before anything runs.
+program is named before anything runs. The `net-master-*` scenarios take
+`tore-master` from beside the game binary and fail with the build command
+when it is missing.
 
 The whole lane takes **79 seconds** of wall clock on the dev machine (Ryzen 9
 7900X, debug build, 7 jobs, 1 window; 2026-10-05). The longest scenario is the
@@ -57,6 +59,7 @@ game's own network code (see "Choosing scenarios by change").
 | `net-server-kick` | 6 | Three bots fly; the driver types the console's `players`, `status`, `kick SEAT`, `kick-player ID REASON` and `end` | The players table shows each bot in its plane. The seat kick reads "kicked by the server" at the bot and "left: kicked" in the log; the id kick reads "The server removed you from the game: REASON"; `end` gives the player still flying a debrief and "Mission ended by the host", and the server stops |
 | `net-discovery` | 5 | `tore-app --find-games` against a running server, then on a free port | The server's line (this build, name, mission, `0/6 players`, `lobby`, `king -`, `open`, `not full`) is printed on its port. A port with nothing prints `No games found.` and exits 0. The console's `quit` stops the server with exit 0 |
 | `net-window-stall` | 17 | A game joins the server and its script blocks the whole main loop for 4 seconds in flight | The server logs "game stalled, flying neutral" and "game back after 4.0 s" (the keepalive held the seat), then a clean leave. The game wrote `logs/net-DATE.tsv` (header, join, mission, seating and once-a-second figures with the right columns) and a capture in `replays/` |
+| `net-master-flood` | 11 | A `tore-master` on 127.0.0.1 (its probe port the main port + 1, status every 2 seconds), then `tore-master flood` at it for 10 seconds; the console's `status`, `listings` and `quit` | The flood exits 0 with "limits held": no port answered with more bytes than it sent, and every browse from 127.0.0.2 during the flood answered (at least 8). The master printed both ports, a `limit source=127.0.0.1` line, a status line with `dropped(limit)` above 0, `listings=0` (the flood made no listing) and `Stopped`; its `state/telemetry/DATE.tsv` counted none of the flood's reports |
 | `net-window-host` | 41 | `tore-app --host` flies the example mission; the driver waits for it to listen, searches, joins a bot, and the host's script leaves after 20 seconds of flight | The search finds the hosted game by name with its King. The bot joins, is seated, flies, hears "Mission ended: the host left the game.", gets its debrief and exits 0. The host exits 0 and wrote the same net log and a `HOSTED` capture |
 
 All of the lane's output is checked for the same general problems as every other
@@ -95,7 +98,7 @@ unit tests in `tools/test_battery_net.py`; the runner's driver support is tested
 
 ## Choosing scenarios by change
 
-`python3 tools/battery.py --changed` maps the network crates to four families (the
+`python3 tools/battery.py --changed` maps the network crates to five families (the
 map is in `tools/battery_selection.py`):
 
 | Family | Scenarios | Chosen when these change |
@@ -104,6 +107,7 @@ map is in `tools/battery_selection.py`):
 | `net-fly` | `net-server-fight`, `-chat`, `-kick` | `tore-codec`, `tore-net`, `tore-session`, `tore-server` |
 | `net-discovery` | `net-discovery` | `tore-net`, `tore-session`, `tore-server`, the app's `net/search.rs` |
 | `net-window` | both `net-window-*` | `tore-codec`, `tore-net`, `tore-session`, and in the app `net/`, `direct_screen/`, `lobby_screen/` and `widgets/` |
+| `net-master` | `net-master-*` | `tore-master`, and `tore-net`'s `master/` module |
 
 A change under the app's `net/` or its screens counts as touching windowed code, so
 the quick check opens a window for it. A change to a crate only (`tore-session`, say)

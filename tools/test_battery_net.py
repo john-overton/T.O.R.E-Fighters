@@ -147,7 +147,7 @@ class ScenarioListTests(unittest.TestCase):
         for s in scenarios:
             self.assertEqual(s.lane, "net", s.name)
             self.assertTrue(callable(s.driver), s.name)
-            self.assertTrue(s.name.startswith(("net-server-", "net-discovery", "net-window-")), s.name)
+            self.assertTrue(s.name.startswith(("net-server-", "net-discovery", "net-window-", "net-master-")), s.name)
             self.assertTrue(set(s.uses) <= {"server", "bot"}, s.name)
             self.assertEqual(s.window, s.name.startswith("net-window-"), f"{s.name}: only the window scenarios open one")
 

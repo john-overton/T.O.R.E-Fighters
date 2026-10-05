@@ -2047,6 +2047,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tore-master"
+version = "0.1.3"
+dependencies = [
+ "tore-net",
+]
+
+[[package]]
 name = "tore-net"
 version = "0.1.3"
 dependencies = [

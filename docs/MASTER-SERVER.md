@@ -10,10 +10,14 @@
 
 How to build, configure, run and update `tore-master`, the program behind
 the game's Internet Lobby. Design of 2026-10-05 for stages I and J of the
-[multiplayer plan](multiplayer-plan.md#stages); **not built yet**, so the
-commands below are what the slices will build. Every setting, default and
-number is an *agent proposal* awaiting John's review unless it is credited
-to him. How it works inside: [architecture](ARCHITECTURE.md#master-server-and-connectivity).
+[multiplayer plan](multiplayer-plan.md#stages). *Built (I2, 2026-10-05):* the
+program, its configuration, listings, browsing, the router test's probes,
+telemetry counts, the limits, the status line and files, and the `flood`
+tool. Introductions and the relay come with slices J2 and J3: until then the
+master reads their packets and drops them, counted. Every setting, default
+and number is an *agent proposal* unless it is credited to John; John
+approved the abuse limits, the ports, the relay cap and where it runs on
+2026-10-05 ([decisions](MULTIPLAYER.md#decisions)). How it works inside: [architecture](ARCHITECTURE.md#master-server-and-connectivity).
 What it says on the wire: [master protocol](formats/master-protocol.md).
 
 ## Contents
@@ -65,7 +69,11 @@ import, and nothing derived from retail media ever reaches it.
   Linode shared 2 GB plan with 1 TB of transfer a month.
 - Very little else. One thread; well under one core even while relaying the
   plan's 64 channels at their full rate (at most about 8 MB/s in and out); a
-  few tens of megabytes of memory with every table full.
+  few tens of megabytes of memory with every table full. Idle, its loop
+  sleeps a millisecond between turns: a debug build took 0.7 percent of one
+  core of the development machine (Ryzen 9 7900X) over 10 idle seconds, and
+  answered a 10-second flood of 2,000 datagrams a second with every limit
+  holding (I2, 2026-10-05).
 - A name in DNS that the game is built to ask for
   ([the name](#the-name)).
 
@@ -94,40 +102,81 @@ runner as the game, which runs on any current long-term Ubuntu.
 tore-master --config /etc/tore-master/master.conf
 tore-master --config master.conf --check-config
 tore-master flood 203.0.113.10:26901 10
+tore-master --version
 ```
 
 | Option | Meaning |
 | --- | --- |
 | `--config FILE` | The configuration file. Without one, every setting has its default |
 | `--check-config` | Reads the configuration, says what it would do, and exits: 0 when it is good, 1 with the line and the reason when not |
-| `flood TARGET SECONDS` | A load tool: sends every kind of request at a master from many ports of this machine for that long, then prints what came back. The master's limits should hold: no source answered with more bytes than it sent, and a normal request still answered during the flood. Only point it at a master you run |
-| `--version` | The build |
+| `flood TARGET SECONDS` | A load tool: sends every kind of request at a master from many ports of this machine for that long, then prints what came back ([the flood tool](#the-flood-tool)). Only point it at a master you run |
+| `--version` | The build: version and commit |
 
-It runs in the foreground, writes its lines to standard output, and stops
-cleanly on Ctrl+C or SIGTERM: it tells every relayed pair that the relay is
-closing and saves the month's relay figure.
+It runs in the foreground and writes its lines to standard output. Typed on
+its standard input, `status` prints the status line now, `listings` prints
+one line per listing and the count, and `quit` stops it cleanly: it writes
+the day's telemetry counts and prints `Stopped`. Ctrl+C and SIGTERM (what
+`systemctl stop` sends) end it at once (agent decision: the standard library
+cannot catch a signal without unsafe code, which the project forbids). That
+loses little: the counts and the minute table are written every minute, and
+the listings are rebuilt within one heartbeat of a restart. From slice J3 a
+stop also ends the relayed pairs, which time out and rejoin as after any
+lost connection.
+
+### The flood tool
+
+`tore-master flood TARGET SECONDS [--rate N] [--ports N]` sends, from 32
+ports of this machine and 2,000 datagrams a second in all (the two
+options), Registers with no cookie and with a wrong one, Heartbeats, Keeps
+and Unregisters with made-up tokens, Browse, Details, Probes to both ports
+(the second at TARGET's port + 1), Introduce, Relay request, Relay frames,
+Relay close, Reports, random bytes and a Browse in a version no master
+speaks. It never answers a Challenge, so it makes no listing, and its
+Reports carry the game version `flood`, which the master does not count.
+
+At the same time it asks for the list once a second from another address
+of the machine, when there is one: against a master on 127.0.0.1 it asks
+from 127.0.0.2, which Linux answers for, so the master sees a second
+source. Against a master elsewhere every port of this machine is the same
+source, so that check is skipped and said so. It prints a progress line a
+second, then:
+
+```text
+flood 127.0.0.1:26911 for 10 s from 32 ports at 2000 datagrams a second
+sent 19999 datagrams (11168383 bytes): browse 1250, details 1250, ...
+answered 293 (16102 bytes): challenge 11, listingdetails 30, page 21, probeanswer 43, unknownlisting 66, unsupported 122
+ports answered with more bytes than they sent: 0 (the largest share of its own bytes one port got back: 0.002)
+a browse from another address during the flood: answered 10 of 10
+limits held
+```
+
+It exits 0 when the limits held (no port got more bytes back than it sent,
+and the other address's browse, if it ran, was answered at least half the
+time), 1 when not. The master's own status lines during the flood show
+`dropped(limit)` rising and one `limit` line for the source.
 
 ## The configuration file
 
 One setting per line, a name and a value; `#` starts a comment. An unknown
 name, a value out of range, or a name given twice is refused with its line,
 as the dedicated server's file is ([its rules](DEDICATED-SERVER.md#the-configuration-file)).
+Numbers may be written with thousands commas (`100,000`).
 
 | Setting | Values | Default | Meaning |
 | --- | --- | --- | --- |
 | `listen` | `any` or one address | `any` | Where both ports listen; `any` is every IPv4 and IPv6 address |
 | `port` | 1 to 65535 | 26901 | The main UDP port: listings, browsing, introductions, the relay, reports |
-| `probe-port` | 1 to 65535, or 0 | 26902 | The second port of the router test; 0 turns the test off (games then never get the relay at once, only after the race) |
+| `probe-port` | 1 to 65535, or 0 | 26902 | The second port of the router test; 0 turns the test off (games then never get the relay at once, only after the race). Games send the test's second probe to the main port + 1, so keep it there (agent decision, slices I2 and I3) |
 | `state-dir` | a folder | the configuration file's folder | Where the statistics, telemetry counts and the relay's monthly figure are written |
 | `max-listings` | 1 to 100,000 | 2,000 | Listings at once |
 | `listings-per-source` | 1 to 1,000 | 8 | Listings from one IPv4 address or IPv6 /64 network |
 | `heartbeat` | 10 to 120 seconds | 30 | The interval the master tells hosts |
 | `keep` | 5 to 60 seconds | 15 | How often hosts keep their router's mapping open |
-| `expiry` | 30 to 600 seconds, at least twice `heartbeat` | 90 | A listing not heard from for this long is dropped |
-| `browse-rate` | 1 to 1,000 a second | 20 | Browse and details requests answered per source |
-| `introduce-rate` | 1 to 100 a second | 4 | Introductions per source |
+| `expiry` | 30 to 255 seconds, at least twice `heartbeat` | 90 | A listing not heard from for this long is dropped (255 at most because Listed tells hosts the expiry in one byte; agent decision, I2) |
+| `browse-rate` | 1 to 1,000 a second | 20 | Browse and details requests answered per source, with bursts of twice as many |
+| `introduce-rate` | 1 to 100 a second | 4 | Introductions per source (used from slice J2) |
 | `answer-rate` | 100 to 100,000 a second | 5,000 | Answers of every kind together |
-| `relay` | `on`, `off` | `on` | Whether to relay at all |
+| `relay` | `on`, `off` | `on` | Whether to relay at all. The `relay-` settings are read and checked now and used from slice J3 |
 | `relay-channels` | 0 to 1,000 | 64 | Relayed pairs at once |
 | `relay-channels-per-source` | 1 to 30 | 2 | Relayed pairs one player's address may have |
 | `relay-rate` | 8 to 1,024 KB/s | 64 | Each channel's limit, each way |
@@ -209,20 +258,41 @@ whenever the master falls silent.
 
 - **Standard output** (the journal, under systemd: `journalctl -u
   tore-master`): the start lines (version, the sockets bound, the settings
-  that differ from the defaults), one status line every `status-interval`,
-  and notable events: a source over a limit (once a minute per source, with
-  its address and the limit), a relay channel opened or closed (with the
-  two ends' addresses and its bytes), the allowance reaching 95 and 100
-  percent, configuration problems.
+  that differ from the defaults, then `Ready`), one status line every
+  `status-interval`, and notable events: each listing made, moved and
+  removed with why, a source over a limit (once a minute per source, with
+  its address, or its /64 for IPv6, and the limit), from slice J3 a relay
+  channel opened or closed (with the two ends' addresses and its bytes) and
+  the allowance reaching 95 and 100 percent, and problems writing the state
+  folder.
 
   ```text
-  status listings=41 sources=318 browse/s=2.4 introductions/min=7 punched=5 relayed=2 channels=3 relay-month=12.7GB dropped(limit)=0 invalid=4
+  status listings=41 sources=318 browse/s=2.4 introductions/min=7 punched=5 relayed=2 channels=3 relay-month=12.7GB dropped(limit)=0 invalid=4 in=812.3KB out=95.1KB
+  listed id=4f1c2a9be07d3e11 from=203.0.113.5:26900 name="Friday night" listings=42
+  moved id=4f1c2a9be07d3e11 from=203.0.113.5:26900 to=203.0.113.5:31877
+  unlisted id=4f1c2a9be07d3e11 from=203.0.113.5:31877 name="Friday night" reason=expired listings=41
+  limit source=198.51.100.7 over=browse (20 a second, bursts of 40)
   ```
 
+  In the status line, `listings`, `sources` (remembered sources) and
+  `channels` are as they stand; `browse/s` (Browse and Details answered),
+  `introductions/min`, `punched`, `relayed`, `dropped(limit)` (requests over
+  a source's or a listing's limit, and answers over `answer-rate`),
+  `invalid` (datagrams that are not a master packet this master answers:
+  damaged, malformed, another version, or one of the master's own kinds) and
+  `in`/`out` (bytes) are over the time since the previous line.
+  `introductions/min`, `punched`, `relayed`, `channels` and `relay-month`
+  stay 0 until slices J2 and J3. A listing's `reason` is `unregistered`,
+  `expired`, `replaced by a new registration` (the game restarted on the
+  same port) or `another listing moved to its address`. The name is quoted
+  with its quotes and control characters escaped.
 - **`state-dir/stats/YYYY-MM-DD.tsv`**: one line a minute with the same
-  counts, for graphs. Kept 90 days, then deleted by the master.
+  counts and a header line, for graphs. Kept 90 days, then deleted by the
+  master.
 - **`state-dir/telemetry/YYYY-MM-DD.tsv`**: the day's counts from the games'
-  reports ([what the master keeps](#what-the-master-keeps)). Kept until
+  reports, one `name<TAB>number` line each ([what the master
+  keeps](#what-the-master-keeps)), rewritten every minute and when the
+  master stops, and read back when it starts again the same day. Kept until
   deleted by hand.
 - **`state-dir/relay-YYYY-MM.txt`**: the month's relayed bytes, written every
   minute so a restart does not forget them.
@@ -234,13 +304,18 @@ whenever the master falls silent.
 - **Listings** are kept in memory only, for as long as each host sends
   heartbeats. A master restart forgets them; every host lists itself again
   within one heartbeat.
-- **Telemetry** is kept as counts per day: how many sessions, how long, how
-  many humans, how players connected (local, by address, mapped port, IPv6,
-  punched, relay) and how long it took, how routers map, which port-mapping
-  method worked, relayed bytes, and, from stage K, host migrations. The
-  number of distinct installs a day is counted with a salt drawn each day and
-  never written down, so an install cannot be followed from one day to the
-  next. No address is ever stored with telemetry.
+- **Telemetry** is kept as counts per day: how many sessions, by role and in
+  minutes, how long (under 5, 5 to 15, 15 to 30, 30 to 60, 60 minutes and
+  up), how many humans, game versions (64 by name, the rest as `other`),
+  platforms, how players connected (local, by address, mapped port, IPv6,
+  punched, relay) and how long it took, a host's players by how they
+  connected, how routers map, which port-mapping method worked, relayed
+  kilobytes, and, from stage K, host migrations. The number of distinct
+  installs a day is counted with a salt drawn each day and never written
+  down, so an install cannot be followed from one day to the next; a master
+  restarted during a day can count an install twice that day. No address is
+  ever stored with telemetry. With `telemetry off` reports are read and
+  dropped.
 - **Addresses** appear only in the journal's lines about limits and relay
   channels, for dealing with abuse. *Agent proposal:* keep the journal 14
   days on this machine (`MaxRetentionSec=14day` in
@@ -299,7 +374,7 @@ probe-port 26912
 ```sh
 target/debug/tore-master --config master.conf
 # A dedicated server that lists itself: in its configuration,
-#   list on
+#   broadcast on
 #   master 127.0.0.1:26911
 target/debug/tore-server --config server.conf --data-dir "$TORE_DATA_DIR"
 # The games it lists, headless:
@@ -310,6 +385,10 @@ target/debug/tore-bot --master 127.0.0.1:26911 --listing "Friday night" --path r
 # The flood tool against the local master:
 target/debug/tore-master flood 127.0.0.1:26911 10
 ```
+
+The battery's net lane runs the last of these as `net-master-flood`
+([the lane](testing/lane-net.md)), and the Rust tests run the master on the
+network simulator (`cargo test --locked -p tore-master`).
 
 In the game, set the master's address in the Internet Lobby's Options (or
 start it with `--master 127.0.0.1:26911`). On one machine every direct path
@@ -341,7 +420,9 @@ his ([open questions](MULTIPLAYER.md#open-questions)); the rest follows.
 6. **Check:** `journalctl -u tore-master -f` shows the start lines and a
    status line a minute. From home: `tore-app --browse 5 --master
    master.jroverton.com:26901` answers (with no games yet), and `tore-master
-   flood master.jroverton.com:26901 10` reports the limits held.
+   flood master.jroverton.com:26901 10` reports the limits held (from
+   outside, its check of a browse from a second address is skipped: every
+   port at home is one source to the master).
 7. **Tell the lead** the name and port: the game's default master address is
    set to it, and from that build on the Internet Lobby uses it.
 8. **Each month,** glance at the plan's transfer in the Linode Cloud Manager

@@ -543,9 +543,11 @@ flowchart TB
 
 A small service, planned for jroverton.com, that lists games, introduces
 players to hosts and relays the traffic of those who cannot connect any
-other way. Its protocol is versioned from day one. *Designed 2026-10-05, not
-built; every item below is an agent proposal awaiting John's review unless
-credited:* the [architecture](ARCHITECTURE.md#master-server-and-connectivity),
+other way. Its protocol is versioned from day one. *Designed 2026-10-05;
+the master program, `tore-master`, is built apart from introductions and the
+relay (I2, 2026-10-05), the game's side is not yet; every item below is an
+agent proposal unless credited, and John's decisions of 2026-10-05 are in
+the [last table of decisions](#decisions):* the [architecture](ARCHITECTURE.md#master-server-and-connectivity),
 the [master's wire](formats/master-protocol.md) and
 [running it](MASTER-SERVER.md).
 

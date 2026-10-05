@@ -395,6 +395,68 @@ def drive_host(d: Drive) -> None:
         d.problem("the hosting game wrote no network capture in replays/")
 
 
+def master_binary(d: Drive) -> Path:
+    """`tore-master` beside the game binary (`cargo build --locked -p tore-master`)."""
+    path = Path(d.app).with_name("tore-master" + (".exe" if str(d.app).endswith(".exe") else ""))
+    if not path.exists():
+        raise DriveError(f"{path} is not built (cargo build --locked -p tore-master)")
+    return path
+
+
+def master_ports(d: Drive) -> int:
+    """A free main port whose next port is free too: games send the mapping test's second probe to the main
+    port + 1, and the flood tool does the same."""
+    for _ in range(50):
+        port = d.port()
+        if port < 65535 and not port_in_use(port + 1):
+            return port
+    raise DriveError("no free pair of UDP ports for the master")
+
+
+def start_master(d: Drive, **settings) -> tuple[Proc, int]:
+    """Starts a `tore-master` on 127.0.0.1 with a console and a state folder in the work folder."""
+    port = master_ports(d)
+    lines = {"listen": LOCALHOST, "port": port, "probe-port": port + 1, "state-dir": "state", "status-interval": 2}
+    lines.update({k.replace("_", "-"): v for k, v in settings.items()})
+    config = d.work / "master.conf"
+    config.write_text("".join(f"{k} {v}\n" for k, v in lines.items()))
+    master = d.start("master", [master_binary(d), "--config", config], stdin=True)
+    if not master.wait_for(r"^Ready", 30):
+        raise DriveError("the master never said it was ready")
+    return master, port
+
+
+def drive_master_flood(d: Drive) -> None:
+    """`tore-master flood` for 10 s against a master on this machine: the limits hold, a browse from another
+    address is answered all through, and the master's status lines show the drops."""
+    master, port = start_master(d)
+    master.expect(rf"^main port on 127\.0\.0\.1:{port}$", "the main port")
+    master.expect(rf"^probe port on 127\.0\.0\.1:{port + 1}$", "the probe port")
+    flood = d.run("flood", [master_binary(d), "flood", f"{LOCALHOST}:{port}", "10"], timeout=60)
+    flood.expect(r"^sent \d+ datagrams \(\d+ bytes\): browse \d+, details \d+, ", "what the flood sent")
+    flood.expect(r"^ports answered with more bytes than they sent: 0 ", "no port answered with more than it sent")
+    m = re.search(r"^a browse from another address during the flood: answered (\d+) of (\d+)$", flood.text(), re.M)
+    if not m:
+        d.problem("the flood's browse check did not run (127.0.0.2 should be bindable on Linux)")
+    elif int(m.group(2)) < 8 or int(m.group(1)) != int(m.group(2)):
+        d.problem(f"the browse during the flood: answered {m.group(1)} of {m.group(2)}")
+    flood.expect(r"^limits held$", "the verdict")
+    master.send("status")
+    master.send("listings")
+    master.send("quit")
+    master.finish(20, 0)
+    master.expect(r"^status listings=0 sources=\d+ .*dropped\(limit\)=[1-9]\d* ", "a status line with the drops")
+    master.expect(r"^limit source=127\.0\.0\.1 over=", "the log line for the source over a limit")
+    master.expect(r"^listings=0$", "no listing made by the flood")
+    master.expect(r"^Stopped$", "the stop line")
+    master.forbid(r"^listed ", "a listing made by the flood")
+    days = sorted((d.work / "state" / "telemetry").glob("*.tsv"))
+    if not days:
+        d.problem("the master wrote no state/telemetry/DATE.tsv")
+    elif days[-1].read_text().splitlines()[:1] != ["installs\t0"] or "reports" in days[-1].read_text():
+        d.problem(f"the flood's reports were counted: {days[-1].read_text()[:200]!r}")
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -424,5 +486,9 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-window-host", lane="net", args=[], driver=drive_host, uses=("bot",), window=True, timeout=300,
             notes="a hosted game answers the search, a bot joins, and the host leaving ends the game for it",
+        ),
+        Scenario(
+            name="net-master-flood", lane="net", args=[], driver=drive_master_flood, timeout=120,
+            notes="tore-master and its flood tool for 10 s: the limits hold and a browse during the flood is answered",
         ),
     ]
