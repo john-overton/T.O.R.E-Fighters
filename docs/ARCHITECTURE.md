@@ -5469,6 +5469,84 @@ stores when the `ai-slot` rule hands one over.
   snapshots and the roster message, and keeps its ledger entries and its
   results row. With none to retire the revival waits and the HUD says so.
 
+*Built (F2-V, 2026-10-05).* The mission core's part is `world/revive.rs`, the
+host's `host/revive.rs`, the client's `client/revival.rs`, the bot's `tore-bot
+--revive SECONDS` and the game's prompt and Enter in `net/play.rs`. What the
+build settled, each an agent decision unless the design above says it:
+
+- **Lost** is the handoff's own test (`World::plane_lost`): crashed or
+  destroyed, or the pilot dead, ejected or escaping, the test that refuses
+  giving such a plane back to the AI.
+- **An abandoned plane** keeps its cockpit and its ownship. The step gives it a
+  paused game's neutral input addressed to the seat `revive::NOBODY` (255, a
+  seat no host gives out), so its cues reach nobody; its tower and crew voice
+  are silent. A destroyed plane's wreck falls on and an ejected pilot's
+  parachute comes down as before.
+- **The seat keeps the wreck while its player stays.** A player who leaves its
+  flight with a lost plane goes back to the lobby while the host *holds* its
+  seat: the wreck flies on with neutral input and the roster still names the
+  player. A player who leaves the game, is dropped or is kicked has its lost
+  plane abandoned (`MissionCommand::Abandon`). This replaces the departed
+  players' orphans, and a held or abandoned plane is refused to anyone else
+  ("Plane 0 is destroyed or has lost its pilot.").
+- **The new plane** takes the next id (one past every plane the mission has
+  had, retired ones included, and past any combat row) and the next member of
+  the old plane's wing (one past the wing's highest). Its combat row is made
+  as the mission's other aircraft are and given that id; the AI aircraft is
+  built as an AI aircraft with a lobby loadout is (the stores, fuel and
+  payload, fresh sensors from its configuration's profiles, the flares and
+  chaff its configuration fills, a wingmate's skill or Average when its side
+  has no AI aircraft left), then taken by the handoff. `World::add_plane`
+  makes the same plane in a client's copy.
+- **The loadout** names its weapons; the mission core takes each record from
+  the configurations the mission already holds (the standard loads, the AI's,
+  the humans'), since the world keeps no import. The base is the player's
+  lobby loadout when its slot is the same aircraft, else the standard load; a
+  lobby loadout that no longer resolves gives way to the standard load. Full
+  fuel is the aircraft's internal capacity. An **air-to-air missile** for
+  `no-missiles` is what the retail debrief counts as one (guided, against
+  aircraft); the creator's Guns only still empties every station but the gun.
+- **The revival point** measures distances horizontally. The altitude is the
+  mission's launch altitude, raised clear of the ground by the rule the
+  mission's airborne spawns follow (5,000 ft above sea level, 1,000 ft above
+  the ground); the speed is the aircraft's flight model start airspeed. Each
+  side's start is the mean position of its aircraft when the mission starts
+  flying, which the host records. With nobody alive the centre is the start;
+  a start on the centre places the plane due south, heading north.
+- **Retiring.** A wreck rests once it has crashed, its wreck no longer falls
+  and its pilot's escape is over; the oldest is the first abandoned. A
+  retired plane's cockpit, ownship and roster entry go and
+  `revive::Book::retired` keeps the entry for the results.
+- **Lives and the delay** are kept by the player's join order, as the scores
+  are, and start afresh each mission; a player who leaves the game and joins
+  again is a new player until stage K's rejoin.
+- **Asking.** Revive (in flight, or from the lobby with a held seat) and Join
+  after a loss are answered at the next tick. Their refusals are "The mission
+  is not flying.", "Your aircraft is not lost.", "No revival in this game.",
+  "No lives left.", "You can fly again in 0:45.", and "No AI aircraft of your
+  side is free."; Revive's come as a Refused, Join's as a Seat refused. With
+  no room the revival waits and the player is sent Revival once more with
+  "Waiting for room for another aircraft.".
+- **`ai-slot`** abandons the lost plane and takes the chosen aircraft for the
+  same seat in one tick. The host cuts the aircraft's stores by the weapons
+  rule just before the take (`World::cut_ai_stores`, a change between ticks
+  as the scoring switch is; a checkpoint carries it as the AI's station
+  rounds). A revival is never a new pilot, so join in progress off does not
+  refuse it, and both rules keep the player's side, so lock sides holds.
+- **Spawned** goes to every connection (a delayed observer's through
+  `send_as_of`) before the player's Seated, and a player who joins later is
+  sent every spawned plane still in the mission after the Mission and Roster
+  messages. A revival's plane is its player's: it does not raise the
+  players a host can seat.
+- **The game.** The client keeps the newest Revival and counts its wait down
+  (`Client::revival`, `revival_prompt`, `may_fly_again`) and adds each
+  spawned plane to its copy (`Client::spawned`). In flight the HUD says the
+  prompt again every five seconds and when the player may fly again; Enter is
+  the visual designation key's binding, which flies again after a loss and
+  designates otherwise. A Seated while flying puts the flight away and starts
+  the new one, as a player who joins again does, and every copy of the
+  mission the game builds gets the spawned planes.
+
 ##### Scoring
 
 Retail's rules ([numbers](spec/multiplayer.md#numbers)): only aircraft and
@@ -5832,9 +5910,15 @@ Stage H must carry what phase 2 adds to the mission core: the scoring switch
 (`World::set_scoring`) with the targets whose end it has recorded
 (`score::Recorder::recorded`; built by F2-S, coded by H10 in `score_checkpoint.rs` with the facts waiting), every `Pilot::Lost` plane and its cockpit, the
 spawned planes (their roster entries, AI actors, combat rows) and which planes
-are retired. The facts themselves are drained every tick and are not state.
-What the host session keeps (the settings, the crown and the house, slot
-locks, lives and delays, tallies, observers' delay rings, away reservations)
+are retired: since F2-V the world's `revival` field (`revive::Book`: each
+abandoned plane with the tick it was abandoned and the tick its wreck came to
+rest, and the retired planes' roster entries, not coded yet), and combat's
+next target id, which adding a spawned plane's row advances. The facts
+themselves are drained every tick and are not state. What the host session
+keeps (the settings, the crown and the house, slot locks, lives and delays,
+the seats held for players whose plane is lost, revivals asked for, each
+side's start, the spawned planes a joiner is sent, tallies, observers' delay
+rings, away reservations)
 is the session's, which stage K moves with the host.
 
 ##### Phase 2 slices
@@ -5856,7 +5940,7 @@ every message below; no later slice changes the wire without the lead.
 | F2-1 The King's lobby | Opus | F2-0 | `host/king.rs`, `host/config.rs`, `host/lobby.rs`, `host/discover.rs`, new `host/king_tests.rs`, `client/lobby_tests.rs` additions; `tore-world` `mission.rs` (`friendly_fire`, the loadout rule) and `world/build.rs`; `tore-server` `config.rs` and `wiring.rs`; `docs/DEDICATED-SERVER.md` | The settings store's King's changes with their phase rules; mode and slots; slot locks; join in progress; lock sides; max players, password and visibility; the loadout rule; friendly fire into the spec; house and crown, passing it, the King's departure; a server's King; the server's configuration keys for every setting | Simulator tests: each setting reaches every lobby state; a non-King and a wrong phase are refused; PvP opens both sides; closed and reserved slots; join in progress off; lock sides; the loadout rule; friendly fire off in a flown mission; the crown passed, used and passed on at a departure; the house's leaving ends the game and the King's does not; a server's first-player King; configuration parsing. A `net` lane scenario: a `tore-server` with `king first-player` and a King bot that changes settings and starts. Single-player baseline SAME. **Built (F2-1, 2026-10-05):** as [described above](#the-kings-lobby-as-built-f2-1): the crown and the house, the settings' checks and phase rules, mode and slots, slot locks, join in progress, lock sides, the limit, password and visibility (a hosted game's thread lists it while public), the loadout rule and friendly fire in the mission, a server's first-player King, `king-mission locked` and its return to the file; the server's keys for every setting (`mode`, `kill-limit`, `observer-delay` and the rest, `king`, `king-mission`); the host log's crown, settings, lock and watch lines; `tore-bot --king`. Tests: `host/king_tests.rs` (16 on the simulator), `host/config.rs`, `settings_tests.rs`, `mission.rs` (the lines, the rule, the build), `tore-server` `config.rs`, `tore-bot`'s options, a hosting thread test of the visibility; the net lane's `net-server-king`, `net-server-pvp` (a kill limit in PvP; the scripted pilot rarely lands a gun kill, so with none the time limit ends it in a draw) and `net-server-delay`. Single-player baseline SAME |
 | F2-R Orders and replies | Sonnet | F2-0, F2-C, stage G's G3a and G8 | `tore-world` `world/replies.rs`, `radio_calls.rs`, `ai_wings/orders.rs`, the comms delivery; the app's handling of the four reply actions; `tore-bot --reply` | The order call to human wingmen; the reply calls and their refusals | World tests on the crowd fixture: a human lead's order reaches its human wingman as a call and a line, and nobody else; each reply reaches the flight's humans only, respects radio silence, and a lead's reply is refused; the radio journal; a `net` scenario with two bots in one wing exchanging an order and a reply. Single-player baseline SAME |
 | F2-S Scoring | Opus | F2-0 | `tore-world` `score.rs` and its call in `world.rs`; `tore-sim` combat's `Strike` amount; `host/score.rs`, new `host/score_tests.rs`; the client's scores; `tore-app` new `net/scoreboard.rs` and its call in `net/play.rs` | Score facts; tallies; limits and the kill limit's end; Scores; the score board on K | World tests: a human killed with the pilot aboard counts two, after ejecting one, ground kills none, damage fractions, losses, AI shooters; host tests for each tally, fight type and owner, the kill limit's end with its winner and a draw, the time limit, the pace; a render test of the board. Single-player baseline SAME (facts off). **Built (F2-S, 2026-10-05):** as [described above](#scoring); the world's facts (`score.rs`, combat's `Strike::amount`), the host's tallies, limits, winner and pace (`host/score.rs`), the client's kept scores and their words (`client/scores.rs`), `tore-bot`'s scores lines, and K's board (`net/scoreboard.rs`, two short hunks in `main.rs`: the K arm and the draw call). Tests: `world/score_tests.rs` (a real gun burst's damage, kill and loss; ejection; AI shooters; no shooter; ground kills and fractions; recording changes nothing the mission does), `host/score_tests.rs` (on the simulator: kills, losses, damage, ratio, both fights, the kill limit by side, total and player with a winner and a draw, the time limit's winner, co-op, the pace, a late joiner and a departure), `client/scores.rs` (the words, and the real client keeping and counting down), the board's lines and a headless render, and the net lane's `net-server-scores` |
-| F2-V Death and revival | Opus | F2-0 | `tore-world` `world/revive.rs`, `world/handoff.rs`, `ai_wings.rs` (the spawned aircraft), new `world/revive_tests.rs`; `host/revive.rs`, new `host/revive_tests.rs`; the client's revival state and its own copy's spawn; `tore-app` `net/play.rs` (the prompt and Enter); `tore-bot --revive` | Abandon and Revive; the revival point and loadout; retiring; lives, delay and the three rules; Join after a loss; replaces the host's orphans | World tests: a revived plane's place, heading, speed, stores under each weapons rule and its handoff invariants; Abandon keeps a wreck falling; 100 revivals in one mission stay within 64 planes; host tests for each rule, lives, the delay, the lobby's Join, lock sides; a client copy that adds the spawned plane; a `net` scenario where a bot ejects, revives and flies on. Single-player baseline SAME |
+| F2-V Death and revival | Opus | F2-0 | `tore-world` `world/revive.rs`, `world/handoff.rs`, `ai_wings.rs` (the spawned aircraft), new `world/revive_tests.rs`; `host/revive.rs`, new `host/revive_tests.rs`; the client's revival state and its own copy's spawn; `tore-app` `net/play.rs` (the prompt and Enter); `tore-bot --revive` | Abandon and Revive; the revival point and loadout; retiring; lives, delay and the three rules; Join after a loss; replaces the host's orphans | World tests: a revived plane's place, heading, speed, stores under each weapons rule and its handoff invariants; Abandon keeps a wreck falling; 100 revivals in one mission stay within 64 planes; host tests for each rule, lives, the delay, the lobby's Join, lock sides; a client copy that adds the spawned plane; a `net` scenario where a bot ejects, revives and flies on. Single-player baseline SAME. **Built (F2-V, 2026-10-05):** as [described above](#death-revival-and-lives); Abandon and Revive, the revival point, the loadout and the weapons rule, retiring and the `Book` in `world/revive.rs` (with a new aircraft for the AI in `ai_wings.rs`, three roster calls in `seats.rs`, and in `world.rs` the field, Abandon in the input check, the lost planes' neutral input and silent radios, and the wrecks' rest each tick); the host's rules, lives, delay, held seats, Join after a loss and Spawned in `host/revive.rs`, replacing the orphans in `host/mod.rs`; the client's Revival, prompt and spawned planes (`client/revival.rs`); `tore-bot --revive`; the game's prompt and Enter (`net/play.rs`, one guard in `main.rs`). Tests: `world/revive_tests.rs` (the point, the stores under each rule, the handoff's invariants, Abandon's falling wreck, a client's copy, the 30 seconds, 100 revivals within 64 planes, the same twice), `host/revive_tests.rs` (each rule, lives, the delay, Join after a loss, lock sides, a late joiner, the held seat), `client/revival_tests.rs` and the prompt's words, the game's copies, and the `net-server-revive` scenario, which needs F2-1's `respawn` key in the server's file. A real-data run (dedicated server, a bot ejecting) revived the bot into plane 12 under `revive` and into plane 1 under `ai-slot` |
 | F2-O1 The observer stream | Opus | F2-0 | `host/observe.rs`, new `host/observe_tests.rs`; the observer flight in `wire/connection.rs` and `wire/from_world.rs`; new `client/observe.rs`; `tore-bot --observe` | Observe and Observing, snapshots with no own plane, relevance by the camera, the delay ring | Simulator tests: an observer gets entities near its subject at the full rate and far ones twice a second; with a delay nothing newer than now less the delay is ever sent, events included; the stream stops at seating and at the end; bandwidth and the ring's memory measured and recorded; a `net` scenario with an observing bot. Quick guard. **Built (F2-O1, 2026-10-05):** as [described above](#the-observer-view): the host's watches and stream (`host/observe.rs`, the hooks in `host/mod.rs`: the watch on each connection, the stream on the host, the stop before Seated and at the end, the lobby's observing mark), `from_world::observer_picture`, `HostConnection::observer_snapshot`, the client's `watch`, `stop_watching` and `observer_frame` (`client/observe.rs`), `Host::send_as_of` for the slices that send news at a tick, and `tore-bot --observe`. Delayed observers' snapshot ticks are the ring's (agent decision). Tests: `host/observe_tests.rs` (rates by the camera, a point and none, the camera's limit, refusals, human-flown planes and events, the delay for snapshots, events and held messages, the stops, measurements; the 60-second ring `#[ignore]`d for the full run), `client/observe_tests.rs`, `from_world`'s observer picture; the `net-server-observe` scenario. Measured: 8.4 MB at a 60-second delay for 30 aircraft; about 12 KB/s to an observer of 30 |
 | F2-L The lobby screen | Sonnet | F2-1 | `tore-app` `lobby_screen/` (new `settings_panel.rs` and `players_panel.rs`), `ordnance.rs` (lobby Cheat loading under the rule), the lobby's glue in `net/` | Settings..., Players..., slot locks, the seven buttons, Watch, the head's summary, greying | `facts` tests for who may press what; headless renders of each Settings page as King and not; a windowed run (through `tools/agent-run.sh`) hosting with a bot: settings changed and seen by the bot, the crown passed and taken back, a slot closed |
 | F2-D The multiplayer debrief | Sonnet | F2-S | `tore-world` `debrief.rs` (`results`); `host/results.rs`; the client's Results; `tore-app` `debrief.rs` and `net/debrief.rs` (the SCORES and RESULTS pages) | Results rows, the message at the end, the pages | A world test with rows for every plane, human and AI, retired included; a host test that every connection gets Results; headless renders of both pages with 30 aircraft; the existing single-player page tests unchanged; quick guard |

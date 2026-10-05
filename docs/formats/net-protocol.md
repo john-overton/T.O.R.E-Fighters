@@ -1296,6 +1296,25 @@ refused "The mission has changed; choose again.", as the lobby's requests are.
 - **Observe.** A subject's code 3 is invalid; a point's coordinates are
   signed varints that must fit 32 bits.
 
+*Built (F2-V), each an agent decision:*
+
+- **Revival** goes to a seated player at the tick the host finds its plane
+  lost, and once more, with the line "Waiting for room for another aircraft.",
+  when a revival it asked for waits for room. The line is "No revival in this
+  game." under `none` and "No lives left." with none left; the lives the
+  registry allows (0 to 10) are all the field carries.
+- **Revive** from a player with no lost plane is refused "Your aircraft is not
+  lost." (seated) or "You have lost no aircraft; press Join to fly." (in the
+  lobby); the rules' refusals are listed in the
+  [architecture](../ARCHITECTURE.md#death-revival-and-lives). A Take plane
+  (Join) from a player in the lobby whose plane is lost is the same request,
+  answered by Seated or a Seat refused.
+- **Spawned** goes to every connection at the revival's tick, before the
+  reviving player's Seated, so each copy of the mission holds the plane the
+  Seated names. A player who joins later is sent every spawned plane still in
+  the mission after the Mission and Roster messages. Its tick is the tick of
+  the revival (the Seated's tick).
+
 ### Changed messages
 
 - **Lobby** (kind 19). The settings list, empty until now, carries every

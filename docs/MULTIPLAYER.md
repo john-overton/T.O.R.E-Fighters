@@ -209,7 +209,10 @@ ground starts exist, "back at a base" starts the player airborne near their
 side's base. *Designed (phase 2):* this is retail's revival: a new aircraft of
 the player's type, airborne, at the revival distance from the battle on the
 bearing of its side's start, with the revival weapons
-([architecture](ARCHITECTURE.md#death-revival-and-lives)).
+([architecture](ARCHITECTURE.md#death-revival-and-lives)). *Built (F2-V,
+2026-10-05):* the HUD says whether and when the player may fly again, Enter or
+Join flies again, and the lost aircraft stays with its player until it flies
+again or leaves the game.
 
 ## Slots, AI fill and handoff
 
