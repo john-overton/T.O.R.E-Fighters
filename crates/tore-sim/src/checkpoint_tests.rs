@@ -101,7 +101,8 @@ fn map_keys_out_of_order_are_refused() {
 #[test]
 fn a_count_the_bits_cannot_hold_is_refused_before_allocating() {
     let mut s = Saver::new();
-    s.count(1 << 40);
+    // Large, but within a 32-bit usize so the test builds for i686 too.
+    s.count(1 << 30);
     let coded = Coded {
         body: s.finish_section(),
         records: Vec::new(),
