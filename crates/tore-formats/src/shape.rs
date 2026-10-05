@@ -349,6 +349,9 @@ impl Shape {
                         let take = match branch {
                             0x74 => value == imm,
                             0x75 => value != imm,
+                            // Y141.SH tests the signed flap word against zero.
+                            // This selects inert geometry, never native execution.
+                            0x7d => value >= imm,
                             _ => return Err(invalid("unsupported shape state guard")),
                         };
                         if take {
@@ -732,6 +735,29 @@ mod tests {
             assert_eq!(shape.faces.len(), 1);
             assert_eq!(shape.faces[0].colors, vec![color; 3]);
         }
+    }
+    #[test]
+    fn signed_flap_guard_selects_negative_and_nonnegative_geometry() {
+        let mut code = vec![0xf0, 0, 0x66, 0x83, 0x3d, 0, 0x71, 0, 0, 0, 0x7d, 11];
+        let mut pointers = Vec::new();
+        for _ in 0..2 {
+            pointers.push(code.len() + 1);
+            code.extend([0x68, 0, 0, 0, 0, 0x68, 0, 0, 0, 0, 0xc3]);
+        }
+        for (index, pointer) in pointers.iter().enumerate() {
+            let dest = 0x1000 + code.len() as u32;
+            code[*pointer..*pointer + 4].copy_from_slice(&dest.to_le_bytes());
+            let mut geometry = program();
+            geometry[27] = 100 + index as u8;
+            code.extend(geometry);
+        }
+        let data = module::fixture(&code);
+        for (value, color) in [(-32768, 100), (-1, 100), (0, 101), (1, 101), (32767, 101)] {
+            let shape = Shape::with_state(&data, &[(0x7100, value)].into()).unwrap();
+            assert_eq!(shape.faces[0].colors, vec![color; 3]);
+        }
+        code[11] = 127;
+        assert!(Shape::with_state(&module::fixture(&code), &[(0x7100, 0)].into()).is_err());
     }
     #[test]
     fn export_keeps_indexed_decals_that_gameplay_projection_omits() {
