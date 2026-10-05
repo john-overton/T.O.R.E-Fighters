@@ -16,7 +16,9 @@ a real UDP socket, flies and leaves, and `quit` stops the server. **Built
 (D8b):** the game joins one with `--connect` ([joining from the
 game](#joining-from-the-game)). **Built (EF3):** a player's game hosts the
 same host session itself with `--host` ([hosting from the
-game](#hosting-from-the-game)). The dedicated server is part of the [multiplayer plan](multiplayer-plan.md#stages)
+game](#hosting-from-the-game)). **Built (I3):** it lists itself on the
+Internet Lobby when `broadcast` is on ([broadcasting](#broadcasting-on-the-internet-lobby)).
+The dedicated server is part of the [multiplayer plan](multiplayer-plan.md#stages)
 and the [multiplayer guide](MULTIPLAYER.md#dedicated-servers). Fighters
 Anthology had no dedicated server; everything on this page is an agent
 proposal unless it is credited to John.
@@ -33,6 +35,7 @@ proposal unless it is credited to John.
 - [Joining from the game](#joining-from-the-game)
 - [Hosting from the game](#hosting-from-the-game)
 - [Finding games from the command line](#finding-games-from-the-command-line)
+- [Broadcasting on the Internet Lobby](#broadcasting-on-the-internet-lobby)
 - [Console, status and logs](#console-status-and-logs)
 - [Ports and firewalls](#ports-and-firewalls)
 - [Discovery and the firewall](#discovery-and-the-firewall)
@@ -109,7 +112,9 @@ resource count and 64-bit digest. A mission that cannot be built is refused
 with the builder's own words, for example "Selected runway is unavailable".
 
 At start it prints the version and commit, the data folder, a summary of the
-mission, the port it listens on and "Waiting for players". It refuses to start,
+mission, the port it listens on, whether it broadcasts on the Internet Lobby
+(`Broadcast: off ...` or `Broadcast: on, to the Internet Lobby at ...`) and
+"Waiting for players". It refuses to start,
 with a plain message, when the import is missing or stale, the mission names
 an aircraft, theater or runway the import does not have, a setting is unknown
 or out of range, or the retail stall-speed switch (`--retail-stall-speeds` or
@@ -138,6 +143,9 @@ start, so a typo never passes silently.
 | `after-end` | `restart` | `restart` the same mission, or `quit` |
 | `restart-delay` | `30` | Seconds between a mission's end and the next start |
 | `status-interval` | `10` | Seconds between status lines; 0 for none |
+| `broadcast` | `off` | `on` lists the server on the Internet Lobby, so players find it there ([broadcasting](#broadcasting-on-the-internet-lobby)); `off` keeps it private: players join by address or find it on their local network (John, 2026-10-05, as OpenRA's servers do) |
+| `master` | the public master | The master server the server broadcasts to, `HOST` or `HOST:PORT` (port 26901 when none is given) |
+| `telemetry` | `on` | While broadcasting, send the master anonymous statistics at the end of each mission (John, 2026-10-05: on by default); `off` sends none |
 
 *Built (D7b).* A name that appears twice is refused too, and a setting with no
 value. A comment runs from the first `#`, so a password cannot contain one.
@@ -502,6 +510,52 @@ machine with a host or a server up on the first: it is the way to check
 game port the hosts use. Any other session option (`--connect`, `--host`, ...)
 is refused with it.
 
+## Broadcasting on the Internet Lobby
+
+*Built (I3, 2026-10-05).* A server is private unless its operator turns
+broadcasting on (John, 2026-10-05, as OpenRA's servers do): with `broadcast
+on` in the configuration, or `broadcast on` typed at the console, it lists
+itself on the master server, and the game's Internet Lobby shows it. Players
+then join it as they join any listed game; joining by address works either
+way. How listing works on the wire is the master protocol's
+[listing a game](formats/master-protocol.md#listing-a-game); the design is
+the architecture guide's [master server and
+connectivity](ARCHITECTURE.md#master-server-and-connectivity).
+
+- The server talks to the master **from its game port**, so the master sees
+  the outside address players reach, and nothing else needs forwarding: the
+  same UDP port rule covers both. The master's datagrams never reach the
+  host session.
+- It registers at once (the master first checks that the address is really
+  the server's), sends the lobby's summary (name, mission, players, whether
+  it has a password, lobby or flying, build) every 30 seconds and within 5
+  seconds of a change, and a small keep-alive every 15 seconds so the
+  router keeps the port open. `quit` and `broadcast off` take it off the
+  list at once; a server that dies drops off within 90 seconds.
+- The log says what happens: `Broadcasting: listed on the Internet Lobby
+  (HOST:PORT), seen at ADDRESS` (the address the master saw, which is the
+  one players outside reach), a new address when the router changes it, the
+  router test's result, and `Broadcasting: the Internet Lobby at ... does
+  not answer, so the server is not listed. Players can still join by
+  address.` when the master is silent for 10 seconds. It then asks again
+  after 2, 4, 8 and up to 60 seconds, and looks the master's name up again.
+- **Anonymous statistics.** While broadcasting with `telemetry on` (the
+  default), the server sends the master one report at the end of each
+  mission: its version and system, the mission's minutes, the most players
+  at once, its players counted by how they connected (in stage I: the local
+  network or by address), and how its router maps the port. The registration
+  carries the same anonymous install id. *Agent decisions:* the id is kept in
+  `server-install-id` in the data folder, drawn at start while telemetry is
+  on; `telemetry off` deletes it, so a later id cannot be linked to the old.
+  A server that does not broadcast sends nothing.
+- *Agent decisions:* the master's second port, for the router test, is its
+  main port plus one (26902 for 26901); the master's name is looked up on a
+  thread at start and every 10 minutes.
+
+To try it on one machine, run a master on loopback ([testing on one
+machine](MASTER-SERVER.md#testing-on-one-machine)) and set `broadcast on`
+and `master 127.0.0.1:26911` in `server.conf`.
+
 ## Console, status and logs
 
 The server reads commands from its standard input:
@@ -514,6 +568,7 @@ The server reads commands from its standard input:
 | `kick-player ID [REASON]` | Removes the player with that lobby id (the `players` table's first column), in the lobby or flying, telling it the reason; its plane, if it flies one, goes back to the AI with no debrief (EF4) |
 | `end` | Ends the mission now, with debriefs |
 | `restart` | Ends the mission and starts it again at once |
+| `broadcast on`, `broadcast off` | Lists the server on the Internet Lobby, or takes it off at once, whatever the configuration said (I3) |
 | `quit` | Tells every player the server is stopping, then exits |
 
 Ctrl+C stops the process at once instead; the players' games report the lost
@@ -528,6 +583,9 @@ A status line every `status-interval` seconds:
 ```text
 00:12:30 tick 90000 players 2/15 aircraft 30 load 11% (1.1 ms a tick) up 64 KB/s down 7 KB/s
 ```
+
+While the server broadcasts, the line ends with where its listing stands,
+for example `, broadcast: listed, seen at 203.0.113.5:26900` (I3).
 
 The log (`logs/server-<date>.log` in the data folder) records the start,
 every connection, refusal, seat change and departure with its reason, the
@@ -585,7 +643,9 @@ stretches of up to 0.1 s after half a second of such work.
 
 The server uses one UDP port, 26900 unless set. On a LAN nothing else is
 needed. For players on the internet, forward that UDP port on the router to the
-server; automatic port mapping, NAT traversal and the relay are stage J.
+server; automatic port mapping, NAT traversal and the relay are stage J. A
+server that [broadcasts](#broadcasting-on-the-internet-lobby) talks to the
+master from the same port, so it needs no other rule.
 Windows and macOS ask once whether the unsigned program may accept connections.
 
 The start line `Listening on UDP` shows the sockets. Listening on every

@@ -35,6 +35,9 @@ pub struct HostSetup {
     pub version: String,
     /// The build's commit, for the join gate.
     pub commit: String,
+    /// The server's anonymous install id when `telemetry` is on, which the
+    /// listing carries and its Reports name; `None` when it is off.
+    pub install_id: Option<u64>,
 }
 
 /// Something that happened that the log records.
@@ -218,6 +221,18 @@ pub trait Host {
     /// True once the host has ended its last mission and will not start
     /// another (`after-end quit`).
     fn finished(&self) -> bool;
+
+    /// Where the server's listing on the Internet Lobby stands, for the
+    /// status line; `None` while it does not broadcast.
+    fn listing(&self) -> Option<String> {
+        None
+    }
+
+    /// The console's `broadcast on` and `broadcast off`: what to log, or why
+    /// not.
+    fn set_broadcast(&mut self, _on: bool, _now: Time) -> Result<String, String> {
+        Err("this server cannot broadcast".into())
+    }
 }
 
 #[cfg(test)]
@@ -244,6 +259,8 @@ pub mod scripted {
         pub done: bool,
         pub polls: u32,
         pub flying: bool,
+        /// What the console's `broadcast` set, if anything.
+        pub broadcast: Option<bool>,
     }
 
     impl Host for ScriptedHost {
@@ -314,6 +331,13 @@ pub mod scripted {
         }
         fn finished(&self) -> bool {
             self.done
+        }
+        fn listing(&self) -> Option<String> {
+            (self.broadcast == Some(true)).then(|| "listed".to_owned())
+        }
+        fn set_broadcast(&mut self, on: bool, _now: Time) -> Result<String, String> {
+            self.broadcast = Some(on);
+            Ok(format!("broadcast {}", if on { "on" } else { "off" }))
         }
     }
 }

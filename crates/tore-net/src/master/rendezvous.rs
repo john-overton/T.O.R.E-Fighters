@@ -829,19 +829,17 @@ impl HostTally {
         }
     }
 
-    /// A player connected from `address`.
-    pub fn joined(&mut self, address: SocketAddr) {
-        self.present.insert(address);
+    /// The players connected now, by their addresses: the host's loop
+    /// gives them after each join or departure.
+    pub fn present(&mut self, addresses: impl IntoIterator<Item = SocketAddr>) {
+        self.present = addresses.into_iter().collect();
         self.most = self.most.max(self.present.len());
-        if address != LINK_ADDRESS && self.counted.insert(address) {
-            let slot = &mut self.by_path[usize::from(path_of(address).code())];
-            *slot = slot.saturating_add(1);
+        for &address in &self.present {
+            if address != LINK_ADDRESS && self.counted.insert(address) {
+                let slot = &mut self.by_path[usize::from(path_of(address).code())];
+                *slot = slot.saturating_add(1);
+            }
         }
-    }
-
-    /// The player at `address` left.
-    pub fn left(&mut self, address: SocketAddr) {
-        self.present.remove(&address);
     }
 
     /// True when anyone joined the session.

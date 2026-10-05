@@ -76,6 +76,14 @@ pub struct Config {
     pub restart_delay_seconds: u32,
     /// Seconds between status lines; 0 for none.
     pub status_interval_seconds: u32,
+    /// List the server on the Internet Lobby (John, 2026-10-05: off unless
+    /// the operator turns broadcasting on, as OpenRA's servers do).
+    pub broadcast: bool,
+    /// The master server, `HOST` or `HOST:PORT` (port 26901 when none).
+    pub master: String,
+    /// Send anonymous statistics to the master while broadcasting (John,
+    /// 2026-10-05: on by default).
+    pub telemetry: bool,
 }
 
 impl Config {
@@ -97,6 +105,9 @@ impl Config {
             after_end: AfterEnd::Restart,
             restart_delay_seconds: 30,
             status_interval_seconds: 10,
+            broadcast: false,
+            master: tore_net::master::DEFAULT_MASTER.into(),
+            telemetry: true,
         }
     }
 
@@ -239,6 +250,13 @@ impl Config {
             }
             "restart-delay" => self.restart_delay_seconds = number(name, value, 0, DELAY_MAX)?,
             "status-interval" => self.status_interval_seconds = number(name, value, 0, DELAY_MAX)?,
+            "broadcast" => self.broadcast = switch(name, value)?,
+            "master" => {
+                tore_net::master::local::parse_master(value)
+                    .map_err(|error| format!("`master` must be HOST or HOST:PORT: {error}"))?;
+                self.master = value.to_owned();
+            }
+            "telemetry" => self.telemetry = switch(name, value)?,
             _ => unreachable!("the name was checked against SETTINGS"),
         }
         Ok(())
@@ -254,7 +272,7 @@ impl Config {
 }
 
 /// Every setting's name, in the guide's order.
-pub const SETTINGS: [&str; 14] = [
+pub const SETTINGS: [&str; 17] = [
     "name",
     "port",
     "address",
@@ -269,7 +287,18 @@ pub const SETTINGS: [&str; 14] = [
     "after-end",
     "restart-delay",
     "status-interval",
+    "broadcast",
+    "master",
+    "telemetry",
 ];
+
+fn switch(name: &str, value: &str) -> Result<bool, String> {
+    match value {
+        "on" => Ok(true),
+        "off" => Ok(false),
+        other => Err(format!("`{name}` must be `on` or `off`, not `{other}`")),
+    }
+}
 
 fn number(name: &str, value: &str, low: u32, high: u32) -> Result<u32, String> {
     let parsed: u32 = value
@@ -330,6 +359,26 @@ mod tests {
         assert_eq!(config.after_end, AfterEnd::Restart);
         assert_eq!(config.restart_delay_seconds, 30);
         assert_eq!(config.status_interval_seconds, 10);
+        assert!(!config.broadcast);
+        assert_eq!(config.master, tore_net::master::DEFAULT_MASTER);
+        assert!(config.telemetry);
+    }
+
+    #[test]
+    fn broadcast_and_telemetry_are_on_or_off_and_the_master_an_address() {
+        let config = parse("broadcast on\ntelemetry off\nmaster 127.0.0.1:26911").unwrap();
+        assert!(config.broadcast && !config.telemetry);
+        assert_eq!(config.master, "127.0.0.1:26911");
+        assert!(!parse("broadcast off").unwrap().broadcast);
+        assert!(refused("broadcast yes").contains("`on` or `off`"));
+        assert!(refused("telemetry 1").contains("`on` or `off`"));
+        assert_eq!(
+            parse("master master.example.org").unwrap().master,
+            "master.example.org"
+        );
+        assert_eq!(parse("master [::1]:26911").unwrap().master, "[::1]:26911");
+        assert!(refused("master host:0").contains("HOST or HOST:PORT"));
+        assert!(refused("master [::1").contains("HOST or HOST:PORT"));
     }
 
     #[test]
@@ -522,6 +571,9 @@ mod tests {
             "after-end quit",
             "restart-delay 1",
             "status-interval 1",
+            "broadcast on",
+            "master localhost",
+            "telemetry off",
         ];
         assert_eq!(samples.len(), SETTINGS.len());
         for (sample, name) in samples.iter().zip(SETTINGS) {

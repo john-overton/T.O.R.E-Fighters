@@ -731,11 +731,14 @@ fn a_report_goes_only_with_an_install_id() {
     rig.list(HOST);
     rig.run(1.0);
     let mut tally = HostTally::new(Duration::ZERO);
-    tally.joined(LINK_ADDRESS);
-    tally.joined(address("192.168.1.30:40000"));
-    tally.joined(address("198.51.100.77:40000"));
-    tally.left(address("192.168.1.30:40000"));
-    tally.joined(address("192.168.1.30:40000"));
+    assert!(!tally.anyone());
+    let lan = address("192.168.1.30:40000");
+    let far = address("198.51.100.77:40000");
+    tally.present([LINK_ADDRESS, lan]);
+    tally.present([LINK_ADDRESS, lan, far]);
+    tally.present([LINK_ADDRESS, far]);
+    tally.present([LINK_ADDRESS, far, lan]);
+    assert!(tally.anyone());
     let report = tally.report(
         Duration::from_secs(600),
         Role::HostingGame,

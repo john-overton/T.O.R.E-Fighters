@@ -74,7 +74,7 @@ impl<'a> Loop<'a> {
             if let Some(due) = next_status
                 && now >= due
             {
-                self.log.print(&status_line(&host.status(now)));
+                self.log.print(&status_text(host, now));
                 next_status = Some(now + self.status_interval);
             }
             if now >= next_figures {
@@ -111,7 +111,7 @@ impl<'a> Loop<'a> {
     fn console_commands(&mut self, host: &mut dyn Host, now: Time) -> Option<Ended> {
         while let Ok(command) = self.console.try_recv() {
             match command {
-                Command::Status => self.log.print(&status_line(&host.status(now))),
+                Command::Status => self.log.print(&status_text(host, now)),
                 Command::Players => {
                     for line in players_table(&host.players()) {
                         self.log.print(&line);
@@ -140,11 +140,25 @@ impl<'a> Loop<'a> {
                     self.log_line("Stopped");
                     return Some(Ended::Quit);
                 }
+                Command::Broadcast(on) => match host.set_broadcast(on, now) {
+                    Ok(line) => self.log_line(&format!("console: {line}")),
+                    Err(reason) => self.log.print(&reason),
+                },
                 Command::Help => self.log.print(HELP),
                 Command::Invalid(message) => self.log.print(&message),
             }
         }
         None
+    }
+}
+
+/// The status line, with where the listing stands while the server
+/// broadcasts: `..., broadcast: listed, seen at 203.0.113.5:26900`.
+fn status_text(host: &mut dyn Host, now: Time) -> String {
+    let line = status_line(&host.status(now));
+    match host.listing() {
+        Some(listing) => format!("{line}, broadcast: {listing}"),
+        None => line,
     }
 }
 
@@ -372,6 +386,8 @@ mod tests {
             "kick-player 8",
             "end",
             "restart",
+            "broadcast on",
+            "status",
             "bogus",
             "help",
             "quit",
@@ -384,6 +400,7 @@ mod tests {
         assert_eq!(host.kicked, vec![2]);
         assert_eq!(host.kicked_players, vec![7], "a lobby player, by its id");
         assert_eq!((host.ended, host.restarted), (1, 1));
+        assert_eq!(host.broadcast, Some(true));
         assert_eq!(host.stopped, Some(Duration::ZERO));
         let text = rig.console.text();
         for needle in [
@@ -395,6 +412,8 @@ mod tests {
             "no player has the lobby id 8",
             "ending the mission",
             "restarting the mission",
+            "console: broadcast on",
+            "down 7 KB/s, broadcast: listed",
             "unknown command `bogus`",
             "Commands: status",
             "Stopped",

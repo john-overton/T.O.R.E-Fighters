@@ -156,8 +156,10 @@ pub fn serve_with(
         format!("Data folder: {}", data_dir.display()),
         check::mission_summary(&spec, aircraft),
         format!("Listening on UDP {}", listening.join(" and ")),
+        broadcast_line(&config),
     ];
     let (status_interval, start_mode) = (config.status_interval_seconds, config.start);
+    let install_id = install_id(&data_dir, config.telemetry);
 
     let mut host = start_host(HostSetup {
         config,
@@ -166,6 +168,7 @@ pub fn serve_with(
         socket,
         version: version().to_owned(),
         commit: commit().to_owned(),
+        install_id,
     })?;
     for line in &start_lines {
         log.log(timer.unix_seconds(), line);
@@ -180,6 +183,57 @@ pub fn serve_with(
     match Loop::new(timer, &mut log, &commands, status_interval).run(host.as_mut()) {
         Ended::Quit | Ended::Finished => Ok(()),
     }
+}
+
+/// The start line about the Internet Lobby: whether the server broadcasts
+/// itself there, to which master, and whether it sends anonymous statistics.
+fn broadcast_line(config: &crate::config::Config) -> String {
+    if config.broadcast {
+        format!(
+            "Broadcast: on, to the Internet Lobby at {}; anonymous statistics {}",
+            config.master,
+            if config.telemetry {
+                "on (`telemetry off` in the configuration turns them off)"
+            } else {
+                "off"
+            }
+        )
+    } else {
+        "Broadcast: off (players join by address; `broadcast on` lists the server on the Internet Lobby)"
+            .into()
+    }
+}
+
+/// The file in the data folder that keeps the server's anonymous install id.
+pub const INSTALL_ID_FILE: &str = "server-install-id";
+
+/// The server's anonymous install id, kept in the data folder: read, or
+/// drawn and written the first time. With `telemetry` off there is none and
+/// the file is deleted, so turning it on again draws a new one that cannot
+/// be linked to the old. *Agent decisions:* the id is drawn at start while
+/// telemetry is on, whether or not the server broadcasts, and a file that
+/// cannot be written leaves the id for this run only.
+pub fn install_id(data_dir: &std::path::Path, telemetry: bool) -> Option<u64> {
+    let path = data_dir.join(INSTALL_ID_FILE);
+    if !telemetry {
+        let _ = std::fs::remove_file(&path);
+        return None;
+    }
+    let kept = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| u64::from_str_radix(text.trim(), 16).ok())
+        .filter(|id| *id != 0);
+    if kept.is_some() {
+        return kept;
+    }
+    let id = loop {
+        let id = tore_net::reach::random_nonce();
+        if id != 0 {
+            break id;
+        }
+    };
+    let _ = std::fs::write(&path, format!("{id:016x}\n"));
+    Some(id)
 }
 
 #[cfg(test)]
@@ -218,6 +272,7 @@ mod tests {
                     setup.config.clone(),
                     setup.spec.clone(),
                     setup.socket.local_addresses(),
+                    setup.install_id,
                 ));
                 Ok(Box::new(ScriptedHost::default()))
             },
@@ -242,16 +297,51 @@ mod tests {
             lines[4].starts_with("Listening on UDP 127.0.0.1:"),
             "{text}"
         );
-        assert_eq!(lines[5], "Waiting for players");
+        assert!(lines[5].starts_with("Broadcast: off"), "{text}");
+        assert_eq!(lines[6], "Waiting for players");
         assert!(text.contains("console: quit"));
         assert!(lines.last().unwrap().ends_with("Stopped"));
-        let (config, spec, sockets) = received.unwrap();
+        let (config, spec, sockets, install) = received.unwrap();
+        // Telemetry is on by default: the id is drawn and kept.
+        assert!(install.is_some());
+        assert_eq!(install_id(&dir, true), install);
         assert_eq!(config.snapshot_rate, 30);
         assert_eq!(spec.theater, "UKR");
         assert_eq!(sockets.len(), 1);
         let file = fs::read_to_string(dir.join("logs/server-2026-09-30.log")).unwrap();
         assert!(file.contains("12:34:56 Waiting for players"), "{file}");
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_install_id_is_kept_while_telemetry_is_on_and_deleted_when_off() {
+        let dir = data_folder("app-install-id", true);
+        let first = install_id(&dir, true).unwrap();
+        assert_ne!(first, 0);
+        assert_eq!(install_id(&dir, true), Some(first));
+        assert!(dir.join(INSTALL_ID_FILE).exists());
+        assert_eq!(install_id(&dir, false), None);
+        assert!(!dir.join(INSTALL_ID_FILE).exists());
+        let second = install_id(&dir, true).unwrap();
+        assert_ne!(second, first);
+        // A damaged file is replaced.
+        fs::write(dir.join(INSTALL_ID_FILE), "nonsense").unwrap();
+        assert_ne!(install_id(&dir, true), Some(second));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_broadcast_start_line_names_the_master_and_telemetry() {
+        let mut config = crate::config::Config::defaults(std::path::Path::new("/srv"));
+        assert!(broadcast_line(&config).starts_with("Broadcast: off"));
+        config.broadcast = true;
+        config.master = "127.0.0.1:26911".into();
+        assert_eq!(
+            broadcast_line(&config),
+            "Broadcast: on, to the Internet Lobby at 127.0.0.1:26911; anonymous statistics on (`telemetry off` in the configuration turns them off)"
+        );
+        config.telemetry = false;
+        assert!(broadcast_line(&config).ends_with("anonymous statistics off"));
     }
 
     #[test]

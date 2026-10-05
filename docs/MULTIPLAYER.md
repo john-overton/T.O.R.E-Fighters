@@ -568,7 +568,7 @@ the [master's wire](formats/master-protocol.md) and
   hosted from Direct Connection is not. Once the King's Visibility setting
   exists (stage F phase 2), *public* lists, *private* does not and
   *password* lists with the lock. A dedicated server lists itself when its
-  configuration says `list on`, off by default. The lobby's Messages say
+  configuration says `broadcast on`, off by default (John, 2026-10-05). The lobby's Messages say
   whether the game is listed and, when the router lets players in, the
   address they reach.
 - **Heartbeats.** A listed game sends its summary (name, mission, players,
@@ -985,7 +985,8 @@ proposal the design is built on:
   the switch and a one-time notice, sending only the list in
   [telemetry](#replay-and-telemetry).
 - **A dedicated server listing itself.** *Agent proposal:* off unless its
-  configuration says `list on`.
+  configuration says `broadcast on` (John chose the name and the default
+  on 2026-10-05; see [decisions](#decisions)).
 - **Port mapping by default.** The game changing the player's router
   settings while hosting. *Agent proposal:* on, with the switch, removed when
   hosting stops, and said in Messages.

@@ -18,6 +18,9 @@ pub enum Command {
     KickPlayer(u8, String),
     End,
     Restart,
+    /// `broadcast on` or `broadcast off`: list the server on the Internet
+    /// Lobby, or take it off.
+    Broadcast(bool),
     Quit,
     Help,
     /// Something typed that is not a command, with what to say back.
@@ -25,8 +28,7 @@ pub enum Command {
 }
 
 /// The help text for `help`.
-pub const HELP: &str =
-    "Commands: status, players, kick SEAT, kick-player ID [REASON], end, restart, quit";
+pub const HELP: &str = "Commands: status, players, kick SEAT, kick-player ID [REASON], end, restart, broadcast on|off, quit";
 
 /// Reads one line. Blank lines are nothing.
 pub fn parse(line: &str) -> Option<Command> {
@@ -53,6 +55,11 @@ pub fn parse(line: &str) -> Option<Command> {
                 Err(_) => Command::Invalid(format!("`{seat}` is not a seat number")),
             },
             _ => Command::Invalid("usage: kick SEAT".into()),
+        },
+        "broadcast" => match rest.as_slice() {
+            ["on"] => Command::Broadcast(true),
+            ["off"] => Command::Broadcast(false),
+            _ => Command::Invalid("usage: broadcast on|off".into()),
         },
         "kick-player" => match rest.split_first() {
             Some((id, reason)) => match id.parse::<u8>() {
@@ -116,6 +123,14 @@ mod tests {
         assert_eq!(parse("restart"), Some(Command::Restart));
         assert_eq!(parse("quit"), Some(Command::Quit));
         assert_eq!(parse("help"), Some(Command::Help));
+        assert_eq!(parse("broadcast on"), Some(Command::Broadcast(true)));
+        assert_eq!(parse(" broadcast  off "), Some(Command::Broadcast(false)));
+        for bad in ["broadcast", "broadcast yes", "broadcast on off"] {
+            assert!(
+                matches!(parse(bad), Some(Command::Invalid(m)) if m.contains("broadcast on|off")),
+                "{bad}"
+            );
+        }
     }
 
     #[test]
