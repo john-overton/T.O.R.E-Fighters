@@ -297,9 +297,20 @@ Before broad creator or flight validation, run the selected aircraft through
 finite flight and branch counts do not establish animation completeness.
 Require signed pitch/roll/yaw response, opposite roll surfaces, shared hinges,
 coherent upper/lower skins and intermediate device travel. Review gear wheel
-separation, roots and stow placement densely. Preserve source neutral geometry;
+separation, roots and stow placement densely, including a near-zero pose before
+gear disappears. Reject new polygon crossings and verify that closing a hook
+raises its blade. Preserve source neutral geometry;
 a pre-deflected branch is not a neutral pose. Record fitted control assignments
 and motion constants in the behavior spec, and keep unknown mechanisms explicit.
+
+Inspect the original atlas before assigning gear joints. Many wheel/strut
+assemblies are transparent panels; their rectangle corners are not separate
+mechanical attachment points. Preserve painted wheel dimensions, check the
+actual painted root, and compare stowed geometry against both sides of the
+neutral fuselage envelope. An out-of-plane bend that merely defeats a planar
+intersection check does not establish a coherent mechanism. Reports labeled
+`motion-survey` have not passed aircraft-specific attachment acceptance.
+
 The [audit](baselines/aircraft-animations.md) and
 [A-7 worked contract](spec/variety-animation.md#a-7-surface-repair-and-acceptance)
 show the first per-aircraft repair and its limitations.

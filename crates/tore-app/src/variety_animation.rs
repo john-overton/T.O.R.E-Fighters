@@ -218,42 +218,90 @@ struct Group {
     max: [f32; 3],
     closed: bool,
 }
+enum SpecificRig {
+    A7(crate::a7_animation::Rig),
+    A310(crate::a310_animation::Rig),
+    F4(Box<crate::f4_animation::Rig>),
+    F15(crate::f15_animation::Rig),
+    F16(crate::f16_animation::Rig),
+    F104(crate::f104_animation::Rig),
+    Mig17(crate::mig17_animation::Rig),
+}
 pub struct Rig {
     id: Id,
     groups: BTreeMap<usize, Group>,
     scale: f32,
-    a7: Option<crate::a7_animation::Rig>,
-    f4: Option<crate::f4_animation::Rig>,
+    specific: Option<SpecificRig>,
 }
 impl Rig {
     pub fn load(id: Id, bytes: &[u8]) -> AppResult<(Self, Shape)> {
         let spec = specification(id).ok_or("unreviewed variety aircraft rig")?;
         let mut shape = Shape::parse(bytes)?;
-        if id == Id::A7 {
-            let (a7, shape) = crate::a7_animation::Rig::load(bytes, shape)?;
-            return Ok((
-                Self {
+        match id {
+            Id::A7 => {
+                let (rig, shape) = crate::a7_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
                     id,
-                    groups: BTreeMap::new(),
-                    scale: spec.scale,
-                    a7: Some(a7),
-                    f4: None,
-                },
-                shape,
-            ));
-        }
-        if matches!(id, Id::F4B | Id::F4J | Id::F4E | Id::F4G) {
-            let (f4, shape) = crate::f4_animation::Rig::load(id, bytes, shape)?;
-            return Ok((
-                Self {
+                    spec.scale,
+                    SpecificRig::A7(rig),
+                    shape,
+                ));
+            }
+            Id::F4B | Id::F4J | Id::F4E | Id::F4G => {
+                let (rig, shape) = crate::f4_animation::Rig::load(id, bytes, shape)?;
+                return Ok(Self::with_specific(
                     id,
-                    groups: BTreeMap::new(),
-                    scale: spec.scale,
-                    a7: None,
-                    f4: Some(f4),
-                },
-                shape,
-            ));
+                    spec.scale,
+                    SpecificRig::F4(Box::new(rig)),
+                    shape,
+                ));
+            }
+            Id::F15 => {
+                let (rig, shape) = crate::f15_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::F15(rig),
+                    shape,
+                ));
+            }
+            Id::F16C => {
+                let (rig, shape) = crate::f16_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::F16(rig),
+                    shape,
+                ));
+            }
+            Id::Mig17 => {
+                let (rig, shape) = crate::mig17_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Mig17(rig),
+                    shape,
+                ));
+            }
+            Id::A310 => {
+                let (rig, shape) = crate::a310_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::A310(rig),
+                    shape,
+                ));
+            }
+            Id::F104 => {
+                let (rig, shape) = crate::f104_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::F104(rig),
+                    shape,
+                ));
+            }
+            _ => {}
         }
         if tore_formats::module::code(bytes)?.0.len() != spec.code
             || shape.faces.len() != spec.faces
@@ -325,35 +373,65 @@ impl Rig {
                 id,
                 groups,
                 scale: spec.scale,
-                a7: None,
-                f4: None,
+                specific: None,
             },
             shape,
         ))
+    }
+    fn with_specific(id: Id, scale: f32, rig: SpecificRig, shape: Shape) -> (Self, Shape) {
+        (
+            Self {
+                id,
+                groups: BTreeMap::new(),
+                scale,
+                specific: Some(rig),
+            },
+            shape,
+        )
     }
     pub fn scale(&self) -> f32 {
         self.scale
     }
     pub fn flame(&self, address: usize) -> bool {
-        if let Some(f4) = &self.f4 {
-            return f4.flame(address);
-        }
-        if self.a7.is_some() {
-            return crate::a7_animation::flame(address);
+        if let Some(rig) = &self.specific {
+            return match rig {
+                SpecificRig::A7(_) => crate::a7_animation::flame(address),
+                SpecificRig::A310(_) => false,
+                SpecificRig::F4(rig) => rig.flame(address),
+                SpecificRig::F15(_) => crate::f15_animation::flame(address),
+                SpecificRig::F16(_) => crate::f16_animation::flame(address),
+                SpecificRig::F104(_) => crate::f104_animation::flame(address),
+                SpecificRig::Mig17(_) => crate::mig17_animation::flame(address),
+            };
         }
         self.groups
             .get(&address)
             .is_some_and(|g| g.part == Part::Flame)
     }
     pub fn animate(&self, source: &Face, state: &State) -> Option<Face> {
-        if let Some(f4) = &self.f4 {
-            return f4.animate(source, state);
-        }
-        if let Some(a7) = &self.a7 {
-            return a7.animate(source, state);
-        }
         if !crate::variety_rotors::keep_face(self.id, source.address) {
             return None;
+        }
+        let mut face = self.animate_devices(source, state)?;
+        // Aircraft-specific control rigs must retain the shared propeller,
+        // tiltrotor and manually selected gun articulation paths.
+        crate::variety_rotors::animate(self.id, &mut face, state);
+        if self.id == Id::Ac130 {
+            animate_gun(&mut face, state);
+        }
+        Some(face)
+    }
+    fn animate_devices(&self, source: &Face, state: &State) -> Option<Face> {
+        if let Some(rig) = &self.specific {
+            return match rig {
+                SpecificRig::A7(rig) => rig.animate(source, state),
+                SpecificRig::A310(rig) => rig.animate(source, state),
+                SpecificRig::F4(rig) => rig.animate(source, state),
+                SpecificRig::F15(rig) => rig.animate(source, state),
+                SpecificRig::F16(rig) => rig.animate(source, state),
+                SpecificRig::F104(rig) => rig.animate(source, state),
+                SpecificRig::Mig17(rig) => rig.animate(source, state),
+            };
         }
         let mut face = source.clone();
         if let Some(group) = self.groups.get(&face.address) {
@@ -418,10 +496,6 @@ impl Rig {
                 }
             }
         }
-        crate::variety_rotors::animate(self.id, &mut face, state);
-        if self.id == Id::Ac130 {
-            animate_gun(&mut face, state);
-        }
         Some(face)
     }
 }
@@ -475,8 +549,7 @@ mod tests {
         let rig = Rig {
             id: Id::F16C,
             scale: 1. / 3.,
-            a7: None,
-            f4: None,
+            specific: None,
             groups: [
                 (
                     1,
@@ -537,7 +610,13 @@ mod tests {
                     normal: None,
                     address,
                 };
-                animate_gun(&mut face, &state);
+                let rig = Rig {
+                    id: Id::Ac130,
+                    scale: SOURCE_SCALE as f32,
+                    specific: None,
+                    groups: BTreeMap::new(),
+                };
+                face = rig.animate(&face, &state).unwrap();
                 let actual = [
                     f64::from(face.positions[1][0]),
                     f64::from(face.positions[1][2]),

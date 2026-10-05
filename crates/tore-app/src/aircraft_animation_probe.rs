@@ -4,7 +4,12 @@
 use crate::{AppResult, aircraft::Airframe, flight::State};
 use std::{collections::BTreeMap, fmt::Write as _, fs, path::Path};
 use tore_formats::{aircraft::AircraftId, shape::Face};
+mod a310;
+mod f104;
+mod f15;
+mod f16;
 mod f4;
+mod mig17;
 
 const EPSILON: f32 = 0.0001;
 const CELL_WIDTH: usize = 256;
@@ -133,7 +138,20 @@ impl Control {
             Self::Gear => Expectation::Required,
             Self::Hook if state.hook_available() => Expectation::Required,
             Self::Hook => Expectation::Unsupported,
-            Self::Brake if matches!(id, Id::A7 | Id::F4B | Id::F4J | Id::F4E | Id::F4G) => {
+            Self::Brake
+                if matches!(
+                    id,
+                    Id::A7
+                        | Id::F4B
+                        | Id::F4J
+                        | Id::F4E
+                        | Id::F4G
+                        | Id::F15
+                        | Id::F16C
+                        | Id::Mig17
+                        | Id::F104
+                ) =>
+            {
                 Expectation::Required
             }
             Self::Brake => Expectation::Unknown,
@@ -161,7 +179,20 @@ impl Control {
             Self::Sweep => Expectation::Unknown,
             Self::GunHeading | Self::GunElevation if id == Id::Ac130 => Expectation::Required,
             Self::GunHeading | Self::GunElevation => Expectation::Unsupported,
-            Self::Exhaust if matches!(id, Id::A7 | Id::F4B | Id::F4J | Id::F4E | Id::F4G) => {
+            Self::Exhaust
+                if matches!(
+                    id,
+                    Id::A7
+                        | Id::F4B
+                        | Id::F4J
+                        | Id::F4E
+                        | Id::F4G
+                        | Id::F15
+                        | Id::F16C
+                        | Id::F104
+                        | Id::Mig17
+                ) =>
+            {
                 Expectation::Required
             }
             Self::Exhaust => Expectation::Unknown,
@@ -207,10 +238,25 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     neutral.ticks = 0;
     let base = airframe.animation_faces(&neutral);
     let scale = airframe.animation_scale();
-    let raw = tore_formats::shape::Shape::parse(
-        data.get(&airframe.profile.shape)
-            .ok_or_else(|| format!("missing {}", airframe.profile.shape))?,
-    )?;
+    let source_bytes = data
+        .get(&airframe.profile.shape)
+        .ok_or_else(|| format!("missing {}", airframe.profile.shape))?;
+    let raw = tore_formats::shape::Shape::parse(source_bytes)?;
+    let a310_sources = if id == AircraftId::A310 {
+        Some(a310::Sources::load(source_bytes)?)
+    } else {
+        None
+    };
+    let f15_sources = if id == AircraftId::F15 {
+        Some(f15::Sources::load(source_bytes)?)
+    } else {
+        None
+    };
+    let mig17_sources = if id == AircraftId::Mig17 {
+        Some(mig17::Sources::load(source_bytes)?)
+    } else {
+        None
+    };
     write_obj(&out.join("source-neutral.obj"), &raw.faces)?;
     write_obj(&out.join("runtime-neutral.obj"), &base)?;
     contact_sheet(
@@ -218,8 +264,25 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
         &raw.faces,
         std::slice::from_ref(&base),
     )?;
+    let scope = if matches!(
+        id,
+        AircraftId::A7
+            | AircraftId::A310
+            | AircraftId::F4B
+            | AircraftId::F4J
+            | AircraftId::F4E
+            | AircraftId::F4G
+            | AircraftId::F15
+            | AircraftId::F16C
+            | AircraftId::F104
+            | AircraftId::Mig17
+    ) {
+        "reviewed-controls-and-attachments"
+    } else {
+        "motion-survey"
+    };
     let mut report = format!(
-        "{{\"aircraft\":\"{}\",\"shape\":\"{}\",\"source_units_to_feet\":{scale},\"neutral_faces\":{},\"controls\":[",
+        "{{\"aircraft\":\"{}\",\"shape\":\"{}\",\"source_units_to_feet\":{scale},\"validation_scope\":\"{scope}\",\"neutral_faces\":{},\"controls\":[",
         id.pt(),
         airframe.profile.shape,
         base.len()
@@ -228,6 +291,10 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
         "{} headless animation sweep\nActual Airframe::animation_faces output; no camera, texture shading or renderer.\nRows: sample values in ascending order. Columns: top (X,Y), side (Y,Z), rear (X,Z).\nGrey: unchanged. Orange: moved or newly visible. Pale blue: reference outline.\nCandidate seam gaps are measured only among vertices coincident in the reference pose.\nThey include intentional moving/fixed boundaries and require source review.\nAll geometry distances in JSON are feet. OBJ vertices retain source coordinates.\n\ncontrol expectation status reversible intermediate_unique\n",
         id.pt()
     );
+    writeln!(
+        notes,
+        "Validation scope: {scope}. A motion survey does not accept unreviewed articulation."
+    )?;
     let mut failures = Vec::new();
     notes.push_str("Exhaust sweeps the source flame geometry demand directly. It does not test or grant afterburner capability.\n");
     if id == AircraftId::A7 {
@@ -236,7 +303,15 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     notes.push('\n');
     for (index, control) in Control::ALL.into_iter().enumerate() {
         let expectation = control.expectation(id, &neutral);
-        let values = control.values();
+        let mut values = control.values();
+        if scope == "reviewed-controls-and-attachments" && matches!(control, Control::Gear) {
+            values.insert(1, 1e-6);
+        }
+        if id == AircraftId::Mig17 && matches!(control, Control::Gear) {
+            // Retain the former connector crossover as a regression sample.
+            values.push(1. - 2. / 8.8);
+            values.sort_by(f64::total_cmp);
+        }
         let poses: Vec<_> = values
             .iter()
             .map(|value| {
@@ -284,6 +359,69 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if let Some(source) = &a310_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                a310::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &f15_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                f15::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::F16C {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                f16::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &mig17_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                mig17::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::F104 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                f104::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    metric,
+                );
+            }
+        }
+        if matches!(control, Control::Hook) {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                hook_stow_direction(*value, reference, pose, scale, metric);
+            }
+        }
         let moved = poses
             .iter()
             .any(|pose| geometry_hash(pose) != geometry_hash(&base));
@@ -301,7 +439,7 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             (false, Expectation::Unsupported) => "not-applicable",
             (false, Expectation::Unknown) => "unreviewed",
         };
-        if !all_finite
+        let failed = !all_finite
             || !reversible
             || (expectation == Expectation::Unsupported && moved)
             || (expectation == Expectation::Required && (!moved || unique < 3))
@@ -312,9 +450,10 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                     || metric.reviewed_direction_failures != 0
                     || metric.reviewed_neutral_mismatch
                     || metric.reviewed_wheel_failed
-            })
-        {
-            failures.push(format!("{}: status={status}, finite={all_finite}, reversible={reversible}, unique={unique}, anchor_missing={}, anchor_gap_ft={}, skin_gap_ft={}, direction_failures={}, neutral_mismatch={}, wheel_failed={}", control.name(), metrics.iter().any(|m| m.reviewed_anchor_missing), metrics.iter().map(|m| m.max_reviewed_anchor_gap).fold(0_f32, f32::max), metrics.iter().map(|m| m.max_reviewed_skin_gap).fold(0_f32, f32::max), metrics.iter().map(|m| m.reviewed_direction_failures).sum::<usize>(), metrics.iter().any(|m| m.reviewed_neutral_mismatch), metrics.iter().any(|m| m.reviewed_wheel_failed)));
+                    || !metric.new_planar_crossings.is_empty()
+            });
+        if failed {
+            failures.push(format!("{}: status={status}, finite={all_finite}, reversible={reversible}, unique={unique}, anchor_missing={}, anchor_gap_ft={}, skin_gap_ft={}, direction_failures={}, neutral_mismatch={}, wheel_failed={}, new_planar_crossings={}", control.name(), metrics.iter().any(|m| m.reviewed_anchor_missing), metrics.iter().map(|m| m.max_reviewed_anchor_gap).fold(0_f32, f32::max), metrics.iter().map(|m| m.max_reviewed_skin_gap).fold(0_f32, f32::max), metrics.iter().map(|m| m.reviewed_direction_failures).sum::<usize>(), metrics.iter().any(|m| m.reviewed_neutral_mismatch), metrics.iter().any(|m| m.reviewed_wheel_failed), metrics.iter().map(|m| m.new_planar_crossings.len()).sum::<usize>()));
         }
         writeln!(
             notes,
@@ -327,9 +466,10 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
         }
         write!(
             report,
-            "{{\"control\":\"{}\",\"expectation\":\"{}\",\"status\":\"{status}\",\"reversible\":{reversible},\"distinct_poses\":{unique},\"samples\":[",
+            "{{\"control\":\"{}\",\"expectation\":\"{}\",\"status\":\"{status}\",\"checks_passed\":{},\"reversible\":{reversible},\"distinct_poses\":{unique},\"samples\":[",
             control.name(),
-            expectation.name()
+            expectation.name(),
+            !failed
         )?;
         for (sample, ((value, pose), metric)) in values.iter().zip(&poses).zip(&metrics).enumerate()
         {
@@ -349,6 +489,12 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             reference,
             &poses,
         )?;
+    }
+    if id == AircraftId::F16C {
+        failures.extend(f16::combinations(&airframe, &neutral, out)?);
+    }
+    if id == AircraftId::F104 {
+        failures.extend(f104::combinations(&airframe, &neutral, out)?);
     }
     report.push_str("]}\n");
     fs::write(out.join("report.json"), report)?;
@@ -408,12 +554,14 @@ fn geometry_hash(faces: &[Face]) -> u64 {
 #[derive(Default)]
 struct Metrics {
     finite: bool,
+    new_planar_crossings: Vec<FaceKey>,
     changed: Vec<FaceKey>,
     added: usize,
     removed: usize,
     topology_changes: usize,
     moved_vertices: usize,
     sides: [usize; 3],
+    hook_lift: Option<f32>,
     max_displacement: f32,
     max_edge_change: f32,
     max_coincident_skin_gap: f32,
@@ -443,6 +591,13 @@ fn measure(reference: &[Face], pose: &[Face], scale: f32) -> Metrics {
     };
     metric.removed = before.keys().filter(|key| !after.contains_key(key)).count();
     for (key, face) in &after {
+        if planar_crossing(face, scale)
+            && before
+                .get(key)
+                .is_none_or(|old| !planar_crossing(old, scale))
+        {
+            metric.new_planar_crossings.push(*key);
+        }
         let Some(old) = before.get(key) else {
             metric.added += 1;
             continue;
@@ -489,6 +644,102 @@ fn measure(reference: &[Face], pose: &[Face], scale: f32) -> Metrics {
         metric.max_coincident_skin_gap = coincident_skin_gap(&before, &after, scale);
     }
     metric
+}
+/// A hook closing from its source deployed pose must raise its lowest moving
+/// point. Attachment checks alone would accept a blade swinging farther down.
+fn hook_stow_direction(
+    value: f64,
+    reference: &[Face],
+    pose: &[Face],
+    scale: f32,
+    metric: &mut Metrics,
+) {
+    if !(0. ..1.).contains(&value) || value == 0. || metric.changed.is_empty() {
+        return;
+    }
+    let before = keyed(reference);
+    let after = keyed(pose);
+    let lowest = |faces: &BTreeMap<FaceKey, &Face>| {
+        metric
+            .changed
+            .iter()
+            .filter_map(|key| faces.get(key))
+            .flat_map(|face| face.positions.iter())
+            .map(|p| p[2])
+            .reduce(f32::min)
+    };
+    if let (Some(a), Some(b)) = (lowest(&before), lowest(&after)) {
+        let lift = (b - a) * scale;
+        metric.hook_lift = Some(lift);
+        if lift <= EPSILON {
+            metric.reviewed_direction_failures += 1;
+        }
+    }
+}
+/// Proper edge crossings in a planar polygon, measured independently of its
+/// stored normal (a bowtie can have a zero Newell normal). Non-planar surfaces
+/// remain a separate diagnostic; an orthographic overlap alone is not a 3D crossing.
+pub(crate) fn planar_crossing(face: &Face, scale: f32) -> bool {
+    let points = &face.positions;
+    if points.len() < 4 || !points.iter().flatten().all(|x| x.is_finite()) {
+        return false;
+    }
+    let origin = points[0].map(f64::from);
+    let mut normal = None;
+    for i in 1..points.len() - 1 {
+        let a: [f64; 3] = std::array::from_fn(|k| f64::from(points[i][k]) - origin[k]);
+        let b: [f64; 3] = std::array::from_fn(|k| f64::from(points[i + 1][k]) - origin[k]);
+        let n = [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ];
+        let length = n.iter().map(|v| v * v).sum::<f64>().sqrt();
+        if length > 1e-10 {
+            normal = Some(n.map(|v| v / length));
+            break;
+        }
+    }
+    let Some(normal) = normal else {
+        return false;
+    };
+    if points.iter().any(|p| {
+        (0..3)
+            .map(|i| (f64::from(p[i]) - origin[i]) * normal[i])
+            .sum::<f64>()
+            .abs()
+            * f64::from(scale)
+            > f64::from(EPSILON)
+    }) {
+        return false;
+    }
+    let axis = (0..3)
+        .max_by(|a, b| normal[*a].abs().total_cmp(&normal[*b].abs()))
+        .unwrap();
+    let project = |p: [f32; 3]| [f64::from(p[(axis + 1) % 3]), f64::from(p[(axis + 2) % 3])];
+    let side = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+        (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    };
+    let opposed = |a: f64, b: f64| (a > 1e-9 && b < -1e-9) || (b > 1e-9 && a < -1e-9);
+    for i in 0..points.len() {
+        let ni = (i + 1) % points.len();
+        for j in i + 1..points.len() {
+            let nj = (j + 1) % points.len();
+            if ni == j || nj == i {
+                continue;
+            }
+            let (a, b, c, d) = (
+                project(points[i]),
+                project(points[ni]),
+                project(points[j]),
+                project(points[nj]),
+            );
+            if opposed(side(a, b, c), side(a, b, d)) && opposed(side(c, d, a), side(c, d, b)) {
+                return true;
+            }
+        }
+    }
+    false
 }
 // Opposite skins with the same source vertices must map every vertex together,
 // even when their windings differ. This separates skin faults from joint gaps.
@@ -760,6 +1011,22 @@ fn shared_vertex_gaps(
 }
 impl Metrics {
     fn json(&self, out: &mut String) -> std::fmt::Result {
+        write!(
+            out,
+            "\"hook_lowest_point_lift_ft\":{},",
+            self.hook_lift
+                .map_or_else(|| "null".into(), |v| v.to_string())
+        )?;
+
+        write!(out, "\"new_planar_self_intersections\":[")?;
+        for (index, key) in self.new_planar_crossings.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            write!(out, "\"{:x}:{}\"", key.0, key.1)?;
+        }
+        out.push_str("],");
+
         write!(
             out,
             "\"reviewed_wheel_failed\":{},\"reviewed_wheel_rigidity_error_ft\":{},\"reviewed_min_wheel_gap_ft\":{},",
@@ -1150,5 +1417,52 @@ mod tests {
         );
         assert!(metric.reviewed_wheel_failed);
         assert!(metric.reviewed_wheel_rigidity_error > 0.);
+    }
+    #[test]
+    fn newly_crossed_planar_connector_is_detected_even_with_zero_area_normal() {
+        let source = face(
+            900,
+            vec![[0., 0., 0.], [0., 3., 0.], [0., 3., -2.], [0., 0., -2.]],
+        );
+        let crossed = face(
+            900,
+            vec![[0., 0., 0.], [0., 3., -2.], [0., 3., 0.], [0., 0., -2.]],
+        );
+        assert!(!planar_crossing(&source, 1.));
+        assert!(planar_crossing(&crossed, 1.));
+        assert_eq!(
+            measure(&[source], std::slice::from_ref(&crossed), 1.).new_planar_crossings,
+            [(900, 0)]
+        );
+        assert!(
+            measure(
+                std::slice::from_ref(&crossed),
+                std::slice::from_ref(&crossed),
+                1.
+            )
+            .new_planar_crossings
+            .is_empty()
+        );
+    }
+    #[test]
+    fn projected_overlap_does_not_claim_a_nonplanar_3d_intersection() {
+        let overpass = face(
+            901,
+            vec![[0., 0., 0.], [0., 3., -2.], [1., 3., 0.], [1., 0., -2.]],
+        );
+        assert!(!planar_crossing(&overpass, 1.));
+    }
+    #[test]
+    fn attached_hook_swinging_down_on_stow_fails_direction_check() {
+        let source = face(902, vec![[0., 0., 0.], [0., -3., -2.], [0., -2., -3.]]);
+        let mut wrong = source.clone();
+        wrong.positions[1][2] -= 1.;
+        wrong.positions[2][2] -= 1.;
+        let original = vec![source];
+        let posed = vec![wrong];
+        let mut metric = measure(&original, &posed, 1.);
+        hook_stow_direction(0.5, &original, &posed, 1., &mut metric);
+        assert_eq!(metric.reviewed_direction_failures, 1);
+        assert_eq!(metric.hook_lift, Some(-1.));
     }
 }

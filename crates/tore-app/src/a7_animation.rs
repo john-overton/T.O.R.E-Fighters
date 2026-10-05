@@ -312,7 +312,7 @@ impl Rig {
                 &mut moving,
                 [0., -17., -12.5],
                 [1., 0., 0.],
-                (1. - travel) * 1.2,
+                -(1. - travel) * 1.2,
             );
             for (p, moved) in result.positions.iter_mut().zip(moving.positions) {
                 if ![[0., -16., -14.], [0., -18., -11.]].contains(p) {
@@ -376,8 +376,8 @@ fn main_gear(face: &mut Face, deployed: f64) {
     let inward = (2. * (1. - deployed)).clamp(0., 1.);
     let lift = (1. - 2. * deployed).clamp(0., 1.);
     let (sin, cos) = (0.70 * inward).sin_cos();
-    let center_x = 11. - 8. * inward;
-    let center_z = -22. + 12. * lift;
+    let center_x = 11. - 8. * inward + 0.5 * lift;
+    let center_z = -22. + 10.8 * lift;
     for p in &mut face.positions {
         let weight = ((-13. - p[2] as f64) / 6.).clamp(0., 1.);
         let lower_x = p[0] as f64 / 11. * (center_x + (p[2] as f64 + 22.) * sin);
@@ -414,7 +414,7 @@ fn verify_main_gear(shape: &Shape) -> AppResult<()> {
                     && moved
                         .positions
                         .iter()
-                        .any(|p| p[0].abs() > 5. || !(-13. ..=-7.).contains(&p[2])))
+                        .any(|p| p[0].abs() > 5.5 || !(-13.6..=-8.8).contains(&p[2])))
             {
                 return Err("unreviewed A7.SH wheel separation or fitted stow envelope".into());
             }
@@ -740,6 +740,32 @@ mod tests {
     }
 
     #[test]
+    fn main_connector_never_folds_across_its_fixed_edge() {
+        // Synthetic connector on the reviewed hinge, with invented Y and
+        // lower-edge height. Dense sampling catches a near-stow bow tie.
+        let panel = synthetic(
+            0x4c4f,
+            vec![
+                [2., -3., -13.],
+                [3., -3., -12.],
+                [11., -3., -24.9],
+                [2., -3., -24.9],
+            ],
+        );
+        for step in 0..=400 {
+            let mut moved = panel.clone();
+            main_gear(&mut moved, step as f64 / 400.);
+            assert!(
+                !crate::aircraft_animation_probe::planar_crossing(&moved, 1.),
+                "connector crossing at gear {}",
+                step as f64 / 400.
+            );
+            close(panel.positions[0], moved.positions[0]);
+            close(panel.positions[1], moved.positions[1]);
+        }
+    }
+
+    #[test]
     fn a7_main_gear_linkage_keeps_rigid_wheels_separated_inside_the_fitted_stow_envelope() {
         // Invented wheel extent of two units, not the retail three-unit skin.
         let wheel = synthetic(
@@ -762,8 +788,8 @@ mod tests {
             (1., [11., -2., -22.]),
             (0.75, [7., -2., -22.]),
             (0.5, [3., -2., -22.]),
-            (0.25, [3., -2., -16.]),
-            (0., [3., -2., -10.]),
+            (0.25, [3.25, -2., -16.6]),
+            (0., [3.5, -2., -11.2]),
         ] {
             let mut right = wheel.clone();
             let mut left = synthetic(
@@ -806,7 +832,7 @@ mod tests {
                     right
                         .positions
                         .iter()
-                        .all(|p| p[0] < 5. && (-13. ..=-7.).contains(&p[2]))
+                        .all(|p| p[0] < 5.5 && (-13.6..=-8.8).contains(&p[2]))
                 );
             }
         }
@@ -840,6 +866,34 @@ mod tests {
             // Analytic bound for the reviewed three-unit retail wheel extent.
             let minimum_x = 11. - 8. * inward - 3. * (0.70 * inward).sin();
             assert!(minimum_x > 1.05);
+        }
+    }
+    #[test]
+    fn hook_stow_raises_the_blade_while_keeping_both_roots_fixed() {
+        let rig = Rig {
+            flaps: BTreeMap::new(),
+        };
+        let mut s = state();
+        let source = synthetic(
+            HOOK[0],
+            vec![
+                [0., -30., -20.],
+                [0., -32., -18.],
+                [0., -18., -11.],
+                [0., -16., -14.],
+            ],
+        );
+        for value in [0.25, 0.5, 0.75, 1.] {
+            s.hook = value;
+            let pose = rig.animate(&source, &s).unwrap();
+            close(pose.positions[2], source.positions[2]);
+            close(pose.positions[3], source.positions[3]);
+            if value < 1. {
+                assert!(pose.positions[0][2] > source.positions[0][2]);
+                assert!(pose.positions[1][2] > source.positions[1][2]);
+            } else {
+                assert_eq!(pose.positions, source.positions);
+            }
         }
     }
 }

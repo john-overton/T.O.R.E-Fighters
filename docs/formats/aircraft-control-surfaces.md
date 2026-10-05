@@ -10,7 +10,7 @@
 
 Research evidence, 2026-10-05. Bounded SH readers inspected user-owned FA_2
 resources; no imported instructions were executed. Coordinates are source
-right, forward, up. These shapes use one-third foot per unit. Source archive
+right, forward, up. The fighter shapes use one-third foot per unit; A310 uses two-thirds. Source archive
 identity is recorded in the [variety inventory](aircraft-variety.md). Geometry
 and branch membership establish these facts; continuous mechanical motion and
 control assignments without an alias remain fitted in the
@@ -82,3 +82,106 @@ Detailed local evidence is retained in `.local/animation-audit/a7-geometry.json`
 `f4-geometry.json` and `f4-source-review.md`. These contain user-owned geometry
 and stay ignored. Pose acceptance and remaining aircraft are recorded in the
 [animation audit](../baselines/aircraft-animations.md).
+
+
+## F-15C source additions
+
+F15.SH SHA-256 is
+`9f47b31a247bea282b5f2ab0656a39abe158e71dbe257a3ee617a334e710e8ad`;
+_F15.PIC is
+`7ea79e88a3e6bdd31d23bdee017d07f6cffbc40e43fd9b91dc9b97ec5ce48374`.
+The bounded reader finds 30,762 CODE bytes, 346 neutral faces and five state
+words: 0x8800 flame, 0x8806 brake, 0x880c gear, and 0x8818/0x881e flaps.
+These branches add eight flame, four brake and 22 gear faces. Flap state -1
+replaces neutral skins and supplies separate end closures.
+
+Neutral flap pairs 0x5c3e/0x5c5d map to down 0x5cc6/0x5ca7, with closure
+0x5ce5. The opposite pair 0x5b57/0x5b76 maps to 0x5bdf/0x5bc0, closure
+0x5bfe. Source vertex order differs between skins and must be matched by
+shared leading and trailing geometry.
+
+Nose side panels 0x5a82/0x5aa1 use the same wheel/strut/diagonal-brace cutout,
+with rectangle Y=50..64,Z=-27..-8. Texture UV [74,230] reaches the forward
+upper corner [0,64,-8]. Front panels 0x5aee/0x5b0d show the same assembly
+from its narrow axis. The untextured 0x5ac0/0x5ad7 panels are separate from
+that wheel cutout and have an upper edge at Y=52,Z=-8. The texture rectangle
+corners do not establish multiple fixed strut joints. The chosen continuous
+fold remains [fitted](../spec/variety-animation.md#f-15c-control-and-device-fit).
+
+Local source evidence is `single-geometry.json`, `f15-rig-plan.json` and the
+F-15 atlas inspection under `.local/animation-audit/`. Retail retraction timing
+and exact mechanisms remain unknown; a live retail comparison is unavailable.
+
+
+## MiG-17F source additions
+
+M17.SH SHA-256 is
+`55552c8524853466cfa5cb482ce3be9b40cc4dbde99f25d6e1e488400b406939`;
+_M17.PIC is
+`07a629908ac897b3c2e9e03f132a0c58effc1bfe8d210d7d1e63fb053aedc9c5`.
+The reviewed shape has 20,602 CODE bytes, 273 neutral faces and state words
+0x6050, 0x6056, 0x605c, 0x6068 and 0x606e. Flame/brake/gear branches add
+5/10/22 faces. No source rudder alias establishes the fitted yaw law.
+
+Neutral rudder/cap skins have thick, distinct forward vertices but common
+trailing points. The source flap down branch adds geometry without removing
+neutral skins, and its front coordinates differ by 1..2 units. Overlaying both
+branches or treating the extra quad as an end-cap triangle is not supported.
+The deliberate anchored flap approximation is recorded in the
+[MiG-17 fit](../spec/variety-animation.md#mig-17f-control-and-device-fit).
+
+Atlas inspection distinguishes wheel/strut panels 0x4713/0x4732 and
+0x483f/0x485e from camouflaged doors 0x4751/0x4770 and 0x487d/0x489c.
+The nose pair 0x4a16/0x4a35 contains one wheel/strut cutout. Its painted top
+band at V=143,U=225..233 maps to Y=32.7838..34.2973,Z=-6. The transparent
+rectangle corners are not separate painted attachment points. These are
+source-art observations; the chosen axis and travel remain fitted.
+
+Evidence: `.local/animation-audit/mig17-geometry.json`, the original atlas
+inspection sheet, and `mig17-painted-root-review.json`. Original mechanical
+linkages, exact live deflections and timing remain unknown.
+
+
+## F-16C and F-104N source additions
+
+| Shape | CODE bytes | Neutral faces | SHA-256 |
+| --- | ---: | ---: | --- |
+| F16.SH | 31488 | 356 | `7d570f1f705cfaa6b1288653e47e4c502d7606109044f306972bd6c63161f315` |
+| F104.SH | 28374 | 297 | `2ee08d6c1f0538e2c3060a7989567c002b7a0820614a7c124947f17981cdd352` |
+
+F16 neutral rudder 0x6323/0x634a has the exact edge [0,-40,11] to [0,-54,37].
+Its paired horizontal-tail root chords span X=+/-10,Y=-32..-59,Z=1. Source
+flaps have four skins/closures on each side. Right lower inboard triangle
+0x5fb4 matches deployed 0x607b through vertex order [1,2,0], rather than a
+blanket order shared with neighboring skins. Nose brace 0x5e1f/0x5e36 has a
+one-unit distal pin edge, which must stay intact under the fitted motion.
+
+F104 neutral rudder 0x5646/0x566e has edge [0,-53,9] to [0,-55,21]. Its high
+tail shares a centerline root chord at Y=-49..-73,Z=21. The flap down branch
+provides closure 0x5920 on the left only. Main wheel skins are separate from
+larger leg/bridge sheets and retain different longitudinal extents on each
+side. Hook 0x6134/0x6154 has near edge [0,-32,-6] to [0,-35,-6]. Neither a
+mirrored missing closure nor symmetric replacement wheel geometry is supported.
+
+Local source inspection and original atlas crops are under
+`.local/animation-audit/`. Continuous laws and limitations are in the
+[F-16/F-104 fit](../spec/variety-animation.md#f-16c-and-f-104n-control-fits).
+
+## A310 source additions
+
+A310.SH SHA-256 is
+`95602bbe6384c3a3ca0b20f7e8c5b35d9baba4283f86d490dd1da8fb7091fce4`,
+with 20,868 CODE bytes, 248 neutral faces and exponent 9. Neutral rudder
+0x484b/0x4872 shares edge [0,-105,17] to [0,-127,57]. Flap state -1 is down;
++1 omits skins. Neutral/down pairs are 0x4704/0x46ba and 0x472b/0x469b on
+the left, 0x4622/0x45d8 and 0x4649/0x45b9 on the right. Separate trailing
+triangles provide fitted roll candidates; the horizontal tail has no independent
+pitch alias.
+
+Original gear artwork contains crossed views of assemblies, rather than a
+separate door for every panel. Main tires fit below source Z=-12. The nose
+shaft/wheel/brace front-view attachment is X=-2..2,Y=63,Z=-8; the sloping
+side-quad upper corners are image margins. Source body sections independently
+bound the stow envelope used by the [A310 fit](../spec/variety-animation.md#a310-control-and-gear-fit).
+Local source evidence is `transport-geometry.json`, `transport-source-review.md`
+and the original gear atlas inspection under `.local/animation-audit/`.

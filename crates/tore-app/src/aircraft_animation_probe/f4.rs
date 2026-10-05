@@ -348,7 +348,7 @@ pub(super) fn check(
     }
 }
 
-fn witness_positions(
+pub(super) fn witness_positions(
     old: &BTreeMap<FaceKey, &Face>,
     new: &BTreeMap<FaceKey, &Face>,
     point: [f32; 3],

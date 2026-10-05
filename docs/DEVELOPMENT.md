@@ -563,10 +563,13 @@ TORE_DATA_DIR=.local/dev-profile cargo run --locked -p tore-app -- --aircraft a7
 
 This exits before window initialization. It writes actual transformed OBJ poses,
 `report.json`, `index.txt` and CPU orthographic contact sheets. Missing required
-motion or a reviewed attachment/direction failure returns an error after writing
+motion, new planar crossings, reversed hook stow or a reviewed attachment/
+direction failure returns an error after writing
 evidence. Raw candidate seams still need source review. Keep these user-owned
 geometry derivatives ignored. `--headless-flight` alone does not test rendered
-control surfaces. See the [aircraft animation audit](baselines/aircraft-animations.md).
+control surfaces. Reports distinguish `motion-survey` from
+`reviewed-controls-and-attachments`; a passing generic survey is not acceptance.
+See the [aircraft animation audit](baselines/aircraft-animations.md).
 
 For a CPU-rendered Ordnance screen capture:
 

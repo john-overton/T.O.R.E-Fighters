@@ -52,7 +52,7 @@ reviewed guard; it does not interpret arbitrary machine instructions.
 
 ## Initial generic motion
 
-Agent choices, explicitly fitted. The A-7 and F-4 family use the aircraft-specific rules
+Agent choices, explicitly fitted. The individually repaired aircraft use the specific rules
 below; other variety rigs retain these initial rules pending individual review.
 
 - Gear uses its original deployed branch. During retraction, the group moves
@@ -74,7 +74,7 @@ below; other variety rigs retain these initial rules pending individual review.
   or afterburner effects from the existence of a source flame branch.
 
 [Propellers, rotors and tiltrotor nacelles](rotor-presentation.md) have their
-own reviewed groups and fitted motion. Outside the corrected A-7 and F-4 family, remaining flap/elevator/aileron groups,
+own reviewed groups and fitted motion. Outside individually repaired profiles, remaining flap/elevator/aileron groups,
 VTOL jet nozzle geometry, unlocated hook geometry and live mirror masks for new
 cockpit families are still incomplete. Static parts remain original geometry;
 the import does not claim every surface is animated.
@@ -101,8 +101,8 @@ coordinates are right, forward, up, at one-third foot per unit.
 | Roll | Use the separate outer-wing trailing triangles. Hold their upper/lower hinge edges and outer tip fixed, and move their shared trailing vertex through a fitted 0.20-radian centerline rotation. Positive roll lowers the left trailing point and raises the right. This constrained skin deformation keeps the two skins joined; it is not a recovered independent aileron branch. |
 | Flaps | Source `_PLleftFlap`/`_PLrightFlap` state -1 supplies down geometry; +1 omits skins and is not an up endpoint. Interpolate each neutral skin vertex to its matched down vertex by the live 0..1 fraction. Preserve all four hinge-skin endpoints on each side and shared trailing vertices. Show original outboard closure triangles during deployment. |
 | Brakes | Keep cavities static. Rotate the left/right panel skins about their own forward vertical source seams, closing through `atan(7/8)` radians with opposite signs. Brace roots remain anchored while outer points follow the panel. Source full-open geometry is exact; continuous travel and brace deformation are fitted. |
-| Hook | Preserve both reviewed source root-edge points. Rotate distal vertices toward stow around fitted mean root `[0,-17,-12.5]`, lateral axis, by `1.2 * (1-hook)` radians. Hide at zero deployment. |
-| Main gear | Fitted two-stage linkage: as gear decreases 1 to 0.5, wheel centers move from X=+/-11 to +/-3 at Y=-2,Z=-22 while tilting 0.70 radians. From 0.5 to 0, centers rise to Z=-10. Upper vertices with Z>=-13 remain fixed; lower vertices use weight `clamp((-13-Z)/6,0,1)` toward the common linkage transform. Wheels remain rigid; connecting skins deform. This replaces an inward hinge fit that crossed the wheels. |
+| Hook | Preserve both reviewed source root-edge points. Rotate distal vertices toward stow around fitted mean root `[0,-17,-12.5]`, lateral axis, by `-1.2 * (1-hook)` radians. Closing must raise the blade, not swing it farther down. Hide at zero deployment. |
+| Main gear | Fitted two-stage linkage: as gear decreases 1 to 0.5, wheel centers move from X=+/-11 to +/-3 at Y=-2,Z=-22 while tilting 0.70 radians. From 0.5 to 0, centers move to X=+/-3.5,Z=-11.2, keeping the connecting panel below its hinge edge until it stows inside the body. Upper vertices with Z>=-13 remain fixed; lower vertices use weight `clamp((-13-Z)/6,0,1)` toward the common linkage transform. Wheels remain rigid; connecting skins deform. This replaces an inward hinge fit that crossed the wheels. |
 | Nose gear and doors | Nose assembly folds around `[0,46,-12]`, lateral axis, through fitted -pi/2 while closing. Each door uses its own source attachment edge and fitted pi/2 travel. Hide deployed branches at zero gear. Mechanical sequencing remains fitted. |
 
 Preserve source texture coordinates, colors and materials. Rotate normals with
@@ -116,7 +116,7 @@ Require exact zero-state neutral rudder skins, fixed reviewed hinge endpoints to
 within 0.0001 ft, coherent twin skins, opposite roll signs and matching pitch
 signs. Require main wheels to stay separated by at least 0.70 ft with each side at
 least 0.35 ft from center, preserve wheel dimensions and upper roots, and fit
-stowed wheel bounds inside abs(X)<=5,Z=-13..-7 source units. Inspect top, side
+stowed wheel bounds inside abs(X)<=5.5,Z=-13.6..-8.8 source units. Inspect top, side
 and rear contact sheets, including intermediate gear poses. Finite/reversible geometry alone does not pass an aircraft. The
 [animation audit](../baselines/aircraft-animations.md) records per-aircraft
 results and remaining gaps.
@@ -178,3 +178,132 @@ engine behavior. Per-aircraft load validation checks the measured shape layout
 and every implemented branch count. Device captures and source-art inspection
 must be recorded separately from flight and multiplayer validation. No claim
 of retail animation timing or complete moving-surface parity is made.
+
+
+## F-15C control and device fit
+
+Implementation fit, agent decision, 2026-10-05. F15.SH source skins and named
+flap endpoints are retained. No source animation law for pitch, roll or gear
+retraction was recovered. Source coordinates use one-third foot per unit.
+
+| Control | Fitted contract |
+| --- | --- |
+| Yaw | Split upper fin skins at `y=-57+(z-5)*5/38`. Rear regions rotate `0.35*rudder` radians around their diagonal seam; lower fins stay fixed. |
+| Pitch | Split the two tail skins at their existing diagonal rear seams. Rotate rear regions by `-0.30*elevator` radians around rightward axes. Both trailing controls rise for positive input. |
+| Roll | Split the outer trailing wing skins at abs(X)=42 and 56. Only the central strip moves through `-0.20*aileron` radians about its outward leading axis. Pin each thick leading-skin edge; retain original inner and tip strips. Positive input raises right and lowers left. |
+| Flaps | Interpolate exact matched source neutral/down vertices. Upper/lower leading edges stay fixed; original end closures appear only above zero deployment. No automatic flap/roll coupling. |
+| Brake | Preserve full-open source geometry and forward edge at Y=28,Z=11. Close about the lateral axis by `atan(19/27)*(1-brake)` radians; hide at zero. |
+| Main gear | Keep upper attachments at Z=-11. Split rigid lower wheel sheets at Z=-18. While closing, turn the lower assembly aft through pi/2 about [+/-13,3,-18] and translate Y by -9 and Z by +12 times closing fraction. The upper connector uses a linear height weight. Doors retain their source hinges; connecting braces follow the adjoining pieces. |
+| Nose gear | Fold complete wheel/strut panels aft through pi/2 around [0,64,-8], the forward painted brace attachment. Rotate the separate solid door around its own source edge at Y=52,Z=-8. Do not pin transparent rectangle corners as separate mechanical roots. All source panel dimensions remain rigid. |
+| Gear visibility | Full deployment reproduces source geometry; zero deployment hides the added branch. Just before hiding, main wheel sheets fit abs(X)=9..15,Y=-15..-6,Z=-11..-1. Complete nose and door panels fit abs(X)<=2,Y=39..64,Z=-8..6. These are fitted stow envelopes, not recovered gear bays. |
+
+Acceptance checks signed controls, fixed source attachment points, exact neutral
+and deployed endpoints, coherent skins, rigid wheels and new polygon crossings.
+Gear needs intermediate poses and a near-zero pose before hiding. Stowed F-15
+nose panel vertices were checked against neutral body cross sections. These
+checks establish bounded geometry, not original mechanical timing or GPU
+texture appearance.
+
+
+## MiG-17F control and device fit
+
+Agent-authored fit, 2026-10-05, using exact MIG17F.PT/M17.SH. Source skins,
+materials and deployed device geometry are retained. Surface roles, continuous
+angles and gear mechanisms are fitted, not recovered original laws.
+
+| Control | Fitted contract |
+| --- | --- |
+| Yaw | Keep each thick rudder skin's distinct forward/root vertices fixed. Rotate common trailing/cap points together by `0.35*rudder` about [0,-41,4] to [0,-57,23]. Forward fin and underside regions stay static. |
+| Pitch | Pin tail roots [0,-43,15] and [0,-55,15]. Rotate distal vertices `-0.30*elevator` about the rightward axis through [0,-49,15]. |
+| Roll | Keep each thick outer trailing skin's forward edges fixed. Move shared trailing points through `-0.20*aileron` about outward axes, left [-28,-12.5,-1] to [-42,-23,-2.5], right [28,-13,-1] to [42,-23,-2.5]. Positive input raises right and lowers left. Tip and flap controls stay separate. |
+| Flaps | Preserve neutral front seams. Interpolate trailing vertices [+/-13,-7,-1] to [+/-13,-7,-4] and [+/-28,-21,-1] to [+/-28,-20,-5]. The additive source down branch moves front coordinates by 1..2 units; this fit deliberately keeps the neutral attachments instead of matching those moved front coordinates. |
+| Brakes | Keep cavities fixed. Close panels about their own diagonal source root edges by opposite `atan(6.5/6)*(1-brake)` angles, right negative, left positive. Brace roots remain fixed and distal points follow the panel. Full-open geometry is exact; hide at zero. |
+| Main gear | Rotate complete wheel/strut panels inward by pi/2 about forward axes through [+/-20,3.5,-2]. Stowed panels fit abs(X)=9..20,Y=0..7,Z=-2. Preserve dimensions and original upper edges. |
+| Main doors | Inner pairs pivot through [+/-7,6,-2], closing outward by pi/2; outer pairs pivot through [+/-21,5,-2], closing inward by pi/2. Well faces stay static while the branch is active. |
+| Nose doors | Use each source upper edge [+/-2,32,-6] to [+/-2,40,-5]. Close inward through 0.70 radians, stopping short of crossing the center. Residual stow clearance and disappearance at zero are fitted. |
+| Nose gear | Rotate the complete wheel/strut rigidly aft by `-100 degrees*(1-gear)` about [0,34.2973,-6], lateral axis. This is the front endpoint of the painted attachment band. A collinear UV marker makes it directly testable without changing the source outline. Transparent rectangle corners move with the assembly. |
+| Exhaust | Scale the reviewed source flame branch from its own forward root with live exhaust; hide at zero. |
+
+At full stow, all 621 sampled opaque nose texel centers fit inspected neutral
+forebody slices, with Y=27.452..34.560 and Z=-6.726..0.028. The wider rectangle
+inspection bounds Y=26..36,Z=-8..1 include transparent margins and do not claim
+solid-volume coverage. Require fixed painted root, rigid complete panels,
+neutral/deployed endpoints, coherent skins, signed controls and no new polygon
+crossings throughout the sampled poses. A prior weighted connector was rejected
+because it collapsed or crossed during retraction. Mechanical timing and
+texture/GPU comparison remain unvalidated.
+
+
+## F-16C and F-104N control fits
+
+Agent-authored continuous motion, 2026-10-05. Each exact aircraft retains its
+own neutral skins, deployed branches and asymmetries from the
+[source review](../formats/aircraft-control-surfaces.md#f-16c-and-f-104n-source-additions).
+Coordinates use one-third foot per unit.
+
+| Component | F-16C | F-104N |
+| --- | --- | --- |
+| Rudder | Neutral skins around the diagonal source hinge, `0.35*rudder` radians | Same angle about its own source hinge |
+| Pitch | Pin tail root chords; rotate distal vertices `-0.30*elevator` around lateral pivots [+/-10,-45.5,1] | Pin the centerline root chord; rotate distal high-tail vertices by the same angle around [0,-61,21] |
+| Flaps | Morph all eight original skins to exact source down poses | Morph exact source down poses; retain the original left-only closure |
+| Fitted flaperons | After flap morph, rotate shared trailing points `-0.20*aileron` around outward axes [+/-26,-3,0] through [+/-14,-12,1]; pin forward edges | Same angle, outward axes [+/-21,0,-2] through [+/-9,-15,-1.5]; pin forward edges |
+| Brakes | Original eight closed faces at zero, eight open faces at one; interpolate the source footprint. Retain the source's one-unit root quantization | Keep Y=24 roots fixed; close distal open skins about [0,24,7] through `atan(2/3)` radians; hide at zero |
+| Hook | Source capability/branch not present; none added | Pin both source near-edge points; close distal blade upward by `-1.05*(1-hook)` around [0,-33.5,-6], lateral axis |
+| Exhaust geometry | Source flame scales from Y=-59 with live exhaust | Source flame scales from Y=-61 |
+
+Flaperon mixing is an explicit fit. Full flap with zero roll remains the source
+down endpoint. Check all 25 combinations of five flap and five roll positions;
+require coherent shared skins, fixed forward edges and signed differential
+movement. Flame geometry does not grant an afterburner capability.
+
+F-16 main wheels split at Z=-14. Rigid lower pieces rise 10 units during the
+first half of closing and another 8 during the second half; then X shifts +2.5
+on the left and -2.7 on the right. Upper roots stay fixed. Main stow bounds are
+left X=-9.5..-1.5, right X=1.3..10.3, Y=-9..0,Z=-3..4. The nose base track
+rises 8 units in each half and moves aft 10 units in the second half. Its painted
+brace's distal one-unit pin edge rotates as a rigid edge through -pi/2 in the
+first 0.30 closing fraction, around [0,32,-13.5]. The actual distal Z=-14 pin
+sets the wheel-cut translation, adding Y=-0.5*sin(angle), Z=0.5*(1-cos(angle)).
+The upper brace pins remain fixed. Nose stow bounds are X=-2..2,Y=19.5..25.5,
+Z=-4.5..2.5. Doors wait until halfway closed, then rotate left main -3*pi/4,
+right main pi-atan(4/5), and nose pi/2 around their source upper edges.
+
+F-104 main wheel skins rotate around their own centers, right [13,-21,-10],
+left [-13,-21.5,-10]. They rise 2 units in the first half of closing and 6 in
+the second half. During the second half they move inward 1.5 units and turn
+pi/2 around forward axes, with opposite signs. Right stow bounds are
+X=8.5..14.5,Y=-24..-18,Z=-2; left X=-14.5..-8.5,Y=-24..-19,Z=-2. Connecting
+skins keep source upper roots and axle/brace junctions attached. Their inner
+source corner at abs(X)=3,Z=-13 stays at or below Z=-5.25, leaving 0.25 unit
+clearance below its root chord and preventing a crossing. Nose sheets split at
+Z=-9, rise 4 units in each half and move aft 7 in the second half. Upper roots
+stay fixed; nose stow bounds are X=-2..2,Y=28..33,Z=-5..-1.
+
+These gear paths and interior clearances are fitted. Require rigid wheels,
+exact deployment, near-stow inspection, intact roots and no introduced polygon
+crossings. A moving, finite panel alone does not pass.
+
+## A310 control and gear fit
+
+Agent-authored continuous motion, 2026-10-05, over A310.SH at two-thirds foot per
+unit. Keep the neutral rudder and rotate it `0.35*rudder` about its diagonal
+source edge. Split a trailing elevator strip at
+`Y+112+0.5*(abs(X)-7)=0`, Z=11, and rotate it `-0.30*elevator`, retaining the
+cut and tail-root endpoints. Outer trailing roll triangles are independent of
+flaps: keep their thick forward edges fixed and move the shared trailing point
+through `-0.20*aileron` around the mean outward hinge. Morph flaps to their own
+exact source down poses.
+
+Main rigid wheel regions begin below Z=-12. They move 16 units aft before
+rising 19 units. Source roots at Z>=-9 stay fixed; the connecting region deforms
+between those roots and the rigid cut. The painted upper strut becomes an
+attached diagonal under this approximation. Main wheels stow at abs(X)<=11,
+Y=-45..-33,Z=-2..7. The entire nose wheel/shaft/brace folds rigidly aft through
+186 degrees around its front-view source attachment line at Y=63,Z=-8. Its
+transparent side-quad margins move with it, rather than acting as extra hinges.
+
+The complete rigid nose fits abs(X)<=2,Y=59..71,Z=-10..6 and stays above the
+source belly `Z=-10+0.25*(Y-59)`. Both upper and lower body-section containment
+were checked separately. Hide added gear at zero. All travel, sequencing and
+control-role assignments remain fitted; unlocated device articulation and
+original mechanical timing remain unknown.
