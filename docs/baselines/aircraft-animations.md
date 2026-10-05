@@ -143,6 +143,13 @@ rotor and manually aimed gun overlays after aircraft-specific control rigs.
 These checks do not accept profiles still
 listed as queued, or replace the deferred full workspace/GPU validation.
 
+The ten `flight-animation-*` scenarios pass in
+`.local/animation-battery/20261005-163812-ten-reviewed/summary.md`. The battery
+requires aircraft-specific attachment scope, all primary control rows and passing
+per-control checks, so a motion-only report cannot pass as reviewed geometry.
+Thirty-five focused Python report/selection tests passed. The full battery was
+not run.
+
 ## Remaining aircraft
 
 The code inventory covers all 37 playable profiles in the ignored local report

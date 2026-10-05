@@ -43,6 +43,7 @@ from typing import Iterable, Optional, Sequence
 
 FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     # Flight lane.
+    "flight-animation": ("reviewed CPU control-surface and device poses", ("flight-animation-*",)),
     "flight-maneuvers": (
         "flight model in the air: level, pull, loop, roll, bank, sprint, climb, overspeed, G, autopilot",
         (
@@ -367,7 +368,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/canvas_present.rs", RENDER_FAMILIES, "presentation", windowed=True),
     _r("crates/tore-app/src/static_art.rs", RENDER_FAMILIES, "art", windowed=True),
     _r("crates/tore-app/src/*_art.rs", RENDER_FAMILIES, "art", windowed=True),
-    _r("crates/tore-app/src/*animation.rs", RENDER_FAMILIES, "animation", windowed=True),
+    _r("crates/tore-app/src/aircraft_animation_probe*", ("flight-animation",), "CPU animation witnesses"),
+    _r("crates/tore-app/src/*animation.rs", RENDER_FAMILIES + ("flight-animation",), "animation", windowed=True),
     _r("crates/tore-app/src/engine_material.rs", RENDER_FAMILIES, "materials", windowed=True),
     _r("crates/tore-app/src/f14_geometry.rs", ("flight-views",), "F-14 source geometry repairs", windowed=True),
     _r("crates/tore-app/src/surface_lighting.rs", RENDER_FAMILIES, "lighting", windowed=True),
@@ -440,6 +442,7 @@ RULES: tuple[Rule, ...] = (
     _r("tools/test_quick_check.py", (), "the quick check's tests", unit_tests=("test_quick_check",)),
     _r("tools/battery.py", ("flight-maneuvers",), "the battery runner (one cheap scenario runs end to end)", unit_tests=("test_battery", "test_battery_selection")),
     _r("tools/test_battery.py", (), "the battery runner's tests", unit_tests=("test_battery",)),
+    _r("tools/battery_scenarios/animation.py", ("flight-animation",), "CPU animation regressions", unit_tests=("test_battery_animation",)),
     _r("tools/battery_scenarios/flight.py", LANE_SMOKE["flight"], "flight scenarios", unit_tests=("test_battery_flight",)),
     _r("tools/test_battery_flight.py", (), "flight scenario tests", unit_tests=("test_battery_flight",)),
     _r("tools/battery_scenarios/render.py", ("flight-views",), "render capture scenarios", windowed=True, unit_tests=("test_battery",)),

@@ -463,6 +463,27 @@ The synthetic GPU checks run separately with
 pavement never hides an aircraft above it and that paint over pavement holds at
 distant and moving cameras.
 
+## Headless animation regressions
+
+`flight-animation-*` scenarios run the actual drawing-path geometry probe for
+individually reviewed aircraft, without opening a window. They require reviewed
+attachment scope and passing per-control gates, including signed motion,
+root/skin coherence, wheel rigidity/separation, intermediate topology and hook
+closing direction. They write user-owned OBJ and CPU contact-sheet evidence
+under the ignored battery output directory.
+
+Run one repaired aircraft before expanding the audit:
+
+```sh
+python3 tools/battery.py --scenario flight-animation-a7 --profile .local/dev-profile
+```
+
+Expand the roster in `tools/battery_scenarios/animation.py` only after independent
+source and pose-sheet review. This regression family does not replace that
+review, validate GPU appearance, or establish retail animation parity. Current
+coverage and remaining profiles are in the
+[aircraft animation audit](../baselines/aircraft-animations.md).
+
 ## Runtime
 
 The full lane, 3,089 scenarios with `--jobs 6 --windows 2`, took 1,804 seconds (30 minutes) on the
