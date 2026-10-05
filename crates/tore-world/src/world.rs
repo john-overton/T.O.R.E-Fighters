@@ -10,7 +10,7 @@
 
 use crate::{
     WorldResult, ai_wings, aircraft_type, airfield_radio, combat, combat_tape, comms, crew_voice,
-    mission_layout, radio_calls,
+    datalink, mission_layout, radio_calls,
     resources::ResourceSource,
     seats::{PlaneId, Roster, SeatId, SeatInput, Slot},
     terrain,
@@ -34,6 +34,8 @@ mod command_tests;
 mod commands;
 #[cfg(test)]
 mod crowd;
+#[cfg(test)]
+mod datalink_tests;
 #[cfg(test)]
 mod fight_tests;
 #[cfg(test)]
@@ -84,6 +86,9 @@ pub struct World {
     pub wing_status: airfield_radio::WingStatus,
     /// Weapon, hit, kill and wing radio calls; see radio_calls.rs.
     pub radio: radio_calls::Radio,
+    /// The flight data link's picture of who tracks, locks and attacks what;
+    /// see docs/DATALINK.md. It observes and changes nothing.
+    pub datalink: datalink::DataLink,
     /// Imported phrase text for composing radio lines.
     pub phrases: comms::Phrases,
 }
@@ -281,6 +286,7 @@ impl World {
         self.comms.restart(1);
         self.wing_status.reset();
         self.radio = Default::default();
+        self.datalink = Default::default();
         if open {
             self.cockpits.clear();
         } else {
@@ -881,6 +887,15 @@ impl World {
                 }
             }
         }
+        // The data link reads the humans' sensors after combat and before the
+        // AI step; it changes neither.
+        self.datalink.before_ai(&datalink::Scene {
+            tick: self.combat.state.tick(),
+            roster: &self.roster,
+            state: &self.combat.state,
+            cockpits: &self.cockpits,
+            wings: self.ai_wings.as_ref(),
+        });
         // One AI tick per combat tick, immediately after it, so the AI reads
         // the damage combat just applied and then writes the authoritative pose
         // back.
@@ -924,6 +939,8 @@ impl World {
             let message = bridge.take_message();
             self.ai_wings = Some(bridge);
             stepped?;
+            self.datalink
+                .after_ai(self.combat.state.tick(), self.ai_wings.as_ref());
             if let Some(text) = message {
                 // Agent decision (B7a): the AI wings' one HUD line goes to
                 // the seats flying in Friendly Wing 1, the wing whose

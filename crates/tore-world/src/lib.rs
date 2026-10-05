@@ -14,6 +14,7 @@ pub mod combat;
 pub mod combat_tape;
 pub mod comms;
 pub mod crew_voice;
+pub mod datalink;
 pub mod debrief;
 pub mod frame;
 pub mod mission;

@@ -282,6 +282,7 @@ pub(super) fn mission() -> World {
         ai_wings: Some(wings),
         comms: comms::Comms::new(1),
         wing_status: Default::default(),
+        datalink: Default::default(),
         radio: Default::default(),
         phrases,
         // The step never reads the setup.

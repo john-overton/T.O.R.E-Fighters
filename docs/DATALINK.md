@@ -9,7 +9,7 @@
 > <!-- tore-header v2 -->
 
 Stage G design of 2026-10-05, for the [multiplayer plan](multiplayer-plan.md#stages).
-Nothing on this page is built yet. It is the guide for players and agents:
+Only the tier table and the picture's bookkeeping are built (slice G0, 2026-10-05), and nothing reads the picture yet, so nothing on this page changes what a player sees or hears. It is the guide for players and agents:
 what a flight shares, which aircraft can share it, what the player sees and
 hears, and how the AI uses it. The code design and the slices that build it
 are in the [architecture guide](ARCHITECTURE.md#flight-data-link); the bytes on

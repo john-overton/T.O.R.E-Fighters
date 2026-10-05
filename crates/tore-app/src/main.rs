@@ -4650,7 +4650,8 @@ fn apply_probe_cheat(cheats: &mut tore_sim::cheats::Cheats, name: &str) {
 
 /// What the headless AI probe scripts for the human leader
 /// (`--maneuver takeoff`, `--probe-wing-size`, `--probe-wing-order`,
-/// `--probe-player-home`, `--probe-lose-player`, `--probe-attack`). Development harness only.
+/// `--probe-player-home`, `--probe-lose-player`, `--probe-attack`,
+/// `--probe-player-lock`). Development harness only.
 #[derive(Clone, Debug, Default)]
 struct ProbeScript {
     enemy_aircraft: Option<tore_formats::aircraft::AircraftId>,
@@ -4675,8 +4676,16 @@ struct ProbeScript {
     fight: Option<(usize, usize)>,
     /// Aircraft for the friendly AI wings, overriding the creator default.
     friendly_aircraft: Option<tore_formats::aircraft::AircraftId>,
-    /// Wing orders to all wingmen at a tick.
-    orders: Vec<(u64, tore_sim::ai::wing::PlayerOrder)>,
+    /// Wing orders at a tick, to all wingmen or to one member of the wing
+    /// (`TICK:ORDER@MEMBER`, the leader being member 0).
+    orders: Vec<(u64, tore_sim::ai::wing::PlayerOrder, Option<u8>)>,
+    /// `--probe-player-lock TICK:ID`: the player designates aircraft `ID` at
+    /// this tick, and the sensors acquire it as they would for a human.
+    player_locks: Vec<(u64, u32)>,
+    /// Print a `data link:` line for each change of the flight data link's
+    /// picture. Set by `--probe-data-link` and by `--probe-player-lock`, so
+    /// the output of every other probe is unchanged.
+    data_link: bool,
     /// `--probe-wing-route`: the player's wing's waypoints, as nautical-mile
     /// offsets east and north of the player's start and an altitude in feet.
     /// Quick Mission has no mission route, so this stands in for one.
@@ -4845,11 +4854,23 @@ struct ProbeAttack {
 
 impl ProbeScript {
     /// `TICK:bug-out`, `TICK:land-selected`, `TICK:attack-on-contact` or
-    /// `TICK:engage-my-target`.
-    fn parse_order(text: &str) -> AppResult<(u64, tore_sim::ai::wing::PlayerOrder)> {
+    /// `TICK:engage-my-target`, each with an optional `@MEMBER` that gives the
+    /// order to that one member of the wing (the leader is member 0, so the
+    /// first wingman is 1), as Alt+Shift+1 to 4 does.
+    fn parse_order(text: &str) -> AppResult<(u64, tore_sim::ai::wing::PlayerOrder, Option<u8>)> {
         use tore_sim::ai::wing::PlayerOrder;
-        let usage = "--probe-wing-order needs TICK:bug-out, TICK:land-selected, TICK:attack-on-contact or TICK:engage-my-target";
+        let usage = "--probe-wing-order needs TICK:bug-out, TICK:land-selected, TICK:attack-on-contact or TICK:engage-my-target, each optionally followed by @MEMBER";
         let (tick, order) = text.split_once(':').ok_or(usage)?;
+        let (order, member) = match order.split_once('@') {
+            Some((order, member)) => {
+                let member: u8 = member.parse().map_err(|_| usage)?;
+                if !(1..=4).contains(&member) {
+                    return Err("--probe-wing-order @MEMBER needs 1..4".into());
+                }
+                (order, Some(member))
+            }
+            None => (order, None),
+        };
         let order = match order {
             "bug-out" => PlayerOrder::BugOut,
             "land-selected" => PlayerOrder::LandAtSelected,
@@ -4857,7 +4878,17 @@ impl ProbeScript {
             "engage-my-target" => PlayerOrder::EngageMyTarget,
             _ => return Err(usage.into()),
         };
-        Ok((option_number("--probe-wing-order", tick)?, order))
+        Ok((option_number("--probe-wing-order", tick)?, order, member))
+    }
+
+    /// `TICK:ID`: the player designates aircraft `ID` at `TICK`.
+    fn parse_player_lock(text: &str) -> AppResult<(u64, u32)> {
+        let usage = "--probe-player-lock needs TICK:ID";
+        let (tick, id) = text.split_once(':').ok_or(usage)?;
+        Ok((
+            option_number("--probe-player-lock", tick)?,
+            id.parse().map_err(|_| usage)?,
+        ))
     }
 
     /// `TICK` for a single attack, or `TICK:REPEAT_SECONDS`.
@@ -6210,6 +6241,34 @@ fn probe_case_name(
 /// The probe builds its AI bridge even when it holds no aircraft.
 const PROBE_BRIDGE: &str = "the probe always builds its AI bridge";
 
+/// One `data link:` line of the AI probe: a change of the flight data link's
+/// picture, with the combat tick it happened on. Scenarios assert on these.
+fn data_link_line(entry: &tore_world::datalink::Entry) -> String {
+    use tore_world::datalink::Entry;
+    match entry {
+        Entry::Member { tick, plane, tier } => {
+            format!(
+                "t={tick} data link: member plane={plane} tier={}",
+                tier.label()
+            )
+        }
+        Entry::Lock {
+            tick,
+            plane,
+            target,
+        } => {
+            format!("t={tick} data link: lock plane={plane} target={target}")
+        }
+        Entry::Unlock {
+            tick,
+            plane,
+            target,
+        } => {
+            format!("t={tick} data link: unlock plane={plane} target={target}")
+        }
+    }
+}
+
 /// Deterministic headless AI probe (`--ai-probe-ticks`).
 ///
 /// It builds the same chain a flown Quick Mission builds: the existing spawner
@@ -6562,6 +6621,7 @@ fn ai_probe_run(
         ai_wings: Some(bridge),
         comms,
         wing_status: Default::default(),
+        datalink: Default::default(),
         radio,
         phrases,
         // The probe builds its own mission; only a restart reads the setup,
@@ -6606,12 +6666,28 @@ fn ai_probe_run(
             );
         }
         // The script's wing orders, given after the leader's own controls.
+        for (_, order, member) in script.orders.iter().filter(|(at, ..)| *at == tick) {
+            // An order to one member addresses it as Alt+Shift+N does, then
+            // goes back to the whole wing.
+            if member.is_some() {
+                commands.push(seats::SeatCommand::WingRecipient(*member));
+            }
+            commands.push(seats::SeatCommand::WingOrder(*order));
+            if member.is_some() {
+                commands.push(seats::SeatCommand::WingRecipient(None));
+            }
+        }
+        // The player's designations: a lock follows once the sensors hold it.
         commands.extend(
             script
-                .orders
+                .player_locks
                 .iter()
                 .filter(|(at, _)| *at == tick)
-                .map(|(_, order)| seats::SeatCommand::WingOrder(*order)),
+                .map(|(_, id)| {
+                    seats::SeatCommand::Combat(tore_sim::combat::live::Command::DesignateTarget(
+                        *id,
+                    ))
+                }),
         );
         for (ordinal, (_, threat)) in script
             .threats
@@ -6674,6 +6750,11 @@ fn ai_probe_run(
         stepped?;
         if let Some(wings) = &mission.ai_wings {
             print_opportunity_notes(tick, wings, &mut opportunity_notes);
+        }
+        if script.data_link {
+            for entry in mission.datalink.take_journal() {
+                println!("{}", data_link_line(&entry));
+            }
         }
         if let Some(error) = &output.fault {
             return Err(error.clone().into());
@@ -6956,8 +7037,20 @@ fn start_probe_recording(
             format!("from tick {} repeat {} ticks", attack.from, attack.repeat),
         ));
     }
-    for (tick, order) in &script.orders {
-        extra.push(("probe.order".into(), format!("tick {tick}: {order:?}")));
+    for (tick, order, member) in &script.orders {
+        extra.push((
+            "probe.order".into(),
+            match member {
+                Some(member) => format!("tick {tick}: {order:?} to member {member}"),
+                None => format!("tick {tick}: {order:?}"),
+            },
+        ));
+    }
+    for (tick, id) in &script.player_locks {
+        extra.push((
+            "probe.player_lock".into(),
+            format!("tick {tick}: designate {id}"),
+        ));
     }
     extra.push(("probe.geometry".into(), format!("{:?}", script.geometry)));
     extra.push(("probe.guns".into(), script.guns.to_string()));
@@ -7835,6 +7928,13 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--probe-wing-order" => probe_script.orders.push(ProbeScript::parse_order(
                 &args.next().ok_or("--probe-wing-order needs TICK:ORDER")?,
             )?),
+            "--probe-player-lock" => {
+                probe_script.player_locks.push(ProbeScript::parse_player_lock(
+                    &args.next().ok_or("--probe-player-lock needs TICK:ID")?,
+                )?);
+                probe_script.data_link = true;
+            }
+            "--probe-data-link" => probe_script.data_link = true,
             "--probe-attack" => probe_script.attack = Some(ProbeScript::parse_attack(
                 &args.next().ok_or("--probe-attack needs TICK or TICK:REPEAT_SECONDS")?,
             )?),
@@ -8592,7 +8692,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             }
             "--help" | "-h" => {
                 println!(
-                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-7 combat-service inputs, including sensor controls and wreck body presence; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched, --probe-ai-flight-model standard|all-hybrid and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-lose-player TICK crashes the player's aircraft at that tick; --probe-wing-route EAST_NM:NORTH_NM:ALT_FT (repeatable) gives the player's wing waypoints, flown by an AI that takes the lead from the lost player once its search finds nothing; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
+                    "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-7 combat-service inputs, including sensor controls and wreck body presence; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched, --probe-ai-flight-model standard|all-hybrid and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen, or one with a trailing @MEMBER (1..4, the first wingman is 1); --probe-player-lock TICK:ID has the player designate aircraft ID at that tick, so the sensors lock it as they would for a human; --probe-data-link and --probe-player-lock print a `data link:` line for each member and each lock taken or dropped in the flight data link's picture; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-lose-player TICK crashes the player's aircraft at that tick; --probe-wing-route EAST_NM:NORTH_NM:ALT_FT (repeatable) gives the player's wing waypoints, flown by an AI that takes the lead from the lost player once its search finds nothing; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
                     "Multiplayer: --connect HOST[:PORT] joins a dedicated server (docs/DEDICATED-SERVER.md); --callsign NAME (1 to 15 printable ASCII characters), --slot N (the plane to take) and --password TEXT go with it. --host MISSION_FILE hosts a game of that mission file (the dedicated server's format) and flies in it: other players join with --connect; --port N (default 26900), --name TEXT, --open-planes friendly|all|N,N and --password TEXT (the password joining players must give) set the game, and --callsign and --slot are the hosting player's own. --find-games SECONDS [--port N] looks for games on the local network for that long, prints each one found (address, build, name, mission, players, phase, King, password, full) and exits."
@@ -11103,6 +11203,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         ai_wings: None,
         comms: comms::Comms::new(1),
         wing_status: Default::default(),
+        datalink: Default::default(),
         radio: Default::default(),
     };
     let presented_plane = world.picture_plane().0;
@@ -11666,17 +11767,45 @@ mod probe_tests {
     fn probe_wing_orders_include_the_attack_orders() {
         assert_eq!(
             ProbeScript::parse_order("600:attack-on-contact").unwrap(),
-            (600, PlayerOrder::AttackOnContact)
+            (600, PlayerOrder::AttackOnContact, None)
         );
         assert_eq!(
             ProbeScript::parse_order("601:engage-my-target").unwrap(),
-            (601, PlayerOrder::EngageMyTarget)
+            (601, PlayerOrder::EngageMyTarget, None)
         );
         assert_eq!(
             ProbeScript::parse_order("9000:bug-out").unwrap(),
-            (9000, PlayerOrder::BugOut)
+            (9000, PlayerOrder::BugOut, None)
         );
         assert!(ProbeScript::parse_order("600:attack").is_err());
+    }
+
+    #[test]
+    fn probe_wing_orders_can_name_one_member() {
+        assert_eq!(
+            ProbeScript::parse_order("600:engage-my-target@2").unwrap(),
+            (600, PlayerOrder::EngageMyTarget, Some(2))
+        );
+        assert_eq!(
+            ProbeScript::parse_order("1:bug-out@1").unwrap(),
+            (1, PlayerOrder::BugOut, Some(1))
+        );
+        for bad in [
+            "600:bug-out@0",
+            "600:bug-out@5",
+            "600:bug-out@x",
+            "600:bug-out@",
+        ] {
+            assert!(ProbeScript::parse_order(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn probe_player_locks_name_a_tick_and_an_aircraft() {
+        assert_eq!(ProbeScript::parse_player_lock("300:4").unwrap(), (300, 4));
+        for bad in ["300", "x:4", "300:x", "300:-1", ":4"] {
+            assert!(ProbeScript::parse_player_lock(bad).is_err(), "{bad}");
+        }
     }
 }
 

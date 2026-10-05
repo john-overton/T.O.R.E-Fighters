@@ -104,6 +104,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("ai-mission-*", "ai-objective-*", "ai-fuzz-*"),
     ),
     "ai-orders": ("wing orders", ("ai-order-*", "ai-orders-*")),
+    "ai-datalink": ("the flight data link's picture and what reads it", ("ai-datalink-*",)),
     "ai-airfield": (
         "AI takeoff, landing, return to base, ILS approaches on every theater",
         (
@@ -225,7 +226,7 @@ def _r(pattern: str, families: Sequence[str], why: str, windowed: bool = False, 
 
 
 FLIGHT_CORE = ("flight-maneuvers", "flight-stall", "flight-takeoff", "flight-landing", "ai-fights")
-AI_CORE = ("ai-fights", "ai-missions", "ai-orders", "ai-airfield", "ai-lead", "ai-regression")
+AI_CORE = ("ai-fights", "ai-missions", "ai-orders", "ai-airfield", "ai-lead", "ai-regression", "ai-datalink")
 MAIN_FAMILIES = (
     "replay-cli", "menus-creator", "flight-maneuvers", "flight-takeoff", "flight-landing", "ai-fights",
     "ai-airfield", "ai-lead", "ai-orders", "ai-regression",
@@ -279,6 +280,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-sim/src/cheats.rs", ("flight-damage", "flight-maneuvers"), "cheats"),
     # tore-sim: AI.
     _r("crates/tore-sim/src/ai/*", AI_CORE + ("radio",), "AI"),
+    # tore-sim: the flight data link's tiers.
+    _r("crates/tore-sim/src/datalink.rs", ("ai-datalink", "ai-orders", "ai-fights"), "data link tiers"),
     # tore-sim: combat, systems, sensors.
     _r("crates/tore-sim/src/combat.rs", ("flight-combat", "flight-damage", "ai-fights", "ai-damage"), "combat"),
     _r("crates/tore-sim/src/combat/*", ("flight-combat", "flight-damage", "ai-fights", "ai-damage"), "combat"),
@@ -299,6 +302,8 @@ RULES: tuple[Rule, ...] = (
     # tore-world.
     _r("crates/tore-world/src/ai_wings.rs", AI_CORE + ("radio",), "wing AI"),
     _r("crates/tore-world/src/ai_wings/*", AI_CORE + ("radio",), "wing AI"),
+    _r("crates/tore-world/src/datalink.rs", ("ai-datalink", "ai-orders", "ai-fights"), "data link picture"),
+    _r("crates/tore-world/src/datalink/*", ("ai-datalink", "ai-orders", "ai-fights"), "data link picture"),
     _r("crates/tore-world/src/airfield_radio.rs", ("ai-airfield", "radio", "airports"), "tower radio"),
     _r("crates/tore-world/src/comms.rs", ("radio", "replay-recording", "ai-fights"), "radio and crew calls"),
     _r("crates/tore-world/src/comms/*", ("radio", "replay-recording", "ai-fights"), "radio and crew calls"),

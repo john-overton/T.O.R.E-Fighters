@@ -409,6 +409,10 @@ impl World {
             radio,
             // Imported phrase text: mission setup.
             phrases: _,
+            // Stage G's data link (G0): mutable state not coded yet. Slice
+            // H10 adds its section; until then a restored world rebuilds an
+            // empty picture and republishes it on the next 30th tick.
+            datalink: _,
         } = self;
         match section {
             Section::Roster => roster.save(s, None),

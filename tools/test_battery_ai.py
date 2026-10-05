@@ -217,5 +217,37 @@ class LandOrderTests(unittest.TestCase):
         self.assertTrue(any("still led the wing" in p for p in self.check(CLEAN + self.REFUSED, whole=self.passes)))
 
 
+class DataLinkPictureTests(unittest.TestCase):
+    MEMBERS = "".join(f"t=1 data link: member plane={n} tier=network\n" for n in range(3))
+    LOCKED = "t=660 data link: lock plane=0 target=2\n"
+
+    def check(self, text, **kw):
+        planes = kw.pop("planes", 3)
+        return ai.datalink_picture_check(planes=planes, designated=2, player_tier="network")(CLEAN + text)
+
+    def test_a_full_picture_passes(self):
+        text = self.MEMBERS + self.LOCKED + "t=900 data link: unlock plane=0 target=2\n"
+        self.assertEqual(self.check(text), [])
+
+    def test_every_plane_is_announced_once(self):
+        problems = self.check(self.MEMBERS.replace("plane=2", "plane=1") + self.LOCKED)
+        self.assertTrue(any("twice" in p for p in problems), problems)
+        self.assertTrue(any("announced" in p for p in problems), problems)
+
+    def test_the_players_tier_is_checked(self):
+        problems = self.check(self.MEMBERS.replace("plane=0 tier=network", "plane=0 tier=voice") + self.LOCKED)
+        self.assertTrue(any("tier" in p for p in problems), problems)
+
+    def test_the_designation_must_become_a_lock(self):
+        problems = self.check(self.MEMBERS)
+        self.assertTrue(any("never locked" in p for p in problems), problems)
+
+    def test_a_lock_must_pair_with_its_unlock(self):
+        problems = self.check(self.MEMBERS + self.LOCKED + "t=9 data link: unlock plane=1 target=2\n")
+        self.assertTrue(any("did not hold" in p for p in problems), problems)
+        problems = self.check(self.MEMBERS + self.LOCKED + self.LOCKED)
+        self.assertTrue(any("over a lock" in p for p in problems), problems)
+
+
 if __name__ == "__main__":
     unittest.main()
