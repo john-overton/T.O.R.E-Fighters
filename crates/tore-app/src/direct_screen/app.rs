@@ -36,6 +36,13 @@ impl Direct {
     pub fn is_building(&self) -> bool {
         self.building.is_some()
     }
+    /// Keeps a kit another screen built (the Internet Lobby, I4), when none
+    /// is kept: the lobby screen opens over either and takes it from here.
+    pub fn keep_kit(&mut self, kit: Arc<Kit>) {
+        if self.kit.is_none() {
+            self.kit = Some(kit);
+        }
+    }
 }
 
 impl App {

@@ -30,6 +30,8 @@ wgpu = { version = "27.0.1", default-features = false, features = ["std", "parki
 winit = "0.30.12"
 
 [dev-dependencies]
+# The master server, for the Internet Lobby's browse and join tests.
+tore-master = { path = "../tore-master" }
 tore-world = { path = "../tore-world", features = ["test-support"] }
 tore-workers = { path = "../tore-workers", features = ["test-support"] }
 

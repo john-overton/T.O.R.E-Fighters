@@ -44,6 +44,7 @@ mod input;
 mod input_catalog;
 mod input_script;
 mod instruments;
+mod internet_screen;
 mod lens_flare;
 mod lobby_screen;
 mod locate;
@@ -332,6 +333,8 @@ struct App {
     net_ending: Option<String>,
     /// The Direct Connection screen, open over the main menu (EF7).
     direct: direct_screen::app::Direct,
+    /// The Internet Lobby screen, open over the main menu (I4).
+    internet: internet_screen::app::Internet,
     /// The lobby screen and the pages opened over it (EF8).
     lobby: lobby_screen::app::Lobby,
 }
@@ -1127,6 +1130,13 @@ impl App {
                 return Action::None;
             };
             return self.direct_key(key, None);
+        }
+        // And the Internet Lobby screen.
+        if self.internet_open() {
+            let Some(key) = key else {
+                return Action::None;
+            };
+            return self.internet_key(key, None);
         }
         // Controller menu buttons navigate the Graphics screen while it is open.
         if let Some(editor) = &mut self.graphics_screen {
@@ -2116,6 +2126,8 @@ impl App {
             Action::Direct => self.open_direct(),
             Action::DirectClose => self.close_direct(),
             Action::DirectLeave => self.leave_direct_session(event_loop),
+            Action::Internet => self.open_internet(),
+            Action::InternetClose => self.close_internet(),
             Action::WatchReplay(ref path) => self.watch_replay(path),
             Action::ReimportMedia => {
                 // The pack on disk is still valid here, so the menu the player
@@ -2374,6 +2386,9 @@ impl App {
                 }
                 Screen::Main if self.direct.screen.is_some() => {
                     "T.O.R.E-Fighters - Direct Connection".to_string()
+                }
+                Screen::Main if self.internet.screen.is_some() => {
+                    "T.O.R.E-Fighters - Internet Lobby".to_string()
                 }
                 Screen::Main => "T.O.R.E-Fighters - Choose Activity".to_string(),
                 Screen::Quick => "T.O.R.E-Fighters - Quick Mission Creator".to_string(),
@@ -2696,6 +2711,16 @@ impl App {
             self.action(event_loop, action);
             return Action::None;
         }
+        // The Internet Lobby screen takes them the same way.
+        if event.pressed
+            && self.internet_open()
+            && !((self.modifiers.super_key() && name.eq_ignore_ascii_case("q"))
+                || (self.modifiers.alt_key() && name == "F4"))
+        {
+            let action = self.internet_key(&name, event.text.as_deref());
+            self.action(event_loop, action);
+            return Action::None;
+        }
         // The Replays screen takes key presses too, except the
         // shortcuts that quit the game.
         if event.pressed
@@ -2888,7 +2913,14 @@ impl ApplicationHandler for App {
                 if let Some(session) = self.connect.take() {
                     match session {
                         net::options::Session::Join(options) => self.start_session(options),
-                        net::options::Session::Host(options) => self.start_hosting(*options),
+                        net::options::Session::Host(mut options) => {
+                            // A game listed from the command line reports
+                            // under the Internet Lobby's statistics switch.
+                            if let Ok(data) = assets::data_directory() {
+                                net::telemetry::for_command_line(&data, &mut options.listing);
+                            }
+                            self.start_hosting(*options)
+                        }
                     }
                     if self.error.is_some() {
                         event_loop.exit();
@@ -3039,6 +3071,7 @@ impl ApplicationHandler for App {
         {
             self.net_tick(event_loop);
             self.direct_tick(event_loop);
+            self.internet_tick(event_loop);
         }
         let Some(renderer) = self.renderer.as_mut() else {
             return;
@@ -3067,6 +3100,7 @@ impl ApplicationHandler for App {
                     screen.cancel_press();
                 }
                 self.direct_cancel_press();
+                self.internet_cancel_press();
                 self.mouse_look = None;
                 self.pointer = None;
                 self.live_debug.release();
@@ -3088,6 +3122,10 @@ impl ApplicationHandler for App {
                 }
                 if self.screen == Screen::Main && self.direct.screen.is_some() {
                     direct_screen::app::pointer_moved(&mut self.lobby, &mut self.direct, point);
+                    return;
+                }
+                if self.screen == Screen::Main && self.internet.screen.is_some() {
+                    internet_screen::app::pointer_moved(&mut self.lobby, &mut self.internet, point);
                     return;
                 }
                 if self.controls.is_some()
@@ -3167,6 +3205,9 @@ impl ApplicationHandler for App {
                 } else if self.direct_open() {
                     self.direct_wheel(notches);
                     Action::None
+                } else if self.internet_open() {
+                    self.internet_wheel(notches);
+                    Action::None
                 } else if self.screen == Screen::Flight && !self.flight_ui.frozen() {
                     self.input.mouse_wheel(notches);
                     Action::None
@@ -3179,6 +3220,7 @@ impl ApplicationHandler for App {
                 self.live_debug.release();
                 self.quick.pointer(None);
                 direct_screen::app::pointer_moved(&mut self.lobby, &mut self.direct, None);
+                internet_screen::app::pointer_moved(&mut self.lobby, &mut self.internet, None);
                 self.menu.state.pointer(None)
             }
             WindowEvent::Focused(true) => {
@@ -3208,6 +3250,7 @@ impl ApplicationHandler for App {
                     screen.cancel_press();
                 }
                 self.direct_cancel_press();
+                self.internet_cancel_press();
                 self.mouse_look = None;
                 self.pointer = None;
                 self.live_debug.release();
@@ -3272,6 +3315,15 @@ impl ApplicationHandler for App {
             {
                 if button == MouseButton::Left {
                     self.direct_button(state == ElementState::Pressed)
+                } else {
+                    Action::None
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. }
+                if self.screen == Screen::Main && self.internet.screen.is_some() =>
+            {
+                if button == MouseButton::Left {
+                    self.internet_button(state == ElementState::Pressed)
                 } else {
                     Action::None
                 }
@@ -3476,12 +3528,17 @@ impl ApplicationHandler for App {
                             &self.lobby,
                             &self.direct,
                             &mut menu::Canvas(&mut self.menu.pixels),
+                        ) || internet_screen::app::draw_screen(
+                            &self.internet,
+                            &mut menu::Canvas(&mut self.menu.pixels),
                         );
                         menu_text = ui_text::finish().filter(|_| drawn);
                         let mut animating = if drawn {
                             true
                         } else {
-                            self.menu.render() || self.direct.is_building()
+                            self.menu.render()
+                                || self.direct.is_building()
+                                || self.internet.is_building()
                         };
                         if let Some(editor) = &self.controls {
                             editor.draw(&mut self.menu.pixels, &self.hornet.font);
@@ -7851,8 +7908,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     }
     diagnostics::stage("argument parsing and startup options");
     if matches!(session, Session::First) {
-        // `--find-games` keeps stdout for the games it lists.
-        if std::env::args().any(|a| a == "--find-games") {
+        // `--find-games` and `--browse` keep stdout for the games they list.
+        if std::env::args().any(|a| a == "--find-games" || a == "--browse") {
             eprintln!("{}", version::label());
         } else {
             println!("{}", version::label());
@@ -7971,6 +8028,8 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut session_args = net::options::SessionArgs::default();
     // `--find-games SECONDS`: list the games on this network and exit.
     let mut find_games: Option<f64> = None;
+    // `--browse SECONDS`: list the games on the Internet Lobby and exit.
+    let mut browse_games: Option<f64> = None;
     let mut input_script_steps: Option<Vec<input_script::Step>> = None;
     let mut replay_options = replay::viewer::Options::default();
     while let Some(arg) = args.next() {
@@ -8661,6 +8720,14 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                         .ok_or("--find-games needs a number of seconds, 0.1 to 3600")?,
                 );
             }
+            "--browse" => {
+                browse_games = Some(
+                    args.next()
+                        .and_then(|text| text.parse::<f64>().ok())
+                        .filter(|seconds| (0.1..=3600.0).contains(seconds))
+                        .ok_or("--browse needs a number of seconds, 0.1 to 3600")?,
+                );
+            }
             "--host" => {
                 session_args.host = Some(PathBuf::from(
                     args.next().ok_or("--host needs a mission file")?,
@@ -8830,7 +8897,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "Visuals: --ejection-preview seat|freefall|chute inspects imported escape poses with --capture-flight. --hud-target-preview bearing,elevation,feet inspects selected-target cues with --capture-flight. --damage-preview 0..1 with --capture-flight inspects original damage bodies and two seconds of smoke. --countermeasure-preview TICKS advances flight and combat after the setup commands, so --combat-command chaff/flare captures show the devices developing.\nCreator: --dummy-aircraft ID,COUNT adds straight-flight fixtures one mile ahead (repeat for mixed aircraft). --quick-mission opens setup; --snapshot-state ordnance opens the loadout preview; --validate-creator checks all imported loadouts and restart without a display.\nCombat: --live-fire starts an explicit PT-default range. Space fires; [ and ] cycle NAV/weapons; T designates; backslash resets target. --weapon-slot N selects a 1-based weapon slot. --loadout none|guns starts with every store off, or everything but the gun off (the Guns only restriction), as the Load Ordnance page leaves them. --combat-command NAME applies a manual setup command before the probe. Shift-K jettisons the selected external group; ; or L clears designation; Insert/Delete release chaff/flare; Use --combat-command class/fail for damage-class and station-fault fixtures. D reports ownship damage and systems in the sim log; Ctrl-Shift-I launches one incoming selected weapon; Shift-Y toggles target ECM; J toggles own ECM (--jammer-on starts powered). Select is the gamepad combat modifier; see INPUT.md. --record-combat NEW_PATH writes version-7 combat-service inputs, including sensor controls and wreck body presence; --replay-combat PATH replays them headlessly with matching --aircraft/--theater and assets. --combat-smoke runs all default slots and five damage classes; TORE_COMBAT_EVIDENCE=DIR also roundtrips per-slot tapes. --combat-probe-ticks 1..7200 advances a scripted firing pass before --capture-flight.\nAI wings: Quick Mission uses AI by default, with separate friendly and enemy delta formations. --ai-wings opens the creator; --fixture-wings retains the old straight-flight setup. --ai-mission free|cap|intercept|escort|self-defense|hold selects the next Quick Mission policy; free is the default. --enemy-skill novice|average forces every enemy aircraft to that level for this session only (the original's persistence of this preference is untraced). --probe-matrix NEW_DIR records the 1,008-case F-22/opponent/skill/geometry/adapter suite using --ai-probe-ticks. --probe-enemy-aircraft ID, --probe-enemy-skill novice|average|experienced|ace, --probe-geometry head|rear|side, --probe-guns (player), --probe-ai-guns-only (AI stores), --probe-flight-model legacy|researched, --probe-ai-flight-model standard|all-hybrid and --probe-threat TICK:hit|gun|aaa configure encounter probes. --probe-fault TICK:INDEX injects a reviewed system fault (0..44) into the first enemy through the normal damage bridge. --ai-probe-ticks 1..216000 runs a headless AI mission and prints a deterministic per-actor summary; with --ground-start it also prints phase transitions and ground hazards. --maneuver takeoff flies the player off the ground start and cruises on the autopilot; --probe-wing-size 1..5 sizes the player's wing; --probe-fight FRIENDLY:ENEMY sizes a whole battle (1..15 a side, five to a wing) and --probe-friendly-aircraft ID picks the friendly AI aircraft; --probe-wing-only removes all other wings for isolated probes or creator captures; --probe-wing-order TICK:bug-out|land-selected|attack-on-contact|engage-my-target orders all wingmen, or one with a trailing @MEMBER (1..4, the first wingman is 1); --probe-player-lock TICK:ID has the player designate aircraft ID at that tick, so the sensors lock it as they would for a human; --probe-data-link and --probe-player-lock print a `data link:` line for each member (with its radar flag) and each lock taken or dropped in the flight data link's picture; --probe-player-home FROM:UNTIL flies the player gear down over the departure field; --probe-lose-player TICK crashes the player's aircraft at that tick; --probe-wing-route EAST_NM:NORTH_NM:ALT_FT (repeatable) gives the player's wing waypoints, flown by an AI that takes the lead from the lost player once its search finds nothing; --probe-attack TICK[:SECONDS] has the scripted leader designate the nearest hostile aircraft, select a weapon and fire from that tick, attacking again SECONDS after each shot. --separation 1|2|5|10|20|50|100|150|200|300 sets the Quick Mission enemy distance in nautical miles.\nMissiles: click CUED/BORESIGHT or bind weapon-seeker-mode. --missile-acceptance runs controlled reach probes. --compatibility-weapons retains prior weapon rules independently of the flight model.\nSensors: one shared radar/infrared component serves every imported aircraft. M cycles the available channels, I selects infrared, R returns to radar, Y toggles contact history, comma/period change the scope setting and a click designates a contact. --sensor-summary prints each aircraft's imported capability; --sensor-channel radar|ir, --scope-range 5|10|25|50|100|150 and --scope-history set the scope for a headless capture. Guidance/contact/damage coupling is a development approximation, not native parity."
                 );
                 println!(
-                    "Multiplayer: --connect HOST[:PORT] joins a dedicated server (docs/DEDICATED-SERVER.md); --callsign NAME (1 to 15 printable ASCII characters), --slot N (the plane to take) and --password TEXT go with it. --host MISSION_FILE hosts a game of that mission file (the dedicated server's format) and flies in it: other players join with --connect; --port N (default 26900), --name TEXT, --open-planes friendly|all|N,N and --password TEXT (the password joining players must give) set the game, and --callsign and --slot are the hosting player's own. --list also lists the hosted game on the Internet Lobby, on the master --master HOST[:PORT] names (default the public one). --find-games SECONDS [--port N] looks for games on the local network for that long, prints each one found (address, build, name, mission, players, phase, King, password, full) and exits."
+                    "Multiplayer: --connect HOST[:PORT] joins a dedicated server (docs/DEDICATED-SERVER.md); --callsign NAME (1 to 15 printable ASCII characters), --slot N (the plane to take) and --password TEXT go with it. --host MISSION_FILE hosts a game of that mission file (the dedicated server's format) and flies in it: other players join with --connect; --port N (default 26900), --name TEXT, --open-planes friendly|all|N,N and --password TEXT (the password joining players must give) set the game, and --callsign and --slot are the hosting player's own. --list also lists the hosted game on the Internet Lobby, on the master --master HOST[:PORT] names (default the public one). --find-games SECONDS [--port N] looks for games on the local network for that long, prints each one found (address, build, name, mission, players, phase, King, password, full) and exits. --browse SECONDS [--master HOST[:PORT]] lists the games on the Internet Lobby for that long, with each one's mission and players, and exits."
                 );
                 println!(
                     "Replays: --watch-replay FILE plays a mission recording (docs/REPLAYS.md). With it, --capture-replay OUT.ppm writes one GPU frame and exits (OUT.png saves the clean view as P does); --replay-tick N pauses at a tick; --flight-view 0..11 and --replay-aircraft ID choose the view; --replay-drone starts in the follow drone; --replay-speed 0.125..16 starts playing at that speed, negative for reverse; --replay-ui labels,timer,trails,comms,subtitles chooses the interface parts; --replay-panels thought,telemetry,guidance,comms,menu opens debug panels, or the right-click menu, on the selected aircraft; --replay-clean starts with the interface hidden, as H hides it; --replay-menu ?|pref|time|help|graphics|sound|controls opens the Escape menu at that page, or that screen over it; --replay-look-at aircraft:ID, ground:ID or weapon:ID starts in the object view looking at it."
@@ -8843,7 +8910,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display. --validate-ils checks the ILS alignment at every airport.
-Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --retail-stall-speeds turns the weight-scaled stall speed off, so the imported envelope's slow edges apply at every weight (developer switch). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, airports, ground-targets-unavailable, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
+Weather: --weather-condition 0..5 selects one of the six source choices (clear, cloudy, foggy, dawn, sunset, night); --validate-weather checks every imported module, one full simulated day and every choice without a display. TORE_WEATHER_TIME=HH:MM overrides the launch time for matched captures; TORE_VAPOR_PROBE=1 prints the resolved wing vapor trail headlessly.\n--capture-flight PATH captures flight with instruments; --flight-view 0..11 chooses front/external/oblique/back/up/track/threat/wing/player-target/target-player/fly-by/missile-target. --flight-reference player/target/missile selects the reference. --flight-menu captures the paused menu. --flight-map opens the Shift-M map. --weapon-diagnostics shows the upper-right weapon diagnostic panel (Escape > Pref > Weapon diagnostics? in flight). --debug-panels turns on the mission timer, right-click menu and debug panels (Escape > Pref > Debug panels?); --flight-panels thought,telemetry,guidance,comms,menu also opens them. --flight-look YAW,PITCH sets look angles in degrees for inspection. --flight-zoom 0.5..4 sets initial zoom.\n--flight-throttle 0..1 sets initial throttle for material inspection. --flight-bay 0..1 sets an F-22 main-bay pose. O toggles bays in flight.\n--flight-devices G,F,B,H,AB sets initial fractions (0..1); --flight-controls pitch,roll,rudder sets initial deflections (-1..1). Animation captures pause at the specified pose.\n--instrument-layout large/small selects four corners or six bottom windows.\n--panel-snapshot PATH writes one instrument; --systems-preview 12,13,14 injects panel-only faults and advances --flight-probe-ticks (default 1200); --instrument-page 0..9 selects it.\n--native-flight-tables DIR enables airborne native research using extracted sine/atan tables; environmental turbulence and native contact/lifecycle producers are unavailable.\n--researched-flight explicitly selects the default hybrid flight/contact model (not native parity). --retail-stall-speeds turns the weight-scaled stall speed off, so the imported envelope's slow edges apply at every weight (developer switch). --legacy-flight selects the previous compatibility model.\n--native-flight-report prints static-translated helper probes (not a native simulation). --native-flight-trig PATH additionally probes an extracted sine-q15.bin table.\n--headless-flight TICKS supports --maneuver level/pull/loop/roll/stall/spin/bank-left/bank-right. --flight-probe-ticks TICKS advances that maneuver before a rendered flight (maximum 7200 ticks).\n--capture-terrain writes a GPU-rendered 960x720 terrain PPM and exits (display required).\nGraphics for one run: --anti-aliasing off/2x/4x/8x, --render-scale 75/100/125/150/200, --spotting-aid off/subtle/strong, --terrain-filtering on/off; --original-graphics turns every addition off.\nViewer: arrows move; Shift speeds up; Q/E or PageDown/PageUp change altitude; A/D turn; W/S pitch; Escape returns.\n--snapshot writes a headless 640x480 menu preview and exits (supports --quick-mission).\n--snapshot-state: normal, hover, pressed, help, pref, multi, notice, internet, internet-games, internet-joining, internet-options, internet-unreachable, controls, controls-keyboard, controls-mouse, controls-head, controls-search, controls-search-keys, graphics, sound, replays, replays-settings, replays-delete, locate, locate-importing, locate-done. Quick mission (with --quick-mission): normal, aircraft, theaters, help, objectives, ground-start, airports, ground-targets-unavailable, objective-1 through objective-6 (the group order popups), field-3 through field-34 (the setting popups), ordnance, ordnance-empty, ordnance-drag, ordnance-message, ordnance-message-long, and debrief, debrief-2 to debrief-5, debrief-success.\n--background: CHOOSEAC, CHOOSE3, CHOOSEU, CHOOSEM, CHOOSEV (default: random; snapshots use CHOOSEV).\n--smoke-test presents one frame without audio and exits.\nThe game starts in borderless fullscreen; --windowed starts in a window, as --window-size, --smoke-test and the captures already do. Alt-Enter switches at any time and the choice is remembered.\nTORE_DATA_DIR overrides the application data directory. TORE_LOG_DIR overrides diagnostic logs; TORE_NO_ERROR_DIALOG=1 suppresses failure dialogs.\n--diagnostics-self-test[=error|panic|worker-panic|graphics|dialog] checks reporting without retail media.\nTab/arrows + Enter navigate; Escape dismisses; ? contains Exit."
                 );
                 return Ok(Outcome::Done);
             }
@@ -8854,6 +8921,16 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         let port = net::options::find_games_port(&mut session_args)?;
         net::search::find_games(seconds, port)
             .map_err(|error| format!("--find-games could not search: {error}"))?;
+        return Ok(Outcome::Done);
+    }
+    if let Some(seconds) = browse_games {
+        let data = assets::data_directory().ok();
+        let remembered = data
+            .as_deref()
+            .and_then(|data| net::settings::Remembered::load(data).master);
+        let master = net::browse::browse_master(&mut session_args, remembered.as_deref())?;
+        net::browse::browse_games(seconds, &master, false)
+            .map_err(|error| format!("--browse failed: {error}"))?;
         return Ok(Outcome::Done);
     }
     let connect = session_args.session(
@@ -10459,6 +10536,15 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
             for p in menu.pixels.chunks_exact(4) {
                 f.write_all(&p[..3])?;
             }
+        } else if snapshot_state.starts_with("internet") {
+            // The Internet Lobby screen with synthetic games and lines.
+            internet_screen::preview::render(&menu.kit_source, &snapshot_state, &mut menu.pixels)?;
+            use std::io::Write;
+            let mut f = std::fs::File::create(&path)?;
+            write!(f, "P6\n640 480\n255\n")?;
+            for p in menu.pixels.chunks_exact(4) {
+                f.write_all(&p[..3])?;
+            }
         } else if let Some(state) = snapshot_state.strip_prefix("replays") {
             // A synthetic list: no recordings are read or needed.
             let mut screen = replay::screen::Replays::preview("Main menu");
@@ -11349,6 +11435,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         net_flight: None,
         net_ending: None,
         direct: Default::default(),
+        internet: Default::default(),
         lobby: Default::default(),
         connect,
         launch_creator,

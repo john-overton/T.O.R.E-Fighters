@@ -6,7 +6,10 @@
 //! The game also hosts a session itself, on a thread, and joins it as a
 //! client (slice EF3, `hosting`). Slice EF5 adds finding games and servers
 //! without a screen: `search` (the local network), `lookup` (a typed address,
-//! off the screen's thread) and `settings` (what is remembered).
+//! off the screen's thread) and `settings` (what is remembered). Slice I4 adds
+//! `browse` (the Internet Lobby's list, from the master) and `telemetry` (the
+//! anonymous statistics a game that uses the master may send).
+pub mod browse;
 pub mod chat;
 pub mod debrief;
 pub mod files;
@@ -20,3 +23,4 @@ pub mod scoreboard;
 pub mod search;
 pub mod session;
 pub mod settings;
+pub mod telemetry;

@@ -1,9 +1,13 @@
 //! What the multiplayer screens remember between sessions (slice EF5): the
 //! player's callsign, the last few addresses joined (most recent first), the
 //! port, the last game name hosted and whether the Direct Connection screen
-//! lists full games. One small text file in the data folder
-//! beside the other preference files (`network-v1.conf`), read and written as
-//! they are. `--connect` and `--host` remember too.
+//! lists full games. Since slice I4 it also holds the Internet Lobby's own
+//! choices: the master's address, whether other versions are listed, whether
+//! the game forwards its port on the router (kept for slice J4b) and the
+//! telemetry switch with whether its one-time notice has been shown. One
+//! small text file in the data folder beside the other preference files
+//! (`network-v1.conf`), read and written as they are. `--connect` and
+//! `--host` remember too.
 //!
 //! The password is never kept: the file is plain text, and a password for one
 //! game is a thing to type again (agent decision).
@@ -14,6 +18,11 @@
 //! port 26900
 //! game-name Friday night
 //! show-full yes
+//! show-other yes
+//! master master.example.org:26901
+//! port-forward no
+//! telemetry no
+//! telemetry-notice yes
 //! address 192.168.1.20:26900
 //! address game.example.org:26900
 //! ```
@@ -45,8 +54,22 @@ pub struct Remembered {
     pub game_name: Option<String>,
     /// The addresses last joined, most recent first.
     pub addresses: Vec<String>,
-    /// The Direct Connection screen lists games that are full (EF7).
+    /// The Direct Connection screen lists games that are full (EF7), and so
+    /// does the Internet Lobby (I4): the check box is shared.
     pub show_full: bool,
+    /// The Internet Lobby lists games of other versions, dimmed (I4).
+    pub show_other: bool,
+    /// The master the Internet Lobby asks, `HOST` or `HOST:PORT`; `None` for
+    /// the built-in one (I4).
+    pub master: Option<String>,
+    /// A hosting game asks its router to forward the game port (stage J4b
+    /// uses it; the switch is kept from I4). On by default.
+    pub port_forward: bool,
+    /// The game sends anonymous statistics to the master when it uses the
+    /// Internet Lobby (I4). On by default (John, 2026-10-05).
+    pub telemetry: bool,
+    /// The one-time notice about the statistics has been shown.
+    pub telemetry_notice: bool,
 }
 
 impl Default for Remembered {
@@ -57,6 +80,11 @@ impl Default for Remembered {
             game_name: None,
             addresses: Vec::new(),
             show_full: false,
+            show_other: false,
+            master: None,
+            port_forward: true,
+            telemetry: true,
+            telemetry_notice: false,
         }
     }
 }
@@ -134,6 +162,21 @@ impl Remembered {
         if self.show_full {
             text += "show-full yes\n";
         }
+        if self.show_other {
+            text += "show-other yes\n";
+        }
+        if let Some(master) = &self.master {
+            text += &format!("master {master}\n");
+        }
+        if !self.port_forward {
+            text += "port-forward no\n";
+        }
+        if !self.telemetry {
+            text += "telemetry no\n";
+        }
+        if self.telemetry_notice {
+            text += "telemetry-notice yes\n";
+        }
         for address in &self.addresses {
             text += &format!("address {address}\n");
         }
@@ -183,12 +226,16 @@ impl Remembered {
                     }
                     found.game_name = Some(value.to_owned());
                 }
-                "show-full" => {
-                    found.show_full = match value {
-                        "yes" => true,
-                        "no" => false,
-                        _ => return Err(format!("show-full `{value}` is not yes or no")),
-                    };
+                "show-full" => found.show_full = yes_or_no(key, value)?,
+                "show-other" => found.show_other = yes_or_no(key, value)?,
+                "port-forward" => found.port_forward = yes_or_no(key, value)?,
+                "telemetry" => found.telemetry = yes_or_no(key, value)?,
+                "telemetry-notice" => found.telemetry_notice = yes_or_no(key, value)?,
+                "master" => {
+                    if !master_ok(value) {
+                        return Err(format!("master `{value}` is not a host and a port"));
+                    }
+                    found.master = Some(value.to_owned());
                 }
                 "address" => {
                     let before = found.addresses.len();
@@ -238,6 +285,30 @@ pub fn remember_host(data: &Path, options: &HostOptions) {
     if let Err(error) = kept.save(data) {
         log::warn!("Network settings not saved: {error}");
     }
+}
+
+fn yes_or_no(key: &str, value: &str) -> Result<bool, String> {
+    match value {
+        "yes" => Ok(true),
+        "no" => Ok(false),
+        _ => Err(format!("{key} `{value}` is not yes or no")),
+    }
+}
+
+/// A master address the screen may keep: at most 255 bytes, no spaces or
+/// control characters, and `HOST` or `HOST:PORT` with a host of letters,
+/// digits and `.-_` or an IPv6 address (nothing is looked up).
+pub fn master_ok(text: &str) -> bool {
+    !text.is_empty()
+        && text.len() <= MAX_ADDRESS
+        && !text.chars().any(char::is_control)
+        && text == text.trim()
+        && tore_net::master::local::parse_master(text).is_ok_and(|(host, _)| {
+            !host.is_empty()
+                && host
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':'))
+        })
 }
 
 fn name_ok(name: &str) -> bool {
@@ -403,5 +474,37 @@ mod tests {
         std::fs::write(Remembered::path(&dir), "not a settings file").unwrap();
         assert_eq!(Remembered::load(&dir), Remembered::default());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_internet_lobbys_choices_are_kept_and_the_defaults_are_not_written() {
+        let plain = Remembered::default();
+        assert!(plain.telemetry && plain.port_forward && !plain.telemetry_notice);
+        let text = plain.text();
+        for key in ["telemetry", "port-forward", "show-other", "master"] {
+            assert!(!text.contains(key), "{key} written by default");
+        }
+        let kept = Remembered {
+            show_other: true,
+            master: Some("master.example.org:26911".into()),
+            port_forward: false,
+            telemetry: false,
+            telemetry_notice: true,
+            ..Remembered::default()
+        };
+        let back = Remembered::parse(&kept.text()).unwrap();
+        assert_eq!(back, kept);
+        for bad in [
+            "tore-network 1\ntelemetry maybe\n",
+            "tore-network 1\nmaster \n",
+            "tore-network 1\nmaster host:0\n",
+            "tore-network 1\nmaster two words:1\n",
+            "tore-network 1\ntelemetry no\ntelemetry yes\n",
+        ] {
+            assert!(Remembered::parse(bad).is_err(), "{bad:?}");
+        }
+        assert!(master_ok("master.jroverton.com"));
+        assert!(master_ok("[::1]:26901"));
+        assert!(!master_ok(" padded"));
     }
 }

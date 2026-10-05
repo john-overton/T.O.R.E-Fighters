@@ -105,12 +105,11 @@ fn the_multi_menu_opens_this_screen() {
     menu.down();
     assert_eq!(menu.up(), Action::Direct);
     assert_eq!(menu.open, None);
-    // The second is the public lobby of stage I, still to come.
+    // The second is the Internet Lobby (slice I4, `internet_screen`).
     menu.open = Some(2);
     menu.pointer(Some((150.0, 90.0)));
     menu.down();
-    assert_eq!(menu.up(), Action::Click);
-    assert!(menu.toast.as_ref().unwrap().0.contains("coming soon"));
+    assert_eq!(menu.up(), Action::Internet);
 }
 
 // ---- focus and the default button ----

@@ -1,0 +1,344 @@
+//! The game's side of the Internet Lobby screen: opening it, building its kit
+//! once, routing the window's events to it and carrying out what it asks for
+//! (join, host, leave), and the player's Report when a session joined through
+//! it ends. `main.rs` only calls these; the screen itself is
+//! [`super::InternetScreen`].
+//!
+//! The screen shares Direct Connection's pieces: the kit is the one Direct
+//! Connection builds (`MODEM3`'s palette), kept in [`crate::direct_screen::app::Direct`]
+//! for the life of the game, so a second visit to either opens at once. A join
+//! or New that starts a session opens the lobby screen
+//! ([`crate::lobby_screen`]) over this one, as it does over Direct
+//! Connection, and these calls hand the window's events to whichever is up.
+use super::{HostRequest, InternetJoin, InternetScreen, Outcome};
+use crate::menu::Action;
+use crate::net::{
+    options::HostOptions,
+    session::Join,
+    telemetry::{self, PlayerTally},
+};
+use crate::{App, Screen};
+use std::path::PathBuf;
+use std::sync::{Arc, mpsc};
+use std::time::Duration;
+use winit::event_loop::ActiveEventLoop;
+
+use crate::widgets::Kit;
+
+/// A session joined through the Internet Lobby whose Report is due when it
+/// ends: the master to send it to, the install id to send it under and what
+/// the session has counted.
+struct Reporting {
+    master: String,
+    install_id: u64,
+    tally: PlayerTally,
+}
+
+/// What the game keeps for the screen: the screen while it is open, the kit it
+/// is being built with (the first visit of the game, when Direct Connection
+/// has not built it yet), and the Report due.
+#[derive(Default)]
+pub struct Internet {
+    pub screen: Option<InternetScreen>,
+    building: Option<mpsc::Receiver<Result<Kit, String>>>,
+    report: Option<Reporting>,
+}
+
+impl Internet {
+    /// The kit is being built.
+    pub fn is_building(&self) -> bool {
+        self.building.is_some()
+    }
+}
+
+impl App {
+    /// The screen is open and showing: over Choose Activity.
+    pub(crate) fn internet_open(&self) -> bool {
+        self.screen == Screen::Main && self.internet.screen.is_some()
+    }
+
+    /// The Multi menu's Internet Lobby row.
+    pub(crate) fn open_internet(&mut self) {
+        if self.internet.screen.is_some() || self.internet.building.is_some() {
+            return;
+        }
+        self.menu.state.cancel();
+        if self.direct.kit().is_some() {
+            self.make_internet_screen();
+            return;
+        }
+        let source = Arc::clone(&self.menu.kit_source);
+        let (send, receive) = mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("tore-kit".into())
+            .spawn(move || {
+                let _ = send.send(source.build("MODEM3").map_err(|error| error.to_string()));
+            });
+        match spawned {
+            Ok(_) => {
+                self.internet.building = Some(receive);
+                self.menu.state.toast = Some((
+                    "Opening the Internet Lobby...".to_owned(),
+                    std::time::Instant::now() + Duration::from_secs(30),
+                ));
+            }
+            Err(error) => self.message(format!("Cannot open the Internet Lobby: {error}")),
+        }
+    }
+
+    fn make_internet_screen(&mut self) {
+        let Some(kit) = self.direct.kit() else {
+            return;
+        };
+        let data: Option<PathBuf> = crate::assets::data_directory().ok();
+        self.internet.screen = Some(InternetScreen::new(kit, data));
+        self.menu.state.cancel();
+        self.mouse_look = None;
+        if let Some(renderer) = &self.renderer {
+            renderer.window.request_redraw();
+        }
+    }
+
+    /// The game's turn for the screen, before a frame is drawn: the kit's
+    /// build taken when it is done, the screen's own turn, what it asks for,
+    /// and the Report of a session that ended.
+    pub(crate) fn internet_tick(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(receive) = &self.internet.building {
+            match receive.try_recv() {
+                Ok(Ok(kit)) => {
+                    self.internet.building = None;
+                    self.direct.keep_kit(Arc::new(kit));
+                    self.make_internet_screen();
+                }
+                Ok(Err(error)) => {
+                    self.internet.building = None;
+                    self.menu.state.toast = None;
+                    self.message(format!("Cannot open the Internet Lobby: {error}"));
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.internet.building = None;
+                    self.message("Cannot open the Internet Lobby: the pieces did not build.");
+                }
+            }
+        }
+        self.report_tick();
+        let session = self.net.is_some();
+        // Flying, or under a debrief with no session, the screen has no turn.
+        if self.screen == Screen::Flight || (self.screen != Screen::Main && !session) {
+            return;
+        }
+        let Some(screen) = &mut self.internet.screen else {
+            return;
+        };
+        let outcome = screen.update(session);
+        let action = self.internet_outcome(outcome);
+        if action != Action::None {
+            self.action(event_loop, action);
+        }
+    }
+
+    /// Counts a joined session's humans, and sends its Report once it ends.
+    fn report_tick(&mut self) {
+        let Some(report) = &mut self.internet.report else {
+            return;
+        };
+        if let Some(session) = &self.net {
+            if let Some(lobby) = session.client.lobby() {
+                report.tally.present(lobby.players.len());
+            }
+            return;
+        }
+        // The session is over: a report only for one that reached its lobby.
+        if let Some(report) = self.internet.report.take()
+            && report.tally.joined()
+        {
+            let version = crate::version::version();
+            telemetry::send(
+                &report.master,
+                report.tally.report(report.install_id, version),
+            );
+        }
+    }
+
+    /// Carries out what the screen asked for.
+    pub(crate) fn internet_outcome(&mut self, outcome: Outcome) -> Action {
+        match outcome {
+            Outcome::None => Action::None,
+            Outcome::Close => Action::InternetClose,
+            Outcome::EndSession => Action::DirectLeave,
+            Outcome::Join(request) => {
+                self.internet_join(*request);
+                Action::Click
+            }
+            Outcome::Host(request) => {
+                self.internet_host(*request);
+                Action::Click
+            }
+        }
+    }
+
+    fn internet_join(&mut self, request: InternetJoin) {
+        let InternetJoin {
+            join:
+                crate::direct_screen::JoinRequest {
+                    address,
+                    label,
+                    callsign,
+                    password,
+                },
+            asked,
+            master,
+            install_id,
+        } = request;
+        match Join::to(address, &callsign, &password, &label) {
+            Ok(mut join) => {
+                // `start_join` says "Joining ..." and any failure in
+                // Messages. A join the screen starts opens the lobby, which
+                // shows the joining and a refusal ends it back here.
+                join.lobby = true;
+                if self.start_join(join, &label) {
+                    self.open_lobby(&label, false);
+                    self.internet.report = install_id.map(|install_id| Reporting {
+                        master,
+                        install_id,
+                        tally: PlayerTally::begin(address, asked),
+                    });
+                }
+            }
+            Err(error) => self.message(error),
+        }
+    }
+
+    /// New: hosts the Quick Mission creator's current mission, airborne,
+    /// listed on the Internet Lobby, and opens the lobby as King (EF8).
+    fn internet_host(&mut self, request: HostRequest) {
+        let HostRequest {
+            callsign,
+            name,
+            port,
+            password,
+            listing,
+        } = request;
+        let label = name.clone();
+        let spec = match self.quick.lobby_spec() {
+            Ok(spec) => spec,
+            Err(problem) => {
+                self.message(format!("Cannot host this mission: {problem}"));
+                return;
+            }
+        };
+        let options = HostOptions {
+            mission: PathBuf::from("the Quick Mission creator"),
+            spec,
+            port,
+            name,
+            open_planes: tore_session::OpenPlanes::Friendly,
+            callsign,
+            slot: None,
+            password,
+            listing: Some(listing),
+        };
+        match self.begin_hosting(options, true) {
+            // The lobby opens; its King presses Fly when everyone is ready.
+            Ok(()) => {
+                if self.net.is_some() {
+                    self.open_lobby(&label, true);
+                }
+            }
+            Err(error) => {
+                // The command line's hint is about --port; the screen has
+                // Options.
+                let error = error.replace(
+                    "Choose another with --port.",
+                    "Choose another port in Options.",
+                );
+                self.message(error);
+            }
+        }
+    }
+
+    /// A key press for the open screen, with the text the key typed.
+    pub(crate) fn internet_key(&mut self, name: &str, text: Option<&str>) -> Action {
+        // The lobby over this screen takes the keys first.
+        if self.lobby.screen.is_some() {
+            return self.direct_key(name, text);
+        }
+        let shift = self.modifiers.shift_key();
+        let typed = text
+            .filter(|_| !self.modifiers.control_key() && !self.modifiers.alt_key())
+            .filter(|text| text.chars().any(|c| !c.is_control()));
+        let Some(screen) = &mut self.internet.screen else {
+            return Action::None;
+        };
+        if let Some(text) = typed
+            && screen.typing()
+        {
+            screen.text_input(text);
+            return Action::None;
+        }
+        let outcome = screen.key(name, shift);
+        self.internet_outcome(outcome)
+    }
+
+    /// The left mouse button on the open screen.
+    pub(crate) fn internet_button(&mut self, pressed: bool) -> Action {
+        if self.lobby.screen.is_some() {
+            return self.direct_button(pressed);
+        }
+        let Some(screen) = &mut self.internet.screen else {
+            return Action::None;
+        };
+        let outcome = screen.button(pressed);
+        self.internet_outcome(outcome)
+    }
+
+    /// A wheel step over the open screen.
+    pub(crate) fn internet_wheel(&mut self, notches: i32) {
+        if self.lobby.screen.is_some() {
+            self.direct_wheel(notches);
+        } else if let Some(screen) = &mut self.internet.screen {
+            screen.wheel(notches);
+        }
+    }
+
+    /// Lets go of anything held on the screen (resize, lost focus).
+    pub(crate) fn internet_cancel_press(&mut self) {
+        if let Some(screen) = &mut self.internet.screen {
+            screen.cancel_press();
+        }
+    }
+
+    /// Leaves the screen.
+    pub(crate) fn close_internet(&mut self) {
+        // Dropping the screen stops its browse and any introduction.
+        self.internet.screen = None;
+        self.menu.state.cancel();
+    }
+}
+
+/// The pointer moved over the screen that is up (canvas pixels), or left
+/// the canvas: the lobby over Direct Connection or this screen takes it
+/// first.
+pub(crate) fn pointer_moved(
+    lobby: &mut crate::lobby_screen::app::Lobby,
+    internet: &mut Internet,
+    point: Option<(f64, f64)>,
+) {
+    if let Some(screen) = &mut lobby.screen {
+        screen.moved(point);
+    } else if let Some(screen) = &mut internet.screen {
+        screen.moved(point);
+    }
+}
+
+/// Draws the screen when it is up; false when it is not.
+pub(crate) fn draw_screen(internet: &Internet, canvas: &mut crate::menu::Canvas) -> bool {
+    match &internet.screen {
+        Some(screen) => {
+            screen.draw(canvas);
+            true
+        }
+        None => false,
+    }
+}

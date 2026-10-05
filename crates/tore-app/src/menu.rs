@@ -48,6 +48,10 @@ pub enum Action {
     DirectClose,
     /// Leaves the game session the Direct Connection screen started.
     DirectLeave,
+    /// The Multi menu's Internet Lobby row: opens that screen (I4).
+    Internet,
+    /// Leaves the Internet Lobby screen.
+    InternetClose,
     /// Opens the mission replay viewer on a recording.
     #[allow(dead_code)] // Sent by the Replays screen's Watch button.
     WatchReplay(std::path::PathBuf),
@@ -118,8 +122,8 @@ impl State {
                 "Controls...".into(),
                 "Re-import media...".into(),
             ],
-            // Authored rows (EF7, agent decision): the direct lobby for friends
-            // and the public lobby stage I will add. Retail's six rows (Serial,
+            // Authored rows (EF7, I4, agent decisions): the direct lobby for
+            // friends and the public Internet Lobby. Retail's six rows (Serial,
             // Modem, IPX/SPX, TCP/IP, Disconnect, Airbase Assault) are not built.
             2 => vec!["Direct Connection...".into(), "Internet Lobby...".into()],
             // Replays opens its screen directly.
@@ -239,6 +243,10 @@ impl State {
                     if bar == 2 && row == 0 {
                         self.cancel();
                         return Action::Direct;
+                    }
+                    if bar == 2 && row == 1 {
+                        self.cancel();
+                        return Action::Internet;
                     }
                     if let Some(item) = self.items(bar).get(row) {
                         self.toast = Some((

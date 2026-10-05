@@ -158,6 +158,9 @@ impl App {
         } else if let Some(screen) = &mut self.direct.screen {
             // The Direct Connection screen is where the player is looking.
             screen.say(&text);
+        } else if let Some(screen) = &mut self.internet.screen {
+            // Or the Internet Lobby screen (I4).
+            screen.say(&text);
         } else {
             self.menu.state.toast = Some((
                 text,
@@ -247,7 +250,10 @@ impl App {
     fn net_event(&mut self, event: ClientEvent) -> bool {
         match event {
             ClientEvent::Connected { .. } => {
-                if self.lobby.screen.is_some() || self.direct.screen.is_some() {
+                if self.lobby.screen.is_some()
+                    || self.direct.screen.is_some()
+                    || self.internet.screen.is_some()
+                {
                     self.message("Connected. Loading the game's mission...");
                 }
             }
