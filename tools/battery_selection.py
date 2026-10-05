@@ -428,6 +428,7 @@ RULES: tuple[Rule, ...] = (
     # tore-app: input and flight shell (windowed).
     _r("crates/tore-app/src/input.rs", ("replay-input", "flight-maneuvers"), "input handling", windowed=True),
     _r("crates/tore-app/src/input_script.rs", ("replay-input", "replay-live"), "input scripts", windowed=True),
+    _r("crates/tore-app/src/target_info.rs", ("replay-input", "replay-live"), "friend-or-foe cues", windowed=True),
     _r("crates/tore-app/src/flight_ui.rs", ("replay-live", "replay-input", "instruments"), "flight screen", windowed=True),
     _r("crates/tore-app/src/flight.rs", ("replay-live", "replay-input", "flight-maneuvers", "flight-takeoff"), "flight screen", windowed=True),
     _r("crates/tore-app/src/flight_watch.rs", ("replay-recording", "replay-live"), "replay watching", windowed=True),

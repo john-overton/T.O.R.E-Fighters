@@ -90,6 +90,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Release flare | Delete | - | View + D-pad right |
 | Jettison selected stores | Shift+K | - | View + Right stick press |
 | Reset range target | Backslash | - | View + D-pad up |
+| IFF squawk on the target | U | - | - |
 | Incoming missile (range) | Ctrl+Shift+I | - | View + Xbox |
 | Target jammer (range) | Shift+Y | - | View + Menu |
 | Next damage class (test) | - | - | - |
@@ -187,6 +188,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Dim HUD | Shift+[ | - | - |
 | Brighten HUD | Shift+] | - | - |
 | Live map | Shift+M | - | - |
+| Show target info | Ctrl+T | - | - |
 
 ### Replay drone
 
@@ -236,6 +238,10 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Address wingman 2 | Alt+Shift+2 | - | - |
 | Address wingman 3 | Alt+Shift+3 | - | - |
 | Address wingman 4 | Alt+Shift+4 | - | - |
+| Reply to the flight: Engaging | Alt+Shift+E | - | - |
+| Reply to the flight: Winchester | Alt+Shift+W | - | - |
+| Reply to the flight: Bingo fuel | Alt+Shift+B | - | - |
+| Request help from the flight | Alt+Shift+H | - | - |
 | Chat line (network games only) | Backquote (~) | - | - |
 | Next airport | Shift+N | - | - |
 | Request landing | Shift+L | - | - |
@@ -252,6 +258,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Slow motion | Shift+C | - | - |
 | End mission | Ctrl+Q | - | - |
 | Valkyries music | Ctrl+V | - | - |
+| Score board (network games) | K | - | - |
 | Mark replay moment | Ctrl+B | - | - |
 | Restart flight | - | - | - |
 | Keyboard help | F11 | - | - |
@@ -321,22 +328,25 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Replay viewer | Esc | The pause menu, over the view even with the interface hidden: pauses playback; Esc again or Resume replay plays on as before, ? > End Replay goes back to the Replays screen, and the Control tab opens the controls screen |
 | Replay viewer, pause menu open | Arrow keys, Tab, Enter / Space, Esc, left click | Move, choose and back out, as in the flight menu; every other key and click waits until it closes |
 
-## Proposed for multiplayer phase 2
+## Multiplayer phase 2
 
-**Proposed, not built** ([design](ARCHITECTURE.md#phase-2-the-rest-of-stage-f)),
-awaiting John's review. Slice F2-C adds them to `input_catalog.rs`, and the
-tables above then list them; until then U says IFF is unavailable and the
-others do nothing new.
+[Design](ARCHITECTURE.md#phase-2-the-rest-of-stage-f). John answered the key
+questions on 2026-10-05 (all as recommended). **Built** (slice F2-C, listed in
+the tables above and remappable like any other key):
 
 | Situation | Input | Action |
 | --- | --- | --- |
-| Flight | U | IFF squawk on the designated aircraft: "IFF: Friendly" for one of the player's side, "IFF: no reply" for any other (retail's key) |
+| Flight | U | IFF squawk on the displayed target: "IFF: Friendly" for one of the player's side, "IFF: no reply" for any other, "IFF: no target" with none (retail's key) |
 | Flight | Ctrl+T | Show Target Info on or off, as the Pref menu's row: identities under visible aircraft and objects, a human's callsign beneath in a network game (retail's key) |
-| Networked flight | K | Score board on or off: the players ranked by the game's tally, with the time left |
-| Networked flight, as a wingman | Alt+Shift+E | Reply to the flight: "Engaging" |
-| Networked flight, as a wingman | Alt+Shift+W | Reply to the flight: "Winchester" (text only) |
-| Networked flight, as a wingman | Alt+Shift+B | Reply to the flight: "Bingo fuel" |
-| Networked flight, as a wingman | Alt+Shift+H | Request: "Need help" |
-| Networked flight, aircraft lost | Enter | Fly again, when the respawn rule, lives and delay allow (retail's key) |
-| Networked flight, the AI flying for the player | Any flight control | Take the aircraft back |
-| Watching a networked mission | The replay viewer's keys | As in the viewer; End returns to live, and nothing goes past live; Esc returns to the lobby |
+| Flight | K | Score board. Until the scoring slice draws it, single player says "Score board: network games only" and a network flight "Score board: not available yet" |
+| Flight, as a wingman | Alt+Shift+E / W / B / H | Reply to the flight: Engaging, Winchester, Bingo fuel, or request help. A plane that leads its wing says "You lead this flight." (single player always does). Until the reply slice sends the call, a wingman in a network flight says "not available yet" |
+
+**Proposed, not built:**
+
+| Situation | Input | Action |
+| --- | --- | --- |
+| Networked flight, aircraft lost | Enter | Fly again, when the respawn rule, lives and delay allow (retail's key; slice F2-V) |
+| Networked flight, the AI flying for the player | Any flight control | Take the aircraft back (slice F2-A) |
+| Watching a networked mission | The replay viewer's keys | As in the viewer; End returns to live, and nothing goes past live; Esc returns to the lobby (slice F2-O2) |
+
+Alt+A and Alt+N stay free for stage G's data link sort and battle net.

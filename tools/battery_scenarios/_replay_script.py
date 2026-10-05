@@ -104,6 +104,52 @@ def missile_check(work: Path, output: str) -> list[str]:
     return problems
 
 
+def orange_pixels(path: Path) -> int:
+    """How many pixels of a P6 frame are Show Target Info's orange (255, 150, 40)."""
+    data = path.read_bytes()
+    fields, at = [], 0
+    while len(fields) < 4:
+        while data[at : at + 1].isspace():
+            at += 1
+        end = at
+        while not data[end : end + 1].isspace():
+            end += 1
+        fields.append(data[at:end])
+        at = end
+    body = data[at + 1 :]
+    return sum(
+        1
+        for i in range(0, len(body) - 2, 3)
+        if body[i] >= 245 and 135 <= body[i + 1] <= 165 and body[i + 2] <= 60
+    )
+
+
+def friend_or_foe_check(work: Path, output: str) -> list[str]:
+    events, _ = load(work)
+    said = [e.get("text") or "" for e in events if e["kind"] == "comms.hud"]
+    problems = []
+    for text in (
+        "IFF: no target",
+        "IFF: no reply",
+        "Show target info: on",
+        "Show target info: off",
+        "Score board: network games only",
+        "You lead this flight.",
+    ):
+        if text not in said:
+            problems.append(f"the flight never said {text!r}; it said {said}")
+    if any("not implemented" in text for text in said):
+        problems.append("a key still reports not implemented yet")
+    shots = work / "shots"
+    try:
+        before, after = orange_pixels(shots / "before.ppm"), orange_pixels(shots / "after.ppm")
+    except OSError as error:
+        return [*problems, f"no frame to compare: {error}"]
+    if after < before + 20:
+        problems.append(f"Show Target Info drew no orange text under the enemy ({before} orange pixels before, {after} after)")
+    return problems
+
+
 def gun_check(work: Path, output: str) -> list[str]:
     events, _ = load(work)
     rounds = count(events, "weapon.launch", 0, **{"class": "gun"})
@@ -419,5 +465,13 @@ def scenarios() -> list[Scenario]:
         build("maneuvers", "maneuvers.txt", free, maneuvers_check),
         build("pause-menu-bookmarks", "pause.txt", free, pause_check),
         build("cheats", "cheats.txt", free, cheats_check),
+        build(
+            "friend-or-foe",
+            "friend-or-foe.txt",
+            [*quick, "--separation", "5", "--ai-mission", "hold"],
+            friend_or_foe_check,
+            ai=3,
+            extra_env={"TORE_SCRIPT_OUT": "{work}/shots"},
+        ),
         *mouse_scenarios(),
     ]

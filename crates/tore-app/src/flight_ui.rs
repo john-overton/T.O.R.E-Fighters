@@ -70,6 +70,66 @@ pub enum Command {
     Valkyries,
     /// Ctrl+B: mark this moment in the mission recording.
     Bookmark,
+    /// U: squawk IFF on the displayed target (retail's key).
+    Iff,
+    /// K: the score board on or off (a networked flight's).
+    ScoreBoard,
+    /// Alt+Shift+E, W, B or H: a reply or request to the player's flight.
+    Reply(Reply),
+}
+/// The four replies and requests a wingman can make to its flight (the
+/// guide's reply keys, John 2026-10-05): Alt+Shift+E, W, B and H.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reply {
+    /// "Engaging".
+    Engaging,
+    /// "Winchester": out of missiles (text only, no recording says it).
+    Winchester,
+    /// "Bingo fuel".
+    BingoFuel,
+    /// "Need help".
+    NeedHelp,
+}
+impl Reply {
+    /// The reply the Alt+Shift+`key` chord makes.
+    pub fn of_key(key: &str) -> Option<Self> {
+        Some(match key {
+            "e" => Self::Engaging,
+            "w" => Self::Winchester,
+            "b" => Self::BingoFuel,
+            "h" => Self::NeedHelp,
+            _ => return None,
+        })
+    }
+    /// The words the reply says.
+    pub fn words(self) -> &'static str {
+        match self {
+            Self::Engaging => "Engaging",
+            Self::Winchester => "Winchester",
+            Self::BingoFuel => "Bingo fuel",
+            Self::NeedHelp => "Need help",
+        }
+    }
+}
+/// What K says until the scoring slice draws the board: in single player there
+/// is no score board, and in a networked flight it is on its way.
+pub fn score_board_answer(session: bool) -> &'static str {
+    if session {
+        "Score board: not available yet"
+    } else {
+        "Score board: network games only"
+    }
+}
+/// What a reply key says until the wing reply slice sends the call. A lead has
+/// no one to answer, in single player too (John, 2026-10-05).
+pub fn reply_answer(leads: bool, session: bool, reply: Reply) -> String {
+    if leads {
+        "You lead this flight.".into()
+    } else if session {
+        format!("{}: not available yet", reply.words())
+    } else {
+        format!("{}: network games only", reply.words())
+    }
 }
 /// The flight menu's bottom buttons, left to right.
 const BUTTONS: [&str; 3] = ["Resume flight", "Restart free flight", "Keyboard shortcuts"];
@@ -116,6 +176,7 @@ fn flight_help(tree: &[MenuNode]) -> Vec<String> {
         "Tower: Shift-N airport | Shift-L landing | Ctrl-Shift-R/C repeat/cancel".into(),
         "Wing: Alt-1 straight, 2-5 break, 6-9 approach, E/R/W engage, B bug out".into(),
         "Alt-T formation | Alt-H/V spacing/stack | Alt-0/Alt-Shift-1..4 address".into(),
+        "U: IFF | Ctrl-T: target info | K: scores | Alt-Shift-E/W/B/H: replies".into(),
         "Pad: hold Select, RB fire / LB weapon / A target / B clear".into(),
         "Select+X previous weapon / Y ECM / L3 radar / R3 jettison".into(),
         "Select+Dpad: up target / down hit / left chaff / right flare".into(),
@@ -160,6 +221,13 @@ pub const WEAPON_DIAGNOSTICS: &str = "Weapon diagnostics?";
 /// panels. Not in the retail menu; opinionated, requested by John on
 /// 2026-09-26 (the label is an agent choice).
 pub const DEBUG_PANELS: &str = "Debug panels?";
+/// Whether a Pref row is retail's Show Target Info (Ctrl+T).
+pub fn is_target_info(label: &str) -> bool {
+    label
+        .trim()
+        .trim_end_matches('?')
+        .eq_ignore_ascii_case("show target info")
+}
 /// Append the authored rows to the imported menu tree. The retail rows and
 /// their order are unchanged.
 pub fn add_authored_rows(tree: &mut [MenuNode]) {
@@ -188,6 +256,9 @@ pub struct FlightUi {
     /// The mission timer, right-click menu and debug panels; off unless
     /// chosen in Pref.
     pub debug_panels: bool,
+    /// Show Target Info: identities under every visible aircraft and object,
+    /// from Pref or Ctrl+T. Off by default, as in retail.
+    pub target_info: bool,
     /// Session-only cheats; they survive Restart but are not saved.
     pub cheats: tore_sim::cheats::Cheats,
     pub brightness: i16,
@@ -219,6 +290,7 @@ impl Default for FlightUi {
             ladder: true,
             weapon_diagnostics: false,
             debug_panels: false,
+            target_info: false,
             cheats: Default::default(),
             brightness: 0,
             zoom: 1.,
@@ -341,6 +413,7 @@ impl FlightUi {
         let on = match label {
             WEAPON_DIAGNOSTICS => self.weapon_diagnostics,
             DEBUG_PANELS => self.debug_panels,
+            _ if is_target_info(label) => self.target_info,
             "Invulnerable" => cheats.damage == Damage::Invulnerable,
             "Normal" => cheats.damage == Damage::Normal,
             "Realistic" => cheats.damage == Damage::Realistic,
@@ -542,6 +615,15 @@ impl FlightUi {
                 });
                 Command::Click
             }
+            _ if is_target_info(label) => {
+                self.target_info = !self.target_info;
+                self.message(if self.target_info {
+                    "Show target info: on"
+                } else {
+                    "Show target info: off"
+                });
+                Command::Click
+            }
             DEBUG_PANELS => {
                 self.debug_panels = !self.debug_panels;
                 self.message(if self.debug_panels {
@@ -687,6 +769,15 @@ impl FlightUi {
         {
             return Command::WingRecipient(Some(n));
         }
+        // The wingman's replies and requests to its flight sit on Alt+Shift
+        // with a letter; the Alt letters are the lead's orders and stay put.
+        if alt
+            && !ctrl
+            && shift
+            && let Some(reply) = Reply::of_key(key)
+        {
+            return Command::Reply(reply);
+        }
         if alt && !ctrl && !shift {
             use tore_sim::ai::wing::{PlayerApproach as A, PlayerBreak as B, PlayerOrder as O};
             // The FA wingman keys (docs/spec/keyboard.md). Alt+L and Alt+0 are
@@ -731,6 +822,10 @@ impl FlightUi {
             }
             if key == "b" && !shift {
                 return Command::Bookmark;
+            }
+            // Retail's Show Target Info key, the Pref row's accelerator.
+            if key == "t" && !shift {
+                return self.activate("Show target info?", "Ctrl-T");
             }
             if key == "Tab" {
                 return Command::InstrumentCycle(if shift { -1 } else { 1 });
@@ -863,7 +958,8 @@ impl FlightUi {
             "t" => Command::Target,
             "\\" => Command::RangeReset,
             "w" => Command::Waypoint(true),
-            "u" => self.unavailable("IFF"),
+            "u" => Command::Iff,
+            "k" => Command::ScoreBoard,
             "i" => Command::SensorInfrared,
             "m" => Command::Mode,
 
@@ -1206,7 +1302,11 @@ mod tests {
         );
         assert_eq!(ui.key("e", false, true, false, &tree()), Command::None);
         assert_eq!(ui.key("e", true, true, false, &tree()), Command::None);
-        assert_eq!(ui.key("e", true, false, true, &tree()), Command::None);
+        // Alt+Shift+E is the Engaging reply, not an eject.
+        assert_eq!(
+            ui.key("e", true, false, true, &tree()),
+            Command::Reply(Reply::Engaging)
+        );
         ui.menu = true;
         assert_eq!(ui.key("e", true, false, false, &tree()), Command::None);
     }
@@ -1743,7 +1843,6 @@ mod tests {
             ("]", Command::NextWeapon),
             ("9", Command::None),
             ("0", Command::None),
-            ("k", Command::None),
         ] {
             assert_eq!(ui.key(key, false, false, false, &tree), command);
         }
@@ -1908,5 +2007,122 @@ mod tests {
             ui.key("l", true, false, false, &[]),
             Command::Wing(_)
         ));
+    }
+    #[test]
+    fn iff_and_the_score_board_take_u_and_k_and_keep_their_shifted_keys() {
+        let mut ui = FlightUi::default();
+        assert_eq!(ui.key("u", false, false, false, &[]), Command::Iff);
+        assert_eq!(ui.key("k", false, false, false, &[]), Command::ScoreBoard);
+        // Shift+U is the HUD, Shift+K jettisons, and no Ctrl or Alt chord
+        // squawks or opens the board.
+        assert_eq!(ui.key("u", true, false, false, &[]), Command::Click);
+        assert!(!ui.hud);
+        assert_eq!(
+            ui.key("k", true, false, false, &[]),
+            Command::Combat(tore_sim::combat::live::Command::Jettison)
+        );
+        for (shift, ctrl, alt) in [(false, true, false), (false, false, true)] {
+            for key in ["u", "k"] {
+                assert_eq!(ui.key(key, shift, ctrl, alt, &[]), Command::None, "{key}");
+            }
+        }
+        // A menu or a pause up: the keys do nothing to the flight.
+        ui.menu = true;
+        assert_eq!(ui.key("u", false, false, false, &tree()), Command::None);
+    }
+    #[test]
+    fn the_reply_keys_are_alt_shift_letters_and_leave_the_lead_orders_alone() {
+        use tore_sim::ai::wing::PlayerOrder as O;
+        let mut ui = FlightUi::default();
+        for (key, reply) in [
+            ("e", Reply::Engaging),
+            ("w", Reply::Winchester),
+            ("b", Reply::BingoFuel),
+            ("h", Reply::NeedHelp),
+        ] {
+            assert_eq!(
+                ui.key(key, true, false, true, &[]),
+                Command::Reply(reply),
+                "{key}"
+            );
+        }
+        // The Alt letters are still the lead's orders, Shift+E still ejects,
+        // and the addressing keys keep Alt+Shift with a digit.
+        assert_eq!(
+            ui.key("e", false, false, true, &[]),
+            Command::Wing(O::EngageMyTarget)
+        );
+        assert_eq!(
+            ui.key("w", false, false, true, &[]),
+            Command::Wing(O::AttackOnContact)
+        );
+        assert_eq!(ui.key("e", true, false, false, &[]), Command::Eject);
+        assert_eq!(
+            ui.key("1", true, false, true, &[]),
+            Command::WingRecipient(Some(1))
+        );
+        // Alt+A (the data link's sort) and Alt+N (the battle net) stay free
+        // for stage G.
+        for key in ["a", "n"] {
+            assert_eq!(ui.key(key, true, false, true, &[]), Command::None, "{key}");
+            assert_eq!(ui.key(key, false, false, true, &[]), Command::None, "{key}");
+        }
+        assert_eq!(Reply::NeedHelp.words(), "Need help");
+        assert_eq!(Reply::of_key("x"), None);
+    }
+    #[test]
+    fn the_keys_answer_what_they_will_do_until_their_slices_land() {
+        assert_eq!(
+            reply_answer(true, false, Reply::Engaging),
+            "You lead this flight."
+        );
+        assert_eq!(
+            reply_answer(true, true, Reply::Winchester),
+            "You lead this flight."
+        );
+        assert_eq!(
+            reply_answer(false, true, Reply::BingoFuel),
+            "Bingo fuel: not available yet"
+        );
+        assert_eq!(
+            reply_answer(false, false, Reply::NeedHelp),
+            "Need help: network games only"
+        );
+        assert_eq!(score_board_answer(false), "Score board: network games only");
+        assert_eq!(score_board_answer(true), "Score board: not available yet");
+    }
+    #[test]
+    fn show_target_info_is_off_by_default_and_toggles_from_ctrl_t_and_the_pref_row() {
+        let mut ui = FlightUi::default();
+        assert!(!ui.target_info);
+        assert_eq!(ui.cheat_state("Show target info?"), Some("Off"));
+        // Ctrl+T, the retail accelerator, works with or without the menu.
+        assert_eq!(ui.key("t", false, true, false, &[]), Command::Click);
+        assert!(ui.target_info);
+        assert_eq!(ui.cheat_state("Show target info?"), Some("On"));
+        assert_eq!(shown(&ui).last().copied(), Some("Show target info: on"));
+        // The Pref row toggles it back, and says it did not need research.
+        assert_eq!(ui.activate("Show target info?", "Ctrl-T"), Command::Click);
+        assert!(!ui.target_info);
+        assert!(
+            shown(&ui)
+                .iter()
+                .all(|line| !line.contains("not implemented"))
+        );
+        // Shift+Ctrl+T and Alt+Ctrl+T are not it; T alone still designates.
+        assert!(!matches!(
+            ui.key("t", true, true, false, &[]),
+            Command::Click
+        ));
+        assert_eq!(ui.key("t", false, false, false, &[]), Command::Target);
+    }
+    #[test]
+    fn a_session_keeps_the_target_info_row_and_the_keys() {
+        let mut ui = FlightUi::default();
+        ui.enter_session();
+        assert_eq!(session_refusal("Show target info?"), None);
+        assert_eq!(ui.key("t", false, true, false, &[]), Command::Click);
+        assert!(ui.target_info);
+        assert_eq!(ui.key("u", false, false, false, &[]), Command::Iff);
     }
 }

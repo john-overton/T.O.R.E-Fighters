@@ -79,6 +79,7 @@ mod startup;
 mod static_art;
 mod surface_lighting;
 mod tape_file;
+mod target_info;
 mod target_preview;
 mod ui_text;
 mod ui_text_renderer;
@@ -1395,6 +1396,56 @@ impl App {
             }
             Command::RadioSilence => {
                 self.queue(seats::SeatCommand::RadioSilence);
+                Action::None
+            }
+            // Retail's IFF squawk: the answer comes from the flight's own copy
+            // of the mission, so a networked flight answers as single player does.
+            Command::Iff => {
+                if !self.flight_ui.frozen() {
+                    let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+                    let sides = target_info::Sides {
+                        roster: &self.world.roster,
+                        wings: self.world.ai_wings.as_ref(),
+                        scene: &self.world.terrain.airport_scene,
+                    };
+                    let answer = target_info::iff(
+                        &sides,
+                        frame.plane,
+                        frame
+                            .readout
+                            .targets
+                            .display
+                            .as_ref()
+                            .map(|target| target.id),
+                    );
+                    self.flight_ui.message(answer.message());
+                }
+                Action::None
+            }
+            // The score board and the wing replies: their screens and calls
+            // come with the scoring and reply slices, so until then each says
+            // what it will do.
+            Command::ScoreBoard => {
+                if !self.flight_ui.frozen() {
+                    self.flight_ui
+                        .message(flight_ui::score_board_answer(self.flight_ui.session));
+                }
+                Action::None
+            }
+            Command::Reply(reply) => {
+                if !self.flight_ui.frozen() {
+                    let frame = net::play::current_frame(&self.world, &self.net_flight, &self.net);
+                    let leads = self
+                        .world
+                        .roster
+                        .plane(frame.plane)
+                        .is_none_or(|plane| plane.slot.member == 0);
+                    self.flight_ui.message(flight_ui::reply_answer(
+                        leads,
+                        self.flight_ui.session,
+                        reply,
+                    ));
+                }
                 Action::None
             }
             Command::DamageReport => {
@@ -4065,16 +4116,19 @@ impl ApplicationHandler for App {
                                 (gyro_bank, self.flight_ui.time_scale),
                             );
                         }
-                        let target_friendly = frame.readout.targets.display.as_ref().is_some_and(|target| {
-                            self.world.ai_wings.as_ref().and_then(|wings| wings.slot(target.id))
-                                .is_some_and(|slot| slot.side == tore_sim::ai::launch::Side::Friendly)
-                                || self.world.terrain.airport_scene.runway(target.id).is_some_and(|runway| {
-                                    self.world.terrain.airport_scene.airports.iter().any(|airport| {
-                                        airport.id == runway.airport
-                                            && airport.allegiance == tore_sim::airport::Allegiance::Friendly
-                                    })
-                                })
-                        });
+                        // The X marks a target on the presented plane's own side, so
+                        // a player flying for the enemy sees it on the enemy's aircraft.
+                        let sides = target_info::Sides {
+                            roster: &self.world.roster,
+                            wings: self.world.ai_wings.as_ref(),
+                            scene: &self.world.terrain.airport_scene,
+                        };
+                        let target_friendly = frame
+                            .readout
+                            .targets
+                            .display
+                            .as_ref()
+                            .is_some_and(|target| sides.friendly_to(frame.plane, target.id));
                         // Easy targeting draws the square wherever the target is on
                         // screen, in place of the HUD's square or edge arrow.
                         let easy_square = (self.flight_ui.cheats.easy_targeting
@@ -4216,6 +4270,49 @@ impl ApplicationHandler for App {
                             );
                         } else if !self.live_debug.idle() {
                             self.live_debug.reset();
+                        }
+                        // Show Target Info (Pref, Ctrl+T): each visible aircraft and
+                        // object's identity below it, in the HUD's font and size.
+                        if self.flight_ui.target_info && !self.flight_ui.map.open {
+                            let size = self.flight_canvas.size.map(f64::from);
+                            let scale =
+                                (size[0] / 640.).min(size[1] / 480.) * flight_canvas::HUD_SCALE;
+                            let lobby = self
+                                .net_flight
+                                .as_ref()
+                                .and(self.net.as_ref())
+                                .and_then(|net| net.client.lobby());
+                            let labels = target_info::labels(
+                                &target_info::View {
+                                    picture: &picture,
+                                    camera: &self.camera,
+                                    size: self.flight_canvas.size,
+                                    font: &self.hornet.hud_font,
+                                    scale,
+                                    brief: frame.readout.target_window.as_ref(),
+                                },
+                                &|pose| {
+                                    target_info::identity(
+                                        pose,
+                                        self.world.combat.ground_name(pose.id),
+                                    )
+                                },
+                                &|plane| {
+                                    lobby.and_then(|lobby| {
+                                        lobby
+                                            .players
+                                            .iter()
+                                            .find(|player| player.slot == Some(plane))
+                                            .map(|player| player.callsign.clone())
+                                    })
+                                },
+                            );
+                            target_info::draw(
+                                &mut self.flight_canvas,
+                                &self.hornet.hud_font,
+                                scale,
+                                &labels,
+                            );
                         }
                         self.flight_ui.draw_notices(
                             &mut self.flight_canvas,

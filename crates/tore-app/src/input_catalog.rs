@@ -329,6 +329,7 @@ pub const ENTRIES: &[Entry] = &[
         &["Shift-k"],
     ),
     cmd("range-target", "Reset range target", Weapons, &["\\"]),
+    cmd("key:u", "IFF squawk on the target", Weapons, &["u"]),
     cmd(
         "incoming",
         "Incoming missile (range)",
@@ -539,6 +540,7 @@ pub const ENTRIES: &[Entry] = &[
     cmd("key:Shift-[", "Dim HUD", View, &["Shift-["]),
     cmd("key:Shift-]", "Brighten HUD", View, &["Shift-]"]),
     cmd("key:Shift-m", "Live map", View, &["Shift-m"]),
+    cmd("key:Ctrl-t", "Show target info", View, &["Ctrl-t"]),
     cmd("key:Alt-1", "Wing: fly straight", Communication, &["Alt-1"]),
     cmd("key:Alt-2", "Wing: break left", Communication, &["Alt-2"]),
     cmd("key:Alt-3", "Wing: break right", Communication, &["Alt-3"]),
@@ -640,6 +642,30 @@ pub const ENTRIES: &[Entry] = &[
         Communication,
         &["Alt-Shift-4"],
     ),
+    cmd(
+        "key:Alt-Shift-e",
+        "Reply to the flight: Engaging",
+        Communication,
+        &["Alt-Shift-e"],
+    ),
+    cmd(
+        "key:Alt-Shift-w",
+        "Reply to the flight: Winchester",
+        Communication,
+        &["Alt-Shift-w"],
+    ),
+    cmd(
+        "key:Alt-Shift-b",
+        "Reply to the flight: Bingo fuel",
+        Communication,
+        &["Alt-Shift-b"],
+    ),
+    cmd(
+        "key:Alt-Shift-h",
+        "Request help from the flight",
+        Communication,
+        &["Alt-Shift-h"],
+    ),
     fixed("", "Chat line (network games only)", Communication, &["`"]),
     cmd("airport-next", "Next airport", Communication, &["Shift-n"]),
     cmd(
@@ -666,6 +692,7 @@ pub const ENTRIES: &[Entry] = &[
     cmd("key:Shift-c", "Slow motion", Game, &["Shift-c"]),
     cmd("end-flight", "End mission", Game, &["Ctrl-q"]),
     cmd("key:Ctrl-v", "Valkyries music", Game, &["Ctrl-v"]),
+    cmd("key:k", "Score board (network games)", Game, &["k"]),
     cmd("bookmark", "Mark replay moment", Game, &["Ctrl-b"]),
     cmd("restart", "Restart flight", Game, &[]),
     cmd("key:F11", "Keyboard help", Game, &["F11"]),
@@ -895,6 +922,32 @@ mod tests {
                     assert_eq!(*key, "Escape", "{key}: {other} and {}", entry.label);
                 }
             }
+        }
+    }
+    #[test]
+    fn the_phase_two_keys_are_listed_with_their_stock_keys() {
+        for (action, key) in [
+            ("key:u", "u"),
+            ("key:Ctrl-t", "Ctrl-t"),
+            ("key:k", "k"),
+            ("key:Alt-Shift-e", "Alt-Shift-e"),
+            ("key:Alt-Shift-w", "Alt-Shift-w"),
+            ("key:Alt-Shift-b", "Alt-Shift-b"),
+            ("key:Alt-Shift-h", "Alt-Shift-h"),
+        ] {
+            let entry = ENTRIES
+                .iter()
+                .find(|entry| entry.action == action)
+                .unwrap_or_else(|| panic!("{action} is not in the catalog"));
+            assert_eq!(entry.keys, [key], "{action}");
+            assert!(entry.bindable() && entry.parsed().is_some(), "{action}");
+        }
+        // Stage G's keys stay free for its own slices.
+        for key in ["Alt-a", "Alt-n", "Alt-Shift-a", "Alt-Shift-n"] {
+            assert!(
+                ENTRIES.iter().all(|entry| !entry.keys.contains(&key)),
+                "{key} is taken"
+            );
         }
     }
     fn cell(values: Vec<String>) -> String {
