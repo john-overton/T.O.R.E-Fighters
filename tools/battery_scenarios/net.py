@@ -737,13 +737,15 @@ def drive_master_introduce(d: Drive) -> None:
     log_must(d, server_log(d), r"joined as Bot", r"Bot( \(plane \d+\))? left: left", forbid=NET_BAD)
 
 
-# The Internet Lobby driven by a script (a pointer needs a moment over a target before a click lands): the Multi menu's second row, the list, a game selected, Join (which the
-# master answers only once slice J2 builds introductions), then New. Menu coordinates are the 640 by 480 layer's.
+# The Internet Lobby driven by a script (a pointer needs a moment over a target before a click lands): the Multi
+# menu's second row, the list, a game selected, New (the lobby opens as King; the driver browses meanwhile), Escape
+# (leave), then Join on the listed server, a slot taken and Ready, and a few seconds of flight. Menu coordinates are
+# the 640 by 480 layer's.
 INTERNET_SCRIPT = """wait 10
 movemenu 150 48
 wait 0.6
 click
-wait 0.5
+wait 0.6
 movemenu 150 90
 wait 0.6
 click
@@ -754,28 +756,47 @@ wait 0.6
 click
 wait 2
 snapshot SHOTS/internet-selected.ppm
-movemenu 200 432
-wait 0.6
-click
-wait 5
-snapshot SHOTS/internet-join.ppm
 movemenu 80 432
 wait 0.6
 click
 wait 30
 snapshot SHOTS/internet-lobby.ppm
 key Escape
-wait 2
-key Escape
 wait 1
+snapshot SHOTS/internet-leave.ppm
+key Tab
+wait 0.5
+key Enter
+wait 6
+movemenu 100 194
+wait 0.6
+click
+wait 2
+movemenu 200 432
+wait 0.6
+click
+wait 12
+snapshot SHOTS/internet-joined.ppm
+movemenu 150 176
+wait 0.6
+click
+click
+wait 2
+movemenu 460 434
+wait 0.6
+click
+wait 3
+snapshot SHOTS/internet-ready.ppm
+waittick 720 40
+shot SHOTS/internet-flight.ppm
 exit
 """
 
 
 def drive_internet(d: Drive) -> None:
     """The game's Internet Lobby screen against a master on this machine (slice I4): it lists a `tore-server` that
-    is listed there, Join asks the master for an introduction, and New lists a game of its own that a second
-    `tore-app --browse` sees. (Joining and flying 30 seconds waits for slice J2: the master drops introductions.)"""
+    is listed there and a game of its own that New lists (a second `tore-app --browse` sees it); then Join on the
+    server runs the master's introduction and the race (slice J2), takes a plane, readies and flies a few seconds."""
     master, mport = start_master(d)
     port = d.port()
     server = start_server(d, port, broadcast="on", master=f"{LOCALHOST}:{mport}")
@@ -801,7 +822,7 @@ def drive_internet(d: Drive) -> None:
             seen = d.run("browse", [d.app, "--browse", "4", "--master", f"{LOCALHOST}:{mport}"], timeout=60)
             seen.expect(r'^"Viper\'s game"  \d/\d players, lobby, open, not full, this build', "the hosted game in a second browse")
             seen.expect(r'^"T\.O\.R\.E server"  0/6 players, ', "the server in the same browse")
-        game.finish(150, 0)
+        game.finish(200, 0)
         log = "\n".join(p.read_text(errors="replace") for p in sorted((d.data / "logs").glob("tore-*.log")))
         if opened in log:
             break
@@ -812,8 +833,10 @@ def drive_internet(d: Drive) -> None:
         (rf"Internet Lobby: Asking the Internet Lobby at {re.escape(LOCALHOST)}:{mport} for games\.\.\.", "the browse starting"),
         (r"Internet Lobby: 1 game is listed on the Internet Lobby\.", "the count"),
         (r"Internet Lobby: Asking the Internet Lobby to introduce you to 'T\.O\.R\.E server'\.\.\.", "Join asking"),
-        # Until slice J2 the master drops the request; afterwards the join goes on.
-        (r"Internet Lobby: (The Internet Lobby did not introduce you to that game|Attempting connection to 'T\.O\.R\.E server' at )", "Join's answer"),
+        (r"Internet Lobby: Trying 1 address for 'T\.O\.R\.E server'\.\.\.", "the introduction"),
+        (r"Network: Connected directly \(punched through\)\.", "the path the join took"),
+        (r"Network: seated in plane 0", "a seating after Join, a slot and Ready"),
+        (r"Network: lobby: Flying, .* Viper plane 0", "the mission flying"),
         (r"Internet Lobby: Hosting Viper's game on UDP port \d+\.\.\. Listing it on the Internet Lobby\.", "New listing the game"),
         (r"Host: Listed on the Internet Lobby, seen at 127\.0\.0\.1:\d+\.", "the host's listing"),
     ):
@@ -821,13 +844,17 @@ def drive_internet(d: Drive) -> None:
             d.problem(f"the game's log lacks {what}: /{pattern}/")
     if re.search(r"master\.jroverton\.com|master\.invalid", log):
         d.problem("the game talked about a master other than the scenario's own")
-    for name in ("internet-list", "internet-selected", "internet-join", "internet-lobby"):
+    for name in ("internet-list", "internet-selected", "internet-lobby", "internet-leave", "internet-joined", "internet-ready", "internet-flight"):
         if not (shots / f"{name}.ppm").exists():
             d.problem(f"the script's {name}.ppm was not written")
     game.forbid(NET_BAD, "a network problem")
     stop_server(d, server)
+    master.send("status")
     master.send("quit")
     master.finish(20, 0)
+    # The server saw the join through the master: seated, ready, flying, and the game's exit.
+    log_must(d, server_log(d), r"joined as Viper", r"Viper took the slot of plane 0", r"seat 0 Viper took plane 0", forbid=NET_BAD)
+    master.expect(r"^status listings=\d+ sources=\d+ browse/s=[\d.]+ introductions/min=[1-9]\d* ", "the introduction counted")
 
 
 def scenarios() -> list[Scenario]:
@@ -885,9 +912,9 @@ def scenarios() -> list[Scenario]:
             notes="tore-master and its flood tool for 10 s: the limits hold and a browse during the flood is answered",
         ),
         Scenario(
-            name="net-window-internet", lane="net", args=[], driver=drive_internet, uses=("server",), window=True, timeout=300,
+            name="net-window-internet", lane="net", args=[], driver=drive_internet, uses=("server",), window=True, timeout=480,
             notes="the Internet Lobby screen against a master and a listed server on this machine: the list, a game "
-            "selected, Join, New; a second `--browse` sees the game New listed",
+            "selected, New (a second `--browse` sees the game), then Join through the master, a plane and a few seconds of flight",
         ),
         Scenario(
             name="net-master-listing", lane="net", args=[], driver=drive_master_listing, uses=("server",), timeout=120,

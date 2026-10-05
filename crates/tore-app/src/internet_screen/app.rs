@@ -13,8 +13,9 @@
 use super::{HostRequest, InternetJoin, InternetScreen, Outcome};
 use crate::menu::Action;
 use crate::net::{
+    browse::MasterJoin,
     options::HostOptions,
-    session::Join,
+    session::{Join, MasterTransport, Transport},
     telemetry::{self, PlayerTally},
 };
 use crate::{App, Screen};
@@ -30,8 +31,10 @@ use crate::widgets::Kit;
 /// the session has counted.
 struct Reporting {
     master: String,
-    install_id: u64,
+    install_id: Option<u64>,
     tally: PlayerTally,
+    /// The path the join took has been said in Messages.
+    said: bool,
 }
 
 /// What the game keeps for the screen: the screen while it is open, the kit it
@@ -138,26 +141,36 @@ impl App {
         }
     }
 
-    /// Counts a joined session's humans, and sends its Report once it ends.
+    /// Counts a joined session's humans, says how it connected, and sends
+    /// its Report once it ends.
     fn report_tick(&mut self) {
         let Some(report) = &mut self.internet.report else {
             return;
         };
         if let Some(session) = &self.net {
+            let mut said = None;
             if let Some(lobby) = session.client.lobby() {
                 report.tally.present(lobby.players.len());
+                if !report.said {
+                    report.said = true;
+                    let path = session.client.path();
+                    report.tally.set_path(path);
+                    said = Some(telemetry::path_line(path));
+                }
+            }
+            if let Some(line) = said {
+                self.message(line);
             }
             return;
         }
-        // The session is over: a report only for one that reached its lobby.
+        // The session is over: a report only for one that reached its lobby,
+        // and only while statistics are on.
         if let Some(report) = self.internet.report.take()
             && report.tally.joined()
+            && let Some(install_id) = report.install_id
         {
             let version = crate::version::version();
-            telemetry::send(
-                &report.master,
-                report.tally.report(report.install_id, version),
-            );
+            telemetry::send(&report.master, report.tally.report(install_id, version));
         }
     }
 
@@ -187,26 +200,41 @@ impl App {
                     callsign,
                     password,
                 },
+            race,
             asked,
             master,
             install_id,
         } = request;
-        match Join::to(address, &callsign, &password, &label) {
-            Ok(mut join) => {
-                // `start_join` says "Joining ..." and any failure in
-                // Messages. A join the screen starts opens the lobby, which
-                // shows the joining and a refusal ends it back here.
-                join.lobby = true;
-                if self.start_join(join, &label) {
-                    self.open_lobby(&label, false);
-                    self.internet.report = install_id.map(|install_id| Reporting {
-                        master,
-                        install_id,
-                        tally: PlayerTally::begin(address, asked),
-                    });
-                }
-            }
-            Err(error) => self.message(error),
+        let Some((socket, joiner)) = self
+            .internet
+            .screen
+            .as_mut()
+            .and_then(|screen| screen.take_through())
+            .map(MasterJoin::into_parts)
+        else {
+            self.message("Cannot join: the Internet Lobby's introduction was lost.");
+            return;
+        };
+        let join = Join {
+            server: address,
+            transport: Transport::Internet(MasterTransport::new(socket, joiner, race)),
+            callsign,
+            slot: None,
+            password,
+            label: label.clone(),
+            // A join the screen starts opens the lobby, which shows the
+            // joining and a refusal ends it back here.
+            lobby: true,
+        };
+        // `start_join` says "Joining ..." and any failure in Messages.
+        if self.start_join(join, &label) {
+            self.open_lobby(&label, false);
+            self.internet.report = Some(Reporting {
+                master,
+                install_id,
+                tally: PlayerTally::begin(address, asked),
+                said: false,
+            });
         }
     }
 

@@ -23,9 +23,9 @@
 //!   session ends. It is never answered and a lost one is lost. A hosting
 //!   game's Report is the hosting thread's (`HostTally`).
 //!
-//! *Agent decision:* in stage I a joining player's path is told from the
-//! host's address ([`tore_net::master::rendezvous::path_of`]); stage J's
-//! join reports the path it really took.
+//! A joining player's path starts as the one told from the host's address
+//! ([`tore_net::master::rendezvous::path_of`]) and is replaced by the path
+//! the client really took ([`PlayerTally::set_path`]) once it is connected.
 
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
@@ -93,6 +93,18 @@ pub fn for_command_line(data: &FilePath, listing: &mut Option<crate::net::hostin
     listing.install_id = install_id(data, settings.telemetry && settings.telemetry_notice);
 }
 
+/// How a join connected, as Messages says it.
+pub fn path_line(path: Path) -> &'static str {
+    match path {
+        Path::LocalNetwork => "Connected over the local network.",
+        Path::ByAddress => "Connected directly.",
+        Path::MappedPort => "Connected directly (forwarded port).",
+        Path::Ipv6 => "Connected directly (IPv6).",
+        Path::Punched => "Connected directly (punched through).",
+        Path::Relay => "Connected through the relay.",
+    }
+}
+
 /// What a joined session tells the Report: when it began, how many humans it
 /// held at most, how the player got there and how long that took.
 #[derive(Clone, Debug)]
@@ -113,6 +125,11 @@ impl PlayerTally {
             path: path_of(host),
             connect_tenths: u8::try_from(asked.as_millis() / 100).unwrap_or(u8::MAX),
         }
+    }
+
+    /// The path the session really took, once the client knows it.
+    pub fn set_path(&mut self, path: Path) {
+        self.path = path;
     }
 
     /// The humans in the session now (the lobby's player count): the most of
@@ -242,6 +259,11 @@ mod tests {
         assert_eq!(report.platform, Platform::current().code());
         assert_eq!((report.minutes, report.humans), (61, 5));
         assert_eq!(report.path, Path::ByAddress);
+        tally.set_path(Path::Punched);
+        assert_eq!(
+            tally.report_after(Duration::ZERO, 1, "0.1.3").path,
+            Path::Punched
+        );
         assert_eq!(report.connect_tenths, 23);
         assert_eq!(report.relayed_kb, 0);
         assert_eq!(report.players_by_path, [0; 6]);

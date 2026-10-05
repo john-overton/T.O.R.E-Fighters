@@ -6,9 +6,8 @@
 //! screen's master is set before its first turn).
 use super::preview::sample_entries;
 use super::*;
-use crate::net::browse::testing::{LoopbackMaster, Script, ScriptedMaster};
+use crate::net::browse::testing::LoopbackMaster;
 use crate::widgets::test_kit;
-use tore_net::master::{Candidate, CandidateKind, IntroductionResult};
 
 /// A master nothing listens on: a literal address, so no name is looked up.
 const NOBODY: &str = "127.0.0.1:9";
@@ -45,26 +44,8 @@ fn lines(s: &InternetScreen) -> String {
     s.message_lines().join("\n")
 }
 
-fn address(text: &str) -> SocketAddr {
-    text.parse().unwrap()
-}
-
 fn names(s: &InternetScreen) -> Vec<String> {
     s.listed_names()
-}
-
-/// Turns the screen on the real clock until it gives an outcome or `done`,
-/// within five seconds.
-fn turn_until(s: &mut InternetScreen, mut done: impl FnMut(&InternetScreen) -> bool) -> Outcome {
-    let started = Instant::now();
-    while started.elapsed() < Duration::from_secs(5) {
-        let outcome = s.update(false);
-        if outcome != Outcome::None || done(s) {
-            return outcome;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    panic!("the screen did not get there: {}", lines(s));
 }
 
 fn values(telemetry: bool) -> options::Values {
@@ -318,41 +299,50 @@ fn join_with_no_browse_says_the_master_cannot_be_reached() {
     assert!(lines(&s).contains("cannot be reached"), "{}", lines(&s));
 }
 
-fn scripted(
-    result: IntroductionResult,
-    candidates: Vec<Candidate>,
-    text: &'static str,
-) -> ScriptedMaster {
-    ScriptedMaster::start(Script {
-        result,
-        candidates,
-        text,
-        answer: true,
-    })
+/// Turns the screen on virtual time, `seconds` of it in steps of a second and
+/// a tenth, with a real moment between steps for the threads.
+fn turn_virtual(s: &mut InternetScreen, from: Duration, seconds: u64) -> (Duration, Outcome) {
+    let mut now = from;
+    let mut outcome = Outcome::None;
+    for _ in 0..seconds {
+        now += Duration::from_millis(1_100);
+        let one = s.update_at(now, false);
+        if one != Outcome::None {
+            outcome = one;
+        }
+        std::thread::sleep(Duration::from_millis(15));
+    }
+    (now, outcome)
 }
 
-/// A screen with the sample games on a scripted master, its browse started.
-fn on_master(master: &ScriptedMaster) -> InternetScreen {
+/// A screen browsing a master nothing answers (a literal address, so no
+/// name is looked up), its browse started and its master known.
+fn on_dead_master() -> (InternetScreen, Duration) {
     let mut s = with_games();
-    s.settings.master = Some(master.address.to_string());
-    s.update(false);
-    assert!(s.browsing());
-    s
+    let mut now = Duration::ZERO;
+    while s.browse.as_ref().is_none_or(|b| b.masters().is_empty()) {
+        s.update_at(now, false);
+        now += Duration::from_millis(10);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The browse's first answer would replace the sample games; there is none.
+    s.set_listed(sample_entries());
+    (s, now)
 }
 
 #[test]
-fn join_asks_the_master_for_an_introduction_and_joins_the_address_it_gives() {
-    let master = scripted(
-        IntroductionResult::Introduced,
-        vec![
-            Candidate::new(CandidateKind::Seen, address("203.0.113.9:40000")),
-            Candidate::new(CandidateKind::Local, address("192.168.1.20:26900")),
-        ],
-        "",
-    );
-    let mut s = on_master(&master);
+fn join_goes_through_the_masters_introduction_to_a_race_of_the_hosts_addresses() {
+    let mut master = LoopbackMaster::start();
+    let (_id, host) = master.list("Friday night", 1, 8, false);
+    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), None);
+    s.settings.master = Some(master.text());
+    s.callsign.set_text("Maverick");
     s.password = "secret".into();
-    s.select_game(1);
+    assert!(master.pump(|| {
+        s.update(false);
+        !names(&s).is_empty()
+    }));
+    s.select_game(0);
     s.focus.set(Id::Games);
     assert_eq!(s.key("Enter", false), Outcome::None);
     assert!(s.joining());
@@ -364,48 +354,88 @@ fn join_asks_the_master_for_an_introduction_and_joins_the_address_it_gives() {
     // While it waits the buttons are off and only Cancel works.
     s.refresh_buttons();
     assert!(!s.join.hit((170, 430)) && s.cancel.hit((520, 430)));
-    let Outcome::Join(request) = turn_until(&mut s, |_| false) else {
+    let mut joined = Outcome::None;
+    master.pump(|| {
+        joined = s.update(false);
+        joined != Outcome::None
+    });
+    let Outcome::Join(request) = joined else {
         panic!("a join: {}", lines(&s));
     };
-    assert_eq!(request.join.address, address("203.0.113.9:40000"));
+    // The race is the host's address as the master saw it (here: itself).
+    let host_at = host.local_addr().unwrap();
+    assert_eq!(request.join.address, host_at);
+    assert_eq!(request.race.targets[0].address, host_at);
+    assert_ne!(request.race.introduction, 0);
     assert_eq!(request.join.label, "Friday night");
     assert_eq!(request.join.callsign, "Maverick");
     assert_eq!(request.join.password, "secret");
-    assert_eq!(request.master, master.address.to_string());
+    assert_eq!(request.master, master.text());
     // No folder to keep an id in (a test), so no report.
     assert_eq!(request.install_id, None);
-    assert!(lines(&s).contains("Attempting connection to 'Friday night' at 203.0.113.9:40000..."));
+    assert!(
+        lines(&s).contains("Trying 1 address for 'Friday night'..."),
+        "{}",
+        lines(&s)
+    );
+    // The socket the introduction ran on goes to the session, once.
+    assert!(s.take_through().is_some());
+    assert!(s.take_through().is_none());
     // The join takes over from the browse.
     assert!(!s.browsing() && !s.joining());
 }
 
 #[test]
-fn a_refused_introduction_is_a_line_in_messages_and_the_screen_goes_on() {
-    let master = scripted(IntroductionResult::Full, Vec::new(), "");
-    let mut s = on_master(&master);
-    s.select_game(0);
+fn a_game_the_master_no_longer_lists_is_a_line_in_messages_and_the_screen_goes_on() {
+    let mut master = LoopbackMaster::start();
+    let mut s = InternetScreen::new(Arc::new(test_kit::kit()), None);
+    s.settings.master = Some(master.text());
+    s.callsign.set_text("Maverick");
+    // The first (empty) list has arrived; then the screen is shown a game the
+    // master does not know.
+    assert!(master.pump(|| {
+        s.update(false);
+        lines(&s).contains("No games are listed")
+    }));
+    s.set_listed(sample_entries());
+    s.select_game(1);
     s.focus.set(Id::Games);
     s.key("Enter", false);
-    let outcome = turn_until(&mut s, |s| !s.joining());
-    assert_eq!(outcome, Outcome::None);
-    assert!(lines(&s).ends_with("That game is full."), "{}", lines(&s));
-    // Join works again afterwards.
+    assert!(s.joining());
+    assert!(master.pump(|| {
+        s.update(false);
+        !s.joining()
+    }));
+    assert!(
+        lines(&s).ends_with("That game is no longer listed."),
+        "{}",
+        lines(&s)
+    );
     assert_eq!(s.default_button(), "Join");
     assert!(s.browsing());
 }
 
 #[test]
+fn a_master_that_never_introduces_is_given_up_on_and_the_screen_goes_on() {
+    let (mut s, now) = on_dead_master();
+    s.select_game(0);
+    s.focus.set(Id::Games);
+    s.key("Enter", false);
+    assert!(s.joining());
+    let (_, outcome) = turn_virtual(&mut s, now, 12);
+    assert_eq!(outcome, Outcome::None);
+    assert!(!s.joining());
+    assert!(
+        lines(&s).contains("did not introduce you to that game"),
+        "{}",
+        lines(&s)
+    );
+    assert_eq!(s.default_button(), "Join");
+}
+
+#[test]
 fn cancel_stops_an_introduction_and_the_next_escape_leaves() {
-    let master = ScriptedMaster::start(Script {
-        result: IntroductionResult::Introduced,
-        candidates: vec![Candidate::new(
-            CandidateKind::Seen,
-            address("203.0.113.9:1"),
-        )],
-        text: "",
-        answer: false,
-    });
-    let mut s = on_master(&master);
+    let (mut s, _) = on_dead_master();
     s.select_game(0);
     s.focus.set(Id::Games);
     s.key("Enter", false);
@@ -757,9 +787,9 @@ fn drawing_every_state_does_not_panic_and_options_cover_the_screen() {
     s.draw(&mut Canvas(&mut pixels));
     assert_ne!(plain, pixels);
     s.joining = Some(Joining {
-        listing_id: 2,
         name: "x".into(),
         asked: Duration::ZERO,
+        through: None,
     });
     s.panel = None;
     s.refresh_buttons();

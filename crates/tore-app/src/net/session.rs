@@ -33,7 +33,8 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tore_formats::aircraft::AircraftId;
-use tore_net::{Datagrams, Entropy, Keepalive, KeepaliveConfig, LinkEnd, RealClock};
+use tore_net::master::join::Joiner;
+use tore_net::{Datagrams, Entropy, Keepalive, KeepaliveConfig, LinkEnd, RealClock, ServerSocket};
 use tore_session::{
     BuildId, Client, ClientConfig, ClientEvent, ClientFrame, Controls, wire::events::WireEvent,
 };
@@ -96,11 +97,42 @@ fn build_mission(spec: &MissionSpec, resources: &BTreeMap<String, Vec<u8>>) -> W
 /// Where the second build of the mission is left for the game.
 type Sink = Rc<RefCell<Option<WorldResult<Built>>>>;
 
-/// What carries the session's datagrams: a UDP socket to a server, or the
-/// in-process link to the host this game runs itself.
+/// What carries the session's datagrams: a UDP socket to a server, the
+/// in-process link to the host this game runs itself, or the socket a join
+/// through the master was introduced on.
 pub enum Transport {
     Udp(UdpSocket),
     Link(LinkEnd),
+    /// A join through the Internet Lobby (slice I4, with J2's joiner).
+    Internet(Box<MasterTransport>),
+}
+
+/// The socket a join through the master was introduced on, read and written
+/// through its joiner so the master's datagrams never reach the transport,
+/// and the race the client runs from it. *Agent decision (I4):* no keepalive
+/// thread runs over it yet (a socket clone comes with slice J3's framing), so
+/// a game stalled for long may be dropped by the host.
+pub struct MasterTransport {
+    socket: ServerSocket,
+    joiner: Joiner,
+    clock: RealClock,
+    race: Option<tore_session::client::Race>,
+}
+
+impl MasterTransport {
+    /// The introduced socket and joiner, and the host's addresses to race.
+    pub fn new(
+        socket: ServerSocket,
+        joiner: Joiner,
+        race: tore_session::client::Race,
+    ) -> Box<Self> {
+        Box::new(Self {
+            socket,
+            joiner,
+            clock: RealClock::new(),
+            race: Some(race),
+        })
+    }
 }
 
 impl Datagrams for Transport {
@@ -108,6 +140,12 @@ impl Datagrams for Transport {
         match self {
             Self::Udp(socket) => socket.send_datagram(to, datagram),
             Self::Link(link) => link.send_datagram(to, datagram),
+            Self::Internet(t) => {
+                let now = t.clock.now();
+                t.joiner
+                    .over(&mut t.socket, now)
+                    .send_datagram(to, datagram)
+            }
         }
     }
 
@@ -115,6 +153,10 @@ impl Datagrams for Transport {
         match self {
             Self::Udp(socket) => socket.recv_datagram(buf),
             Self::Link(link) => link.recv_datagram(buf),
+            Self::Internet(t) => {
+                let now = t.clock.now();
+                t.joiner.over(&mut t.socket, now).recv_datagram(buf)
+            }
         }
     }
 }
@@ -332,7 +374,7 @@ impl NetSession {
     ) -> Result<Self, String> {
         let Join {
             server,
-            transport: socket,
+            transport: mut socket,
             callsign,
             slot,
             password,
@@ -340,7 +382,13 @@ impl NetSession {
             lobby,
         } = join;
         let clock = RealClock::new();
+        // A join through the master races the host's addresses.
+        let race = match &mut socket {
+            Transport::Internet(t) => t.race.take(),
+            _ => None,
+        };
         let config = ClientConfig {
+            race,
             password,
             plane: slot,
             entropy: Entropy::System,

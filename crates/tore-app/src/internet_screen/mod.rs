@@ -17,10 +17,12 @@
 //!
 //! - **New** hosts a game listed on the Internet Lobby (a [`HostRequest`]),
 //!   once the callsign is checked.
-//! - **Join** joins the selected game: it asks the master to introduce the
-//!   player ([`Browse::introduce`]) and, when the master gives the host's
-//!   address, starts the join. Enter presses it when a game is selected, New
-//!   otherwise (*agent decision*, as on Direct Connection).
+//! - **Join** joins the selected game: a [`MasterJoin`] (the mapping test and
+//!   the master's introduction, on a socket of its own) and, when the master
+//!   introduces the player, a join that races the host's addresses from that
+//!   socket while the host punches back (slice J2). Enter presses it when a
+//!   game is selected, New otherwise (*agent decision*, as on Direct
+//!   Connection).
 //! - **Refresh** (or F5) asks for the list again now (*agent decision*).
 //! - **Options** opens the panel of [`options`]; **Cancel** (or Esc) stops an
 //!   introduction, leaves a session, or leaves the screen, in that order.
@@ -36,7 +38,7 @@
 use crate::direct_screen::{JoinRequest, Timing};
 use crate::menu::{Canvas, text_width};
 use crate::net::{
-    browse::{Browse, News},
+    browse::{Browse, MasterJoin, News},
     hosting::Listing,
     options::{DEFAULT_CALLSIGN, callsign_problem},
     settings::Remembered,
@@ -49,11 +51,10 @@ use crate::widgets::{
     tone,
 };
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tore_net::master::{ListingSummary, PageEntry, browse::BrowseEvent};
+use tore_net::master::{ListingSummary, PageEntry, browse::BrowseEvent, join::JoinEvent};
 use tore_net::packet::DiscoverPhase;
 
 pub mod app;
@@ -89,6 +90,8 @@ enum Id {
 pub struct InternetJoin {
     /// The address, name, callsign and password, as Direct Connection's join.
     pub join: JoinRequest,
+    /// The host's addresses and the introduction, for the session's race.
+    pub race: tore_session::client::Race,
     /// From pressing Join to the master's answer, for the player's Report.
     pub asked: Duration,
     /// The master that introduced the player, for the player's Report.
@@ -125,11 +128,11 @@ pub enum Outcome {
 }
 
 /// A join under way: the master has been asked to introduce the player.
-#[derive(Clone, Debug)]
 struct Joining {
-    listing_id: u64,
     name: String,
     asked: Duration,
+    /// The socket and joiner the master's introduction runs on.
+    through: Option<MasterJoin>,
 }
 
 /// The screen.
@@ -169,6 +172,11 @@ pub struct InternetScreen {
     said_count: Option<usize>,
     said_trouble: bool,
     joining: Option<Joining>,
+    /// The join the master introduced, until the game takes it with
+    /// [`InternetScreen::take_through`].
+    introduced: Option<MasterJoin>,
+    /// The time of the screen's last turn, on the browse's clock.
+    last: Duration,
     /// A session this screen's join or host started is running.
     session: bool,
     /// The browse's clock.
@@ -282,6 +290,8 @@ impl InternetScreen {
             said_count: None,
             said_trouble: false,
             joining: None,
+            introduced: None,
+            last: Duration::ZERO,
             session: false,
             clock: tore_net::RealClock::new(),
             pointer: None,
@@ -416,13 +426,17 @@ impl InternetScreen {
     }
 
     fn turn(&mut self, now: Duration, session: bool) -> Outcome {
+        self.last = now;
         if self.session && !session {
             // The session ended (the game said why in Messages).
             self.browse_failed = false;
         }
         self.session = session;
         self.sync_browse();
-        let outcome = self.poll_browse(now);
+        let mut outcome = self.poll_browse(now);
+        if outcome == Outcome::None {
+            outcome = self.poll_joining(now);
+        }
         let at = Instant::now();
         self.games.advance(at);
         self.players.advance(at);
@@ -493,7 +507,6 @@ impl InternetScreen {
         while let Some(item) = browse.poll_news() {
             news.push(item);
         }
-        let mut outcome = Outcome::None;
         let mut changed = false;
         for item in news {
             match item {
@@ -553,26 +566,6 @@ impl InternetScreen {
                         ));
                     }
                 },
-                News::Introduced {
-                    listing_id,
-                    address,
-                } => {
-                    if let Some(joining) = self.joining.take()
-                        && joining.listing_id == listing_id
-                    {
-                        outcome = self.start_join(joining, address, now);
-                    }
-                }
-                News::NotIntroduced { listing_id, text } => {
-                    if self
-                        .joining
-                        .as_ref()
-                        .is_some_and(|joining| joining.listing_id == listing_id)
-                    {
-                        self.joining = None;
-                        self.say(&text);
-                    }
-                }
             }
         }
         if changed && let Some(browse) = &self.browse {
@@ -580,6 +573,59 @@ impl InternetScreen {
             self.details
                 .retain(|id, _| self.entries.iter().any(|e| e.listing_id == *id));
             self.rebuild_games();
+        }
+        Outcome::None
+    }
+
+    /// The introduction under way: the master's answers read, the steps in
+    /// Messages. Introduced is a join, a refusal a line.
+    fn poll_joining(&mut self, now: Duration) -> Outcome {
+        let Some(joining) = &mut self.joining else {
+            return Outcome::None;
+        };
+        let Some(through) = &mut joining.through else {
+            return Outcome::None;
+        };
+        let mut lines = Vec::new();
+        let mut introduced = None;
+        let mut failed = false;
+        for event in through.update(now) {
+            match event {
+                JoinEvent::MappingTested(mapping) => {
+                    log::info!("Internet Lobby: mapping test: {mapping:?}");
+                }
+                JoinEvent::Introduced(found) => introduced = Some(found),
+                JoinEvent::Refused { text, .. } => {
+                    lines.push(text);
+                    failed = true;
+                }
+                JoinEvent::MasterSilent => {
+                    lines.push(
+                        "The Internet Lobby did not introduce you to that game. Try Refresh, or join by address in Direct Connection."
+                            .to_owned(),
+                    );
+                    failed = true;
+                }
+                JoinEvent::Unsupported(text) => {
+                    lines.push(format!(
+                        "The Internet Lobby does not take this game: {text}"
+                    ));
+                    failed = true;
+                }
+            }
+        }
+        let outcome = match introduced {
+            Some(found) if !failed => {
+                let joining = self.joining.take().expect("a join under way");
+                self.start_join(joining, found, now)
+            }
+            _ => Outcome::None,
+        };
+        if failed {
+            self.joining = None;
+        }
+        for line in lines {
+            self.say(&line);
         }
         outcome
     }
@@ -702,7 +748,7 @@ impl InternetScreen {
     /// The player picked a game: its players show, its details are asked.
     fn game_selected(&mut self) {
         let id = self.selected_entry().map(|e| e.listing_id);
-        let now = self.clock.now();
+        let now = self.last;
         if let Some(browse) = &mut self.browse {
             browse.watch(id, now);
         }
@@ -788,7 +834,7 @@ impl InternetScreen {
         if self.busy() {
             return;
         }
-        let now = self.clock.now();
+        let now = self.last;
         match &mut self.browse {
             Some(browse) => {
                 browse.refresh(now);
@@ -857,33 +903,58 @@ impl InternetScreen {
             self.say(&problem);
             return Outcome::None;
         }
-        let Some(browse) = &mut self.browse else {
+        let masters = self
+            .browse
+            .as_ref()
+            .map(|browse| browse.masters().to_vec())
+            .unwrap_or_default();
+        if masters.is_empty() {
             self.say(
                 "The Internet Lobby cannot be reached, so there is nobody to ask. Try Refresh.",
             );
             return Outcome::None;
+        }
+        let now = self.last;
+        let through = match MasterJoin::start(&masters, listing_id, now) {
+            Ok(through) => through,
+            Err(problem) => {
+                self.say(&problem);
+                return Outcome::None;
+            }
         };
-        let now = self.clock.now();
-        browse.introduce(listing_id, now);
         self.say(&format!(
             "Asking the Internet Lobby to introduce you to '{name}'..."
         ));
         self.save();
         self.joining = Some(Joining {
-            listing_id,
             name,
             asked: now,
+            through: Some(through),
         });
         Outcome::None
     }
 
-    /// The master gave the host's address: the join starts.
-    fn start_join(&mut self, joining: Joining, address: SocketAddr, now: Duration) -> Outcome {
+    /// The master introduced the player: the join starts, racing the host's
+    /// addresses from the socket the introduction ran on.
+    fn start_join(
+        &mut self,
+        mut joining: Joining,
+        found: tore_net::master::join::Introduced,
+        now: Duration,
+    ) -> Outcome {
         let callsign = self.callsign.text().to_owned();
+        let Some(first) = found.targets.first() else {
+            self.say("The Internet Lobby gave no address for that game.");
+            return Outcome::None;
+        };
+        let address = first.address;
+        let count = found.targets.len();
         self.say(&format!(
-            "Attempting connection to '{}' at {address}...",
+            "Trying {count} address{} for '{}'...",
+            if count == 1 { "" } else { "es" },
             joining.name
         ));
+        self.introduced = joining.through.take();
         // The join takes over from the browse.
         self.browse = None;
         Outcome::Join(Box::new(InternetJoin {
@@ -893,17 +964,23 @@ impl InternetScreen {
                 callsign,
                 password: self.password.clone(),
             },
+            race: tore_session::client::Race {
+                targets: found.targets,
+                introduction: found.introduction_id,
+            },
             asked: now.saturating_sub(joining.asked),
             master: self.master_text(),
             install_id: self.install_id(),
         }))
     }
 
+    /// The socket and joiner of the join just started, for the session.
+    pub fn take_through(&mut self) -> Option<MasterJoin> {
+        self.introduced.take()
+    }
+
     fn cancel_or_leave(&mut self) -> Outcome {
         if self.joining.take().is_some() {
-            if let Some(browse) = &mut self.browse {
-                browse.cancel_introduction();
-            }
             self.say("Cancelled.");
             return Outcome::None;
         }
@@ -1050,7 +1127,7 @@ impl InternetScreen {
     fn filters_changed(&mut self) {
         self.rebuild_games();
         self.save();
-        let now = self.clock.now();
+        let now = self.last;
         let (other, full) = (self.other.checked(), self.full.checked());
         if let Some(browse) = &mut self.browse {
             browse.set_filters(other, full, now);

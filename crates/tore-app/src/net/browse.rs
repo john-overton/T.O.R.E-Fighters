@@ -13,14 +13,13 @@
 //!   selected game's details every [`DETAILS`].
 //! - A master whose name cannot be looked up is tried again after
 //!   [`REFRESH`], as a silent one is.
-//! - **Join** asks the master to introduce the player to a listed game
-//!   ([`Browse::introduce`]) and takes the host's address from the answer.
-//!   *Agent decision (slice I4):* a Page and a game's Details carry no
-//!   address, so the design's "Join goes straight to the address the master
-//!   saw" needs the master's Introduction (kind 17), which slice J2 makes the
-//!   master answer. Until then a master drops the request and the join says
-//!   so; once J2 is in, the first host address (the one the master saw) is
-//!   joined as stage I wants, and stage J5 replaces this with the race.
+//! - **Join** is [`MasterJoin`]: a socket and a `tore_net::master::join::Joiner`
+//!   of its own that run the mapping test and ask the master to introduce the
+//!   player, then hand both to the session, which races the host's addresses
+//!   from that very socket while the host punches back (slice J2). The
+//!   socket is the session's, not the browse's, because the host's punches
+//!   open the router's mapping for the address the master saw the Introduce
+//!   come from.
 //!
 //! The wire is `docs/formats/master-protocol.md`, "Browsing" and
 //! "Introductions".
@@ -31,11 +30,9 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tore_net::master::browse::{BrowseEvent, Browser, BrowserConfig};
 use tore_net::master::candidate::canonical;
-use tore_net::master::local::{MasterLookup, parse_master};
-use tore_net::master::{
-    Build, CandidateKind, Introduce, Introduction, IntroductionResult, ListingSummary, MappingType,
-    MasterPacket, PageEntry, packet::MAX_MASTER_DATAGRAM,
-};
+use tore_net::master::join::{JoinConfig, JoinEvent, Joiner};
+use tore_net::master::local::{MasterLookup, host_candidates, own_address_toward, parse_master};
+use tore_net::master::{Build, ListingSummary, PageEntry, packet::MAX_MASTER_DATAGRAM};
 use tore_net::{Datagrams, Entropy, Listen, ServerSocket};
 
 /// The list is asked for again this often while the screen is open (the
@@ -43,10 +40,6 @@ use tore_net::{Datagrams, Entropy, Listen, ServerSocket};
 pub const REFRESH: Duration = Duration::from_secs(15);
 /// The selected game's details are asked for this often (5 seconds).
 pub const DETAILS: Duration = Duration::from_secs(5);
-/// An introduction request with no answer is sent again after this long...
-const INTRODUCE_RETRY: Duration = Duration::from_secs(1);
-/// ...this many times in all, then the master counts as silent.
-const INTRODUCE_TRIES: u32 = 3;
 /// Datagrams one update reads at most.
 const MAX_READ: usize = 256;
 
@@ -72,32 +65,6 @@ pub enum News {
     /// What the browse client said: games added, changed and dropped, a
     /// finished refresh, a game's details, a silent master.
     Browse(BrowseEvent),
-    /// The master introduced the player to a game: its listing and the
-    /// address to join.
-    Introduced {
-        /// The listing asked for.
-        listing_id: u64,
-        /// Where the host is: the address the master saw, or the first it
-        /// gave.
-        address: SocketAddr,
-    },
-    /// An introduction was refused, or not answered: the line for Messages.
-    NotIntroduced {
-        /// The listing asked for.
-        listing_id: u64,
-        /// What to tell the player.
-        text: String,
-    },
-}
-
-/// An introduction under way: the request, and the answer's wait.
-#[derive(Clone, Debug)]
-struct Introducing {
-    nonce: u64,
-    cookie: u64,
-    listing_id: u64,
-    sent: Duration,
-    tries: u32,
 }
 
 /// The browse loop on a socket of its own. Generic over the datagram socket
@@ -105,7 +72,6 @@ struct Introducing {
 pub struct Browse<D: Datagrams = ServerSocket> {
     socket: D,
     browser: Browser,
-    build: Build,
     host: String,
     port: u16,
     lookup: Option<MasterLookup>,
@@ -115,7 +81,6 @@ pub struct Browse<D: Datagrams = ServerSocket> {
     /// When the lookup is tried again after a failure.
     retry_lookup: Option<Duration>,
     details: Option<(u64, Duration)>,
-    introducing: Option<Introducing>,
     events: VecDeque<News>,
 }
 
@@ -158,7 +123,6 @@ impl<D: Datagrams> Browse<D> {
         let mut browse = Self {
             socket,
             browser,
-            build,
             host,
             port,
             lookup: None,
@@ -166,7 +130,6 @@ impl<D: Datagrams> Browse<D> {
             next_refresh: None,
             retry_lookup: None,
             details: None,
-            introducing: None,
             events: VecDeque::new(),
         };
         browse.look_up();
@@ -234,52 +197,9 @@ impl<D: Datagrams> Browse<D> {
         }
     }
 
-    /// Asks the master to introduce the player to `listing_id`. One at a
-    /// time: a new one replaces the one under way.
-    pub fn introduce(&mut self, listing_id: u64, now: Duration) {
-        self.introducing = Some(Introducing {
-            nonce: tore_net::reach::random_nonce(),
-            cookie: 0,
-            listing_id,
-            sent: now,
-            tries: 0,
-        });
-        self.send_introduce(now);
-    }
-
-    /// Stops an introduction under way.
-    pub fn cancel_introduction(&mut self) {
-        self.introducing = None;
-    }
-
-    /// An introduction is under way.
-    #[cfg(test)]
-    pub fn introducing(&self) -> bool {
-        self.introducing.is_some()
-    }
-
-    fn send_introduce(&mut self, now: Duration) {
-        let Some(&to) = self.masters.first() else {
-            return;
-        };
-        let Some(asking) = &mut self.introducing else {
-            return;
-        };
-        asking.sent = now;
-        asking.tries += 1;
-        let request = MasterPacket::Introduce(Introduce {
-            nonce: asking.nonce,
-            cookie: asking.cookie,
-            listing_id: asking.listing_id,
-            build: self.build.clone(),
-            mapping: MappingType::Unknown,
-            candidates: Vec::new(),
-        });
-        if let Ok(datagram) = request.encode()
-            && let Err(error) = self.socket.send_datagram(to, &datagram)
-        {
-            log::info!("Internet Lobby: send failed: {error}");
-        }
+    /// The master's addresses, once its name is known (IPv4 first).
+    pub fn masters(&self) -> &[SocketAddr] {
+        &self.masters
     }
 
     /// The loop's turn: the lookup read, the list asked for when it is time,
@@ -301,7 +221,6 @@ impl<D: Datagrams> Browse<D> {
         }
         self.read(now);
         self.browser.update(now);
-        self.retry_introduce(now);
         while let Some(event) = self.browser.poll_event() {
             self.events.push_back(News::Browse(event));
         }
@@ -342,92 +261,71 @@ impl<D: Datagrams> Browse<D> {
                     break;
                 }
             };
-            let datagram = &buf[..len];
-            if !self.masters.contains(&canonical(from)) {
-                continue;
-            }
-            match MasterPacket::decode(datagram) {
-                Ok(MasterPacket::Challenge(challenge)) => {
-                    if let Some(asking) = &mut self.introducing
-                        && asking.nonce == challenge.nonce
-                        && asking.cookie == 0
-                    {
-                        asking.cookie = challenge.cookie;
-                        asking.tries = 0;
-                        self.send_introduce(now);
-                    }
-                }
-                Ok(MasterPacket::Introduction(answer)) => self.introduction(answer),
-                _ => {
-                    self.browser.receive(now, from, datagram);
-                }
-            }
-        }
-    }
-
-    fn introduction(&mut self, answer: Introduction) {
-        let Some(asking) = &self.introducing else {
-            return;
-        };
-        if asking.nonce != answer.nonce {
-            return;
-        }
-        let listing_id = asking.listing_id;
-        self.introducing = None;
-        let refused = |text: &str| News::NotIntroduced {
-            listing_id,
-            text: text.to_owned(),
-        };
-        let news = match answer.result {
-            IntroductionResult::Introduced => {
-                let seen = answer
-                    .host_candidates
-                    .iter()
-                    .find(|c| c.kind == CandidateKind::Seen)
-                    .or_else(|| answer.host_candidates.first());
-                match seen {
-                    Some(candidate) => News::Introduced {
-                        listing_id,
-                        address: candidate.address,
-                    },
-                    None => refused("The Internet Lobby gave no address for that game."),
-                }
-            }
-            _ if !answer.text.is_empty() => refused(&answer.text),
-            IntroductionResult::NoListing => refused("That game is no longer listed."),
-            IntroductionResult::OtherBuild => {
-                refused("That game runs another version and cannot be joined.")
-            }
-            IntroductionResult::Full => refused("That game is full."),
-            IntroductionResult::TooMany => {
-                refused("Too many joins are under way from here; try again in a moment.")
-            }
-        };
-        self.events.push_back(news);
-    }
-
-    fn retry_introduce(&mut self, now: Duration) {
-        let Some(asking) = &self.introducing else {
-            return;
-        };
-        if now.saturating_sub(asking.sent) < INTRODUCE_RETRY {
-            return;
-        }
-        if asking.tries >= INTRODUCE_TRIES || self.masters.is_empty() {
-            let listing_id = asking.listing_id;
-            self.introducing = None;
-            self.events.push_back(News::NotIntroduced {
-                listing_id,
-                text: "The Internet Lobby did not introduce you to that game. Joining through it needs a master that does so; try Refresh, or join by address in Direct Connection.".into(),
-            });
-        } else {
-            self.send_introduce(now);
+            self.browser.receive(now, from, &buf[..len]);
         }
     }
 
     /// The next news.
     pub fn poll_news(&mut self) -> Option<News> {
         self.events.pop_front()
+    }
+}
+
+/// A join through the master under way (slice J2's `Joiner` on a socket of
+/// its own): the mapping test, then the introduction. The screen turns it
+/// every frame with [`MasterJoin::update`]; on [`JoinEvent::Introduced`] the
+/// socket and the joiner go to the session ([`MasterJoin::into_parts`]),
+/// which races the host's addresses from the same socket.
+pub struct MasterJoin {
+    socket: ServerSocket,
+    joiner: Joiner,
+}
+
+impl MasterJoin {
+    /// A join of `listing_id` on the master at `masters` (as the browse
+    /// found them), from a new dual-stack socket whose port is the one the
+    /// master will see and the host will punch.
+    pub fn start(masters: &[SocketAddr], listing_id: u64, now: Duration) -> Result<Self, String> {
+        if masters.is_empty() {
+            return Err("the Internet Lobby's address is not known yet".into());
+        }
+        let socket = ServerSocket::bind(Listen::Any, 0)
+            .map_err(|error| format!("Cannot open a socket to join with: {error}"))?;
+        let port = socket.local_addresses().first().map_or(0, SocketAddr::port);
+        let mut joiner = Joiner::new(
+            JoinConfig {
+                build: build(),
+                listing_id,
+                entropy: Entropy::System,
+            },
+            now,
+        );
+        joiner.set_masters(
+            masters.to_vec(),
+            host_candidates(masters, port, own_address_toward),
+            now,
+        );
+        Ok(Self { socket, joiner })
+    }
+
+    /// The loop's turn: the master's datagrams read (anything else before the
+    /// race is dropped), the timers, the datagrams sent; what happened.
+    pub fn update(&mut self, now: Duration) -> Vec<JoinEvent> {
+        let mut buf = [0u8; tore_net::MAX_DATAGRAM + 1];
+        {
+            let mut routed = self.joiner.over(&mut self.socket, now);
+            while let Ok(Some(_)) = routed.recv_datagram(&mut buf) {}
+        }
+        self.joiner.update(now);
+        if let Err(error) = self.joiner.transmit(&mut self.socket) {
+            log::info!("Internet Lobby: send failed: {error}");
+        }
+        std::iter::from_fn(|| self.joiner.poll_event()).collect()
+    }
+
+    /// The socket and the joiner, for the session that races the host.
+    pub fn into_parts(self) -> (ServerSocket, Joiner) {
+        (self.socket, self.joiner)
     }
 }
 
@@ -602,12 +500,9 @@ pub(crate) mod testing {
     use super::*;
     use std::net::UdpSocket;
     use std::path::Path;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    use std::thread::JoinHandle;
     use std::time::Instant;
     use tore_master::{Config, run::Running};
-    use tore_net::master::{Candidate, Challenge, Hint, Introduction, MasterPacket, Register};
+    use tore_net::master::{MasterPacket, Register};
     use tore_net::packet::DiscoverPhase;
 
     /// The real master, `tore_master::run::Running`, on 127.0.0.1 and a
@@ -727,96 +622,13 @@ pub(crate) mod testing {
             (listed.listing_id, host)
         }
     }
-
-    /// A master that answers an Introduce the way a test says (the real
-    /// master drops it until slice J2), on a thread of its own.
-    pub struct ScriptedMaster {
-        /// Where it listens.
-        pub address: SocketAddr,
-        /// Introduce requests received.
-        pub requests: Arc<AtomicUsize>,
-        stop: Arc<AtomicBool>,
-        thread: Option<JoinHandle<()>>,
-    }
-
-    /// What a scripted master answers with.
-    pub struct Script {
-        pub result: IntroductionResult,
-        pub candidates: Vec<Candidate>,
-        pub text: &'static str,
-        /// Answer the Challenge's repeat; false is a master that never
-        /// introduces.
-        pub answer: bool,
-    }
-
-    impl ScriptedMaster {
-        pub fn start(script: Script) -> Self {
-            let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-            socket
-                .set_read_timeout(Some(Duration::from_millis(10)))
-                .unwrap();
-            let address = socket.local_addr().unwrap();
-            let requests = Arc::new(AtomicUsize::new(0));
-            let stop = Arc::new(AtomicBool::new(false));
-            let (counted, flag) = (Arc::clone(&requests), Arc::clone(&stop));
-            let thread = std::thread::spawn(move || {
-                let mut buf = [0u8; 1_500];
-                while !flag.load(Ordering::Relaxed) {
-                    let Ok((len, from)) = socket.recv_from(&mut buf) else {
-                        continue;
-                    };
-                    let Ok(MasterPacket::Introduce(request)) = MasterPacket::decode(&buf[..len])
-                    else {
-                        continue;
-                    };
-                    counted.fetch_add(1, Ordering::Relaxed);
-                    let reply = if request.cookie == 0 {
-                        MasterPacket::Challenge(Challenge {
-                            nonce: request.nonce,
-                            cookie: 0xC00C1E,
-                        })
-                    } else if request.cookie == 0xC00C1E && script.answer {
-                        MasterPacket::Introduction(Introduction {
-                            nonce: request.nonce,
-                            result: script.result,
-                            introduction_id: 77,
-                            hint: Hint::Race,
-                            seen: from,
-                            host_mapping: MappingType::Unknown,
-                            host_candidates: script.candidates.clone(),
-                            text: script.text.to_owned(),
-                        })
-                    } else {
-                        continue;
-                    };
-                    let _ = socket.send_to(&reply.encode().unwrap(), from);
-                }
-            });
-            Self {
-                address,
-                requests,
-                stop,
-                thread: Some(thread),
-            }
-        }
-    }
-
-    impl Drop for ScriptedMaster {
-        fn drop(&mut self) {
-            self.stop.store(true, Ordering::Relaxed);
-            if let Some(thread) = self.thread.take() {
-                let _ = thread.join();
-            }
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::testing::{LoopbackMaster, Script, ScriptedMaster};
+    use super::testing::LoopbackMaster;
     use super::*;
     use std::time::Instant;
-    use tore_net::master::{Candidate, CandidateKind};
 
     fn address(text: &str) -> SocketAddr {
         text.parse().unwrap()
@@ -944,196 +756,64 @@ mod tests {
         }
     }
 
-    fn seen_and_local() -> Vec<Candidate> {
-        vec![
-            Candidate::new(CandidateKind::Seen, address("203.0.113.9:40000")),
-            Candidate::new(CandidateKind::Local, address("192.168.1.20:26900")),
-        ]
-    }
-
-    /// A browse on a scripted master, and the news after asking for an
-    /// introduction to listing 5.
-    fn introduce(script: Script) -> (Vec<News>, usize) {
-        let master = ScriptedMaster::start(script);
-        let mut browse = Browse::start(&master.address.to_string(), false, false).unwrap();
+    #[test]
+    fn a_join_through_the_master_is_introduced_to_the_host_from_its_own_socket() {
+        let mut master = LoopbackMaster::start();
+        let (id, host) = master.list("Friday night", 1, 8, false);
+        let masters = [master.main];
         let clock = Instant::now();
-        browse.introduce(5, clock.elapsed());
-        // Held until the master is known: sent once the lookup is read.
-        assert!(browse.introducing());
-        let mut news = Vec::new();
-        while clock.elapsed() < Duration::from_secs(8) {
-            browse.update(clock.elapsed());
-            while let Some(item) = browse.poll_news() {
-                if matches!(item, News::Introduced { .. } | News::NotIntroduced { .. }) {
-                    news.push(item);
+        let mut join = MasterJoin::start(&masters, id, clock.elapsed()).unwrap();
+        let mut introduced = None;
+        let mut mapping = None;
+        master.pump(|| {
+            for event in join.update(clock.elapsed()) {
+                match event {
+                    JoinEvent::MappingTested(m) => mapping = Some(m),
+                    JoinEvent::Introduced(i) => introduced = Some(i),
+                    other => panic!("{other:?}"),
                 }
             }
-            if !news.is_empty() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let requests = master.requests.load(std::sync::atomic::Ordering::Relaxed);
-        (news, requests)
-    }
-
-    #[test]
-    fn an_introduction_gives_the_address_the_master_saw_for_the_host() {
-        let (news, requests) = introduce(Script {
-            result: IntroductionResult::Introduced,
-            candidates: seen_and_local(),
-            text: "",
-            answer: true,
+            introduced.is_some()
         });
+        let introduced = introduced.expect("an introduction");
+        // On this machine the master sees the host at its own address.
         assert_eq!(
-            news,
-            [News::Introduced {
-                listing_id: 5,
-                address: address("203.0.113.9:40000")
-            }]
+            introduced.targets[0].address,
+            host.local_addr().unwrap(),
+            "{introduced:?}"
         );
-        // The request, then its repeat with the Challenge's cookie.
-        assert_eq!(requests, 2);
-        // With no Seen candidate the first one is used.
-        let (news, _) = introduce(Script {
-            result: IntroductionResult::Introduced,
-            candidates: seen_and_local()[1..].to_vec(),
-            text: "",
-            answer: true,
-        });
-        assert_eq!(
-            news,
-            [News::Introduced {
-                listing_id: 5,
-                address: address("192.168.1.20:26900")
-            }]
-        );
-        // No address at all is a plain refusal, not a join to nowhere.
-        let (news, _) = introduce(Script {
-            result: IntroductionResult::Introduced,
-            candidates: Vec::new(),
-            text: "",
-            answer: true,
-        });
-        assert!(
-            matches!(news.as_slice(), [News::NotIntroduced { listing_id: 5, text }] if text.contains("no address"))
-        );
+        assert!(mapping.is_some());
+        // The socket the master saw is the one handed on.
+        let (socket, _joiner) = join.into_parts();
+        assert_eq!(introduced.seen.port(), socket.local_addresses()[0].port());
     }
 
     #[test]
-    fn a_refused_introduction_says_why_in_plain_words() {
-        for (result, text, wanted) in [
-            (IntroductionResult::NoListing, "", "no longer listed"),
-            (IntroductionResult::OtherBuild, "", "another version"),
-            (IntroductionResult::Full, "", "full"),
-            (IntroductionResult::TooMany, "", "Too many"),
-            // The master's own words win.
-            (
-                IntroductionResult::Full,
-                "Try the other server.",
-                "Try the other server.",
-            ),
-        ] {
-            let (news, _) = introduce(Script {
-                result,
-                candidates: Vec::new(),
-                text,
-                answer: true,
-            });
-            assert!(
-                matches!(news.as_slice(), [News::NotIntroduced { listing_id: 5, text }] if text.contains(wanted)),
-                "{result:?}: {news:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_master_that_never_introduces_is_given_up_on_after_three_tries() {
-        let master = ScriptedMaster::start(Script {
-            result: IntroductionResult::Introduced,
-            candidates: Vec::new(),
-            text: "",
-            answer: false,
-        });
-        let mut browse = Browse::start(&master.address.to_string(), false, false).unwrap();
-        // The lookup of a literal address ends at once; wait for it.
+    fn a_game_the_master_does_not_list_is_refused_in_its_words_and_a_dead_master_goes_silent() {
+        let mut master = LoopbackMaster::start();
         let clock = Instant::now();
-        while browse.masters.is_empty() && clock.elapsed() < Duration::from_secs(5) {
-            browse.update(clock.elapsed());
-            std::thread::sleep(Duration::from_millis(2));
-        }
-        // From here the time is the test's: one second a step.
-        let mut now = Duration::from_secs(100);
-        browse.introduce(5, now);
-        let mut given_up = None;
-        for _ in 0..8 {
-            now += Duration::from_millis(1_100);
-            browse.update(now);
-            while let Some(item) = browse.poll_news() {
-                if let News::NotIntroduced { text, .. } = item {
-                    given_up = Some(text);
+        let mut join = MasterJoin::start(&[master.main], 99, clock.elapsed()).unwrap();
+        let mut refused = None;
+        master.pump(|| {
+            for event in join.update(clock.elapsed()) {
+                if let JoinEvent::Refused { text, .. } = event {
+                    refused = Some(text);
                 }
             }
-            if given_up.is_some() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(30));
-        }
-        let text = given_up.expect("the join gives up");
-        assert!(text.contains("did not introduce"), "{text}");
-        assert!(!browse.introducing());
-        // The Challenge was answered, then no more than two repeats.
-        let requests = master.requests.load(std::sync::atomic::Ordering::Relaxed);
-        assert!((3..=6).contains(&requests), "{requests} requests");
-    }
-
-    #[test]
-    fn a_datagram_that_is_not_from_the_master_is_ignored() {
-        let master = ScriptedMaster::start(Script {
-            result: IntroductionResult::Introduced,
-            candidates: seen_and_local(),
-            text: "",
-            answer: false,
+            refused.is_some()
         });
-        let mut browse = Browse::start(&master.address.to_string(), false, false).unwrap();
-        let clock = Instant::now();
-        while browse.masters.is_empty() {
-            browse.update(clock.elapsed());
-            std::thread::sleep(Duration::from_millis(2));
+        assert_eq!(refused.as_deref(), Some("That game is no longer listed."));
+        // A master nothing listens on: on virtual time, silent after six tries.
+        let dead = address("127.0.0.1:9");
+        let mut join = MasterJoin::start(&[dead], 1, Duration::ZERO).unwrap();
+        let mut silent = false;
+        for step in 1..=12 {
+            for event in join.update(Duration::from_millis(1_100) * step) {
+                silent |= event == JoinEvent::MasterSilent;
+            }
         }
-        browse.introduce(5, clock.elapsed());
-        let nonce = browse.introducing.as_ref().unwrap().nonce;
-        let forged = MasterPacket::Introduction(Introduction {
-            nonce,
-            result: IntroductionResult::Introduced,
-            introduction_id: 1,
-            hint: tore_net::master::Hint::Race,
-            seen: address("198.51.100.1:1"),
-            host_mapping: MappingType::Unknown,
-            host_candidates: seen_and_local(),
-            text: String::new(),
-        })
-        .encode()
-        .unwrap();
-        // Sent to the browse's own socket by someone else.
-        let target = browse
-            .socket
-            .local_addresses()
-            .into_iter()
-            .find(|a| a.is_ipv4());
-        let stranger = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-        if let Some(target) = target {
-            let to = address(&format!("127.0.0.1:{}", target.port()));
-            stranger.send_to(&forged, to).unwrap();
-        }
-        std::thread::sleep(Duration::from_millis(50));
-        browse.update(clock.elapsed());
-        assert!(
-            browse
-                .poll_news()
-                .is_none_or(|n| !matches!(n, News::Introduced { .. }))
-        );
-        assert!(browse.introducing(), "still waiting for the real master");
+        assert!(silent);
+        assert!(MasterJoin::start(&[], 1, Duration::ZERO).is_err());
     }
 
     #[test]

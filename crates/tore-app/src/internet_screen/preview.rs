@@ -188,9 +188,9 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
             screen.select_game(1);
             screen.say("Asking the Internet Lobby to introduce you to 'Friday night'...");
             screen.joining = Some(Joining {
-                listing_id: 2,
                 name: "Friday night".into(),
                 asked: Duration::ZERO,
+                through: None,
             });
         }
         "internet-unreachable" => {

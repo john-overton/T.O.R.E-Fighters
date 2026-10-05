@@ -6288,28 +6288,37 @@ lettering is, or the player's own `InternetLobby.png` in the data folder).
 - Snapshot states for the menus lane: `internet`, `internet-games`,
   `internet-joining`, `internet-options`, `internet-unreachable`.
 
-In stage I, Join asks the master to introduce the player and joins the
-address it gives for the host (the one the master saw: a game whose host has an
-open or mapped port works); stage J's slice J5 replaces it with the race.
+Join runs [joining through the master](#joining-through-the-master) as far as
+J2 builds it: the mapping test, the introduction, and a race of every address
+the master gives for the host while the host punches back. The relay (J3) and
+the full set of Messages lines are slice J5's.
 
 **Built (I4, 2026-10-05):** `internet_screen/` (`mod.rs` the screen and its
 rules, `options.rs` the panel, `app.rs` the game's side, `preview.rs` the
-headless states), `net/browse.rs` (the browse loop, the introduction request
-and `--browse`), `net/telemetry.rs` (the install id, the notice, a player's
+headless states), `net/browse.rs` (the browse loop, `MasterJoin` and `--browse`), `net/telemetry.rs` (the install id, the notice, a player's
 Report), the Internet Lobby's keys in `net/settings.rs`
 (`network-v1.conf`: `master`, `show-other`, `port-forward`, `telemetry`,
 `telemetry-notice`), and the title lettering in `widgets/header.rs`. Agent
 decisions:
 
-- **Join needs the master's Introduction.** A Page and a game's Details carry
-  no address, so "straight to the address the master saw" cannot be read from
-  the list. Join sends the master an Introduce (kind 16, the Challenge
-  exchange, mapping type unknown, no candidates) and joins the first host
-  candidate in the Introduction, the Seen one when there is one. The master
-  drops Introduce until slice J2, so against today's master Join ends after
-  three tries with "The Internet Lobby did not introduce you to that game";
-  it is tested against a scripted master that answers, and J2 makes it work
-  end to end. J5 replaces the one-address join with the race.
+- **Join uses J2's joiner, from the screen.** A Page and a game's Details
+  carry no address, so Join starts a `net::browse::MasterJoin`: a new
+  dual-stack socket and a `tore_net::master::join::Joiner` on it, which run
+  the mapping test and the Introduce from the very socket the session then
+  joins with (the host's punches open the player's router for that address).
+  On the master's Introduction the screen hands the socket and joiner to
+  `NetSession` as `Transport::Internet` (`net::session::MasterTransport`,
+  read and written through `Joiner::over`) with the introduction's
+  `Race`, and `Client::connect` races the host's addresses (`ClientConfig::race`).
+  Messages: "Asking the Internet Lobby to introduce you to 'X'...", "Trying 3
+  addresses for 'X'...", then the game's "Joining X...", and "Connected
+  directly (punched through)." (or the local network, IPv6, a forwarded port;
+  "through the relay" waits for J3) once the lobby has the player. A refusal
+  is the master's own words; a silent master (six tries) reads "The Internet
+  Lobby did not introduce you to that game." *Not done, J5's:* the framed
+  keepalive (no keepalive thread runs over this transport, so a game stalled
+  for long may be dropped by the host), the relay request after 3 seconds, the
+  15-second give-up, and the Messages lines of each race step.
 - **The list**: the master's order with the games that cannot be joined
   (another version, full, closing) after those that can, each group in the
   master's order; the check boxes also filter on the screen so a game
@@ -6344,15 +6353,17 @@ decisions:
 - **Outside the row's file list** (small hunks the build needed):
   `direct_screen/app.rs` (`Direct::keep_kit`), `direct_screen/tests.rs` (the
   Multi menu test's second row), `net/play.rs` (a message and the Connected
-  line reach this screen), `widgets/{kit,panel}.rs` (a title per screen),
+  line reach this screen), `net/session.rs` (`Transport::Internet`: the
+  introduced socket, its joiner and the race), `widgets/{kit,panel}.rs` (a
+  title per screen),
   `tools/battery_scenarios/{net,menus}.py`, `tools/battery_selection.py`,
   and `tore-master` as a dev-dependency of `tore-app` for the tests.
-- Tests: the screen's rules on the synthetic kit, the browse loop against the
-  real master on 127.0.0.1 and a scripted one, `net-master-listing` (extended
+- Tests: the screen's rules on the synthetic kit, the browse loop and the
+  join's introduction against the real master on 127.0.0.1, `net-master-listing` (extended
   with `tore-app --browse`) and `net-window-internet` (the screen driven in a
-  window against a listed server: the list, a game selected, Join, New, and a
-  second `--browse` that sees the game New listed). The windowed join and 30
-  seconds of flight wait for J2.
+  window against a listed server: the list, a game selected, New with a second
+  `--browse` that sees the game, then Join through the master to the server,
+  a plane, Ready and a few seconds of flight).
 
 ### Joining through the master
 
