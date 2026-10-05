@@ -15,8 +15,11 @@
 //! This module holds the wire (slice I1): every packet's encoder and bounded
 //! decoder ([`packet`]), the common fields ([`candidate`]), the constants
 //! both ends share, and the cookie key the master proves addresses with
-//! ([`CookieKey`]). Like the transport, nothing here reads a clock or
-//! touches a socket.
+//! ([`CookieKey`]). Like the transport, nothing there reads a clock or
+//! touches a socket. A host's side of listing (slice I3) is the
+//! [`Rendezvous`] state machine ([`rendezvous`]), the router that takes the
+//! master's datagrams out of the game port's stream ([`routed`]), and the
+//! host's own addresses and the master's lookup ([`local`]).
 //!
 //! ```
 //! use tore_net::master::{Challenge, MasterPacket};
@@ -74,7 +77,12 @@ macro_rules! codes {
 
 pub mod browse;
 pub mod candidate;
+pub mod local;
+mod meet;
 pub mod packet;
+mod relay;
+pub mod rendezvous;
+pub mod routed;
 
 pub use candidate::{Candidate, CandidateKind, MAX_CANDIDATES, MappingType, relay_likely};
 pub use packet::{
@@ -85,6 +93,11 @@ pub use packet::{
     RelayOffer, RelayOpen, RelayOpenAck, RelayRequest, RelayResult, Report, Role, UnknownListing,
     Unregister, Unsupported,
 };
+pub use rendezvous::{
+    HostListing, HostRendezvous, HostTally, ListingState, Rendezvous, RendezvousCounters,
+    RendezvousEvent,
+};
+pub use routed::Routed;
 
 /// The master protocol version this build speaks. It is separate from the
 /// game's protocol version: one master serves every build of the game.
