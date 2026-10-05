@@ -80,9 +80,12 @@ also cover A-4E, MiG-17, F-4E, AC-130 and unarmed C-130.
 The broad quick-check battery completed 162 other scenarios. Its initial creator
 run exposed the old compressed-index gesture assumption, corrected above. The
 unrelated exhaustive AI matrix was stopped after about 20 minutes; no pass is
-claimed for it. The final full creator run is still in progress. The required workspace checks
-and focused ordnance acceptance above are complete; no full creator result is
-claimed yet.
+claimed for it. The final full creator run passed against the implementation tree committed as
+`4371259`: all 37 playable profiles passed loadout/dragging/removal/restart checks,
+13,979 setups started, 43 were refused with an explanatory message, and zero
+problems were reported. The render sweep produced 606 pictures; creator input
+fuzz exercised 147,000 events and screen input fuzz exercised 76,000 events, all
+with zero problems. This supersedes the initial creator-probe failure.
 
 Validation logs are under `.local/ordnance-audit/retail-layout-*`. Selective
 extractor checks also passed with no errors: original tank thumbnails are
