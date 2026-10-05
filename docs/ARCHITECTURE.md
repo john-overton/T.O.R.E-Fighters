@@ -3934,7 +3934,7 @@ flowchart LR
 
 The conversion runs twice over the data: first the client is run again from
 the capture with an observer that keeps what the client was given
-(`client/observe.rs`; a client with no observer pays for none of it), then one
+(`client/seen.rs`; a client with no observer pays for none of it), then one
 replay frame is built for every host tick and handed to the writer as it is
 made (a ten-minute flight with 30 aircraft is 72,000 frames, too many to hold).
 Running the client again is the only way to decode the snapshots, whose

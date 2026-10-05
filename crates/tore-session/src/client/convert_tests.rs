@@ -2,8 +2,8 @@
 //! (docs/ARCHITECTURE.md, "Converting a capture into a replay").
 
 use super::convert::{self, Conversion, End, FlightInfo, MAX_BRIDGE_TICKS};
-use super::seen::FlightSeen;
 use super::prediction::Trace;
+use super::seen::FlightSeen;
 use super::tests::{Rig, Shared, bot_script, spec};
 use crate::wire::entity::{EntityKind, EntityState};
 use std::collections::BTreeMap;

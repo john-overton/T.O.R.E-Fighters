@@ -3,8 +3,8 @@
 
 use super::MAX_BRIDGE_TICKS;
 use crate::client::interpolation::{self, Sample, hermite, per_tick};
-use crate::client::seen::OwnSample;
 use crate::client::prediction::Trace;
+use crate::client::seen::OwnSample;
 use crate::wire::entity::{EntityKey, EntityState};
 use std::collections::BTreeMap;
 use std::f64::consts::{PI, TAU};

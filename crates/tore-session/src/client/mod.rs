@@ -57,7 +57,6 @@ mod observe_tests;
 #[cfg(test)]
 mod phase2_seams_tests;
 pub mod prediction;
-pub mod seen;
 #[cfg(test)]
 mod relay_tests;
 pub mod results;
@@ -65,6 +64,7 @@ pub mod revival;
 #[cfg(test)]
 mod revival_tests;
 pub mod scores;
+pub mod seen;
 #[cfg(test)]
 mod stall_tests;
 #[cfg(test)]
