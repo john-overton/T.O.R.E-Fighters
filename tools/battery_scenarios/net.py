@@ -904,6 +904,64 @@ def drive_internet(d: Drive) -> None:
     master.expect(r"^status listings=\d+ sources=\d+ browse/s=[\d.]+ introductions/min=[1-9]\d* ", "the introduction counted")
 
 
+def drive_master_relay(d: Drive) -> None:
+    """A `tore-bot --master --listing --path relay` joins a `tore-server` listed on a `tore-master` on this machine
+    through the master's relay (slice J3): on one machine every direct path works, so the bot asks for the relay at
+    once and never races. It joins the channel's relayed address, flies 30 seconds with no drop and leaves; the
+    master logs the channel opened and closed by an end with the bytes each way, and its status line counts the
+    channel and the month's relayed bytes."""
+    master, mport = start_master(d)
+    port = d.port()
+    server = start_server(d, port, broadcast="on", master=f"{LOCALHOST}:{mport}")
+    if not server.wait_for(r"Broadcasting: listed on the Internet Lobby", 10):
+        d.problem("the server never said it was listed")
+    bot = d.start(
+        "bot",
+        [d.bot, "--master", f"{LOCALHOST}:{mport}", "--listing", "T.O.R.E server", "--path", "relay", "--seconds", "30"],
+    )
+    bot.finish(120, 0)
+    server.finish(40, 0)
+    master.send("status")
+    master.send("quit")
+    master.finish(20, 0)
+    master.expect(r"^relay ACTIVE: up to 64 channels, ", "the start line saying the relay is active")
+    master.expect(r"^relay this month \(\d{4}-\d{2}\): \d+B of 800 GB relayed$", "the month's figure at start")
+    bot.expect(rf'^found "T\.O\.R\.E server" on the Internet Lobby at 127\.0\.0\.1:{mport}$', "the listing found")
+    bot.expect(r"^Bot: introduced; not racing its [1-8] address(es)?$", "the introduction, not raced")
+    bot.expect(r"^Bot: --path relay; asking for the relay\.\.\.$", "the relay asked for")
+    bot.expect(r"^Bot: the relay is open; joining through it$", "the channel open")
+    bot.expect(r"^Bot: joined through the Internet Lobby, path relay$", "the join through the relay")
+    bot.expect(r"^Bot: seat \d+, plane \d+, at tick \d+$", "a seating")
+    bot.expect(r"^Bot: round trip \d+ ms, loss", "flight figures")
+    bot.expect(r"^Bot: debrief: (success|failure), \d+ kills, \d+ seconds$", "a debrief")
+    bot.expect(r"^Bot: The connection ended: the player left\.$", "a clean leave")
+    bot.forbid(NET_BAD, "a network problem")
+    bot.forbid(r"trying \d+ address|path punched|The relay closed|relay is (busy|full|switched off)", "a race or a lost relay")
+    server.expect(r"^mission ended: everyone left$", "the end")
+    server.forbid(NET_BAD, "a network problem")
+    opened = rf"^relay opened channel=[0-9a-f]{{8}} host=127\.0\.0\.1:{port} player=127\.0\.0\.1:\d+ channels=1$"
+    master.expect(opened, "the channel opened")
+    m = re.search(
+        r"^relay closed channel=[0-9a-f]{8} .* reason=closed by an end to-host=(\d+) to-player=(\d+) channels=0$",
+        master.text(),
+        re.M,
+    )
+    if not m:
+        d.problem("the master never logged the channel closed by an end")
+    elif int(m.group(1)) < 10_000 or int(m.group(2)) < 100_000:
+        d.problem(f"too few relayed bytes for 30 seconds of flight: {m.group(1)} to the host, {m.group(2)} to the bot")
+    master.expect(
+        r"^status listings=\d+ sources=\d+ .* relayed=1 channels=0 relay-month=[\d.]+(KB|MB) ",
+        "the status line counting the channel and the month's bytes",
+    )
+    master.forbid(r"reason=(idle|over its rate)|relay refused", "a channel closed by the master or refused")
+    master.expect(r"^Stopped$", "the stop line")
+    figure = sorted((d.work / "state").glob("relay-*.txt"))
+    if not figure or int(figure[-1].read_text().strip() or 0) < 100_000:
+        d.problem(f"the month's relay figure was not written at the stop: {figure}")
+    log_must(d, server_log(d), r"joined as Bot", r"Bot( \(plane \d+\))? left: left", forbid=NET_BAD)
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -977,5 +1035,11 @@ def scenarios() -> list[Scenario]:
             timeout=180,
             notes="tore-bot --master --listing joins a listed tore-server through an introduction from a tore-master "
             "on this machine, along the punched path, and flies 30 seconds (slice J2)",
+        ),
+        Scenario(
+            name="net-master-relay", lane="net", args=[], driver=drive_master_relay, uses=("server", "bot"),
+            timeout=180,
+            notes="tore-bot --path relay joins a listed tore-server through the relay of a tore-master on this "
+            "machine, flies 30 seconds with no drop, and the master counts the channel and its bytes (slice J3)",
         ),
     ]

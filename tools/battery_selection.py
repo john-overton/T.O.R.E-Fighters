@@ -195,6 +195,10 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "a bot joining a listed dedicated server through an introduction from a master on this machine",
         ("net-master-introduce",),
     ),
+    "net-relay": (
+        "a bot joining a listed dedicated server through the relay of a master on this machine",
+        ("net-master-relay",),
+    ),
     "net-window": (
         "the game itself over the network: a joined game that stalls, a hosted game",
         ("net-window-*",),
@@ -388,7 +392,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-import/*", ("menus-validate", "replay-settings"), "importer and data folder"),
     _r("crates/tore-codec/*", NET_FAMILIES, "network encoding"),
     _r("crates/tore-net/src/master/*", ("net-master",), "the master server's wire and the browse client"),
-    _r("crates/tore-net/*", NET_FAMILIES + ("net-discovery", "net-introduce"), "network transport"),
+    _r("crates/tore-net/*", NET_FAMILIES + ("net-discovery", "net-introduce", "net-relay"), "network transport"),
     _r("crates/tore-session/src/settings.rs", NET_FAMILIES + ("net-discovery",), "the King's settings registry"),
     _r("crates/tore-session/src/client/scores.rs", NET_FAMILIES, "the scores a game keeps and their words (tore-bot prints them)"),
     _r(
@@ -403,7 +407,7 @@ RULES: tuple[Rule, ...] = (
     ),
     _r(
         "crates/tore-session/*",
-        NET_FAMILIES + ("net-discovery", "net-introduce"),
+        NET_FAMILIES + ("net-discovery", "net-introduce", "net-relay"),
         "network sessions, the host and tore-bot",
     ),
     _r("crates/tore-server/*", ("net-check", "net-fly", "net-discovery", "net-listing"), "dedicated server"),
