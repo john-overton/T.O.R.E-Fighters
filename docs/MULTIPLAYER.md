@@ -265,7 +265,8 @@ mode**: the view follows the newest moment, and the player can pause, scrub
 back through the last 10 minutes and return to live, never past it. A player
 whose aircraft is lost flies again by the King's respawn rule and lives, or
 watches when none is left ([architecture](ARCHITECTURE.md#the-observer-view)).
-Rejoining with a token is stage K.
+Rejoining with a token is stage K. *Built (F2-O1, 2026-10-05):* the stream, as
+described; the live mode of the viewer is slice F2-O2's.
 
 ## Comms and chat
 

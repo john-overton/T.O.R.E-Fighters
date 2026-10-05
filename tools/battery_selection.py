@@ -178,8 +178,8 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     # Net lane: real UDP on this machine, a driver per scenario.
     "net-check": ("the dedicated server's start-up and --check", ("net-server-check",)),
     "net-fly": (
-        "a server and bots over UDP: join, fly, chat, console, debrief, clean exit",
-        ("net-server-fight", "net-server-chat", "net-server-kick"),
+        "a server and bots over UDP: join, fly, chat, console, observe, debrief, clean exit",
+        ("net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe"),
     ),
     "net-discovery": ("finding games on the local network", ("net-discovery",)),
     "net-master": ("the master server on this machine: its limits under the flood tool", ("net-master-*",)),

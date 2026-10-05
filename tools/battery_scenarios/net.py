@@ -303,6 +303,31 @@ def drive_kick(d: Drive) -> None:
     server.forbid(r"\bfault\b|protocol error|bad packets", "a network problem")
 
 
+def drive_observe(d: Drive) -> None:
+    """An observer (stage F phase 2): a bot with no plane watches two bots fight, then leaves."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(separation_nm=5))
+    flyers = start_bots(d, port, "flyers", 35, "--count", "2", "--callsign", "Bot")
+    if not server.wait_for(r"^mission started$", 60):
+        raise DriveError("the mission never started")
+    owl = start_bots(d, port, "owl", 20, "--callsign", "Owl", "--observe", "0")
+    owl.finish(60, 0)
+    flyers.finish(90, 0)
+    server.finish(40, 0)
+    owl.expect(r"^Owl: joined$", "the observer's join")
+    owl.expect(r"^Owl: observing from tick \d+, 0 s behind$", "the observer flight's start")
+    owl.expect(r"^Owl: watching: frames [1-9]\d*, aircraft [1-9]\d*$", "frames with aircraft in them")
+    owl.expect(r"^Owl: lobby: Flying, .*Owl no slot observing", "the lobby marks the observer")
+    owl.expect(r"^Owl: The connection ended: the player left\.$", "a clean leave")
+    owl.forbid(r"^Owl: (seat \d+|debrief)", "a plane or a debrief for the observer")
+    owl.forbid(NET_BAD, "a network problem")
+    for n in (1, 2):
+        flyers.expect(rf"^Bot{n}: seat \d+, plane \d+, at tick \d+$", "a seating")
+    flyers.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+    log_must(d, server_log(d), r"joined as Owl", r"Owl\b.* left: left", forbid=NET_BAD)
+
+
 def drive_discovery(d: Drive) -> None:
     """`tore-app --find-games` lists a server on this machine, and says so when there is none."""
     port = d.port()
@@ -474,6 +499,10 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-server-kick", lane="net", args=[], driver=drive_kick, uses=("server", "bot"), timeout=240,
             notes="the console's players, status, kick, kick-player and end",
+        ),
+        Scenario(
+            name="net-server-observe", lane="net", args=[], driver=drive_observe, uses=("server", "bot"), timeout=240,
+            notes="a bot with no plane watches two bots fight (stage F phase 2's observer stream) and leaves",
         ),
         Scenario(
             name="net-discovery", lane="net", args=[], driver=drive_discovery, uses=("server",), timeout=120,

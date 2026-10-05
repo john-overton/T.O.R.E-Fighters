@@ -22,10 +22,15 @@
 //! receivers once it may (a line to anyone but All waits until it flies).
 //! `tore-bot` prints every line its bots receive, with the receiver, so
 //! tests and the windowed run can see both directions.
+//!
+//! Observers (stage F phase 2, slice F2-O1): a bot told to watch
+//! ([`Bot::watch`]) takes no plane; whenever the mission flies it watches
+//! with its camera on the subject given, and draws the observer's frames
+//! ([`Bot::watched`], [`Bot::watched_aircraft`]).
 
 use crate::client::{Client, ClientFrame, Controls};
 use crate::wire::chat::{ChatSend, QuickMessage, Receiver, Refusal};
-use crate::wire::messages::RosterPlane;
+use crate::wire::messages::{LobbyPhase, RosterPlane, Subject};
 use std::collections::BTreeSet;
 use std::f64::consts::{PI, TAU};
 use std::time::Duration;
@@ -204,6 +209,14 @@ pub struct Bot {
     pub chat_refused: Vec<(String, Refusal)>,
     /// Lines sent.
     pub chat_sent: u64,
+    /// Watch the flying mission with the camera on this subject, flying no
+    /// plane ([`Bot::watch`]).
+    observe: Option<Subject>,
+    /// The watch was asked for in this flying spell of the lobby.
+    observe_asked: bool,
+    /// Observer frames drawn, and the aircraft the last one drew.
+    pub watched: u64,
+    pub watched_aircraft: usize,
 }
 
 impl Bot {
@@ -221,6 +234,35 @@ impl Bot {
             chat: Vec::new(),
             chat_refused: Vec::new(),
             chat_sent: 0,
+            observe: None,
+            observe_asked: false,
+            watched: 0,
+            watched_aircraft: 0,
+        }
+    }
+
+    /// The bot watches instead of flying: whenever the mission flies it asks
+    /// to watch with the camera on `subject`. Its client should not take a
+    /// plane by itself ([`crate::client::ClientConfig::auto_ready`] off).
+    pub fn watch(&mut self, subject: Subject) {
+        self.observe = Some(subject);
+    }
+
+    /// Asks to watch once the mission flies, again after each mission.
+    fn watch_when_flying(&mut self) {
+        let Some(subject) = self.observe else {
+            return;
+        };
+        let flying = self
+            .client
+            .lobby()
+            .is_some_and(|l| l.phase == LobbyPhase::Flying)
+            && self.client.mission().is_some();
+        if !flying {
+            self.observe_asked = false;
+        } else if !self.observe_asked && self.client.watching().is_none() {
+            self.observe_asked = true;
+            self.client.watch(subject);
         }
     }
 
@@ -300,6 +342,14 @@ impl Bot {
                 self.frames += 1;
                 self.picture = Some(frame.picture.clone());
                 drawn = Some(frame);
+            } else if let Some(frame) = self.client.observer_frame(now) {
+                self.watched += 1;
+                self.watched_aircraft = frame
+                    .picture
+                    .targets
+                    .iter()
+                    .filter(|t| t.aircraft.is_some())
+                    .count();
             }
         }
         let controls = match self.client.prediction() {
@@ -316,6 +366,7 @@ impl Bot {
             None => Controls::default(),
         };
         self.client.update(now, &controls);
+        self.watch_when_flying();
         self.start_if_ready();
         self.send_chat(now);
         drawn

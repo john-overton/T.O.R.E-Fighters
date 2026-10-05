@@ -11,6 +11,7 @@
 //! tore-bot --connect HOST[:PORT] [--data-dir DIR] [--count N] [--callsign NAME]
 //!          [--slot PLANE] [--seconds S] [--password TEXT]
 //!          [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...
+//!          [--observe PLANE|none]
 //! ```
 //!
 //! `--say` makes every bot send the text to the receiver (`all`,
@@ -20,6 +21,13 @@
 //! line names, or all. Both may be given more than once. Every chat line a
 //! bot receives is printed with its sender and receiver, the host's words
 //! (no one hears you, a refusal) too.
+//!
+//! `--observe` makes every bot an observer (stage F phase 2): it takes no
+//! plane and, whenever the mission flies, watches it with the camera on
+//! PLANE (or on nothing, `none`), printing when its observer flight starts
+//! and ends and, with its figures, the observer frames drawn and the
+//! aircraft in the last. An observer succeeds when it watched, drew frames
+//! with aircraft in them and left cleanly.
 //!
 //! It prints one line per join, seating, debrief, lobby change and
 //! departure, and each bot's figures every five seconds. It exits 0 when
@@ -35,12 +43,12 @@ use tore_net::{CloseReason, DisconnectReason, Entropy, RealClock, bind_udp};
 use tore_session::bot::Bot;
 use tore_session::client::ended_text;
 use tore_session::wire::chat::Receiver;
-use tore_session::wire::messages::{Goodbye, LobbyState};
+use tore_session::wire::messages::{Goodbye, LobbyState, Observing, Subject};
 use tore_session::{BuildId, Client, ClientConfig, ClientEvent, ClientPhase};
 
 const USAGE: &str = "usage: tore-bot --connect HOST[:PORT] [--data-dir DIR] [--count N] \
 [--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] \
-[--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...";
+[--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none]";
 
 /// How long a bot waits for its debrief and the disconnect after leaving.
 const LEAVE_GRACE: Duration = Duration::from_secs(8);
@@ -57,6 +65,8 @@ struct Options {
     say: Vec<(Duration, Receiver, String)>,
     /// `--quick`: when, which line.
     quick: Vec<(Duration, u8)>,
+    /// `--observe`: watch instead of flying, the camera on this subject.
+    observe: Option<Subject>,
 }
 
 fn receiver(word: &str) -> Result<Receiver, String> {
@@ -116,6 +126,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         password: String::new(),
         say: Vec::new(),
         quick: Vec::new(),
+        observe: None,
     };
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -146,6 +157,17 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--password" => options.password = value()?,
             "--say" => options.say.push(say(&value()?)?),
             "--quick" => options.quick.push(quick(&value()?)?),
+            "--observe" => {
+                let value = value()?;
+                options.observe = Some(match value.as_str() {
+                    "none" => Subject::None,
+                    plane => Subject::Aircraft(
+                        plane
+                            .parse()
+                            .map_err(|_| "--observe is a plane number or none")?,
+                    ),
+                });
+            }
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unknown option {other}\n{USAGE}")),
         }
@@ -228,6 +250,8 @@ struct Running {
     lobby: Option<String>,
     /// The host said it left the game.
     host_left: bool,
+    /// An observer's flight started.
+    observed: bool,
 }
 
 /// The lobby in one line: the phase, and each player's slot and marks.
@@ -246,6 +270,8 @@ fn lobby_line(lobby: &LobbyState) -> String {
             }
             if p.flying {
                 text.push_str(" flying");
+            } else if p.observing {
+                text.push_str(" observing");
             } else if p.ready {
                 text.push_str(" ready");
             }
@@ -312,6 +338,7 @@ fn main() -> ExitCode {
             password: options.password.clone(),
             plane: options.slot.map(|slot| slot + i as u32),
             entropy: Entropy::System,
+            auto_ready: options.observe.is_none(),
             ..ClientConfig::new(options.connect, &name, build())
         };
         let client = match Client::connect(config, Arc::clone(&resources), clock.now()) {
@@ -328,6 +355,9 @@ fn main() -> ExitCode {
         for (at, number) in &options.quick {
             bot.quick_at(*at, *number, &lines);
         }
+        if let Some(subject) = options.observe {
+            bot.watch(subject);
+        }
         bots.push(Running {
             name,
             socket,
@@ -338,6 +368,7 @@ fn main() -> ExitCode {
             closed: None,
             lobby: None,
             host_left: false,
+            observed: false,
         });
     }
     let end = Duration::from_secs(options.seconds);
@@ -423,13 +454,22 @@ fn main() -> ExitCode {
                         r.closed = Some(reason);
                     }
                     ClientEvent::Roster => {}
+                    ClientEvent::Observing(observing) => match *observing {
+                        Observing::Started(started) => {
+                            r.observed = true;
+                            println!(
+                                "{}: observing from tick {}, {} s behind",
+                                r.name, started.tick, started.delay_seconds
+                            );
+                        }
+                        Observing::Ended => println!("{}: observing ended", r.name),
+                    },
                     // Stage F phase 2: each slice's bot option reports its
                     // own.
                     ClientEvent::Revival(_)
                     | ClientEvent::Spawned(_)
                     | ClientEvent::Scores(_)
-                    | ClientEvent::Results(_)
-                    | ClientEvent::Observing(_) => {}
+                    | ClientEvent::Results(_) => {}
                 }
             }
         }
@@ -457,6 +497,12 @@ fn main() -> ExitCode {
                     s.bytes_up_per_second,
                     s.bytes_down_per_second
                 );
+                if r.observed {
+                    println!(
+                        "{}: watching: frames {}, aircraft {}",
+                        r.name, r.bot.watched, r.bot.watched_aircraft
+                    );
+                }
             }
         }
         if bots.iter().all(|r| r.closed.is_some()) {
@@ -472,16 +518,19 @@ fn main() -> ExitCode {
         std::thread::sleep(wake);
     }
     let clean = bots.iter().all(|r| {
-        r.seated
-            && r.debrief
-            && (r.host_left
-                || matches!(
-                    r.closed,
-                    Some(CloseReason::Disconnected {
-                        reason: DisconnectReason::Left,
-                        ..
-                    })
-                ))
+        let done = if options.observe.is_some() {
+            r.observed && r.bot.watched > 0
+        } else {
+            r.seated && r.debrief
+        };
+        done && (r.host_left
+            || matches!(
+                r.closed,
+                Some(CloseReason::Disconnected {
+                    reason: DisconnectReason::Left,
+                    ..
+                })
+            ))
     });
     if clean {
         ExitCode::SUCCESS
@@ -513,6 +562,17 @@ mod tests {
         assert!(parse(&args("--count 2")).is_err());
         assert!(parse(&args("--connect 127.0.0.1 --count 0")).is_err());
         assert!(parse(&args("--connect 127.0.0.1 --bogus")).is_err());
+    }
+
+    #[test]
+    fn observe_takes_a_plane_or_none() {
+        let o = parse(&args("--connect 127.0.0.1 --observe 3")).unwrap();
+        assert_eq!(o.observe, Some(Subject::Aircraft(3)));
+        let o = parse(&args("--connect 127.0.0.1 --observe none")).unwrap();
+        assert_eq!(o.observe, Some(Subject::None));
+        assert_eq!(parse(&args("--connect 127.0.0.1")).unwrap().observe, None);
+        assert!(parse(&args("--connect 127.0.0.1 --observe")).is_err());
+        assert!(parse(&args("--connect 127.0.0.1 --observe me")).is_err());
     }
 
     #[test]
