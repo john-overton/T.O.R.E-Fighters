@@ -336,7 +336,7 @@ Bearing and range are measured from the receiving aircraft. The order is heard
 even with a data link, lands in the replay's comms record, and behaves the same
 for human and AI wingmen. All data link events are recorded in the replay.
 
-*Designed (stage G, 2026-10-05); slice G0, the radar flag and the picture, is built and nothing reads it yet:* the [data link guide](DATALINK.md)
+*Designed (stage G, 2026-10-05); slices G0 (the radar flag and the picture), G1 (the engagement table) and G3a (assignments and their calls) are built; the AI does not read the picture yet:* the [data link guide](DATALINK.md)
 says what the player sees and hears, who shares what, how the AI
 uses the picture, the wing and battle nets, and what changes in single player;
 the code design and its slices are in the

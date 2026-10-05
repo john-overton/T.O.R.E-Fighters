@@ -9,7 +9,7 @@
 > <!-- tore-header v2 -->
 
 Stage G design of 2026-10-05, for the [multiplayer plan](multiplayer-plan.md#stages).
-Only the radar table and the picture's bookkeeping are built (slice G0, 2026-10-05), and nothing reads the picture yet, so nothing on this page changes what a player sees or hears. It is the guide for players and agents:
+Built so far: the radar table and the picture's bookkeeping (slice G0), the engagement table (G1) and the assignments with their calls (G3a, 2026-10-05). Of this page a player today meets only the assignment call, below, and the rest waits for its slices. It is the guide for players and agents:
 what a flight shares, who can share it, what the player sees and
 hears, and how the AI uses it. The code design and the slices that build it
 are in the [architecture guide](ARCHITECTURE.md#flight-data-link); the bytes on
@@ -168,9 +168,9 @@ dropped by radio silence, as the player's orders are not.
 | --- | --- | --- |
 | Who | The wingman's position, "Two"; the flight colour, "Red", when the whole flight is addressed | `^NUM02`; `^RED`, `^BLUE`, `^GREEN`, `^BLACK`, `^WHITE` (orange, purple and yellow flights have the words only) |
 | What | "attack bandit" | `^ATTACK`, `^BANDIT` |
-| Bearing | "bearing 270": from the wingman to the target, whole degrees | `^BEARING` and the number |
-| Range | "15 miles": from the wingman, whole nautical miles; left out under 1 mile | the miles rule of the contact report |
-| Height | "angels 20": the target's height in thousands of feet | `^ANGELS` and the number |
+| Bearing | "bearing 270": from the wingman to the target, true, whole degrees from 1 to 360 (north is "three six zero") | `^BEARING` and the number |
+| Range | "15 miles": from the wingman, over the ground, whole nautical miles; left out under 1 mile | the miles rule of the contact report |
+| Height | "angels 20": the target's height in thousands of feet, to the nearest thousand | `^ANGELS` and the number |
 
 Example: "Two, attack bandit, bearing 270, 15 miles, angels 20." Numbers
 follow retail's rule for the waypoint call: up to twelve is one word, larger
@@ -190,7 +190,10 @@ with no bearing, range or height (John, 2026-10-05). It makes no assignment.
 
 When the whole flight is addressed, the call is made once and each hearer
 hears the bearing, range and height from its own aircraft, as each hearer of a
-contact report hears its own clock position.
+contact report hears its own clock position. The lead, who speaks the call,
+hears it from the first wingman addressed, the one that replies. Today only
+the human lead hears it: giving it to a human wingman's radio is stage F's
+order call (slice F2-R).
 
 **Replies.** A wingman that takes an assignment answers as it answers
 "Engage my target" today ("Engaging", "I'm on him" and the other retail

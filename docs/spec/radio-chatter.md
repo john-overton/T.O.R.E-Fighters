@@ -560,6 +560,12 @@ Everything below is **spec-derived** unless the fitted table says otherwise.
 - The engage reply and "Showtime!" now travel through the radio channel two
   seconds after the player's order call, which still plays at once. Attack on
   contact now says "Attack".
+- Since the flight data link's assignments (slice G3a, John, 2026-10-05) the
+  player's Engage my target and Engage from formation say the assignment call
+  instead of "Attack": "Two, attack bandit, bearing 270, 15 miles, angels 20",
+  measured from the wingman ([guide](../DATALINK.md#what-the-player-hears)),
+  and Attack on contact says "Attack bandits". These are TORE's own words,
+  not retail's.
 
 ### Several seats (multiplayer, agent decisions, 2026-09-29)
 
