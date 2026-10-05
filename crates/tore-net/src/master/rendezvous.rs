@@ -233,9 +233,11 @@ pub struct Rendezvous {
     /// The one listed with now.
     current: usize,
     candidates: Vec<Candidate>,
+    /// The candidates [`Rendezvous::set_masters`] was given, as given.
+    own: Vec<Candidate>,
     /// The outside address a router's port mapping gave, kept apart from
-    /// `candidates` so a new set of the host's own addresses does not lose
-    /// it ([`Rendezvous::set_mapped`]).
+    /// `own` so a new set of the host's own addresses does not lose it
+    /// ([`Rendezvous::set_mapped`]).
     mapped: Option<SocketAddr>,
     wanted: bool,
     nonce: u64,
@@ -280,6 +282,7 @@ impl Rendezvous {
             masters: Vec::new(),
             current: 0,
             candidates: Vec::new(),
+            own: Vec::new(),
             mapped: None,
             wanted: false,
             nonce,
@@ -358,7 +361,7 @@ impl Rendezvous {
             }
         }
         let before = self.masters.get(self.current).copied();
-        self.candidates = candidates;
+        self.own = candidates;
         self.apply_mapped();
         self.masters = unique;
         self.current = before
@@ -405,15 +408,17 @@ impl Rendezvous {
         &self.candidates
     }
 
-    /// Puts the mapped address among the candidates, replacing any Mapped
-    /// one, and never beyond [`MAX_CANDIDATES`].
+    /// The candidates the listing carries: the host's own as given, and the
+    /// router's mapped address in place of any Mapped one among them, never
+    /// beyond [`MAX_CANDIDATES`].
     fn apply_mapped(&mut self) {
-        self.candidates.retain(|c| c.kind != CandidateKind::Mapped);
-        if let Some(address) = self.mapped
-            && self.candidates.len() < MAX_CANDIDATES
-        {
-            self.candidates
-                .push(Candidate::new(CandidateKind::Mapped, address));
+        self.candidates = self.own.clone();
+        if let Some(address) = self.mapped {
+            self.candidates.retain(|c| c.kind != CandidateKind::Mapped);
+            if self.candidates.len() < MAX_CANDIDATES {
+                self.candidates
+                    .push(Candidate::new(CandidateKind::Mapped, address));
+            }
         }
     }
 
@@ -909,11 +914,11 @@ impl Rendezvous {
             return;
         };
         let second = self.mapping.second;
+        // The host's own candidates as given, not the router's mapped
+        // address, which is not the machine's own.
         let own = self
-            .candidates
+            .own
             .iter()
-            // A router's mapped address is not the machine's own.
-            .filter(|c| c.kind != CandidateKind::Mapped)
             .map(|c| c.address)
             .find(|a| a.is_ipv4() == from.is_ipv4());
         let result = MappingType::from_probes(own, main, second);

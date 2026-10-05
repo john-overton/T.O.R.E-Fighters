@@ -822,6 +822,7 @@ mod tests {
             "broadcast on",
             "master localhost",
             "telemetry off",
+            "port-mapping off",
             "king first-player",
             "king-mission open",
             "mode co-op",
