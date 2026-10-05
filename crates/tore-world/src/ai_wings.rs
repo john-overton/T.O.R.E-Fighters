@@ -5813,7 +5813,11 @@ mod tests {
             .unwrap();
         assert!(report.message.contains("1 applied"));
         // The player's call is immediate; the reply is a delayed radio event.
-        assert_eq!(report.radio, ["^ATTACK"]);
+        assert_eq!(
+            report.radio,
+            bridge.assignment_stems(1, Some(3), Some(1), 0)
+        );
+        assert_eq!(report.radio[0], "^NUM02", "wingman 1 is Two");
         let engage = Chatter::Engage {
             speaker: 1,
             aircraft: true,
@@ -5839,7 +5843,11 @@ mod tests {
         let report = bridge
             .command(PLAYER_ID, O::EngageMyTarget, Some(3), Some(2))
             .unwrap();
-        assert_eq!(report.radio, ["^ATTACK"]);
+        assert_eq!(
+            report.radio,
+            bridge.assignment_stems(2, Some(3), Some(2), 0)
+        );
+        assert_eq!(report.radio[0], "^NUM03", "wingman 2 is Three");
         assert!(
             bridge.chatter.is_empty(),
             "only the first living wingman replies"
@@ -5933,7 +5941,8 @@ mod tests {
                 .command(PLAYER_ID, O::EngageMyTarget, Some(3), None)
                 .unwrap()
                 .radio,
-            ["^ATTACK"]
+            // From the first wingman left alive.
+            bridge.assignment_stems(2, Some(3), None, 0)
         );
         assert_eq!(
             bridge.chatter,
@@ -5964,7 +5973,9 @@ mod tests {
             .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), None)
             .unwrap();
         assert!(report.message.contains("0 applied, 2 rejected"));
-        assert_eq!(report.radio, ["^ATTACK"]);
+        // The call is still voiced: the rejection comes back as a reply.
+        assert_eq!(report.radio, bridge.assignment_stems(1, Some(3), None, 0));
+        assert!(report.reached.is_empty(), "a rejected order reaches no one");
         assert!(bridge.chatter.is_empty(), "a rejected order has no reply");
         for id in [1, 2] {
             assert!(

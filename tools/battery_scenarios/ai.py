@@ -260,6 +260,49 @@ def checker(**kw) -> Callable[[str], list[str]]:
 DATALINK_LINE = re.compile(r"^t=(\d+) data link: (member|lock|unlock) plane=(\d+)(?: radar=(true|false)| target=(\d+))$", re.M)
 
 
+ASSIGNMENT_LINE = re.compile(
+    r"^t=(\d+) data link: (assign|clear|acknowledge) plane=(\d+) target=(\d+)(?: by=(\d+) order=(\w+)| why=([a-z ]+))?$", re.M
+)
+
+
+def datalink_assign_check(plane: int, target: int, lead: int, cleared_by_order_at: int) -> Callable[[str], list[str]]:
+    """The assignment lines of the flight data link (slice G3a): the lead's
+    Engage my target gives `plane` the target, the plane acknowledges it at most
+    once and only after the assignment, and the later Attack on contact clears
+    it for the reason `order`. Every assignment has its giver and order, and no
+    clear or acknowledgement comes without an assignment."""
+
+    def check(output: str) -> list[str]:
+        problems = probe_problems(output)
+        held: dict[int, int] = {}
+        acknowledged: set[int] = set()
+        assigned = cleared = False
+        for tick, kind, who, aimed, by, order, why in ASSIGNMENT_LINE.findall(output):
+            who, aimed = int(who), int(aimed)
+            if kind == "assign":
+                if who in held:
+                    problems.append(f"t={tick}: plane {who} assigned over an assignment")
+                held[who] = aimed
+                acknowledged.discard(who)
+                assigned |= (who, aimed, int(by), order) == (plane, target, lead, "EngageMyTarget")
+            elif held.get(who) != aimed:
+                problems.append(f"t={tick}: {kind} for plane {who} target {aimed} that it was not assigned")
+            elif kind == "acknowledge":
+                if who in acknowledged:
+                    problems.append(f"t={tick}: plane {who} acknowledged twice")
+                acknowledged.add(who)
+            else:
+                held.pop(who)
+                cleared |= who == plane and why == "order" and int(tick) >= cleared_by_order_at
+        if not assigned:
+            problems.append(f"no assignment of target {target} to plane {plane} by plane {lead}")
+        if not cleared:
+            problems.append(f"plane {plane}'s assignment was not cleared by the order at tick {cleared_by_order_at}")
+        return problems
+
+    return check
+
+
 def datalink_picture_check(planes: int, designated: int) -> Callable[[str], list[str]]:
     """The flight data link's picture, as the probe prints it (`data link:`
     lines, from `--probe-player-lock` and `--probe-data-link`): every plane is
@@ -553,6 +596,15 @@ def scenarios() -> list[Scenario]:
                      expect=[r"data link: member plane=0 radar=true", r"data link: lock plane=0 target=4",
                              r"order=EngageMyTarget reply"],
                      check=datalink_picture_check(planes=6, designated=4)))
+    # 9c. Assignments (stage G3a): an Engage my target to the first wingman
+    # becomes its assignment (the probe prints `data link: assign`), and a later
+    # Attack on contact clears it.
+    out.append(probe("datalink-assign", ["--probe-wing-size", "2", "--separation", "5", "--probe-player-lock", "600:4",
+                                         "--probe-wing-order", "700:engage-my-target@1",
+                                         "--probe-wing-order", "900:attack-on-contact"], ticks=2400,
+                     expect=[r"data link: assign plane=1 target=4 by=0 order=EngageMyTarget",
+                             r"data link: clear plane=1 target=4 why=order"],
+                     check=datalink_assign_check(plane=1, target=4, lead=0, cleared_by_order_at=900)))
 
     # 10. Ground starts: takeoff, formation, landing orders.
     for size in [1, 2, 3, 4, 5]:

@@ -21,11 +21,14 @@
 //! identical on every platform and from one run to the next.
 
 mod ai_input;
+mod assign;
+pub mod calls;
 mod journal;
 mod picture;
 mod view;
 
 pub use ai_input::{AiInput, FlightFeed};
+pub use assign::ClearReason;
 pub use journal::{CAPACITY as JOURNAL_CAPACITY, Entry, Journal};
 pub use picture::{
     Assignment, Damage, Engagement, FLIGHT_TRACKS, FlightId, FlightPicture, Fuel, Lock,
@@ -102,7 +105,7 @@ pub struct DataLink {
     locks: BTreeMap<u32, Lock>,
     /// Who attacks what: an AI's target, a human's locked target.
     engaged: BTreeMap<u32, u32>,
-    /// What the lead gave each member, by receiver. Written from slice G3a.
+    /// What the lead gave each member, by receiver ([`DataLink::assign`]).
     assignments: BTreeMap<u32, Assignment>,
     /// Lock pairs already warned of: (plane, plane, target). Written from G6.
     warned: BTreeSet<(u32, u32, u32)>,
@@ -139,7 +142,8 @@ impl DataLink {
     }
 
     /// The step's second half, after the AI: reads each AI actor's lock and
-    /// target.
+    /// target, then ends the assignments the mission has finished and marks
+    /// the ones the receiver has locked.
     pub fn after_ai(&mut self, tick: u64, wings: Option<&AiWings>) {
         for index in 0..self.members.len() {
             let member = self.members[index];
@@ -159,6 +163,7 @@ impl DataLink {
             self.set_lock(member.plane, lock, tick);
             self.set_engagement(member.plane, target);
         }
+        self.settle(tick, wings);
     }
 
     fn refresh_members(&mut self, scene: &Scene<'_>) {
@@ -367,7 +372,7 @@ impl DataLink {
             .collect()
     }
 
-    /// What the lead gave each member, by receiver. Empty until slice G3a.
+    /// What the lead gave each member, by receiver.
     pub fn assignments(&self) -> &BTreeMap<u32, Assignment> {
         &self.assignments
     }

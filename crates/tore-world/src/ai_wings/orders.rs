@@ -4,9 +4,11 @@
 //! answer (including the ones skipped before delivery), the silent side
 //! orders, a refusal before anyone received it, and which wingman replied.
 use super::*;
+use crate::comms;
 use crate::comms::journal::{
     Answer, Answered, Audience, Cause, Entry, Origin, Outcome, Reason, Reply, Source, WingReply,
 };
+use crate::datalink::calls;
 use tore_sim::{
     ai::{
         airfield::{AirfieldAnchors, LandingOrder, LandingReason, Phase, RunwayView},
@@ -19,11 +21,17 @@ use tore_sim::{
     airport::{Allegiance, Scene, Service},
 };
 
+#[derive(Default)]
 pub struct OrderReport {
     pub message: String,
     /// The player's own order call, played at once. The wingman's reply is
     /// a [`Chatter`] event delivered through the radio channel.
     pub radio: Vec<&'static str>,
+    /// The aircraft the order reached, for the data link's assignments: the
+    /// AI wingmen that took it and the human wingmen it addressed.
+    pub reached: Vec<u32>,
+    /// The aircraft an attack order named.
+    pub target: Option<u32>,
 }
 
 /// The player's aircraft as the landing-priority rule sees it.
@@ -292,7 +300,7 @@ impl AiWings {
     ) -> OrderReport {
         let report = OrderReport {
             message: "Wing order unavailable: you are not leading your wing".into(),
-            radio: vec![],
+            ..OrderReport::default()
         };
         self.journal_order(
             sender,
@@ -346,6 +354,21 @@ impl AiWings {
         selected: Option<u32>,
         recipient: Option<u8>,
         site: Option<&LandingSite>,
+    ) -> WorldResult<OrderReport> {
+        self.command_called(sender, order, selected, recipient, site, None)
+    }
+
+    /// [`Self::command_at`] with the radio flight number of the sender's
+    /// flight (0 is Red), which the attack call names when it addresses the
+    /// whole flight. `None` is the player's flight, Red.
+    pub fn command_called(
+        &mut self,
+        sender: u32,
+        order: PlayerOrder,
+        selected: Option<u32>,
+        recipient: Option<u8>,
+        site: Option<&LandingSite>,
+        flight: Option<u8>,
     ) -> WorldResult<OrderReport> {
         if matches!(order, PlayerOrder::BugOut | PlayerOrder::LandAtSelected) {
             return self.command_landing(sender, order, recipient, site);
@@ -406,7 +429,7 @@ impl AiWings {
         if members.is_empty() && humans.is_empty() {
             let report = OrderReport {
                 message: bugged_out_notice(bugged_out, recipient),
-                radio: vec![],
+                ..OrderReport::default()
             };
             let outcome = Outcome::Refused(Reason::AllBuggedOut { count: bugged_out });
             self.journal_order(sender, cause, recipient, &report, outcome);
@@ -426,7 +449,7 @@ impl AiWings {
         if needs_target && target.is_none() {
             let report = OrderReport {
                 message: "Wing order unavailable: no valid hostile target".into(),
-                radio: vec![],
+                ..OrderReport::default()
             };
             let outcome = Outcome::Refused(Reason::NoHostileTarget);
             self.journal_order(sender, cause, recipient, &report, outcome);
@@ -442,6 +465,7 @@ impl AiWings {
         let mut no_motion = 0;
         let mut wing_sender = None;
         let mut replied = None;
+        let mut reached = Vec::new();
         for (member, id) in &members {
             let actor = self.mission.actor(*id).unwrap();
             let (control, horizontal, vertical) = actor.controller().wing_settings();
@@ -560,6 +584,7 @@ impl AiWings {
             }
             match outcome {
                 ReceiverOutcome::Applied(_) | ReceiverOutcome::MotionInstalled(_) => {
+                    reached.push(*id);
                     if let Some(assignment) = mission_assignment(sender, order, target) {
                         self.mission
                             .actor_mut(*id)
@@ -601,6 +626,7 @@ impl AiWings {
                 }
                 ReceiverOutcome::Rejected(_) => rejected += 1,
                 ReceiverOutcome::AppliedNoMotion => {
+                    reached.push(*id);
                     if let Some(assignment) = mission_assignment(sender, order, target) {
                         self.mission
                             .actor_mut(*id)
@@ -614,6 +640,7 @@ impl AiWings {
         // A human member cannot be flown by an order: it only records that it
         // was given one.
         for (member, id) in &humans {
+            reached.push(*id);
             answers.push(Answer {
                 recipient: *id,
                 member: *member,
@@ -621,10 +648,17 @@ impl AiWings {
                 side: Vec::new(),
             });
         }
-        let mut radio = Vec::new();
-        if let Some(stem) = wing_sender.flatten() {
-            radio.push(stem);
-        }
+        // The order call. The attack orders say it with the target's place as
+        // the first addressed wingman hears it (or a blanket "Attack
+        // bandits"); every other order says its one stem.
+        let radio = match (order, members.first()) {
+            (_, None) => Vec::new(),
+            (PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation, Some(&(_, first))) => {
+                self.assignment_stems(first, target, recipient, flight.unwrap_or(0))
+            }
+            (PlayerOrder::AttackOnContact, _) => calls::blanket_stems(),
+            _ => wing_sender.flatten().into_iter().collect(),
+        };
         let mut message = format!(
             "{}: {applied} applied, {rejected} rejected, {no_motion} without motion",
             order_label(order)
@@ -635,7 +669,18 @@ impl AiWings {
         if !humans.is_empty() {
             message.push_str(&format!(", {} flown by a human", humans.len()));
         }
-        let report = OrderReport { message, radio };
+        let named = matches!(
+            order,
+            PlayerOrder::EngageMyTarget | PlayerOrder::EngageFromFormation
+        )
+        .then_some(target)
+        .flatten();
+        let report = OrderReport {
+            message,
+            radio,
+            reached,
+            target: named,
+        };
         let reply = replied.unwrap_or_else(|| no_reply(order, first, &answers));
         self.journal_order(
             sender,
@@ -645,6 +690,34 @@ impl AiWings {
             Outcome::Answered { answers, reply },
         );
         Ok(report)
+    }
+
+    /// The stems of the attack call to `target`, as the wingman at `first`
+    /// hears it: "Two, attack bandit, bearing 270, 15 miles, angels 20", or
+    /// the flight colour in place of "Two" when the whole flight is addressed.
+    pub(super) fn assignment_stems(
+        &self,
+        first: u32,
+        target: Option<u32>,
+        recipient: Option<u8>,
+        flight: u8,
+    ) -> Vec<&'static str> {
+        let positions = (
+            self.mission.actor(first).map(|a| a.flight().position),
+            target.and_then(|id| self.mission.actor(id).map(|a| a.flight().position)),
+        );
+        let (Some(from), Some(to)) = positions else {
+            return Vec::new();
+        };
+        let addressee = match recipient {
+            Some(member) => calls::Addressee::Wingman(member),
+            None => calls::Addressee::Flight(flight),
+        };
+        calls::assignment_stems(
+            &comms::Phrases::new(),
+            addressee,
+            calls::Geometry::between(from, to),
+        )
     }
 
     /// Journal one player order with its outcome. Every order that returns
@@ -725,7 +798,7 @@ impl AiWings {
                 let report = OrderReport {
                     message: "Wing order unavailable: no airport selected (Shift-A selects one)"
                         .into(),
-                    radio: vec![],
+                    ..OrderReport::default()
                 };
                 let outcome = Outcome::Refused(Reason::NoAirportSelected);
                 self.journal_order(sender, cause, recipient, &report, outcome);
@@ -741,8 +814,10 @@ impl AiWings {
             result,
             side: Vec::new(),
         };
+        let mut reached = Vec::new();
         for (member, id) in humans {
             human += 1;
+            reached.push(id);
             answers.push(answer(id, member, Answered::Human));
         }
         for (member, id) in members {
@@ -810,6 +885,7 @@ impl AiWings {
                 // shots, as a recall does.
                 self.pending_guns
                     .retain(|(queued_actor, _), _| *queued_actor != id);
+                reached.push(id);
                 accepted += 1;
             }
         }
@@ -823,7 +899,7 @@ impl AiWings {
         {
             let report = OrderReport {
                 message: bugged_out_notice(bugged_out, recipient),
-                radio: vec![],
+                ..OrderReport::default()
             };
             let outcome = Outcome::Refused(Reason::AllBuggedOut { count: bugged_out });
             self.journal_order(sender, cause, recipient, &report, outcome);
@@ -862,7 +938,8 @@ impl AiWings {
         }
         let report = OrderReport {
             message: format!("{label}: {}", parts.join(", ")),
-            radio: vec![],
+            reached,
+            ..OrderReport::default()
         };
         let outcome = Outcome::Answered {
             answers,
@@ -919,7 +996,7 @@ fn no_reply(order: PlayerOrder, first: Option<u32>, answers: &[Answer]) -> Reply
 fn unavailable_no_wingmen() -> OrderReport {
     OrderReport {
         message: "Wing order unavailable: no addressed wingmen".into(),
-        radio: vec![],
+        ..OrderReport::default()
     }
 }
 
@@ -1015,10 +1092,11 @@ fn sender_stem(
         }
         PlayerOrder::Disengage => "^DISENG",
         PlayerOrder::ProtectMe => "^CLRMY6",
-        // "Attack" alone for attack on contact (docs/spec/radio-chatter.md).
-        PlayerOrder::EngageMyTarget | PlayerOrder::AttackOnContact => "^ATTACK",
-        // Sender mapping for engage from formation is not yet established.
-        PlayerOrder::EngageFromFormation => return None,
+        // The attack orders are called by the data link (slice G3a): the
+        // assignment call, or "Attack bandits" for the blanket order.
+        PlayerOrder::EngageMyTarget
+        | PlayerOrder::EngageFromFormation
+        | PlayerOrder::AttackOnContact => return None,
         // No reviewed sender recording for these orders.
         PlayerOrder::BugOut | PlayerOrder::LandAtSelected => return None,
     })
@@ -1701,7 +1779,10 @@ mod landing_tests {
             .unwrap();
         let entry = order_entry(&mut wings);
         assert_eq!(entry.text, report.message);
-        assert_eq!(entry.stems, ["^ATTACK"]);
+        // The call to the whole flight, from the first wingman's place.
+        let call = wings.assignment_stems(1, Some(3), None, 0);
+        assert_eq!(call[0], "^RED");
+        assert_eq!(entry.stems, call);
         assert_eq!(entry.label, "YOU");
         assert_eq!(entry.route, Some(crate::comms::Route::Radio));
         assert_eq!(entry.origin.speaker, Some(PLAYER_ID));

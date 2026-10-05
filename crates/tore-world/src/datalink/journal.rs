@@ -7,13 +7,15 @@
 //! drains keeps the newest [`CAPACITY`] entries and counts the rest in
 //! [`Journal::lost`].
 
+use super::ClearReason;
 use std::collections::VecDeque;
+use tore_sim::ai::wing::PlayerOrder;
 
 /// Entries kept between drains.
 pub const CAPACITY: usize = 1024;
 
-/// One change of the picture. Later slices add the assignment and warning
-/// entries.
+/// One change of the picture. Slice G3a adds the assignment entries; a later
+/// slice adds the warning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Entry {
     /// A plane joined the picture, with whether its aircraft has a radar (the
@@ -23,6 +25,24 @@ pub enum Entry {
     Lock { tick: u64, plane: u32, target: u32 },
     /// A member let go of a lock (the target, the member or the lock is gone).
     Unlock { tick: u64, plane: u32, target: u32 },
+    /// A lead gave `plane` a target (`by` is the lead). The words of the call
+    /// are in the communication journal's entry for the order.
+    Assign {
+        tick: u64,
+        plane: u32,
+        target: u32,
+        by: u32,
+        order: PlayerOrder,
+    },
+    /// `plane`'s assignment ended.
+    Clear {
+        tick: u64,
+        plane: u32,
+        target: u32,
+        why: ClearReason,
+    },
+    /// `plane` locked the target it was assigned (the first time).
+    Acknowledge { tick: u64, plane: u32, target: u32 },
 }
 
 /// A bounded list of entries waiting for the host.

@@ -321,12 +321,25 @@ impl World {
         } else {
             None
         };
-        let result = self
-            .ai_wings
-            .as_mut()
-            .map(|wings| wings.command_at(plane.0, order, selected, recipient, site.as_ref()));
+        // The attack call names the flight by its radio colour.
+        let flight = crate::radio_calls::members(&self.roster, self.ai_wings.as_ref(), |_| true)
+            .iter()
+            .find(|member| member.id == plane.0)
+            .map(|member| member.flight);
+        let result = self.ai_wings.as_mut().map(|wings| {
+            wings.command_called(plane.0, order, selected, recipient, site.as_ref(), flight)
+        });
         let outcome = match result {
             Some(Ok(report)) => {
+                // The lead's order becomes assignments: written for the
+                // members it reached, or cleared for them (slice G3a).
+                self.datalink.assign(
+                    self.combat.state.tick(),
+                    plane.0,
+                    order,
+                    &report.reached,
+                    report.target,
+                );
                 // The order voice is played at once, cuts off the wing lines
                 // still playing and holds the seat's radio channel for its
                 // length, whether or not a sound device plays it (John,

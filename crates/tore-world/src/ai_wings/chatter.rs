@@ -600,7 +600,10 @@ mod tests {
         let report = wings
             .command(PLAYER_ID, PlayerOrder::EngageMyTarget, Some(3), None)
             .unwrap();
-        assert_eq!(report.radio, ["^ATTACK"], "the reply is delayed, not here");
+        // The player's call is the assignment call, "Red, attack bandit,
+        // bearing ..."; the reply is delayed, not here.
+        assert_eq!(report.radio, wings.assignment_stems(1, Some(3), None, 0));
+        assert_eq!(report.radio[0], "^RED");
         assert_eq!(
             wings.chatter,
             [Chatter::Engage {

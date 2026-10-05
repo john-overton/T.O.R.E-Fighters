@@ -256,7 +256,7 @@ fn locks_are_journaled_when_taken_and_dropped() {
             Entry::Unlock { plane, target, .. } => {
                 assert_eq!(held.remove(&plane), Some(target), "unlock of no lock");
             }
-            Entry::Member { .. } => {}
+            _ => {}
         }
     }
     let now: std::collections::BTreeMap<u32, u32> = world

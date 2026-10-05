@@ -6367,6 +6367,35 @@ fn data_link_line(entry: &tore_world::datalink::Entry) -> String {
         } => {
             format!("t={tick} data link: unlock plane={plane} target={target}")
         }
+        Entry::Assign {
+            tick,
+            plane,
+            target,
+            by,
+            order,
+        } => {
+            format!(
+                "t={tick} data link: assign plane={plane} target={target} by={by} order={order:?}"
+            )
+        }
+        Entry::Clear {
+            tick,
+            plane,
+            target,
+            why,
+        } => {
+            format!(
+                "t={tick} data link: clear plane={plane} target={target} why={}",
+                why.name()
+            )
+        }
+        Entry::Acknowledge {
+            tick,
+            plane,
+            target,
+        } => {
+            format!("t={tick} data link: acknowledge plane={plane} target={target}")
+        }
     }
 }
 
