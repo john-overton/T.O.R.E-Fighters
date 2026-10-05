@@ -419,7 +419,11 @@ impl List {
                             Align::Centre => (column.width - iw) / 2,
                             Align::Right => column.width - iw,
                         };
-                        icon.draw(canvas, (origin + column.x + ix, y + (BAR_HEIGHT - ih) / 2));
+                        icon.draw(
+                            canvas,
+                            (origin + column.x + ix, y + (BAR_HEIGHT - ih) / 2),
+                            row.dim.then(|| ghost(118)),
+                        );
                     }
                     Cell::Text(text) => {
                         let text = fit(font, text, column.width);
@@ -759,7 +763,7 @@ mod tests {
         let mut l = List::new((48, 185), 200, 4).with_columns(vec![
             Column {
                 x: 0,
-                width: 11,
+                width: 12,
                 align: Align::Centre,
             },
             Column {
@@ -774,9 +778,16 @@ mod tests {
         )]);
         let mut pixels = blank();
         l.draw(&mut Canvas(&mut pixels), &kit, false);
-        // The crown (11 wide) fills its 11 pixel column from x + 20; the text
-        // (3 characters of 6 pixels) ends at the column's right edge.
-        assert_eq!(at(&pixels, 48 + 20, 185 + 5), [255, 205, 60]);
+        // The crown (12 wide) fills its 12 pixel column from x + 20, in the
+        // icons' one colour; the text (3 characters of 6 pixels) ends at the
+        // column's right edge.
+        let crown = at(&pixels, 48 + 20 + 5, 185 + 3 + 5);
+        for c in 0..3 {
+            assert!(
+                crown[c].abs_diff(crate::widgets::icons::COLOUR[c]) < 10,
+                "{crown:?}"
+            );
+        }
         let right_edge = 48 + 20 + 20 + 60;
         assert_eq!(
             at(&pixels, right_edge - 1, 185 + 5),

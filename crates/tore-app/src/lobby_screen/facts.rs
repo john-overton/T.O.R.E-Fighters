@@ -283,8 +283,8 @@ pub fn status_word(player: &LobbyPlayer) -> &'static str {
     }
 }
 
-/// The Players list's rows: the crown, the house, the ready tick, the name
-/// and the state. Unable players are red and the player's own row green.
+/// The Players list's rows: the crown, the house, the ready tick, the
+/// platform, the name and the state. Unable players are red and the player's own row green.
 pub fn player_rows(lobby: &LobbyState) -> Vec<Row> {
     lobby
         .players
@@ -310,6 +310,7 @@ pub fn player_rows(lobby: &LobbyState) -> Vec<Row> {
                     } else {
                         Cell::Empty
                     },
+                    Icon::of_platform(p.platform).map_or(Cell::Empty, Cell::Icon),
                     Cell::Text(p.callsign.clone()),
                     Cell::Text(status_word(p).to_owned()),
                 ],

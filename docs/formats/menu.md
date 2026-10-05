@@ -556,6 +556,15 @@ this on 2026-10-05: easier to read, the same size, not fuzzy (*opinionated*).
   near fixed width cells that look gappy in another face. Typed text
   (`text_cells`) keeps every glyph in its retail cell so the caret, which a
   field places from the retail widths, stays between the letters.
+- **Icons.** The marks in list rows (padlock, crown, ready tick, house, the
+  player's own arrow, the unable cross and the Windows, macOS and Linux
+  platform marks) are hand drawn minimalist SVGs in one colour
+  (`assets/icons/*.svg`, John, 2026-10-05, *opinionated*), baked at 64 by 64 into
+  the same atlas and drawn the same way: recorded and drawn sharp over the
+  canvas, 12 pixels square, in one light grey (a dimmed row's tint darkens
+  them, a row's own colour does not). Without the sharp layer the atlas's
+  picture is averaged down to 12 by 12 into the canvas. They replace the first
+  set of pixel pictures in six colours.
 - **Pop-ups.** The text is on top of the canvas, so a panel drawn over earlier
   text (Options, Kick, Leave) records its rectangle (`draw_panel`) and the
   earlier glyphs are cut to what shows round it. A screen's backdrop is drawn

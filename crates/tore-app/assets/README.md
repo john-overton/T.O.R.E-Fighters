@@ -44,20 +44,35 @@ Either source may be left out; only the named atlas is rewritten. Only
 regeneration needs ImageMagick and the source fonts. Runtime uses the
 committed atlases consistently on Linux, Windows and macOS.
 
-## Sharp UI text atlas
+## Sharp UI text and icon atlas
 
 `ui-text.bin` holds **Noto Sans Medium** (the same source font and SHA-256 as
 `menu-font-large.bin`, copyright 2022 The Noto Project Authors, SIL Open Font
 License 1.1 in `OFL-NotoSans.txt`) rendered at 48 px to the em, so the
 multiplayer screens can draw their text at the window's resolution instead of
-stretching the retail bitmap fonts. It contains no retail game data. The file
-layout is documented in `tools/build_ui_text_atlas.py`; the app lays the
-glyphs out in the retail fonts' sizes and places (`docs/formats/menu.md`,
-"Sharp text"). Regeneration needs Python and ImageMagick 7:
+stretching the retail bitmap fonts. It also holds the screens' icons,
+rasterized at 64 by 64 from the SVGs in `icons/` as coverage only (the game
+tints them). It contains no retail game data. The file layout is documented in
+`tools/build_ui_text_atlas.py`; the app lays the glyphs out in the retail fonts'
+sizes and places (`docs/formats/menu.md`, "Sharp text"). Regeneration needs
+Python, ImageMagick 7 and `rsvg-convert` (librsvg):
 
 ```sh
 python3 tools/build_ui_text_atlas.py /path/to/NotoSans-Medium.ttf
 ```
+
+## Icons
+
+`icons/*.svg` are the marks a list row can carry: `lock` (a game with a
+password), `crown` (the King), `ready` (a tick), `house` (the player whose
+machine hosts), `you` (the player's own slot), `unable` (a cross) and the
+platforms `windows`, `macos` and `linux`. They are hand drawn for this project
+by an agent at John's request (2026-10-05): minimalist solid shapes on a 16 by
+16 grid, all one colour, and covered by the repository `LICENSE` like the rest
+of the source. They hold no retail art. The three platform marks are our own
+simplified drawings of a window of four panes, an apple with a leaf and a bite,
+and a penguin; they are not the vendors' logo artwork, and the Windows, Apple
+and Linux names and marks belong to their owners.
 
 ## Connection screens' title lettering
 

@@ -160,7 +160,7 @@ impl LobbyScreen {
         let slot_columns = vec![
             Column {
                 x: 0,
-                width: 11,
+                width: 12,
                 align: Align::Centre,
             },
             Column {
@@ -184,30 +184,37 @@ impl LobbyScreen {
                 align: Align::Centre,
             },
         ];
+        // The crown, the house, the ready tick and the platform, 12 pixels
+        // wide at a pitch of 13, then the name and the state.
         let player_columns = vec![
             Column {
                 x: 0,
-                width: 11,
+                width: 12,
                 align: Align::Centre,
             },
             Column {
-                x: 12,
-                width: 10,
+                x: 13,
+                width: 12,
                 align: Align::Centre,
             },
             Column {
-                x: 24,
-                width: 10,
+                x: 26,
+                width: 12,
                 align: Align::Centre,
             },
             Column {
-                x: 37,
-                width: 78,
+                x: 39,
+                width: 12,
+                align: Align::Centre,
+            },
+            Column {
+                x: 53,
+                width: 62,
                 align: Align::Left,
             },
             Column {
-                x: 118,
-                width: 40,
+                x: 117,
+                width: 41,
                 align: Align::Left,
             },
         ];

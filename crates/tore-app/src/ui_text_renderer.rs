@@ -275,6 +275,13 @@ mod tests {
             None,
             Some([255, 120, 120]),
         );
+        // Icons go through the same pipeline: three in a row, the middle one
+        // half hidden by a panel drawn after it.
+        let icon = crate::widgets::Icon::Crown;
+        icon.draw(&mut drawing, (30, 110), None);
+        crate::widgets::Icon::MacOs.draw(&mut drawing, (50, 110), None);
+        crate::widgets::Icon::Linux.draw(&mut drawing, (70, 110), Some([118; 3]));
+        ui_text::occlude((50, 110, 6, 12));
         let layer = ui_text::finish().expect("a layer");
 
         let mut renderer = UiTextRenderer::new(&device, &queue, format);

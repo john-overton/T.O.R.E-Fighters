@@ -392,7 +392,15 @@ fn the_players_list_marks_the_crown_the_house_ready_and_unable() {
     assert_eq!(rows[0].cells[1], Cell::Icon(Icon::House));
     assert_eq!(rows[1].cells[2], Cell::Icon(Icon::Ready));
     assert_eq!(rows[2].cells[2], Cell::Icon(Icon::Unable));
-    assert_eq!(rows[2].cells[4], Cell::Text("Unable".into()));
+    assert_eq!(rows[2].cells[5], Cell::Text("Unable".into()));
+    // The platform sits beside the name: the sample players are on Linux
+    // (id 1), Windows (2) and macOS (3), and an unnamed platform has no mark.
+    assert_eq!(rows[0].cells[3], Cell::Icon(Icon::Linux));
+    assert_eq!(rows[1].cells[3], Cell::Icon(Icon::Windows));
+    assert_eq!(rows[2].cells[3], Cell::Icon(Icon::MacOs));
+    assert_eq!(rows[0].cells[4], Cell::Text("Maverick".into()));
+    state.players[0].platform = tore_session::wire::Platform::Unknown;
+    assert_eq!(facts::player_rows(&state)[0].cells[3], Cell::Empty);
     assert!(rows[2].tint.is_some());
     assert_eq!(
         facts::player_detail(&state, 3).as_deref(),

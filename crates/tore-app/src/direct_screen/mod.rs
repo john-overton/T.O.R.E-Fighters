@@ -180,7 +180,7 @@ impl DirectScreen {
         let games_columns = vec![
             Column {
                 x: 0,
-                width: 11,
+                width: 12,
                 align: Align::Centre,
             },
             Column {
@@ -202,7 +202,7 @@ impl DirectScreen {
         let players_columns = vec![
             Column {
                 x: 0,
-                width: 11,
+                width: 12,
                 align: Align::Centre,
             },
             Column {

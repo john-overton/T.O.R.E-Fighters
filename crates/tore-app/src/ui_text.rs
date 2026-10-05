@@ -46,8 +46,13 @@ struct Glyph {
     ink_h: f32,
 }
 
+/// The size of an icon's picture in the atlas, and how far in from its
+/// cell's top left corner it starts (`tools/build_ui_text_atlas.py`).
+pub const ICON_SIZE: usize = 64;
+const ICON_PAD: usize = 4;
+
 /// The glyph atlas: cells of `cell` pixels in `columns` columns, and the
-/// glyphs in them.
+/// glyphs and icons in them.
 pub struct Atlas {
     pub cell: (usize, usize),
     pub columns: usize,
@@ -57,6 +62,9 @@ pub struct Atlas {
     baseline: f32,
     glyphs: [Option<Glyph>; 256],
     advances: [f32; 256],
+    /// The icons' names, in the order of their cells after the glyphs'.
+    icons: Vec<String>,
+    glyph_count: usize,
     pub width: usize,
     pub height: usize,
     pub plane: &'static [u8],
@@ -75,19 +83,20 @@ fn le16s(data: &[u8], at: usize) -> f32 {
 pub fn atlas() -> &'static Atlas {
     static ATLAS: OnceLock<Atlas> = OnceLock::new();
     ATLAS.get_or_init(|| {
-        assert_eq!(&DATA[..4], b"TUA1", "ui-text.bin is not a text atlas");
+        assert_eq!(&DATA[..4], b"TUA2", "ui-text.bin is not a text atlas");
         let (cell_w, cell_h, columns) = (le16(DATA, 4), le16(DATA, 6), le16(DATA, 8));
-        let (em, cap, origin_x, baseline, count) = (
+        let (em, cap, origin_x, baseline, count, icon_count) = (
             le16(DATA, 10),
             le16(DATA, 12),
             le16(DATA, 14),
             le16(DATA, 16),
             le16(DATA, 18),
+            le16(DATA, 20),
         );
         let mut glyphs = [None; 256];
         let mut advances = [0.0; 256];
         for slot in 0..count {
-            let at = 20 + slot * 12;
+            let at = 22 + slot * 12;
             let code = usize::from(DATA[at]);
             advances[code] = le16(DATA, at + 2) as f32 / 16.0;
             glyphs[code] = Some(Glyph {
@@ -98,8 +107,19 @@ pub fn atlas() -> &'static Atlas {
                 ink_h: le16(DATA, at + 10) as f32,
             });
         }
-        let plane = &DATA[20 + count * 12..];
-        let (width, height) = (columns * cell_w, count.div_ceil(columns) * cell_h);
+        let names = 22 + count * 12;
+        let icons = (0..icon_count)
+            .map(|i| {
+                let name = &DATA[names + i * 16..names + (i + 1) * 16];
+                let end = name.iter().position(|b| *b == 0).unwrap_or(16);
+                String::from_utf8_lossy(&name[..end]).into_owned()
+            })
+            .collect();
+        let plane = &DATA[names + icon_count * 16..];
+        let (width, height) = (
+            columns * cell_w,
+            (count + icon_count).div_ceil(columns) * cell_h,
+        );
         assert_eq!(plane.len(), width * height, "ui-text.bin is cut short");
         Atlas {
             cell: (cell_w, cell_h),
@@ -110,11 +130,25 @@ pub fn atlas() -> &'static Atlas {
             baseline: baseline as f32,
             glyphs,
             advances,
+            icons,
+            glyph_count: count,
             width,
             height,
             plane,
         }
     })
+}
+
+impl Atlas {
+    /// The top left corner of the named icon's picture in the atlas, in atlas
+    /// pixels.
+    fn icon_origin(&self, name: &str) -> Option<(f32, f32)> {
+        let slot = self.glyph_count + self.icons.iter().position(|n| n == name)?;
+        Some((
+            ((slot % self.columns) * self.cell.0 + ICON_PAD) as f32,
+            ((slot / self.columns) * self.cell.1 + ICON_PAD) as f32,
+        ))
+    }
 }
 
 /// How one retail font is drawn sharp: made from the font's own picture.
@@ -189,15 +223,32 @@ struct Run {
     cells: bool,
 }
 
+/// One recorded icon call: the named picture from the atlas stretched over
+/// `rect` in one colour.
+#[derive(Clone, Debug)]
+struct IconRun {
+    name: &'static str,
+    rect: Rect,
+    color: [u8; 3],
+    clip: Rect,
+}
+
+/// What a screen's drawing recorded, in drawing order.
+#[derive(Clone, Debug)]
+enum Item {
+    Text(Run),
+    Icon(IconRun),
+}
+
 /// The width of Noto Sans' space, in ems.
 const SPACE: f32 = 0.26;
 
-/// What a screen's drawing recorded: its text runs in drawing order and the
-/// rectangles later drawn over them.
+/// What a screen's drawing recorded: its text runs and icons in drawing order
+/// and the rectangles later drawn over them.
 #[derive(Clone, Debug, Default)]
 pub struct Layer {
-    runs: Vec<Run>,
-    /// A rectangle and the number of runs recorded before it was drawn.
+    items: Vec<Item>,
+    /// A rectangle and the number of items recorded before it was drawn.
     occluders: Vec<([f32; 4], usize)>,
 }
 
@@ -243,8 +294,8 @@ pub fn capture<R>(draw: impl FnOnce() -> R) -> (R, Option<Layer>) {
 pub fn replay(layer: &Layer) {
     RECORDER.with(|r| {
         if let Some(now) = r.borrow_mut().as_mut() {
-            let offset = now.runs.len();
-            now.runs.extend(layer.runs.iter().cloned());
+            let offset = now.items.len();
+            now.items.extend(layer.items.iter().cloned());
             now.occluders.extend(
                 layer
                     .occluders
@@ -260,7 +311,7 @@ pub fn occlude((x, y, w, h): Rect) {
     RECORDER.with(|r| {
         if let Some(now) = r.borrow_mut().as_mut() {
             let rect = [x as f32, y as f32, (x + w) as f32, (y + h) as f32];
-            now.occluders.push((rect, now.runs.len()));
+            now.occluders.push((rect, now.items.len()));
         }
     });
 }
@@ -326,14 +377,14 @@ fn place(
         let clip = clip.unwrap_or((0, 0, 640, 480));
         RECORDER.with(|r| {
             if let Some(now) = r.borrow_mut().as_mut() {
-                now.runs.push(Run {
+                now.items.push(Item::Text(Run {
                     glyphs,
                     y: at.1,
                     style,
                     tint,
                     clip,
                     cells,
-                });
+                }));
             }
         });
         return x;
@@ -345,6 +396,58 @@ fn place(
             at.0 + text_width(font, text)
         }
     }
+}
+
+/// Draws the named icon (one of the atlas's: `crown`, `house`, `lock`, `ready`,
+/// `you`, `unable`, `windows`, `macos`, `linux`) stretched over `rect` in the
+/// one colour `tint`, clipped to `clip` when given. While recording it is
+/// recorded to be drawn sharp and this returns true; otherwise nothing is
+/// drawn and it returns false, and the caller draws [`icon_mask`] instead.
+pub fn icon(name: &'static str, rect: Rect, tint: [u8; 3], clip: Option<Rect>) -> bool {
+    RECORDER.with(|r| match r.borrow_mut().as_mut() {
+        Some(now) => {
+            now.items.push(Item::Icon(IconRun {
+                name,
+                rect,
+                color: tint,
+                clip: clip.unwrap_or((0, 0, 640, 480)),
+            }));
+            true
+        }
+        None => false,
+    })
+}
+
+/// The named icon's coverage at `size` by `size` pixels, 0 to 255, made by
+/// averaging the atlas's 64 by 64 picture down: what a canvas draws when text
+/// and icons are not drawn sharp. None for a name the atlas does not have.
+pub fn icon_mask(name: &str, size: usize) -> Option<Vec<u8>> {
+    let atlas = atlas();
+    let (cell_x, cell_y) = atlas.icon_origin(name)?;
+    let (cell_x, cell_y) = (cell_x as usize, cell_y as usize);
+    let mut mask = Vec::with_capacity(size * size);
+    for y in 0..size {
+        for x in 0..size {
+            let (x0, x1) = (
+                x * ICON_SIZE / size,
+                ((x + 1) * ICON_SIZE / size).max(x * ICON_SIZE / size + 1),
+            );
+            let (y0, y1) = (
+                y * ICON_SIZE / size,
+                ((y + 1) * ICON_SIZE / size).max(y * ICON_SIZE / size + 1),
+            );
+            let mut total = 0usize;
+            for row in y0..y1 {
+                let at = (cell_y + row) * atlas.width + cell_x;
+                total += atlas.plane[at + x0..at + x1]
+                    .iter()
+                    .map(|v| usize::from(*v))
+                    .sum::<usize>();
+            }
+            mask.push((total / ((x1 - x0) * (y1 - y0))) as u8);
+        }
+    }
+    Some(mask)
 }
 
 /// One glyph rectangle for the GPU: where it goes on the canvas, its place in
@@ -407,6 +510,36 @@ fn subtract(piece: [f32; 4], hole: [f32; 4], out: &mut Vec<[f32; 4]>) {
     }
 }
 
+/// `rect` (left, top, right, bottom) cut to `clip` and then by each of
+/// `covers`: what shows, as up to a few rectangles in `pieces` (none when
+/// nothing does). `next` is scratch.
+fn visible(
+    rect: [f32; 4],
+    clip: [f32; 4],
+    covers: &[[f32; 4]],
+    pieces: &mut Vec<[f32; 4]>,
+    next: &mut Vec<[f32; 4]>,
+) {
+    pieces.clear();
+    let first = [
+        rect[0].max(clip[0]),
+        rect[1].max(clip[1]),
+        rect[2].min(clip[2]),
+        rect[3].min(clip[3]),
+    ];
+    if first[0] >= first[2] || first[1] >= first[3] {
+        return;
+    }
+    pieces.push(first);
+    for hole in covers {
+        next.clear();
+        for piece in pieces.iter() {
+            subtract(*piece, *hole, next);
+        }
+        std::mem::swap(pieces, next);
+    }
+}
+
 impl Run {
     /// The pen position of each glyph in canvas pixels: the retail cell for
     /// a cell run, otherwise the face's own spacing spread to end where the
@@ -445,7 +578,7 @@ impl Run {
 impl Layer {
     #[cfg(test)]
     pub fn is_empty(&self) -> bool {
-        self.runs.is_empty()
+        self.items.is_empty()
     }
 
     /// The glyph rectangles to draw, in drawing order. `linear` is whether the
@@ -456,7 +589,51 @@ impl Layer {
         let mut quads = Vec::new();
         let mut pieces = Vec::new();
         let mut next = Vec::new();
-        for (index, run) in self.runs.iter().enumerate() {
+        for (index, item) in self.items.iter().enumerate() {
+            let covers: Vec<[f32; 4]> = self
+                .occluders
+                .iter()
+                .filter(|(_, after)| *after > index)
+                .map(|(rect, _)| *rect)
+                .collect();
+            let run = match item {
+                Item::Text(run) => run,
+                Item::Icon(icon) => {
+                    let Some((cell_x, cell_y)) = atlas.icon_origin(icon.name) else {
+                        continue;
+                    };
+                    let (x, y, w, h) = icon.rect;
+                    let color: [f32; 3] = std::array::from_fn(|c| {
+                        if linear {
+                            srgb_to_linear(icon.color[c])
+                        } else {
+                            f32::from(icon.color[c]) / 255.0
+                        }
+                    });
+                    let clip = [
+                        icon.clip.0 as f32,
+                        icon.clip.1 as f32,
+                        (icon.clip.0 + icon.clip.2) as f32,
+                        (icon.clip.1 + icon.clip.3) as f32,
+                    ];
+                    let rect = [x as f32, y as f32, (x + w) as f32, (y + h) as f32];
+                    visible(rect, clip, &covers, &mut pieces, &mut next);
+                    for piece in &pieces {
+                        quads.push(Quad {
+                            dst: [x as f32, y as f32, w as f32, h as f32],
+                            uv: [
+                                cell_x,
+                                cell_y,
+                                cell_x + ICON_SIZE as f32,
+                                cell_y + ICON_SIZE as f32,
+                            ],
+                            clip: *piece,
+                            color: [color[0], color[1], color[2], 1.0],
+                        });
+                    }
+                    continue;
+                }
+            };
             let tint = run.tint.unwrap_or([255; 3]);
             let color: [f32; 3] = std::array::from_fn(|c| {
                 let byte = (u32::from(run.style.color[c]) * u32::from(tint[c]) + 127) / 255;
@@ -472,12 +649,6 @@ impl Layer {
                 (run.clip.0 + run.clip.2) as f32,
                 (run.clip.1 + run.clip.3) as f32,
             ];
-            let covers: Vec<[f32; 4]> = self
-                .occluders
-                .iter()
-                .filter(|(_, after)| *after > index)
-                .map(|(rect, _)| *rect)
-                .collect();
             let scale = run.style.scale;
             let across = scale * run.style.squeeze;
             let lefts = run.lefts(atlas);
@@ -519,23 +690,7 @@ impl Layer {
                     cell_y + atlas.baseline + glyph.ink_y + glyph.ink_h + MARGIN,
                 ];
                 let rect = [dst[0], dst[1], dst[0] + dst[2], dst[1] + dst[3]];
-                pieces.clear();
-                pieces.push([
-                    rect[0].max(clip[0]),
-                    rect[1].max(clip[1]),
-                    rect[2].min(clip[2]),
-                    rect[3].min(clip[3]),
-                ]);
-                if pieces[0][0] >= pieces[0][2] || pieces[0][1] >= pieces[0][3] {
-                    continue;
-                }
-                for hole in &covers {
-                    next.clear();
-                    for piece in &pieces {
-                        subtract(*piece, *hole, &mut next);
-                    }
-                    std::mem::swap(&mut pieces, &mut next);
-                }
+                visible(rect, clip, &covers, &mut pieces, &mut next);
                 for piece in &pieces {
                     quads.push(Quad {
                         dst,
@@ -876,11 +1031,11 @@ mod tests {
             occlude((0, 0, 5, 5));
         });
         let part = part.expect("a captured layer");
-        assert_eq!(part.runs.len(), 1);
+        assert_eq!(part.items.len(), 1);
         replay(&part);
         replay(&part);
         let layer = finish().unwrap();
-        assert_eq!(layer.runs.len(), 3, "A, then BC twice");
+        assert_eq!(layer.items.len(), 3, "A, then BC twice");
         // The second copy's occluder comes after the runs before it.
         assert_eq!(layer.occluders[0].1, 2);
         assert_eq!(layer.occluders[1].1, 3);

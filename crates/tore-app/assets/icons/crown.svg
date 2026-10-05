@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- The King: three points on a band. -->
+  <path fill="currentColor" d="M1.8 11.6 L1.8 4.6 L5.4 8 L8 3 L10.6 8 L14.2 4.6 L14.2 11.6 Z"/>
+  <rect fill="currentColor" x="1.8" y="12.9" width="12.4" height="1.9" rx="0.5"/>
+</svg>
