@@ -320,3 +320,23 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Replay viewer | P | Save the view, without the interface, as a PNG in `screenshots/` |
 | Replay viewer | Esc | The pause menu, over the view even with the interface hidden: pauses playback; Esc again or Resume replay plays on as before, ? > End Replay goes back to the Replays screen, and the Control tab opens the controls screen |
 | Replay viewer, pause menu open | Arrow keys, Tab, Enter / Space, Esc, left click | Move, choose and back out, as in the flight menu; every other key and click waits until it closes |
+
+## Proposed for multiplayer phase 2
+
+**Proposed, not built** ([design](ARCHITECTURE.md#phase-2-the-rest-of-stage-f)),
+awaiting John's review. Slice F2-C adds them to `input_catalog.rs`, and the
+tables above then list them; until then U says IFF is unavailable and the
+others do nothing new.
+
+| Situation | Input | Action |
+| --- | --- | --- |
+| Flight | U | IFF squawk on the designated aircraft: "IFF: Friendly" for one of the player's side, "IFF: no reply" for any other (retail's key) |
+| Flight | Ctrl+T | Show Target Info on or off, as the Pref menu's row: identities under visible aircraft and objects, a human's callsign beneath in a network game (retail's key) |
+| Networked flight | K | Score board on or off: the players ranked by the game's tally, with the time left |
+| Networked flight, as a wingman | Alt+Shift+E | Reply to the flight: "Engaging" |
+| Networked flight, as a wingman | Alt+Shift+W | Reply to the flight: "Winchester" (text only) |
+| Networked flight, as a wingman | Alt+Shift+B | Reply to the flight: "Bingo fuel" |
+| Networked flight, as a wingman | Alt+Shift+H | Request: "Need help" |
+| Networked flight, aircraft lost | Enter | Fly again, when the respawn rule, lives and delay allow (retail's key) |
+| Networked flight, the AI flying for the player | Any flight control | Take the aircraft back |
+| Watching a networked mission | The replay viewer's keys | As in the viewer; End returns to live, and nothing goes past live; Esc returns to the lobby |

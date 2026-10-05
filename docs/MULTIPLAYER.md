@@ -175,10 +175,29 @@ lobby is the same without the King's buttons. How it works, the layout and
 what was measured:
 [architecture](ARCHITECTURE.md#the-lobby-screen-as-built-ef8).
 
+*Designed (phase 2, 2026-10-05; agent proposals awaiting John unless
+credited):* the King's settings in the table become one numbered list that the
+host keeps and every player sees in the lobby's **Settings...** panel, greyed
+for anyone but the King, as retail greys them. Each setting's values and its
+co-op and PvP defaults are in the
+[architecture](ARCHITECTURE.md#the-kings-settings). Max human players, join in
+progress, the password and whether the game answers the local network's search
+change at any time; the rest only in the lobby. The King passes the crown from
+**Players...**, which also kicks; a King who leaves passes it to the
+longest-connected player. The *house*, the game that runs the host, is apart
+from the crown: its leaving still ends a game a player hosts, until host
+migration (stage K). Difficulty and realism stay the mission's own cheats, set
+by the King in the lobby and fixed for the flight. Not in phase 2: the Host row
+(pinned or calculated) and releasing a reserved aircraft (stage K), and public
+visibility (stage I).
+
 **Start.** Everyone starts airborne, as in retail multiplayer. Late joiners take
 over aircraft already flying. *Retail gap-fill (agent):* until multiplayer
 ground starts exist, "back at a base" starts the player airborne near their
-side's base.
+side's base. *Designed (phase 2):* this is retail's revival: a new aircraft of
+the player's type, airborne, at the revival distance from the battle on the
+bearing of its side's start, with the revival weapons
+([architecture](ARCHITECTURE.md#death-revival-and-lives)).
 
 ## Slots, AI fill and handoff
 
@@ -196,6 +215,15 @@ Each wing flies one aircraft type, chosen by the King in the creator.
 the normal Load Ordnance screen before the mission starts, as retail players
 armed their own aircraft. A late joiner keeps the loadout of the aircraft they
 take over.
+
+*Designed (phase 2):* in PvP every aircraft of both sides is a slot. The King
+can lock a slot: **closed** (the AI flies it and no human takes it, the lead
+included) or **reserved** for one callsign. With join in progress off, nobody
+takes an aircraft once the mission flies except to fly again after a loss; with
+lock sides on, a player stays on the side of the first aircraft it flew. A
+revival adds a new aircraft to the player's wing; a mission holds at most 64
+aircraft at once, and the oldest wreck that has rested 30 seconds is retired to
+make room ([architecture](ARCHITECTURE.md#slots-sides-and-joining)).
 
 **Flight model.** Every aircraft in a multiplayer mission flies the hybrid
 flight model, AI included, so a human taking over an AI aircraft never feels its
@@ -226,6 +254,17 @@ flying, but they talk among themselves ([decision](#decisions)). In
 PvP the King can set an observer delay so observers cannot relay live positions
 to a side. The delay is applied by the host before anything is sent, so an
 observer's machine never holds live positions.
+
+*Designed (phase 2; the decision above is John's, the rest agent proposals):*
+a connection with no plane while the mission flies can **Watch**: the host
+sends it snapshots with no plane of its own, near its camera at the full rate
+and the rest twice a second, delayed by the King's observer delay (0, 10, 30 or
+60 seconds, PvP only). The game shows them in the replay viewer in a **live
+mode**: the view follows the newest moment, and the player can pause, scrub
+back through the last 10 minutes and return to live, never past it. A player
+whose aircraft is lost flies again by the King's respawn rule and lives, or
+watches when none is left ([architecture](ARCHITECTURE.md#the-observer-view)).
+Rejoining with a token is stage K.
 
 ## Comms and chat
 
@@ -310,13 +349,21 @@ recording), the sort order (Alt+A), the battle net and its monitor key
 
 - No pause and no time compression.
 - Opening the in-flight menu, losing window focus or unplugging a controller
-  does not pause the mission. What the aircraft does meanwhile is an
-  [open question](#open-questions).
+  does not pause the mission. The controls go neutral meanwhile (John,
+  2026-09-30). *Designed (phase 2, awaiting John):* after the King's
+  `idle-ai` time away, 10 seconds by default, the AI flies the aircraft,
+  reserved for the player, until the player touches the flight controls
+  ([architecture](ARCHITECTURE.md#the-ai-flies-an-idle-players-aircraft)).
 - Game speed and realism settings are locked by the lobby for everyone.
 - If a flight lead is shot down, a human in the flight takes the lead if there
   is one, otherwise the next AI member ([lead succession](#slots-ai-fill-and-handoff)).
 - *Retail gap-fill (agent):* the Cheat menu is available to the King only and
   its settings apply to every human, following retail's host-only rule.
+  *Phase 2 design (agent proposal, awaiting John):* the King sets the
+  mission's cheats in the lobby, and nobody changes them in flight, so every
+  player's prediction runs the same rules all mission long.
+- *Designed (phase 2):* friendly fire is a mission setting the King chooses
+  (on by default); collisions stay on whatever it says (John, 2026-09-28).
 - Leaving never ends the mission for anyone else. *Agent proposal:* only the
   King can end it early.
 
@@ -325,6 +372,14 @@ when the target is on your side, and an IFF squawk (U) on the selected target
 answers Friendly for a same-side aircraft, both as in retail. *Retail gap-fill
 (agent):* with Show Target Info on, a human's callsign appears beneath the
 aircraft's label.
+
+*Designed (phase 2):* the X follows the player's own side, so a player flying
+for the enemy sees it on the enemy's aircraft; U answers "IFF: Friendly" for
+the player's side and "IFF: no reply" otherwise (fitted); Show Target Info
+(the Pref row, Ctrl+T) labels every visible aircraft and object with its
+identity, the displayed target with its manoeuvre, in orange, red when it
+aims at the player, and a human's callsign beneath
+([architecture](ARCHITECTURE.md#friend-or-foe)).
 
 ## Debrief
 
@@ -349,6 +404,15 @@ debrief is unchanged ([how it works](ARCHITECTURE.md#smoke-test-fixes-ef-f)).
 A player who ended its own flight can press Join and fly it again, any number
 of times; a player the server removes reads "The server removed you from the
 game: REASON" (a game a player hosts says "The King").
+
+*Designed (phase 2):* a networked debrief adds, after its first page,
+**SCORES** (PvP: the winner and each player's kills, losses, damage and ratio)
+and **RESULTS** (every aircraft, human and AI, with its pilot, status, kills,
+hit percentage and damage). Kills count as retail counts them: aircraft only,
+two for a human shot down with the pilot aboard. The **K** key opens the score
+board in flight for every player. After a loss a player's Join counts as flying
+again under the respawn rules, so leaving cannot dodge the lives
+([architecture](ARCHITECTURE.md#scoring)).
 
 ## Architecture
 
@@ -899,14 +963,20 @@ Raised while planning (2026-09-28):
   while the menu is open, and after 10 seconds without input the AI flies the
   aircraft until the player touches the controls again. John settled the first
   half on 2026-09-30 (neutral controls, [decisions](#decisions)); the AI
-  takeover is still open, for stage F.
+  takeover is still open. *Designed in phase 2* as the King's setting
+  `idle-ai`, 10 seconds by default, with `never` available
+  ([architecture](ARCHITECTURE.md#the-ai-flies-an-idle-players-aircraft)),
+  awaiting John.
 - **Dedicated server King.** *Agent proposal:* the first human to join a
   dedicated server becomes King, unless its config file fixes the mission and
   locks the settings. Stage D's server always takes its mission and settings
   from its files ([server guide](DEDICATED-SERVER.md)). The stage F design and
   EF4 built the server's lobby with no King: its mission comes from its file
   and its `start` setting starts it ([rules](DEDICATED-SERVER.md#the-lobby)).
-  A King on a server stays open for phase 2.
+  *Designed in phase 2, awaiting John:* no King by default, as built; a
+  server's configuration may give the crown to the first player
+  (`king first-player`) and may lock its mission (`king-mission locked`)
+  ([architecture](ARCHITECTURE.md#the-king-the-crown-and-the-house)).
 - **No eligible host.** If every peer can connect only through the relay, no one
   can be the calculated host. *Agent proposal:* the King sees a plain warning
   and can pin a relayed host anyway, or use a dedicated server.
@@ -915,3 +985,6 @@ Raised while planning (2026-09-28):
   the project rules prefer.
 - **Reply keys.** Which keys the human wingmen's replies and requests use. They
   are new actions, so the [controls list](CONTROLS.md) changes with them.
+  *Proposed in phase 2, awaiting John:* Alt+Shift+E Engaging, Alt+Shift+W
+  Winchester, Alt+Shift+B Bingo fuel, Alt+Shift+H Need help
+  ([proposed keys](CONTROLS.md#proposed-for-multiplayer-phase-2)).
