@@ -6059,6 +6059,8 @@ and the player gets the channel and its key. From then on:
 `tore_net::portmap::PortMapper` asks the router to forward the game port. It
 blocks, for at most 5 seconds in all, so the hosting game runs it on a thread
 of its own; the dedicated server runs it on start when `port-mapping on`.
+*Built (J4):* the library, standard library only; the hosts' use of it is
+slice J4b.
 
 - **Three protocols at once.** UPnP: an SSDP search (`M-SEARCH` to
   239.255.255.250:1900 for an InternetGatewayDevice, 2 seconds), the
@@ -6069,24 +6071,65 @@ of its own; the dedicated server runs it on start when `port-mapping on`.
   `WANPPPConnection` service. NAT-PMP (RFC 6886) and PCP (RFC 6887) to the
   gateway on UDP 5351: PCP's MAP first, NAT-PMP when the gateway answers that
   it does not speak PCP. The first to succeed is used.
-- **The gateway's address.** The SSDP answer's address, else on Linux the
-  default route in `/proc/net/route`, on macOS and Windows the system's
-  `route` command's answer (read with `std::process::Command`), else the
-  local address with its last byte 1.
+- **As built (J4, agent decisions).** UPnP and PCP each run on a scoped
+  thread. The first to map claims the result; the other stops within 50 ms
+  (every wait looks at a shared flag that often), and if it had mapped the
+  port in the same instant it removes its own mapping, within one more
+  second. The search asks for both IGD versions with `MX: 1` and is sent
+  again once after a second without an answer. A device's description must
+  come from the address that answered the search, and its control addresses
+  must stay on that host, so an answer on the local network cannot send the
+  game to another machine. `WANIPConnection` of the highest version is tried
+  first, then `WANPPPConnection`. PCP and NAT-PMP repeat a request after
+  250 ms, 500 ms, 1 s and 2 s. A PCP answer counts only from the gateway's
+  address and port with the request's nonce, protocol and inside port.
+  Every error reads as one line for the player; when every protocol fails,
+  the most telling is kept (a second router, then taken ports, no outside
+  address, a refusal, silence).
+- **The gateway's address.** On Linux the default route in
+  `/proc/net/route`, on Windows `route print`, on macOS and the BSDs `route
+  -n get default` (each command read with `std::process::Command` and given
+  a second), else the address that answered the SSDP search, else the local
+  address with its last byte 1. *Corrected by J4 (agent decision):* the
+  design put the SSDP answer first, but both RFCs send to the default
+  router, which the system knows without waiting for the search, so PCP
+  starts at once.
 - **Behind a second router.** An outside address that is itself private or
   in the carriers' 100.64/10 means the mapping is on an inner router: it is
   removed, and the game says "Your router is behind another one, so the
-  port could not be opened to the internet."
+  port could not be opened to the internet." UPnP and NAT-PMP ask for the
+  outside address before mapping, so they map nothing then; PCP learns it
+  in the mapping's answer and removes the mapping (agent decision). An
+  outside address of 0.0.0.0, loopback or link-local means the router is not
+  connected: "Your router has no internet address, so the port could not be
+  opened."
 - **IPv6.** PCP's MAP for the host's global IPv6 address opens the router's
   IPv6 firewall where the router allows it. UPnP's IPv6 firewall control is
-  not tried.
+  not tried. The IPv6 router comes from `/proc/net/ipv6_route` (with the
+  interface's index for a link-local router), `route print -6` or `route -n
+  get -inet6 default`; the request is asked alongside the IPv4 ones and
+  reported apart from them.
 - **Renewing and removing.** Renewed at half the lease; removed when hosting
   stops. A game that dies leaves a mapping that lapses within the hour.
-- **Bounded.** HTTP bodies at most 64 KB, a minimal reader for the XML
-  elements it needs, every read with a timeout; the parsers are fuzzed.
+  `PortMapper::renew` asks again by the protocol that made the mapping, and
+  from the start for one that fails, within the same 5 seconds;
+  `PortMapper::remove` takes at most 2 seconds. A mapper keeps one PCP nonce
+  for its life, since a gateway refuses a known mapping asked for with
+  another nonce until it lapses. Nothing is removed when a mapper is
+  dropped (agent decisions).
+- **Bounded.** HTTP bodies at most 64 KB and heads 16 KB, chunked bodies
+  read, a minimal reader for the XML elements it needs (at most 20,000
+  events, 64 deep), every read with a timeout; the parsers are fuzzed.
+  Addresses in a router's answers must be literal: no name is looked up.
 - **What the player sees.** In the lobby's Messages: "Your router forwards
   UDP port 26900 (UPnP). Friends can join at 203.0.113.5:26900.", or why not.
-  The address is the game's Mapped candidate.
+  The address is the game's Mapped candidate. Both lines are the
+  `Display` of `Mapping` and `MapError`; `MapReport::telemetry` gives the
+  report's port mapping value.
+- **Tested against fakes.** `tore_net::portmap::fake` holds a UPnP device
+  with its SSDP responder (`FakeUpnp`) and a PCP and NAT-PMP gateway
+  (`FakeGateway`) on loopback, public as the simulator is, for the J4b
+  tests. Every test points every target at them; none asks a real router.
 - **Settings.** The game: "Forward the game port on my router" in both
   screens' Options, on by default (a question for John); it applies to every
   game the player hosts, from either screen, since a friend joining a Direct
@@ -6249,7 +6292,7 @@ change in these stages.
 | --- | --- | --- | --- | --- | --- |
 | I1 Master wire | Opus | | `tore-net/src/master/{mod,packet,candidate}.rs`, `tore-net/master-golden.txt`, one `pub mod master;` line in `tore-net/src/lib.rs` | Every packet of [master-protocol.md](formats/master-protocol.md): encode, bounded decode, padding, fitting answers to requests; addresses, candidates, mapping types; the summary coded as a discovery answer without its nonce; the constants (ports, version, the default master address as a placeholder until John names it); `CookieKey` made public for the master | Seeded round trips of every kind; 100,000 fuzzed datagrams never panic; the golden file; for every request an unproven sender may make, the largest possible answer is no longer than the request; a summary with every text at its limit and 30 callsigns fits Register, Heartbeat and Listing details, cut and flagged. **Built (I1, 2026-10-05):** `tore_net::master` with `packet.rs` (`MasterPacket`, the 26 kinds, `fit` on Register, Heartbeat, Listing details and Page, `RelayFrame` read in place), `candidate.rs` (addresses, candidates, `MappingType::from_probes`, `relay_likely`) and `mod.rs` (the constants, `DEFAULT_MASTER` as the placeholder `master.invalid:26901`, and `CookieKey`, a wrapper of the transport's cookie hash rather than the transport's type made public, so `entropy.rs` is unchanged); decoding is strict, so every packet has one encoding, and the 100,000-datagram fuzz checks that whatever decodes encodes back to the same bytes; what the build settled is in [the wire as built](formats/master-protocol.md#the-wire-as-built) |
 | J1 NAT simulator | Opus | | `tore-net/src/sim.rs` moved to `sim/mod.rs`, new `sim/nat.rs` | [The NAT simulator](#the-nat-simulator) | One test per mapping, filtering and port-choice behaviour; mapping expiry refreshed by outgoing traffic only; hairpinning on and off; a router behind a router; an IPv6 firewall; static forwards; the same seed gives the same trace; every existing test that uses the simulator passes unchanged **Built (J1, 2026-10-05):** the routers as [designed](#the-nat-simulator), deciding arrivals when they arrive; 24 tests in `sim/nat.rs` cover each behaviour named here, a router deciding at arrival, two homes on one prefix behind a carrier, a dual-stack socket, links across routers and refused placements; a pinned fingerprint shows a run with no router gives exactly what the code before J1 gave, and every existing test passes unchanged |
-| J4 Port mapping library | Opus | | `tore-net/src/portmap/{mod,ssdp,http,xml,igd,natpmp,pcp,gateway}.rs`, one `pub mod portmap;` line in `tore-net/src/lib.rs` | [Port mapping](#port-mapping): the three protocols at once, the gateway, renewing, removing, the second-router check | Against fakes on loopback: SSDP and the device description (both IGD versions, chunked bodies), `AddPortMapping`, the conflict code and the next port, a device that takes only a lease of 0, `DeletePortMapping`; NAT-PMP and PCP answers, PCP's version refusal falling back to NAT-PMP, nonces checked; a private outside address reported as a second router; every call ends within its time with a silent fake; the HTTP, XML and packet parsers fuzzed |
+| J4 Port mapping library | Opus | | `tore-net/src/portmap/{mod,ssdp,http,xml,igd,natpmp,pcp,gateway}.rs`, one `pub mod portmap;` line in `tore-net/src/lib.rs` | [Port mapping](#port-mapping): the three protocols at once, the gateway, renewing, removing, the second-router check | Against fakes on loopback: SSDP and the device description (both IGD versions, chunked bodies), `AddPortMapping`, the conflict code and the next port, a device that takes only a lease of 0, `DeletePortMapping`; NAT-PMP and PCP answers, PCP's version refusal falling back to NAT-PMP, nonces checked; a private outside address reported as a second router; every call ends within its time with a silent fake; the HTTP, XML and packet parsers fuzzed. **Built (J4, 2026-10-05):** 52 tests in `portmap`, about 6 seconds: every acceptance item, plus a `WANPPPConnection`, a device that needs equal ports after a conflict, refusals by each protocol, both gateways at once leaving one mapping, a failed renewal mapping again, a search answer naming another host not followed, and PCP for IPv6 on `::1`; the silent fakes end at 5.0 s for `map`, inside the budget for `renew` and `remove`. The fakes are public (`portmap::fake`) for J4b. The gateway is the system's default route first ([corrected](#port-mapping)) |
 | I2 Master server | Opus | I1 | The new crate `crates/tore-master/` (every file), `tore-net/src/master/browse.rs`, the workspace `Cargo.toml` member and `Cargo.lock`, a `crates/tore-master/*` rule in `tools/battery_selection.py`, `docs/MASTER-SERVER.md` | [The master](#the-master): proving addresses, listings, heartbeats, keeps, expiry, Unknown listing, unregister, browse pages and details, probes on both ports, reports into daily counts, limits, the status line and daily table, the configuration and `--check-config`, the `flood` tool; the browse client. `introduce.rs` and `relay.rs` exist with their dispatch and drop their packets, counted, until J2 and J3 | On the simulator with a scripted host and browser: no listing without a cookie, and a forged source gets nothing but a 23-byte Challenge; a listing appears in the next Browse; a missing heartbeat drops it at 90 seconds (virtual clock), an Unregister at once; pages list every match once, filtered by build and fullness, in order; under a seeded flood from 1,000 sources the bytes answered to every unproven source are at most the bytes it sent, every limit holds, and a proper browser is still answered; IPv6 sources count by /64. Real sockets on 127.0.0.1: register and browse. Battery: `net-master-flood` (the master and its flood tool for 10 s; the status line shows the limits held and a browse during the flood answered) |
 | I3 Listing from hosts | Opus | I1; its end-to-end commit after I2 | `tore-net/src/master/{rendezvous,routed,local}.rs`, `meet.rs` and `relay.rs` as dispatch stubs, `crates/tore-server/src/{config,wiring,run,console,options}.rs` and its tests, `docs/DEDICATED-SERVER.md`, `crates/tore-app/src/net/{hosting,hosting_tests,options}.rs` | The host's `Rendezvous` and `Routed` ([one socket](#one-socket-two-protocols), [listing](#listing-a-game)): lookup, mapping test, register, heartbeats with the summary, change heartbeats, keeps, register again, back-off, unregister; the install id in Register; the host's or server's Report at the session's end. `tore-server`: `list` (off by default), `master`, `telemetry`, the console's `list on` and `list off`, the start and status lines. The game: `HostSetup.listing`, `Command::SetListed`, `Report::Listing`, `--host FILE --list [--master ADDRESS]` | On the simulator against `tore_master::Master` (a dev-dependency): a host is browsable within its first exchange and its summary's changes within 5 seconds; a vanished host is gone within 90 seconds; a master restart is healed within one heartbeat; a silent master is asked with back-off, never more than once a second; game datagrams pass `Routed` unchanged and no master datagram reaches the transport; a claim of `100::/64` from the socket is dropped. A hosting thread with `listing` registers to an in-test master and unregisters on stop. Battery: `net-master-listing` (a master, a `tore-server` with `list on`, `tore-app --browse 5` lists it; quitting the server removes it) |
 | I4 Internet Lobby screen | Sonnet | I2; New after I3 | `crates/tore-app/src/internet_screen/*`, `net/{browse,telemetry,settings}.rs`, `menu.rs`, `main.rs` (routing, `--browse`, snapshot states), `widgets/header.rs`, `assets/internet-lobby-title.png`, the `internet_screen/*` rule in `tools/battery_selection.py`, the menus lane's `menus-snap-internet*` scenarios, `README.md`'s telemetry section | [The screen](#the-internet-lobby-screen); Join straight to the seen address; New hosting a listed game; Options (the master's address, port forwarding and statistics switches, kept in `network-v1.conf`); the install id; the player's Report | Screen tests (paging, filters, sorting, selection, keys, the shared callsign and port); headless renders of the five snapshot states; `--browse` against a scripted master; a windowed run through `tools/agent-run.sh`: open the Internet Lobby with a loopback master and a listed `tore-server`, join, fly 30 seconds, leave, and New lists a hosted game that a second `--browse` sees |
