@@ -812,6 +812,13 @@ impl App {
             self.net_debrief_screen(wire, cause)
         });
         let capture = self.net.as_ref().and_then(|s| s.capture.clone());
+        // A capture of a session that flew converts into a replay once it is
+        // closed (below).
+        let convert_with = self
+            .net
+            .as_ref()
+            .filter(|s| s.client.clone_stats().snapshots > 0)
+            .map(|s| s.resources());
         if let Some(session) = &mut self.net {
             let now = session.now();
             session.client.disconnect(now);
@@ -842,6 +849,9 @@ impl App {
         if let Some(path) = capture {
             // The finished capture counts in the replays' pruning from now.
             log::info!("Network capture: {}", path.display());
+            if let Some(resources) = convert_with {
+                crate::replay::net_convert::spawn(path, resources);
+            }
         }
         if let Some(screen) = screen {
             match screen {

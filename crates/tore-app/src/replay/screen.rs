@@ -365,6 +365,22 @@ fn name_part(name: &str, part: usize) -> Option<&str> {
     stem.split('_').nth(part)
 }
 
+/// The details panel's Network row for a replay converted from a networked
+/// flight's capture: the server as typed, the mean round trip and the mean
+/// loss, read from the header and the footer. `None` for any other replay.
+fn network_detail(entry: &Entry) -> Option<String> {
+    let header = &entry.peek.as_ref().ok()?.header;
+    let mut text = header.extra("net.server")?.to_owned();
+    if let Some(rtt) = footer_value(entry, "net.rtt_ms_mean") {
+        let whole = rtt.split('.').next().unwrap_or(rtt);
+        text.push_str(&format!(", {whole} ms"));
+        if let Some(loss) = footer_value(entry, "net.loss_percent_mean") {
+            text.push_str(&format!(", {loss}% lost"));
+        }
+    }
+    Some(text)
+}
+
 fn footer_value<'a>(entry: &'a Entry, key: &str) -> Option<&'a str> {
     let footer = entry.peek.as_ref().ok()?.footer.as_ref()?;
     footer
@@ -1803,7 +1819,7 @@ impl Replays {
             }
         });
         let player = aircraft(entry);
-        let lines: Vec<(&str, String)> = vec![
+        let mut lines: Vec<(&str, String)> = vec![
             ("Started", format!("{} UTC", started(&entry.name))),
             (
                 "Mission",
@@ -1823,6 +1839,9 @@ impl Replays {
             ("Bookmarks", bookmarks),
             ("Size", size(entry.bytes)),
         ];
+        if let Some(network) = network_detail(entry) {
+            lines.insert(9, ("Network", network));
+        }
         let mut y = panel.1 + 24;
         let value_x = x + LABEL_W;
         let value_w = panel.0 + panel.2 - 8 - value_x;
@@ -2937,6 +2956,49 @@ mod tests {
         assert_eq!(choices.len(), 6);
         assert!(s.chosen(Choice::KeepLast(37)));
         assert_eq!(choices[3], Choice::KeepLast(37), "in order");
+    }
+
+    #[test]
+    fn a_converted_network_replay_shows_its_server_and_link_in_the_details() {
+        let entry = |extra: Vec<(String, String)>, result: Vec<(String, String)>| Entry {
+            path: PathBuf::from("x.tore-replay"),
+            name: "2026-10-05_1540_UKR_F18.tore-replay".into(),
+            bytes: 1,
+            partial: false,
+            kept: false,
+            peek: Ok(tore_replay::Peek {
+                header: Header {
+                    extra,
+                    ..Header::default()
+                },
+                footer: Some(tore_replay::Footer {
+                    end_tick: 1,
+                    result,
+                }),
+                ticks: Some((0, 1)),
+                frames: 2,
+                file_bytes: 1,
+                complete: true,
+            }),
+        };
+        let pair = |k: &str, v: &str| (k.to_owned(), v.to_owned());
+        let net = entry(
+            vec![pair("net.server", "192.168.1.20:26900")],
+            vec![
+                pair("end", "end flight"),
+                pair("net.rtt_ms_mean", "145.1"),
+                pair("net.loss_percent_mean", "1.84"),
+            ],
+        );
+        assert_eq!(
+            network_detail(&net).as_deref(),
+            Some("192.168.1.20:26900, 145 ms, 1.84% lost")
+        );
+        // A cut capture's replay has no figures to give: the server only.
+        let bare = entry(vec![pair("net.server", "game.example.org")], Vec::new());
+        assert_eq!(network_detail(&bare).as_deref(), Some("game.example.org"));
+        // A single-player recording has no such row.
+        assert_eq!(network_detail(&entry(Vec::new(), Vec::new())), None);
     }
 
     #[test]

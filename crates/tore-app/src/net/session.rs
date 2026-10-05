@@ -625,6 +625,12 @@ fn equip(
 pub const LEAVE_GRACE: Duration = Duration::from_secs(8);
 
 impl NetSession {
+    /// The import the session's mission is built from, which its capture
+    /// converts with.
+    pub fn resources(&self) -> Arc<BTreeMap<String, Vec<u8>>> {
+        Arc::clone(&self.resources)
+    }
+
     /// Starts the join over `join`'s transport. The mission is built when
     /// the host sends it.
     pub fn start(

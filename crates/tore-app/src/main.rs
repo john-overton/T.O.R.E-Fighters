@@ -7949,6 +7949,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
     let mut recording_log: Option<PathBuf> = None;
     let mut recording_acmi: Option<PathBuf> = None;
     let mut recording_diff: Option<(PathBuf, PathBuf)> = None;
+    let mut convert_capture: Option<PathBuf> = None;
     let mut recording_out: Option<PathBuf> = None;
     let mut recording_from: Option<f64> = None;
     let mut recording_to: Option<f64> = None;
@@ -8346,6 +8347,11 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
             "--recording-acmi" => {
                 recording_acmi = Some(PathBuf::from(
                     args.next().ok_or("--recording-acmi needs a recording")?,
+                ));
+            }
+            "--convert-capture" => {
+                convert_capture = Some(PathBuf::from(
+                    args.next().ok_or("--convert-capture needs a capture")?,
                 ));
             }
             "--recording-diff" => {
@@ -8931,7 +8937,7 @@ fn run(event_loop: &mut Option<EventLoop<()>>, session: Session) -> AppResult<Ou
                     "Controllers: --no-controllers, --record-input NEW_PATH, --replay-input PATH, --list-inputs, --monitor-inputs SECONDS, --write-input-profile NEW_PATH, --input-profile PATH, --test-rumble DEVICE_ID|only, --controls-menu. See docs/INPUT.md.\nInstrument focus: Ctrl-Tab / Ctrl-Shift-Tab, Ctrl-1..6; Ctrl-Shift-1..4 operates selected instrument buttons.\nScripted input: --input-script FILE feeds key presses and mouse clicks to a windowed run through the window's own handlers, for tests (steps: wait, waittick, key, down, up, move, movemenu, click, press, release, wheel, snapshot, exit; see docs/DEVELOPMENT.md)."
                 );
                 println!(
-                    "Mission recordings: every flight records what happened into replays/ in the data folder; Ctrl+B marks a moment (TORE_RECORD_MISSIONS=0 turns recording off for a run). These are not the --record-input/--replay-input or --record-combat/--replay-combat tapes, which store inputs and simulate them again. --recording-info FILE describes a recording. --recording-log FILE [--out DIR] [--from SECONDS] [--to SECONDS] [--ids 0,7] [--rate HZ] writes log.jsonl and summary.txt. --recording-acmi FILE [--out FILE] [--rate HZ] [--guns] writes a Tacview .txt.acmi file. --recording-diff A B compares two recordings. --ai-probe-ticks N --record-mission NEW_PATH records a headless probe without changing its output; --verify-render then checks every recorded tick redraws the picture the probe drew. See docs/REPLAYS.md."
+                    "Mission recordings: every flight records what happened into replays/ in the data folder; Ctrl+B marks a moment (TORE_RECORD_MISSIONS=0 turns recording off for a run). These are not the --record-input/--replay-input or --record-combat/--replay-combat tapes, which store inputs and simulate them again. --recording-info FILE describes a recording. --recording-log FILE [--out DIR] [--from SECONDS] [--to SECONDS] [--ids 0,7] [--rate HZ] writes log.jsonl and summary.txt. --recording-acmi FILE [--out FILE] [--rate HZ] [--guns] writes a Tacview .txt.acmi file. --recording-diff A B compares two recordings. --convert-capture CAPTURE [--out REPLAY] turns a networked flight's capture (replays/*.tore-capture) into a replay, smoothed through every update received; it needs the import and takes the replay's name from the capture unless --out names it. --ai-probe-ticks N --record-mission NEW_PATH records a headless probe without changing its output; --verify-render then checks every recorded tick redraws the picture the probe drew. See docs/REPLAYS.md."
                 );
                 println!(
                     "Usage: tore-app [--free-flight | --viewer | --quick-mission] [--theater CODE] [--capture-terrain OUTPUT.ppm] [--import MEDIA_DIR] [--import-only] [--no-audio] [--smoke-test] [--snapshot OUTPUT.ppm] [--snapshot-state STATE] [--background NAME]\n\nImports original menus, all theaters, F/A-18D, Rafale C, F-14D, A-4E, X-31 EFM, MiG-29, Su-27, MiG-21, Su-25, MiG-23, Su-35, F-22A and F-22N assets into platform application data.\n--import MEDIA_DIR takes an installed Fighters Anthology folder, or the folder of a mounted disc 1 holding SETUP.ESA (the container path itself is also accepted). A raw .iso is not read: mount it and choose the mounted folder.\nOn first run without --import the remembered source is used, otherwise a local gameassets/fighters-anthology directory.\n--aircraft f18|rafale|f14|a4e|x31|mig29|su27|mig21|su25|mig23|su35|f22|f22n|faxx selects the aircraft (default f18).\n--free-flight launches the selected aircraft; --headless-flight TICKS runs without a display.\n--launch-quick-mission launches the creator setup directly.\n--ground-start AIRPORT_NUMBER selects a runway start, or presets Ground in --quick-mission. The researched flight model is required.\nUse --ground-start N --headless-flight TICKS --maneuver takeoff for a deterministic rollout probe.\nFlight: Shift-arrows look/orbit, keypad 5 or Shift-/ recenter. Arrows pitch/bank, End/PageDown or Z/X rudder, 1-5 throttle idle to 100%, 6 afterburner, 7/8 throttle -/+5%, Insert/Delete chaff/flare, Shift-E twice to eject. F1 front, F2 back, F3 up, F4 track, F5 threat, F6 wing, F7 player-target, F8 target-player, F9 fly-by, F10 external, F12 missile-target. Alt/Ctrl+view references target/last missile (Alt-F4 exits). V saves Other View. Shift-0..9 instruments. Esc > Pref > Large windows? switches four-corner/six-bottom layouts. Esc flight menu, Ctrl-P pause, Backspace cockpit, F11 keyboard help. See docs/FLIGHT-CONTROLS.md.\n--quick-mission opens the creator; --viewer opens the selected theater.\n--theater CODE selects a base theater or imported layout variant, such as ~UKR1 (default UKR). --validate-maps constructs every imported map without a display. --validate-ils checks the ILS alignment at every airport.
@@ -9142,15 +9148,22 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         recording_log.is_some(),
         recording_acmi.is_some(),
         recording_diff.is_some(),
+        convert_capture.is_some(),
     ]
     .into_iter()
     .filter(|on| *on)
     .count();
     if recording_commands > 1 {
-        return Err("use one --recording-* command at a time".into());
+        return Err("use one --recording-* or --convert-capture command at a time".into());
     }
-    if recording_out.is_some() && recording_log.is_none() && recording_acmi.is_none() {
-        return Err("--out goes with --recording-log or --recording-acmi".into());
+    if recording_out.is_some()
+        && recording_log.is_none()
+        && recording_acmi.is_none()
+        && convert_capture.is_none()
+    {
+        return Err(
+            "--out goes with --recording-log, --recording-acmi or --convert-capture".into(),
+        );
     }
     if (recording_from.is_some() || recording_to.is_some() || recording_ids.is_some())
         && recording_log.is_none()
@@ -9198,6 +9211,10 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
     }
     if let Some((a, b)) = recording_diff {
         replay::cli::diff(&a, &b, &mut std::io::stdout().lock())?;
+        return Ok(Outcome::Done);
+    }
+    if let Some(path) = convert_capture {
+        replay::net_convert::command(&path, recording_out.as_deref())?;
         return Ok(Outcome::Done);
     }
     let probe_record = record_mission.map(|path| ProbeRecord {

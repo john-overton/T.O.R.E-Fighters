@@ -32,6 +32,7 @@ winit = "0.30.12"
 [dev-dependencies]
 # The master server, for the Internet Lobby's browse and join tests.
 tore-master = { path = "../tore-master" }
+tore-session = { path = "../tore-session", features = ["test-support"] }
 tore-world = { path = "../tore-world", features = ["test-support"] }
 tore-workers = { path = "../tore-workers", features = ["test-support"] }
 

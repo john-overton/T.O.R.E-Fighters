@@ -19,6 +19,7 @@ pub mod host;
 pub mod identity;
 pub mod library;
 pub mod live;
+pub mod net_convert;
 pub mod overlay;
 pub mod panels;
 pub mod pause;
