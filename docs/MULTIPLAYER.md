@@ -181,15 +181,16 @@ host keeps and every player sees in the lobby's **Settings...** panel, greyed
 for anyone but the King, as retail greys them. Each setting's values and its
 co-op and PvP defaults are in the
 [architecture](ARCHITECTURE.md#the-kings-settings). Max human players, join in
-progress, the password and whether the game answers the local network's search
-change at any time; the rest only in the lobby. The King passes the crown from
+progress, the password and the visibility (hidden, answering the local
+network's search, or public once stage I lists games) change at any time; the
+rest only in the lobby. The King passes the crown from
 **Players...**, which also kicks; a King who leaves passes it to the
 longest-connected player. The *house*, the game that runs the host, is apart
 from the crown: its leaving still ends a game a player hosts, until host
 migration (stage K). Difficulty and realism stay the mission's own cheats, set
 by the King in the lobby and fixed for the flight. Not in phase 2: the Host row
-(pinned or calculated) and releasing a reserved aircraft (stage K), and public
-visibility (stage I).
+(pinned or calculated) and releasing a reserved aircraft (stage K), and what
+public visibility does on the master server (stage I).
 
 **Start.** Everyone starts airborne, as in retail multiplayer. Late joiners take
 over aircraft already flying. *Retail gap-fill (agent):* until multiplayer

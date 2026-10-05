@@ -1270,7 +1270,7 @@ value's coding. The names are the configuration file's and the logs'.
 | 1 | `mode` | 0 co-op, 1 PvP |
 | 2 | `max-players` | 1 to 30 |
 | 3 | `join-in-progress` | 0 off, 1 on |
-| 4 | `listed` | 0 no, 1 yes |
+| 4 | `visibility` | 0 hidden, 1 local, 2 public (refused until stage I) |
 | 5 | `password` | 0 none, 1 set (in the lobby state only; Settings carries the text) |
 | 6 | `friendly-fire` | 0 off, 1 on |
 | 7 | `lock-sides` | 0 off, 1 on |
