@@ -90,6 +90,10 @@ pub struct Config {
     /// Send anonymous statistics to the master while broadcasting (John,
     /// 2026-10-05: on by default).
     pub telemetry: bool,
+    /// Ask the router to forward the game port when the server starts, by
+    /// UPnP, NAT-PMP or PCP (slice J4b). Off by default, since a server's
+    /// port is normally forwarded by its owner.
+    pub port_mapping: bool,
     /// `king first-player`: the first player to join wears the crown, and
     /// then the longest-connected (stage F phase 2; John, 2026-10-05: none
     /// by default).
@@ -124,6 +128,7 @@ impl Config {
             broadcast: false,
             master: tore_net::master::DEFAULT_MASTER.into(),
             telemetry: true,
+            port_mapping: false,
             king: false,
             king_mission_locked: false,
             settings: Vec::new(),
@@ -313,6 +318,7 @@ impl Config {
                 self.master = value.to_owned();
             }
             "telemetry" => self.telemetry = switch(name, value)?,
+            "port-mapping" => self.port_mapping = switch(name, value)?,
             "king" => {
                 self.king = match value {
                     "first-player" => true,
@@ -356,7 +362,7 @@ impl Config {
 
 /// Every setting's name, in the guide's order: the server's own, then the
 /// King's (stage F phase 2) by their registry names.
-pub const SETTINGS: [&str; 36] = [
+pub const SETTINGS: [&str; 37] = [
     "name",
     "port",
     "address",
@@ -374,6 +380,7 @@ pub const SETTINGS: [&str; 36] = [
     "broadcast",
     "master",
     "telemetry",
+    "port-mapping",
     "king",
     "king-mission",
     "mode",
@@ -612,6 +619,14 @@ mod tests {
         assert_eq!(parse("master [::1]:26911").unwrap().master, "[::1]:26911");
         assert!(refused("master host:0").contains("HOST or HOST:PORT"));
         assert!(refused("master [::1").contains("HOST or HOST:PORT"));
+    }
+
+    #[test]
+    fn port_mapping_is_off_by_default_and_a_switch() {
+        assert!(!parse("port 26900").unwrap().port_mapping);
+        assert!(parse("port-mapping on").unwrap().port_mapping);
+        assert!(!parse("port-mapping off").unwrap().port_mapping);
+        assert!(refused("port-mapping maybe").contains("`on` or `off`"));
     }
 
     #[test]

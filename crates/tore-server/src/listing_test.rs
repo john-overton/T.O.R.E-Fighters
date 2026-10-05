@@ -501,3 +501,73 @@ fn a_broadcasting_server_lists_itself_and_quitting_removes_it() {
     assert!(dir.join(crate::app::INSTALL_ID_FILE).exists());
     let _ = fs::remove_dir_all(dir);
 }
+
+/// Slice J4b: the test builds of the server never choose the real router,
+/// whatever `port-mapping` says.
+#[test]
+fn a_test_build_never_chooses_the_real_router() {
+    assert!(wiring::mapping_choice(true).is_none());
+    assert!(wiring::mapping_choice(false).is_none());
+}
+
+/// Slice J4b: a server with `port-mapping on` asks the router (a fake
+/// gateway on loopback here) when it starts, logs what the router did in the
+/// operator's words, and removes the mapping when it stops.
+#[test]
+fn a_server_with_port_mapping_forwards_its_port_and_removes_it_at_quit() {
+    use tore_net::portmap::MapperConfig;
+    use tore_net::portmap::fake::{FakeGateway, FakeGatewayConfig};
+    use tore_net::portmap::keeper::KeeperConfig;
+    let router = Arc::new(
+        FakeGateway::start("127.0.0.1:0".parse().unwrap(), FakeGatewayConfig::default())
+            .expect("a fake router"),
+    );
+    let dir = data_folder("portmap", true);
+    fs::write(dir.join("mission.txt"), MISSION).unwrap();
+    let (console, commands) = channel();
+    let server_dir = dir.clone();
+    let mapper = KeeperConfig::with_config(MapperConfig {
+        upnp: false,
+        gateway: Some(router.address()),
+        gateway_v6: Some("[::1]:9".parse().unwrap()),
+        entropy: Entropy::Seeded(3),
+        ..MapperConfig::new(0)
+    });
+    let server = std::thread::spawn(move || {
+        let mut prepared = prepare::prepare(&Options::default(), &server_dir).unwrap();
+        prepared.config.address = Listen::Address("127.0.0.1".parse().unwrap());
+        prepared.config.port = 0;
+        prepared.config.status_interval_seconds = 0;
+        prepared.config.port_mapping = true;
+        let log = Logger::new(server_dir.join("logs"), Box::new(std::io::sink()));
+        serve_with(
+            prepared,
+            move |setup| wiring::start_host_with(setup, Some(mapper)),
+            commands,
+            &mut RealTimer::new(),
+            log,
+        )
+    });
+    let start = Instant::now();
+    while router.mappings().is_empty() {
+        assert!(start.elapsed() < Duration::from_secs(10), "no mapping");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let held = router.mappings();
+    assert_eq!(held.len(), 1);
+    let port = held[0].internal_port;
+    // The news reaches the log on a later poll.
+    std::thread::sleep(Duration::from_millis(300));
+    console.send(Command::Quit).unwrap();
+    assert_eq!(server.join().expect("the server thread"), Ok(()));
+    assert!(router.mappings().is_empty(), "removed at quit");
+    let mut log = String::new();
+    for entry in fs::read_dir(dir.join("logs")).unwrap().flatten() {
+        log += &fs::read_to_string(entry.path()).unwrap();
+    }
+    let line = format!(
+        "Port mapping: Your router forwards UDP port {port} (PCP). Friends can join at 203.0.113.5:{port}."
+    );
+    assert!(log.contains(&line), "{line} in\n{log}");
+    let _ = fs::remove_dir_all(dir);
+}

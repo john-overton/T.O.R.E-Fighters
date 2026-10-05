@@ -8,6 +8,14 @@
 //! written through it, so the master's datagrams never reach the host, and
 //! it lists the server while `broadcast` is on. A broadcasting server sends
 //! the master a Report at the end of each mission when `telemetry` is on.
+//!
+//! With `port-mapping on` (slice J4b) it also asks the router to forward the
+//! game port from the start (`tore_net::portmap::keeper`), gives the listing
+//! the Mapped candidate, logs what the router did, and removes the mapping
+//! when the server stops. *Agent decision:* the real router is asked only
+//! through [`mapping_choice`], which is never the real one in a test build,
+//! so no test of the server can reach a router; tests give
+//! [`start_host_with`] a fake gateway.
 
 use crate::{
     app::is_release,
@@ -16,14 +24,36 @@ use crate::{
 };
 use std::{collections::VecDeque, time::Duration};
 use tore_net::master::{
-    Build, HostListing, HostRendezvous, HostTally, ListingState, MappingType, RendezvousEvent, Role,
+    Build, HostListing, HostRendezvous, HostTally, ListingState, MappingType, PortMapping,
+    RendezvousEvent, Role,
 };
+use tore_net::portmap::keeper::{self, Keeper, KeeperConfig};
 use tore_net::{Entropy, Platform, ServerSocket};
 use tore_session::wire::chat::receiver_label;
 use tore_session::{BuildId, HostConfig, HostLog, LeaveReason, Phase};
 
+/// The mapper the configuration asks for: the real router when
+/// `port-mapping` is on (and `TORE_NO_PORT_MAPPING` is not set), never in a
+/// test build.
+pub fn mapping_choice(port_mapping: bool) -> Option<KeeperConfig> {
+    if cfg!(test) {
+        return None;
+    }
+    keeper::choose(port_mapping)
+}
+
 /// Builds the host session for a prepared mission.
 pub fn start_host(setup: HostSetup) -> Result<Box<dyn Host>, String> {
+    let mapping = mapping_choice(setup.config.port_mapping);
+    start_host_with(setup, mapping)
+}
+
+/// [`start_host`] with the router asked as `mapping` says (a test's fake
+/// gateway), whatever the configuration's `port-mapping` is.
+pub fn start_host_with(
+    setup: HostSetup,
+    mapping: Option<KeeperConfig>,
+) -> Result<Box<dyn Host>, String> {
     let HostSetup {
         config: c,
         spec,
@@ -90,6 +120,8 @@ pub fn start_host(setup: HostSetup) -> Result<Box<dyn Host>, String> {
     config.retail_stall_speeds = false;
     let host = tore_session::Host::new(spec, resources, config)
         .map_err(|error| format!("The host session cannot start: {error}"))?;
+    // After the checks above: a start that is refused asks the router nothing.
+    let keeper = mapping.map(|mapping| Keeper::start(mapping, port));
     Ok(Box::new(SessionHost {
         host,
         socket,
@@ -97,6 +129,8 @@ pub fn start_host(setup: HostSetup) -> Result<Box<dyn Host>, String> {
         listing,
         tally: None,
         now: Duration::ZERO,
+        keeper,
+        port_mapping: PortMapping::NotTried,
     }))
 }
 
@@ -110,6 +144,10 @@ struct SessionHost {
     tally: Option<HostTally>,
     /// The time of the last poll.
     now: Time,
+    /// The router's port mapping, when `port-mapping` is on.
+    keeper: Option<Keeper>,
+    /// What the mapping came to, for the Report.
+    port_mapping: PortMapping,
 }
 
 /// A listing event as a log line.
@@ -181,6 +219,29 @@ fn end_text(reason: tore_session::wire::messages::EndReason) -> &'static str {
 }
 
 impl SessionHost {
+    /// Takes in what the mapper thread has to say: the candidate to the
+    /// listing, the lines to the log.
+    fn take_mapping_news(&mut self, now: Time) {
+        let Some(keeper) = &self.keeper else {
+            return;
+        };
+        for news in keeper.poll() {
+            if let keeper::News::Mapped {
+                outside,
+                port_mapping,
+                ..
+            } = &news
+            {
+                self.port_mapping = *port_mapping;
+                self.listing.set_mapped(*outside, now);
+            }
+            for line in news.lines() {
+                self.events
+                    .push_back(Event::Note(format!("Port mapping: {line}")));
+            }
+        }
+    }
+
     fn present(&mut self) {
         if let Some(tally) = self.tally.as_mut() {
             tally.present(self.host.players().into_iter().map(|p| p.address));
@@ -196,13 +257,14 @@ impl SessionHost {
             return;
         }
         let mapping = self.listing.rendezvous().mapping();
-        let report = tally.report(
+        let mut report = tally.report(
             self.now,
             Role::DedicatedServer,
             &self.host.config().build.version,
             Platform::current().code(),
             mapping,
         );
+        report.port_mapping = self.port_mapping;
         self.listing.rendezvous_mut().report(report);
     }
 
@@ -315,6 +377,7 @@ impl Host for SessionHost {
                 .push_back(Event::Note(format!("receive failed: {error}")));
         }
         self.host.update(now);
+        self.take_mapping_news(now);
         let host = &self.host;
         self.listing.update(now, || host.discover_answer(0).into());
         if let Err(error) = self
@@ -407,6 +470,10 @@ impl Host for SessionHost {
 
     fn stop(&mut self, now: Time) {
         self.now = now;
+        // The mapping comes off while the players are told.
+        if let Some(keeper) = self.keeper.as_mut() {
+            keeper.begin_stop();
+        }
         self.host.stop();
         // The mission's end, and its Report, before the listing goes.
         self.drain_log();
@@ -420,6 +487,15 @@ impl Host for SessionHost {
                 .push_back(Event::Note(format!("send failed: {error}")));
         }
         self.send_listing();
+        if let Some(mut keeper) = self.keeper.take() {
+            keeper.finish(keeper::REMOVE_WAIT);
+            for news in keeper.poll() {
+                for line in news.lines() {
+                    self.events
+                        .push_back(Event::Note(format!("Port mapping: {line}")));
+                }
+            }
+        }
     }
 
     fn finished(&self) -> bool {
