@@ -590,13 +590,15 @@ template):
 | Item | Rectangle or position | Notes |
 | --- | --- | --- |
 | Title | "Lobby" centred on the panel at y 87 | |
-| Game, Mission, start rule | `PANELFNT` lines at (45, 106), (45, 120), (45, 134), up to 549 wide; the rule in `PANELFND` | The game's name, the mission's summary, the start rule in words |
-| Slots | heading (45, 152); list (45, 168), 286 wide, five rows; frame (40, 164, 355, 97) | Columns from the text origin: own mark (centred, 11 wide, x 0), "Wing 1 #3" (x 14, 54), aircraft (x 70, 104), holder or AI (x 176, 62), ready tick (x 242, 12). Pager: PREV (336, 184), NEXT (336, 207), rocker (364, 183), PAGE (336, 226), page box (336, 240) |
+| Game, Mission, start rule, rules | `PANELFNT` lines at (45, 102), (45, 115), (45, 128) and (45, 141), up to 549 wide; the start rule in `PANELFND` | The game's name, the mission's summary, the start rule in words and, since F2-L, "Rules: " and the King's settings in words (they were at 106, 120, 134 before) |
+| Slots | heading (45, 152); list (45, 168), 286 wide, five rows; frame (40, 164, 355, 97) | Columns from the text origin: own mark (centred, 11 wide, x 0), "Wing 1 #3" (x 14, 54), aircraft (x 70, 84), holder, AI, "Closed (AI)" or "Reserved: Hawk" (x 156, 100), ready tick (x 258, 12) (F2-L widened the holder column; EF8 had the aircraft at x 70, 104, the holder at x 176, 62 and the tick at x 242). Pager: PREV (336, 184), NEXT (336, 207), rocker (364, 183), PAGE (336, 226), page box (336, 240) |
 | Players | heading (400, 152); list (404, 168), 186 wide, five rows, no pager; grey box (400, 165, 194, 95) | Columns: crown (x 0, 11), house (x 12, 10), ready tick or red cross (x 24, 10), callsign (x 37, 78), state word (x 118, 40) |
 | Hint line | `PANELFNT` at (45, 266), up to 549 wide | |
 | Messages | heading (45, 282); EF6's box (45, 294), 549 by 78 (seven lines) | |
 | Chat line | grey box (45, 377), 549 by 18 | Hint "type a message, Enter sends to all"; 80 characters |
-| Buttons | y 419, 85 wide, x 45, 138, 231, 324, 417, 510 | King: Mission..., Loadout, Ready, Kick, Fly, Leave. Others: Loadout (324), Ready (417), Leave (510) |
+| Buttons | y 419, 75 wide, x 45, 124, 203, 282, 361, 440, 519 (a 79 pitch; EF8 had six 85 wide at 45 to 510) | King: Mission..., Settings..., Players..., Loadout, Ready, Fly, Leave. Others: Settings... (282), Loadout (361), Ready (440), Leave (519). While the mission flies Loadout reads Watch (Stop Watch while watching). Kick moved into the Players panel |
+| Settings panel | panel (45, 100), 550 by 362, over the screen | Title; four page buttons at y 132 (x 67, 159, 251, 343, 88 wide); rows from y 166 on a 21 pitch, the label at x 69 and the value box (x 295, 270 wide, 18 high; the Game page's name and password are grey text lines there); Realism is two columns of eight (labels x 67 and 329, 160 wide, value boxes 88 wide); the notice or the selected row's reason at y 400; Close (278, 422) |
+| Players panel | panel (110, 150), 420 by 180 (Kick's place) | Two lines of words; Give crown (150, 282, 105 wide), Kick... (270, 282) and Close (370, 282, blue, the keyboard) |
 | Kick and Leave panels | panel (110, 150), 420 by 180, over the screen | Kick: a grey line (132, 234), 376 by 18, for the reason (60 characters); Kick (210, 282) and Cancel (345, 282). Leave: Leave (210, 270) and Cancel (345, 270), Cancel has the blue face and the keyboard |
 
 New pixel icons (authored, no retail art): the house (9 by 8), the player's own
@@ -616,7 +618,10 @@ player's two pages draw and behave as before.
 
 Headless renders, `--snapshot-state` `lobby-king`, `lobby-joiner`,
 `lobby-unable`, `lobby-flying`, `lobby-server`, `lobby-kick`, `lobby-leave` and
-`lobby-ready`, and with `--quick-mission` `lobby-creator`,
+`lobby-ready`, and (F2-L) `lobby-settings`, `lobby-settings-revival`,
+`lobby-settings-scoring`, `lobby-settings-realism`, `lobby-settings-joiner`,
+`lobby-settings-pvp`, `lobby-settings-flying`, `lobby-players`,
+`lobby-players-house`, `lobby-locks`, `lobby-watch` and `lobby-pvp`, and with `--quick-mission` `lobby-creator`,
 `lobby-creator-refused`, `lobby-ordnance`, `lobby-ordnance-refused` and
 `lobby-ordnance-cheat`, are in the lead's notes
 (`.local/mp-notes/stage-ef/ef8/`).

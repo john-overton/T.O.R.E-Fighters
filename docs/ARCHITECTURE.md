@@ -5931,7 +5931,9 @@ question 4).
 
 ##### The lobby's display
 
-The lobby screen (EF8) gains:
+The lobby screen (EF8) gains the following; *built by F2-L*, see
+[the lobby panels as built](#the-lobby-panels-as-built-f2-l) for what the
+build settled:
 
 - **Buttons.** The King: Mission..., Settings..., Players..., Loadout, Ready,
   Fly, Leave, seven at 75 wide on a 79 pitch across the 549-wide row. Everyone
@@ -5954,6 +5956,106 @@ The lobby screen (EF8) gains:
 - **The head line** summarises the settings in words under the start rule:
   "Co-op, friendly fire on, no revival" or "PvP by sides, 5 kills or 10
   minutes, revival with unlimited lives".
+
+##### The lobby panels as built (F2-L)
+
+*Built (F2-L, 2026-10-05).* The screen shows and asks; the host decides
+(`lobby_screen/settings_panel.rs`, `players_panel.rs`, `facts.rs`, `mod.rs` and
+the game's side in `app.rs`). Every choice is an agent decision unless it says
+otherwise.
+
+- **The seven buttons.** The King: Mission..., Settings..., Players...,
+  Loadout, Ready, Fly, Leave, 75 wide on a 79 pitch from x 45; everyone else:
+  Settings..., Loadout, Ready, Leave in the last four places (Leave is always
+  in the last). **Kick** moved from its own button into the Players panel, as
+  the design says. Settings... is for everyone while the lobby's state is
+  here; Players... is the King's, enabled when a player other than the King's
+  own row is selected in Players ("Select another player in Players first."
+  otherwise). Facts: `facts::buttons`, `LoadoutAs`.
+- **Settings.** One panel over the lobby, four pages behind four page buttons
+  (Game, Revival, Scoring, Realism; agent decision: buttons, not a rocker,
+  because each page has its own rows). The rows are the registry's
+  ([the settings](#the-kings-settings)), each a label and a grey value box:
+  a left click turns it to the next allowed value, a right click to the one
+  before, wrapping round; Right, Left and Enter do the same from the keyboard,
+  Up and Down choose a row, Tab and Shift+Tab turn the page, Esc closes. A row
+  sends exactly one `SettingsChange` and shows the value the host's next lobby
+  state carries, never a guess; the host's refusal ("2 players are connected:
+  the limit cannot be lower.") reads at the foot of the panel. Rows turn
+  through every allowed value in order, so the player limit takes up to 29
+  clicks to cross its range (no step of five yet). A value off the list (a
+  server's file gives a time limit of any whole minute) turns to the nearest
+  listed value in the direction asked. The Game page is the game's name and
+  the password as two text lines (the King's: type, press Enter; an empty
+  password line with a password set takes it away), then game type, players,
+  join in progress, who can find it, friendly fire, lock sides, loadouts, how
+  long before the AI flies an idle aircraft, and observer delay.
+- **Greying** (`settings_panel::row_state`, tested for every row): for anyone
+  but the King every row is greyed ("Only the King may change the
+  settings."); a lobby-only row while the mission flies ("Change it in the
+  lobby, between missions."); PvP-only rows in co-op ("This applies only in a
+  PvP game."; the time limit is not one); the Realism rows before the mission
+  has arrived. A click on a greyed row says why at the foot of the panel.
+- **Realism** is the lobby mission's own cheats: Damage (Normal, Invulnerable,
+  Realistic), Enemy AI (Unchanged and the four levels) and the thirteen
+  switches of the in-flight Cheat menu that work. A click sends the whole
+  mission again with the changed cheats as a mission change (`Request::Cheats`,
+  `client.change_mission`); every player's copy rebuilds, and ready marks clear
+  as a mission change does. Guns only is the mission's own air combat setting
+  and stays with Mission...; it is not a Realism row.
+- **Players.** For the selected player: **Give crown** (`pass_crown`, then the
+  panel closes) and **Kick...**, which opens EF8's reason panel. The house is
+  not offered Kick, with the reason in the panel; the panel closes by itself
+  when its player leaves or the crown is no longer ours.
+- **Slot locks.** The King's right click on a slot row (a main.rs hunk of
+  seven lines routes the right button to `App::lobby_right_button`; the left
+  button's path is unchanged): with no player selected it cycles open and
+  closed, a reserved slot opens; with a player selected in Players it keeps
+  the slot for that player, or opens it when it is kept for that player
+  already. A closed slot reads "Closed (AI)", a reserved one "Reserved:
+  Hawk", both dimmed unless the slot is kept for the reader; a click on
+  one says "Plane 3 is closed: the AI flies it." or "Plane 3 is kept for
+  Hawk." The holder column grew to fit (the aircraft column shrank; see the
+  layout in [menu formats](formats/menu.md)).
+- **Watch.** While the mission flies the Loadout button reads **Watch** for a
+  player with no plane (**Stop Watch** while watching, **Loadout** in the
+  lobby). Pressing it asks the host for the observer stream with no camera
+  subject (`client.watch`) and says so in Messages; Ready (Join) stops the
+  watch first. The observer *screen* is slice F2-O2's: until it lands the
+  stream arrives and nothing draws it, so a player who presses Watch before
+  F2-O2 sees only the line in Messages and the lobby's "observing" mark.
+- **The head.** A fourth line, "Rules: Co-op, friendly fire on, no revival" or
+  "Rules: PvP by sides, 5 kills or 10 minutes, revival with unlimited lives,
+  sides locked", sums the settings up (`facts::settings_summary`: game type and
+  fight, friendly fire in co-op and when off, the kill and time limits, the
+  revival rule and lives, locked sides, any loadout). The four head lines moved
+  up to y 102, 115, 128 and 141 to make room.
+- **Messages** now say what the host's lobby state changed: the settings
+  ("Settings: mode pvp, kill-limit 3."), the game's new name, and a slot's
+  lock ("Plane 3's slot is closed: the AI flies it.").
+- **Load Ordnance** follows the King's loadout rule (`ordnance.rs`):
+  under `loadouts any` the lobby page's Cheat row works as single player's
+  does; under `own` it answers "Cheat loading is not allowed in a
+  multiplayer game." as before. Accept checks the loadout with
+  `LoadoutSpec::check_in` against the lobby mission (its Guns only and its
+  loadout rule), and a page that is open or kept when the King turns the rule
+  to `own` drops its Cheat loading (stations unloaded, Cheat off, a line on the
+  page). Single player's page is not a lobby page and is unchanged.
+- **Tests.** `lobby_screen/phase2_tests.rs` (buttons and their greying, every
+  registry row on a page, each row's greying, the turning of every setting
+  through its values, the cheats' edits, the name and password lines, the
+  panel on the screen with the mouse and the keyboard, the Players panel, slot
+  locks, Watch, the head's words and Messages' lines, every page drawing for
+  the King and a joiner), `ordnance.rs` (the rule), twelve more headless
+  snapshot states (`lobby-settings` and the rest; the menus lane's
+  `menus-snap-lobby-*`) and the net lane's `net-window-lobby`, which drives the
+  window: the King's game hosts from Direct Connection's New, a `tore-bot`
+  joins once the Game type is PvP (the default mission has one friendly
+  plane, so the hosting player fills it), the script turns Game type, Friendly
+  fire, the Scoring page's kill limit and the Realism page's Damage, closes and
+  opens the bot's slot with the right click, selects the bot and gives it the
+  crown with Players...; the bot wears the crown, and when it leaves the crown
+  comes back. Single player is unchanged (the quick guard).
 
 ##### Single player in phase 2
 
@@ -6007,7 +6109,7 @@ every message below; no later slice changes the wire without the lead.
 | F2-S Scoring | Opus | F2-0 | `tore-world` `score.rs` and its call in `world.rs`; `tore-sim` combat's `Strike` amount; `host/score.rs`, new `host/score_tests.rs`; the client's scores; `tore-app` new `net/scoreboard.rs` and its call in `net/play.rs` | Score facts; tallies; limits and the kill limit's end; Scores; the score board on K | World tests: a human killed with the pilot aboard counts two, after ejecting one, ground kills none, damage fractions, losses, AI shooters; host tests for each tally, fight type and owner, the kill limit's end with its winner and a draw, the time limit, the pace; a render test of the board. Single-player baseline SAME (facts off). **Built (F2-S, 2026-10-05):** as [described above](#scoring); the world's facts (`score.rs`, combat's `Strike::amount`), the host's tallies, limits, winner and pace (`host/score.rs`), the client's kept scores and their words (`client/scores.rs`), `tore-bot`'s scores lines, and K's board (`net/scoreboard.rs`, two short hunks in `main.rs`: the K arm and the draw call). Tests: `world/score_tests.rs` (a real gun burst's damage, kill and loss; ejection; AI shooters; no shooter; ground kills and fractions; recording changes nothing the mission does), `host/score_tests.rs` (on the simulator: kills, losses, damage, ratio, both fights, the kill limit by side, total and player with a winner and a draw, the time limit's winner, co-op, the pace, a late joiner and a departure), `client/scores.rs` (the words, and the real client keeping and counting down), the board's lines and a headless render, and the net lane's `net-server-scores` |
 | F2-V Death and revival | Opus | F2-0 | `tore-world` `world/revive.rs`, `world/handoff.rs`, `ai_wings.rs` (the spawned aircraft), new `world/revive_tests.rs`; `host/revive.rs`, new `host/revive_tests.rs`; the client's revival state and its own copy's spawn; `tore-app` `net/play.rs` (the prompt and Enter); `tore-bot --revive` | Abandon and Revive; the revival point and loadout; retiring; lives, delay and the three rules; Join after a loss; replaces the host's orphans | World tests: a revived plane's place, heading, speed, stores under each weapons rule and its handoff invariants; Abandon keeps a wreck falling; 100 revivals in one mission stay within 64 planes; host tests for each rule, lives, the delay, the lobby's Join, lock sides; a client copy that adds the spawned plane; a `net` scenario where a bot ejects, revives and flies on. Single-player baseline SAME. **Built (F2-V, 2026-10-05):** as [described above](#death-revival-and-lives); Abandon and Revive, the revival point, the loadout and the weapons rule, retiring and the `Book` in `world/revive.rs` (with a new aircraft for the AI in `ai_wings.rs`, three roster calls in `seats.rs`, and in `world.rs` the field, Abandon in the input check, the lost planes' neutral input and silent radios, and the wrecks' rest each tick); the host's rules, lives, delay, held seats, Join after a loss and Spawned in `host/revive.rs`, replacing the orphans in `host/mod.rs`; the client's Revival, prompt and spawned planes (`client/revival.rs`); `tore-bot --revive`; the game's prompt and Enter (`net/play.rs`, one guard in `main.rs`). Tests: `world/revive_tests.rs` (the point, the stores under each rule, the handoff's invariants, Abandon's falling wreck, a client's copy, the 30 seconds, 100 revivals within 64 planes, the same twice), `host/revive_tests.rs` (each rule, lives, the delay, Join after a loss, lock sides, a late joiner, the held seat), `client/revival_tests.rs` and the prompt's words, the game's copies, the `net-server-revive` scenario (the server's file sets `respawn revive` by F2-1's keys), and for checkpoints `world/revive_checkpoint.rs` and the equivalence scenario "revivals and wrecks". The ai-slot rule keeps to F2-1's slot locks and lock sides but not to join in progress. A real-data run (dedicated server, a bot ejecting) revived the bot into plane 12 under `revive` and into plane 1 under `ai-slot` |
 | F2-O1 The observer stream | Opus | F2-0 | `host/observe.rs`, new `host/observe_tests.rs`; the observer flight in `wire/connection.rs` and `wire/from_world.rs`; new `client/observe.rs`; `tore-bot --observe` | Observe and Observing, snapshots with no own plane, relevance by the camera, the delay ring | Simulator tests: an observer gets entities near its subject at the full rate and far ones twice a second; with a delay nothing newer than now less the delay is ever sent, events included; the stream stops at seating and at the end; bandwidth and the ring's memory measured and recorded; a `net` scenario with an observing bot. Quick guard. **Built (F2-O1, 2026-10-05):** as [described above](#the-observer-view): the host's watches and stream (`host/observe.rs`, the hooks in `host/mod.rs`: the watch on each connection, the stream on the host, the stop before Seated and at the end, the lobby's observing mark), `from_world::observer_picture`, `HostConnection::observer_snapshot`, the client's `watch`, `stop_watching` and `observer_frame` (`client/observe.rs`), `Host::send_as_of` for the slices that send news at a tick, and `tore-bot --observe`. Delayed observers' snapshot ticks are the ring's (agent decision). Tests: `host/observe_tests.rs` (rates by the camera, a point and none, the camera's limit, refusals, human-flown planes and events, the delay for snapshots, events and held messages, the stops, measurements; the 60-second ring `#[ignore]`d for the full run), `client/observe_tests.rs`, `from_world`'s observer picture; the `net-server-observe` scenario. Measured: 8.4 MB at a 60-second delay for 30 aircraft; about 12 KB/s to an observer of 30 |
-| F2-L The lobby screen | Sonnet | F2-1 | `tore-app` `lobby_screen/` (new `settings_panel.rs` and `players_panel.rs`), `ordnance.rs` (lobby Cheat loading under the rule), the lobby's glue in `net/` | Settings..., Players..., slot locks, the seven buttons, Watch, the head's summary, greying | `facts` tests for who may press what; headless renders of each Settings page as King and not; a windowed run (through `tools/agent-run.sh`) hosting with a bot: settings changed and seen by the bot, the crown passed and taken back, a slot closed |
+| F2-L The lobby screen | Sonnet | F2-1 | `tore-app` `lobby_screen/` (new `settings_panel.rs` and `players_panel.rs`), `ordnance.rs` (lobby Cheat loading under the rule), the lobby's glue in `net/` | Settings..., Players..., slot locks, the seven buttons, Watch, the head's summary, greying | `facts` tests for who may press what; headless renders of each Settings page as King and not; a windowed run (through `tools/agent-run.sh`) hosting with a bot: settings changed and seen by the bot, the crown passed and taken back, a slot closed. **Built (F2-L, 2026-10-05):** as [the lobby panels as built](#the-lobby-panels-as-built-f2-l); the seven buttons with Kick inside the Players panel, the Settings panel's four pages, the King's right click on a slot, Watch, the head's "Rules" line, Messages' lines for settings and locks, and Load Ordnance under the loadout rule. Tests: `lobby_screen/phase2_tests.rs`, `ordnance.rs`, twelve snapshot states, and the net lane's `net-window-lobby` (a window hosting with a bot: settings turned and seen by the bot, a slot closed and opened, the crown given and back). Single-player SAME |
 | F2-D The multiplayer debrief | Sonnet | F2-S | `tore-world` `debrief.rs` (`results`); `host/results.rs`; the client's Results; `tore-app` `debrief.rs` and `net/debrief.rs` (the SCORES and RESULTS pages) | Results rows, the message at the end, the pages | A world test with rows for every plane, human and AI, retired included; a host test that every connection gets Results; headless renders of both pages with 30 aircraft; the existing single-player page tests unchanged; quick guard. **Built (F2-D, 2026-10-05):** as [described above](#the-multiplayer-debrief): `debrief::results` and its rows, `host/results.rs`, the client's kept Results (`client/results.rs`) and `tore-bot`'s results line, the SCORES and RESULTS pages (`net/debrief.rs`, the `.columns` directive in `debrief.rs`, two lines in `net/play.rs` to hand them over), the `net-server-results` scenario. Single-player debrief unchanged (the full baseline is in the run's notes) |
 | F2-A The AI flies an idle aircraft | Opus | F2-1, F2-O1 | `host/away.rs`, new `host/away_tests.rs`; away detection in `tore-app` `net/play.rs` and the banner; `tore-bot --away` | Away and Back, the stall's count, the reservation, the handoff both ways | Simulator tests: away for the setting's seconds hands the plane to the AI and reserves it; another player's take is refused; Back retakes it with its stores and damage; a stalled game the same; `never` does nothing; a `net` scenario with a bot away and back |
 | F2-O2 The observer screen | Sonnet | F2-O1, F2-L, stage E's replays | `tore-app` new `net/observe.rs`; the viewer's live mode in `replay/`; the routing in `main.rs` | The live recording, the viewer's live mode, Watch and Esc | Tests of the growing recording, live, pause, scrub and End; a headless render; a windowed run watching a server with bots. Single-player replays byte-identical (the replay lane's `--changed` scenarios) |

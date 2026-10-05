@@ -200,9 +200,18 @@ hosted game lists itself on the Internet Lobby while it is public), the
 loadout rule (Cheat loading under `any`), friendly fire in the flown mission,
 the crown passed and passed on, the house apart from it, and a dedicated
 server's King with `king first-player` and `king-mission locked`; a server's
-file sets every setting by name. The Settings... and Players... panels are
-slice F2-L's. How it works and each agent decision:
+file sets every setting by name. How it works and each agent decision:
 [architecture](ARCHITECTURE.md#the-kings-lobby-as-built-f2-1).
+
+*Built on the screen (F2-L, 2026-10-05):* **Settings...** opens the panel for
+every player (four pages: Game, Revival, Scoring and Realism; a click turns a
+row forward, a right click back; greyed for anyone but the King and for a row
+that does not apply). **Players...** (the King, for the player selected in
+Players) gives the crown or kicks. The King's right click on a slot closes it,
+opens it again, or keeps it for the player selected in Players. While the
+mission flies the Loadout button reads **Watch**. The lobby's head sums the
+settings up in a line. How it works and each agent decision:
+[architecture](ARCHITECTURE.md#the-lobby-panels-as-built-f2-l).
 
 **Start.** Everyone starts airborne, as in retail multiplayer. Late joiners take
 over aircraft already flying. *Retail gap-fill (agent):* until multiplayer
