@@ -32,6 +32,8 @@ mod build_tests;
 pub(crate) mod checkpoint;
 pub use build::{Built, Hooks, Seating};
 #[cfg(test)]
+mod combat_core_checkpoint_tests;
+#[cfg(test)]
 mod command_tests;
 mod commands;
 #[cfg(test)]

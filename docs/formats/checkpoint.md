@@ -367,6 +367,12 @@ memories and sensors (3 to 6 KB each). Coding each rewind frame against the
 one before is part of the combat slice. Delta coding against the previous
 checkpoint is built only if the measured size needs it.
 
+*Built (H3a):* the rewind history codes only the newest 61 frames, the ones a
+gun round's rewind (at most 60 ticks) can read, and each volume's previous
+position is one flag. That is about 5.7 KB per aircraft on the crowd fixture,
+so about 170 KB for 30 aircraft, and about 57 KB for the whole combat state
+of eight.
+
 ## The state, by area
 
 What six read-only surveys at `884f9916` found, for the coders. Line numbers
