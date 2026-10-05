@@ -1422,11 +1422,12 @@ impl App {
                 }
                 Action::None
             }
-            // The score board and the wing replies: their screens and calls
-            // come with the scoring and reply slices, so until then each says
-            // what it will do.
+            // K opens and closes a networked flight's score board
+            // (net/scoreboard.rs); single player has none and says so. The
+            // wing replies' calls come with the reply slice, so until then
+            // each says what it will do.
             Command::ScoreBoard => {
-                if !self.flight_ui.frozen() {
+                if !self.flight_ui.frozen() && !net::scoreboard::toggle(&mut self.net_flight) {
                     self.flight_ui
                         .message(flight_ui::score_board_answer(self.flight_ui.session));
                 }
@@ -4325,6 +4326,12 @@ impl ApplicationHandler for App {
                             &self.hornet.hud_font,
                             self.instruments.layout,
                         );
+                        net::scoreboard::draw(
+                            self.net_flight.as_ref(),
+                            self.net.as_ref(),
+                            &mut self.flight_canvas,
+                            &self.hornet.hud_font,
+                        );
                         self.flight_ui.draw(
                             &mut self.menu.pixels,
                             &self.hornet.font,
@@ -6716,6 +6723,7 @@ fn ai_probe_run(
         comms,
         wing_status: Default::default(),
         datalink: Default::default(),
+        score: None,
         radio,
         phrases,
         // The probe builds its own mission; only a restart reads the setup,
@@ -11302,6 +11310,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         comms: comms::Comms::new(1),
         wing_status: Default::default(),
         datalink: Default::default(),
+        score: None,
         radio: Default::default(),
     };
     let presented_plane = world.picture_plane().0;

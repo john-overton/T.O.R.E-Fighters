@@ -68,6 +68,8 @@ mod phase2_seams_tests;
 pub mod replies;
 pub mod revive;
 #[cfg(test)]
+mod score_tests;
+#[cfg(test)]
 mod succession_tests;
 #[cfg(test)]
 mod tick_tests;
@@ -99,6 +101,10 @@ pub struct World {
     pub datalink: datalink::DataLink,
     /// Imported phrase text for composing radio lines.
     pub phrases: comms::Phrases,
+    /// A networked game's score facts, recorded while the host has scoring
+    /// on ([`Self::set_scoring`]); `None`, as in single player, records
+    /// nothing.
+    pub score: Option<crate::score::Recorder>,
 }
 
 /// A human-flown plane's state outside combat: its flight, where the tick
@@ -488,6 +494,32 @@ impl World {
         self.combat.state.tick()
     }
 
+    /// Turns the recording of score facts on or off (stage F phase 2,
+    /// docs/ARCHITECTURE.md "Scoring"). The host turns it on for a networked
+    /// mission; single player never does. Turning it on again keeps what is
+    /// recorded.
+    pub fn set_scoring(&mut self, on: bool) {
+        match (on, self.score.is_some()) {
+            (true, false) => self.score = Some(crate::score::Recorder::default()),
+            (false, _) => self.score = None,
+            (true, true) => {}
+        }
+    }
+
+    /// Whether score facts are recorded.
+    pub fn scoring(&self) -> bool {
+        self.score.is_some()
+    }
+
+    /// The score facts recorded since the last call, leaving none: empty
+    /// with scoring off.
+    pub fn take_score_facts(&mut self) -> crate::score::Facts {
+        self.score
+            .as_mut()
+            .map(crate::score::Recorder::take)
+            .unwrap_or_default()
+    }
+
     /// Where the plane `seat` flies keeps its cockpit, if it flies one.
     pub fn cockpit_of(&self, seat: SeatId) -> Option<usize> {
         let plane = self.roster.seat(seat)?.plane?;
@@ -634,6 +666,7 @@ impl World {
         commands_applied: impl FnOnce(&World, &TickOutput) -> WorldResult<()>,
     ) -> WorldResult<()> {
         *out = TickOutput::default();
+        let stepped = self.tick();
         self.check_inputs(mission, inputs)?;
         // Mission commands first, then each seat's commands in seat order on
         // its own plane. A handoff changes who flies which plane, so the
@@ -975,6 +1008,12 @@ impl World {
             .as_mut()
             .map(ai_wings::AiWings::take_ai_journal);
         out.cues.push(Cue::Picture);
+        // A networked game's score facts, read before the radio drains this
+        // tick's strikes (docs/ARCHITECTURE.md, "Scoring").
+        if let Some(mut score) = self.score.take() {
+            score.record(self, stepped, self.combat.state.strikes());
+            self.score = Some(score);
+        }
         self.step_radio(out, &events);
         out.emissions = self.combat.state.take_sound_events();
         out.events = events;

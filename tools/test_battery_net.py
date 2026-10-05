@@ -115,6 +115,30 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(net.figures_problems(line, ["Bot1"]), [])
         self.assertEqual(net.figures_problems(line, ["Bot1", "Bot2"]), ["the server log has no figures line for Bot2"])
 
+    def test_the_scores_lines_are_checked_per_bot(self):
+        good = (
+            "Bot1: scores: players ranked by kills: 1 Bot1 (friendly) 0/0 0.00, 2 Bot2 (friendly) 0/0 0.00; "
+            "sides 0/0 to 0/0; 0:58 left\n"
+            "Bot2: scores: players ranked by kills: 1 Bot1 (friendly) 0/0 0.00, 2 Bot2 (friendly) 0/0 0.00; "
+            "sides 0/0 to 0/0; 0:58 left\n"
+            "Bot1: scores: players ranked by kills: 1 Bot1 (friendly) 1/0 1.00, 2 Bot2 (friendly) 0/0 0.00; "
+            "sides 1/0 to 0/0; 0:00 left\n"
+            "Bot1: Mission ended: the time limit.\n"
+            "Bot2: scores: players ranked by kills: 1 Bot1 (friendly) 1/0 1.00, 2 Bot2 (friendly) 0/0 0.00; "
+            "sides 1/0 to 0/0; 0:00 left\n"
+            "Bot2: Mission ended: the time limit.\n"
+        )
+        self.assertEqual(net.scores_problems(good, ["Bot1", "Bot2"]), [])
+        self.assertEqual(net.scores_problems(good, ["Bot1", "Bot3"])[-1], "Bot3 printed no scores")
+        late = good.replace("Bot2: Mission ended: the time limit.\n", "") + "Bot2: Mission ended: the time limit.\n"
+        self.assertEqual(net.scores_problems(late, ["Bot1", "Bot2"]), [])
+        no_final = good.replace("0:00 left", "0:01 left")
+        self.assertIn("Bot1's last scores are not the final ones (0:00 left)", net.scores_problems(no_final, ["Bot1"]))
+        after = good + "Bot1: scores: players ranked by kills: 1 Bot1 0/0 0.00; sides 0/0 to 0/0; 0:00 left\n"
+        self.assertIn("Bot1's final scores came after the end", net.scores_problems(after, ["Bot1"]))
+        alone = good.replace(", 2 Bot2 (friendly) 0/0 0.00", "")
+        self.assertIn("no scores line of Bot1's lists every player", net.scores_problems(alone, ["Bot1", "Bot2"]))
+
     def test_bad_network_words_are_recognised(self):
         import re
 

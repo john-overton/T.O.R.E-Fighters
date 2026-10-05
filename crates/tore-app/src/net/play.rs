@@ -92,6 +92,8 @@ pub struct NetFlight {
     was_dead: bool,
     was_crashed: bool,
     was_burning: bool,
+    /// K's score board is open (`scoreboard`).
+    pub score_board: bool,
 }
 
 impl App {
@@ -546,6 +548,7 @@ impl App {
             was_dead: false,
             was_crashed: false,
             was_burning: false,
+            score_board: false,
         });
         true
     }

@@ -393,6 +393,10 @@ and helicopters count toward a score, and shooting down a human player before
 they eject counts as two kills. *Retail gap-fill (agent):* retail's INCOMPLETE outcome, used only in
 multiplayer, applies when the King ends a mission early, and every player can
 open a score board in flight, as retail's host could with Show Player Scores.
+*Built (F2-S, 2026-10-05):* K opens it in a network flight: the players ranked
+by the game's tally, the sides, the kill limit, the time left and, at a
+limit's end in PvP, the winner. A kill limit ends a PvP mission. The debrief's
+scores page is slice F2-D's ([scoring as built](ARCHITECTURE.md#scoring)).
 
 *Built (EF-F, agent decisions):* the first page of a networked debrief does not
 call a mission that somebody ended a failure. When the mission's objectives

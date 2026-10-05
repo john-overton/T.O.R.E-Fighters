@@ -466,10 +466,13 @@ fn main() -> ExitCode {
                     },
                     // Stage F phase 2: each slice's bot option reports its
                     // own.
-                    ClientEvent::Revival(_)
-                    | ClientEvent::Spawned(_)
-                    | ClientEvent::Scores(_)
-                    | ClientEvent::Results(_) => {}
+                    ClientEvent::Scores(scores) => println!(
+                        "{}: scores: {}",
+                        r.name,
+                        tore_session::client::scores::summary(&scores)
+                    ),
+                    ClientEvent::Revival(_) | ClientEvent::Spawned(_) | ClientEvent::Results(_) => {
+                    }
                 }
             }
         }

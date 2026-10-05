@@ -177,6 +177,32 @@ def net_log_problems(text: str) -> list[str]:
     return problems
 
 
+def scores_problems(text: str, callsigns: list[str]) -> list[str]:
+    """What each bot printed of the Scores messages (slice F2-S): at least one while flying that lists every
+    player with the time counting down, and the final ones, with no time left, before the mission's end."""
+    problems = []
+    for name in callsigns:
+        lines = re.findall(rf"^{name}: scores: (players ranked by kills: .*)$", text, re.M)
+        if not lines:
+            problems.append(f"{name} printed no scores")
+            continue
+        if not any(all(re.search(rf"\d {other}\b", line) for other in callsigns) for line in lines):
+            problems.append(f"no scores line of {name}'s lists every player")
+        lefts = [int(m) * 60 + int(s) for m, s in (re.findall(r"; (\d+):(\d\d) left", line)[0] for line in lines
+                                                   if re.search(r"; \d+:\d\d left", line))]
+        if not lefts or lefts[0] == 0:
+            problems.append(f"{name}'s first scores show no time left to fly")
+        if lefts and lefts[-1] != 0:
+            problems.append(f"{name}'s last scores are not the final ones (0:00 left)")
+        ended = text.find(f"{name}: Mission ended: the time limit")
+        last = text.rfind(f"{name}: scores: ")
+        if ended < 0:
+            problems.append(f"{name} did not hear the time limit end the mission")
+        elif last > ended:
+            problems.append(f"{name}'s final scores came after the end")
+    return problems
+
+
 def figures_problems(log: str, callsigns: list[str]) -> list[str]:
     """The once-a-minute figures a server logs for each player."""
     problems = []
@@ -326,6 +352,22 @@ def drive_observe(d: Drive) -> None:
     flyers.forbid(NET_BAD, "a network problem")
     server.forbid(NET_BAD, "a network problem")
     log_must(d, server_log(d), r"joined as Owl", r"Owl\b.* left: left", forbid=NET_BAD)
+
+
+def drive_scores(d: Drive) -> None:
+    """Scores (slice F2-S): a server with a one-minute time limit and two bots; each bot hears the scores while it
+    flies and the final ones as the time limit ends the mission, and the server stops by itself."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(separation_nm=5), time_limit=1)
+    bots = start_bots(d, port, "bots", 100, "--count", "2", "--callsign", "Bot")
+    if not server.wait_for(r"^mission ended: the time limit$", 150):
+        d.problem("the time limit did not end the mission")
+    bots.finish(60, None)
+    server.finish(40, 0)
+    for problem in scores_problems(bots.text(), ["Bot1", "Bot2"]):
+        d.problem(problem)
+    bots.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
 
 
 def drive_discovery(d: Drive) -> None:
@@ -557,6 +599,10 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-server-observe", lane="net", args=[], driver=drive_observe, uses=("server", "bot"), timeout=240,
             notes="a bot with no plane watches two bots fight (stage F phase 2's observer stream) and leaves",
+        ),
+        Scenario(
+            name="net-server-scores", lane="net", args=[], driver=drive_scores, uses=("server", "bot"), timeout=300,
+            notes="a one-minute time limit with two bots: the scores while flying and the final ones at the end",
         ),
         Scenario(
             name="net-discovery", lane="net", args=[], driver=drive_discovery, uses=("server",), timeout=120,

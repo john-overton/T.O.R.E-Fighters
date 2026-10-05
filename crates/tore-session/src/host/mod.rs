@@ -536,6 +536,8 @@ pub struct Host {
     out: TickOutput,
     /// The observers' pictures and delay ring (stage F phase 2).
     stream: observe::Stream,
+    /// The mission's scores (stage F phase 2, `score`).
+    score: score::Scoring,
     /// What each seat's game could not foresee, by tick (tests only).
     #[cfg(test)]
     unforeseen_log: Vec<(u64, SeatId, Unforeseen)>,
@@ -782,6 +784,7 @@ impl Host {
             snapshot_executor: None,
             out: TickOutput::default(),
             stream: observe::Stream::default(),
+            score: score::Scoring::default(),
             settings: crate::settings::Store::from_config(&config),
             config,
         };
@@ -2478,6 +2481,8 @@ impl Host {
         self.life = Life::Flying;
         self.origin = None;
         self.ticks_run = 0;
+        // Stage F phase 2: fresh scores, and the world records score facts.
+        self.score_start();
         // The players have the lobby's mission already: the loadouts are
         // all they need to build the flight's (a joiner in flight gets the
         // whole text, loadouts included).
@@ -3067,7 +3072,10 @@ impl Host {
         }
         let next = self.after_end();
         let flown = ticks_time(self.world.tick());
-        if self.config.time_limit.is_some_and(|limit| flown >= limit) {
+        // The King's time limit (stage F phase 2), which starts as the
+        // configuration's.
+        let limit = self.settings.time_limit_seconds();
+        if limit.is_some_and(|limit| flown >= Duration::from_secs(u64::from(limit))) {
             self.end_mission(EndReason::TimeLimit, next);
         } else if self
             .empty_since
@@ -3087,8 +3095,9 @@ impl Host {
             return;
         }
         let now = self.now;
-        // Stage F phase 2: the observers stop watching, and every plane's
-        // results go out, before Mission ended.
+        // Stage F phase 2: the final scores, the observers stop watching,
+        // and every plane's results go out, before Mission ended.
+        self.score_end(reason);
         self.observe_end();
         self.send_results(reason);
         let ended = Message::MissionEnded(MissionEnded {

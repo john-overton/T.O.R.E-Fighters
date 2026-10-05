@@ -287,6 +287,7 @@ impl World {
             comms,
             wing_status: Default::default(),
             datalink: Default::default(),
+            score: None,
             radio: Default::default(),
             phrases: comms::phrases(resources),
         };

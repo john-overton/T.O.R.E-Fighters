@@ -283,6 +283,7 @@ pub(super) fn mission() -> World {
         comms: comms::Comms::new(1),
         wing_status: Default::default(),
         datalink: Default::default(),
+        score: None,
         radio: Default::default(),
         phrases,
         // The step never reads the setup.

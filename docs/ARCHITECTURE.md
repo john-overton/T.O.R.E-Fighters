@@ -5406,6 +5406,60 @@ reach the kill limit.
   RATIO or TOTAL DAMAGE, the players in order with their side, and the time
   left.
 
+*Built (F2-S, 2026-10-05).* What the build settled, each an agent decision
+unless the design above says it:
+
+- **Recording.** `tore_world::score::Recorder` lives on the world while
+  scoring is on (`World::score`, `None` in single player). It runs after
+  combat and the AI, before the radio drains combat's strikes, and only
+  reads: combat's `Strike` gained `amount` (the hit points the hit took) and
+  `State::strikes` reads the tick's strikes in place. A **kill** is recorded
+  when a plane of the roster becomes lost by the handoff's own test (crashed,
+  no hit points, pilot dead or escaped), credited as the debrief credits a
+  loss: combat's kill, else the last plane to hit it; a plane whose last hit
+  was its own, a crash with no hit and a plane lost out of bounds credit
+  nobody. `pilot_aboard` is false only when the pilot escaped first, so a
+  plane shot down and then ejected from counts as killed with its pilot
+  aboard. Any other target a hit destroys (a ground object) is a kill with
+  `aircraft` false. Each target's end is recorded once: the set of recorded
+  targets is the recorder's only state between ticks.
+- **Tallies.** The host keeps them by connection (its join order, never
+  reused), so a lobby id given out again starts afresh; a player who leaves
+  leaves the list, and what it scored stays in its side's tally. A side's
+  tally is its players' only: the AI scores nothing, for its side either.
+  Kills and damage count against opponents only; a kill of one's own side
+  takes nothing away (retail's penalty, if any, is unknown).
+- **Co-op.** Scores go out in co-op too, so K works there, but the scoring
+  settings that are greyed in co-op do not apply: no kill limit, the fight by
+  sides, and no winner.
+- **The winner** is named only when a limit (kills or time) ends a PvP
+  mission; a mission ended any other way sends its final scores with none.
+  Players rank by the tally, then kills, then damage, then joining order; a
+  free-for-all whose best two are level is a draw.
+- **Scores** go to seated players and observers: whenever the tallies or
+  the listed players and sides change, at most once every 120 ticks, and to
+  a newly seated player or new observer at the next of those chances. An
+  observer watching with a delay gets them once its stream shows their tick
+  (F2-O1's `send_as_of`). At the end every connection gets the final scores
+  at once, before the observers' watches end, Results and Mission ended.
+- **The time limit** the host ends a mission at is now the settings store's
+  (`time-limit`, which starts as the configuration's), so the King's change
+  applies.
+- **The client** keeps the newest Scores (`Client::scores`) and counts the
+  time left down from its arrival (`Client::seconds_left`); a new mission or
+  a flight's start clears them. Each one is a `scores` line in the game's net
+  log, and `tore-bot` prints it (`NAME: scores: ...`, the words of
+  `tore_session::client::scores::summary`).
+- **The board** (`tore-app` `net/scoreboard.rs`, fitted: retail's layout is
+  unknown): K opens and closes it in a networked flight, and it closes with
+  each new flight. It is drawn in the HUD's font over a translucent band, 360
+  layer units wide and centred, from 96 units down: the heading, a row for
+  each player (rank, callsign, side, kills, losses, damage in aircraft, ratio)
+  in the colours of the chat window (the viewer's side green, the other red,
+  no side yet grey, the viewer's own row gold), each side's totals when the
+  fight is by sides, the kill limit and the time left, and the winner once
+  there is one. Before the first message it says "Waiting for the scores".
+
 ##### The multiplayer debrief
 
 `tore_world::debrief::results(&World)` gives a row for every plane the mission
@@ -5493,9 +5547,11 @@ menu.
   plane that leads its wing (single player always does: John took this on
   2026-10-05) and "Winchester: not available yet" and so on for a wingman in a
   network flight; K says "Score board: network games only" in single player
-  and "Score board: not available yet" in a network flight. The slices that
-  build them replace `flight_ui::reply_answer` and `score_board_answer`'s
-  callers in `main.rs` (`Command::Reply` and `Command::ScoreBoard`).
+  and, until F2-S drew the board, "Score board: not available yet" in a network
+  flight. The slices that build them replace `flight_ui::reply_answer` and
+  `score_board_answer`'s callers in `main.rs` (`Command::Reply` and
+  `Command::ScoreBoard`); F2-S's K now opens the board in a network flight and
+  says "network games only" in single player.
 - **Keys** are in the [controls list](CONTROLS.md#multiplayer-phase-2) (built by F2-C; John took the recommended keys on 2026-10-05).
 
 ##### The observer view
@@ -5673,7 +5729,8 @@ single-player baseline and must compare SAME; the others run the quick guard.
 ##### State for exact checkpoints
 
 Stage H must carry what phase 2 adds to the mission core: the scoring switch
-(`World::set_scoring`), every `Pilot::Lost` plane and its cockpit, the
+(`World::set_scoring`) with the targets whose end it has recorded
+(`score::Recorder::recorded`; built by F2-S, not coded yet), every `Pilot::Lost` plane and its cockpit, the
 spawned planes (their roster entries, AI actors, combat rows) and which planes
 are retired. The facts themselves are drained every tick and are not state.
 What the host session keeps (the settings, the crown and the house, slot
@@ -5698,7 +5755,7 @@ every message below; no later slice changes the wire without the lead.
 | F2-C Friend-or-foe cues and the new keys | Sonnet | | `tore-app`: `main.rs` (the X's side), new `target_info.rs`, `flight_ui.rs` (U, Ctrl+T and the Pref row), `input_catalog.rs` (every phase 2 key: IFF, Show Target Info, score board, the four replies, each answering "network games only" until its slice lands), `docs/CONTROLS.md` (generated), `docs/tore-keyboard-map.html` | The X on the presented plane's side; IFF's answers; Show Target Info's labels and colours; the catalog rows | Unit tests: the X for a viewer on each side; IFF for friendly, other and none; label text, colours and callsigns from a fixture picture and roster; the controls list test; a headless render of the labels; the menus lane's "Show target info" row no longer reports not implemented; quick guard. **Built (F2-C, 2026-10-05):** as [described above](#friend-or-foe); unit tests for the X on each side (and on a friendly and a hostile runway), IFF's three answers, label text, colours, callsigns, the cap and a headless render; the catalog rows and the controls test; a windowed `replay-script-friend-or-foe` scenario (the replay lane's input scripts) that presses U, Ctrl+T, K and a reply key in single player and compares a frame before and after for the orange text. Single-player change as planned (John, 2026-10-05): the full baseline was recorded and every difference explained in the run's notes |
 | F2-1 The King's lobby | Opus | F2-0 | `host/king.rs`, `host/config.rs`, `host/lobby.rs`, `host/discover.rs`, new `host/king_tests.rs`, `client/lobby_tests.rs` additions; `tore-world` `mission.rs` (`friendly_fire`, the loadout rule) and `world/build.rs`; `tore-server` `config.rs` and `wiring.rs`; `docs/DEDICATED-SERVER.md` | The settings store's King's changes with their phase rules; mode and slots; slot locks; join in progress; lock sides; max players, password and visibility; the loadout rule; friendly fire into the spec; house and crown, passing it, the King's departure; a server's King; the server's configuration keys for every setting | Simulator tests: each setting reaches every lobby state; a non-King and a wrong phase are refused; PvP opens both sides; closed and reserved slots; join in progress off; lock sides; the loadout rule; friendly fire off in a flown mission; the crown passed, used and passed on at a departure; the house's leaving ends the game and the King's does not; a server's first-player King; configuration parsing. A `net` lane scenario: a `tore-server` with `king first-player` and a King bot that changes settings and starts. Single-player baseline SAME |
 | F2-R Orders and replies | Sonnet | F2-0, F2-C, stage G's G3a and G8 | `tore-world` `world/replies.rs`, `radio_calls.rs`, `ai_wings/orders.rs`, the comms delivery; the app's handling of the four reply actions; `tore-bot --reply` | The order call to human wingmen; the reply calls and their refusals | World tests on the crowd fixture: a human lead's order reaches its human wingman as a call and a line, and nobody else; each reply reaches the flight's humans only, respects radio silence, and a lead's reply is refused; the radio journal; a `net` scenario with two bots in one wing exchanging an order and a reply. Single-player baseline SAME |
-| F2-S Scoring | Opus | F2-0 | `tore-world` `score.rs` and its call in `world.rs`; `tore-sim` combat's `Strike` amount; `host/score.rs`, new `host/score_tests.rs`; the client's scores; `tore-app` new `net/scoreboard.rs` and its call in `net/play.rs` | Score facts; tallies; limits and the kill limit's end; Scores; the score board on K | World tests: a human killed with the pilot aboard counts two, after ejecting one, ground kills none, damage fractions, losses, AI shooters; host tests for each tally, fight type and owner, the kill limit's end with its winner and a draw, the time limit, the pace; a render test of the board. Single-player baseline SAME (facts off) |
+| F2-S Scoring | Opus | F2-0 | `tore-world` `score.rs` and its call in `world.rs`; `tore-sim` combat's `Strike` amount; `host/score.rs`, new `host/score_tests.rs`; the client's scores; `tore-app` new `net/scoreboard.rs` and its call in `net/play.rs` | Score facts; tallies; limits and the kill limit's end; Scores; the score board on K | World tests: a human killed with the pilot aboard counts two, after ejecting one, ground kills none, damage fractions, losses, AI shooters; host tests for each tally, fight type and owner, the kill limit's end with its winner and a draw, the time limit, the pace; a render test of the board. Single-player baseline SAME (facts off). **Built (F2-S, 2026-10-05):** as [described above](#scoring); the world's facts (`score.rs`, combat's `Strike::amount`), the host's tallies, limits, winner and pace (`host/score.rs`), the client's kept scores and their words (`client/scores.rs`), `tore-bot`'s scores lines, and K's board (`net/scoreboard.rs`, two short hunks in `main.rs`: the K arm and the draw call). Tests: `world/score_tests.rs` (a real gun burst's damage, kill and loss; ejection; AI shooters; no shooter; ground kills and fractions; recording changes nothing the mission does), `host/score_tests.rs` (on the simulator: kills, losses, damage, ratio, both fights, the kill limit by side, total and player with a winner and a draw, the time limit's winner, co-op, the pace, a late joiner and a departure), `client/scores.rs` (the words, and the real client keeping and counting down), the board's lines and a headless render, and the net lane's `net-server-scores` |
 | F2-V Death and revival | Opus | F2-0 | `tore-world` `world/revive.rs`, `world/handoff.rs`, `ai_wings.rs` (the spawned aircraft), new `world/revive_tests.rs`; `host/revive.rs`, new `host/revive_tests.rs`; the client's revival state and its own copy's spawn; `tore-app` `net/play.rs` (the prompt and Enter); `tore-bot --revive` | Abandon and Revive; the revival point and loadout; retiring; lives, delay and the three rules; Join after a loss; replaces the host's orphans | World tests: a revived plane's place, heading, speed, stores under each weapons rule and its handoff invariants; Abandon keeps a wreck falling; 100 revivals in one mission stay within 64 planes; host tests for each rule, lives, the delay, the lobby's Join, lock sides; a client copy that adds the spawned plane; a `net` scenario where a bot ejects, revives and flies on. Single-player baseline SAME |
 | F2-O1 The observer stream | Opus | F2-0 | `host/observe.rs`, new `host/observe_tests.rs`; the observer flight in `wire/connection.rs` and `wire/from_world.rs`; new `client/observe.rs`; `tore-bot --observe` | Observe and Observing, snapshots with no own plane, relevance by the camera, the delay ring | Simulator tests: an observer gets entities near its subject at the full rate and far ones twice a second; with a delay nothing newer than now less the delay is ever sent, events included; the stream stops at seating and at the end; bandwidth and the ring's memory measured and recorded; a `net` scenario with an observing bot. Quick guard. **Built (F2-O1, 2026-10-05):** as [described above](#the-observer-view): the host's watches and stream (`host/observe.rs`, the hooks in `host/mod.rs`: the watch on each connection, the stream on the host, the stop before Seated and at the end, the lobby's observing mark), `from_world::observer_picture`, `HostConnection::observer_snapshot`, the client's `watch`, `stop_watching` and `observer_frame` (`client/observe.rs`), `Host::send_as_of` for the slices that send news at a tick, and `tore-bot --observe`. Delayed observers' snapshot ticks are the ring's (agent decision). Tests: `host/observe_tests.rs` (rates by the camera, a point and none, the camera's limit, refusals, human-flown planes and events, the delay for snapshots, events and held messages, the stops, measurements; the 60-second ring `#[ignore]`d for the full run), `client/observe_tests.rs`, `from_world`'s observer picture; the `net-server-observe` scenario. Measured: 8.4 MB at a 60-second delay for 30 aircraft; about 12 KB/s to an observer of 30 |
 | F2-L The lobby screen | Sonnet | F2-1 | `tore-app` `lobby_screen/` (new `settings_panel.rs` and `players_panel.rs`), `ordnance.rs` (lobby Cheat loading under the rule), the lobby's glue in `net/` | Settings..., Players..., slot locks, the seven buttons, Watch, the head's summary, greying | `facts` tests for who may press what; headless renders of each Settings page as King and not; a windowed run (through `tools/agent-run.sh`) hosting with a bot: settings changed and seen by the bot, the crown passed and taken back, a slot closed |

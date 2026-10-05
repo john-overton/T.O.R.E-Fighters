@@ -122,6 +122,8 @@ struct TestClient {
     own: Vec<(OwnStateHeader, ExactState)>,
     events: Vec<ReceivedEvent>,
     errors: Vec<String>,
+    /// Every Scores message (phase 2, slice F2-S).
+    scores: Vec<crate::wire::messages::Scores>,
 }
 
 impl TestClient {
@@ -164,6 +166,7 @@ impl TestClient {
             own: Vec::new(),
             events: Vec::new(),
             errors: Vec::new(),
+            scores: Vec::new(),
         }
     }
 
@@ -325,6 +328,7 @@ impl TestClient {
             }
             Message::MissionEnded(ended) => self.ended = Some(ended),
             Message::Notice(_) => {}
+            Message::Scores(scores) => self.scores.push(*scores),
             other => self.errors.push(format!("unexpected {other:?}")),
         }
     }
@@ -1453,3 +1457,6 @@ fn a_player_who_leaves_its_flight_stays_and_flies_again_as_a_new_flight() {
 
 #[path = "worker_tests.rs"]
 mod worker_tests;
+
+#[path = "score_tests.rs"]
+mod score_tests;

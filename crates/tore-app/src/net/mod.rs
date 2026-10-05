@@ -16,6 +16,7 @@ pub mod lobby_chat;
 pub mod lookup;
 pub mod options;
 pub mod play;
+pub mod scoreboard;
 pub mod search;
 pub mod session;
 pub mod settings;

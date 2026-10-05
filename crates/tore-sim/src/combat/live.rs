@@ -187,6 +187,10 @@ pub struct Strike {
     pub weapon_flags: u32,
     /// The damage left the victim with no hit points.
     pub destroyed: bool,
+    /// The hit points the hit took from the victim, at most what it had
+    /// left (a networked game's damage tally reads it: docs/ARCHITECTURE.md,
+    /// "Scoring").
+    pub amount: i32,
 }
 /// Strikes kept between drains; older ones are dropped first.
 pub const MAX_STRIKES: usize = 64;
@@ -2892,6 +2896,12 @@ impl State {
     pub fn take_strikes(&mut self) -> Vec<Strike> {
         std::mem::take(&mut self.strikes)
     }
+    /// Projectile damage since the last drain, oldest first, left in place:
+    /// the mission core's score facts read them before the radio drains
+    /// them.
+    pub fn strikes(&self) -> &[Strike] {
+        &self.strikes
+    }
     fn strike(&mut self, strike: Strike) {
         if self.strikes.len() == MAX_STRIKES {
             self.strikes.remove(0);
@@ -3913,6 +3923,7 @@ impl State {
                         victim: t.id,
                         weapon_flags: w.flags,
                         destroyed: t.hp == 0,
+                        amount: applied,
                     });
                     if t.hp == 0 {
                         if by_ownship {
@@ -3994,7 +4005,7 @@ impl State {
             } else {
                 amount
             };
-            let alive = own.hp > 0;
+            let (alive, before) = (own.hp > 0, own.hp);
             self.damage_ownship(own, amount, &mut events);
             if alive && amount > 0 {
                 // The debrief credits the shooter, human or AI, with the kill,
@@ -4019,6 +4030,7 @@ impl State {
                     victim: own.aircraft,
                     weapon_flags,
                     destroyed: own.hp == 0,
+                    amount: before - own.hp,
                 });
             }
         }

@@ -178,8 +178,8 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     # Net lane: real UDP on this machine, a driver per scenario.
     "net-check": ("the dedicated server's start-up and --check", ("net-server-check",)),
     "net-fly": (
-        "a server and bots over UDP: join, fly, chat, console, observe, debrief, clean exit",
-        ("net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe"),
+        "a server and bots over UDP: join, fly, chat, console, observe, scores, debrief, clean exit",
+        ("net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe", "net-server-scores"),
     ),
     "net-discovery": ("finding games on the local network", ("net-discovery",)),
     "net-master": (
@@ -379,6 +379,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-net/src/master/*", ("net-master",), "the master server's wire and the browse client"),
     _r("crates/tore-net/*", NET_FAMILIES + ("net-discovery",), "network transport"),
     _r("crates/tore-session/src/settings.rs", NET_FAMILIES + ("net-discovery",), "the King's settings registry"),
+    _r("crates/tore-session/src/client/scores.rs", NET_FAMILIES, "the scores a game keeps and their words (tore-bot prints them)"),
     _r("crates/tore-session/*", NET_FAMILIES + ("net-discovery",), "network sessions, the host and tore-bot"),
     _r("crates/tore-server/*", ("net-check", "net-fly", "net-discovery", "net-listing"), "dedicated server"),
     _r("crates/tore-master/*", ("net-master",), "the master server, its configuration and its flood tool"),
@@ -461,6 +462,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/direct_screen/*", ("menus-screens", "net-window"), "the Direct Connection screen; its snapshot states are menus-snap-direct*", windowed=True),
     _r("crates/tore-app/src/lobby_screen/*", ("menus-screens", "net-window"), "the lobby screen; its snapshot states are menus-snap-lobby*", windowed=True),
     _r("crates/tore-app/src/net/lobby_chat.rs", ("menus-screens", "net-window"), "the lobby's chat box and line; the lobby screen draws it (menus-snap-lobby*)", windowed=True),
+    _r("crates/tore-app/src/net/scoreboard.rs", ("net-window",), "K's score board in a networked flight", windowed=True),
     _r("crates/tore-app/src/net/search.rs", ("net-discovery",), "the local-network game search; --find-games, which net-discovery runs, and the Direct Connection screen use it"),
     _r("crates/tore-app/src/net/lookup.rs", ("net-window",), "the typed-address lookup thread; the Direct Connection screen reaches it", windowed=True),
     _r("crates/tore-app/src/net/settings.rs", ("net-window",), "the remembered multiplayer settings; --connect and --host reach them", windowed=True),

@@ -413,6 +413,10 @@ impl World {
             // H10 adds its section; until then a restored world rebuilds an
             // empty picture and republishes it on the next 30th tick.
             datalink: _,
+            // Stage F phase 2's score facts (F2-S): the recorded targets are
+            // mutable state not coded yet; stage H adds its section. The
+            // pending facts are drained every tick and are not state.
+            score: _,
         } = self;
         match section {
             Section::Roster => roster.save(s, None),

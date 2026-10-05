@@ -2016,6 +2016,7 @@ mod tests {
                         victim: 3,
                         weapon_flags: 0x80,
                         destroyed: tick == 6_000,
+                        amount: 1,
                     };
                     radio.strike(&mut comms, &scene, &strike);
                 }

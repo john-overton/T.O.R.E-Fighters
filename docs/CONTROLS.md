@@ -338,7 +338,7 @@ the tables above and remappable like any other key):
 | --- | --- | --- |
 | Flight | U | IFF squawk on the displayed target: "IFF: Friendly" for one of the player's side, "IFF: no reply" for any other, "IFF: no target" with none (retail's key) |
 | Flight | Ctrl+T | Show Target Info on or off, as the Pref menu's row: identities under visible aircraft and objects, a human's callsign beneath in a network game (retail's key) |
-| Flight | K | Score board. Until the scoring slice draws it, single player says "Score board: network games only" and a network flight "Score board: not available yet" |
+| Flight | K | Score board in a network flight, open or closed (built, F2-S): the players ranked by the game's tally with their side, kills, losses, damage and ratio, the sides' totals, the kill limit, the time left and the winner. Single player says "Score board: network games only" |
 | Flight, as a wingman | Alt+Shift+E / W / B / H | Reply to the flight: Engaging, Winchester, Bingo fuel, or request help. A plane that leads its wing says "You lead this flight." (single player always does). Until the reply slice sends the call, a wingman in a network flight says "not available yet" |
 
 **Proposed, not built:**

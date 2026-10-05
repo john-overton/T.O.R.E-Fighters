@@ -1353,6 +1353,7 @@ mod tests {
             victim,
             weapon_flags: flags,
             destroyed,
+            amount: 1,
         }
     }
     fn lines(comms: &mut Comms, now: f64) -> Vec<String> {
