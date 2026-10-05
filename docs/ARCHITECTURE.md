@@ -5067,7 +5067,9 @@ choice below an agent decision unless credited.
 ### How stages E and F land
 
 Two phases. The first is everything John's three-machine test needs; the
-second completes the plan's stage F and stage E's replays.
+second, [phase 2](#phase-2-the-rest-of-stage-f), completes the plan's stage F.
+Stage E's replays are designed and built apart, under
+[recordings and diagnostics](#recordings-and-diagnostics).
 
 **Phase 1: fly together.**
 
@@ -5089,17 +5091,6 @@ second completes the plan's stage F and stage E's replays.
 | EF-F Smoke-test fixes | Sonnet | EF9 | What the lead's smoke test found: a player who ended its own flight is seated again (it was stuck in the lobby), a networked debrief says how the mission ended instead of "MISSION FAILURE", a server's kick says "The server", the net log and the screen say the same words, a game just left is not listed as Closed, the lobby's cheat notice covers no label, and a `stall SECONDS` input-script step | Tests for each; a windowed run of host, joiner and bot: leave and rejoin twice, an 8 second stall that keeps the joiner connected, the debrief headlines, a server's kick wording. **Built (EF-F):** see [smoke-test fixes](#smoke-test-fixes-ef-f) |
 | EF-Y Reliable real-time tests | Opus | EF-M | Make the real-time tests reliable on the CI runners (the 8 and 2 second stalls, the lookup, the hosted mission on 32-bit Windows, the diagnostics WouldBlock), fixing real defects if any | Three consecutive green `ci.yml` runs and a green `network.yml`; single-player baseline SAME. **Built (EF-Y):** see [real-time tests on shared runners](#real-time-tests-on-shared-runners-ef-y) |
 
-**Phase 2: the rest of stage F, and stage E's replays.** The King's settings
-(co-op or PvP and sides, slot locks, password, join in progress, friendly fire,
-respawn rules with retail's revival settings, PvP scoring, locked realism, kick
-and release, passing the crown, and **loadout rules**: any store on any
-aircraft, or the stores each aircraft really carries, John 2026-10-01); reply
-and request keys for human wingmen;
-friend-or-foe cues (the lock box's X, the IFF squawk, callsigns under labels);
-the multiplayer debrief with every aircraft; the basic observer view; the AI
-taking over an idle player's aircraft (an open question); captures converted to
-smoothed replays.
-
 ```mermaid
 flowchart TD
   EF0["EF0 Research"] --> EF1["EF1 Import the art"]
@@ -5120,6 +5111,536 @@ flowchart TD
 
 EF0 and EF3 start together. EF7 and EF8 both edit the menus and `main.rs`, so
 they run one after the other.
+
+#### Phase 2: the rest of stage F
+
+Design for the rest of stage F, written by a design agent on 2026-10-05 for the
+lead's run through Milestone 2. Stage E's last piece, captures converted to
+smoothed replays, is designed and built apart, under
+[recordings and diagnostics](#recordings-and-diagnostics). Everything below is
+an *agent proposal* unless it is credited to John; his binding decisions are the
+guide's [decisions](MULTIPLAYER.md#decisions). The questions that are John's to
+answer are listed at the end of this subsection with a recommendation each, and
+the design builds as written if he takes the recommendations.
+
+In short:
+
+- **The King's settings** are one numbered list, kept by the host, shown to
+  every player in the lobby state, changed only by the King and checked by the
+  host. A dedicated server takes the same list from its configuration file.
+- **The crown and the house come apart.** The King runs the lobby and can pass
+  the crown; the house is the machine that runs the host. The house leaving
+  still ends a game a player hosts (until stage K's migration); the King
+  leaving passes the crown on.
+- **Death and revival** are two new mission commands: a lost plane is
+  abandoned to the mission, and a revival either takes a free AI aircraft or
+  spawns a new aircraft of the same type at the revival distance from the
+  battle, with retail's revival weapons. The host counts lives and the delay.
+- **Scoring** is mission facts recorded by the mission core (who killed whom,
+  with which pilot aboard; damage; losses) and tallies, limits and the end kept
+  by the host. A kill limit ends the mission as a time limit does.
+- **The results** at the end list every aircraft, human and AI, and, in PvP,
+  the scores, as new pages of the debrief.
+- **Friend or foe:** the lock box's X follows the viewer's side, U squawks IFF,
+  and Show Target Info labels aircraft, with a human's callsign beneath.
+- **Human wingmen** hear their leader's orders as a radio call and text, and
+  answer with four reply keys.
+- **Observers** get a snapshot stream with no plane of their own, optionally
+  delayed in PvP, watched through the replay viewer in a live mode.
+- **An idle player's aircraft** goes to the AI after a King's setting of 10
+  seconds away (menu, focus, stall) and comes back at the first control input.
+- **A dedicated server can have a King**, when its configuration says so.
+- Single player does not change, apart from three retail features it gains
+  only if John agrees (question 2).
+
+##### Where each rule lives
+
+The mission core keeps what the simulation must decide the same way on every
+machine, and what a checkpoint (stage H) must carry; the host session keeps the
+people (players, the crown, lives, tallies); the screens only show and ask.
+
+| Rule | Mission core (`tore-world`, `tore-sim`) | Host session (`tore-session`) | Screens (`tore-app`) |
+| --- | --- | --- | --- |
+| Sides | Each plane's side, fixed at setup (built) | Which sides humans may take (mode), lock sides | Slots list by side |
+| Friendly fire | `MissionSpec::friendly_fire`, put on combat's `State::friendly_fire` at the build (the rule is built: B1) | The King's setting, written into the spec it sends | Settings panel |
+| Loadout rule | `LoadoutSpec::check_for_plane` takes the rule | The King's setting; checks each loadout | Load Ordnance's Cheat loading enabled or refused |
+| Realism | The spec's cheats (built) | The King's mission change | Settings panel's Realism page edits the mission |
+| Death | A plane is lost: destroyed, pilot dead or ejected (`World::can_take` refuses it, built) | Notices the seat's loss, starts the delay | Revival prompt |
+| Revival | `MissionCommand::Abandon` and `Revive`; the revival point; the weapons rule | Respawn rule, lives, delay; picks the AI plane or asks for a spawn | Enter to fly again |
+| Scoring | Score facts each tick (kills with the pilots aboard, damage, losses) | Tallies by player and side, limits, the winner, the end | In-flight score board, SCORES page |
+| Results | `debrief::results`: a row for every plane | Adds callsigns and scores, sends Results | RESULTS pages |
+| Orders and replies | The order call to human wingmen; reply calls | Nothing new (seat commands) | Reply keys |
+| Friend or foe | Nothing new | Nothing new | The X, IFF, labels, from the client's copy of the mission |
+| Observers | Nothing new | The observer stream and its delay | The viewer in live mode |
+| Idle aircraft | Handoff (built) | Away and back, the reservation, the setting | Away detection, the banner |
+| The crown | Nothing | King, house, passing, a server's King | Players panel |
+
+##### The King's settings
+
+The settings are numbered (the wire carries a number and a value, as the lobby
+state's placeholder already does) and live in one registry,
+`tore_session::settings`, which holds each one's number, text name, values,
+defaults, when it may change and its check. The host, the dedicated server's
+configuration file, the lobby screen and the logs all read it, so a setting is
+added in one place. Values the retail host dialogs offered are kept where they
+are known; the rows of the `MC_*` dialogs are unknown
+([retail spec](spec/multiplayer.md#the-hosts-mission-setting-dialogs)), so the
+choices below are fitted to retail's ranges ([numbers](spec/multiplayer.md#numbers)).
+
+| No. | Name | Values | Default, co-op | Default, PvP | The King changes it |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `mode` | `co-op` (humans on the friendly side), `pvp` (humans on either side) | co-op | pvp | In the lobby |
+| 2 | `max-players` | 1 to 30 | 30, or the server's | same | Any time, never below the players connected |
+| 3 | `join-in-progress` | `off`, `on` | on | on | Any time |
+| 4 | `listed` | `no`, `yes`: answer the local network's search | yes | yes | Any time |
+| 5 | `password` | set or not (the text travels only in the King's request, never in the lobby state) | not set | not set | Any time; applies to the next joins |
+| 6 | `friendly-fire` | `off`, `on` | on | on | In the lobby |
+| 7 | `lock-sides` | `off`, `on` | off | on | In the lobby |
+| 8 | `loadouts` | `own` (what each aircraft really carries), `any` (any store on any station, the loadout page's Cheat) | own | own | In the lobby |
+| 9 | `respawn` | `none`, `ai-slot` (take a free AI aircraft of one's side), `revive` (retail's revival: a new aircraft out of the battle) | none | revive | In the lobby |
+| 10 | `lives` | 0 to 10, `unlimited` | unlimited | unlimited | In the lobby |
+| 11 | `revive-delay` | 0 to 5 minutes, whole minutes | 0 | 0 | In the lobby |
+| 12 | `revive-distance` | 1, 5, 10, 20 or 40 nautical miles | 10 | 10 | In the lobby |
+| 13 | `revive-weapons` | `missiles`, `no-missiles` (keeps air-to-ground missiles), `guns`, `half-guns` | missiles | missiles | In the lobby |
+| 14 | `fight` | `sides`, `free-for-all` | sides | sides | In the lobby |
+| 15 | `tally` | `kills`, `damage`, `ratio` | kills | kills | In the lobby |
+| 16 | `time-limit` | none, 1, 5, 10, 15, 20 or 30 minutes | none | 10 | In the lobby |
+| 17 | `kill-limit` | none, 1, 2, 3, 5, 7 or 10 | none | 5 | In the lobby |
+| 18 | `kill-owner` | `total`, `side`, `player` | side | side | In the lobby |
+| 19 | `observer-delay` | 0, 10, 30 or 60 seconds; PvP only | 0 | 0 | In the lobby |
+| 20 | `idle-ai` | `never`, 10, 30 or 60 seconds away | 10 | 10 | Any time |
+
+- **Changing the mode** sets every other setting to the new mode's defaults,
+  as the creator's own choices reset what depends on them; the King then
+  adjusts. Settings 14 to 19 are greyed in co-op except the time limit, which
+  ends a co-op mission too (the dedicated server's `time-limit` is this
+  setting).
+- **A change in the lobby** that alters what players chose (mode, lock
+  sides, loadouts, a slot lock) clears every ready mark, as a mission change
+  does; any other change keeps them. A change refused for its phase says
+  "Change it in the lobby, between missions."
+- **The game's name** is a text setting beside the numbers, changed any time.
+- **Realism** stays the mission's own cheats (John's spec: inherited from the
+  Quick Mission settings and locked for every human). The Settings panel's
+  Realism page edits the lobby mission's cheats and sends it as a mission
+  change; nothing changes the mission's cheats in flight, so every client's
+  prediction keeps running the same rules. *This replaces the earlier gap-fill*
+  in the guide that gave the King the Cheat menu in flight (question 6).
+- **Stage I and K settings** are not here: public listing on the master server
+  (stage I) and the pinned or calculated host and releasing a reserved aircraft
+  (stage K). Retail's in-flight Multi menu handicaps (reduce bullet accuracy and
+  the rest, [retail](spec/multiplayer.md#retail-connection-screens)) are not in
+  phase 2.
+
+##### The King, the crown and the house
+
+EF4 made the King the hosting player's own connection and its leaving the end
+of the game. Phase 2 separates the two roles the guide already names:
+
+- **The house** is the connection of the player whose game runs the host (the
+  in-process link's address in a hosted game; none on a dedicated server). It is
+  the one exempt from the silence timeout, and its leaving ends the game for
+  everyone, as EF4 built it, until stage K migrates the host.
+  `HostConfig::king` becomes `HostConfig::house`, and the King is a lobby role.
+- **The King** is a player. In a hosted game it starts as the house. **Pass
+  the crown** (message 23, the King only) gives it to another connected player.
+  A King who leaves, or is dropped, passes it to the longest-connected player
+  (in a hosted game that is the house). The King's Leave asks "Leaving ends
+  the game for everyone." only of the house; a King who is not the house is
+  told "The crown passes to Hawk."
+- **Only the King** changes the mission and the settings, locks slots, starts
+  and ends the mission, kicks and passes the crown (EF4's refusal "Only the
+  King may do that." stands). The house without the crown is an ordinary player
+  but for leaving.
+- **A dedicated server** keeps no King by default. Its configuration's new
+  `king first-player` gives the crown to the first player to join and then to
+  the longest-connected; the server's start rule becomes the King's while a
+  King is connected. `king-mission locked` refuses the King's mission changes
+  (the file's mission and its settings stay; start, kick and the crown still
+  work). When the last player leaves, the server waits out its empty timeout
+  and goes back to its file's mission and settings, so a public server does not
+  keep a stranger's choices.
+
+##### Slots, sides and joining
+
+- **Mode.** Co-op makes every friendly plane a slot (EF4's default); PvP makes
+  every plane of both sides one, and the lobby lists them by side. The
+  dedicated server's `open-planes` stays its own rule when it has no King.
+- **Slot locks** (message 27, the King only): each slot is `open`, `closed`
+  (the AI flies it; nobody takes it, the lead included) or `reserved` for one
+  callsign (only that player takes it). A lock that removes a player's slot
+  frees it and tells the player. The lobby state carries each slot's lock.
+- **Join in progress off** refuses every seating after the mission's first
+  tick, except a player's own revival: "This game takes no new pilots once the
+  mission flies." Players in the lobby watch instead. On, the EF4 rules stand.
+- **Lock sides** keeps each player on the side of the first plane it flew in
+  this mission: taking a plane or a revival on the other side is refused, "Sides
+  are locked until the mission ends."
+- **Max players** lowers or raises the capacity the handshake checks (the
+  lesser of it and the open slots, as built); the password and the listing
+  apply to the next joins and the next search answers.
+
+##### Loadout rule, friendly fire and realism
+
+- `LoadoutSpec::check_for_plane` takes the loadout rule. Under `any`, the
+  Cheat loading the page offers is allowed and checked by the page's own cheat
+  rules; under `own`, EF4's refusal stands. Changing the rule to `own` drops a
+  kept cheat loadout to the standard load with a Notice, as a mission change
+  does.
+- `MissionSpec` gains `friendly_fire` (text form `friendly-fire on/off`, on
+  when absent, refused off in a single-player spec), which the build puts on
+  combat's setting. Single player's spec never carries it, so its build is
+  unchanged.
+
+##### Death, revival and lives
+
+**When a plane is lost.** A human's plane is lost when it is destroyed or its
+pilot is dead or has ejected, the same test `World::can_take` already makes.
+The seat keeps the wreck until the player flies again or leaves. Retail's
+player "presses Enter to re-enter the battle".
+
+**Two mission commands** (`tore-world`, applied first in the tick with Take and
+GiveBack):
+
+- `MissionCommand::Abandon { seat }` frees the seat from its lost plane. The
+  plane's pilot becomes `Pilot::Lost`: its cockpit goes on stepping inside the
+  world with a paused game's neutral controls (wreck motion, the escape), as the
+  host's departed-player orphans do today, which this replaces. Nobody can take
+  it.
+- `MissionCommand::Revive { seat, spawn }` abandons the seat's lost plane and
+  seats it in a **new plane**: the next plane id after every plane the mission
+  has had, in the old plane's wing with the next free member number, the same
+  aircraft, at the spawn's position, heading and speed, with the spawn's
+  loadout and full fuel. It is built as the mission builds an AI aircraft with
+  a lobby loadout (`plane_loadouts`), then taken by the existing handoff, so
+  every rule of the handoff holds. A `Spawned` message tells every client, whose
+  copy of the mission adds the same plane, so the roster, the sides and the
+  aircraft types know it.
+
+**The revival point** (`world::revive::point`, fitted: retail says only "just
+outside the battle zone at the host's revival distance"). The battle's centre
+is the mean position of the living aircraft that have an aircraft of the other
+side within 20 nm, or of every living aircraft if none has. The new plane is
+placed on the bearing from that centre towards the mean start position of its
+side's wings, at the revival distance from the centre, at the mission's
+airborne start altitude, heading for the centre, at its aircraft's airborne
+start speed.
+
+**The weapons rule** (`world::revive::revival_loadout`), applied to the loadout
+the player chose in the lobby (or the standard load): `missiles` keeps it whole;
+`no-missiles` empties every air-to-air missile station and keeps air-to-ground
+missiles, bombs and the gun; `guns` keeps the gun alone; `half-guns` keeps the
+gun with half its rounds, rounded up. The same rule cuts an AI aircraft's
+stores when the `ai-slot` rule hands one over.
+
+**The host's part** (`host/revive.rs`):
+
+- The respawn rule: `none` (the player watches until the mission ends),
+  `ai-slot` (a free AI plane of the player's side open to it, its own wing
+  first, then the side's other wings, lowest id first; Abandon then Take, with
+  the weapons rule), or `revive` (Revive with a point and a loadout).
+- **Lives** count revivals, per player per mission, reset at the next mission.
+  **The delay** counts from the moment the plane was lost.
+- A seat whose plane is lost is sent **Revival** (message 29): its lives left,
+  the seconds until it may fly again, and the rule. The flight's HUD says "Press
+  Enter to fly again (2 lives left)", "You can fly again in 0:45", or "No lives
+  left. Esc, then Watch, shows the battle." Enter sends **Revive** (message 28);
+  the answer is a new Seated (a new [flight](formats/net-protocol.md#flights))
+  or a refusal in words.
+- **Joining from the lobby** after a loss counts as a revival: the same rule,
+  lives and delay apply, so leaving and pressing Join cannot dodge them (this
+  changes EF-F's free rejoin for a player whose plane was lost).
+- **Room.** A mission holds at most 64 planes at once (the wire's aircraft in
+  a snapshot). A revival that would pass it first retires the oldest lost plane
+  whose wreck has rested on the ground for 30 seconds: it leaves combat, the
+  snapshots and the roster message, and keeps its ledger entries and its
+  results row. With none to retire the revival waits and the HUD says so.
+
+##### Scoring
+
+Retail's rules ([numbers](spec/multiplayer.md#numbers)): only aircraft and
+helicopters count; killing a human player before he ejects counts as two kills;
+the tallies are total kills, total damage delivered to opponents, or the kill
+ratio; the time limit and kill limit end the game; the kill owner says who must
+reach the kill limit.
+
+- **Facts in the mission core** (`tore-world`, `score.rs`). When the host
+  turns scoring on (`World::set_scoring(true)`; single player never does, so
+  its tick and fingerprint are untouched), each tick records, from the
+  ledger's new kills and combat's strikes: `Kill` (shooter plane and its pilot,
+  victim plane and its pilot, an aircraft or not, the pilot still aboard),
+  `Damage` (shooter, victim, the hit's fraction of the victim's full hit
+  points) and `Loss` (a human's plane lost, by any cause). The host drains them
+  every tick. Combat's `Strike` gains the damage amount for this.
+- **Tallies in the host** (`host/score.rs`), by player: kills (two for a human
+  victim with the pilot aboard, one otherwise; aircraft only), damage to
+  opponents (in aircraft: a whole aircraft's hit points is 1.0), losses, and the
+  ratio (kills over losses, kills alone with no loss). A kill is credited to the
+  player flying the shooter's plane at the kill's tick; a lost plane's late
+  missile credits the player who flew it; an AI shooter scores nothing.
+  Opponents are the other side's aircraft under `sides`, and every aircraft
+  but one's own under `free-for-all` (the AI on one's own side does not count;
+  `free-for-all` changes the scoring only, never who can hit whom).
+- **Limits.** The kill limit is reached when the kills of every player together
+  (`total`), of one side's players (`side`) or of one player (`player`) reach
+  it. The mission then ends with the new reason **kill limit**, as the time
+  limit ends it, with the winner by the tally: a side under `sides`, a player
+  under `free-for-all`, or a draw.
+- **Scores** (message 31) go to every player whenever they change, at most
+  once a second, and with the end. In flight **K** opens and closes the score
+  board, retail's Show Player Scores open to every player (the guide's
+  gap-fill): one of retail's three headings, PLAYERS RANKED BY KILLS, KILL
+  RATIO or TOTAL DAMAGE, the players in order with their side, and the time
+  left.
+
+##### The multiplayer debrief
+
+`tore_world::debrief::results(&World)` gives a row for every plane the mission
+had, retired planes included, from the same `Ending::pilot` rule each seat's
+report uses: status, damage, kills by the ten rows summed, friendly fire,
+air-to-air and gun shots and hits. The host adds each row's pilot (a callsign,
+or AI, and every callsign that flew it), the scores and the winner, and sends
+**Results** (message 32) to every connection at the mission's end, observers
+and players in the lobby included.
+
+The debrief keeps the retail pages for the player's own plane and, in a
+networked game, adds after the first page: **SCORES** (PvP only: the winner,
+the ranking with each player's kills, losses, damage and ratio) and
+**RESULTS** (every aircraft by side and wing, fifteen to a page:
+callsign or AI, aircraft, status, kills, hit percentage, damage). Single
+player's debrief is unchanged: the pages appear only with a Results message.
+
+##### Friend or foe
+
+- **The lock box's X.** Drawn today when the displayed target is on the
+  *friendly* side (`main.rs`, `target_friendly`). It becomes "on the presented
+  plane's side", so a player flying for the enemy side sees the X on its own
+  side's aircraft. Single player always flies the friendly side, so it is
+  unchanged.
+- **IFF squawk (U).** Retail: "returns a Friendly message if you've targeted
+  someone on your own side." The game answers from its copy of the mission:
+  "IFF: Friendly" for an aircraft of the presented plane's side, "IFF: no
+  reply" for any other (fitted: retail's other answer is unknown), "IFF: no
+  target" with nothing designated. Today U says "IFF unavailable".
+- **Show Target Info** (the Pref menu's row, Ctrl+T; listed as not implemented
+  in the [menus lane](testing/lane-menus.md)). Retail: each target's identity
+  below it in the forward view, with an aeroplane's current manoeuvre, orange,
+  red when the object targets you, and in multiplayer each player's callsign
+  beneath. Built from the frame's picture and readout: the identity of every
+  visible aircraft and object, the manoeuvre for the displayed target (the
+  target window's activity, the only one a client knows), red when the readout
+  says it aims at the player, and the callsign of a human-flown aircraft from
+  the roster. Off by default.
+
+##### Orders to human wingmen, and their replies
+
+- **The order call.** A human lead's Alt-key order reaches human wingmen today
+  only as a note that one was flown by a human (`ai_wings/orders.rs`). It
+  becomes a radio call to each human member the order addressed: the lead's
+  own order stems and a text line ("Lead: Engage my target"), delivered on that
+  seat's channel with the usual hold and radio silence. The AI members act as
+  before.
+- **Replies and requests** are a new seat command, `SeatCommand::WingReply`,
+  with four kinds from the guide: **Engaging** (Alt+Shift+E, `^ENGAGE`),
+  **Winchester** (Alt+Shift+W, text only: no retail recording says it),
+  **Bingo fuel** (Alt+Shift+B, `^BINGO`) and **Need help** (Alt+Shift+H, the
+  retail recording whose phrase asks for help, `^CLRMY6` or `^OFFME`, chosen by
+  its phrase text). The call goes from the seat's plane to its flight: every
+  human of the wing hears it as a radio line ("Two: Winchester"). The AI does
+  nothing with it (no AI work is asked for). A plane that leads its wing has no
+  one to answer: the key says "You lead this flight." The keys work in single
+  player too, where a lead has no human wingman, so they only say so.
+- **Keys** are proposed in the [controls list](CONTROLS.md#proposed-for-multiplayer-phase-2).
+
+##### The observer view
+
+John (2026-09-28): observers use the replay viewer's camera and playback
+controls on the live session, cannot chat with the players flying, and in PvP
+the King can set a delay applied by the host, so an observer's machine never
+holds live positions.
+
+- **Who observes.** While a mission flies, a connection with no plane: in the
+  lobby (a late joiner, a player who ended its flight), a player whose plane is
+  lost and who has no revival, and a player whose plane the AI flies while it is
+  away. The lobby's **Watch** button, and Watch on the revival prompt, start it.
+- **The stream** (`host/observe.rs`). **Observe** (message 33) starts or stops
+  it and names the camera's subject (an aircraft, or a point). The host answers
+  **Observing** (message 34: a new flight, the roster, the destroyed ground
+  objects, the delay) and then sends the connection ordinary snapshots with no
+  own plane: no own state hash, no readout, no exact state. Relevance follows
+  the camera: the subject, everything within 20 nm of the camera's point and
+  any missile within 10 nm at the full rate, the rest twice a second. The
+  client sends Observe again when the subject changes, or the point moves more
+  than 2 nm, at most twice a second.
+- **The delay.** With a delay D the host keeps, for D seconds, every
+  snapshot's whole quantized picture and the mission-wide events with their
+  ticks, and builds an observer's snapshots and events from tick now less D:
+  nothing newer leaves the host. About 9 MB at a 60-second delay for 30
+  aircraft (measured by the slice). Scores to an observer are delayed the same.
+- **The screen** (`net/observe.rs`). The client's interpolated observer frames
+  feed the replay recorder's conversion (the one a single-player flight
+  records with) into an in-memory recording that grows as the mission flies,
+  and the replay viewer plays it in a **live mode**: the playhead follows the
+  newest frame; the player may pause, step back, scrub within what has arrived
+  (the last 10 minutes are kept) and press End to return to live; it can never
+  go past live. The viewer's cameras, views, labels and panels work as on any
+  replay. Esc leaves the view for the lobby.
+
+##### The AI flies an idle player's aircraft
+
+The open question since 2026-09-28 (the guide's agent proposal: after 10
+seconds without input the AI flies the aircraft until the player touches the
+controls). Designed as the King's setting `idle-ai` (default 10 seconds,
+question 4).
+
+- **Away** is not a centred stick, which a player cruising hands-off also
+  sends. A game is away while its controls are neutral because of a menu (the
+  Esc or pause menu, a settings screen), the window lacking focus, or the loss
+  of the controller it was flying with; the client sends **Away** (message 35)
+  once that has lasted the setting's seconds. A game whose loop is stalled (the
+  [stall rule](#a-stalled-game-stays-connected-ef-k)) is away by the host's own
+  count after the same time.
+- **The host** gives the plane back to the AI (GiveBack, the handoff's rules)
+  and **reserves** it for that player: nobody else takes it, and its slot reads
+  "AI (Viper away)". The player's connection observes its own plane meanwhile
+  (the observer stream, its subject the plane), and the screen says "The AI is
+  flying your aircraft. Move the stick or press any flight key to take it
+  back."
+- **Back** (message 36) at the first flight input with no menu up and the
+  window focused: the host takes the plane back for the player at the next tick
+  (a Take, a new flight), with its stores and damage as the AI left them. A
+  plane lost while the AI flew it is lost to the player as any other (revival
+  rules).
+
+##### The lobby's display
+
+The lobby screen (EF8) gains:
+
+- **Buttons.** The King: Mission..., Settings..., Players..., Loadout, Ready,
+  Fly, Leave, seven at 75 wide on a 79 pitch across the 549-wide row. Everyone
+  else: Settings..., Loadout, Ready, Leave. While the mission flies Loadout
+  reads **Watch**.
+- **Settings...** opens a panel over the lobby with the registry's rows as the
+  creator's text buttons (left click forward, right click back), on four pages
+  behind the rocker: Game (mode, players, join in progress, listed, password,
+  friendly fire, lock sides, loadouts, idle aircraft, observer delay), Revival
+  (respawn, lives, delay, distance, weapons), Scoring (fight, tally, time limit,
+  kill limit, kill owner) and Realism (the mission's cheats). Every player sees
+  it; for anyone but the King every row is greyed, as retail greys a client's
+  settings. A row that does not apply (scoring in co-op) is greyed for the King
+  too.
+- **Players...** (the King): for the player selected in Players, Kick (EF8's
+  reason panel) and Give the crown.
+- **Slot locks.** The King's right click on a slot cycles open and closed;
+  with a player selected in Players it reserves the slot for that player. A
+  closed slot reads "Closed (AI)", a reserved one "Reserved: Hawk".
+- **The head line** summarises the settings in words under the start rule:
+  "Co-op, friendly fire on, no revival" or "PvP by sides, 5 kills or 10
+  minutes, revival with unlimited lives".
+
+##### Single player in phase 2
+
+Nothing above changes single player by default. Its spec never carries the new
+fields, the scoring facts are off, the mission commands and messages are never
+sent, the debrief adds pages only with a Results message, and the X now
+follows the presented plane's side, which in single player is always the
+friendly one.
+Three retail features would reach single player if John agrees (question 2):
+U's IFF answer, Show Target Info, and the reply keys' "You lead this flight."
+line. The slices that touch the mission core (F2-1, F2-S, F2-V, F2-R) run the
+single-player baseline and must compare SAME; the others run the quick guard.
+
+##### Phase 2 slices
+
+Every slice follows the lead's rules for Milestone 2's remaining stages
+(John, 2026-10-05): targeted tests, each added to the full suite, a battery
+scenario for anything done through a binary (the `net` lane,
+`docs/testing/lane-net.md`, being built beside this design), a rule in
+`tools/battery_selection.py` for every new file, and an entry in the run's test
+ledger. Each slice's tests go in **files of their own** (`host/king_tests.rs`,
+`host/score_tests.rs` and so on), never in the shared `host/tests.rs`, so
+parallel slices do not collide. F2-0 takes **the next protocol version** for
+every message below; no later slice changes the wire without the lead.
+
+| Slice | Model | After | Owns | Work | Acceptance |
+| --- | --- | --- | --- | --- | --- |
+| F2-0 Wire and seams | Opus | | `tore-session`: `wire/messages.rs`, `wire/inputs.rs`, `wire/mod.rs` (the version), the wire tests and `wire-golden.txt`, new `settings.rs`, new empty `host/{king,revive,score,observe,away,results}.rs` and the calls to them in `host/mod.rs`, `client/mod.rs` (events and senders); `tore-world`: `seats.rs` (`WingReply`, `Pilot::Lost`), `world/commands.rs` (the new commands' variants), new `world/{revive,replies}.rs` and `score.rs` holding only the shared types | Every message and field of the [phase 2 wire](formats/net-protocol.md#phase-2-the-kings-settings-revival-scores-and-observers) with its coding; the settings registry with ranges, defaults, names and checks, and the host's settings store (defaults, no King's changes yet); the types the slices share (`Reply`, `Spawn`, `RevivalWeapons`, score facts); the hooks each slice fills (the take check, the tick's revive, score and away calls, message dispatch), each doing nothing yet; requests not built yet are refused "Not available yet." | Round trip, fuzz and golden tests for every new message and field; the golden refreshed under the next version; the host refuses each new request politely; every existing session test passes; quick check `--no-battery` (the new world variants are never sent) |
+| F2-C Friend-or-foe cues and the new keys | Sonnet | | `tore-app`: `main.rs` (the X's side), new `target_info.rs`, `flight_ui.rs` (U, Ctrl+T and the Pref row), `input_catalog.rs` (every phase 2 key: IFF, Show Target Info, score board, the four replies, each answering "network games only" until its slice lands), `docs/CONTROLS.md` (generated), `docs/tore-keyboard-map.html` | The X on the presented plane's side; IFF's answers; Show Target Info's labels and colours; the catalog rows | Unit tests: the X for a viewer on each side; IFF for friendly, other and none; label text, colours and callsigns from a fixture picture and roster; the controls list test; a headless render of the labels; the menus lane's "Show target info" row no longer reports not implemented; quick guard |
+| F2-1 The King's lobby | Opus | F2-0 | `host/king.rs`, `host/config.rs`, `host/lobby.rs`, `host/discover.rs`, new `host/king_tests.rs`, `client/lobby_tests.rs` additions; `tore-world` `mission.rs` (`friendly_fire`, the loadout rule) and `world/build.rs`; `tore-server` `config.rs` and `wiring.rs`; `docs/DEDICATED-SERVER.md` | The settings store's King's changes with their phase rules; mode and slots; slot locks; join in progress; lock sides; max players, password and listing; the loadout rule; friendly fire into the spec; house and crown, passing it, the King's departure; a server's King; the server's configuration keys for every setting | Simulator tests: each setting reaches every lobby state; a non-King and a wrong phase are refused; PvP opens both sides; closed and reserved slots; join in progress off; lock sides; the loadout rule; friendly fire off in a flown mission; the crown passed, used and passed on at a departure; the house's leaving ends the game and the King's does not; a server's first-player King; configuration parsing. A `net` lane scenario: a `tore-server` with `king first-player` and a King bot that changes settings and starts. Single-player baseline SAME |
+| F2-R Orders and replies | Sonnet | F2-0, F2-C | `tore-world` `world/replies.rs`, `radio_calls.rs`, `ai_wings/orders.rs`, the comms delivery; the app's handling of the four reply actions; `tore-bot --reply` | The order call to human wingmen; the reply calls and their refusals | World tests on the crowd fixture: a human lead's order reaches its human wingman as a call and a line, and nobody else; each reply reaches the flight's humans only, respects radio silence, and a lead's reply is refused; the radio journal; a `net` scenario with two bots in one wing exchanging an order and a reply. Single-player baseline SAME |
+| F2-S Scoring | Opus | F2-0 | `tore-world` `score.rs` and its call in `world.rs`; `tore-sim` combat's `Strike` amount; `host/score.rs`, new `host/score_tests.rs`; the client's scores; `tore-app` new `net/scoreboard.rs` and its call in `net/play.rs` | Score facts; tallies; limits and the kill limit's end; Scores; the score board on K | World tests: a human killed with the pilot aboard counts two, after ejecting one, ground kills none, damage fractions, losses, AI shooters; host tests for each tally, fight type and owner, the kill limit's end with its winner and a draw, the time limit, the pace; a render test of the board. Single-player baseline SAME (facts off) |
+| F2-V Death and revival | Opus | F2-0 | `tore-world` `world/revive.rs`, `world/handoff.rs`, `ai_wings.rs` (the spawned aircraft), new `world/revive_tests.rs`; `host/revive.rs`, new `host/revive_tests.rs`; the client's revival state and its own copy's spawn; `tore-app` `net/play.rs` (the prompt and Enter); `tore-bot --revive` | Abandon and Revive; the revival point and loadout; retiring; lives, delay and the three rules; Join after a loss; replaces the host's orphans | World tests: a revived plane's place, heading, speed, stores under each weapons rule and its handoff invariants; Abandon keeps a wreck falling; 100 revivals in one mission stay within 64 planes; host tests for each rule, lives, the delay, the lobby's Join, lock sides; a client copy that adds the spawned plane; a `net` scenario where a bot ejects, revives and flies on. Single-player baseline SAME |
+| F2-O1 The observer stream | Opus | F2-0 | `host/observe.rs`, new `host/observe_tests.rs`; the observer flight in `wire/connection.rs` and `wire/from_world.rs`; new `client/observe.rs`; `tore-bot --observe` | Observe and Observing, snapshots with no own plane, relevance by the camera, the delay ring | Simulator tests: an observer gets entities near its subject at the full rate and far ones twice a second; with a delay nothing newer than now less the delay is ever sent, events included; the stream stops at seating and at the end; bandwidth and the ring's memory measured and recorded; a `net` scenario with an observing bot. Quick guard |
+| F2-L The lobby screen | Sonnet | F2-1 | `tore-app` `lobby_screen/` (new `settings_panel.rs` and `players_panel.rs`), `ordnance.rs` (lobby Cheat loading under the rule), the lobby's glue in `net/` | Settings..., Players..., slot locks, the seven buttons, Watch, the head's summary, greying | `facts` tests for who may press what; headless renders of each Settings page as King and not; a windowed run (through `tools/agent-run.sh`) hosting with a bot: settings changed and seen by the bot, the crown passed and taken back, a slot closed |
+| F2-D The multiplayer debrief | Sonnet | F2-S | `tore-world` `debrief.rs` (`results`); `host/results.rs`; the client's Results; `tore-app` `debrief.rs` and `net/debrief.rs` (the SCORES and RESULTS pages) | Results rows, the message at the end, the pages | A world test with rows for every plane, human and AI, retired included; a host test that every connection gets Results; headless renders of both pages with 30 aircraft; the existing single-player page tests unchanged; quick guard |
+| F2-A The AI flies an idle aircraft | Opus | F2-1, F2-O1 | `host/away.rs`, new `host/away_tests.rs`; away detection in `tore-app` `net/play.rs` and the banner; `tore-bot --away` | Away and Back, the stall's count, the reservation, the handoff both ways | Simulator tests: away for the setting's seconds hands the plane to the AI and reserves it; another player's take is refused; Back retakes it with its stores and damage; a stalled game the same; `never` does nothing; a `net` scenario with a bot away and back |
+| F2-O2 The observer screen | Sonnet | F2-O1, F2-L, stage E's replays | `tore-app` new `net/observe.rs`; the viewer's live mode in `replay/`; the routing in `main.rs` | The live recording, the viewer's live mode, Watch and Esc | Tests of the growing recording, live, pause, scrub and End; a headless render; a windowed run watching a server with bots. Single-player replays byte-identical (the replay lane's `--changed` scenarios) |
+| F2-X Acceptance | lead, then John | all | | The lead's smoke test: a hosting game, a joining game and bots in PvP with a kill limit, revivals, an observer with a delay, the crown passed, the idle AI; then John on three machines | John plays a PvP and a co-op game from the menus |
+
+```mermaid
+flowchart TD
+  W["F2-0 Wire and seams"] --> K["F2-1 The King's lobby"]
+  W --> S["F2-S Scoring"]
+  W --> V["F2-V Death and revival"]
+  W --> O1["F2-O1 Observer stream"]
+  W --> R["F2-R Orders and replies"]
+  C["F2-C Friend-or-foe cues<br/>and the new keys"] --> R
+  K --> L["F2-L Lobby screen"]
+  S --> D["F2-D Multiplayer debrief"]
+  K --> A["F2-A Idle aircraft"]
+  O1 --> A
+  O1 --> O2["F2-O2 Observer screen"]
+  L --> O2
+  E["Stage E replays<br/>(built apart)"] --> O2
+  D --> X["F2-X Acceptance"]
+  A --> X
+  O2 --> X
+  V --> X
+  R --> X
+```
+
+**What runs at once.** F2-0 and F2-C start together. Once F2-0 lands, F2-1,
+F2-S, F2-V, F2-O1 and F2-R run in parallel (four Opus and one Sonnet): each
+owns its own host module and test file, and the mission core's files split as
+the table says. Their shared edges are small: `world.rs` (F2-S's call and
+F2-V's fields), the client's `mod.rs` (event handling), `net/play.rs` (F2-S's
+board, F2-V's prompt, later F2-A) and `tore-bot`'s options; each keeps those
+diffs short and the later merge rebases. Then F2-L, F2-D and F2-A run together,
+and F2-O2 last, once stage E's replays have merged.
+
+##### Questions for John
+
+The design builds as written with these recommendations; each is John's to
+change.
+
+1. **Respawn rules.** The guide's "back at a base" becomes retail's revival:
+   a new aircraft of the same type at the revival distance from the battle,
+   airborne, with the revival weapons; beside it `ai-slot` (take a free AI
+   aircraft of one's side) and `none`. A player whose plane was lost can no
+   longer press Join for a free plane outside these rules. *Recommended.*
+2. **Single player gains three retail features:** U answers IFF ("IFF:
+   Friendly") instead of "IFF unavailable", Show Target Info (Pref row and
+   Ctrl+T, off by default) works, and the reply keys say "You lead this
+   flight." *Recommended: all three*; otherwise they are limited to networked
+   flights.
+3. **PvP defaults:** revival with unlimited lives, no delay, 10 nm, with
+   missiles; by sides, total kills, kill limit 5 by one side, time limit 10
+   minutes, sides locked. Co-op: no revival, no limits, friendly fire on.
+   *Recommended as tabled.*
+4. **The AI flies an idle aircraft** after 10 seconds away (menu, focus, a
+   lost controller, a stall), in co-op and PvP, as the King's setting with
+   `never` available. *Recommended.*
+5. **A dedicated server's King:** none by default (today's behaviour); a
+   server's configuration may give the crown to the first player
+   (`king first-player`) and may lock its mission. *Recommended.*
+6. **Realism is fixed for the flight:** the King sets the mission's cheats in
+   the lobby; nobody's Cheat menu changes them in flight, which keeps every
+   client's prediction exact. This replaces the guide's gap-fill that gave the
+   King the Cheat menu in flight. *Recommended.*
+7. **Keys:** replies on Alt+Shift+E (Engaging), Alt+Shift+W (Winchester),
+   Alt+Shift+B (Bingo fuel) and Alt+Shift+H (Need help); the score board on K;
+   U and Ctrl+T as retail; Enter flies again after a loss, as retail.
+   *Recommended.*
 
 ## Master server and connectivity
 

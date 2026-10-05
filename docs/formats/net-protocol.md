@@ -39,6 +39,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Data link (stage G)](#data-link-stage-g)
 - [Quantization](#quantization)
 - [What the game's sections settled](#what-the-games-sections-settled)
+- [Phase 2: the King's settings, revival, scores and observers](#phase-2-the-kings-settings-revival-scores-and-observers) (designed)
 - [Limits](#limits)
 - [Captures](#captures)
 - [Versions](#versions)
@@ -1068,7 +1069,9 @@ client keeps its last 64.
 
 Kind bytes 1 to 11 in the table's order (Mission to Mission ended), then the
 lobby's 12 to 22 in theirs (Slot to Flight loadouts); 23 and 24 are kept for
-the phase 2 lobby (passing the crown, the King's settings). The
+the phase 2 lobby (passing the crown, the King's settings), which
+[phase 2](#phase-2-the-kings-settings-revival-scores-and-observers) designs
+with kinds 27 to 36. The
 spec text and the exact state are long byte strings (a varint length); the
 exact state in Seated is coded with no baseline and the client decodes it with
 its plane's aircraft model. A loadout is the fuel as a 64-bit float, the
@@ -1194,6 +1197,100 @@ later flight must name none). The host drops Inputs of another flight.
 Reliable delivery keeps a Names message of the earlier flight before the
 Seated message of the next, so the name table never mixes two flights.
 
+## Phase 2: the King's settings, revival, scores and observers
+
+*Designed 2026-10-05, not built*: the wire of stage F's phase 2
+([architecture](../ARCHITECTURE.md#phase-2-the-rest-of-stage-f)). Slice F2-0
+builds all of it at once under **the next protocol version**, which the lead
+hands out at merge, so the slices after it never change the bytes. Every
+choice is an agent proposal. Codings follow [what the game's sections
+settled](#what-the-games-sections-settled): varints are `tore-codec`'s,
+strings a length byte and UTF-8, "a presence bit" a 1 then the value or a 0
+alone.
+
+### New messages
+
+Kinds 23 and 24, kept since EF4, and 27 to 36. Every request a player sends
+counts against the 20 a second the host answers, and every refusal is a
+Refused (kind 20) with its words.
+
+| Kind | Name | Direction | Body |
+| --- | --- | --- | --- |
+| 23 | Pass crown | the King to host | The player's lobby id (8 bits) |
+| 24 | Settings | the King to host | A count (varint, 1 to 64), then each setting's number (8 bits) and value (varint); a presence bit and the game's name (a string); a presence bit and the password: 1 bit (0 clear it, 1 set it, then a string of 1 to 255 bytes). The host applies all or none: the first that fails refuses the whole message |
+| 27 | Slot lock | the King to host | The mission's number (varint), the plane (varint), the lock (2 bits: 0 open, 1 closed, 2 reserved) and, when reserved, the callsign (a string) |
+| 28 | Revive | client to host | The mission's number (varint): fly again after a loss, by the respawn rule |
+| 29 | Revival | host to client | The seat's plane is lost: the rule (2 bits: 0 none, 1 AI slot, 2 revive), the lives left (1 bit unlimited, else 4 bits, 0 to 10), the seconds until it may fly again (varint), and a presence bit and a line of why it waits or cannot ("No lives left.", "Waiting for room for another aircraft.") |
+| 30 | Spawned | host to every player | A revival's new plane, which every client adds to its copy of the mission: the plane (varint), the tick (32 bits), its wing (side 1 bit, index 2 bits), its member (8 bits), its aircraft (4 bits, the roster's index), its position (three 64-bit floats, feet), heading and speed (64-bit floats, radians and feet a second), and its loadout as Seated codes one |
+| 31 | Scores | host to client | The tally (2 bits: kills 0, damage 1, ratio 2), the fight (1 bit: sides 0, free for all 1), a presence bit and the seconds left (varint), the kill limit (4 bits, 0 for none), the kill owner (2 bits: total 0, side 1, player 2); the players (a count, at most 64; each: lobby id 8 bits, callsign a string, a presence bit and its side 1 bit, kills, losses and damage in thousandths of an aircraft, each a varint); each side's kills, losses and damage (six varints); and the winner (2 bits: 0 none yet, 1 a side then 1 bit, 2 a player then 8 bits, 3 a draw) |
+| 32 | Results | host to client | Sent once at the mission's end. The end's reason (3 bits, as Mission ended), the rows (a count as a varint, at most 1,024; each: plane varint, side 1 bit, wing index 2 bits, member 8 bits, aircraft 4 bits, a presence bit and the callsign of its last human pilot, status 2 bits (alive 0, ejected 1, dead 2, retired 3), damage in thousandths (10 bits), aircraft killed, other kills, friendly fire, then air-to-air launched and hit, gun launched and hit, air-to-ground launched and hit, each a varint), then a presence bit and the final Scores coded as kind 31 |
+| 33 | Observe | client to host | 1 bit: 0 stop watching; 1 watch, then the subject (2 bits: 0 none, 1 an aircraft then its id as a varint, 2 a point then x, y and z in whole feet as signed varints) |
+| 34 | Observing | host to client | 1 bit: 0 the observer flight has ended (nothing follows); 1 it starts: the connection's new [flight](#flights) (8 bits), the delay in seconds (8 bits), the tick the first snapshot will show (32 bits), the roster as the Roster message codes it, and the destroyed ground objects (a count and varints) |
+| 35 | Away | client to host | Nothing: the game has been away (a menu, no focus, a lost controller) for the `idle-ai` setting's seconds |
+| 36 | Back | client to host | Nothing: the player touched the flight controls; take the plane back |
+
+A Pass crown, Settings or Slot lock from anyone but the King is refused "Only
+the King may do that." Revive and Back are answered by a Seated message (a new
+flight) or a Refused.
+
+### Changed messages
+
+- **Lobby** (kind 19). The settings list, empty until now, carries every
+  setting of the [registry](../ARCHITECTURE.md#the-kings-settings) by number
+  (the password as setting 5, 1 when one is set; the password itself never).
+  The house id (the field the lobby state calls the host's) and the King's id
+  now differ when the crown has passed. Each slot gains its lock (2 bits) and,
+  when reserved, the callsign (a string). Each player gains two bits after
+  flying: observing (it watches the flying mission) and away (the AI flies its
+  plane while it is away).
+- **Mission ended** (kind 11) and Results: reason 5 is the kill limit (3 bits
+  already).
+- **Inputs**: command code 22 is a **wing reply**, followed by its kind in 2
+  bits (Engaging 0, Winchester 1, Bingo fuel 2, Need help 3).
+
+### Observer flights
+
+An observer's connection has a flight like a seated one: Observing starts it,
+and its Snapshot sections carry its number, with **no own state hash** (the
+header's presence bit 0, as before seating), no cockpit readout (its bit 0),
+and zero for the input fields. No Own state section and no Inputs section
+belong to it; its Events section carries only mission-wide events. The
+entities are coded as for a seated player, with the relevance of the observer's
+camera ([architecture](../ARCHITECTURE.md#the-observer-view)). With a delay,
+the snapshot's tick is the delayed tick, never newer than the host's tick less
+the delay. Its snapshot ticks are its lobby id modulo the ticks per snapshot.
+
+### Settings by number
+
+The registry's numbers, which the Lobby and Settings messages carry, with each
+value's coding. The names are the configuration file's and the logs'.
+
+| No. | Name | Value |
+| --- | --- | --- |
+| 1 | `mode` | 0 co-op, 1 PvP |
+| 2 | `max-players` | 1 to 30 |
+| 3 | `join-in-progress` | 0 off, 1 on |
+| 4 | `listed` | 0 no, 1 yes |
+| 5 | `password` | 0 none, 1 set (in the lobby state only; Settings carries the text) |
+| 6 | `friendly-fire` | 0 off, 1 on |
+| 7 | `lock-sides` | 0 off, 1 on |
+| 8 | `loadouts` | 0 own, 1 any |
+| 9 | `respawn` | 0 none, 1 AI slot, 2 revive |
+| 10 | `lives` | 0 to 10, 255 unlimited |
+| 11 | `revive-delay` | seconds: 0, 60, 120, 180, 240 or 300 |
+| 12 | `revive-distance` | nautical miles: 1, 5, 10, 20 or 40 |
+| 13 | `revive-weapons` | 0 missiles, 1 no missiles, 2 guns, 3 half guns |
+| 14 | `fight` | 0 sides, 1 free for all |
+| 15 | `tally` | 0 kills, 1 damage, 2 ratio |
+| 16 | `time-limit` | seconds: 0 none, 60, 300, 600, 900, 1,200 or 1,800 (a dedicated server's file may give any whole minute up to 30) |
+| 17 | `kill-limit` | 0 none, 1, 2, 3, 5, 7 or 10 |
+| 18 | `kill-owner` | 0 total, 1 side, 2 player |
+| 19 | `observer-delay` | seconds: 0, 10, 30 or 60 |
+| 20 | `idle-ai` | seconds: 0 never, 10, 30 or 60 |
+
+A number the host does not know, or a value outside its list, is refused with
+the setting's name and its values.
+
 ## Limits
 
 Decoders check every count and length against these before reading on.
@@ -1222,6 +1319,7 @@ Decoders check every count and length against these before reading on.
 | Chat line (protocol 4) | 80 characters of printable ASCII, 5 lines in 5 seconds a player, a quick message's sound 12 characters |
 | Keepalive (protocol 5) | 1 a second from a stalled game, for at most 60 seconds of stall |
 | Punch (stage J) | 5 to each of at most 8 addresses for each introduction, at most 10 introductions a second |
+| Phase 2 (designed) | Settings in one message 64; players in Scores 64; rows in Results 1,024; a password 255 bytes; Observe at most twice a second from one connection |
 
 ## Captures
 
@@ -1267,7 +1365,9 @@ to a replay is stage E.
   EF4, 4 since chat, EF6, 5 since the transport's [Keepalive](#keepalive),
   EF-K, 6 since the exact flight state added the overspeed countdown and legacy
   failure RNG, 7 since each player's platform, in the Challenge answer and
-  the lobby's player list). Any change to the bytes raises it. A test
+  the lobby's player list; the next, designed, for
+  [phase 2](#phase-2-the-kings-settings-revival-scores-and-observers)). Any
+  change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
   protocol 5 it holds one transport packet too, the Keepalive, sealed for the
