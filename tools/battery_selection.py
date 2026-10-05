@@ -187,6 +187,10 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ("net-master-*",),
     ),
     "net-listing": ("a dedicated server broadcasting itself on a master on this machine", ("net-master-listing",)),
+    "net-introduce": (
+        "a bot joining a listed dedicated server through an introduction from a master on this machine",
+        ("net-master-introduce",),
+    ),
     "net-window": (
         "the game itself over the network: a joined game that stalls, a hosted game",
         ("net-window-*",),
@@ -377,10 +381,14 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-import/*", ("menus-validate", "replay-settings"), "importer and data folder"),
     _r("crates/tore-codec/*", NET_FAMILIES, "network encoding"),
     _r("crates/tore-net/src/master/*", ("net-master",), "the master server's wire and the browse client"),
-    _r("crates/tore-net/*", NET_FAMILIES + ("net-discovery",), "network transport"),
+    _r("crates/tore-net/*", NET_FAMILIES + ("net-discovery", "net-introduce"), "network transport"),
     _r("crates/tore-session/src/settings.rs", NET_FAMILIES + ("net-discovery",), "the King's settings registry"),
     _r("crates/tore-session/src/client/scores.rs", NET_FAMILIES, "the scores a game keeps and their words (tore-bot prints them)"),
-    _r("crates/tore-session/*", NET_FAMILIES + ("net-discovery",), "network sessions, the host and tore-bot"),
+    _r(
+        "crates/tore-session/*",
+        NET_FAMILIES + ("net-discovery", "net-introduce"),
+        "network sessions, the host and tore-bot",
+    ),
     _r("crates/tore-server/*", ("net-check", "net-fly", "net-discovery", "net-listing"), "dedicated server"),
     _r("crates/tore-master/*", ("net-master",), "the master server, its configuration and its flood tool"),
     _r("crates/tore-realtime-native/*", ALL_FAMILIES, "host and shared-worker scheduling on macOS", windowed=True),

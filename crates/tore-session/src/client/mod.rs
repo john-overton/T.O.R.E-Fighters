@@ -88,7 +88,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tore_formats::aircraft::AircraftId;
-use tore_net::{CloseReason, Datagrams, DisconnectReason, Entropy, Event, Transmit};
+use tore_net::master::Path;
+use tore_net::{CloseReason, Datagrams, DisconnectReason, Entropy, Event, Target, Transmit};
 use tore_sim::combat::blast::MarkKind;
 use tore_sim::combat::live::{Configuration, EffectKind};
 use tore_sim::flight::{self, PilotInput};
@@ -159,6 +160,21 @@ pub struct ClientConfig {
     /// The operating system this game runs on, which the host shows beside
     /// the callsign in the lobby: this build's own by default.
     pub platform: Platform,
+    /// A join through the master (stage J, slice J2): every address the
+    /// master gave for the host, raced at once, and the introduction whose
+    /// punches add more. `None` joins `server` alone.
+    pub race: Option<Race>,
+}
+
+/// The host's addresses from the master's introduction, for a join that
+/// races them ([`tore_net::Client::connect_any`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Race {
+    /// The host's addresses and the path each stands for, the master's
+    /// order.
+    pub targets: Vec<Target>,
+    /// The introduction id the host's punches carry.
+    pub introduction: u64,
 }
 
 impl ClientConfig {
@@ -175,6 +191,7 @@ impl ClientConfig {
             retail_stall_speeds: false,
             auto_ready: true,
             platform: Platform::current(),
+            race: None,
         }
     }
 }
@@ -708,18 +725,23 @@ impl Client {
         if config.retail_stall_speeds || tore_sim::flight::retail_stall_speeds() {
             return Err(ClientError::RetailStallSpeeds);
         }
-        let net = tore_net::Client::connect(
-            tore_net::ClientConfig {
-                game_version: config.build.version.clone(),
-                game_commit: config.build.commit.clone(),
-                password: config.password.clone(),
-                platform: config.platform,
-                entropy: Entropy::Seeded(seed),
-                ..tore_net::ClientConfig::new(PROTOCOL_VERSION, &config.callsign)
-            },
-            config.server,
-            now,
-        )
+        let net_config = tore_net::ClientConfig {
+            game_version: config.build.version.clone(),
+            game_commit: config.build.commit.clone(),
+            password: config.password.clone(),
+            platform: config.platform,
+            entropy: Entropy::Seeded(seed),
+            ..tore_net::ClientConfig::new(PROTOCOL_VERSION, &config.callsign)
+        };
+        let net = match &config.race {
+            Some(race) => tore_net::Client::connect_any(
+                net_config,
+                &race.targets,
+                Some(race.introduction),
+                now,
+            ),
+            None => tore_net::Client::connect(net_config, config.server, now),
+        }
         .map_err(|error| ClientError::Config(error.to_string()))?;
         Ok(Client {
             config,
@@ -903,9 +925,22 @@ impl Client {
         self.net.keepalive_datagram()
     }
 
-    /// The host's address.
+    /// The host's address: the one the race chose, for a join through the
+    /// master.
     pub fn server(&self) -> SocketAddr {
         self.net.server()
+    }
+
+    /// How the player reached the host (stage J): the path of the address
+    /// joined, which the Challenge answer told the host.
+    pub fn path(&self) -> Path {
+        self.net.path()
+    }
+
+    /// True once the join's address is settled: given one, or the race's
+    /// first answer chose it.
+    pub fn chosen(&self) -> bool {
+        self.net.chosen()
     }
 
     /// How long from `now` until the next predicted tick is due, at most

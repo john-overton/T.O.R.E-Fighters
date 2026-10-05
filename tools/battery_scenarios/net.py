@@ -578,6 +578,39 @@ def drive_master_listing(d: Drive) -> None:
     log_must(d, log, r"Broadcasting: listed on the Internet Lobby", r"console: quit", forbid=NET_BAD)
 
 
+def drive_master_introduce(d: Drive) -> None:
+    """A `tore-bot --master --listing` joins a `tore-server` listed on a `tore-master` on this machine through an
+    introduction (slice J2): the bot finds the game on the master's list, runs the mapping test, is introduced,
+    races the host's addresses while the server punches back, joins along the punched path, flies 30 seconds and
+    leaves; the server stops by itself and the master's status line counted the introduction."""
+    master, mport = start_master(d)
+    port = d.port()
+    server = start_server(d, port, broadcast="on", master=f"{LOCALHOST}:{mport}")
+    if not server.wait_for(r"Broadcasting: listed on the Internet Lobby", 10):
+        d.problem("the server never said it was listed")
+    bot = d.start("bot", [d.bot, "--master", f"{LOCALHOST}:{mport}", "--listing", "T.O.R.E server", "--seconds", "30"])
+    bot.finish(120, 0)
+    server.finish(40, 0)
+    master.send("status")
+    master.send("quit")
+    master.finish(20, 0)
+    bot.expect(rf'^found "T\.O\.R\.E server" on the Internet Lobby at 127\.0\.0\.1:{mport}$', "the listing found")
+    bot.expect(r"^Bot: asking the Internet Lobby for an introduction\.\.\.$", "the introduction asked for")
+    bot.expect(r"^Bot: mapping test: (NoTranslation|SamePort)$", "the mapping test")
+    bot.expect(r"^Bot: introduced; trying [1-8] address(es)?\.\.\.$", "the introduction")
+    bot.expect(r"^Bot: joined through the Internet Lobby, path punched$", "the join along the punched path")
+    bot.expect(r"^Bot: seat \d+, plane \d+, at tick \d+$", "a seating")
+    bot.expect(r"^Bot: debrief: (success|failure), \d+ kills, \d+ seconds$", "a debrief")
+    bot.expect(r"^Bot: The connection ended: the player left\.$", "a clean leave")
+    bot.forbid(NET_BAD, "a network problem")
+    bot.forbid(r"no direct path|only the relay", "a race that found no direct path")
+    server.expect(r"^mission ended: everyone left$", "the end")
+    server.forbid(NET_BAD, "a network problem")
+    master.expect(r"^status listings=\d+ sources=\d+ browse/s=[\d.]+ introductions/min=[1-9]\d* ", "an introduction counted")
+    master.expect(r"^Stopped$", "the stop line")
+    log_must(d, server_log(d), r"joined as Bot", r"Bot( \(plane \d+\))? left: left", forbid=NET_BAD)
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -624,5 +657,11 @@ def scenarios() -> list[Scenario]:
             name="net-master-listing", lane="net", args=[], driver=drive_master_listing, uses=("server",), timeout=120,
             notes="a tore-server with `broadcast on` lists itself on a tore-master on this machine; `broadcast off`, "
             "`broadcast on` and `quit` take it off and back",
+        ),
+        Scenario(
+            name="net-master-introduce", lane="net", args=[], driver=drive_master_introduce, uses=("server", "bot"),
+            timeout=180,
+            notes="tore-bot --master --listing joins a listed tore-server through an introduction from a tore-master "
+            "on this machine, along the punched path, and flies 30 seconds (slice J2)",
         ),
     ]

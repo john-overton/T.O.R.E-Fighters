@@ -10,7 +10,7 @@
 //! with each frame. The replayed client writes its own capture, which equals
 //! the original byte for byte when it behaved the same.
 
-use super::{Client, ClientConfig, ClientFrame, Sampled};
+use super::{Client, ClientConfig, ClientFrame, Race, Sampled};
 use crate::host::BuildId;
 use crate::wire::entity::{EntityKey, EntityKind};
 use crate::wire::inputs::{InputFrame, read_command, write_command};
@@ -20,7 +20,8 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tore_codec::{BitReader, BitWriter};
-use tore_net::Entropy;
+use tore_net::master::Path;
+use tore_net::{Entropy, Target};
 use tore_sim::sensors::{Channel, Controls as Scope};
 
 /// The file's first bytes.
@@ -41,6 +42,9 @@ pub mod kind {
     pub const REQUEST: u8 = 8;
     /// The player left the game: Leave, then quit once the debrief is in.
     pub const LEAVE_GAME: u8 = 9;
+    /// A join through the master (protocol 9, slice J2): right after the
+    /// start, the host's addresses raced and the introduction.
+    pub const RACE: u8 = 10;
 }
 
 /// A record body's largest size: a datagram and its header with room.
@@ -132,6 +136,16 @@ impl CaptureWriter {
         }
         body.push(u8::from(config.auto_ready));
         self.record(kind::START, &body);
+        if let Some(race) = &config.race {
+            let mut body = Vec::new();
+            body.extend_from_slice(&race.introduction.to_le_bytes());
+            body.push(race.targets.len().min(usize::from(u8::MAX)) as u8);
+            for target in race.targets.iter().take(usize::from(u8::MAX)) {
+                put_str(&mut body, &target.address.to_string());
+                body.push(target.path.code());
+            }
+            self.record(kind::RACE, &body);
+        }
     }
 
     /// A lobby request the player made at `now`: the message's kind and
@@ -337,6 +351,7 @@ pub enum Record {
     LeaveGame {
         now: Duration,
     },
+    Race(Race),
 }
 
 /// A capture's records, read one by one. A capture cut short (the game
@@ -482,6 +497,21 @@ impl<'a> Reader<'a> {
                 body: c.rest().to_vec(),
             },
             kind::LEAVE_GAME => Record::LeaveGame { now: c.time()? },
+            kind::RACE => {
+                let introduction = c.u64()?;
+                let count = c.u8()?;
+                let mut targets = Vec::with_capacity(usize::from(count));
+                for _ in 0..count {
+                    let address = c.address()?;
+                    let path =
+                        Path::from_code(u64::from(c.u8()?)).ok_or(CaptureError::Damaged("path"))?;
+                    targets.push(Target::new(address, path));
+                }
+                Record::Race(Race {
+                    targets,
+                    introduction,
+                })
+            }
             _ => return Err(CaptureError::Damaged("record kind")),
         };
         self.at += 5 + len;
@@ -536,10 +566,20 @@ pub fn replay(
     else {
         return Err(CaptureError::Damaged("no start record"));
     };
+    // A join through the master names its race right after the start.
+    let mut pending = reader.next_record()?;
+    let race = match pending.take() {
+        Some(Record::Race(race)) => Some(race),
+        other => {
+            pending = other;
+            None
+        }
+    };
     let config = ClientConfig {
         plane,
         auto_ready,
         entropy: Entropy::Seeded(seed),
+        race,
         ..ClientConfig::new(server, &callsign, build)
     };
     let mut client = Client::start(config, resources, started, seed)
@@ -547,14 +587,18 @@ pub fn replay(
     let copy = Shared::default();
     client.set_capture(Box::new(copy.clone()));
     let mut out = Replayed {
-        records: 1,
+        records: 1 + u64::from(client.config.race.is_some()),
         frames: 0,
         identical: false,
     };
-    while let Some(record) = reader.next_record()? {
+    while let Some(record) = match pending.take() {
+        Some(record) => Some(record),
+        None => reader.next_record()?,
+    } {
         out.records += 1;
         match record {
             Record::Start { .. } => return Err(CaptureError::Damaged("a second start")),
+            Record::Race(_) => return Err(CaptureError::Damaged("a race after the start")),
             Record::Receive {
                 now,
                 from,
@@ -675,5 +719,39 @@ mod tests {
             Reader::new(b"TORE-CAX\x01\0\x01\0").err(),
             Some(CaptureError::NotACapture)
         );
+    }
+
+    #[test]
+    fn a_race_is_recorded_right_after_the_start() {
+        let shared = Shared::default();
+        let mut writer = CaptureWriter::new(Box::new(shared.clone()));
+        let race = Race {
+            targets: vec![
+                Target::new("203.0.113.5:26900".parse().unwrap(), Path::Punched),
+                Target::new("[2001:db8::5]:26900".parse().unwrap(), Path::Ipv6),
+            ],
+            introduction: 0xABCD,
+        };
+        let config = ClientConfig {
+            race: Some(race.clone()),
+            ..ClientConfig::new(
+                "203.0.113.5:26900".parse().unwrap(),
+                "Viper",
+                BuildId {
+                    version: "0.1.3".into(),
+                    commit: "abc".into(),
+                    release: false,
+                },
+            )
+        };
+        writer.header(&config, 42, Duration::ZERO);
+        let bytes = shared.0.lock().unwrap().clone();
+        let mut reader = Reader::new(&bytes).unwrap();
+        assert!(matches!(
+            reader.next_record().unwrap(),
+            Some(Record::Start { .. })
+        ));
+        assert_eq!(reader.next_record().unwrap(), Some(Record::Race(race)));
+        assert_eq!(reader.next_record().unwrap(), None);
     }
 }

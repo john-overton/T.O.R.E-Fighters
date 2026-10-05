@@ -8,11 +8,24 @@
 //! first and waiting for its debrief).
 //!
 //! ```text
-//! tore-bot --connect HOST[:PORT] [--data-dir DIR] [--count N] [--callsign NAME]
+//! tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME [--path auto|direct])
+//!          [--data-dir DIR] [--count N] [--callsign NAME]
 //!          [--slot PLANE] [--seconds S] [--password TEXT]
 //!          [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]...
 //!          [--observe PLANE|none]
 //! ```
+//!
+//! `--master` and `--listing` join through the Internet Lobby (stage J,
+//! slice J2) as the game's Join on a listed game does: the bot asks the
+//! master at ADDRESS (port 26901 unless given) for its list, takes the first
+//! game named NAME, and each bot runs the mapping test, asks for an
+//! introduction from a dual-stack socket of its own and races every address
+//! the master gives for the host while the host punches back. It prints
+//! each step and the path the join took. `--path auto` (the default) says
+//! when 3 seconds pass without a direct path or the master says the relay is
+//! needed; the relay itself, and `--path relay`, come with slice J3.
+//! `--path direct` races only. Tests point `--master` at a loopback
+//! `tore-master`, never the public one.
 //!
 //! `--say` makes every bot send the text to the receiver (`all`,
 //! `friendlies`, `enemies`, `wing` or `target`) that many seconds after it
@@ -39,22 +52,52 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
-use tore_net::{CloseReason, DisconnectReason, Entropy, RealClock, bind_udp};
+use tore_net::master::browse::{BrowseEvent, Browser, BrowserConfig};
+use tore_net::master::join::{JoinConfig, JoinEvent, Joiner};
+use tore_net::master::local::{host_candidates, own_address_toward, parse_master};
+use tore_net::master::{Build, Hint, Path, RACE_BEFORE_RELAY};
+use tore_net::{
+    CloseReason, Datagrams, DisconnectReason, Entropy, Listen, RealClock, ServerSocket, bind_udp,
+};
 use tore_session::bot::Bot;
-use tore_session::client::ended_text;
+use tore_session::client::{Race, ended_text};
 use tore_session::wire::chat::Receiver;
 use tore_session::wire::messages::{Goodbye, LobbyState, Observing, Subject};
 use tore_session::{BuildId, Client, ClientConfig, ClientEvent, ClientPhase};
 
-const USAGE: &str = "usage: tore-bot --connect HOST[:PORT] [--data-dir DIR] [--count N] \
+const USAGE: &str = "usage: tore-bot (--connect HOST[:PORT] | --master ADDRESS --listing NAME \
+[--path auto|direct]) [--data-dir DIR] [--count N] \
 [--callsign NAME] [--slot PLANE] [--seconds S] [--password TEXT] \
 [--say SECONDS,RECEIVER,TEXT]... [--quick SECONDS,NUMBER]... [--observe PLANE|none]";
+
+/// How long the bot looks for the listing on the master's list.
+const FIND_LISTING: Duration = Duration::from_secs(10);
+
+/// How a join through the master may go (`--path`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JoinPath {
+    /// Race the host's addresses; say when the relay would be asked for.
+    Auto,
+    /// Race only.
+    Direct,
+}
+
+/// Where the bots join: an address, or a listing through the master.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum JoinBy {
+    Connect(SocketAddr),
+    Master {
+        master: String,
+        listing: String,
+        path: JoinPath,
+    },
+}
 
 /// How long a bot waits for its debrief and the disconnect after leaving.
 const LEAVE_GRACE: Duration = Duration::from_secs(8);
 
 struct Options {
-    connect: SocketAddr,
+    target: JoinBy,
     data_dir: Option<PathBuf>,
     count: usize,
     callsign: String,
@@ -116,8 +159,11 @@ fn quick(value: &str) -> Result<(Duration, u8), String> {
 
 fn parse(args: &[String]) -> Result<Options, String> {
     let mut connect = None;
+    let mut master = None;
+    let mut listing = None;
+    let mut path = JoinPath::Auto;
     let mut options = Options {
-        connect: SocketAddr::from(([127, 0, 0, 1], tore_net::DEFAULT_PORT)),
+        target: JoinBy::Connect(SocketAddr::from(([127, 0, 0, 1], tore_net::DEFAULT_PORT))),
         data_dir: None,
         count: 1,
         callsign: "Bot".into(),
@@ -137,6 +183,22 @@ fn parse(args: &[String]) -> Result<Options, String> {
         };
         match arg.as_str() {
             "--connect" => connect = Some(value()?),
+            "--master" => master = Some(value()?),
+            "--listing" => listing = Some(value()?),
+            "--path" => {
+                path = match value()?.as_str() {
+                    "auto" => JoinPath::Auto,
+                    "direct" => JoinPath::Direct,
+                    "relay" => {
+                        return Err(
+                            "--path relay is not available yet: the Internet Lobby's relay \
+                             comes with a later build"
+                                .into(),
+                        );
+                    }
+                    other => return Err(format!("--path is auto or direct, not {other:?}")),
+                }
+            }
             "--data-dir" => options.data_dir = Some(PathBuf::from(value()?)),
             "--count" => {
                 options.count = value()?
@@ -172,8 +234,28 @@ fn parse(args: &[String]) -> Result<Options, String> {
             other => return Err(format!("unknown option {other}\n{USAGE}")),
         }
     }
-    let connect = connect.ok_or_else(|| format!("--connect is required\n{USAGE}"))?;
-    options.connect = reach(&connect)?;
+    options.target = match (connect, master, listing) {
+        (Some(connect), None, None) => JoinBy::Connect(reach(&connect)?),
+        (None, Some(master), Some(listing)) => {
+            parse_master(&master)?;
+            JoinBy::Master {
+                master,
+                listing,
+                path,
+            }
+        }
+        (None, Some(_), None) => return Err(format!("--master needs --listing\n{USAGE}")),
+        (None, None, Some(_)) => return Err(format!("--listing needs --master\n{USAGE}")),
+        (Some(_), _, _) => {
+            return Err(format!(
+                "--connect joins by address; --master and --listing join through the \
+                 Internet Lobby: give one or the other\n{USAGE}"
+            ));
+        }
+        (None, None, None) => {
+            return Err(format!("--connect or --master is required\n{USAGE}"));
+        }
+    };
     Ok(options)
 }
 
@@ -237,11 +319,120 @@ fn build() -> BuildId {
     }
 }
 
+/// The master protocol's build: the same three facts as the game's.
+fn master_build(build: &BuildId) -> Build {
+    Build {
+        protocol_version: tore_session::wire::PROTOCOL_VERSION,
+        game_version: build.version.clone(),
+        game_commit: build.commit.clone(),
+        release: build.release,
+    }
+}
+
+/// The master's addresses, IPv4 first.
+fn masters(master: &str) -> Result<Vec<SocketAddr>, String> {
+    let (host, port) = parse_master(master)?;
+    let found = tore_net::reach::resolve(&host, port)
+        .map_err(|error| format!("cannot resolve the master {master}: {error}"))?;
+    if found.is_empty() {
+        return Err(format!("cannot resolve the master {master}"));
+    }
+    Ok(found)
+}
+
+/// The id of the first game named `name` on the master's list, asking again
+/// each second for up to ten.
+fn find_listing(
+    masters: &[SocketAddr],
+    name: &str,
+    build: &BuildId,
+    clock: &RealClock,
+) -> Result<u64, String> {
+    let local: SocketAddr = if masters[0].is_ipv4() {
+        SocketAddr::from(([0, 0, 0, 0], 0))
+    } else {
+        "[::]:0".parse().expect("an address")
+    };
+    let mut socket = bind_udp(local).map_err(|error| format!("cannot open a socket: {error}"))?;
+    let mut browser = Browser::new(
+        BrowserConfig {
+            build: master_build(build),
+            other_builds: false,
+            full_games: true,
+            entropy: Entropy::System,
+        },
+        masters.to_vec(),
+    );
+    let start = clock.now();
+    browser.refresh(start);
+    let mut again = None;
+    loop {
+        let now = clock.now();
+        if now.saturating_sub(start) > FIND_LISTING {
+            return Err(format!("no game named {name:?} on the Internet Lobby"));
+        }
+        if again.is_some_and(|at| now >= at) {
+            again = None;
+            browser.refresh(now);
+        }
+        let _ = browser.transmit(&mut socket);
+        let _ = browser.receive_from(&mut socket, now);
+        browser.update(now);
+        while let Some(event) = browser.poll_event() {
+            match event {
+                BrowseEvent::Refreshed { .. } => {
+                    if let Some(game) = browser.games().iter().find(|g| g.name == name) {
+                        return Ok(game.listing_id);
+                    }
+                    again = Some(now + Duration::from_secs(1));
+                }
+                BrowseEvent::Silent => {
+                    return Err("The Internet Lobby does not answer.".into());
+                }
+                BrowseEvent::Unsupported { text } => return Err(text),
+                _ => {}
+            }
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// A path as the bot's lines say it.
+fn path_words(path: Path) -> &'static str {
+    match path {
+        Path::LocalNetwork => "local network",
+        Path::ByAddress => "by address",
+        Path::MappedPort => "mapped port",
+        Path::Ipv6 => "IPv6",
+        Path::Punched => "punched",
+        Path::Relay => "relay",
+    }
+}
+
+/// A bot's join through the master, before and during the race.
+struct Through {
+    socket: ServerSocket,
+    joiner: Joiner,
+    path: JoinPath,
+    /// When the race started; the relay line once said.
+    raced: Option<Duration>,
+    relay_said: bool,
+}
+
 /// One bot and how it is doing.
 struct Running {
     name: String,
-    socket: UdpSocket,
-    bot: Bot,
+    /// The socket of a join by address.
+    socket: Option<UdpSocket>,
+    /// The join through the master.
+    through: Option<Through>,
+    /// The client's settings, kept until the master's introduction for a
+    /// join through it.
+    config: ClientConfig,
+    /// The bot, once its client has started.
+    bot: Option<Bot>,
+    /// Why a join through the master ended before the race.
+    failed: Option<String>,
     seated: bool,
     debrief: bool,
     left_at: Option<Duration>,
@@ -252,6 +443,112 @@ struct Running {
     host_left: bool,
     /// An observer's flight started.
     observed: bool,
+}
+
+impl Running {
+    /// Starts the client and the bot with the options' chat lines and
+    /// watch.
+    fn start(
+        &mut self,
+        options: &Options,
+        resources: &Arc<tore_import::Resources>,
+        lines: &[tore_session::wire::chat::QuickMessage],
+        now: Duration,
+    ) -> Result<(), ExitCode> {
+        let client = match Client::connect(self.config.clone(), Arc::clone(resources), now) {
+            Ok(client) => client,
+            Err(error) => {
+                eprintln!("{}: {error}", self.name);
+                return Err(ExitCode::from(2));
+            }
+        };
+        let mut bot = Bot::new(client);
+        for (at, to, text) in &options.say {
+            bot.say_at(*at, *to, text);
+        }
+        for (at, number) in &options.quick {
+            bot.quick_at(*at, *number, lines);
+        }
+        if let Some(subject) = options.observe {
+            bot.watch(subject);
+        }
+        self.bot = Some(bot);
+        Ok(())
+    }
+
+    /// A join through the master: the joiner's datagrams and timers, its
+    /// steps printed, and the client started on the introduction.
+    fn join_through(
+        &mut self,
+        now: Duration,
+        options: &Options,
+        resources: &Arc<tore_import::Resources>,
+        lines: &[tore_session::wire::chat::QuickMessage],
+    ) -> Result<(), ExitCode> {
+        let name = self.name.clone();
+        let Some(t) = self.through.as_mut() else {
+            return Ok(());
+        };
+        if self.bot.is_none() {
+            // Before the race only the master's datagrams matter.
+            let mut buf = [0u8; tore_net::MAX_DATAGRAM + 1];
+            let mut routed = t.joiner.over(&mut t.socket, now);
+            while let Ok(Some(_)) = routed.recv_datagram(&mut buf) {}
+        }
+        t.joiner.update(now);
+        let mut race = None;
+        while let Some(event) = t.joiner.poll_event() {
+            match event {
+                JoinEvent::MappingTested(mapping) => {
+                    println!("{name}: mapping test: {mapping:?}");
+                }
+                JoinEvent::Introduced(introduced) => {
+                    let count = introduced.targets.len();
+                    let plural = if count == 1 { "" } else { "es" };
+                    println!("{name}: introduced; trying {count} address{plural}...");
+                    if introduced.hint == Hint::RelayNow && t.path == JoinPath::Auto {
+                        println!(
+                            "{name}: the Internet Lobby says only the relay reaches this game; \
+                             the relay comes with a later build, so the race goes on"
+                        );
+                        t.relay_said = true;
+                    }
+                    t.raced = Some(now);
+                    race = Some(Race {
+                        targets: introduced.targets,
+                        introduction: introduced.introduction_id,
+                    });
+                }
+                JoinEvent::Refused { text, .. } | JoinEvent::Unsupported(text) => {
+                    println!("{name}: {text}");
+                    self.failed = Some(text);
+                }
+                JoinEvent::MasterSilent => {
+                    let text = "The Internet Lobby does not answer.".to_owned();
+                    println!("{name}: {text}");
+                    self.failed = Some(text);
+                }
+            }
+        }
+        let _ = t.joiner.transmit(&mut t.socket);
+        let relay_due = t.path == JoinPath::Auto
+            && !t.relay_said
+            && t.raced.is_some_and(|at| now >= at + RACE_BEFORE_RELAY);
+        if let Some(race) = race {
+            self.config.server = race.targets[0].address;
+            self.config.race = Some(race);
+            self.start(options, resources, lines, now)?;
+        }
+        if relay_due && self.bot.as_ref().is_some_and(|b| !b.client.chosen()) {
+            println!(
+                "{name}: no direct path; the relay comes with a later build, so the race goes on"
+            );
+            if let Some(t) = self.through.as_mut() {
+                t.relay_said = true;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The lobby in one line: the phase, and each player's slot and marks.
@@ -306,15 +603,32 @@ fn main() -> ExitCode {
         }
     };
     let clock = RealClock::new();
-    let local: SocketAddr = if options.connect.is_ipv4() {
-        SocketAddr::from(([0, 0, 0, 0], 0))
-    } else {
-        "[::]:0".parse().expect("an address")
-    };
     let lines = resources
         .get(tore_import::selection::CHAT_RESOURCE)
         .map(|bytes| tore_formats::chat::parse(bytes))
         .unwrap_or_default();
+    // A join through the master finds its listing first.
+    let found = match &options.target {
+        JoinBy::Connect(_) => None,
+        JoinBy::Master {
+            master, listing, ..
+        } => {
+            let found = masters(master).and_then(|masters| {
+                let id = find_listing(&masters, listing, &build(), &clock)?;
+                Ok((masters, id))
+            });
+            match found {
+                Ok((masters, id)) => {
+                    println!("found {listing:?} on the Internet Lobby at {master}");
+                    Some((masters, id))
+                }
+                Err(text) => {
+                    eprintln!("{text}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+    };
     let mut bots = Vec::new();
     for i in 0..options.count {
         let name = if options.count == 1 {
@@ -327,41 +641,24 @@ fn main() -> ExitCode {
                 options.callsign.chars().take(keep).collect::<String>()
             )
         };
-        let socket = match bind_udp(local) {
-            Ok(socket) => socket,
-            Err(error) => {
-                eprintln!("cannot open a socket: {error}");
-                return ExitCode::from(2);
-            }
+        let server = match &options.target {
+            JoinBy::Connect(address) => *address,
+            JoinBy::Master { .. } => SocketAddr::from(([0, 0, 0, 0], 0)),
         };
         let config = ClientConfig {
             password: options.password.clone(),
             plane: options.slot.map(|slot| slot + i as u32),
             entropy: Entropy::System,
             auto_ready: options.observe.is_none(),
-            ..ClientConfig::new(options.connect, &name, build())
+            ..ClientConfig::new(server, &name, build())
         };
-        let client = match Client::connect(config, Arc::clone(&resources), clock.now()) {
-            Ok(client) => client,
-            Err(error) => {
-                eprintln!("{name}: {error}");
-                return ExitCode::from(2);
-            }
-        };
-        let mut bot = Bot::new(client);
-        for (at, to, text) in &options.say {
-            bot.say_at(*at, *to, text);
-        }
-        for (at, number) in &options.quick {
-            bot.quick_at(*at, *number, &lines);
-        }
-        if let Some(subject) = options.observe {
-            bot.watch(subject);
-        }
-        bots.push(Running {
-            name,
-            socket,
-            bot,
+        let mut running = Running {
+            name: name.clone(),
+            socket: None,
+            through: None,
+            config,
+            bot: None,
+            failed: None,
             seated: false,
             debrief: false,
             left_at: None,
@@ -369,34 +666,126 @@ fn main() -> ExitCode {
             lobby: None,
             host_left: false,
             observed: false,
-        });
+        };
+        match (&options.target, &found) {
+            (JoinBy::Master { path, .. }, Some((masters, listing_id))) => {
+                // One dual-stack socket: its IPv4 and IPv6 candidates and
+                // its Connect requests all leave from one port.
+                let socket = match ServerSocket::bind(Listen::Any, 0) {
+                    Ok(socket) => socket,
+                    Err(error) => {
+                        eprintln!("cannot open a socket: {error}");
+                        return ExitCode::from(2);
+                    }
+                };
+                let port = socket.local_addresses().first().map_or(0, SocketAddr::port);
+                let now = clock.now();
+                let mut joiner = Joiner::new(
+                    JoinConfig {
+                        build: master_build(&build()),
+                        listing_id: *listing_id,
+                        entropy: Entropy::System,
+                    },
+                    now,
+                );
+                joiner.set_masters(
+                    masters.clone(),
+                    host_candidates(masters, port, own_address_toward),
+                    now,
+                );
+                println!("{name}: asking the Internet Lobby for an introduction...");
+                running.through = Some(Through {
+                    socket,
+                    joiner,
+                    path: *path,
+                    raced: None,
+                    relay_said: false,
+                });
+            }
+            _ => {
+                let local: SocketAddr = if server.is_ipv4() {
+                    SocketAddr::from(([0, 0, 0, 0], 0))
+                } else {
+                    "[::]:0".parse().expect("an address")
+                };
+                running.socket = match bind_udp(local) {
+                    Ok(socket) => Some(socket),
+                    Err(error) => {
+                        eprintln!("cannot open a socket: {error}");
+                        return ExitCode::from(2);
+                    }
+                };
+                if let Err(code) = running.start(&options, &resources, &lines, clock.now()) {
+                    return code;
+                }
+            }
+        }
+        bots.push(running);
     }
     let end = Duration::from_secs(options.seconds);
     let mut next_report = Duration::from_secs(5);
     loop {
         let now = clock.now();
         for r in &mut bots {
-            if r.closed.is_some() {
+            if r.closed.is_some() || r.failed.is_some() {
                 continue;
             }
-            let _ = r.bot.client.receive_from(now, &mut r.socket);
+            if let Err(code) = r.join_through(now, &options, &resources, &lines) {
+                return code;
+            }
+            if r.failed.is_some() {
+                continue;
+            }
+            let Some(bot) = r.bot.as_mut() else {
+                if now >= end {
+                    let text = "the join through the Internet Lobby did not finish in time";
+                    println!("{}: {text}", r.name);
+                    r.failed = Some(text.into());
+                }
+                continue;
+            };
+            match (&mut r.through, &mut r.socket) {
+                (Some(t), _) => {
+                    let _ = bot
+                        .client
+                        .receive_from(now, &mut t.joiner.over(&mut t.socket, now));
+                }
+                (None, Some(socket)) => {
+                    let _ = bot.client.receive_from(now, socket);
+                }
+                (None, None) => {}
+            }
             if now >= end && r.left_at.is_none() {
                 r.left_at = Some(now);
-                if r.bot.client.phase() == ClientPhase::Connecting {
-                    r.bot.client.disconnect(now);
+                if bot.client.phase() == ClientPhase::Connecting {
+                    bot.client.disconnect(now);
                 } else {
-                    r.bot.client.leave_game(now);
+                    bot.client.leave_game(now);
                 }
             }
             if r.left_at
                 .is_some_and(|at| now.saturating_sub(at) > LEAVE_GRACE)
             {
-                r.bot.client.disconnect(now);
+                bot.client.disconnect(now);
             }
-            r.bot.update(now);
-            let _ = r.bot.client.transmit(&mut r.socket);
-            while let Some(event) = r.bot.client.poll_event() {
+            bot.update(now);
+            match (&mut r.through, &mut r.socket) {
+                (Some(t), _) => {
+                    let _ = bot.client.transmit(&mut t.joiner.over(&mut t.socket, now));
+                    let _ = t.joiner.transmit(&mut t.socket);
+                }
+                (None, Some(socket)) => {
+                    let _ = bot.client.transmit(socket);
+                }
+                (None, None) => {}
+            }
+            while let Some(event) = bot.client.poll_event() {
                 match event {
+                    ClientEvent::Connected { .. } if r.through.is_some() => println!(
+                        "{}: joined through the Internet Lobby, path {}",
+                        r.name,
+                        path_words(bot.client.path())
+                    ),
                     ClientEvent::Connected { .. } => println!("{}: joined", r.name),
                     ClientEvent::MissionLoaded => println!("{}: mission loaded", r.name),
                     ClientEvent::ContentRefused { names, reason } => {
@@ -410,7 +799,7 @@ fn main() -> ExitCode {
                         println!("{}: refused: {reason}", r.name);
                     }
                     ClientEvent::Lobby => {
-                        if let Some(lobby) = r.bot.client.lobby() {
+                        if let Some(lobby) = bot.client.lobby() {
                             let line = lobby_line(lobby);
                             if r.lobby.as_deref() != Some(line.as_str()) {
                                 println!("{}: lobby: {line}", r.name);
@@ -449,8 +838,8 @@ fn main() -> ExitCode {
                         println!("{}: {}", r.name, ended_text(&ended));
                     }
                     ClientEvent::Closed(reason) => {
-                        println!("{}: {}", r.name, r.bot.client.close_text(&reason));
-                        r.host_left = r.bot.client.goodbye() == Some(&Goodbye::HostLeft);
+                        println!("{}: {}", r.name, bot.client.close_text(&reason));
+                        r.host_left = bot.client.goodbye() == Some(&Goodbye::HostLeft);
                         r.closed = Some(reason);
                     }
                     ClientEvent::Roster => {}
@@ -479,10 +868,10 @@ fn main() -> ExitCode {
         if now >= next_report {
             next_report += Duration::from_secs(5);
             for r in &mut bots {
-                if r.closed.is_some() {
+                let Some(bot) = r.bot.as_mut().filter(|_| r.closed.is_none()) else {
                     continue;
-                }
-                let s = r.bot.client.stats();
+                };
+                let s = bot.client.stats();
                 println!(
                     "{}: round trip {:.0} ms, loss {:.1}%, margin {}, delay {:.0} ms, \
                      corrections {}, mismatches {}, extrapolated {}, repeated {}, \
@@ -496,25 +885,29 @@ fn main() -> ExitCode {
                     s.mismatches,
                     s.extrapolated,
                     s.inputs_repeated,
-                    r.bot.pilot.bursts,
+                    bot.pilot.bursts,
                     s.bytes_up_per_second,
                     s.bytes_down_per_second
                 );
                 if r.observed {
                     println!(
                         "{}: watching: frames {}, aircraft {}",
-                        r.name, r.bot.watched, r.bot.watched_aircraft
+                        r.name, bot.watched, bot.watched_aircraft
                     );
                 }
             }
         }
-        if bots.iter().all(|r| r.closed.is_some()) {
+        if bots
+            .iter()
+            .all(|r| r.closed.is_some() || r.failed.is_some())
+        {
             break;
         }
         let wake = bots
             .iter()
             .filter(|r| r.closed.is_none())
-            .map(|r| r.bot.client.next_wake(now))
+            .filter_map(|r| r.bot.as_ref())
+            .map(|bot| bot.client.next_wake(now))
             .min()
             .unwrap_or(Duration::from_millis(1))
             .clamp(Duration::from_micros(200), Duration::from_millis(2));
@@ -522,18 +915,19 @@ fn main() -> ExitCode {
     }
     let clean = bots.iter().all(|r| {
         let done = if options.observe.is_some() {
-            r.observed && r.bot.watched > 0
+            r.observed && r.bot.as_ref().is_some_and(|bot| bot.watched > 0)
         } else {
             r.seated && r.debrief
         };
-        done && (r.host_left
-            || matches!(
-                r.closed,
-                Some(CloseReason::Disconnected {
-                    reason: DisconnectReason::Left,
-                    ..
-                })
-            ))
+        done && r.failed.is_none()
+            && (r.host_left
+                || matches!(
+                    r.closed,
+                    Some(CloseReason::Disconnected {
+                        reason: DisconnectReason::Left,
+                        ..
+                    })
+                ))
     });
     if clean {
         ExitCode::SUCCESS
@@ -553,18 +947,53 @@ mod tests {
     #[test]
     fn options_parse_with_their_defaults() {
         let o = parse(&args("--connect 127.0.0.1")).unwrap();
-        assert_eq!(o.connect, "127.0.0.1:26900".parse().unwrap());
+        assert_eq!(
+            o.target,
+            JoinBy::Connect("127.0.0.1:26900".parse().unwrap())
+        );
         assert_eq!((o.count, o.seconds, o.slot), (1, 60, None));
         let o = parse(&args(
             "--connect 127.0.0.1:4000 --count 2 --callsign Viper --slot 3 --seconds 5",
         ))
         .unwrap();
-        assert_eq!(o.connect.port(), 4000);
+        assert!(matches!(o.target, JoinBy::Connect(a) if a.port() == 4000));
         assert_eq!((o.count, o.seconds, o.slot), (2, 5, Some(3)));
         assert_eq!(o.callsign, "Viper");
         assert!(parse(&args("--count 2")).is_err());
         assert!(parse(&args("--connect 127.0.0.1 --count 0")).is_err());
         assert!(parse(&args("--connect 127.0.0.1 --bogus")).is_err());
+    }
+
+    #[test]
+    fn a_join_through_the_master_needs_a_listing_and_no_address() {
+        let o = parse(&args("--master 127.0.0.1:26911 --listing Friday")).unwrap();
+        assert_eq!(
+            o.target,
+            JoinBy::Master {
+                master: "127.0.0.1:26911".into(),
+                listing: "Friday".into(),
+                path: JoinPath::Auto,
+            }
+        );
+        let o = parse(&args("--master 127.0.0.1 --listing x --path direct")).unwrap();
+        assert!(matches!(
+            o.target,
+            JoinBy::Master {
+                path: JoinPath::Direct,
+                ..
+            }
+        ));
+        for bad in [
+            "--master 127.0.0.1",
+            "--listing Friday",
+            "--connect 127.0.0.1 --master 127.0.0.1 --listing x",
+            "--master 127.0.0.1 --listing x --path relay",
+            "--master 127.0.0.1 --listing x --path sideways",
+            "--master host:0 --listing x",
+            "",
+        ] {
+            assert!(parse(&args(bad)).is_err(), "{bad}");
+        }
     }
 
     #[test]

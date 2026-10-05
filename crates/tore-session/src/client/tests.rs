@@ -334,6 +334,43 @@ fn a_client_joins_flies_and_leaves_with_its_debrief() {
     assert!(!p.digests.is_empty());
 }
 
+/// A join through the master (slice J2): the race of the host's addresses
+/// chooses the one that answers, the client is seated along its path, and
+/// its capture, which names the race, replays the same.
+#[test]
+fn a_raced_join_is_seated_along_the_answering_path_and_its_capture_replays() {
+    let mut rig = Rig::new(
+        spec(1, 1, 20),
+        LinkConfig::for_round_trip(40 * MS, 0., 0., 0.),
+        5,
+    );
+    let race = Race {
+        targets: vec![
+            Target::new("10.0.0.99:26900".parse().unwrap(), Path::LocalNetwork),
+            Target::new(host_address(), Path::Punched),
+        ],
+        introduction: 0x51,
+    };
+    let player = rig.join(|c| c.race = Some(race), level_script());
+    let capture = Shared::default();
+    rig.players[player]
+        .client
+        .set_capture(Box::new(capture.clone()));
+    assert!(!rig.players[player].client.chosen());
+    assert!(rig.run_until(Duration::from_secs(3), |r| r.seated(player)));
+    let client = &rig.players[player].client;
+    assert!(client.chosen());
+    assert_eq!(
+        (client.server(), client.path()),
+        (host_address(), Path::Punched)
+    );
+    rig.run(Duration::from_secs(2));
+    let bytes = capture.0.lock().unwrap().clone();
+    let replayed = capture::replay(&bytes, Arc::clone(&rig.resources), &mut |_| {}).unwrap();
+    assert!(replayed.identical, "the replay sent the same");
+    assert!(replayed.frames > 0);
+}
+
 #[test]
 fn a_different_import_is_refused_with_the_names_that_differ() {
     let mut rig = Rig::new(spec(1, 1, 20), LinkConfig::PERFECT, 4);
