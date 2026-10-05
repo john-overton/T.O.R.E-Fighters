@@ -101,10 +101,23 @@ fn ended_page(retail: &[String], ended: &Ended) -> Vec<String> {
     page
 }
 
+/// The pages with none of a networked flight's extra ones.
+#[cfg(test)]
+pub fn pages_ended(report: &Report, text: &MissionText, ended: Option<&Ended>) -> Vec<Vec<String>> {
+    pages_with(report, text, ended, &[])
+}
+
 /// Page markup in the mission-text grammar: `.center`, `.left`, `.header`,
 /// `.body`, `.bold`/`..bold`, `.underline`/`..underline` and tab columns.
 /// `ended` is a networked flight's, which its objectives did not decide.
-pub fn pages_ended(report: &Report, text: &MissionText, ended: Option<&Ended>) -> Vec<Vec<String>> {
+/// `extra` pages (a networked flight's SCORES and RESULTS, see
+/// `net::debrief::extra_pages`) are turned in after the first.
+pub fn pages_with(
+    report: &Report,
+    text: &MissionText,
+    ended: Option<&Ended>,
+    extra: &[Vec<String>],
+) -> Vec<Vec<String>> {
     let success = report.outcome == Outcome::Success;
     let retail = text
         .debrief(success)
@@ -243,7 +256,10 @@ pub fn pages_ended(report: &Report, text: &MissionText, ended: Option<&Ended>) -
     enemy.push(String::new());
     shots(&mut enemy, "AAA", &|p| p.enemy_aaa);
 
-    vec![first, outcome, kills, hits, enemy]
+    let mut pages = vec![first];
+    pages.extend(extra.iter().cloned());
+    pages.extend([outcome, kills, hits, enemy]);
+    pages
 }
 
 pub struct Debrief {
@@ -267,7 +283,7 @@ impl Debrief {
         data: &BTreeMap<String, Vec<u8>>,
         background: Option<&str>,
     ) -> AppResult<Self> {
-        Self::networked(report, data, background, None)
+        Self::networked(report, data, background, None, &[])
     }
 
     /// A networked flight's debrief: `ended` is set when the flight ended
@@ -279,6 +295,7 @@ impl Debrief {
         data: &BTreeMap<String, Vec<u8>>,
         background: Option<&str>,
         ended: Option<&Ended>,
+        extra: &[Vec<String>],
     ) -> AppResult<Self> {
         let background = background.map_or_else(
             || {
@@ -355,7 +372,7 @@ impl Debrief {
                 .ok_or("missing debrief resource QUICK.MT; re-import media")?,
         )?;
         Ok(Self {
-            pages: pages_ended(&report, &text, ended),
+            pages: pages_with(&report, &text, ended, extra),
             page: 0,
             sprites,
             background,
@@ -556,12 +573,26 @@ fn label(c: &mut Canvas, font: &Sprite, text: &str, (x, y, w): (i32, i32, i32)) 
 /// Lays out one page of mission-text markup on the clipboard.
 fn clipboard(c: &mut Canvas, s: &BTreeMap<String, Sprite>, lines: &[String], first_page: bool) {
     let (mut center, mut header, mut bold, mut underline) = (false, false, false, false);
+    // `.columns X1 X2 ...` (the networked pages' own directive, not retail's)
+    // starts cell n of every following line at the n-th x, whatever the
+    // cells before it hold.
+    let mut columns: Vec<i32> = Vec::new();
     let mut y = TOP;
     for line in lines {
         let trimmed = line.trim();
         if trimmed.starts_with('.') {
-            for directive in trimmed.split_whitespace() {
+            let mut words = trimmed.split_whitespace();
+            while let Some(directive) = words.next() {
                 match directive {
+                    ".columns" => {
+                        columns.clear();
+                        let mut rest = words.clone().peekable();
+                        while let Some(x) = rest.peek().and_then(|w| w.parse::<i32>().ok()) {
+                            columns.push(x);
+                            rest.next();
+                            words.next();
+                        }
+                    }
                     ".center" => center = true,
                     ".left" => center = false,
                     ".header" => header = true,
@@ -592,7 +623,9 @@ fn clipboard(c: &mut Canvas, s: &BTreeMap<String, Sprite>, lines: &[String], fir
             LEFT
         };
         for (index, text) in cells.iter().enumerate() {
-            if index > 0 {
+            if let Some(column) = columns.get(index).filter(|_| cells.len() > 1) {
+                x = *column;
+            } else if index > 0 {
                 x = TABS.iter().copied().find(|stop| *stop > x).unwrap_or(x);
             }
             c.text(font, text, x, y, None);
@@ -643,6 +676,20 @@ mod tests {
         );
         assert_eq!(won[0][2], "WON");
         assert!(won[1].contains(&"MISSION OUTCOME : SUCCESS".to_string()));
+    }
+    #[test]
+    fn a_networked_flights_extra_pages_follow_the_first_and_single_player_has_none() {
+        let extra = vec![vec!["SCORES".to_owned()], vec!["RESULTS".to_owned()]];
+        let report = Report::default();
+        let with = pages_with(&report, &text(), None, &extra);
+        assert_eq!(with.len(), 7);
+        assert_eq!(with[0], [".center", ".header", "LOST"]);
+        assert_eq!(with[1], ["SCORES"]);
+        assert_eq!(with[2], ["RESULTS"]);
+        assert!(with[3].contains(&"MISSION OUTCOME : FAILURE".to_string()));
+        // The retail pages after them are the five-page debrief's, unchanged.
+        let plain = pages(&report, &text());
+        assert_eq!([&with[..1], &with[3..]].concat(), plain);
     }
     #[test]
     fn empty_cells_show_a_dash_and_missing_wingman_is_all_dashes() {
@@ -728,5 +775,216 @@ mod tests {
         let bare = pages_ended(&Report::default(), &empty, Some(&ended));
         assert!(bare[0].contains(&"MISSION ENDED".to_string()));
         assert!(bare[0].contains(&"The King ended the mission.".to_string()));
+    }
+}
+
+/// The multiplayer pages as they draw (stage F phase 2, slice F2-D): thirty
+/// aircraft and a dozen players, headless. The committed tests lay the pages
+/// out in a bundled font (the retail ones need the user's media), checking
+/// that every page stays on the clipboard's height; the ignored one draws
+/// them with the retail art of an imported profile and checks every cell
+/// against its column in the retail fonts.
+#[cfg(test)]
+mod net_pages {
+    use super::*;
+    use crate::net::debrief::{PER_PAGE, extra_pages, sample_results};
+
+    const WHITE: [u8; 3] = [255, 255, 255];
+    /// The clipboard paper's right edge, and the lowest line that fits.
+    const RIGHT: i32 = 581;
+    const BOTTOM: i32 = 466;
+
+    /// The retail fonts' places taken by the bundled font.
+    fn bundled_fonts() -> BTreeMap<String, Sprite> {
+        ["BODYFONT.PIC", "BOLDFONT.PIC", "HEADFONT.PIC"]
+            .into_iter()
+            .map(|name| (name.to_owned(), crate::menu::flat_font(WHITE)))
+            .collect()
+    }
+
+    /// Draws the page and returns the box of pixels it touched.
+    fn bounds(fonts: &BTreeMap<String, Sprite>, lines: &[String]) -> (i32, i32, i32, i32) {
+        let mut pixels = vec![0u8; WIDTH * HEIGHT * 4];
+        clipboard(&mut Canvas(&mut pixels), fonts, lines, false);
+        let (mut left, mut top, mut right, mut bottom) = (i32::MAX, i32::MAX, 0, 0);
+        for (n, px) in pixels.chunks_exact(4).enumerate() {
+            if px[3] > 0 {
+                let (x, y) = ((n % WIDTH) as i32, (n / WIDTH) as i32);
+                (left, top, right, bottom) = (left.min(x), top.min(y), right.max(x), bottom.max(y));
+            }
+        }
+        (left, top, right, bottom)
+    }
+
+    /// Every cell of a `.columns` page against its column: where the cell
+    /// ends must be left of the next column (a pixel to spare), and the last
+    /// one inside the paper. Returns what does not fit.
+    fn overflows(fonts: &BTreeMap<String, Sprite>, lines: &[String]) -> Vec<String> {
+        let (mut columns, mut bold) = (Vec::<i32>::new(), false);
+        let mut problems = Vec::new();
+        for line in lines {
+            if line.trim().starts_with('.') {
+                let mut words = line.split_whitespace();
+                while let Some(word) = words.next() {
+                    match word {
+                        ".columns" => {
+                            columns = words.clone().map_while(|w| w.parse().ok()).collect();
+                        }
+                        ".bold" => bold = true,
+                        "..bold" => bold = false,
+                        _ => {}
+                    }
+                }
+                continue;
+            }
+            let cells: Vec<&str> = line.split('\t').collect();
+            if cells.len() < 2 {
+                continue;
+            }
+            let font = &fonts[if bold { "BOLDFONT.PIC" } else { "BODYFONT.PIC" }];
+            for (n, cell) in cells.iter().enumerate() {
+                let end = columns[n] + text_width(font, cell.trim_end());
+                // A cell may run on over the empty ones after it.
+                let limit = (n + 1..cells.len())
+                    .find(|m| !cells[*m].is_empty())
+                    .map_or(RIGHT, |m| columns[m] - 1);
+                if end > limit {
+                    problems.push(format!("{cell:?} ends at {end}, past {limit}"));
+                }
+            }
+        }
+        problems
+    }
+
+    #[test]
+    fn thirty_aircraft_and_a_dozen_players_fit_the_clipboard_and_page_as_designed() {
+        let fonts = bundled_fonts();
+        let results = sample_results(15, 6);
+        let pages = extra_pages(&results);
+        // One page of scores (12 players) and two of results (15 and 15).
+        assert_eq!(pages.len(), 3);
+        let text = |page: &[String]| page.iter().filter(|l| !l.starts_with('.')).count();
+        assert!(pages[0].contains(&"SCORES".to_string()));
+        assert!(pages[1].contains(&"RESULTS : FRIENDLY SIDE".to_string()));
+        assert!(pages[2].contains(&"RESULTS : ENEMY SIDE".to_string()));
+        // A heading, a blank, the column heads and the fifteen rows.
+        assert_eq!(text(&pages[1]), 1 + 1 + 1 + PER_PAGE);
+        assert_eq!(text(&pages[2]), 1 + 1 + 1 + PER_PAGE);
+        for (n, page) in pages.iter().enumerate() {
+            let (left, top, _, bottom) = bounds(&fonts, page);
+            assert!(left >= LEFT, "page {n} starts at {left}");
+            assert!(top >= TOP - 4, "page {n} starts at {top}");
+            assert!(bottom <= BOTTOM, "page {n} runs to {bottom}");
+        }
+    }
+
+    #[test]
+    fn thirty_players_take_two_score_pages_and_the_sides_totals_come_last() {
+        let fonts = bundled_fonts();
+        let results = sample_results(15, 15);
+        let pages = extra_pages(&results);
+        // Two of scores (15 and 15), two of results.
+        assert_eq!(pages.len(), 4);
+        let totals = |page: &[String]| page.iter().filter(|l| l.contains(" SIDE\t")).count();
+        assert_eq!((totals(&pages[0]), totals(&pages[1])), (0, 2));
+        // Ranks run on over the pages.
+        assert!(pages[1].iter().any(|l| l.starts_with("16\t")));
+        for page in &pages {
+            assert!(bounds(&fonts, page).3 <= BOTTOM);
+        }
+    }
+
+    #[test]
+    fn a_lopsided_mission_pages_each_side_apart() {
+        // 20 against 10: two pages for the first side, one for the second.
+        let mut results = sample_results(20, 0);
+        results
+            .rows
+            .retain(|r| r.wing.side == tore_sim::ai::launch::Side::Friendly || r.plane < 30);
+        results.scores = None;
+        let pages = extra_pages(&results);
+        let titles: Vec<&str> = pages
+            .iter()
+            .map(|p| {
+                p.iter()
+                    .find(|l| l.starts_with("RESULTS"))
+                    .unwrap()
+                    .as_str()
+            })
+            .collect();
+        assert_eq!(
+            titles,
+            [
+                "RESULTS : FRIENDLY SIDE",
+                "RESULTS : FRIENDLY SIDE",
+                "RESULTS : ENEMY SIDE"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_column_starts_where_the_columns_directive_says_whatever_comes_before() {
+        let fonts = bundled_fonts();
+        let wide = ".columns 300 420".to_owned();
+        let alone = bounds(&fonts, &[wide.clone(), "A\tB".into()]);
+        let far = bounds(&fonts, &[wide, "AAAAAAAAAA\tB".into()]);
+        // The second cell sits at 420 either way: the right edge is the same.
+        assert_eq!(alone.2, far.2);
+    }
+
+    /// Draws the pages with the retail fonts and clipboard of an imported
+    /// profile, one picture each into `TORE_CREATOR_DUMP` when it is set, and
+    /// checks every cell against its column in the retail fonts:
+    ///
+    /// ```text
+    /// TORE_DATA_DIR=... TORE_CREATOR_DUMP=/some/folder cargo test --locked \
+    ///     -p tore-app debrief::net_pages::retail_art -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "needs an imported data profile (TORE_DATA_DIR)"]
+    fn retail_art_draws_the_multiplayer_pages() {
+        let data = crate::assets::data_directory().expect("data directory");
+        let assets = crate::assets::Assets::load(&data).expect("an imported pack");
+        for (name, per_side, humans) in [("even", 15, 6), ("lopsided", 20, 3), ("full", 15, 15)] {
+            let results = sample_results(per_side, humans);
+            let extra = extra_pages(&results);
+            let report = Report::sample();
+            let pages = 5 + extra.len();
+            for page in 0..pages {
+                let mut debrief = Debrief::networked(
+                    report.clone(),
+                    &assets.theater_resources,
+                    Some("DEBSCV.PIC"),
+                    None,
+                    &extra,
+                )
+                .unwrap();
+                debrief.page = page;
+                let mut shot = vec![0u8; WIDTH * HEIGHT * 4];
+                debrief.render(&mut shot);
+                if let Some(folder) = std::env::var_os("TORE_CREATOR_DUMP") {
+                    let folder = std::path::PathBuf::from(folder);
+                    std::fs::create_dir_all(&folder).unwrap();
+                    let mut out = format!("P6\n{WIDTH} {HEIGHT}\n255\n").into_bytes();
+                    for p in shot.chunks_exact(4) {
+                        out.extend_from_slice(&p[..3]);
+                    }
+                    std::fs::write(
+                        folder.join(format!("debrief-net-{name}-{}.ppm", page + 1)),
+                        out,
+                    )
+                    .unwrap();
+                }
+                // The pages after the first and before the retail ones.
+                if (1..=extra.len()).contains(&page) {
+                    let problems = overflows(&debrief.sprites, &extra[page - 1]);
+                    assert!(
+                        problems.is_empty(),
+                        "{name} page {}: {problems:?}",
+                        page + 1
+                    );
+                }
+            }
+        }
     }
 }

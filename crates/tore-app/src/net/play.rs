@@ -398,11 +398,20 @@ impl App {
     ) -> crate::AppResult<crate::debrief::Debrief> {
         let lobby = self.net.as_ref().and_then(|s| s.client.lobby());
         let ended = debrief::ending(debrief, cause, lobby);
+        // The results of the mission, when the host sent them (stage F
+        // phase 2): the SCORES and RESULTS pages after the first.
+        let extra = self
+            .net
+            .as_ref()
+            .and_then(|s| s.client.results())
+            .map(debrief::extra_pages)
+            .unwrap_or_default();
         crate::debrief::Debrief::networked(
             debrief::report(debrief),
             &self.theater_resources,
             None,
             ended.as_ref(),
+            &extra,
         )
     }
 
