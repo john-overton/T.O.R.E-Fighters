@@ -98,6 +98,7 @@ impl KitSource {
         let mut kit = Kit::new(&self.pics, &self.multiplayer, primary)?;
         if let Ok(dir) = crate::assets::data_directory() {
             kit.header = super::header::load(&dir);
+            kit.internet_header = super::header::load_title(&dir, super::header::Title::Internet);
         }
         Ok(kit)
     }
@@ -118,6 +119,8 @@ pub struct Kit {
     pub(crate) sprites: BTreeMap<String, Sprite>,
     /// The player's own title bar picture (`super::header`), when there is one.
     header: Option<Sprite>,
+    /// The player's own picture for the Internet Lobby's title bar.
+    internet_header: Option<Sprite>,
     /// How each retail font is drawn sharp (`crate::ui_text`), made on first
     /// use.
     text_styles: std::sync::OnceLock<Vec<(&'static str, Option<Style>)>>,
@@ -205,6 +208,7 @@ impl Kit {
         Ok(Self {
             sprites,
             header: None,
+            internet_header: None,
             text_styles: Default::default(),
         })
     }
@@ -215,6 +219,7 @@ impl Kit {
         Self {
             sprites,
             header: None,
+            internet_header: None,
             text_styles: Default::default(),
         }
     }
@@ -226,9 +231,19 @@ impl Kit {
         self
     }
 
-    /// The player's title bar picture, drawn over `NETIPX3`'s bar.
-    pub fn header(&self) -> Option<&Sprite> {
-        self.header.as_ref()
+    /// The player's title bar picture for `title`, when there is one.
+    pub fn title_picture(&self, title: super::header::Title) -> Option<&Sprite> {
+        match title {
+            super::header::Title::Direct => self.header.as_ref(),
+            super::header::Title::Internet => self.internet_header.as_ref(),
+        }
+    }
+
+    /// The kit with `header` as the player's Internet Lobby title picture.
+    #[cfg(test)]
+    pub fn with_internet_header(mut self, header: Sprite) -> Self {
+        self.internet_header = Some(header);
+        self
     }
 
     /// How `font`, one of the kit's own text fonts, is drawn sharp; none for

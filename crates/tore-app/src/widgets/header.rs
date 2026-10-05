@@ -16,6 +16,11 @@
 //! The player's file is their own, read at run time and never part of the
 //! repository or a package: a bar made from retail's carries retail's badge
 //! and stone texture (John, 2026-10-05, *opinionated*, requested).
+//!
+//! The Internet Lobby screen (slice I4) has its own words, INTERNET LOBBY
+//! ([`Title::Internet`], `assets/internet-lobby-title.png`, lettered the same
+//! way by `tools/build_title_lettering.py`), and its own player file,
+//! `InternetLobby.png`, which is read the same way.
 use super::png_read::decode_rows;
 use crate::menu::{Sprite, WIDTH};
 use std::path::Path;
@@ -23,6 +28,43 @@ use std::sync::OnceLock;
 
 /// The lettering the game ships: 564 by 36, to be fixed to the top right.
 const TITLE: &[u8] = include_bytes!("../../assets/direct-network-connection-title.png");
+/// The Internet Lobby's lettering, made the same way.
+const INTERNET_TITLE: &[u8] = include_bytes!("../../assets/internet-lobby-title.png");
+
+/// Which screen's words the title bar carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Title {
+    /// DIRECT NETWORK CONNECTION: the Direct Connection and lobby screens.
+    Direct,
+    /// INTERNET LOBBY: the Internet Lobby screen.
+    Internet,
+}
+
+impl Title {
+    /// The player's own file for this title, looked for in the data folder.
+    pub const fn file(self) -> &'static str {
+        match self {
+            Self::Direct => FILE,
+            Self::Internet => INTERNET_FILE,
+        }
+    }
+
+    /// The lettering the game ships for this title.
+    pub fn built_in(self) -> &'static Sprite {
+        match self {
+            Self::Direct => built_in(),
+            Self::Internet => {
+                static SPRITE: OnceLock<Sprite> = OnceLock::new();
+                SPRITE.get_or_init(|| {
+                    sprite(
+                        decode_rows(INTERNET_TITLE, WIDTH, ROWS)
+                            .expect("assets/internet-lobby-title.png is a PNG that fits the bar"),
+                    )
+                })
+            }
+        }
+    }
+}
 
 fn sprite(image: super::png_read::Image) -> Sprite {
     Sprite {
@@ -45,17 +87,24 @@ pub fn built_in() -> &'static Sprite {
     })
 }
 
-/// The file looked for in the data folder.
+/// The file looked for in the data folder for the Direct Connection title.
 pub const FILE: &str = "DirectNetworkConnection.png";
+/// The file looked for in the data folder for the Internet Lobby title.
+pub const INTERNET_FILE: &str = "InternetLobby.png";
 /// The rows of the picture that are used: `NETIPX3`'s title bar.
 pub const ROWS: usize = super::panel::TITLE_BAR_ROWS as usize;
 /// The largest file read, in bytes.
 const LARGEST: u64 = 16 << 20;
 
-/// The title bar in `dir`, or none when there is no such file or it cannot
-/// be used (the log says why, and the retail bar stays).
+/// The Direct Connection title bar in `dir`, or none when there is no such
+/// file or it cannot be used (the log says why, and the retail bar stays).
 pub fn load(dir: &Path) -> Option<Sprite> {
-    let path = dir.join(FILE);
+    load_title(dir, Title::Direct)
+}
+
+/// The player's picture for `title` in `dir`, as [`load`].
+pub fn load_title(dir: &Path, title: Title) -> Option<Sprite> {
+    let path = dir.join(title.file());
     let size = std::fs::metadata(&path).ok()?.len();
     let sprite = if size > LARGEST {
         Err(format!("it is {size} bytes, over {LARGEST}"))
@@ -173,5 +222,43 @@ mod tests {
         assert_eq!((columns[0], columns[columns.len() - 1]), (4, 445));
         assert_eq!((rows[0], rows[rows.len() - 1]), (7, 30));
         assert_eq!(WIDTH - title.width + columns[0], 80);
+    }
+
+    #[test]
+    fn each_screen_has_its_own_file_and_its_own_shipped_words() {
+        let dir = folder("internet");
+        std::fs::write(dir.join(FILE), rgba_png(300, 20)).unwrap();
+        // The Direct Connection file does not stand in for the Internet one.
+        assert!(load_title(&dir, Title::Direct).is_some());
+        assert!(load_title(&dir, Title::Internet).is_none());
+        std::fs::write(dir.join(INTERNET_FILE), rgba_png(200, 10)).unwrap();
+        let internet = load_title(&dir, Title::Internet).expect("a header");
+        assert_eq!((internet.width, internet.height), (200, 10));
+        assert_ne!(Title::Direct.file(), Title::Internet.file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_internet_lobby_lettering_is_lettering_fixed_to_the_top_right() {
+        let title = Title::Internet.built_in();
+        assert_eq!((title.width, title.height), (564, 36));
+        let clear: Vec<&[u8]> = title.rgba.chunks_exact(4).filter(|px| px[3] == 0).collect();
+        assert!(clear.len() > title.width * title.height * 3 / 4);
+        assert!(
+            clear.iter().all(|px| px[..3] == [0; 3]),
+            "colour under clear"
+        );
+        let ink = |x: usize, y: usize| title.rgba[(y * title.width + x) * 4 + 3] > 0;
+        let columns: Vec<usize> = (0..title.width)
+            .filter(|x| (0..title.height).any(|y| ink(*x, y)))
+            .collect();
+        let rows: Vec<usize> = (0..title.height)
+            .filter(|y| (0..title.width).any(|x| ink(x, *y)))
+            .collect();
+        // Starts where the other lettering does, x 80 on the canvas, and is
+        // the same height; INTERNET LOBBY is shorter than the other words.
+        assert_eq!(WIDTH - title.width + columns[0], 80);
+        assert_eq!((rows[0], rows[rows.len() - 1]), (7, 30));
+        assert!(columns[columns.len() - 1] < 445);
     }
 }

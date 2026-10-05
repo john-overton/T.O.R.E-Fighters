@@ -1,7 +1,8 @@
 """Regenerate the connection screens' title lettering, not retail data.
 
 `crates/tore-app/assets/direct-network-connection-title.png` is the words
-DIRECT NETWORK CONNECTION in Liberation Sans Regular (SIL Open Font License
+DIRECT NETWORK CONNECTION, and `internet-lobby-title.png` (the Internet Lobby
+screen, slice I4) the words INTERNET LOBBY, each in Liberation Sans Regular (SIL Open Font License
 1.1, a metric compatible open face) over a dark copy of the same words offset
 two pixels right and down, on a transparent background, 564 by 36 pixels. The
 game covers retail's own title lettering with the bar's texture and draws this
@@ -18,17 +19,22 @@ four times as large. The shadow is 31 grey and sharp. Every clear pixel is
 written `0, 0, 0, 0`, so no colour is hidden under it. Only ImageMagick 7 and
 Python are needed.
 
-Usage:
+Usage (the Direct Connection words unless `--title internet` is given):
 
     python3 tools/build_title_lettering.py \
+        /usr/share/fonts/liberation/LiberationSans-Regular.ttf
+    python3 tools/build_title_lettering.py --title internet \
         /usr/share/fonts/liberation/LiberationSans-Regular.ttf
 """
 import argparse
 from pathlib import Path
 import subprocess
 
-ASSET = Path(__file__).resolve().parents[1] / 'crates/tore-app/assets/direct-network-connection-title.png'
-TEXT = 'DIRECT NETWORK CONNECTION'
+ASSETS = Path(__file__).resolve().parents[1] / 'crates/tore-app/assets'
+TITLES = {
+    'direct': ('DIRECT NETWORK CONNECTION', ASSETS / 'direct-network-connection-title.png'),
+    'internet': ('INTERNET LOBBY', ASSETS / 'internet-lobby-title.png'),
+}
 WIDTH, HEIGHT = 564, 36
 SUPER = 4  # the picture is drawn this many times as large, then averaged down
 POINTS = 29
@@ -37,11 +43,11 @@ LEFT, TOP = 4.6, 8.0  # where the white's top left corner goes
 SHADOW = (31, 2, 2)  # grey, then the offset right and down in pixels
 
 
-def big_plane(font):
+def big_plane(font, text):
     """The words on a plane SUPER times as large, 8-bit coverage."""
     cmd = ['magick', '-size', f'{WIDTH * SUPER}x{HEIGHT * SUPER}', 'xc:black', '-font', str(font),
            '-pointsize', str(POINTS * SUPER), '-fill', 'white',
-           '-annotate', f'+{6 * SUPER}+{30 * SUPER}', TEXT, '-depth', '8', 'gray:-']
+           '-annotate', f'+{6 * SUPER}+{30 * SUPER}', text, '-depth', '8', 'gray:-']
     plane = subprocess.run(cmd, check=True, capture_output=True).stdout
     if len(plane) != WIDTH * HEIGHT * SUPER * SUPER:
         raise RuntimeError('unexpected ImageMagick output')
@@ -67,8 +73,10 @@ def coverage(plane, corner, dx=0, dy=0):
     return out
 
 
-def build(font):
-    plane = big_plane(font)
+def build(font, title='direct', out=None):
+    text_words, asset = TITLES[title]
+    asset = out or asset
+    plane = big_plane(font, text_words)
     wide = WIDTH * SUPER
     lit = [i for i, v in enumerate(plane) if v > 128]
     corner = (min(i % wide for i in lit), min(i // wide for i in lit))
@@ -85,14 +93,17 @@ def build(font):
         colour = (255 * ta + grey * sa * (1 - ta)) / alpha
         rgba += bytes((round(colour),) * 3 + (round(alpha * 255),))
     subprocess.run(['magick', '-size', f'{WIDTH}x{HEIGHT}', '-depth', '8', 'rgba:-',
-                    '-strip', f'PNG32:{ASSET}'], check=True, input=bytes(rgba))
-    print(f'{ASSET.name}: {WIDTH}x{HEIGHT}, {ASSET.stat().st_size} bytes')
+                    '-strip', f'PNG32:{asset}'], check=True, input=bytes(rgba))
+    print(f'{asset.name}: {WIDTH}x{HEIGHT}, {asset.stat().st_size} bytes')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('font', type=Path, help='LiberationSans-Regular.ttf')
-    build(parser.parse_args().font)
+    parser.add_argument('--title', choices=sorted(TITLES), default='direct', help='which words to letter')
+    parser.add_argument('--out', type=Path, help='write here instead of the shipped asset')
+    args = parser.parse_args()
+    build(args.font, args.title, args.out)
 
 
 if __name__ == '__main__':

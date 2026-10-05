@@ -114,6 +114,7 @@ fn cover_old_title(canvas: &mut Canvas, picture: &crate::menu::Sprite) {
 pub struct Background {
     base: &'static str,
     header: bool,
+    title: super::header::Title,
 }
 
 impl Background {
@@ -123,6 +124,7 @@ impl Background {
         Self {
             base,
             header: false,
+            title: super::header::Title::Direct,
         }
     }
     /// `NETIPX3` with its lettering covered and the title lettering, the
@@ -131,6 +133,16 @@ impl Background {
         Self {
             base: "NETIPX3",
             header: true,
+            title: super::header::Title::Direct,
+        }
+    }
+    /// The same, lettered INTERNET LOBBY (or with the player's own
+    /// `InternetLobby.png`): the Internet Lobby screen's.
+    pub fn internet_lobby() -> Self {
+        Self {
+            base: "NETIPX3",
+            header: true,
+            title: super::header::Title::Internet,
         }
     }
     pub fn draw(&self, canvas: &mut Canvas, kit: &Kit) {
@@ -138,7 +150,9 @@ impl Background {
         canvas.0[..WIDTH * HEIGHT * 4].copy_from_slice(&base.rgba[..WIDTH * HEIGHT * 4]);
         if self.header {
             cover_old_title(canvas, base);
-            let title = kit.header().unwrap_or_else(|| super::header::built_in());
+            let title = kit
+                .title_picture(self.title)
+                .unwrap_or_else(|| self.title.built_in());
             canvas.blit(
                 title,
                 (WIDTH as i32 - title.width as i32, 0),
@@ -324,6 +338,39 @@ mod tests {
         let mut pixels = blank();
         Background::single("NETIPX3").draw(&mut Canvas(&mut pixels), &kit);
         assert_eq!(at(&pixels, 50, 10), retail);
+    }
+
+    #[test]
+    fn the_internet_lobby_has_its_own_words_and_its_own_players_bar() {
+        let kit = kit();
+        let direct = {
+            let mut pixels = blank();
+            Background::direct_connection().draw(&mut Canvas(&mut pixels), &kit);
+            pixels
+        };
+        let internet = {
+            let mut pixels = blank();
+            Background::internet_lobby().draw(&mut Canvas(&mut pixels), &kit);
+            pixels
+        };
+        // Same photograph below the bar, other words in it.
+        assert_eq!(direct[77 * 640 * 4..], internet[77 * 640 * 4..]);
+        assert_ne!(direct[..77 * 640 * 4], internet[..77 * 640 * 4]);
+        // A player's Internet Lobby picture is for that screen only, and the
+        // Direct Connection's picture is for the other.
+        let bar = Sprite {
+            width: 640,
+            height: 77,
+            rgba: [200, 100, 50, 255].repeat(640 * 77),
+            glyphs: Vec::new(),
+        };
+        let with_internet = kit.with_internet_header(bar);
+        let mut pixels = blank();
+        Background::internet_lobby().draw(&mut Canvas(&mut pixels), &with_internet);
+        assert_eq!(at(&pixels, 50, 10), [200, 100, 50]);
+        let mut pixels = blank();
+        Background::direct_connection().draw(&mut Canvas(&mut pixels), &with_internet);
+        assert_ne!(at(&pixels, 50, 10), [200, 100, 50]);
     }
 
     #[test]
