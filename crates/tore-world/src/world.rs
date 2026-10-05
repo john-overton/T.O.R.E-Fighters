@@ -53,6 +53,8 @@ pub mod plane;
 #[cfg(test)]
 mod plane_tests;
 #[cfg(test)]
+mod radio_checkpoint_tests;
+#[cfg(test)]
 mod readout_tests;
 #[cfg(test)]
 mod records_checkpoint_tests;
