@@ -281,8 +281,10 @@ the same in single player, which keeps AI wingmen honest.
 the full link with shared tracks and cues. Older aircraft get assignments by
 voice only, with bearing and range, and the pilot finds the target on their own
 radar or by eye. A mixed flight shares what the least capable member can
-receive, per member. No era or capability table exists yet: the twelve ported
-aircraft need one, proposed by an agent and approved by John.
+receive, per member. *Designed (stage G, 2026-10-05):* the
+[data link guide](DATALINK.md#which-aircraft-can-share-it) proposes three
+tiers (Voice, Flight, Network) and a row for each of the twelve ported
+aircraft, awaiting John's approval.
 
 **Rates.** The shared track picture updates at 4 Hz. Locks and assignments are
 sent immediately.
@@ -292,6 +294,17 @@ the imported voice recordings, such as "Two, engage bandit, bearing 270, 15."
 Bearing and range are measured from the receiving aircraft. The order is heard
 even with a data link, lands in the replay's comms record, and behaves the same
 for human and AI wingmen. All data link events are recorded in the replay.
+
+*Designed (stage G, 2026-10-05), not built:* the [data link guide](DATALINK.md)
+says what the player sees and hears, which aircraft share what, how the AI
+uses the picture, the wing and battle nets, and what changes in single player;
+the code design and its slices are in the
+[architecture guide](ARCHITECTURE.md#flight-data-link) and the bytes in the
+[wire protocol](formats/net-protocol.md#data-link-stage-g). Its choices are agent
+proposals awaiting John's review: the tier table, the call's words ("Two,
+attack bandit, bearing 270, 15 miles, angels 20": there is no "engage"
+recording), the sort order (Alt+A), the battle net and its monitor key
+(Alt+N, off by default), and each single-player change.
 
 ## Sim rules in multiplayer
 

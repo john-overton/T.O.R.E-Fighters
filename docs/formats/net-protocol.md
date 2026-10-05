@@ -35,6 +35,7 @@ limits a player notices are in the [netcode numbers](../MULTIPLAYER.md#netcode-n
 - [Inputs](#inputs)
 - [Snapshots](#snapshots)
 - [Events](#events)
+- [Data link (stage G)](#data-link-stage-g)
 - [Quantization](#quantization)
 - [What the game's sections settled](#what-the-games-sections-settled)
 - [Limits](#limits)
@@ -683,6 +684,52 @@ snapshot's tick.
 Recording stems, weapon and sound names are sent by their index in the
 connection's name table (the Names message), which the host fills before the
 first use. Radio text is sent as it is: the client never composes calls.
+
+## Data link (stage G)
+
+*Designed 2026-10-05, not built* ([architecture](../ARCHITECTURE.md#flight-data-link),
+[guide](../DATALINK.md)). What the flight data link adds to the wire, all in
+the next protocol version the lead hands out (slice G7). Every choice is an
+agent decision unless credited. Nothing of it reaches a client that a human
+in the same slot would not see: each part is the seat's own share, computed
+by the host.
+
+**Readout parts.** Two groups join the [cockpit readout](#cockpit-readout),
+coded like the others (a changed bit each, against the acknowledged
+baseline):
+
+| Part | Place | Kind | Fields |
+| --- | --- | --- | --- |
+| Link | Right after the header, so an assignment is never the part that waits for room | Scalar (signed varints, as the other scalar groups) | The plane's tier (Voice 0, Flight 1, Network 2); the assignment by link: target id plus one (0 for none), the assigner's plane id, acknowledged; the newest sort warning: target id plus one, the other plane's id; whether the seat monitors the battle net |
+| Link tracks | After the contacts | List, keyed by target id, at most 24 | Position (whole feet) predicted from velocity (1/4 ft/s), as the contacts; slow fields: source (own, flight, network: 2 bits), lockers (a mask of the flight's member numbers, 8 bits), locked over the battle net (a presence bit and the plane id), assigned to (a mask, 8 bits) |
+| Link mates | After the link tracks | List, keyed by plane id, at most 7 | Slow fields only: member number (3 bits), fuel (normal, joker, bingo, fumes, out: 3 bits), weapons (missiles, guns only, Winchester: 2 bits), damage (none, light, heavy: 2 bits) |
+
+Tracks and mates change only on the host's publishing ticks (every thirtieth),
+so between them the parts send nothing; locks and assignments change the
+masks and the Link scalar the tick they happen. A Voice-tier plane's parts
+are empty but for its tier.
+
+**Event.** One new event code, after Sound:
+
+| Event | For | Fields |
+| --- | --- | --- |
+| Link | the seat, about members of its flight | What (assigned, cleared, acknowledged, lock, unlock, sort warning: 3 bits), the plane (varint), the target (varint), and for assigned the assigner (varint) and the delivery (link or voice, 1 bit) |
+
+Events repeat until acknowledged, so a lock or an assignment reaches the
+client in the next snapshot and is never lost; the readout carries the state
+it leaves. The sort warning's HUD line and beep are ordinary Message and
+Radio events. A captured `Link` event becomes a replay's `datalink` event when
+the capture converts.
+
+**Radio events** gain the call's net (1 bit: wing 0, battle 1), so the client
+can show `Net` before a battle-net speaker.
+
+**Inputs.** The wing order coding gains Sort (code 13, after Land at selected
+airport) and the commands gain Battle net (toggle monitoring, no fields).
+
+**Room.** Estimated at under 40 bytes a snapshot on average for a busy seat
+and about 1 KB/s at worst while 24 tracks move; G7 measures it on the 15
+against 15 mission against the readout's 200-byte share.
 
 ## Quantization
 
