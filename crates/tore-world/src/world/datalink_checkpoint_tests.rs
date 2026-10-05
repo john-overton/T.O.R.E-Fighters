@@ -6,9 +6,16 @@
 //! own round trips are beside the types.
 
 use super::checkpoint_scenarios::{self, Scenario};
-use super::{TickOutput, World};
+use super::crowd::*;
+use super::{SeatId, SeatInput, TickOutput, World};
 use crate::checkpoint::Section;
 use crate::datalink::{DataLink, PUBLISH_TICKS};
+use crate::seats::SeatCommand;
+use tore_input::{PilotCommand, PilotInput, Switch};
+use tore_sim::{
+    ai::{weapon_service::StoreCapability, wing::PlayerOrder},
+    combat::live::Command,
+};
 
 const LINK: [Section; 2] = [Section::DataLink, Section::Score];
 
@@ -204,4 +211,103 @@ fn damaged_link_sections_are_refused_without_a_panic() {
         }
     }
     assert!(refused > 0, "no damaged section was refused");
+}
+
+/// The assignment tests' fight (`datalink_assign_tests`): the friendly wing is
+/// the lead, a second human and two AI wingmen, armed the way a real mission
+/// arms them; the lead's radar is on at tick 10, it designates an enemy at 40
+/// and orders its wing to engage that target at 60. The same script, kept
+/// here so these tests need nothing of that file.
+fn assigning_mission() -> World {
+    let mut world = ai_mission();
+    let wings = world.ai_wings.as_mut().unwrap();
+    for id in 1..=7 {
+        let stations = wings.mission_mut().actor_mut(id).unwrap().stations_mut();
+        stations[0].guided = false;
+        stations[0].capability = StoreCapability::GUN;
+        stations[1].guided = true;
+        stations[1].capability = StoreCapability::AIR_TO_AIR_MISSILE;
+    }
+    world.take_plane(SeatId(1), F_HUMAN).unwrap();
+    world
+}
+
+fn assigning_step(world: &mut World, tick: usize, out: &mut TickOutput) {
+    let inputs = inputs(world, |seat| {
+        let mut pilot = PilotInput::default();
+        let mut commands = Vec::new();
+        if seat == SeatId(0) {
+            if tick == 10 {
+                pilot.commands.push(PilotCommand::Set(Switch::Radar, true));
+            }
+            if tick == 40 {
+                commands.push(SeatCommand::Combat(Command::DesignateTarget(E_AI[0].0)));
+            }
+            if tick == 60 {
+                commands.push(SeatCommand::WingOrder(PlayerOrder::EngageMyTarget));
+            }
+        }
+        SeatInput {
+            pilot,
+            commands,
+            ..SeatInput::default()
+        }
+    });
+    world.step(&inputs, out).unwrap();
+}
+
+/// A live assignment at the checkpoint tick, once just given and once after a
+/// wingman has acknowledged it: the table restores into a fresh world, and
+/// into a twin whose link was wiped, which then steps on with the same table
+/// (the acknowledgement included) for 120 steps.
+#[test]
+fn a_live_assignment_restores_and_steps_on_identically() {
+    let mut world = assigning_mission();
+    let mut out = TickOutput::default();
+    let mut tick = 0;
+    let mut checkpoints = Vec::new();
+    // Just after the order, and the first tick a wingman has acknowledged.
+    while checkpoints.len() < 2 && tick < 3_000 {
+        assigning_step(&mut world, tick, &mut out);
+        tick += 1;
+        let held = world.datalink.assignments();
+        if checkpoints.is_empty() && tick == 62 {
+            assert!(!held.is_empty(), "no assignment was given");
+            assert!(held.values().all(|a| !a.acknowledged));
+            checkpoints.push(tick);
+        } else if checkpoints.len() == 1 && held.values().any(|a| a.acknowledged) {
+            checkpoints.push(tick);
+        }
+    }
+    assert_eq!(
+        checkpoints.len(),
+        2,
+        "no wingman acknowledged by tick {tick}"
+    );
+
+    for at in checkpoints {
+        let mut a = assigning_mission();
+        let mut b = assigning_mission();
+        let mut out = TickOutput::default();
+        for n in 0..at {
+            assigning_step(&mut a, n, &mut out);
+            assigning_step(&mut b, n, &mut out);
+        }
+        assert!(!a.datalink.assignments().is_empty(), "tick {at}");
+        let bytes = a.checkpoint_sections(&LINK).unwrap();
+
+        let mut fresh = assigning_mission();
+        assert_eq!(fresh.restore_sections(&bytes).unwrap(), LINK);
+        same_link(&a.datalink, &fresh.datalink, &format!("fresh at {at}"));
+
+        b.datalink = DataLink::default();
+        assert_eq!(b.restore_sections(&bytes).unwrap(), LINK);
+        same_link(&a.datalink, &b.datalink, &format!("twin at {at}"));
+        let mut out = TickOutput::default();
+        for n in at..at + 120 {
+            assigning_step(&mut a, n, &mut out);
+            assigning_step(&mut b, n, &mut out);
+            same_link(&a.datalink, &b.datalink, &format!("step {n}"));
+        }
+    }
 }
