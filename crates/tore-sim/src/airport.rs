@@ -1213,3 +1213,7 @@ mod tests {
         assert!(service.guidance(&s, p).is_some());
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "airport_checkpoint.rs"]
+mod checkpoint;
