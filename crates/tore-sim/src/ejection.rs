@@ -638,3 +638,7 @@ mod tests {
         }
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "ejection_checkpoint.rs"]
+mod checkpoint;

@@ -1917,3 +1917,7 @@ mod tests {
         assert_eq!(s.phase(), Phase::LineUp);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "airfield_checkpoint.rs"]
+mod checkpoint;

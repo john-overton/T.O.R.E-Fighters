@@ -360,3 +360,7 @@ mod tests {
         assert!(s.motion(1, 1, own(), |_| 0.).is_some());
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "incoming_fire_checkpoint.rs"]
+mod checkpoint;

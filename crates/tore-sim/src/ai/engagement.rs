@@ -1363,3 +1363,7 @@ mod tests {
         );
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "engagement_checkpoint.rs"]
+mod checkpoint;

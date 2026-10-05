@@ -595,3 +595,7 @@ mod tests {
         );
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "opportunity_checkpoint.rs"]
+mod checkpoint;

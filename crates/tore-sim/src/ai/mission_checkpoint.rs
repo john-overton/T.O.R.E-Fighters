@@ -1,15 +1,375 @@
-//! The coders of the AI mission and its actors.
+//! The coders of the AI mission and its actors (docs/formats/checkpoint.md,
+//! stage H slice H4): every AI aircraft with its flight, controller,
+//! awareness, sensors, stores, orders, airfield sequence and escape monitor;
+//! the wings' leaders, humans, assignments, opportunities and routes.
 //!
-//! Stage H slice H4 (AI mission) fills this in; until then it reports itself not
-//! covered (docs/ARCHITECTURE.md, "How stage H lands").
+//! `AiMission` and `AiActor` are coded as new values, since a handoff adds
+//! and removes actors; the AI wings section (slice H6) restores them whole.
+//! The controller (slice H5), the sensors and threat service (slice H1) and
+//! the types in the sibling `*_checkpoint.rs` files are called, not coded
+//! here.
+//!
+//! What is left out, by class:
+//!
+//! - **Why-records:** `AiMission::journal` (the message journal, drained by
+//!   the host, which no decision reads); `AiActor::trace` (the latest step's
+//!   explanation, started afresh on every step) and `AiActor::journal_memory`
+//!   (which journal lines were already written; it only gates journal text).
+//! - **Per-tick scratch:** `AiMission::missiles` and `AiMission::gun_rounds`
+//!   (proof at the skip), `AiActor::adapter` and `AiActor::last_input` (proofs
+//!   at the skip).
+//!
+//! Every other field is coded, including the ones that look like caches:
+//! `last_defense`, `pending_threats`, `pending_events`, `device_schedule`,
+//! `observed_attacks`, `ignored_attack_ids` and `received_emitters` are all
+//! read by a later tick.
+//!
+//! Copied records are shared records: the runway views of an actor (its home
+//! runway, its landing order, its ground start and its airfield sequence)
+//! and the weapon record of each of its guns.
 
-use crate::checkpoint::{Checkpoint, CheckpointError, Loader, Saver, not_covered};
+use super::{
+    AiActor, AiMission, EquipmentFaults, HumanMember, JournalMemory, ObservedAttack, StationSpec,
+    WingLeader,
+};
+use crate::ai::airfield::{LandingOrder, RunwayView};
+use crate::ai::thought::{ActorTrace, Journal};
+use crate::ai::weapon_service::{Delay, ProjectilePacing};
+use crate::checkpoint::{
+    Checkpoint, CheckpointError, Loader, Saver, invalid, load_flight, save_flight,
+};
+use std::collections::BTreeMap;
+use tore_formats::weapons::Weapon;
 
-impl Checkpoint for super::AiMission {
-    fn save(&self, _: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
-        not_covered("ai::mission::AiMission")
+impl Checkpoint for Delay {
+    fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
+        self.quarter_count().save(s, None)
     }
-    fn load(_: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
-        not_covered("ai::mission::AiMission")
+    fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
+        Ok(Delay::quarters(u32::load(l, None)?))
     }
 }
+
+crate::checkpoint_struct!(ProjectilePacing {
+    burst_count,
+    burst_interval,
+    reload,
+    startup,
+});
+
+crate::checkpoint_struct!(StationSpec {
+    station,
+    guided,
+    capability,
+    store,
+    debit,
+    external_round_lbs,
+    projectile_count,
+    employment_limit_deg,
+    damage_vs_category,
+    store_speed,
+    tracking_delay,
+    pacing,
+    maximum_range_ft,
+    minimum_range_ft,
+    requires_radar,
+    requires_sensor,
+    employment_zone,
+    mount,
+});
+
+crate::checkpoint_struct!(ObservedAttack {
+    report,
+    bearing_world_deg,
+    observed_tick,
+    event_id,
+});
+
+crate::checkpoint_struct!(EquipmentFaults {
+    radar,
+    infrared,
+    visual,
+    rwr,
+});
+
+crate::checkpoint_struct!(HumanMember {
+    id,
+    side,
+    wing,
+    member,
+    pilot_alive,
+});
+
+crate::checkpoint_struct!(WingLeader {
+    side,
+    wing,
+    leader,
+    reformed,
+});
+
+/// An optional runway view, the view itself a shared record.
+fn save_runway(s: &mut Saver, runway: &Option<RunwayView>) -> Result<(), CheckpointError> {
+    s.writer().write_bool(runway.is_some());
+    match runway {
+        Some(view) => s.shared(view),
+        None => Ok(()),
+    }
+}
+
+fn load_runway(l: &mut Loader<'_>) -> Result<Option<RunwayView>, CheckpointError> {
+    if l.reader().read_bool()? {
+        Ok(Some(l.shared()?))
+    } else {
+        Ok(None)
+    }
+}
+
+/// An optional landing order: its runway view a shared record, then its
+/// reason.
+fn save_landing_order(s: &mut Saver, order: &Option<LandingOrder>) -> Result<(), CheckpointError> {
+    s.writer().write_bool(order.is_some());
+    if let Some(LandingOrder { runway, reason }) = order {
+        s.shared(runway)?;
+        reason.save(s, None)?;
+    }
+    Ok(())
+}
+
+fn load_landing_order(l: &mut Loader<'_>) -> Result<Option<LandingOrder>, CheckpointError> {
+    if !l.reader().read_bool()? {
+        return Ok(None);
+    }
+    let runway = l.shared()?;
+    let reason = Checkpoint::load(l, None)?;
+    Ok(Some(LandingOrder { runway, reason }))
+}
+
+/// An actor's gun records, by station: each weapon a shared record.
+fn save_guns(s: &mut Saver, guns: &BTreeMap<u8, Weapon>) -> Result<(), CheckpointError> {
+    s.count(guns.len());
+    for (station, weapon) in guns {
+        station.save(s, None)?;
+        s.shared(weapon)?;
+    }
+    Ok(())
+}
+
+fn load_guns(l: &mut Loader<'_>) -> Result<BTreeMap<u8, Weapon>, CheckpointError> {
+    let count = l.count()?;
+    let mut guns = BTreeMap::new();
+    for _ in 0..count {
+        let station = u8::load(l, None)?;
+        let weapon = l.shared()?;
+        if guns.insert(station, weapon).is_some() {
+            return invalid(format!("gun station {station} coded twice"));
+        }
+    }
+    Ok(guns)
+}
+
+impl Checkpoint for AiActor {
+    fn save(&self, s: &mut Saver, _: Option<&Self>) -> Result<(), CheckpointError> {
+        // `adapter`: per-tick scratch and a report. Its `last_requested` is
+        // written by `ControlAdapter::controls` for tests and reporting and
+        // read by nothing in the simulation. Its `gun_aim` is cleared by
+        // `step_actor` before anything else and set again before the only
+        // call to `controls`, in the same step.
+        //
+        // `last_input`: the controls the actor flew last, kept for the
+        // formation trace rows and the replay recorder's control display.
+        // Nothing in the simulation reads it, and every step that flies
+        // overwrites it, so a restored actor reports neutral controls until
+        // its next flown step.
+        //
+        // `trace` and `journal_memory`: why-records.
+        let AiActor {
+            identity,
+            controller,
+            adapter: _,
+            flight,
+            sensors,
+            awareness,
+            search_target,
+            missile_threats,
+            defense_state,
+            last_defense,
+            incoming_fire,
+            lookout,
+            fire_defending,
+            assignment,
+            mission_policy,
+            observed_attacks,
+            neutral,
+            formation_order_tick,
+            ignored_attack_ids,
+            received_emitters,
+            equipment,
+            damage_return,
+            stations,
+            guns,
+            gun_target,
+            dispensers,
+            wing_slot,
+            home_airport,
+            home_runway,
+            ground_start,
+            landing_order,
+            bugged_out,
+            join_cancelled,
+            avoiding,
+            airfield,
+            route_random,
+            pending_threats,
+            pending_events,
+            device_schedule,
+            activity,
+            last_input: _,
+            alive,
+            dummy,
+            escape_monitor,
+            trace: _,
+            journal_memory: _,
+        } = self;
+        identity.save(s, None)?;
+        controller.save(s, None)?;
+        save_flight(s, flight, identity.aircraft)?;
+        sensors.save(s, None)?;
+        awareness.save(s, None)?;
+        search_target.save(s, None)?;
+        missile_threats.save(s, None)?;
+        defense_state.save(s, None)?;
+        last_defense.save(s, None)?;
+        incoming_fire.save(s, None)?;
+        lookout.save(s, None)?;
+        fire_defending.save(s, None)?;
+        assignment.save(s, None)?;
+        mission_policy.save(s, None)?;
+        observed_attacks.save(s, None)?;
+        neutral.save(s, None)?;
+        formation_order_tick.save(s, None)?;
+        ignored_attack_ids.save(s, None)?;
+        received_emitters.save(s, None)?;
+        equipment.save(s, None)?;
+        damage_return.save(s, None)?;
+        stations.save(s, None)?;
+        save_guns(s, guns)?;
+        gun_target.save(s, None)?;
+        dispensers.save(s, None)?;
+        wing_slot.save(s, None)?;
+        home_airport.save(s, None)?;
+        save_runway(s, home_runway)?;
+        ground_start.save(s, None)?;
+        save_landing_order(s, landing_order)?;
+        bugged_out.save(s, None)?;
+        join_cancelled.save(s, None)?;
+        avoiding.save(s, None)?;
+        airfield.save(s, None)?;
+        route_random.save(s, None)?;
+        pending_threats.save(s, None)?;
+        pending_events.save(s, None)?;
+        device_schedule.save(s, None)?;
+        activity.save(s, None)?;
+        alive.save(s, None)?;
+        dummy.save(s, None)?;
+        escape_monitor.save(s, None)
+    }
+
+    fn load(l: &mut Loader<'_>, _: Option<&Self>) -> Result<Self, CheckpointError> {
+        let identity: crate::ai::controller::ActorIdentity = Checkpoint::load(l, None)?;
+        let controller = Checkpoint::load(l, None)?;
+        let (aircraft, flight) = load_flight(l)?;
+        if aircraft != identity.aircraft {
+            return invalid(format!(
+                "an actor of {:?} flies a {aircraft:?}",
+                identity.aircraft
+            ));
+        }
+        Ok(AiActor {
+            identity,
+            controller,
+            adapter: crate::ai::steering_adapter::ControlAdapter::new(),
+            flight,
+            sensors: Checkpoint::load(l, None)?,
+            awareness: Checkpoint::load(l, None)?,
+            search_target: Checkpoint::load(l, None)?,
+            missile_threats: Checkpoint::load(l, None)?,
+            defense_state: Checkpoint::load(l, None)?,
+            last_defense: Checkpoint::load(l, None)?,
+            incoming_fire: Checkpoint::load(l, None)?,
+            lookout: Checkpoint::load(l, None)?,
+            fire_defending: Checkpoint::load(l, None)?,
+            assignment: Checkpoint::load(l, None)?,
+            mission_policy: Checkpoint::load(l, None)?,
+            observed_attacks: Checkpoint::load(l, None)?,
+            neutral: Checkpoint::load(l, None)?,
+            formation_order_tick: Checkpoint::load(l, None)?,
+            ignored_attack_ids: Checkpoint::load(l, None)?,
+            received_emitters: Checkpoint::load(l, None)?,
+            equipment: Checkpoint::load(l, None)?,
+            damage_return: Checkpoint::load(l, None)?,
+            stations: Checkpoint::load(l, None)?,
+            guns: load_guns(l)?,
+            gun_target: Checkpoint::load(l, None)?,
+            dispensers: Checkpoint::load(l, None)?,
+            wing_slot: Checkpoint::load(l, None)?,
+            home_airport: Checkpoint::load(l, None)?,
+            home_runway: load_runway(l)?,
+            ground_start: Checkpoint::load(l, None)?,
+            landing_order: load_landing_order(l)?,
+            bugged_out: Checkpoint::load(l, None)?,
+            join_cancelled: Checkpoint::load(l, None)?,
+            avoiding: Checkpoint::load(l, None)?,
+            airfield: Checkpoint::load(l, None)?,
+            route_random: Checkpoint::load(l, None)?,
+            pending_threats: Checkpoint::load(l, None)?,
+            pending_events: Checkpoint::load(l, None)?,
+            device_schedule: Checkpoint::load(l, None)?,
+            activity: Checkpoint::load(l, None)?,
+            last_input: tore_input::PilotInput::default(),
+            alive: Checkpoint::load(l, None)?,
+            dummy: Checkpoint::load(l, None)?,
+            escape_monitor: Checkpoint::load(l, None)?,
+            trace: ActorTrace::default(),
+            journal_memory: JournalMemory::default(),
+        })
+    }
+}
+
+// `missiles` and `gun_rounds`: per-tick scratch. The host hands the mission
+// the complete lifecycle snapshot with `set_missiles` and `set_gun_rounds`
+// before every step (`AiWings::step` sets both on every call, empty when
+// there is nothing in flight, and the golden fixtures set them every tick),
+// and the only reads are inside that step (`update_defense`). A restored
+// mission starts with none and the next tick's host sets them first. A test
+// that sets them once and steps many times must set them again after a
+// restore.
+//
+// `journal`: why-record. Nothing reads the message journal; the host drains
+// it for the recorder.
+crate::checkpoint_struct!(AiMission {
+    actors,
+    tick,
+    wing_control,
+    formation,
+    horizontal_spacing_ft,
+    vertical_spacing_ft,
+    humans,
+    leaders,
+    humans_flying,
+    human_assignments,
+    must_survive,
+    pending_attack_reports,
+    priority_landing,
+    hostiles_seen,
+    airborne_seen,
+    opportunities,
+    routes,
+} skip {
+    missiles = Vec::new(),
+    gun_rounds = Vec::new(),
+    journal = Journal::default(),
+});
+
+#[cfg(test)]
+#[path = "mission_checkpoint_tests.rs"]
+mod tests;

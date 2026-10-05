@@ -615,3 +615,7 @@ mod tests {
         assert!(low < 5100 && high > 9900, "{low}..{high}");
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "route_checkpoint.rs"]
+mod checkpoint;

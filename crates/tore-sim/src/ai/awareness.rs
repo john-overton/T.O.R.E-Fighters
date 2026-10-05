@@ -606,3 +606,7 @@ mod tests {
         assert!(memory.select_target(Some(2)).is_none());
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "awareness_checkpoint.rs"]
+mod checkpoint;

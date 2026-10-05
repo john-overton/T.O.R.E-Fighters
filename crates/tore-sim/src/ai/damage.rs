@@ -249,3 +249,7 @@ mod tests {
         }
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "damage_checkpoint.rs"]
+mod checkpoint;
