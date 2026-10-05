@@ -219,8 +219,9 @@ def drive_fight(d: Drive) -> None:
     server.forbid(NET_BAD, "a network problem")
     log = server_log(d)
     log_must(
-        d, log, r"joined as Bot1", r"joined as Bot2", r"seat \d+ Bot1 \(plane \d+\) left: left",
-        r"seat \d+ Bot2 \(plane \d+\) left: left", r"mission ended: everyone left", forbid=NET_BAD,
+        # A bot shot down before the end leaves from the lobby, with no plane.
+        d, log, r"joined as Bot1", r"joined as Bot2", r"Bot1( \(plane \d+\))? left: left",
+        r"Bot2( \(plane \d+\))? left: left", r"mission ended: everyone left", forbid=NET_BAD,
     )
     if len(re.findall(r"^Bot\d: .* bursts [1-9]\d*,", bots.text(), re.M)) == 0:
         d.problem("neither bot fired a burst in 75 seconds with the enemy 5 nm away")
