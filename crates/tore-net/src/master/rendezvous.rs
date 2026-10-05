@@ -49,7 +49,7 @@ use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
-use super::candidate::{Candidate, MappingType, canonical};
+use super::candidate::{Candidate, CandidateKind, MAX_CANDIDATES, MappingType, canonical};
 use super::local::{
     MasterLookup, host_candidates, own_address_toward, parse_master, probe_address,
 };
@@ -233,6 +233,10 @@ pub struct Rendezvous {
     /// The one listed with now.
     current: usize,
     candidates: Vec<Candidate>,
+    /// The outside address a router's port mapping gave, kept apart from
+    /// `candidates` so a new set of the host's own addresses does not lose
+    /// it ([`Rendezvous::set_mapped`]).
+    mapped: Option<SocketAddr>,
     wanted: bool,
     nonce: u64,
     listing: Option<Listing>,
@@ -276,6 +280,7 @@ impl Rendezvous {
             masters: Vec::new(),
             current: 0,
             candidates: Vec::new(),
+            mapped: None,
             wanted: false,
             nonce,
             listing: None,
@@ -354,6 +359,7 @@ impl Rendezvous {
         }
         let before = self.masters.get(self.current).copied();
         self.candidates = candidates;
+        self.apply_mapped();
         self.masters = unique;
         self.current = before
             .and_then(|before| self.masters.iter().position(|m| *m == before))
@@ -369,6 +375,45 @@ impl Rendezvous {
         if before.is_none() {
             self.next_ask = self.next_ask.max(now);
             self.mapping = Mapping::new(self.mapping.result, now);
+        }
+    }
+
+    /// Tells the listing the outside address a router's port mapping gave
+    /// (slice J4b), or `None` when there is none any more (the mapping was
+    /// removed or lost). It goes to the master as a Mapped candidate beside
+    /// the host's own ([`Rendezvous::set_masters`] keeps it when the own
+    /// ones change). A change raises the change counter and sends a
+    /// Heartbeat within 5 seconds, as a summary change does; the same
+    /// address again changes nothing. *Agent decision:* only the IPv4
+    /// mapping is a Mapped candidate, since an IPv6 address is already the
+    /// GlobalIpv6 candidate.
+    pub fn set_mapped(&mut self, mapped: Option<SocketAddr>, _now: Duration) {
+        let mapped = mapped.map(canonical);
+        if mapped == self.mapped {
+            return;
+        }
+        self.mapped = mapped;
+        self.apply_mapped();
+        if self.listing.is_some() {
+            self.change = self.change.wrapping_add(1);
+            self.changed = true;
+        }
+    }
+
+    /// The candidates the listing carries.
+    pub fn candidates(&self) -> &[Candidate] {
+        &self.candidates
+    }
+
+    /// Puts the mapped address among the candidates, replacing any Mapped
+    /// one, and never beyond [`MAX_CANDIDATES`].
+    fn apply_mapped(&mut self) {
+        self.candidates.retain(|c| c.kind != CandidateKind::Mapped);
+        if let Some(address) = self.mapped
+            && self.candidates.len() < MAX_CANDIDATES
+        {
+            self.candidates
+                .push(Candidate::new(CandidateKind::Mapped, address));
         }
     }
 
@@ -867,6 +912,8 @@ impl Rendezvous {
         let own = self
             .candidates
             .iter()
+            // A router's mapped address is not the machine's own.
+            .filter(|c| c.kind != CandidateKind::Mapped)
             .map(|c| c.address)
             .find(|a| a.is_ipv4() == from.is_ipv4());
         let result = MappingType::from_probes(own, main, second);
@@ -1080,6 +1127,12 @@ impl HostListing {
     /// See [`Rendezvous::set_listed`].
     pub fn set_listed(&mut self, listed: bool, now: Duration) {
         self.rendezvous.set_listed(listed, now);
+    }
+
+    /// See [`Rendezvous::set_mapped`]; kept across the master lookups that
+    /// rebuild the host's own candidates.
+    pub fn set_mapped(&mut self, mapped: Option<SocketAddr>, now: Duration) {
+        self.rendezvous.set_mapped(mapped, now);
     }
 
     /// The lookup, the summary when it is wanted, and the rendezvous's

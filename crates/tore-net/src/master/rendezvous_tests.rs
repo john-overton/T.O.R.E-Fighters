@@ -943,3 +943,120 @@ fn a_meet_is_punched_and_acknowledged_only_while_listed() {
     assert_eq!(rig.rendezvous.counters.punches, 10);
     assert_eq!(rig.master.count(MasterKind::MeetAck), 2);
 }
+
+/// The candidates the host sent in its latest Register or Heartbeat.
+fn sent_candidates(master: &ScriptedMaster) -> Vec<Candidate> {
+    master
+        .log
+        .iter()
+        .rev()
+        .find_map(|(_, _, p)| match p {
+            MasterPacket::Register(r) => Some(r.candidates.clone()),
+            MasterPacket::Heartbeat(h) => Some(h.candidates.clone()),
+            _ => None,
+        })
+        .expect("the host sent a listing")
+}
+
+/// Slice J4b: the address a router's port mapping gave goes to the master
+/// as a Mapped candidate, in the Register and every Heartbeat; a change
+/// reaches the master within 5 seconds and raises the change counter, the
+/// same address again does not, and taking it away removes it.
+#[test]
+fn a_mapped_address_is_a_candidate_and_a_change_reaches_the_master() {
+    let mapped = address("203.0.113.5:26900");
+    let local = Candidate::new(CandidateKind::Local, address(HOST));
+    let mapped_candidate = Candidate::new(CandidateKind::Mapped, mapped);
+    let mut rig = Rig::new(HOST);
+    // Known before listing starts: the Register carries it.
+    rig.rendezvous.set_mapped(Some(mapped), rig.net.now());
+    rig.list(HOST);
+    rig.run(1.0);
+    assert_eq!(sent_candidates(&rig.master), vec![local, mapped_candidate]);
+    // The same address again changes nothing.
+    let heartbeats = rig.master.count(MasterKind::Heartbeat);
+    rig.rendezvous.set_mapped(Some(mapped), rig.net.now());
+    rig.run(4.0);
+    assert_eq!(rig.master.count(MasterKind::Heartbeat), heartbeats);
+    // A new address (a renewal that moved the port) reaches the master.
+    let moved = address("203.0.113.5:26902");
+    rig.rendezvous.set_mapped(Some(moved), rig.net.now());
+    let took = rig
+        .run_until(10.0, |rig| {
+            sent_candidates(&rig.master).contains(&Candidate::new(CandidateKind::Mapped, moved))
+        })
+        .expect("the new candidate arrives");
+    assert!(took <= 5.0, "{took}");
+    assert_eq!(sent_candidates(&rig.master).len(), 2);
+    let change = |rig: &Rig| {
+        rig.master.log.iter().rev().find_map(|(_, _, p)| match p {
+            MasterPacket::Heartbeat(h) => Some(h.change),
+            _ => None,
+        })
+    };
+    assert_eq!(change(&rig), Some(1));
+    // Mapping removed: the candidate goes.
+    rig.rendezvous.set_mapped(None, rig.net.now());
+    rig.run_until(10.0, |rig| sent_candidates(&rig.master) == vec![local])
+        .expect("the removal arrives");
+    assert_eq!(change(&rig), Some(2));
+}
+
+/// The own candidates are rebuilt after every master lookup; the mapped one
+/// stays, and the mapping test never takes it for the machine's own address.
+#[test]
+fn a_mapped_address_survives_a_new_set_of_own_candidates_and_the_mapping_test() {
+    let mapped = address("203.0.113.5:26900");
+    let mut rig = Rig::new(HOST);
+    rig.list(HOST);
+    rig.rendezvous.set_mapped(Some(mapped), rig.net.now());
+    let local = Candidate::new(CandidateKind::Local, address(HOST));
+    rig.rendezvous
+        .set_masters(vec![address(MASTER)], vec![local], rig.net.now());
+    assert_eq!(
+        rig.rendezvous.candidates(),
+        [local, Candidate::new(CandidateKind::Mapped, mapped)]
+    );
+    // No own candidate at all: the mapped one is not "the host's own
+    // address", so the test cannot call a mapped host untranslated.
+    let net = SimNetwork::new(4);
+    net.add_router(RouterConfig::nat(
+        "203.0.113.9".parse().unwrap(),
+        "192.168.1.0/24".parse::<Prefix>().unwrap(),
+    ))
+    .unwrap();
+    let mut rig = Rig::on(net, "192.168.1.20:26900");
+    // The very address the master will see.
+    let mapped = address("203.0.113.9:26900");
+    rig.rendezvous.set_mapped(Some(mapped), rig.net.now());
+    rig.rendezvous
+        .set_masters(vec![address(MASTER)], Vec::new(), rig.net.now());
+    rig.rendezvous.set_listed(true, rig.net.now());
+    rig.run(1.0);
+    assert_eq!(rig.rendezvous.mapping(), MappingType::SamePort);
+}
+
+/// A host listing keeps the mapped address across its master lookup.
+#[test]
+fn a_host_listing_adds_the_mapped_address_after_its_lookup() {
+    let mapped = address("203.0.113.5:26900");
+    let mut listing = HostListing::new("127.0.0.1:26911", config(None), 26900, Duration::ZERO)
+        .expect("a literal address");
+    listing.set_mapped(Some(mapped), Duration::ZERO);
+    listing.set_listed(true, Duration::ZERO);
+    let mut now = Duration::ZERO;
+    let started = std::time::Instant::now();
+    while listing.state() == ListingState::FindingMaster {
+        now += Duration::from_millis(1);
+        listing.update(now, || summary(1));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        listing.rendezvous().candidates(),
+        [
+            Candidate::new(CandidateKind::Local, address("127.0.0.1:26900")),
+            Candidate::new(CandidateKind::Mapped, mapped)
+        ]
+    );
+}
