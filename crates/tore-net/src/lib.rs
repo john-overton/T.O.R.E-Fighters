@@ -67,6 +67,7 @@ use std::time::Duration;
 pub mod keepalive;
 pub mod link;
 pub mod packet;
+pub mod platform;
 pub mod reach;
 pub mod sim;
 
@@ -89,6 +90,7 @@ pub use entropy::{Entropy, SplitMix64};
 pub use keepalive::{Keepalive, KeepaliveConfig};
 pub use link::{LINK_ADDRESS, LinkEnd, Linked};
 pub use packet::{MAX_DATAGRAM, Section};
+pub use platform::Platform;
 pub use reliable::{MAX_MESSAGE_BODY, MAX_MESSAGE_LEN, MAX_QUEUED_MESSAGES, MESSAGE_WINDOW};
 pub use server::{AcceptInfo, ConnectDetails, Decision, Gate, Server, ServerConfig, ServerEvent};
 pub use socket::{Listen, ServerSocket};

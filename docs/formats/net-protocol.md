@@ -142,7 +142,7 @@ sequenceDiagram
 | --- | --- |
 | Connect request | protocol version (16), client nonce (64), game version (string), game commit (string), zero padding to 1,000 bytes. The version and the nonce come first and never move, so a host of any version can refuse with the nonce |
 | Challenge | client nonce (64), cookie (64); 21 bytes |
-| Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), zero padding to 1,000 bytes |
+| Challenge answer | client nonce (64), cookie (64), callsign (string, 1 to 15 printable ASCII characters), password (string, may be empty), game version and game commit again (the host kept nothing from the request), platform (8, protocol 7), zero padding to 1,000 bytes |
 | Accepted | client nonce (64), connection id (32, random, never 0), session id (64), ticks per second (8, always 120), ticks per snapshot (8, 4 by default), host tick now (32); 31 bytes |
 | Refuse | client nonce (64), reason (8), text (string, up to 200 bytes) |
 | Disconnect | connection id (32), reason (8); sent three times at once; 10 bytes |
@@ -154,6 +154,18 @@ refuse or misdirect a join; the game version and commit are repeated in the
 answer because the host's accept decision needs them and it keeps no state
 between the two (agent decisions, D2, which also moved the nonce ahead of the
 strings).
+
+The **platform** byte names the operating system the player's game runs on:
+0 unknown (a build for another system), 1 Windows, 2 macOS, 3 Linux. A game
+sends the system it was built for. The host keeps it with the player and
+sends it in the [lobby's player list](#messages-as-built), so a lobby can
+show it beside the callsign (John's request, 2026-10-05). Any other code
+makes the answer malformed, and it is dropped. The host only shows the
+platform; nothing in the session depends on it. Its byte, its codes and the
+lobby's 3 bits are agent decisions. With a callsign of `c` bytes, a password
+of `p`, a game version of `v` and a commit of `m`, the byte is at offset
+`25 + c + p + v + m` of the packet (checksum 4, kind 1, nonce 8, cookie 8 and
+the four strings' length bytes), and zero padding follows it.
 
 The **cookie** is a keyed hash of the client's address and port, its nonce
 and the current 10-second time slot, with a key drawn at host start from the
@@ -957,7 +969,8 @@ host left the game (4); the King's End mission is reason 3.
   players in the order they connected (a count, then each: id 8 bits,
   callsign, a presence bit and the slot's plane, ready, armed with its own
   loadout, flying (one bit each), a presence bit and why its import cannot
-  play the mission), the slots in plane order (a count, then each: plane
+  play the mission, and, since protocol 7, its platform in 3 bits with the
+  Challenge answer's codes, 4 to 7 invalid), the slots in plane order (a count, then each: plane
   varint, side 1 bit, wing 2, member 8, aircraft 4, a presence bit and the
   holder's id) and the King's settings (a count, then each a number of 8
   bits and a varint value; none in phase 1).
@@ -1108,11 +1121,13 @@ to a replay is stage E.
   (`wire::PROTOCOL_VERSION`, 2 since the readout's coding, 3 since the lobby,
   EF4, 4 since chat, EF6, 5 since the transport's [Keepalive](#keepalive),
   EF-K, 6 since the exact flight state added the overspeed countdown and legacy
-  failure RNG). Any change to the bytes raises it. A test
+  failure RNG, 7 since each player's platform, in the Challenge answer and
+  the lobby's player list). Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
   protocol 5 it holds one transport packet too, the Keepalive, sealed for the
-  version); when
+  version; since protocol 7 also the Challenge answer's bytes before its
+  padding); when
   they differ it fails and says to raise the version and refresh the copy
   (`TORE_UPDATE_WIRE_GOLDEN=1 cargo test --locked -p tore-session
   wire_golden`), the way the controls list test works. The copy records the

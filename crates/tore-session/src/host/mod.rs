@@ -48,7 +48,9 @@ use crate::wire::messages::{
     SlotRequest, StartRule, kind,
 };
 use crate::wire::snapshot::SnapshotHeader;
-use crate::wire::{PROTOCOL_VERSION, SECTION_INPUTS, SECTION_OWN_STATE, WireError, from_world};
+use crate::wire::{
+    PROTOCOL_VERSION, Platform, SECTION_INPUTS, SECTION_OWN_STATE, WireError, from_world,
+};
 use inputs::InputBuffer;
 use lobby::Entry;
 use sorting::{Timed, Tracker, Wide};
@@ -395,6 +397,8 @@ enum Stage {
 struct Peer {
     address: SocketAddr,
     callsign: String,
+    /// The operating system its game said it runs on when it joined.
+    platform: Platform,
     stage: Stage,
     /// The seat and plane while seated (and leaving).
     seat: Option<SeatId>,
@@ -1252,6 +1256,7 @@ impl Host {
             Peer {
                 address: details.address,
                 callsign: callsign.clone(),
+                platform: details.platform,
                 stage: Stage::Lobby,
                 seat: None,
                 plane: None,
@@ -2284,6 +2289,7 @@ impl Host {
                     loadout: peer.lobby.loadout.is_some(),
                     flying: Self::in_flight(peer),
                     unable: peer.lobby.unable.clone(),
+                    platform: peer.platform,
                 })
                 .collect(),
             slots: self

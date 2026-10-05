@@ -194,8 +194,8 @@ mod tests {
     use super::*;
     use crate::sim::SimNetwork;
     use crate::{
-        AcceptInfo, Client, ClientConfig, ClientEvent, ConnectDetails, Decision, Entropy, Server,
-        ServerConfig,
+        AcceptInfo, Client, ClientConfig, ClientEvent, ConnectDetails, Decision, Entropy, Platform,
+        Server, ServerConfig,
     };
     use std::time::Duration;
 
@@ -295,7 +295,8 @@ mod tests {
 
     /// The full handshake over the link: the link's address passes the rate
     /// limits and the cookie check like any other, and a client and a remote
-    /// one join the same server side by side.
+    /// one join the same server side by side. The hosting player's own game
+    /// names its platform the same way a remote one does.
     #[test]
     fn a_client_joins_a_server_over_the_link_beside_a_remote_one() {
         let net = SimNetwork::new(4);
@@ -309,7 +310,7 @@ mod tests {
         });
         let mut joined = Vec::new();
         let mut gate = |details: &ConnectDetails| {
-            joined.push(details.address);
+            joined.push((details.address, details.platform));
             Decision::Accept(AcceptInfo {
                 session_id: 1,
                 ticks_per_second: 120,
@@ -322,7 +323,17 @@ mod tests {
             ..ClientConfig::new(1, callsign)
         };
         let mut local = Client::connect(config(6, "Host"), LINK_ADDRESS, net.now()).unwrap();
-        let mut remote = Client::connect(config(7, "Guest"), host_address, net.now()).unwrap();
+        // The remote player is on another system than this build's.
+        let elsewhere = if Platform::current() == Platform::Windows {
+            Platform::Linux
+        } else {
+            Platform::Windows
+        };
+        let remote_config = ClientConfig {
+            platform: elsewhere,
+            ..config(7, "Guest")
+        };
+        let mut remote = Client::connect(remote_config, host_address, net.now()).unwrap();
         let mut connected = [false, false];
         for _ in 0..200 {
             net.advance(Duration::from_millis(1));
@@ -346,7 +357,8 @@ mod tests {
             }
         }
         assert_eq!(connected, [true, true]);
-        assert!(joined.contains(&LINK_ADDRESS));
+        assert!(joined.contains(&(LINK_ADDRESS, Platform::current())));
+        assert!(joined.contains(&("10.0.0.2:4000".parse().unwrap(), elsewhere)));
         assert_eq!(server.counters().rate_limited, 0);
         assert_eq!(server.counters().bad_cookie, 0);
     }

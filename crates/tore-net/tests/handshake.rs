@@ -11,8 +11,8 @@ use tore_net::packet::{
 };
 use tore_net::sim::LinkConfig;
 use tore_net::{
-    ClientEvent, ClientState, CloseReason, DisconnectReason, Event, RATE_LIMIT_PER_ADDRESS,
-    RefuseReason, ServerConfig, ServerEvent,
+    ClientEvent, ClientState, CloseReason, DisconnectReason, Event, Platform,
+    RATE_LIMIT_PER_ADDRESS, RefuseReason, ServerConfig, ServerEvent,
 };
 
 fn closed(events: &[(Duration, ClientEvent)]) -> Option<(Duration, CloseReason)> {
@@ -81,6 +81,71 @@ fn handshake_completes_on_a_lossy_link_and_never_amplifies() {
         assert_eq!(w.players[0].client.state(), ClientState::Connected);
         assert_eq!(w.server.connections().count(), 1);
     }
+}
+
+#[test]
+fn each_players_platform_reaches_the_gate_and_the_connected_event() {
+    let mut w = World::new(21, LinkConfig::one_way(10 * MS));
+    for (n, platform) in Platform::ALL.into_iter().enumerate() {
+        let mut config = w.player_config(&format!("Pilot{n}"), n as u16);
+        config.platform = platform;
+        w.join_with(config, n as u16);
+    }
+    let count = Platform::ALL.len();
+    assert!(w.run_until(Duration::from_secs(2), |w| {
+        (0..count).all(|i| w.connected(i))
+    }));
+    for (n, platform) in Platform::ALL.into_iter().enumerate() {
+        let callsign = format!("Pilot{n}");
+        let seen = w.gate.seen.iter().find(|d| d.callsign == callsign).unwrap();
+        assert_eq!(seen.platform, platform, "{callsign}");
+        let connected = w.host_events.iter().find_map(|(_, e)| match e {
+            ServerEvent::Connected { details, .. } if details.callsign == callsign => {
+                Some(details.platform)
+            }
+            _ => None,
+        });
+        assert_eq!(connected, Some(platform), "{callsign}");
+    }
+    // A client left to its defaults names the system it was built for.
+    assert_eq!(w.player_config("Viper", 9).platform, Platform::current());
+}
+
+#[test]
+fn an_answer_with_an_unknown_platform_code_is_dropped_as_malformed() {
+    let mut w = World::new(22, LinkConfig::one_way(10 * MS));
+    w.net.start_trace();
+    w.join("Viper");
+    assert!(w.run_until(Duration::from_secs(1), |w| w.connected(0)));
+    let mut answer = sent_answer(&w);
+    let Packet::ChallengeAnswer(decoded) = Packet::decode(&answer, VERSION).unwrap() else {
+        panic!("not an answer")
+    };
+    w.players[0].client.disconnect(DisconnectReason::Left);
+    w.run_for(Duration::from_secs(1));
+    // The platform byte follows the nonce, the cookie and four strings.
+    let at = 5
+        + 8
+        + 8
+        + [
+            &decoded.callsign,
+            &decoded.password,
+            &decoded.game_version,
+            &decoded.game_commit,
+        ]
+        .iter()
+        .map(|s| 1 + s.len())
+        .sum::<usize>();
+    assert_eq!(answer[at], Platform::current().code());
+    answer[at] = Platform::MAX_CODE + 1;
+    let crc = tore_net::packet::checksum(PacketKind::ChallengeAnswer, VERSION, &answer[4..]);
+    answer[..4].copy_from_slice(&crc.to_le_bytes());
+    let before = w.server.counters().malformed;
+    w.net.inject(player_addr(0), host_addr(), &answer);
+    w.step(MS);
+    assert_eq!(w.server.counters().malformed, before + 1);
+    assert_eq!(connected_count(&w.host_events), 1);
+    assert_eq!(w.gate.seen.len(), 1);
 }
 
 #[test]

@@ -18,6 +18,8 @@ use std::fmt;
 
 use tore_codec::{BitReader, BitWriter, CodecError, Crc32};
 
+use crate::platform::Platform;
+
 /// The largest datagram either side sends or accepts.
 pub const MAX_DATAGRAM: usize = 1200;
 /// The exact size of a Connect request and a Challenge answer.
@@ -64,7 +66,8 @@ pub enum PacketKind {
     ConnectRequest = 1,
     /// Host to client: the cookie.
     Challenge = 2,
-    /// Client to host: the cookie echoed, the callsign and password, padded.
+    /// Client to host: the cookie echoed, the callsign and password and the
+    /// player's platform, padded.
     ChallengeAnswer = 3,
     /// Host to client: the connection id and the session's rates.
     Accepted = 4,
@@ -226,6 +229,8 @@ pub struct ChallengeAnswer {
     pub game_version: String,
     /// Repeated from the request.
     pub game_commit: String,
+    /// The operating system the player's game runs on (protocol 7).
+    pub platform: Platform,
 }
 
 /// Accepted: the join succeeded. 31 bytes.
@@ -512,6 +517,7 @@ impl Packet {
                 put_str(&mut w, &p.password)?;
                 put_str(&mut w, &p.game_version)?;
                 put_str(&mut w, &p.game_commit)?;
+                w.write_bits(u64::from(p.platform.code()), 8).ok();
                 pad(&mut w)?;
             }
             Self::Accepted(p) => {
@@ -811,7 +817,8 @@ pub fn decode_challenge(body: &[u8]) -> Result<Challenge, PacketError> {
 }
 
 /// Decodes a Challenge answer's body. `len` is the whole datagram's length,
-/// which must be exactly 1,000.
+/// which must be exactly 1,000. A platform code the protocol does not name is
+/// malformed.
 pub fn decode_challenge_answer(len: usize, body: &[u8]) -> Result<ChallengeAnswer, PacketError> {
     if len != PADDED_LEN {
         return Err(PacketError::Malformed);
@@ -826,6 +833,7 @@ pub fn decode_challenge_answer(len: usize, body: &[u8]) -> Result<ChallengeAnswe
     let password = r.read_str()?;
     let game_version = r.read_str()?;
     let game_commit = r.read_str()?;
+    let platform = Platform::from_code(u8_of(&mut r)?).ok_or(PacketError::Malformed)?;
     padding(&r)?;
     Ok(ChallengeAnswer {
         nonce,
@@ -834,6 +842,7 @@ pub fn decode_challenge_answer(len: usize, body: &[u8]) -> Result<ChallengeAnswe
         password,
         game_version,
         game_commit,
+        platform,
     })
 }
 
@@ -983,6 +992,7 @@ mod tests {
                 password: "secret".into(),
                 game_version: "0.1.3".into(),
                 game_commit: "fb9c2ec".into(),
+                platform: Platform::MacOs,
             }),
             Packet::Accepted(Accepted {
                 nonce: 4,
@@ -1245,6 +1255,47 @@ mod tests {
     }
 
     #[test]
+    fn the_answer_carries_every_platform_and_refuses_an_unknown_code() {
+        let Packet::ChallengeAnswer(base) = samples()[2].clone() else {
+            panic!("not an answer")
+        };
+        // Header 5, nonce 8, cookie 8, then four strings with their length
+        // bytes; the platform byte follows them.
+        let at = 5
+            + 8
+            + 8
+            + [
+                &base.callsign,
+                &base.password,
+                &base.game_version,
+                &base.game_commit,
+            ]
+            .iter()
+            .map(|s| 1 + s.len())
+            .sum::<usize>();
+        for platform in Platform::ALL {
+            let answer = ChallengeAnswer {
+                platform,
+                ..base.clone()
+            };
+            let bytes = Packet::ChallengeAnswer(answer.clone()).encode(V).unwrap();
+            assert_eq!(bytes.len(), PADDED_LEN);
+            assert_eq!(bytes[at], platform.code());
+            assert_eq!(
+                Packet::decode(&bytes, V).unwrap(),
+                Packet::ChallengeAnswer(answer)
+            );
+        }
+        let mut bytes = samples()[2].encode(V).unwrap();
+        for code in [Platform::MAX_CODE + 1, 7, u8::MAX] {
+            bytes[at] = code;
+            let crc = checksum(PacketKind::ChallengeAnswer, V, &bytes[4..]);
+            bytes[..4].copy_from_slice(&crc.to_le_bytes());
+            assert_eq!(Packet::decode(&bytes, V), Err(PacketError::Malformed));
+        }
+    }
+
+    #[test]
     fn another_version_fails_the_checksum_except_hello_kinds() {
         for packet in samples() {
             let bytes = packet.encode(V).unwrap();
@@ -1300,6 +1351,7 @@ mod tests {
                 password: String::new(),
                 game_version: String::new(),
                 game_commit: String::new(),
+                platform: Platform::Unknown,
             });
             assert_eq!(answer.encode(V), Err(EncodeError::BadString));
         }

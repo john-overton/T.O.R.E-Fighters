@@ -13,6 +13,7 @@ use crate::entropy::{Entropy, Rng};
 use crate::packet::{
     self, ChallengeAnswer, ConnectRequest, MAX_DATAGRAM, Packet, PacketKind, valid_callsign,
 };
+use crate::platform::Platform;
 use crate::{Counters, Datagrams, HANDSHAKE_GIVE_UP, HANDSHAKE_RETRY, MAX_SECTION_KIND, Transmit};
 
 /// The client's settings for one join.
@@ -28,6 +29,9 @@ pub struct ClientConfig {
     pub callsign: String,
     /// The server's password; empty for none.
     pub password: String,
+    /// The operating system the game runs on, which the host shows beside
+    /// the callsign.
+    pub platform: Platform,
     /// The highest section kind a Payload may carry (5 in protocol 1).
     pub max_section_kind: u8,
     /// Where the nonce comes from; [`Entropy::System`] on a real network.
@@ -35,8 +39,8 @@ pub struct ClientConfig {
 }
 
 impl ClientConfig {
-    /// Defaults for a join: no password, empty build strings, section kinds
-    /// up to 5, system entropy.
+    /// Defaults for a join: no password, empty build strings, this build's
+    /// platform, section kinds up to 5, system entropy.
     pub fn new(protocol_version: u16, callsign: &str) -> Self {
         Self {
             protocol_version,
@@ -44,6 +48,7 @@ impl ClientConfig {
             game_commit: String::new(),
             callsign: callsign.to_owned(),
             password: String::new(),
+            platform: Platform::current(),
             max_section_kind: MAX_SECTION_KIND,
             entropy: Entropy::System,
         }
@@ -395,6 +400,7 @@ impl Client {
             password: self.config.password.clone(),
             game_version: self.config.game_version.clone(),
             game_commit: self.config.game_commit.clone(),
+            platform: self.config.platform,
         });
         let Ok(answer) = answer.encode(self.config.protocol_version) else {
             return;

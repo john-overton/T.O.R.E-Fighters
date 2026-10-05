@@ -69,6 +69,27 @@ fn lines(version: u16) -> Vec<(String, String)> {
         "transport-keepalive".into(),
         hex(&keepalive.encode(version).unwrap()),
     ));
+    // The transport's Challenge answer, which carries the player's platform
+    // since protocol 7, sealed for the version. It is padded with zeros to
+    // 1,000 bytes; the line keeps the bytes before the padding (the checksum
+    // covers it all).
+    let answer = tore_net::packet::Packet::ChallengeAnswer(tore_net::packet::ChallengeAnswer {
+        nonce: 0x0123_4567_89AB_CDEF,
+        cookie: 0xFEDC_BA98_7654_3210,
+        callsign: "Viper".into(),
+        password: "secret".into(),
+        game_version: "0.1.3".into(),
+        game_commit: "fb9c2ec".into(),
+        platform: super::Platform::Linux,
+    })
+    .encode(version)
+    .unwrap();
+    assert_eq!(answer.len(), tore_net::packet::PADDED_LEN);
+    let head = answer.len() - answer.iter().rev().take_while(|&&b| b == 0).count();
+    out.push((
+        "transport-challenge-answer-head".into(),
+        hex(&answer[..head]),
+    ));
     out
 }
 

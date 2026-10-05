@@ -13,6 +13,7 @@ use crate::packet::{
     self, Accepted, Challenge, Discover, DiscoverAnswer, MAX_DATAGRAM, MAX_REFUSE_TEXT, Packet,
     PacketKind, Refuse,
 };
+use crate::platform::Platform;
 use crate::{
     COOKIE_SLOT, Counters, Datagrams, MAX_SECTION_KIND, RATE_LIMIT_PER_ADDRESS, RATE_LIMIT_TOTAL,
     Transmit,
@@ -62,6 +63,8 @@ pub struct ConnectDetails {
     pub callsign: String,
     /// The password it gave; may be empty.
     pub password: String,
+    /// The operating system its game runs on, as it says.
+    pub platform: Platform,
 }
 
 /// What the host tells an accepted client, besides its connection id.
@@ -536,6 +539,7 @@ impl Server {
             game_commit: answer.game_commit,
             callsign: answer.callsign,
             password: answer.password,
+            platform: answer.platform,
         };
         let info = match gate.accept(&details) {
             Decision::Accept(info) => info,

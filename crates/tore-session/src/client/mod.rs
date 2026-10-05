@@ -65,7 +65,7 @@ use crate::wire::messages::{
 use crate::wire::names::NameIndex;
 use crate::wire::own_state::OwnStateHeader;
 use crate::wire::{
-    PROTOCOL_VERSION, SECTION_EVENTS, SECTION_INPUTS, SECTION_OWN_STATE, SECTION_SNAPSHOT,
+    PROTOCOL_VERSION, Platform, SECTION_EVENTS, SECTION_INPUTS, SECTION_OWN_STATE, SECTION_SNAPSHOT,
 };
 use capture::CaptureWriter;
 use clock::{
@@ -149,11 +149,14 @@ pub struct ClientConfig {
     /// with the standard loadout. A lobby screen turns it off and calls
     /// [`Client::take_slot`], [`Client::set_ready`] and the rest itself.
     pub auto_ready: bool,
+    /// The operating system this game runs on, which the host shows beside
+    /// the callsign in the lobby: this build's own by default.
+    pub platform: Platform,
 }
 
 impl ClientConfig {
     /// A join to `server` as `callsign` with this `build`: no password, any
-    /// plane, system entropy.
+    /// plane, system entropy, this build's platform.
     pub fn new(server: SocketAddr, callsign: &str, build: BuildId) -> Self {
         Self {
             server,
@@ -164,6 +167,7 @@ impl ClientConfig {
             entropy: Entropy::System,
             retail_stall_speeds: false,
             auto_ready: true,
+            platform: Platform::current(),
         }
     }
 }
@@ -682,6 +686,7 @@ impl Client {
                 game_version: config.build.version.clone(),
                 game_commit: config.build.commit.clone(),
                 password: config.password.clone(),
+                platform: config.platform,
                 entropy: Entropy::Seeded(seed),
                 ..tore_net::ClientConfig::new(PROTOCOL_VERSION, &config.callsign)
             },

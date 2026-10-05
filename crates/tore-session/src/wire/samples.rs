@@ -1,6 +1,7 @@
 //! Fixed sample contents of every section and message, shared by the golden,
 //! round-trip and fuzz tests.
 
+use super::Platform;
 use super::chat::{ChatFrom, ChatLine, ChatSend, Quick, Receiver, Standing};
 use super::entity::{
     AircraftState, DamageState, DebrisState, Devices, EngineState, Entity, EntityKey, EntityKind,
@@ -658,7 +659,8 @@ pub fn messages(exact: Vec<u8>) -> Vec<Message> {
     ]
 }
 
-/// A lobby with a King, a player flying, one unable, and three slots.
+/// A lobby with a King, a player flying, one unable, one more waiting, and
+/// three slots: the four players cover every platform.
 pub fn lobby() -> LobbyState {
     LobbyState {
         name: "Viper's game".into(),
@@ -678,6 +680,7 @@ pub fn lobby() -> LobbyState {
                 loadout: true,
                 flying: true,
                 unable: None,
+                platform: Platform::Linux,
             },
             LobbyPlayer {
                 id: 1,
@@ -687,6 +690,7 @@ pub fn lobby() -> LobbyState {
                 loadout: false,
                 flying: false,
                 unable: None,
+                platform: Platform::Windows,
             },
             LobbyPlayer {
                 id: 3,
@@ -696,6 +700,17 @@ pub fn lobby() -> LobbyState {
                 loadout: false,
                 flying: false,
                 unable: Some("Your game data differs".into()),
+                platform: Platform::MacOs,
+            },
+            LobbyPlayer {
+                id: 4,
+                callsign: "Lynx".into(),
+                slot: None,
+                ready: false,
+                loadout: false,
+                flying: false,
+                unable: None,
+                platform: Platform::Unknown,
             },
         ],
         slots: vec![

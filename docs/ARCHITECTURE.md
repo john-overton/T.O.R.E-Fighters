@@ -2743,8 +2743,9 @@ regeneration of smoke, contrails, chaff, flares and tracers from the frame is
 D8b's.
 
 **The calls.** `Client::connect(ClientConfig, resources, now)` starts the
-join (server, callsign, password, build, the plane wanted or any, the entropy;
-it refuses the retail stall-speed switch). The caller drives it like the host:
+join (server, callsign, password, build, the plane wanted or any, the entropy,
+and the platform, this build's own by default; it refuses the retail
+stall-speed switch). The caller drives it like the host:
 `receive` or `receive_from`, `update(now, &Controls)` with the pilot's held
 controls and the commands given since the last update (`Controls::neutral`
 while a menu is up), `poll_transmit` or `transmit`, and `next_wake(now)`.
@@ -3144,7 +3145,7 @@ sequenceDiagram
   participant H as Host
   C->>H: Connect request (protocol, build, padded)
   H->>C: Challenge (cookie)
-  C->>H: Challenge answer (cookie, callsign, password)
+  C->>H: Challenge answer (cookie, callsign, password, platform)
   H->>C: Accepted (session, tick rates)
   H->>C: Mission (spec text, content manifest)
   C->>C: Load the mission from its own import, compare manifests
@@ -4124,8 +4125,10 @@ it starts as its `start` setting says. *Agent decisions.*
   name, the mission's summary (`MissionSpec::summary`) and number, the phase
   (lobby, flying, ended), the start rule, the King and the house, the
   receiving player's own id, the players in the order they connected (lobby
-  id, callsign, slot, ready, armed, flying, and why the player's import
-  cannot play the mission, if it cannot), and the slots: the planes open to
+  id, callsign, slot, ready, armed, flying, why the player's import
+  cannot play the mission, if it cannot, and, since protocol 7, the platform
+  its game said it runs on when it joined: Windows, macOS, Linux or unknown,
+  John 2026-10-05), and the slots: the planes open to
   players (every friendly plane by default; a server's `open-planes`), each
   with its wing, member, aircraft and holder. A slot is held without seating
   anyone; one holder a slot. The state goes out only when something changed,

@@ -5,6 +5,7 @@ use super::*;
 use crate::AppResult;
 use crate::widgets::KitSource;
 use tore_formats::aircraft::AircraftId;
+use tore_session::wire::Platform;
 use tore_session::wire::chat::{ChatFrom, Receiver, Standing};
 use tore_session::wire::messages::{LobbyPhase, LobbyPlayer, LobbySlot, StartRule};
 use tore_sim::ai::launch::{Side, WingId};
@@ -21,7 +22,9 @@ pub const STATES: [&str; 8] = [
     "lobby-ready",
 ];
 
-/// A player of the sample lobby.
+/// A player of the sample lobby, on a platform picked by its id so the
+/// sample shows a mix: Maverick on Linux, Goose on Windows, the third on
+/// macOS.
 pub(crate) fn player(id: u8, name: &str, slot: Option<u32>) -> LobbyPlayer {
     LobbyPlayer {
         id,
@@ -31,6 +34,11 @@ pub(crate) fn player(id: u8, name: &str, slot: Option<u32>) -> LobbyPlayer {
         loadout: false,
         flying: false,
         unable: None,
+        platform: match id % 3 {
+            1 => Platform::Linux,
+            2 => Platform::Windows,
+            _ => Platform::MacOs,
+        },
     }
 }
 

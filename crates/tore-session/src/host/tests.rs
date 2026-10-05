@@ -982,6 +982,22 @@ fn refusals_reach_the_client_with_their_reason() {
     assert_eq!(reason, RefuseReason::GameBuild);
     assert!(text.contains("0.1.3-1-gtest"), "{text}");
 
+    // A game of protocol 6, before each player's platform, is refused by
+    // its version, naming both, before it can send an answer.
+    let (rig, client) = try_join(config(), |c| c.protocol_version = 6);
+    let (reason, text) = refused(&rig, client);
+    assert_eq!(reason, RefuseReason::ProtocolVersion);
+    assert_eq!(PROTOCOL_VERSION, 7);
+    assert!(
+        text.contains("protocol version 7") && text.contains("uses version 6"),
+        "{text}"
+    );
+    assert!(
+        !rig.logs
+            .iter()
+            .any(|l| matches!(l, HostLog::Connected { .. }))
+    );
+
     // Full: one player at most.
     let (mut rig, _) = try_join(
         HostConfig {

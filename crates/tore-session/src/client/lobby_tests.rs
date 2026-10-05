@@ -311,6 +311,41 @@ fn a_king_and_two_players_arm_ready_fly_return_and_fly_again() {
 }
 
 #[test]
+fn each_players_platform_reaches_every_lobby() {
+    use crate::wire::Platform;
+    let mut rig = kings_rig(Platform::ALL.len());
+    let players: Vec<(usize, String, Platform)> = Platform::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(n, platform)| {
+            let callsign = format!("Pilot{n}");
+            let name = callsign.clone();
+            let index = rig.join(
+                move |c| {
+                    c.callsign = name;
+                    c.auto_ready = false;
+                    c.platform = platform;
+                },
+                Box::new(|now, _, _| weave(now.as_secs_f64())),
+            );
+            (index, callsign, platform)
+        })
+        .collect();
+    let indices: Vec<usize> = players.iter().map(|(i, ..)| *i).collect();
+    gathered(&mut rig, &indices);
+    for &(viewer, ..) in &players {
+        let l = lobby(&rig, viewer).unwrap();
+        for (_, callsign, platform) in &players {
+            let shown = l.players.iter().find(|p| p.callsign == *callsign).unwrap();
+            assert_eq!(
+                shown.platform, *platform,
+                "{callsign} as player {viewer} sees it"
+            );
+        }
+    }
+}
+
+#[test]
 fn the_kings_mission_change_reaches_everyone_frees_vanished_slots_and_clears_ready() {
     let mut rig = kings_rig(3);
     let king = manual(&mut rig, "Viper");

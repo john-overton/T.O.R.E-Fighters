@@ -773,6 +773,17 @@ fn the_king_ends_the_mission_and_everyone_flies_again() {
         tore_session::wire::messages::LobbyPhase::Flying
     );
     assert_eq!(lobby.players.len(), 2, "{lobby:?}");
+    // The hosting player's game joins over the in-process link like any
+    // other and names its own platform; the remote one over UDP names this
+    // build's too.
+    assert!(
+        lobby
+            .players
+            .iter()
+            .all(|p| p.platform == tore_session::wire::Platform::current()),
+        "{lobby:?}"
+    );
+    assert_eq!(lobby.me().map(|me| me.callsign.as_str()), Some("Host"));
     assert!(
         game.bot
             .client

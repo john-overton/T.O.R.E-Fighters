@@ -402,6 +402,45 @@ fn messages_round_trip() {
 }
 
 #[test]
+fn every_lobby_platform_round_trips_and_an_unknown_code_is_invalid() {
+    use super::{Platform, WireError};
+    let with = |platform: Platform| {
+        let mut lobby = samples::lobby();
+        for player in &mut lobby.players {
+            player.platform = platform;
+        }
+        Message::Lobby(Box::new(lobby))
+    };
+    for platform in Platform::ALL {
+        let message = with(platform);
+        let bytes = message.encode().unwrap();
+        assert_eq!(Message::decode(message.kind(), &bytes).unwrap(), message);
+    }
+    // The first player's platform field: the one bit where Windows (code 1)
+    // and Unknown (code 0) differ is its lowest. Codes 4 to 7 are not named.
+    let unknown = with(Platform::Unknown).encode().unwrap();
+    let windows = with(Platform::Windows).encode().unwrap();
+    assert_eq!(unknown.len(), windows.len());
+    let bit = (0..unknown.len() * 8)
+        .find(|&b| (unknown[b / 8] ^ windows[b / 8]) & (1 << (b % 8)) != 0)
+        .unwrap();
+    for code in 4u8..8 {
+        let mut bad = unknown.clone();
+        for i in 0..3 {
+            if code & (1 << i) != 0 {
+                let at = bit + i;
+                bad[at / 8] |= 1 << (at % 8);
+            }
+        }
+        assert_eq!(
+            Message::decode(super::messages::kind::LOBBY, &bad),
+            Err(WireError::Invalid("platform")),
+            "code {code}"
+        );
+    }
+}
+
+#[test]
 fn full_records_round_trip() {
     let mut rng = SplitMix64::new(13);
     for _ in 0..300 {

@@ -10,13 +10,15 @@
 //!
 //! Protocol 4 (slice EF6) adds chat: a player's line and the host's
 //! delivered line ([`super::chat`]).
+//!
+//! Protocol 7 adds each lobby player's platform ([`Platform`]).
 
 use super::bits::{
     self, read_count, read_long_str, read_str, read_u32, write_count, write_long_str, write_str,
 };
 use super::chat::{ChatLine, ChatSend};
 use super::names::ReceivedNames;
-use super::{WireError, WireResult, limits};
+use super::{Platform, WireError, WireResult, limits};
 use tore_codec::{BitReader, BitWriter};
 use tore_formats::aircraft::AircraftId;
 use tore_sim::ai::launch::{Side, WingId};
@@ -216,6 +218,9 @@ pub struct LobbyPlayer {
     pub flying: bool,
     /// Why the player's import cannot play the mission, when it cannot.
     pub unable: Option<String>,
+    /// The operating system the player's game runs on, as its game said
+    /// when it joined (protocol 7).
+    pub platform: Platform,
 }
 
 /// One slot: a friendly plane of the co-op mission (or whatever the host's
@@ -717,6 +722,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
             loadout,
             flying,
             unable,
+            platform,
         } = player;
         let _ = w.write_bits(u64::from(*id), 8);
         write_str(w, callsign);
@@ -725,6 +731,7 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         w.write_bool(*loadout);
         w.write_bool(*flying);
         bits::write_option(w, unable.as_deref(), write_str);
+        let _ = w.write_bits(u64::from(platform.code()), PLATFORM_BITS);
     }
     write_count(w, slots.len());
     for slot in slots {
@@ -742,6 +749,14 @@ fn write_lobby(w: &mut BitWriter, lobby: &LobbyState) -> WireResult<()> {
         w.write_varint(u64::from(*value));
     }
     Ok(())
+}
+
+/// A lobby player's platform code: 3 bits, codes 0 to 7, of which the
+/// protocol names 0 to 3 (unknown, Windows, macOS, Linux).
+const PLATFORM_BITS: u32 = 3;
+
+fn read_platform(r: &mut BitReader<'_>) -> WireResult<Platform> {
+    Platform::from_code(r.read_bits(PLATFORM_BITS)? as u8).ok_or(WireError::Invalid("platform"))
 }
 
 fn read_id(r: &mut BitReader<'_>) -> WireResult<u8> {
@@ -778,6 +793,7 @@ fn read_lobby(r: &mut BitReader<'_>) -> WireResult<LobbyState> {
             loadout: r.read_bool()?,
             flying: r.read_bool()?,
             unable: bits::read_option(r, read_str)?,
+            platform: read_platform(r)?,
         });
     }
     let count = read_count(r, SLOTS_LIMIT, "slots")?;
