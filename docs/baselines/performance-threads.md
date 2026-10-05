@@ -319,7 +319,11 @@ comparison remains unavailable. John approved the merge into `multiplayer` on
 2026-10-03 after the multiplayer lead's review; his flight on macOS, Windows
 and Linux in the three-machine test is the first runtime check off Linux,
 including a Mac hosting while it flies, where the host's real-time thread
-waits on workers that run at user-interactive QoS.
+waits on workers that run at user-interactive QoS. John ran the test across
+the three platforms on 2026-10-05 (protocol 7 builds from `48d62dac`) and
+reports that it works well. That is a hands-on report: which machine hosted,
+for how long, and any frame or tick figures were not recorded, so it does not
+settle the Mac-hosting question with a measurement.
 
 ## Evidence locations
 
