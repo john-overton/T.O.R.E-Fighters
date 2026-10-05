@@ -514,10 +514,11 @@ pub struct Host {
     server: Server,
     session_id: u64,
     peers: BTreeMap<ConnectionId, Peer>,
-    /// Seats whose plane could not go back to the AI (destroyed, or its pilot
-    /// gone) when their player left: the host flies them with neutral input,
-    /// keeping the departed player's callsign for the roster.
-    orphans: BTreeMap<SeatId, String>,
+    /// Death and revival (stage F phase 2, `revive`): lives, delays, the
+    /// seats held for players whose plane is lost, the revivals asked for.
+    /// It replaces the departed players' orphans: a lost plane is held for
+    /// its player while it stays, and abandoned to the mission when it goes.
+    revival: revive::Revivals,
     /// Seats whose plane goes back to the AI at the next tick.
     gives: Vec<(SeatId, String)>,
     tracker: Tracker,
@@ -773,7 +774,7 @@ impl Host {
             manifest,
             server,
             peers: BTreeMap::new(),
-            orphans: BTreeMap::new(),
+            revival: revive::Revivals::default(),
             gives: Vec::new(),
             tracker,
             life: Life::Lobby,
@@ -1358,6 +1359,8 @@ impl Host {
         self.send(connection, &mission);
         let roster = Message::Roster(self.roster());
         self.send(connection, &roster);
+        // Stage F phase 2: the planes revivals have added to the mission.
+        self.revive_connected(connection);
         self.lobby_dirty = true;
     }
 
@@ -1736,7 +1739,7 @@ impl Host {
                 Stage::Taking { seat, .. } => Some(seat),
                 _ => peer.seat,
             })
-            .chain(self.orphans.keys().copied())
+            .chain(self.revival.held_seats())
             .chain(self.gives.iter().map(|(seat, _)| *seat))
             .collect();
         SEAT_IDS.map(SeatId).find(|seat| !used.contains(seat))
@@ -1751,10 +1754,10 @@ impl Host {
         if !self.open(plane) {
             return Some(format!("Plane {} is not open to players.", plane.0));
         }
-        // A departed player's plane that could not go back to the AI stays
-        // with that player's seat, but nobody flies it.
-        if let Pilot::Human(seat) = entry.pilot
-            && self.orphans.contains_key(&seat)
+        // A lost plane: abandoned to the mission, or held for its player
+        // in the lobby (stage F phase 2's revival).
+        if entry.pilot == Pilot::Lost
+            || matches!(entry.pilot, Pilot::Human(seat) if self.held_callsign(seat).is_some())
         {
             return Some(format!(
                 "Plane {} is destroyed or has lost its pilot.",
@@ -2013,6 +2016,16 @@ impl Host {
         if peer.stage != Stage::Lobby {
             return;
         }
+        // Stage F phase 2: Join after a loss flies again by the revival rules.
+        if let Some(result) = self.revive_join(connection) {
+            if let Err(reason) = result {
+                self.refuse_seat(connection, reason);
+            }
+            return;
+        }
+        let Some(peer) = self.peers.get(&connection) else {
+            return;
+        };
         let held = peer.lobby.slot;
         // Stage F phase 2: join in progress off refuses every plane alike.
         if let Some(why) = self.new_pilot_refusal() {
@@ -2158,7 +2171,7 @@ impl Host {
         self.world = world;
         self.manifest = manifest;
         self.tracker = Tracker::new(&self.world);
-        self.orphans.clear();
+        self.revival = revive::Revivals::default();
         self.gives.clear();
         self.number = self.number.wrapping_add(1);
         self.king_mission_changed(&old);
@@ -2339,7 +2352,7 @@ impl Host {
                         || matches!(peer.stage, Stage::Taking { seat: s, .. } if s == seat)
                 })
                 .map(|peer| peer.callsign.clone())
-                .or_else(|| self.orphans.get(&seat).cloned())
+                .or_else(|| self.held_callsign(seat))
                 .unwrap_or_default()
         };
         messages::Roster {
@@ -2531,7 +2544,6 @@ impl Host {
         // The same mission, with the loadouts: its number stays, so a
         // request made just before the start still counts.
         self.spec_text = spec.to_text();
-        self.orphans.clear();
         self.gives.clear();
         self.ever_seated = false;
         self.empty_since = None;
@@ -2539,9 +2551,10 @@ impl Host {
         self.origin = None;
         self.ticks_run = 0;
         // Stage F phase 2: fresh scores, and the world records score facts;
-        // nobody has a side yet for lock sides.
+        // nobody has a side yet for lock sides; revivals start afresh.
         self.score_start();
         self.king_mission_start();
+        self.revive_start();
         // The players have the lobby's mission already: the loadouts are
         // all they need to build the flight's (a joiner in flight gets the
         // whole text, loadouts included).
@@ -2627,9 +2640,10 @@ impl Host {
         let mut commands = Vec::new();
 
         // Planes going back to the AI; a plane that cannot (destroyed, or its
-        // pilot gone) stays with its seat, flown with neutral input.
+        // pilot gone) is held for its player while it stays connected, and
+        // abandoned to the mission when it goes (stage F phase 2).
         let mut given = Vec::new();
-        for (seat, callsign) in std::mem::take(&mut self.gives) {
+        for (seat, _callsign) in std::mem::take(&mut self.gives) {
             if self
                 .world
                 .roster
@@ -2644,7 +2658,7 @@ impl Host {
                 commands.push(MissionCommand::GiveBack { seat });
                 given.push(seat);
             } else {
-                self.orphans.insert(seat, callsign);
+                self.revive_keep(seat, &mut commands);
                 given.push(seat);
             }
         }
@@ -2700,7 +2714,7 @@ impl Host {
         for &(_, seat, _) in &takes {
             inputs.push(InputFrame::default().seat_input(seat, tick, &[], None));
         }
-        for &seat in self.orphans.keys() {
+        for seat in self.revive_inputs() {
             if !inputs.iter().any(|input| input.seat == seat) {
                 inputs.push(InputFrame::default().seat_input(seat, tick, &[], None));
             }
@@ -2742,6 +2756,8 @@ impl Host {
         for (connection, seat, plane) in takes {
             self.seated(connection, seat, plane, tick, &out);
         }
+        // Stage F phase 2: revivals seated, and planes newly lost.
+        self.revive_after(tick, &out);
         self.sort_seats(tick, &out, &wide);
         // Stage F phase 2: the tick's score facts.
         self.score_tick(tick, &out);
@@ -3223,7 +3239,7 @@ impl Host {
                 self.manifest = manifest;
                 self.spec_text = self.spec.to_text();
                 self.tracker = Tracker::new(&self.world);
-                self.orphans.clear();
+                self.revival = revive::Revivals::default();
                 self.gives.clear();
                 self.origin = None;
                 self.ticks_run = 0;

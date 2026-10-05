@@ -148,13 +148,20 @@ fn every_new_request_is_refused_in_words_until_its_slice_lands() {
     player.away();
     player.back();
     rig.run(Duration::from_millis(300));
-    for request in [kind::REVIVE, kind::AWAY, kind::BACK] {
+    for request in [kind::AWAY, kind::BACK] {
         assert!(
             refused(&rig, cobra, request, NOT_AVAILABLE),
             "{request}: {:?}",
             refusals(&rig, cobra)
         );
     }
+    // Revival is built (F2-V): refused in words before the mission flies.
+    assert!(refused(
+        &rig,
+        cobra,
+        kind::REVIVE,
+        "The mission is not flying."
+    ));
     // Watching is built (F2-O1): refused in words before the mission flies.
     assert!(refused(
         &rig,

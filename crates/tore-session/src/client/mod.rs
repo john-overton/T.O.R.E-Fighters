@@ -51,6 +51,9 @@ mod observe_tests;
 #[cfg(test)]
 mod phase2_seams_tests;
 pub mod prediction;
+pub mod revival;
+#[cfg(test)]
+mod revival_tests;
 pub mod scores;
 #[cfg(test)]
 mod stall_tests;
@@ -340,10 +343,10 @@ pub enum ClientEvent {
     // Stage F phase 2 (protocol 8). The client passes these on; the slices
     // that build each part act on them.
     /// The player's plane is lost: whether and when it may fly again
-    /// ([`Client::revive`]; slice F2-V).
+    /// ([`Client::revive`], [`Client::revival`]; slice F2-V).
     Revival(Box<Revival>),
-    /// A revival's new plane, which the mission's copy is to add (slice
-    /// F2-V).
+    /// A revival's new plane, which the client has added to its copy of the
+    /// mission ([`Client::spawned`]; slice F2-V).
     Spawned(Box<Spawned>),
     /// The scores changed (slice F2-S); the newest are also kept
     /// ([`Client::scores`]).
@@ -658,6 +661,10 @@ pub struct Client {
     lobby: Option<LobbyState>,
     /// The newest scores of the mission flying (slice F2-S).
     scores: Option<scores::Kept>,
+    /// The newest Revival since the player's plane was lost, and the
+    /// revivals' new planes of the mission (slice F2-V, [`revival`]).
+    revival: Option<revival::Kept>,
+    spawned: Vec<Spawned>,
     /// The newest Mission message's number, and the number of the newest
     /// mission built and matched.
     number: Option<u32>,
@@ -782,6 +789,8 @@ impl Client {
             margin_input: 0,
             lobby: None,
             scores: None,
+            revival: None,
+            spawned: Vec::new(),
             number: None,
             loaded: None,
             unable: None,
@@ -1619,6 +1628,8 @@ impl Client {
         match message {
             Message::Mission(mission) => {
                 self.scores = None;
+                self.revival = None;
+                self.spawned.clear();
                 self.mission_arrived(mission);
             }
             Message::Roster(roster) => {
@@ -1667,6 +1678,7 @@ impl Client {
             }
             Message::MissionEnded(ended) => {
                 self.log("mission-ended", &[&format!("{:?}", ended.reason)]);
+                self.revival = None;
                 self.end_flight();
                 self.event(ClientEvent::MissionEnded(ended));
                 // Only the flight's build failed here: back in the lobby the
@@ -1703,19 +1715,16 @@ impl Client {
                 self.event(ClientEvent::Goodbye(goodbye));
             }
             Message::FlightLoadouts(loadouts) => {
-                // A mission starts flying: its scores start afresh.
+                // A mission starts flying: its scores and revivals start
+                // afresh.
                 self.scores = None;
+                self.revival = None;
+                self.spawned.clear();
                 self.flight_loadouts(loadouts);
             }
-            // Stage F phase 2: passed on for the slices that act on them.
-            Message::Revival(revival) => {
-                self.log("revival", &[&format!("{:?}", revival.rule)]);
-                self.event(ClientEvent::Revival(revival));
-            }
-            Message::Spawned(spawned) => {
-                self.log("spawned", &[&spawned.plane.to_string()]);
-                self.event(ClientEvent::Spawned(spawned));
-            }
+            // Stage F phase 2.
+            Message::Revival(revival) => self.revival_message(revival),
+            Message::Spawned(spawned) => self.spawned_message(spawned),
             Message::Scores(scores) => {
                 self.log("scores", &[&scores::summary(&scores)]);
                 self.scores = Some(scores::Kept {
@@ -2009,6 +2018,8 @@ impl Client {
         let mut offset = Offset::default();
         offset.clear(now.as_secs_f64());
         self.roster = Some(seated.roster.clone());
+        // A new plane: a revival's wait is over.
+        self.revival = None;
         self.seat = Some(Seat {
             seat: SeatId(seated.seat),
             plane,

@@ -124,6 +124,9 @@ struct TestClient {
     errors: Vec<String>,
     /// Every Scores message (phase 2, slice F2-S).
     scores: Vec<crate::wire::messages::Scores>,
+    /// Every Revival and Spawned message (phase 2, slice F2-V).
+    revivals: Vec<crate::wire::messages::Revival>,
+    spawned: Vec<crate::wire::messages::Spawned>,
 }
 
 impl TestClient {
@@ -167,6 +170,8 @@ impl TestClient {
             events: Vec::new(),
             errors: Vec::new(),
             scores: Vec::new(),
+            revivals: Vec::new(),
+            spawned: Vec::new(),
         }
     }
 
@@ -329,6 +334,8 @@ impl TestClient {
             Message::MissionEnded(ended) => self.ended = Some(ended),
             Message::Notice(_) => {}
             Message::Scores(scores) => self.scores.push(*scores),
+            Message::Revival(revival) => self.revivals.push(*revival),
+            Message::Spawned(spawned) => self.spawned.push(*spawned),
             other => self.errors.push(format!("unexpected {other:?}")),
         }
     }
@@ -1106,6 +1113,9 @@ fn a_command_repeated_in_many_packets_toggles_once() {
     assert!(rig.clients[client].own.len() > own_states);
 }
 
+/// Slice F2-V replaced the departed players' orphans: a lost plane whose
+/// player leaves the game is abandoned to the mission (host/revive_tests.rs
+/// has the rest).
 #[test]
 fn a_player_whose_plane_cannot_go_back_leaves_it_where_it_is() {
     let mut rig = Rig::new(spec(2, 2, 20), config(), LinkConfig::one_way(5 * MS));
@@ -1119,18 +1129,25 @@ fn a_player_whose_plane_cannot_go_back_leaves_it_where_it_is() {
     assert!(rig.run_until(Duration::from_secs(6), |r| r.closed(client)));
     let debrief = rig.clients[client].debrief.clone().unwrap();
     assert_eq!(debrief.player.status, PilotStatus::Dead);
-    // The plane stays with the departed player's seat and flies on.
-    assert_eq!(
-        rig.host.world().roster.plane(PlaneId(0)).unwrap().pilot,
-        Pilot::Human(SeatId(0))
+    // The plane is abandoned to the mission once its player has gone, and
+    // flies on with nobody.
+    assert!(rig.run_until(Duration::from_secs(1), |r| {
+        r.host.world().roster.plane(PlaneId(0)).unwrap().pilot == Pilot::Lost
+    }));
+    assert!(
+        rig.host
+            .world()
+            .cockpits
+            .iter()
+            .any(|c| c.plane == PlaneId(0))
     );
     rig.run(Duration::from_millis(500));
-    // A new player gets another seat and plane.
+    // A new player gets the free seat and another plane.
     let next = rig.join(|_| {});
     assert!(rig.run_until(Duration::from_secs(2), |r| r.seated(next)));
     let seated = rig.clients[next].seated.clone().unwrap();
-    assert_eq!((seated.seat, seated.plane), (1, 1));
-    let orphan = seated
+    assert_eq!((seated.seat, seated.plane), (0, 1));
+    let lost = seated
         .roster
         .planes
         .iter()
@@ -1138,13 +1155,7 @@ fn a_player_whose_plane_cannot_go_back_leaves_it_where_it_is() {
         .unwrap()
         .pilot
         .clone();
-    assert_eq!(
-        orphan,
-        RosterPilot::Human {
-            seat: 0,
-            callsign: "Viper".into()
-        }
-    );
+    assert_eq!(lost, RosterPilot::Ai, "the roster names nobody for it");
     // Asking for the lost plane says why, not that someone flies it.
     let third = rig.join(|_| {});
     rig.clients[third].ready = Some(Some(0));
@@ -1460,3 +1471,6 @@ mod worker_tests;
 
 #[path = "score_tests.rs"]
 mod score_tests;
+
+#[path = "revive_tests.rs"]
+mod revive_tests;

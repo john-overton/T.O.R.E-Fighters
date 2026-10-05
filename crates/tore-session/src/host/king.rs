@@ -295,7 +295,7 @@ impl Host {
         self.world = world;
         self.manifest = manifest;
         self.tracker = super::Tracker::new(&self.world);
-        self.orphans.clear();
+        self.revival = super::revive::Revivals::default();
         self.gives.clear();
         let slots = self.slots();
         let mut dropped = Vec::new();
@@ -657,7 +657,7 @@ impl Host {
                 self.world = world;
                 self.manifest = manifest;
                 self.tracker = super::Tracker::new(&self.world);
-                self.orphans.clear();
+                self.revival = super::revive::Revivals::default();
                 self.gives.clear();
                 self.number = self.number.wrapping_add(1);
                 self.court.locks.clear();
