@@ -150,6 +150,38 @@ def friend_or_foe_check(work: Path, output: str) -> list[str]:
     return problems
 
 
+def link_cues_check(work: Path, output: str) -> list[str]:
+    """The wingmen lock the player's bandit: the flight data link's sort warning reads on the HUD."""
+    events, _ = load(work)
+    said = [e.get("text") or "" for e in events if e["kind"] == "comms.hud"]
+    problems = []
+    clashes = [text for text in said if text.startswith("Sort: ")]
+    if not clashes:
+        problems.append(f"no wingman locked the player's bandit, so no sort warning read; the flight said {said}")
+    for text in clashes:
+        if not (text.startswith("Sort: Red ") and text.endswith(" is locked on your target.")):
+            problems.append(f"a sort warning reads {text!r}")
+    for name in ("before", "clash", "after"):
+        if not (work / "shots" / f"{name}.ppm").is_file():
+            problems.append(f"no {name}.ppm frame")
+    return problems
+
+
+def link_assign_check(work: Path, output: str) -> list[str]:
+    """The lead's Engage my target assigns the bandit to both wingmen, who then lock it: not a sort clash."""
+    events, _ = load(work)
+    said = [e.get("text") or "" for e in events if e["kind"] == "comms.hud"]
+    problems = []
+    if "Engage my target: 2 applied, 0 rejected, 0 without motion" not in said:
+        problems.append(f"the order was not applied to both wingmen; the flight said {said}")
+    if any(text.startswith("Sort: ") for text in said):
+        problems.append(f"an assigned lock was called a sort clash: {said}")
+    for name in ("before", "assigned"):
+        if not (work / "shots" / f"{name}.ppm").is_file():
+            problems.append(f"no {name}.ppm frame")
+    return problems
+
+
 def gun_check(work: Path, output: str) -> list[str]:
     events, _ = load(work)
     rounds = count(events, "weapon.launch", 0, **{"class": "gun"})
@@ -470,6 +502,22 @@ def scenarios() -> list[Scenario]:
             "friend-or-foe.txt",
             [*quick, "--separation", "5", "--ai-mission", "hold"],
             friend_or_foe_check,
+            ai=3,
+            extra_env={"TORE_SCRIPT_OUT": "{work}/shots"},
+        ),
+        build(
+            "link-cues",
+            "link-cues.txt",
+            [*quick, "--separation", "10", "--ai-mission", "hold", "--probe-wing-size", "3"],
+            link_cues_check,
+            ai=3,
+            extra_env={"TORE_SCRIPT_OUT": "{work}/shots"},
+        ),
+        build(
+            "link-assign",
+            "link-assign.txt",
+            [*quick, "--separation", "10", "--ai-mission", "hold", "--probe-wing-size", "3"],
+            link_assign_check,
             ai=3,
             extra_env={"TORE_SCRIPT_OUT": "{work}/shots"},
         ),

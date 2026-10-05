@@ -1,0 +1,14 @@
+# Quick Mission, a flight of three and an enemy 10 nm ahead holding fire: designate the enemy (T)
+# and order the wingmen to engage it (Alt+0, then Alt+E). The lead's order assigns the target to
+# both wingmen, so the radar numbers them to the left of the contact, the target window says
+# ASSIGNED TO 2 3, and the wingmen's locks are meant, so no sort warning reads.
+wait 1
+shot before.ppm
+key t
+waittick 240
+key Alt+0
+key Alt+e
+waittick 900
+shot assigned.ppm
+waittick 2400
+exit

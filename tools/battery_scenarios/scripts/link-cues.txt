@@ -1,0 +1,16 @@
+# Quick Mission, a flight of three and an enemy 10 nm ahead holding fire: designate the enemy (T)
+# and order the wingmen to attack on contact (Alt+0, then Alt+W), which assigns nobody. The
+# wingmen lock the player's bandit, so the flight data link's sort warning reads and beeps, and
+# the radar and target window show the wingmen's lock numbers. Frames before and while it happens.
+wait 1
+shot before.ppm
+key t
+waittick 240
+key Alt+0
+key Alt+w
+waittick 1000
+shot clash.ppm
+waittick 1800
+shot after.ppm
+waittick 2400
+exit

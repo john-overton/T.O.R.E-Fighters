@@ -148,3 +148,53 @@ fn two_runs_warn_alike() {
     let (_, second) = sort_cues(900);
     assert_eq!(first, second);
 }
+
+/// The lead orders Engage my target to its flight: the assignments the merged
+/// picture holds reach the displays as marks on the lead's readout and as the
+/// assignment on each receiver's, and a wingman that locks the target it was
+/// given is not a sort clash.
+#[test]
+fn an_assignment_reaches_the_displays_and_meant_locks_do_not_warn() {
+    use super::datalink_assign_tests::{TARGET, mission, step as step_orders};
+    use crate::seats::SeatCommand;
+    use tore_sim::ai::wing::PlayerOrder;
+    let mut world = mission();
+    let order = [(60, SeatCommand::WingOrder(PlayerOrder::EngageMyTarget))];
+    let mut warned = Vec::new();
+    let mut checked = false;
+    for tick in 0..600 {
+        let mut out = TickOutput::default();
+        step_orders(&mut world, tick, &order, &mut out);
+        warned.extend(out.cues.iter().filter_map(|cue| match cue {
+            Cue::Message { text, .. } if text.starts_with("Sort: ") => Some(text.clone()),
+            _ => None,
+        }));
+        if tick == 100 {
+            checked = true;
+            let given: Vec<u32> = world.datalink.assignments().keys().copied().collect();
+            assert!(!given.is_empty(), "the order assigned nobody");
+            let lead = readout_of(&world, F_LEAD).link;
+            let mark = lead
+                .marks
+                .iter()
+                .find(|m| m.target == TARGET.0)
+                .expect("the lead sees its flight's assignment");
+            let bits = given
+                .iter()
+                .map(|plane| 1u16 << world.datalink.member(*plane).unwrap().member)
+                .fold(0, |all, bit| all | bit);
+            assert_eq!(mark.assigned_to, bits);
+            assert_eq!(lead.assigned, None, "the lead gave it, it was not given");
+            if let Some(row) = world.datalink.assignments().get(&F_HUMAN.0) {
+                let own = readout_of(&world, F_HUMAN).link.assigned.expect("assigned");
+                assert_eq!(
+                    (own.target, own.by, own.acknowledged),
+                    (row.target, row.by, row.acknowledged)
+                );
+            }
+        }
+    }
+    assert!(checked);
+    // The lead locked the target it assigned: no clash was announced for it.
+    assert!(warned.is_empty(), "meant locks warned: {warned:?}");
+}

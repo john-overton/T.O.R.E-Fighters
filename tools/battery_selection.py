@@ -105,6 +105,10 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "ai-orders": ("wing orders", ("ai-order-*", "ai-orders-*")),
     "ai-datalink": ("the flight data link's picture and what reads it", ("ai-datalink-*",)),
+    "link-cues": (
+        "the flight data link's cues, flown by hand with wingmen",
+        ("replay-script-link-*",),
+    ),
     "ai-airfield": (
         "AI takeoff, landing, return to base, ILS approaches on every theater",
         (
@@ -321,7 +325,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-world/src/ai_wings.rs", AI_CORE + ("radio",), "wing AI"),
     _r("crates/tore-world/src/ai_wings/*", AI_CORE + ("radio",), "wing AI"),
     _r("crates/tore-world/src/datalink.rs", ("ai-datalink", "ai-orders", "ai-fights"), "data link picture"),
-    _r("crates/tore-world/src/datalink/*", ("ai-datalink", "ai-orders", "ai-fights"), "data link picture"),
+    _r("crates/tore-world/src/datalink/*", ("ai-datalink", "ai-orders", "ai-fights", "link-cues"), "data link picture"),
     _r("crates/tore-world/src/airfield_radio.rs", ("ai-airfield", "radio", "airports"), "tower radio"),
     _r("crates/tore-world/src/comms.rs", ("radio", "replay-recording", "ai-fights"), "radio and crew calls"),
     _r("crates/tore-world/src/comms/*", ("radio", "replay-recording", "ai-fights"), "radio and crew calls"),
@@ -334,8 +338,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-world/src/debrief.rs", ("menus-screens", "ai-fights") + NET_FAMILIES, "debrief evaluator; the multiplayer results rows"),
     _r("crates/tore-world/src/debrief/*", ("menus-screens", "ai-fights") + NET_FAMILIES, "the multiplayer results rows' tests"),
     _r("crates/tore-world/src/seats.rs", ("ai-lead", "ai-fights"), "seats"),
-    _r("crates/tore-world/src/frame.rs", ("flight-views", "instruments", "replay-recording"), "the flight frame"),
-    _r("crates/tore-world/src/readout.rs", ("instruments", "flight-combat", "replay-live"), "the cockpit readout"),
+    _r("crates/tore-world/src/frame.rs", ("flight-views", "instruments", "replay-recording", "link-cues"), "the flight frame"),
+    _r("crates/tore-world/src/readout.rs", ("instruments", "flight-combat", "replay-live", "link-cues"), "the cockpit readout"),
     _r("crates/tore-world/src/snapshot.rs", ("replay-recording", "ai-fights"), "snapshots"),
     _r("crates/tore-world/src/mission_layout.rs", ("ai-missions", "menus-creator"), "mission layout"),
     _r(
@@ -348,7 +352,7 @@ RULES: tuple[Rule, ...] = (
         "the content digests (stage L): computed by the lobby and the dedicated server, which later slices wire in; "
         "no scenario reads them yet",
     ),
-    _r("crates/tore-world/src/target_window.rs", ("instruments",), "target window"),
+    _r("crates/tore-world/src/target_window.rs", ("instruments", "link-cues"), "target window"),
     _r("crates/tore-world/src/aircraft_type.rs", ("ai-fights", "menus-creator"), "aircraft types"),
     # Stage F phase 2's shared types (F2-0); single player never uses them.
     _r("crates/tore-world/src/score.rs", NET_FAMILIES, "score facts (networked games)"),
@@ -438,9 +442,9 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/*.wgsl", RENDER_FAMILIES, "shaders", windowed=True),
     _r("crates/tore-app/src/*renderer*.rs", RENDER_FAMILIES, "renderers", windowed=True),
     _r("crates/tore-app/src/scenery*", RENDER_FAMILIES, "scenery drawing", windowed=True),
-    _r("crates/tore-app/src/instruments*", ("instruments", "windowed-menus"), "cockpit instruments", windowed=True),
+    _r("crates/tore-app/src/instruments*", ("instruments", "windowed-menus", "link-cues"), "cockpit instruments", windowed=True),
     _r("crates/tore-app/src/hud*", ("instruments", "windowed-menus"), "HUD", windowed=True),
-    _r("crates/tore-app/src/weapon_hud.rs", ("instruments", "windowed-menus"), "weapon HUD", windowed=True),
+    _r("crates/tore-app/src/weapon_hud.rs", ("instruments", "windowed-menus", "link-cues"), "weapon HUD", windowed=True),
     _r("crates/tore-app/src/render_snapshot.rs", RENDER_FAMILIES + ("menus-screens",), "snapshot drawing", windowed=True),
     _r("crates/tore-app/src/graphics*", RENDER_FAMILIES + ("menus-screens",), "graphics options", windowed=True),
     _r("crates/tore-app/src/flight_views.rs", ("flight-views", "windowed-menus"), "flight views", windowed=True),
@@ -449,7 +453,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/camera.rs", RENDER_FAMILIES, "camera", windowed=True),
     _r("crates/tore-app/src/flight_canvas.rs", RENDER_FAMILIES, "flight canvas", windowed=True),
     _r("crates/tore-app/src/flight_map.rs", RENDER_FAMILIES, "flight map", windowed=True),
-    _r("crates/tore-app/src/scope.rs", RENDER_FAMILIES, "radar scope", windowed=True),
+    _r("crates/tore-app/src/scope.rs", RENDER_FAMILIES + ("link-cues",), "radar scope", windowed=True),
     _r("crates/tore-app/src/canvas_present.rs", RENDER_FAMILIES, "presentation", windowed=True),
     _r("crates/tore-app/src/static_art.rs", RENDER_FAMILIES, "art", windowed=True),
     _r("crates/tore-app/src/*_art.rs", RENDER_FAMILIES, "art", windowed=True),
@@ -464,7 +468,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/weather.rs", RENDER_FAMILIES + ("flight-environment",), "weather drawing", windowed=True),
     _r("crates/tore-app/src/target_preview.rs", RENDER_FAMILIES, "target preview", windowed=True),
     _r("crates/tore-app/src/attitude.rs", RENDER_FAMILIES, "attitude drawing", windowed=True),
-    _r("crates/tore-app/src/combat_view.rs", ("flight-combat", "windowed-menus"), "combat view", windowed=True),
+    _r("crates/tore-app/src/combat_view.rs", ("flight-combat", "windowed-menus", "link-cues"), "combat view", windowed=True),
     _r("crates/tore-app/src/pause_menu.rs", ("windowed-menus", "replay-live"), "pause menu", windowed=True),
     # tore-app: menus.
     _r("crates/tore-app/src/menu.rs", MENU_FAMILIES, "menus", windowed=True),

@@ -855,14 +855,15 @@ baseline):
 
 | Part | Place | Kind | Fields |
 | --- | --- | --- | --- |
-| Link | Right after the header, so an assignment is never the part that waits for room | Scalar (signed varints, as the other scalar groups) | The plane's tier (Voice 0, Flight 1, Network 2); the assignment by link: target id plus one (0 for none), the assigner's plane id, acknowledged; the newest sort warning: target id plus one, the other plane's id; whether the seat monitors the battle net |
-| Link tracks | After the contacts | List, keyed by target id, at most 24 | Position (whole feet) predicted from velocity (1/4 ft/s), as the contacts; slow fields: source (own, flight, network: 2 bits), lockers (a mask of the flight's member numbers, 8 bits), locked over the battle net (a presence bit and the plane id), assigned to (a mask, 8 bits) |
+| Link | Right after the header, so an assignment is never the part that waits for room | Scalar (signed varints, as the other scalar groups) | The radar flag (built in G6 as `LinkReadout::radar`; it replaces the tier); the assignment by link: target id plus one (0 for none), the assigner's plane id, acknowledged; whether the seat monitors the battle net. The design's newest sort warning is not in the readout (G6 agent decision): the warning is the Message and Radio events |
+| Link tracks | After the contacts | List, keyed by target id, at most 24 | Position (whole feet) predicted from velocity (1/4 ft/s), as the contacts; slow field: source (own, flight, network: 2 bits) |
+| Link marks | After the link tracks | List, keyed by target id, at most 32 (agent decision, G6: the masks moved off the tracks so a lock shows the tick it is taken) | Slow fields only: lockers (a mask of the flight's member numbers), locked over the battle net (a presence bit, the flight and the member number), assigned to (a mask) |
 | Link mates | After the link tracks | List, keyed by plane id, at most 7 | Slow fields only: member number (3 bits), fuel (normal, joker, bingo, fumes, out: 3 bits), weapons (missiles, guns only, Winchester: 2 bits), damage (none, light, heavy: 2 bits) |
 
 Tracks and mates change only on the host's publishing ticks (every thirtieth),
 so between them the parts send nothing; locks and assignments change the
-masks and the Link scalar the tick they happen. A Voice-tier plane's parts
-are empty but for its tier.
+marks and the Link scalar the tick they happen. A plane with no radar gets the
+parts all the same, with the radar flag down.
 
 **Event.** One new event code, after Sound:
 

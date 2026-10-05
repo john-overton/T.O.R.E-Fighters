@@ -16,13 +16,13 @@ use tore_sim::{
 };
 
 /// The enemy the lead designates: an AI aircraft of the other side.
-const TARGET: PlaneId = E_AI[0];
+pub(super) const TARGET: PlaneId = E_AI[0];
 /// The tick the lead's radar is on and the target designated.
 const DESIGNATE: usize = 40;
 
 /// The fight of `datalink_tests`: the friendly wing is the lead, a second human
 /// and two AI wingmen, armed the way a real mission arms them.
-fn mission() -> World {
+pub(super) fn mission() -> World {
     let mut world = ai_mission();
     let wings = world.ai_wings.as_mut().unwrap();
     for id in 1..=7 {
@@ -39,7 +39,12 @@ fn mission() -> World {
 
 /// Steps one tick. The lead turns its radar on, designates [`TARGET`] and
 /// gives `orders` (seat commands) at the tick each names.
-fn step(world: &mut World, tick: usize, orders: &[(usize, SeatCommand)], out: &mut TickOutput) {
+pub(super) fn step(
+    world: &mut World,
+    tick: usize,
+    orders: &[(usize, SeatCommand)],
+    out: &mut TickOutput,
+) {
     let step_inputs = inputs(world, |seat| {
         let mut pilot = PilotInput::default();
         let mut commands = Vec::new();
@@ -68,7 +73,7 @@ fn step(world: &mut World, tick: usize, orders: &[(usize, SeatCommand)], out: &m
 
 /// Runs to the order's tick and one more, returning the world and the output
 /// of the tick the order was given.
-fn order_at(order: SeatCommand, tick: usize) -> (World, TickOutput) {
+pub(super) fn order_at(order: SeatCommand, tick: usize) -> (World, TickOutput) {
     let mut world = mission();
     let mut out = TickOutput::default();
     let orders = [(tick, order)];
