@@ -20,7 +20,14 @@ use tore_sim::{attitude, flight};
 
 mod build;
 #[cfg(test)]
+mod checkpoint_scenarios;
+#[cfg(test)]
+mod checkpoint_tests;
+// Exact checkpoints (docs/formats/checkpoint.md): the cockpits section.
+#[cfg(test)]
 mod build_tests;
+#[path = "world_checkpoint.rs"]
+pub(crate) mod checkpoint;
 pub use build::{Built, Hooks, Seating};
 #[cfg(test)]
 mod command_tests;

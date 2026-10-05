@@ -963,3 +963,7 @@ mod tests {
         assert_eq!(delivered.origin.audience, Audience::Player);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "airfield_radio_checkpoint.rs"]
+mod checkpoint;

@@ -4695,3 +4695,7 @@ mod tests {
         }
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "controller_checkpoint.rs"]
+mod checkpoint;

@@ -424,3 +424,7 @@ mod tests {
         assert_eq!(smoke.puffs[0].position[0], 4.);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "smoke_checkpoint.rs"]
+mod checkpoint;

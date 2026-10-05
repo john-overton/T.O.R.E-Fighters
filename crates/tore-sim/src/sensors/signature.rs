@@ -277,3 +277,7 @@ mod tests {
         );
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "signature_checkpoint.rs"]
+mod checkpoint;

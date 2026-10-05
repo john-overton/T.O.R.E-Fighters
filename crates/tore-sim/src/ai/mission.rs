@@ -6982,3 +6982,7 @@ mod airfield_integration_tests;
 #[cfg(test)]
 #[path = "thought_tests.rs"]
 mod thought_tests;
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "mission_checkpoint.rs"]
+mod checkpoint;

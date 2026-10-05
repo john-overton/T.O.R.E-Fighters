@@ -446,3 +446,7 @@ impl SensorProfiles {
         )
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "profile_checkpoint.rs"]
+mod checkpoint;

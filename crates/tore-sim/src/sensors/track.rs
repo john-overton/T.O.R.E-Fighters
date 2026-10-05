@@ -933,3 +933,7 @@ fn strobes(
 
 #[cfg(test)]
 mod performance_tests;
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "track_checkpoint.rs"]
+mod checkpoint;

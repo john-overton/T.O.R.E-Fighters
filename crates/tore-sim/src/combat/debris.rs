@@ -156,3 +156,7 @@ mod tests {
         assert!(at[2] > 20.);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "debris_checkpoint.rs"]
+mod checkpoint;

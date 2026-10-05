@@ -2004,3 +2004,7 @@ mod tests {
         );
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "radio_calls_checkpoint.rs"]
+mod checkpoint;

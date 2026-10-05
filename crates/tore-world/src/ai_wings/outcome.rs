@@ -587,3 +587,7 @@ mod tests {
         assert!(!succeeded(&state, Some(&wings), 0, true));
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "outcome_checkpoint.rs"]
+mod checkpoint;

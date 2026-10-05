@@ -6026,3 +6026,7 @@ mod tests {
         );
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "ai_wings_checkpoint.rs"]
+mod checkpoint;

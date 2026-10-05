@@ -1009,3 +1009,7 @@ mod tests {
         assert!(c.seat_cooldown(S0, "warn", 3., 6.));
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "comms_checkpoint.rs"]
+mod checkpoint;

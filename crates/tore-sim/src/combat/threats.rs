@@ -670,3 +670,7 @@ mod tests {
         assert!(service.records().next().unwrap().stale);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "threats_checkpoint.rs"]
+mod checkpoint;

@@ -8810,3 +8810,7 @@ mod friendly_fire_tests {
         }
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "live_checkpoint.rs"]
+mod checkpoint;

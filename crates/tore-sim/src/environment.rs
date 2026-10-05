@@ -865,3 +865,7 @@ pub fn sun_whitening_target(layer: &Layer, seconds: i32, alignment: f64) -> u8 {
     (((alignment.clamp(-1., 1.) * (32767. * 32767. / 65536.)).floor() as i32 - 15564) / 3)
         .clamp(0, 255) as u8
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "environment_checkpoint.rs"]
+mod checkpoint;

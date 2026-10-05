@@ -2262,3 +2262,7 @@ pub mod fixtures {
         assert_eq!(devices(&combat), None, "a restart forgets them");
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "combat_checkpoint.rs"]
+mod checkpoint;

@@ -474,6 +474,23 @@ impl State {
         Ok(())
     }
 
+    /// The flight model as the import built it, before the weight scaling:
+    /// what [`Self::read_exact`] takes. A checkpoint's restore collects these
+    /// from the fresh world (docs/formats/checkpoint.md, "Restoring").
+    pub fn import_model(&self) -> crate::models::AircraftModel {
+        let mut model = self.model.clone();
+        if let Some(raw) = &self.raw_envelopes {
+            let mut configuration = model.configuration().clone();
+            configuration.aerodynamics.envelopes = raw.as_ref().clone();
+            // The raw polygons are the import's own and passed validation
+            // when it built the model.
+            model
+                .set_configuration(configuration)
+                .expect("the imported envelopes are valid");
+        }
+        model
+    }
+
     /// Reads a state [`Self::write_exact`] wrote against the same `base`.
     /// `model` is the aircraft type's flight model as the import builds it,
     /// before any weight scaling: the decoder rebuilds the scaled envelopes

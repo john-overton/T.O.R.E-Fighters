@@ -108,10 +108,15 @@ The checkpoint supplies everything else, including the structure:
   lists are rebuilt from the checkpoint, never matched to the fresh world's.
   A fresh open mission has no cockpits; a restored one has as many as the
   checkpoint says.
-- **Aircraft types by identity.** A flight state codes the `AircraftId` of its
-  aircraft beside its exact state. On loading, the flight model comes from the
-  fresh world's import table (`Imports`), built from every aircraft type the
-  fresh world loaded. Two different models under one identity are refused.
+- **Flight models by identity.** A flight state codes the `AircraftId` of its
+  aircraft and its model's ordinal beside its exact state. On loading, the
+  flight model comes from the fresh world's model table (`Models`): every
+  distinct model, as the import built it, of every aircraft type and every
+  flight the world holds. Handoffs move flights, never models, so the table
+  is the same all mission long and on both sides. A world built from an import
+  has one model per identity, so the ordinal is 0; test fixtures can carry two
+  (a synthetic player beside real AI rows), which the ordinal tells apart, in
+  an order fixed by a fingerprint of each model.
 - **Copied records by value.** Ownship configurations, weapon records, sensor
   profiles and runway views are coded in full, once each, so a restore never
   needs the import's files.
@@ -188,7 +193,8 @@ always writes the same bytes. A record may refer to earlier records.
 
 ### Flight states
 
-A flight state is coded as its `AircraftId` (8 bits) and then the
+A flight state is coded as its `AircraftId` and its model's ordinal (two
+varints) and then the
 [exact own-plane coding](../ARCHITECTURE.md#the-exact-state-of-a-humans-plane)
 (`flight::State::write_exact`, no baseline) that the wire already uses. The
 same bytes as the wire mean one coder to keep complete, not two. The write-only
@@ -208,10 +214,10 @@ pub trait Checkpoint: Sized {
 }
 ```
 
-`Saver` wraps a `BitWriter` with the shared-record table; `Loader` wraps a
-`BitReader` with the shared records and the fresh world's `Imports`. Holders
-restored in place implement `Restore` (`save` and `restore(&mut self, ..)`)
-instead. The rules:
+`Saver` wraps a `BitWriter` with the shared-record table and the world's
+flight models; `Loader` wraps a `BitReader` with the shared records and the
+fresh world's flight models. Holders restored in place implement `InPlace`
+(`save_in_place` and `restore_in_place(&mut self, ..)`) instead. The rules:
 
 - **Exact values.** Every float is coded by its bits (the exclusive-or coding
   of `tore-codec`'s `write_f64_xor`, against the baseline or zero), so NaN
@@ -230,14 +236,17 @@ instead. The rules:
   `HashMap` or `HashSet` may enter mission state (none exists).
 - **Strings** code a varint byte count and UTF-8 bytes, with no 255-byte cap:
   composed radio text can be longer.
-- **Enums.** A field-less enum codes its variant's fixed number with
-  `checkpoint_enum!`. An enum with data is written by hand as one `match` with
+- **Enums.** A field-less enum codes its variant's fixed number, a varint,
+  with `checkpoint_enum!`. An enum with data is written by hand as one `match` with
   every variant and no `_` arm, so a new variant fails to compile.
 - **Every field named.** A struct's coder destructures it with every field
   listed and no `..`, and builds it back the same way.
-  `checkpoint_struct!(Type { a, b; skip c = <rebuild> })` does both; a hand
-  coder does it in a `let Type { .. }` with every field. A skipped field names
-  its class in a comment: why-record, scratch (with the proof), setup or local.
+  `checkpoint_struct!(Type { a, b } shared { c } skip { d = <rebuild> })` does
+  both (`shared` fields are coded as shared records, `skip` fields rebuilt by
+  their expression); `checkpoint_tuple!(Type(a, b))` does it for a tuple
+  struct; a hand coder does it in a `let Type { .. } = self` with every field.
+  A skipped field names its class in a comment: why-record, scratch (with the
+  proof), setup or local.
 - **`&'static str`** in state codes as an index into a fixed table beside the
   type (the radio cooldown keys are the one case found), and an unknown string
   on saving is an error, not a silent skip.
@@ -301,20 +310,29 @@ macOS); every scenario is built from synthetic fixtures, never retail data.
 
 | Scenario | Fixture | At tick N the test asserts | N, M |
 | --- | --- | --- | --- |
-| Dogfight with missiles and rounds in flight | The crowd fixture (`world/crowd.rs`): four against four at 10,000 ft, four human seats | At least one missile guiding and one gun round in flight, a lock held | First tick after 600 with both in flight; 600 |
+| Dogfight with missiles and rounds in flight | The crowd fixture (`world/crowd.rs`): four against four at 10,000 ft, four human seats. *Built (H0)* without the assertions | At least one missile guiding and one gun round in flight, a lock held | First tick after 600 with both in flight; 600 |
 | Damaged aircraft | The crowd fixture | An aircraft with hit points lost and a subsystem fault, a wreck falling, a pilot under canopy | First tick after 900 with all three; 600 |
 | Handoffs | The crowd fixture | A seat gave its plane back to the AI and another took one, after the fight started | 700; 600 |
-| Open mission, fresh build | `World::new` with `Seating::Open` from the synthetic import | Restored into a world fresh from `World::new`, so the structure (cockpits, ownships, actors) differs from the fresh world's | 900; 600 |
+| Open mission, fresh build | `World::new` with `Seating::Open` from the synthetic import, three against three; seats take planes at steps 60 and 61, one gives its plane back at 500, another takes one at 640. *Built (H0)* | Restored into a world fresh from `World::new`, so the structure (cockpits, ownships, actors) differs from the fresh world's | 700; 600 |
 | AI landing | The single-player tick mission with the wing ordered to land on the fixture airport | An AI aircraft on approach, one on the runway | Picked by state; 600 |
 | Ground start | A synthetic import with an airport, `Start::Ground` | Aircraft parked, taxiing and rolling | 240; 900 |
 | Changing weather | The single-player tick mission with a weather configuration that reselects its layers inside the run | A fog reselection between N and N + M | Picked by state; 1,200 |
-| Single player | The full-tick fingerprint mission (`world/tick_tests.rs`) | Turbulence, the airport service and the player's tower conversation in use | 600; 600 |
+| Single player | The full-tick fingerprint mission (`world/tick_tests.rs`) with its script and drones. *Built (H0)* | Turbulence, the airport service and the player's tower conversation in use | 600; 600 |
 
 Until every section is coded, the whole-world test is ignored with its reason,
 and each slice runs the **twin restore** instead: build the scenario twice,
 step both to N, restore only the covered sections from one into the other, and
 step on. The uncovered sections are already equal in the twin, so any
-difference comes from the covered sections' coding.
+difference comes from the covered sections' coding. The harness finds the
+covered sections itself: a section is covered when it checkpoints alone, and
+any error but "not coded yet" fails the test.
+
+A twin restore can only catch a coding error in state that matters during the
+M ticks: a field that is wrongly skipped but empty at tick N, or that no
+later tick reads, is invisible to it (H0 checked this by skipping fields of
+the radio section on purpose: they were empty at N in every scenario, and
+the test still passed). That is why each scenario asserts the state it is
+meant to exercise at tick N.
 
 ## Measurement
 

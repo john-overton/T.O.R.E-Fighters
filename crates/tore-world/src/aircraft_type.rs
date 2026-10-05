@@ -35,6 +35,12 @@ pub fn load_type(resources: &dyn ResourceSource, id: AircraftId) -> WorldResult<
 }
 
 impl AircraftType {
+    /// The flight model a flight of this type starts with, as the import
+    /// builds it: what a checkpoint's restore decodes flight states against.
+    pub(crate) fn model(&self) -> &AircraftModel {
+        &self.model
+    }
+
     /// Loads the simulation half of an aircraft type: parses the profile,
     /// checks that it is the identity asked for, and builds the flight model
     /// and the sensor profiles. The engine outlets are empty: they come from

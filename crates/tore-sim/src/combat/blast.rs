@@ -363,3 +363,7 @@ mod tests {
         assert_eq!(fire.strength(), 1.);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "blast_checkpoint.rs"]
+mod checkpoint;

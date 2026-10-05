@@ -6,6 +6,7 @@ pub mod airport;
 pub mod attitude;
 pub mod autopilot;
 pub mod cheats;
+pub mod checkpoint;
 pub mod combat;
 pub mod ejection;
 pub mod environment;

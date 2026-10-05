@@ -250,6 +250,11 @@ RULES: tuple[Rule, ...] = (
     _r("crates/*/test_support.rs", (), "test support only"),
     _r("crates/*/test_support/*", (), "test support only"),
     _r("crates/*/assets/*", (), "bundled art and notices", windowed=True),
+    # Exact checkpoints (docs/formats/checkpoint.md): coders only read state, and only tests restore a
+    # checkpoint until host migration (stage K) uses one, so no scenario's output can change.
+    _r("crates/*_checkpoint.rs", (), "checkpoint coders"),
+    _r("crates/*/checkpoint.rs", (), "checkpoint traits and container"),
+    _r("crates/*/checkpoint_*.rs", (), "checkpoint shared coders, records, scenarios and tests"),
     # Build configuration can change anything.
     _r("Cargo.toml", ALL_FAMILIES, "workspace manifest"),
     _r("Cargo.lock", ALL_FAMILIES, "dependency versions"),

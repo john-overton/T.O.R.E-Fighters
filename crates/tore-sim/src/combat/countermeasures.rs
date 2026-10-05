@@ -576,3 +576,7 @@ mod tests {
         assert!(dot(devices.flares[1].side, side) < 0.);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "countermeasures_checkpoint.rs"]
+mod checkpoint;

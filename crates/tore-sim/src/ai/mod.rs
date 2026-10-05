@@ -19,7 +19,9 @@
 //! - The simulation runs at a fixed 120 Hz; nominal timings are simulation
 //!   seconds on a quarter-second clock ([`QUARTER_SECOND_TICKS`]).
 pub mod airfield;
+// Exact checkpoints (docs/formats/checkpoint.md).
 pub mod awareness;
+mod checkpoint;
 pub mod controller;
 pub mod damage;
 pub mod defense;

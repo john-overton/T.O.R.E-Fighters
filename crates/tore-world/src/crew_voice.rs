@@ -2058,3 +2058,7 @@ mod tests {
         );
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "crew_voice_checkpoint.rs"]
+mod checkpoint;

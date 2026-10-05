@@ -420,3 +420,7 @@ mod tests {
         assert_eq!(roster.seats().len(), 2);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "seats_checkpoint.rs"]
+mod checkpoint;
