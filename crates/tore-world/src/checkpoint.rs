@@ -43,11 +43,12 @@ pub enum Section {
     Radio,
     DataLink,
     Score,
+    Revival,
 }
 
 impl Section {
     /// Every section, in id order.
-    pub const ALL: [Section; 10] = [
+    pub const ALL: [Section; 11] = [
         Section::Roster,
         Section::Combat,
         Section::AiWings,
@@ -58,6 +59,7 @@ impl Section {
         Section::Radio,
         Section::DataLink,
         Section::Score,
+        Section::Revival,
     ];
 
     pub fn id(self) -> u8 {
@@ -72,6 +74,7 @@ impl Section {
             Section::Radio => 8,
             Section::DataLink => 9,
             Section::Score => 10,
+            Section::Revival => 11,
         }
     }
 
@@ -91,6 +94,7 @@ impl Section {
             Section::Radio => "radio",
             Section::DataLink => "data link",
             Section::Score => "score",
+            Section::Revival => "revival",
         }
     }
 }
@@ -278,7 +282,9 @@ impl World {
             hash.update(aircraft.profile.id.pt().as_bytes());
             hash.update(&[0xfe]);
         }
-        for plane in self.roster.planes() {
+        // The planes a fresh build has: a revival's new planes are left out
+        // and retired ones counted (slice F2-V).
+        for plane in self.revival.first_planes(self.roster.planes()) {
             let PlaneId(id) = plane.id;
             hash.update(&id.to_le_bytes());
             hash.update(&[
@@ -422,10 +428,9 @@ impl World {
             // Stage F phase 2's score recorder (F2-S), the score section
             // (H10): present only while the host has scoring on.
             score,
-            // Stage F phase 2's revival bookkeeping (F2-V): the abandoned
-            // planes with when each wreck came to rest, and the retired
-            // ones. Mutable state not coded yet; stage H adds its section.
-            revival: _,
+            // Stage F phase 2's revival bookkeeping (F2-V), the revival
+            // section.
+            revival,
         } = self;
         match section {
             Section::Roster => roster.save(s, None),
@@ -450,6 +455,7 @@ impl World {
                     None => Ok(()),
                 }
             }
+            Section::Revival => revival.save(s, None),
         }
     }
 
@@ -482,6 +488,7 @@ impl World {
                     None
                 }
             }
+            Section::Revival => self.revival = Checkpoint::load(l, None)?,
         }
         Ok(())
     }

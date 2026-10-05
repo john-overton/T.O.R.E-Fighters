@@ -135,7 +135,9 @@ The checkpoint supplies everything else, including the structure:
 The **mission identity** is FNV-1a 64 over what the fresh world fixes and the
 checkpoint relies on: the terrain's theater and layout, the aircraft
 identities of every loaded type in load order, every plane's slot, and the
-setup's start. It catches a restore into a different mission, not a
+setup's start. The planes are the ones the mission was built with: a
+revival's new planes are left out and retired planes counted, from the
+revival book (*F2-V*). It catches a restore into a different mission, not a
 different import: the handshake's content manifest already guarantees the
 import.
 
@@ -180,10 +182,12 @@ compile without a section (see [keeping it complete](#keeping-it-complete)):
 | 8 | Radio | The radio call memory (hits by shooter and victim) | New value |
 | 9 | Data link | The flight data link's picture: members, each flight's published tracks and member status with their publish ticks, locks, engagements, assignments, the two warning tables, the planes already announced | New value |
 | 10 | Score | Whether the host has scoring on and, if so, the targets whose end is recorded and the score facts waiting for the host, with their tick | New value |
+| 11 | Revival | Stage F phase 2's revival book (`revive::Book`): each abandoned plane with the tick it was abandoned and the tick its wreck came to rest, in the order they were abandoned; the retired planes' roster entries; the planes revivals added, in order. Refused: a plane twice in one list, a plane both abandoned and retired, a retired plane with a pilot. *Built (F2-V)* | New value |
 
 Not coded at `World` level: `setup`, `phrases` and every terrain field but
 the weather (mission setup). Stage G added the data link's picture (section 9)
-and stage F phase 2 the score recorder (section 10); each new `World` field gets
+and stage F phase 2 the score recorder (section 10) and the revival book
+(section 11); each new `World` field gets
 the next free id, and state added inside an existing holder joins that
 holder's section. A G slice that adds state to `DataLink` codes it in
 `datalink_checkpoint.rs`, whose field list will not compile until it does. The
@@ -330,6 +334,7 @@ macOS); every scenario is built from synthetic fixtures, never retail data.
 | AI landing | `World::new` over the synthetic import with an airport, airborne, the wing ordered to land at step 20; the two wingmen start at the first approach gate and 16,000 ft behind it. *Built (H8)* | One wingman in the rollout on the runway, the other holding or approaching; after the run the first has cleared the runway and the second is on approach | 12,500; 1,600 |
 | Ground start | `World::new` over the synthetic import with an airport, `Start::Ground`, a wing of four, the player's takeoff at step 5. *Built (H8)* | A wingman parked, one lining up on the taxiway, the player rolling at over 100 ft/s | 2,000; 1,400 |
 | Changing weather | The single-player fingerprint mission with a weather configuration whose two layers both run the fog callback and whose first layer ends five seconds in. *Built (H8)* | The first layer active with a fog tint drawn; after the run the second layer is active | 300; 1,200 |
+| Revivals and wrecks | `World::new` open mission, three against three; seat 0's pilot killed at step 200 and revived at 201, seat 1's plane crashed at 300 and abandoned at 301, its wreck retired by hand at 400, seat 0's new plane lost at 500 and revived at 501. *Built (F2-V)* | Planes 0 and 6 abandoned (wrecks with cockpits nobody flies), plane 5 retired, planes 6 and 7 added by revivals and seat 0 in plane 7: a structure no fresh build has, restored into one | 700; 600 |
 
 The scenarios live in `world/checkpoint_scenarios.rs`. Each has an `expect`
 that asserts its state at tick N, and the test

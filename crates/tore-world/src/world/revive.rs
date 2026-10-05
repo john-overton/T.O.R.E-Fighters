@@ -160,12 +160,15 @@ pub struct LostPlane {
 }
 
 /// The revival's bookkeeping in the mission core: the abandoned planes in
-/// the order they were abandoned, and the retired ones. Mutable mission
-/// state that a checkpoint must carry (stage H codes it).
+/// the order they were abandoned, the retired ones, and the planes the
+/// mission did not start with. Mutable mission state, coded in its own
+/// checkpoint section (`revive_checkpoint.rs`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Book {
     lost: Vec<LostPlane>,
     retired: Vec<Plane>,
+    /// Every plane [`World::add_plane`] added, in order.
+    added: Vec<PlaneId>,
 }
 
 impl Book {
@@ -179,6 +182,25 @@ impl Book {
     /// and their results row.
     pub fn retired(&self) -> &[Plane] {
         &self.retired
+    }
+
+    /// The planes the mission did not start with (revivals' new planes), in
+    /// the order they were added, retired ones included.
+    pub fn added(&self) -> &[PlaneId] {
+        &self.added
+    }
+
+    /// The planes the mission started with, as the roster `planes` and the
+    /// retired ones hold them, in id order: what a fresh build of the
+    /// mission has, for the checkpoint's mission identity.
+    pub fn first_planes<'a>(&'a self, planes: &'a [Plane]) -> Vec<&'a Plane> {
+        let mut first: Vec<&Plane> = planes
+            .iter()
+            .chain(&self.retired)
+            .filter(|plane| !self.added.contains(&plane.id))
+            .collect();
+        first.sort_by_key(|plane| plane.id);
+        first
     }
 }
 
@@ -792,6 +814,7 @@ impl World {
                 pilot: Pilot::Ai,
             })
             .map_err(std::io::Error::other)?;
+        self.revival.added.push(new.plane);
         self.refresh_friendlies();
         Ok(())
     }
@@ -865,6 +888,10 @@ impl World {
         }
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md): the revival section.
+#[path = "revive_checkpoint.rs"]
+mod checkpoint;
 
 // The world tests of abandoning, reviving and retiring (slice F2-V).
 #[cfg(test)]

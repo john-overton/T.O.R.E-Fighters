@@ -88,6 +88,7 @@ pub(super) fn all() -> Vec<Scenario> {
         ai_landing(),
         ground_start(),
         changing_weather(),
+        revivals(),
     ]
 }
 
@@ -919,6 +920,122 @@ pub(super) fn changing_weather() -> Scenario {
         then: 1_200,
         expect,
         after: Some(after),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Slice F2-V's scenario.
+
+/// An open mission, three against three, with stage F phase 2's revival: seat
+/// 0's pilot is killed and it is revived in a new plane of its wing (step
+/// 201); seat 1's plane crashes and is abandoned (301) and its wreck retired
+/// (400, by hand: a real retirement waits 30 seconds of rest); seat 0's new
+/// plane is lost and revived once more (501). The checkpoint's roster,
+/// cockpits, combat rows, AI and revival book then hold planes a fresh build
+/// lacks, one it has no longer, and two wrecks nobody flies.
+pub(super) fn revivals() -> Scenario {
+    use super::revive::RevivalWeapons;
+    fn build() -> World {
+        let mut spec = MissionSpec::new(THEATER, AircraftId::F18);
+        spec.wings[0].count = 3;
+        spec.wings[3].count = 3;
+        spec.wings[3].skill = Skill::Average;
+        spec.separation_nm = 10;
+        spec.start = Start::Airborne {
+            altitude_ft: 10_000,
+        };
+        World::new(&spec, &resources(), Seating::Open).unwrap()
+    }
+    fn cockpit_of(world: &mut World, seat: u8) -> &mut super::Cockpit {
+        let plane = world.roster.seat(SeatId(seat)).unwrap().plane.unwrap();
+        world
+            .cockpits
+            .iter_mut()
+            .find(|c| c.plane == plane)
+            .unwrap()
+    }
+    fn revive(world: &World, seat: u8) -> MissionCommand {
+        let side = tore_sim::ai::launch::Side::Friendly;
+        let start = world.side_mean(side).unwrap();
+        let spawn = world
+            .revival_spawn(
+                SeatId(seat),
+                start,
+                30_000.,
+                None,
+                RevivalWeapons::NoMissiles,
+            )
+            .unwrap();
+        MissionCommand::Revive {
+            seat: SeatId(seat),
+            spawn: Box::new(spawn),
+        }
+    }
+    fn drive(world: &mut World, step: u64) -> Step {
+        match step {
+            200 | 500 => cockpit_of(world, 0).flight.systems.pilot.dead = true,
+            300 => cockpit_of(world, 1).flight.crashed = true,
+            400 => world.retire_plane(PlaneId(5)).unwrap(),
+            _ => {}
+        }
+        let commands = match step {
+            60 => vec![
+                MissionCommand::Take {
+                    seat: SeatId(0),
+                    plane: PlaneId(0),
+                },
+                MissionCommand::Take {
+                    seat: SeatId(1),
+                    plane: PlaneId(5),
+                },
+            ],
+            201 | 501 => vec![revive(world, 0)],
+            301 => vec![MissionCommand::Abandon { seat: SeatId(1) }],
+            _ => Vec::new(),
+        };
+        let mut flying = flying_after(world, &commands);
+        if commands
+            .iter()
+            .any(|c| matches!(c, MissionCommand::Abandon { .. }))
+        {
+            flying.retain(|seat| *seat != SeatId(1));
+        }
+        let inputs = inputs_for(world, flying, |_| SeatInput {
+            pilot: PilotInput {
+                pitch: 0.1,
+                roll: if step % 480 < 240 { 0.2 } else { -0.2 },
+                ..PilotInput::default()
+            },
+            ..SeatInput::default()
+        });
+        (commands, inputs)
+    }
+    fn expect(world: &World) -> String {
+        use crate::seats::Pilot;
+        let pilot = |plane| world.roster.plane(PlaneId(plane)).map(|p| p.pilot);
+        // Planes 0 to 5 were built; 6 and 7 are revivals; 5 is retired.
+        assert_eq!(pilot(0), Some(Pilot::Lost));
+        assert_eq!(pilot(5), None);
+        assert_eq!(pilot(6), Some(Pilot::Lost));
+        assert_eq!(pilot(7), Some(Pilot::Human(SeatId(0))));
+        assert_eq!(world.roster.seat(SeatId(1)).unwrap().plane, None);
+        let book = &world.revival;
+        let lost: Vec<u32> = book.lost().iter().map(|l| l.plane.0).collect();
+        assert_eq!(lost, [0, 6]);
+        assert_eq!(book.retired()[0].id, PlaneId(5));
+        assert_eq!(book.added(), [PlaneId(6), PlaneId(7)]);
+        let flown: Vec<u32> = world.cockpits.iter().map(|c| c.plane.0).collect();
+        assert_eq!(flown, [0, 6, 7]);
+        format!("{lost:?}")
+    }
+    Scenario {
+        name: "revivals and wrecks",
+        build,
+        drive,
+        at: 700,
+        then: 600,
+        expect,
+        after: None,
     }
 }
 
