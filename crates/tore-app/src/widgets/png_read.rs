@@ -1,8 +1,9 @@
-//! A small PNG reader for the title bar picture a player supplies
-//! ([`super::header`]), so reading it needs no dependency.
+//! A small PNG reader for the title bar pictures ([`super::header`]: the
+//! lettering the game ships and the one a player can supply), so reading them
+//! needs no dependency.
 //!
-//! It reads the first rows of a non-interlaced picture of a width the caller
-//! names, at any bit depth and colour type PNG allows (palette and grey
+//! It reads the first rows of a non-interlaced picture no wider than the
+//! caller allows, at any bit depth and colour type PNG allows (palette and grey
 //! levels included, a palette's `tRNS` alpha too), and stops inflating once it
 //! has them. It checks the structure it relies on and bounds everything it
 //! allocates, but not the chunk or zlib checksums (a damaged picture shows as
@@ -25,9 +26,9 @@ fn be32(bytes: &[u8]) -> usize {
     u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize
 }
 
-/// The first `keep` rows of the PNG in `file`, which must be `width` pixels
-/// wide and at least `keep` rows tall.
-pub fn decode_top(file: &[u8], width: usize, keep: usize) -> Result<Image> {
+/// The first `most` rows (or all of them, if fewer) of the PNG in `file`,
+/// which may be at most `widest` pixels wide.
+pub fn decode_rows(file: &[u8], widest: usize, most: usize) -> Result<Image> {
     if file.get(..8) != Some(&SIGNATURE) {
         return Err("it is not a PNG picture".into());
     }
@@ -50,12 +51,10 @@ pub fn decode_top(file: &[u8], width: usize, keep: usize) -> Result<Image> {
         at += 12 + length;
     }
     let header = header.ok_or("the PNG has no header chunk")?;
-    if header.width != width {
-        return Err(format!("it is {} pixels wide, not {width}", header.width));
+    if header.width > widest {
+        return Err(format!("it is {} pixels wide, over {widest}", header.width));
     }
-    if header.height < keep {
-        return Err(format!("it is {} rows tall, under {keep}", header.height));
-    }
+    let (width, keep) = (header.width, header.height.min(most));
     if header.color == 3 && palette.is_empty() {
         return Err("the PNG has no palette".into());
     }
@@ -577,14 +576,20 @@ mod tests {
                 0, 1, 2, 3, 255, 4, 5, 6, 128, 0, 7, 8, 9, 0, 10, 11, 12, 255,
             ],
         );
-        let image = decode_top(&file, 2, 2).unwrap();
+        let image = decode_rows(&file, 2, 2).unwrap();
         assert_eq!((image.width, image.rows), (2, 2));
         assert_eq!(
             image.rgba,
             [1, 2, 3, 255, 4, 5, 6, 128, 7, 8, 9, 0, 10, 11, 12, 255]
         );
-        // Only the rows asked for are kept.
-        assert_eq!(decode_top(&file, 2, 1).unwrap().rgba.len(), 8);
+        // Only the rows asked for are kept, and a narrower picture is fine.
+        assert_eq!(decode_rows(&file, 2, 1).unwrap().rgba.len(), 8);
+        let narrow = decode_rows(&file, 640, 77).unwrap();
+        assert_eq!(
+            (narrow.width, narrow.rows),
+            (2, 2),
+            "its own size, under the limits"
+        );
     }
 
     #[test]
@@ -619,7 +624,7 @@ mod tests {
             let c = if i >= 3 { target[2][i - 3] } else { 0 };
             lines.push(target[3][i].wrapping_sub(paeth(a, b, c)));
         }
-        let image = decode_top(&png((2, 4), (8, 2), &[], &lines), 2, 4).unwrap();
+        let image = decode_rows(&png((2, 4), (8, 2), &[], &lines), 2, 4).unwrap();
         for (row, line) in target.iter().enumerate() {
             let got: Vec<u8> = image.rgba[row * 8..(row + 1) * 8]
                 .chunks_exact(4)
@@ -629,7 +634,7 @@ mod tests {
         }
         // Average, with a left and an up neighbour, on its own.
         let lines = [0, 10, 20, 30, 40, 50, 60, 3, 5, 5, 5, 5, 5, 5];
-        let image = decode_top(&png((2, 2), (8, 2), &[], &lines), 2, 2).unwrap();
+        let image = decode_rows(&png((2, 2), (8, 2), &[], &lines), 2, 2).unwrap();
         // First byte: 5 + (0 + 10) / 2 = 10, then 5 + (0 + 20) / 2 = 15 and
         // 5 + (0 + 30) / 2 = 20; the second pixel's first byte is
         // 5 + (10 + 40) / 2 = 30, then 5 + (15 + 50) / 2 = 37 and
@@ -649,14 +654,14 @@ mod tests {
             &[(b"PLTE", &palette), (b"tRNS", &[255, 128])],
             &[0, 0x01, 0x20],
         );
-        let image = decode_top(&file, 3, 1).unwrap();
+        let image = decode_rows(&file, 3, 1).unwrap();
         assert_eq!(image.rgba, [255, 0, 0, 255, 0, 255, 0, 128, 0, 0, 255, 255]);
         // 2 bit grey: 0, 1, 2, 3 are 0, 85, 170, 255.
-        let image = decode_top(&png((4, 1), (2, 0), &[], &[0, 0b00_01_10_11]), 4, 1).unwrap();
+        let image = decode_rows(&png((4, 1), (2, 0), &[], &[0, 0b00_01_10_11]), 4, 1).unwrap();
         let grey: Vec<u8> = image.rgba.chunks_exact(4).map(|p| p[0]).collect();
         assert_eq!(grey, [0, 85, 170, 255]);
         // 16 bit grey with alpha keeps the high byte of each sample.
-        let image = decode_top(
+        let image = decode_rows(
             &png((1, 1), (16, 4), &[], &[0, 0x12, 0x34, 0xab, 0xcd]),
             1,
             1,
@@ -668,12 +673,11 @@ mod tests {
     #[test]
     fn a_picture_that_does_not_fit_says_why() {
         let rgba = png((2, 2), (8, 6), &[], &[0; 18]);
-        let say = |file: &[u8], width, keep| match decode_top(file, width, keep) {
+        let say = |file: &[u8], width, keep| match decode_rows(file, width, keep) {
             Ok(_) => panic!("it should be refused"),
             Err(why) => why,
         };
-        assert!(say(&rgba, 3, 2).contains("2 pixels wide, not 3"));
-        assert!(say(&rgba, 2, 3).contains("2 rows tall"));
+        assert!(say(&rgba, 1, 2).contains("2 pixels wide, over 1"));
         assert!(say(b"GIF89a....", 2, 2).contains("not a PNG"));
         let mut interlaced = rgba.clone();
         interlaced[28] = 1;

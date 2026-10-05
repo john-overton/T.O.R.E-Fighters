@@ -3652,11 +3652,16 @@ The **Direct Connection** screen replaces the MULTI menu's stubs:
 
 The look (John, 2026-10-05; from 2026-10-01 it was `MODEM3`'s red photograph
 under `NETIPX3`'s title bar): `NETIPX3` alone, its grey photograph under its
-own title bar, which reads NETWORK CONNECTION unless the player has put a
-`DirectNetworkConnection.png` of their own in the data folder (its top 77
-rows are drawn over the bar; see `widgets/header.rs`, read by
-`widgets/png_read.rs`, a small PNG reader with no dependency; the file is never
-in the repository or a package), and the TCP/IP Network connection panel at
+own title bar, which reads DIRECT NETWORK CONNECTION: the retail lettering is
+covered with a copy of the bar's own texture and the shipped lettering,
+`assets/direct-network-connection-title.png` (the words in Liberation Sans with
+a shadow, on a transparent background, no retail pixels), is drawn over it at
+the top right. A
+`DirectNetworkConnection.png` of the player's own in the data folder is drawn
+there instead (see `widgets/header.rs`, read by `widgets/png_read.rs`, a small
+PNG reader with no dependency; that file is never in the repository or a
+package if it carries retail art). The look continues with the TCP/IP Network
+connection panel at
 retail's size and place, drawn from the panel pieces, with retail's buttons,
 list wells, rocker and page box. The full-size panel covers most of the
 photograph, which shows at its edges and between the bar and the panel.

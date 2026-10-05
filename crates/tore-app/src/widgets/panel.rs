@@ -77,12 +77,38 @@ pub fn draw_panel(canvas: &mut Canvas, kit: &Kit, (x, y, w, h): Rect) {
 /// pictures, EF8).
 pub const TITLE_BAR_ROWS: i32 = 77;
 
-/// A background of one retail picture, with the player's own title bar over
-/// its top rows when the kit holds one ([`super::header`]).
+/// Where `NETIPX3`'s own lettering NETWORK CONNECTION and its shadow are: the
+/// lettering spans x 80 to 350 and y 7 to 28, its shadow x 83 to 354 and y 9 to
+/// 32 (measured on the imported picture), a few pixels more all round. The
+/// help bar starts at row 36.
+const OLD_TITLE: Rect = (76, 3, 282, 32);
+/// Where the bar's clean texture to the right of that lettering starts. It is
+/// even all along the bar (mean 79 to 82 in every row), so a copy of it hides
+/// the lettering without a seam showing.
+const CLEAN_FROM: i32 = 364;
+
+/// Covers `NETIPX3`'s lettering with a copy of the bar's own texture from the
+/// right of it, row for row. The pixels come from the player's own import and
+/// stay in memory; nothing retail is shipped.
+fn cover_old_title(canvas: &mut Canvas, picture: &crate::menu::Sprite) {
+    let (x, y, w, h) = OLD_TITLE;
+    let clean = WIDTH as i32 - CLEAN_FROM;
+    for row in y..y + h {
+        for column in x..x + w {
+            let from = (row as usize * WIDTH + (CLEAN_FROM + (column - x) % clean) as usize) * 4;
+            let to = (row as usize * WIDTH + column as usize) * 4;
+            canvas.0[to..to + 4].copy_from_slice(&picture.rgba[from..from + 4]);
+        }
+    }
+}
+
+/// A background of one retail picture, with the connection screens' title
+/// lettering over its title bar ([`super::header`]).
 ///
 /// John's look for the connection screens, from 2026-10-05, is `NETIPX3`
-/// alone: its grey photograph under its own title bar, which a player can
-/// reword. (On 2026-10-01 he approved `MODEM3`'s red photograph under
+/// alone: its grey photograph under its own title bar, the retail lettering
+/// covered and DIRECT NETWORK CONNECTION drawn instead, or the player's own
+/// lettering. (On 2026-10-01 he approved `MODEM3`'s red photograph under
 /// `NETIPX3`'s bar; the red is no longer drawn.)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Background {
@@ -99,7 +125,8 @@ impl Background {
             header: false,
         }
     }
-    /// `NETIPX3`, with the player's title bar over its bar when there is one.
+    /// `NETIPX3` with its lettering covered and the title lettering, the
+    /// player's or the game's, fixed to the bar's top right.
     pub fn direct_connection() -> Self {
         Self {
             base: "NETIPX3",
@@ -109,8 +136,16 @@ impl Background {
     pub fn draw(&self, canvas: &mut Canvas, kit: &Kit) {
         let base = kit.sprite(self.base);
         canvas.0[..WIDTH * HEIGHT * 4].copy_from_slice(&base.rgba[..WIDTH * HEIGHT * 4]);
-        if let Some(header) = kit.header().filter(|_| self.header) {
-            canvas.blit(header, (0, 0), 0, header.width, 1.0);
+        if self.header {
+            cover_old_title(canvas, base);
+            let title = kit.header().unwrap_or_else(|| super::header::built_in());
+            canvas.blit(
+                title,
+                (WIDTH as i32 - title.width as i32, 0),
+                0,
+                title.width,
+                1.0,
+            );
         }
     }
 }
@@ -289,6 +324,51 @@ mod tests {
         let mut pixels = blank();
         Background::single("NETIPX3").draw(&mut Canvas(&mut pixels), &kit);
         assert_eq!(at(&pixels, 50, 10), retail);
+    }
+
+    #[test]
+    fn the_old_lettering_is_covered_with_the_bars_own_texture_and_the_words_go_top_right() {
+        // A NETIPX3 whose red grows with x, so where a pixel was copied from
+        // can be read off it.
+        let mut rgba = Vec::new();
+        for _y in 0..480 {
+            for x in 0..640usize {
+                rgba.extend_from_slice(&[(x % 251) as u8, 0, 0, 255]);
+            }
+        }
+        let picture = Sprite {
+            width: 640,
+            height: 480,
+            rgba,
+            glyphs: Vec::new(),
+        };
+        let kit = with(kit(), "NETIPX3", picture);
+        let mut pixels = blank();
+        Background::direct_connection().draw(&mut Canvas(&mut pixels), &kit);
+        let red = |x: i32, y: i32| at(&pixels, x, y)[0];
+        // Under the old lettering (below the new words' ink at row 33) each
+        // pixel is the bar's texture from the clean strip, 364 on.
+        assert_eq!(
+            red(100, 33),
+            (388 % 251) as u8,
+            "76 + 24 copies from 364 + 24"
+        );
+        assert_eq!(red(352, 33), (364 % 251) as u8, "the strip starts again");
+        // Just outside the covered rectangle, nothing changed.
+        for (x, y) in [(75, 33), (358, 33), (100, 2), (100, 35), (600, 15)] {
+            assert_eq!(red(x, y), (x % 251) as u8, "{x}, {y}");
+        }
+        // The words are drawn in the top right: white ink from x 80 on.
+        let white = |x: i32, y: i32| at(&pixels, x, y) == [255; 3];
+        let inked = (81..522)
+            .flat_map(|x| (7..31).map(move |y| (x, y)))
+            .filter(|(x, y)| white(*x, *y))
+            .count();
+        assert!(inked > 400, "{inked} white pixels in the lettering's box");
+        assert!(
+            (0..80).all(|x| (0..36).all(|y| !white(x, y))),
+            "nothing left of x 80"
+        );
     }
 
     use crate::menu::Canvas;

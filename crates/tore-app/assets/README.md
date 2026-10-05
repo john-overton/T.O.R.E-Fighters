@@ -59,6 +59,28 @@ glyphs out in the retail fonts' sizes and places (`docs/formats/menu.md`,
 python3 tools/build_ui_text_atlas.py /path/to/NotoSans-Medium.ttf
 ```
 
+## Connection screens' title lettering
+
+`direct-network-connection-title.png` is the words DIRECT NETWORK CONNECTION in
+**Liberation Sans Regular** (version 2.1.5, copyright 2010 Google Corporation
+and 2012 Red Hat, Inc., SIL Open Font License 1.1 in `OFL-LiberationSans.txt`,
+copied from the font's `LICENSE`) over a dark copy of the same words offset two
+pixels right and down as a shadow, 564 by 36 pixels on a transparent
+background. It is drawn at the top right of the Direct Connection and lobby
+screens' title bar, where the first letter starts at x 80 as retail's lettering
+did. It holds no retail art: every clear pixel is `0, 0, 0, 0`, and the game
+covers retail's own lettering with the bar's texture from the player's import,
+in memory. Source `LiberationSans-Regular.ttf` SHA-256:
+`baccc64becc3eb7d104b7c84d99f5314a0a1f896e2b3ea6c2f22fc08d2003bee`.
+
+John first set the words in Helvetica, a commercial typeface, and asked on
+2026-10-05 for this open-licensed redraw instead, sized to his (29 points,
+narrowed by 4.9 percent). Regeneration needs Python and ImageMagick 7:
+
+```sh
+python3 tools/build_title_lettering.py /path/to/LiberationSans-Regular.ttf
+```
+
 ## Application icon
 
 `icon/tore-*.png`, `icon/tore.ico` and `icon/tore-64.rgba` are downscales of
