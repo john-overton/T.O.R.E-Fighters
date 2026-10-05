@@ -129,6 +129,7 @@ pub fn animate(id: AircraftId, face: &mut Face, state: &flight::State) {
             .contains(&face.address)
             {
                 turn(face, [0., 5., 19.], [0., 0., 1.], phase * 1.);
+                cyclic(face, [0., 5., 19.], state, 0.);
             }
             if [0x4320, 0x4343, 0x4366, 0x4459, 0x447c, 0x449f].contains(&face.address) {
                 turn(face, [-5., -93., 18.], [1., 0., 0.], phase * 3.);
@@ -140,7 +141,8 @@ pub fn animate(id: AircraftId, face: &mut Face, state: &flight::State) {
             ]
             .contains(&face.address)
             {
-                turn(face, [0., -3., 23.], [0., 0., 1.], phase * 1.);
+                turn(face, [0., -3., 23.], [0., 1., 44.], phase);
+                cyclic(face, [0., -3., 23.], state, 0.);
             }
             if [0x2f65, 0x2f8c, 0x2fab, 0x30c1, 0x30e8, 0x3107].contains(&face.address) {
                 turn(face, [-5., -112., 27.], [1., 0., 0.], phase * 3.);
@@ -148,10 +150,12 @@ pub fn animate(id: AircraftId, face: &mut Face, state: &flight::State) {
         }
         AircraftId::Ch47 => {
             if [0x2067, 0x3e0c].contains(&face.address) {
-                turn(face, [0., -45., 29.], [0., 0., 1.], phase);
+                turn(face, [0., -45., 29.], [0., 9., 136.], phase);
+                cyclic(face, [0., -45., 29.], state, -1.);
             }
             if [0x3ae5, 0x3c63].contains(&face.address) {
-                turn(face, [0., 67., 15.], [0., 0., 1.], -phase);
+                turn(face, [0., 67., 15.], [0., 9., 137.], -phase);
+                cyclic(face, [0., 67., 15.], state, 1.);
             }
         }
         AircraftId::V22 => {
@@ -192,6 +196,31 @@ pub fn animate(id: AircraftId, face: &mut Face, state: &flight::State) {
         }
         _ => {}
     }
+}
+
+/// Fitted disk tilt. Individual blade feathering is not represented by the
+/// original flat texture panels. See the rotor presentation contract.
+fn cyclic(face: &mut Face, pivot: [f32; 3], state: &flight::State, yaw_mix: f64) {
+    let (pitch_scale, roll_scale, yaw_scale) = if yaw_mix == 0. {
+        (0.10, 0.10, 0.)
+    } else {
+        // The already-canted tandem panels overlap in plan. Bound authored
+        // cyclic travel so they remain separated under combined inputs.
+        (0.03, 0.08, 0.02)
+    };
+    turn(
+        face,
+        pivot,
+        [1., 0., 0.],
+        pitch_scale * state.elevator.clamp(-1., 1.),
+    );
+    turn(
+        face,
+        pivot,
+        [0., 1., 0.],
+        roll_scale * state.aileron.clamp(-1., 1.)
+            + yaw_scale * yaw_mix * state.rudder.clamp(-1., 1.),
+    );
 }
 
 #[cfg(test)]
@@ -287,8 +316,75 @@ mod tests {
         assert_eq!(blade.positions[0], [0., 67., 15.]);
         assert_ne!(blade.positions[1], [10., 67., 15.]);
         assert!(
-            (blade.positions[1][0].powi(2) + (blade.positions[1][1] - 67.).powi(2) - 100.).abs()
+            (blade.positions[1][0].powi(2)
+                + (blade.positions[1][1] - 67.).powi(2)
+                + (blade.positions[1][2] - 15.).powi(2)
+                - 100.)
+                .abs()
                 < 0.001
         );
+    }
+    #[test]
+    fn helicopter_cyclic_keeps_mast_and_disk_rigid_under_combined_controls() {
+        for (id, address, pivot) in [
+            (AircraftId::Ah64, 0x3553, [0., 5., 19.]),
+            (AircraftId::Mi24, 0x4d5f, [0., -3., 23.]),
+            (AircraftId::Ch47, 0x2067, [0., -45., 29.]),
+            (AircraftId::Ch47, 0x3ae5, [0., 67., 15.]),
+        ] {
+            let source = face(
+                address,
+                vec![
+                    pivot,
+                    [pivot[0] + 13., pivot[1], pivot[2]],
+                    [pivot[0], pivot[1] + 17., pivot[2]],
+                ],
+            );
+            for pitch in [-1., 0., 1.] {
+                for roll in [-1., 0., 1.] {
+                    for yaw in [-1., 0., 1.] {
+                        for tick in [0, 3, 7] {
+                            let mut s = state();
+                            s.engine = true;
+                            s.throttle = 0.5;
+                            s.ticks = tick;
+                            s.elevator = pitch;
+                            s.aileron = roll;
+                            s.rudder = yaw;
+                            let mut moved = source.clone();
+                            animate(id, &mut moved, &s);
+                            assert_eq!(moved.positions[0], pivot);
+                            for i in 0..3 {
+                                for j in i + 1..3 {
+                                    let distance = |a: [f32; 3], b: [f32; 3]| {
+                                        (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f32>()
+                                    };
+                                    assert!(
+                                        (distance(source.positions[i], source.positions[j])
+                                            - distance(moved.positions[i], moved.positions[j]))
+                                        .abs()
+                                            < 0.003
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn tandem_pedals_tilt_front_and_aft_disks_oppositely() {
+        let mut s = state();
+        s.engine = false;
+        s.rudder = 1.;
+        let mut forward = face(0x3ae5, vec![[0., 67., 15.], [10., 67., 15.]]);
+        let mut aft = face(0x2067, vec![[0., -45., 29.], [10., -45., 29.]]);
+        animate(AircraftId::Ch47, &mut forward, &s);
+        animate(AircraftId::Ch47, &mut aft, &s);
+        assert!(forward.positions[1][2] < 15.);
+        assert!(aft.positions[1][2] > 29.);
+        assert_eq!(forward.positions[0], [0., 67., 15.]);
+        assert_eq!(aft.positions[0], [0., -45., 29.]);
     }
 }

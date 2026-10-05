@@ -98,7 +98,10 @@ variety aircraft use the established hybrid solver. AV8 and YAK141 use fitted
 vector thrust, V22 uses fitted nacelle conversion, and AH64, MI24 and CH47 use
 fitted collective-controlled rotor lift. Ordinary throttle remains engine power.
 The fits, travel rates, initial clearance and known limits have one home in the
-linked contract. These are working approximations, not measured retail parity.
+linked contract. Ground contact uses the complete deployed gear, including
+AV8 central pieces already present in the neutral shape; counting only a switched
+branch missed its lowest nose wheel. These are working approximations, not
+measured retail parity.
 
 Powered controls operate only in the hybrid adapter. Legacy compatibility and
 restricted native research remain separate. Actuator positions and lagged lift

@@ -36,3 +36,25 @@ class AnimationReportTests(unittest.TestCase):
     def test_rejects_unreadable_report(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertTrue(check_report(Path(tmp), "0 required/check failures"))
+
+
+    def test_rotor_acceptance_requires_complete_combined_sweep(self):
+        report = self.report()
+        report["aircraft"] = "CH47.PT"
+        self.assertTrue(self.check(report))
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            (work / "poses").mkdir()
+            (work / "poses/report.json").write_text(json.dumps(report))
+            combined = dict(poses=6000, checks_passed=True)
+            target = work / "poses/rotor-combinations.json"
+            target.write_text(json.dumps(combined))
+            self.assertEqual(check_report(work, ""), [])
+            combined["poses"] = 5999
+            target.write_text(json.dumps(combined))
+            self.assertTrue(check_report(work, ""))
+
+    def test_mixed_flaperons_require_all_twenty_five_source_poses(self):
+        report = self.report()
+        report["aircraft"] = "E3.PT"
+        self.assertTrue(self.check(report))

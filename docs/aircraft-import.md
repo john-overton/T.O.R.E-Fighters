@@ -310,6 +310,9 @@ actual painted root, and compare stowed geometry against both sides of the
 neutral fuselage envelope. An out-of-plane bend that merely defeats a planar
 intersection check does not establish a coherent mechanism. Reports labeled
 `motion-survey` have not passed aircraft-specific attachment acceptance.
+Check rotor spin in the original panel plane, combined cyclic/phase poses and
+tandem separation. Audit always-present gear as well as switched additions,
+both for retraction ownership and the ground-contact low point.
 
 The [audit](baselines/aircraft-animations.md) and
 [A-7 worked contract](spec/variety-animation.md#a-7-surface-repair-and-acceptance)

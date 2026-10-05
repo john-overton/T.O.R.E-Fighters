@@ -307,3 +307,150 @@ source belly `Z=-10+0.25*(Y-59)`. Both upper and lower body-section containment
 were checked separately. Hide added gear at zero. All travel, sequencing and
 control-role assignments remain fitted; unlocated device articulation and
 original mechanical timing remain unknown.
+
+
+## Mi-24 gear fit
+
+Agent-authored retraction, 2026-10-05. HIND.SH supplies three opposite pairs
+of complete wheel/strut texture panels. Rotate each main assembly rigidly
+outward and up by 160 degrees during closing, around its source upper edge at
+X=+/-7,Z=-17, parallel to Y. The nose assembly folds rigidly aft by 90 degrees
+around its forward upper source corner [0,43,-17], parallel to X. Hide added
+gear at zero. These folds preserve the source deployed endpoint and panel
+sizes; actual mechanical axes and timing remain unknown.
+
+Complete stowed main panels fit abs(X)=6.7..7.1,Y=-23..-13,Z=-17..-3. The
+nose fits X=0,Y=30..43,Z=-17..-9. All 24 original panel corners fit sampled
+neutral-body cross sections at stow. Check independent source roots, wheel
+rigidity, side separation and a near-zero pose before hiding. Rotor cyclic
+motion remains in the [rotor contract](rotor-presentation.md).
+
+
+## C-130 and AC-130 control fits
+
+Agent-authored partitions and motion, 2026-10-05. Both exact source shapes only
+name a gear branch; the control assignments below are fitted. Preserve each
+shape's own asymmetries, original artwork, nacelle corridors and common
+propeller overlay. AC-130 barrel aiming remains a separate shared overlay.
+Coordinates use two-thirds foot per unit.
+
+| Component | C-130 | AC-130 |
+| --- | --- | --- |
+| Rudder | Split aft fin at the diagonal through [0,-67,11] and [0,-61,52]; rotate rear strip `0.35*rudder` | Split aft fin behind Y=-80; rotate rear strip `0.35*rudder` about its fixed vertical cut |
+| Pitch | Tail cut `Y+64+0.1*(abs(X)-8)=0`, axis Z=9, angle `-0.30*elevator`; preserve aft root points | Tail cut `Y+78+0.05*(abs(X)-10)=0`, axis Z=4.5, same angle; preserve roots [+/-4,-90,5] and quantized hinge points |
+| Wing hinge | `Y=-8+(abs(X)-28)*9/70` | `Y=-16+(abs(X)-26)*10/71`, Z=6 |
+| Flaps | Independent trailing strips at abs(X)=14..21 and 33..46, down 0.45 radians | Independent strips at abs(X)=13..20 and 34..45, down 0.45 radians |
+| Roll | Separate strips at abs(X)=60..92, opposed 0.20-radian travel | Separate strips at abs(X)=62..90, opposed 0.20-radian travel |
+
+C-130 gear artwork contains three complete wheel/strut assemblies. Rotate the
+main panels rigidly outward through 150 degrees about their own upper edges;
+rotate the nose aft through 90 degrees about [0,49,-13]. Preserve roots and
+hide at zero. One unchanged right upper image-margin corner lies 0.1042 unit
+outside the source body hull; its original pixel is transparent index 255.
+Do not distort the painted assembly to force that margin into the hull.
+
+AC-130 mains are two-wheel/fairing cards, and the nose has isolated wheel cards
+without separate strut meshes or reviewed body attachment vertices. Recess
+complete cards rigidly: left displacement [2,0,10], right [-3,0,10], nose
+[0,0,8], each multiplied by closing fraction. Mains stow at X=+/-9,
+Y=-9..8,Z=-10..-4; nose at X=-2/+1,Y=40..44,Z=-12..-8. Hide at zero. This
+is fitted recession into the source body, not a claim of pinned mechanical
+hinges. Do not fabricate a strut or use image margins as joints.
+
+AC-130 hook command capability remains enabled by its PT data. Whole decoded
+shape review has not located supported visual hook geometry. That mapping is
+explicitly unknown, not absent or complete. Next research is review of bounded
+unselected drawing records and the exact PT hook consumer. These fits do not
+alter gun selection, tracking, firing, AI, or flight-force behavior.
+
+
+## A-10 control and exposed-gear fit
+
+Agent-authored fit, 2026-10-05. Keep exact A10.PT/A10.SH identities. The
+separate aft tail skins rotate `-0.30*elevator` about their source span seams at
+Y=-66,Z=1. Inner trailing roll skins retain their distinct Y=-6 forward edges;
+shared trailing points follow `-0.20*aileron` around outward mean seams, right
+[24,-6,-3.5] to [47,-6,-1.5], left [-25,-6,-3.5] to [-48,-6,-1.5]. Outer
+flaps remain independent and morph to their exact source down endpoints,
+including both original end closures. A neutral thick closure is a boundary
+wedge, not necessarily a collapsed triangle.
+
+Split all solid and cutout fin skins at Y=-63. Keep forward pieces fixed and
+move aft points in X by `tan(0.35*rudder)*(-63-Y)`, retaining Y/Z. This fitted
+shear preserves registration of thick skins and original cutout art; it is not
+a recovered rigid rudder mechanism.
+
+Complete crossed wheel/strut images fold forward around painted roots, mains
+[-23,-1,-8] and [21,-1,-8] through 90 degrees, nose [0,38,-4] through 100
+degrees. Collinear UV markers expose those roots without changing the outline.
+**Retain original main wheel cutouts at zero gear**, an agent choice because
+the tested rigid footprint does not fit completely inside the source fairings.
+Do not shrink tires or hide remaining painted pixels. The fitted exposed stow
+has at most 2.76 source units, 0.92 ft, of painted lower exposure; this is not
+claimed as recovered retail behavior. Main bounds are Y=-1..13,Z=-12..-4,
+left X=-26..-20, right X=19..24. The rigid nose hides after stowing; all 1,794
+opaque source samples must fit inspected neutral-body sections at near-zero.
+
+Independent main doors keep their source upper edges at Y=-5,Z=-9 and close
+through pi-atan(5). The nose front panel uses Y=35,Z=-4 and pi-atan(11).
+The nose side door uses X=3,Z=-4 and pi/2 about Y. Nose and doors hide at zero.
+Visual brake articulation remains unknown. No hook or afterburner is added.
+
+## AV-8B control, nozzle and gear fit
+
+Agent-authored continuous motion, 2026-10-05. Source facts and the complete
+central-gear ground-contact correction are in the
+[Harrier evidence](../formats/aircraft-control-surfaces.md#harrier-central-landing-gear-evidence).
+Tail roots stay fixed while distal skins rotate `-0.30*elevator`. Split the
+fin at `Y=-73-0.20*(Z-5)` and rotate the trailing region `0.35*rudder` about
+[0,-73,5], direction [0,-4,20]. Flaps morph to exact source down endpoints,
+independently of outer roll. Outer roll uses its own diagonal source hinges,
+left [-27,-33,0] to [-49,-30,-3], right [28,-33,1] to [49,-30,-3], through
+`-0.20*aileron` on outward axes. Preserve inner outrigger strips.
+
+Rotate each original nozzle card about its own center: rear [+/-8,-14.5,-3.5],
+front [+/-11,3,-2.5]. Apply -15 degrees times actual vector yaw about Z, then
+90 degrees times actual vector pitch about X. All four centers and card
+sizes remain fixed, including shared vertices of the split left rear card.
+This expresses the existing force direction without adding a new nozzle mesh.
+Check all 25 pitch/yaw combinations.
+
+Own all sixteen gear pieces, including the eight always-present central pieces.
+Outrigger wheels rise 14 units and move inward 3 units in the second half of
+closing; their upper legs keep source roots fixed. Central main wheel cards
+rise 14 and move aft 4 in the second half, while the brace's lower edge follows
+as one rigid two-unit edge. Nose cards split at Z=-13 above the painted tire;
+rigid lower pieces rise 15 and move aft 8 in the second half, with original
+upper roots fixed. Hide all sixteen at zero; deployment reproduces the complete
+source geometry. The corresponding contact fit is 7 ft, including the central
+nose wheel. Source mechanical timing and unlocated brake presentation remain
+unknown; no compatibility adapter or flight-force law changes here.
+
+
+## E-3 control and gear fit
+
+Agent-authored motion, 2026-10-05, using exact E3.PT/AWACS.SH. Keep neutral
+rudder skins and rotate them `0.35*rudder` around their diagonal source edge.
+Pitch uses a trailing tail cut `Y+107+0.30*(abs(X)-7)=0`, at Z=9, with
+`-0.30*elevator` around rightward axes and fixed actual roots. Preserve original
+left/right asymmetries.
+
+Morph flap skins to exact source down endpoints, then move shared trailing
+vertices through `-0.20*aileron` around the outward mean hinge axes. Keep both
+thick leading-skin edges fixed. Original closures follow the same endpoint
+correspondence and appear when either flap or roll is nonzero. This differential
+flaperon assignment is fitted; test all 25 flap/roll combinations.
+
+Fold complete crossed gear assemblies rigidly around fitted pivots: right
+[4.525,-26,-3.65] and left [-4.22,-26,-3.94], forward axes with outward
+half-turns; nose [0,72,-7], lateral axis with an aft half-turn. The main pivots
+are fitted near the upper strut region, not recovered shafts or source vertices.
+Do not independently pin transparent rectangle margins. Hide gear at zero.
+
+Full stow boxes are right X=0.05..6.05,Y=-34..-18,Z=-6.3..10.7; left
+X=-6.44..-0.44,Y=-34..-18,Z=-5.88..10.12; nose X=-2..2,Y=67..75,Z=-7..5.
+Source-body section tests include complete cards and their interior grids.
+The closest raw card margins are transparent; report their conservative gap
+separately from the indexed-art wheel/strut clearance. The source afterburner
+alias adds no flame, so it is not connected to exhaust demand. Radome animation
+and original timing remain unreviewed.

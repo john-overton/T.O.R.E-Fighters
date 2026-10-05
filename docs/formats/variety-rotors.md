@@ -53,3 +53,12 @@ panels two (tail three), C130 and CH47 four, and AC130 blade polygons two. Origi
 transparent. The images contain the original grey blade blur over that cutout;
 overlaying all phases makes a dense noisy white disc. The host selects one
 image phase as a documented fitted choice in the linked presentation contract.
+
+
+The HIND main panels span Y=-91..85 with Z=25..21. Their source plane normal
+is proportional to [0,1,44]. CH47 aft panels span Y=-113..23,Z=34..25, giving
+normal [0,9,136]; front panels span Y=-2..135,Z=19..10, giving [0,9,137].
+These tilted planes are source geometry, not a demand to spin about vertical.
+Using their own normals keeps each blade image in its plane throughout spin.
+Cyclic limits and the shared mast pivot choices remain fitted in the
+[presentation contract](../spec/rotor-presentation.md#helicopter-cyclic-presentation).

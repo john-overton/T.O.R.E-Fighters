@@ -185,3 +185,87 @@ side-quad upper corners are image margins. Source body sections independently
 bound the stow envelope used by the [A310 fit](../spec/variety-animation.md#a310-control-and-gear-fit).
 Local source evidence is `transport-geometry.json`, `transport-source-review.md`
 and the original gear atlas inspection under `.local/animation-audit/`.
+
+
+## Harrier central landing-gear evidence
+
+AV8.SH SHA-256 is
+`00b8a8b4001cef06cf6b41b584481deaa4fd32e8d17c64045af075bd94f67df7`,
+with 18,014 CODE bytes, 270 neutral faces and state words 0x5640, 0x564c,
+0x5652. Its neutral geometry already includes central gear skins 0x43dd/0x43fc
+(nose) and 0x42f6/0x4315/0x4334/0x4353 (main), plus brace 0x4372/0x4391.
+The switched gear branch supplies eight additional outrigger faces. The nose
+skins reach source Z=-21, below the outrigger minimum Z=-17. At one-third foot
+per unit, the complete deployed mesh needs the
+[7 ft contact fit](../spec/variety-flight.md). Counting only added faces misses
+both central retraction ownership and the lowest ground-contact geometry.
+Local evidence is `.local/animation-audit/av8-neutral-ground.json` and the
+independent AV8 source/atlas review.
+
+
+## Hercules family source additions
+
+Shape hashes and original propeller groups are in
+[rotor geometry](variety-rotors.md). C130.SH has 10,812 CODE bytes and 144
+neutral faces, with gear state 0x3a30. AC130.SH has 19,666 CODE bytes and 339
+neutral faces, with gear state 0x5cc0. Both use exponent 9. No signed primary
+control branch was recovered; those assignments remain fitted.
+
+C130 gear pairs are left 0x2909/0x292c, right 0x294f/0x2972, nose
+0x2995/0x29b0. Original atlas samples show complete wheel/strut cards. Main
+upper edges are X=-8/+9,Y=-7..5,Z=-12. The unchanged right corner [9,5,-12]
+is 0.1042 unit beyond the triangulated body hull; UV [145,269] is source
+palette index 255 on cutout subtype 0x6c, so this is transparent image margin.
+
+AC130 mains 0x491c/0x4979 and 0x493b/0x495a contain two-wheel/fairing images.
+Nose pairs 0x4998/0x49b7 and 0x49d6/0x49f5 contain isolated wheel images.
+There is no separate strut or exact neutral-body vertex attachment in the
+selected gear branch. A tail/underside review of all 339 decoded neutral faces,
+signed named states and line records found no supported hook group. PT hook
+command capability is a separate fact; visual mapping remains unknown.
+
+Local evidence: `transport-geometry.json`, `transport-source-review.md`,
+`c130-gear-independent-review.json` and `ac130-gear-independent-review.json`
+under `.local/animation-audit/`. Continuous behavior and the hook research gap
+are recorded in the [Hercules fit](../spec/variety-animation.md#c-130-and-ac-130-control-fits).
+
+
+## A-10 source additions
+
+A10.SH SHA-256 is
+`982c980cb0af161eeb3d9a03ed65758ee06084e35d7a41dbed2cbcc05b7624c2`,
+with 19,854 CODE bytes, 303 neutral faces and exponent 8. Reviewed aliases
+are gearDown 0x5d70, gearPos 0x5d76, leftFlap 0x5d7c, rightFlap 0x5d82.
+The PT has flags 0x11, airBrakesDrag=0 and aftThrust=0. No source hook bit or
+nonzero afterburner capability is present; brake visual behavior remains unknown.
+
+Separate aft tail pairs have exact span seams at Y=-66,Z=1. Solid fin skins
+and cutout overlays have different offsets and thicknesses, so a shared fitted
+partition must preserve art registration rather than rotate them about unrelated
+bounds. Source flap down branches provide matched skins plus independent inboard
+and outboard closures. Gear artwork separates complete crossed wheel/strut
+assemblies from untextured doors. Local evidence is `a10-geometry.json`,
+`a10-source-review.md` and original atlas/root inspection under
+`.local/animation-audit/`. The deliberate exposed-main stow is an
+[agent fit](../spec/variety-animation.md#a-10-control-and-exposed-gear-fit), not a
+source fact about retail retraction.
+
+
+## E-3 source additions
+
+AWACS.SH SHA-256 is
+`a82b3790e0582be838c13ab57e04abe8ab590170476b86a8c1676d73c3688699`,
+with 26,794 CODE bytes, 296 neutral faces and exponent 9. Neutral rudder
+0x51db/0x51f2 shares edge [0,-104,13] to [0,-109,38]. Flap pairs
+0x5003/0x5022 and 0x4eb9/0x4ed8 map to exact down skins
+0x50ba/0x50d9 and 0x4f70/0x4f8f, with two original closures per side.
+Signed +1 omits those panels. Neighboring tip triangles alone do not establish
+a complete independent aileron.
+
+The original atlas shows four crossed strut/wheel faces per main assembly and
+three nose faces, rather than a separate door per rectangle. The afterburner
+alias removes static engine/fin geometry and adds no flame. Continuous motion
+and selected pivots are in the [E-3 fit](../spec/variety-animation.md#e-3-control-and-gear-fit).
+Source branches and atlas evidence are in the shared local transport review;
+`awacs-painted-wheel-gap.json` distinguishes 12,044 opaque lower-region samples
+from transparent card margins.

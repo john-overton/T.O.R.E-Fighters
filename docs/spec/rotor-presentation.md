@@ -48,6 +48,38 @@ and rotates that original texture continuously. It preserves the source
 cutout, colors and blade artwork, with no atlas recoloring or global shader
 change. Original phase-selection sequencing remains unknown.
 
+## Helicopter cyclic presentation
+
+Agent-authored fit, 2026-10-05, for the individual animation audit. The existing
+main-rotor source panels follow cyclic pitch and roll while retaining their
+reviewed mast centers. Apply spin first, then pitch about source X by
+`0.10*elevator` radians, then lateral tilt about source Y by `0.10*aileron`.
+Positive pitch tilts the disk's lift direction aft; positive roll tilts it right.
+Both inputs use the same smoothed live control state as the aircraft surfaces,
+not separate animation keys. Preserve blade radii, panel dimensions, material
+and texture coordinates. The fuselage, mast and fixed landing gear do not tilt
+with the rotor panel.
+
+CH-47 uses smaller fitted limits because its canted panels overlap in plan:
+`0.03*elevator` pitch and `0.08*aileron` lateral tilt. Add `0.02*rudder`
+radians to the front disk and subtract it from the aft disk. This
+expresses opposite rotor thrust directions without inventing a tail rotor.
+Mi-24 and CH-47 spin about the normals of their original tilted panel planes:
+Mi-24 [0,1,44], CH-47 aft [0,9,136], front [0,9,137]. Spinning about source
+vertical instead made the canted panels wobble. All axes are normalized before
+rotation. The smaller CH-47 control fit preserves separation through combined
+inputs, including opposing yaw tilt. These angles are presentation fits, not new aerodynamic forces or recovered
+retail actuator schedules. Combined controls must remain rigid and keep each
+mast center fixed at every rotor phase.
+
+The original rotor art is a flat blade/blur image rather than separately
+feathering blade meshes. Collective and AH-64/Mi-24 tail-rotor pedal changes
+therefore have no independently reviewed blade-pitch geometry in this fit.
+Their existing flight inputs and force response remain available. Do not report
+those missing visual mechanisms as recovered behavior, or distort the whole
+disk to imply individual blade feathering. Gear and other airframe devices
+retain separate per-aircraft acceptance requirements.
+
 ## Geometry provenance
 
 The shape build identities, face groups and pivots are recorded once in the
@@ -64,6 +96,9 @@ Synthetic checks preserve propeller hub positions and radius, leave unselected
 faces unchanged, verify the V-22's 90-degree end position and transformed normal,
 and rotate the CH-47 front rotor about its existing separate mast.
 Phase-selection checks retain one original image per panel and leave unrelated
-geometry untouched. Runtime source rendering
-still requires the combined aircraft-variety validation pass; synthetic tests do
-not establish retail animation parity.
+geometry untouched. Independent actual-source probes now check fixed mast
+centers, rigid panels and spin-plane preservation. Combined control/phase
+sweeps cover 8,400 helicopter poses, including direct tandem-panel separation
+checks. The [animation audit](../baselines/aircraft-animations.md) records those
+results and the remaining aircraft. GPU appearance and retail timing remain
+unvalidated; these geometry tests do not establish retail animation parity.

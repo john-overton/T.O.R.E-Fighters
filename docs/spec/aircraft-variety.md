@@ -68,7 +68,11 @@ Source review and dependency closure are in the [inventory](../formats/aircraft-
 Flight results and fits are in the [flight baseline](../baselines/variety-flight.md).
 "Initial rig" means source cockpit/art and the [reviewed device branches](variety-animation.md),
 including [propeller/rotor/nacelle motion](rotor-presentation.md); it does not
-claim every control surface or cockpit mirror is animated. "Source profiles"
+claim every control surface or cockpit mirror is animated. "Rig reviewed"
+means bounded CPU surface/device acceptance in the
+[per-aircraft animation audit](../baselines/aircraft-animations.md), with explicit
+fitted mechanics and unresolved devices. It does not add cockpit-mirror or GPU
+appearance acceptance. "Source profiles"
 means installed or absent equipment is explicit and default stores connect to
 the shared systems. Sound references are loaded; audible acceptance remains separate.
 
@@ -80,29 +84,29 @@ Keep complete validation evidence in feature baselines rather than per-check fil
 
 | PT | Source | Hybrid flight and inputs | Exterior and cockpit | Systems and audio | Multiplayer | Validation |
 | --- | --- | --- | --- | --- | --- | --- |
-| C130 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| AC130 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| E3 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| IL76 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| E2 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| AV8 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| YAK141 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| V22 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| AH64 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| MI24 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| CH47 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| MIG17F | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| F4B | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| F4J | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| F4E | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| F4 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| A7 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| F15 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| F16C | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| F104 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| A10 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| B747 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
-| A310 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Headless passed |
+| C130 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| AC130 | Reviewed | Passed | Rig reviewed; hook open | Source profiles | Integrated | Flight passed; poses reviewed |
+| E3 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| IL76 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Flight passed; poses queued |
+| E2 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Flight passed; poses queued |
+| AV8 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| YAK141 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Flight passed; poses queued |
+| V22 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Flight passed; poses queued |
+| AH64 | Reviewed | Passed | Rotor/gear reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| MI24 | Reviewed | Passed | Rotor/gear reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| CH47 | Reviewed | Passed | Rotor/gear reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| MIG17F | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| F4B | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| F4J | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| F4E | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| F4 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| A7 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| F15 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| F16C | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| F104 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| A10 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
+| B747 | Reviewed | Passed | Initial rig | Source profiles | Integrated | Flight passed; poses queued |
+| A310 | Reviewed | Passed | Rig reviewed | Source profiles | Integrated | Flight passed; poses reviewed |
 
 AC-130 linked fire and the tank side task have additional acceptance cases in
 their linked contracts. New autonomous flight behavior is outside this batch;

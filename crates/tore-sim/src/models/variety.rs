@@ -82,7 +82,9 @@ impl VarietyFlightModel {
             E3 => 38. / 3.,
             Il76 => 50. / 3.,
             E2 => 28. / 3.,
-            Av8 => 17. / 3.,
+            // The always-present central nose gear reaches Z=-21, below
+            // the switched outriggers at Z=-17. Source scale is 1/3 ft.
+            Av8 => 7.,
             Yak141 => 7.,
             V22 => 13.,
             Ah64 => 23. / 3.,
@@ -223,6 +225,19 @@ pub(crate) mod tests {
             wrong.shape = "F18.SH".into();
             assert!(AircraftModel::for_aircraft(&wrong).is_err());
         }
+    }
+    #[test]
+    fn harrier_ground_start_places_the_lowest_central_wheel_on_the_runway() {
+        let model = AircraftModel::for_aircraft(&synthetic(AircraftId::Av8)).unwrap();
+        let mut state = crate::flight::State::from_model(model, [0., 5000., 0.]);
+        state.enable_research(1).unwrap();
+        state.start_on_runway([0., 123., 0.], 0.).unwrap();
+        assert_eq!(state.position[1], 130.);
+        for _ in 0..240 {
+            state.step(&crate::flight::PilotInput::default(), |_, _| 123.);
+        }
+        assert!(!state.crashed);
+        assert!((state.position[1] - 7. - 123.).abs() < 0.001);
     }
     #[test]
     fn f4_variants_preserve_their_independent_source_fuel_and_thrust() {

@@ -37,6 +37,8 @@ Actuators take 3 seconds, exhaust response 0.2 seconds, control deflection
 0.95 and source afterburner thrust. Tire scrub is 8/second, rolling resistance
 0.8 ft/s squared and brakes 18 ft/s squared. Ground clearance fits use the lowest deployed original gear point times its
 host SH scale. AH64 and CH47 use the lowest point of their fixed-gear mesh.
+AV8 includes its always-present central nose wheel at source Z=-21; using only
+the switched outriggers at Z=-17 left that wheel 4/3 ft below the runway.
 These are reviewed geometry fits for the contact plane, rather than measurements
 of original flight behavior. Hook availability uses the reviewed configuration,
 independent of flight family.
@@ -48,7 +50,7 @@ independent of flight family.
 | E3 | 38/3 |
 | IL76 | 50/3 |
 | E2 | 28/3 |
-| AV8 | 17/3 |
+| AV8 | 7 |
 | YAK141 | 7 |
 | V22 | 13 |
 | AH64 | 23/3 |

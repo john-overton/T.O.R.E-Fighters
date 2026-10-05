@@ -466,7 +466,8 @@ distant and moving cameras.
 ## Headless animation regressions
 
 `flight-animation-*` scenarios run the actual drawing-path geometry probe for
-individually reviewed aircraft, without opening a window. They require reviewed
+individually reviewed aircraft, without opening a window. Combined rotor, flap/roll and
+nozzle sweeps are required where their aircraft contracts specify them. They require reviewed
 attachment scope and passing per-control gates, including signed motion,
 root/skin coherence, wheel rigidity/separation, intermediate topology and hook
 closing direction. They write user-owned OBJ and CPU contact-sheet evidence

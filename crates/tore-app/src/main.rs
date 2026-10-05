@@ -2,8 +2,10 @@
 // the executable before startup and fatal interactive errors use an OS dialog.
 // CLI/probe output stays on stdout; startup diagnostics also go to session logs.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+mod a10_animation;
 mod a310_animation;
 mod a7_animation;
+mod ac130_animation;
 mod additional_animation;
 mod ai_roster_probe;
 mod aircraft;
@@ -12,6 +14,9 @@ mod aircraft_animation_probe;
 mod assets;
 mod attitude;
 mod audio;
+mod av8_animation;
+mod awacs_animation;
+mod c130_animation;
 mod camera;
 mod canvas_present;
 mod celestial;
@@ -56,6 +61,7 @@ mod lobby_screen;
 mod locate;
 mod look;
 mod menu;
+mod mi24_animation;
 mod mig17_animation;
 mod mirrors;
 mod missile_acceptance;

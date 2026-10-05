@@ -134,28 +134,99 @@ F-104 upward-closing hook were reviewed. This remains bounded CPU geometry
 acceptance; no broad workspace, creator, GPU or retail-runtime validation has
 been run for this animation pass.
 
+## Hercules family and helicopter results
+
+C130.PT and AC130.PT pass their specific control/gear witnesses and complete
+pose-sheet review in `.local/animation-probes/c130-first` and `ac130-first`.
+Their original propeller phase filtering remains active: C-130 retains eight
+cards, AC-130 retains 32, without alternate phase overlays. All four propellers
+move on each aircraft. AC-130's ten barrel faces covering three mounts retain
+their combat pivot radii through both aiming sweeps, within 0.000002 source unit.
+
+| Aircraft | Gear samples | Minimum wheel gap, ft | Maximum rigid error, ft |
+| --- | ---: | ---: | ---: |
+| C-130 | 22 | 11.333334 | 0.000001907 |
+| AC-130 | 22 | 12.000004 | 0.000000636 |
+| Mi-24 | 22 | 4.498559 | 0.000000954 |
+
+Independent 201-position source reviews confirm rigid Hercules gear. C-130 has
+one unchanged transparent upper-card margin outside its source hull; its
+original pixel is index 255. AC-130's final complete stow cards pass a 35 by 13
+point grid against source body sections. Its source gear does not establish
+fixed strut roots, so the probe tests rigid recession and stow instead of
+invented hinges. **AC-130 hook visual mapping remains unknown**, while its PT
+command capability stays enabled. This is not full device acceptance.
+
+AH64.PT, MI24.PT and CH47.PT pass independent rotor attachment, rigidity,
+signed cyclic and spin-plane checks in `.local/animation-probes/*-combined`.
+Pitch, roll and rotor phase sheets were inspected on each, along with CH-47
+differential yaw and the worst combined tandem pose. Mi-24's repaired gear
+has rigid source panels, fixed roots, exact deployment and complete stow;
+its intermediate gear sheets were also reviewed.
+
+The combined sweeps contain 1,200 poses each for AH-64 and Mi-24, and 6,000 for
+CH-47. Largest inferred mast attachment error is 0.000007626 ft, and largest
+panel dimension error is 0.000010173 ft. CH-47 minimum rear/front panel clearance
+is 0.388398 ft across overlapping projected footprints. Original tilted Mi-24
+and CH-47 panels now spin in their source planes instead of wobbling around
+vertical. Collective feathering and AH-64/Mi-24 pedal blade-pitch geometry
+remain unimplemented because the original art is a flat rotor image. Their
+flight controls remain available; those visual limitations are not labeled
+retail behavior or physical absence.
+
+## A-10, Harrier and E-3 results
+
+A10.PT passes `.local/animation-probes/a10-first` and eleven focused tests.
+All five required groups, source flap/deployed endpoints, fixed roots and
+paired skins pass. All sheets were reviewed, including retained main-wheel
+stow and the neutral overlay. Gear uses 22 poses, with a minimum main gap of
+13 ft and maximum whole-assembly dimension error of 0.000001272 ft. The
+independent runtime atlas witness checks every opaque nose sample against
+source body sections at near-zero gear. Main wheels deliberately remain visible
+at zero in their documented exposed stow; this is an agent fit, not retail parity.
+
+AV8.PT passes `.local/animation-probes/av8-reviewed`, four focused tests and all
+25 nozzle pitch/yaw combinations. The four nozzle centers, exact source flap
+endpoints and paired skins pass. Gear has 22 samples and includes the previously
+unowned central gear, which retracts with the outriggers. All moving and static
+sheets, gear intermediates and nozzle extremes were reviewed. A separate
+synthetic ground-start plus 240-tick idle test confirms the complete nose wheel
+rests on the runway with the corrected 7 ft contact fit.
+
+E3.PT passes `.local/animation-probes/e3-first` and four focused tests. All
+control/device sheets, 22 gear poses and 25 flap/roll combinations were reviewed.
+Maximum fitted-pivot error is 0.000004779 ft and maximum rigidity error is
+0.000003815 ft, with zero control hinge/skin gaps or new planar crossings.
+The conservative raw-card gap is 0.326726 ft near stow; independent original
+indexed-art sampling through 201 poses establishes at least 1.11098 ft between
+painted lower wheel/strut regions. Complete stow cards and dense interior grids
+fit source body sections. Radome motion and other unreviewed devices remain
+outside this bounded acceptance.
+
 ## Focused checkpoint checks
 
-The repaired ten-profile set passed 94 Rust tests selected by `animation` and
-an app-only build. App-only Clippy, formatting and documentation consistency
-also passed. This includes the shared dispatcher retaining propeller,
-rotor and manually aimed gun overlays after aircraft-specific control rigs.
-These checks do not accept profiles still
-listed as queued, or replace the deferred full workspace/GPU validation.
+The eighteen-profile set passed 127 Rust tests selected by `animation`, ten
+rotor-focused tests, the Harrier ground-contact test and an app-only build.
+App-only Clippy, formatting and documentation consistency passed. The shared
+dispatcher retains propeller, rotor and manually aimed gun overlays after
+specific control rigs.
 
-The ten `flight-animation-*` scenarios pass in
-`.local/animation-battery/20261005-163812-ten-reviewed/summary.md`. The battery
-requires aircraft-specific attachment scope, all primary control rows and passing
-per-control checks, so a motion-only report cannot pass as reviewed geometry.
-Thirty-five focused Python report/selection tests passed. The full battery was
-not run.
+All eighteen `flight-animation-*` scenarios pass in
+`.local/animation-battery/20261005-173532-eighteen-reviewed/summary.md`.
+Thirty-seven focused Python report/selection tests passed. The battery requires
+reviewed attachment scope and passing per-control gates, plus complete combined
+rotor, flaperon and nozzle artifacts where applicable. A motion-only report
+cannot pass as reviewed geometry.
+
+These checks do not accept queued profiles or replace the deferred full
+workspace, full battery, creator, GPU and retail-runtime validation.
 
 ## Remaining aircraft
 
 The code inventory covers all 37 playable profiles in the ignored local report
 `.local/animation-audit/mapping-inventory.md`. At the start of this pass all 23
-variety imports lacked pitch, roll and flap mappings. Ten profiles have passed focused geometry review: A-7, the four F-4 variants,
-F-15, F-16C, F-104N, MiG-17F and A310. Every profile has a baseline
+variety imports lacked pitch, roll and flap mappings. Eighteen profiles have bounded geometry acceptance in the table below, with
+explicit device gaps such as AC-130 hook geometry and helicopter blade feathering. Every profile has a baseline
 motion survey; the table below records which still needs individual attachment
 and pose acceptance. Existing transforms are not accepted merely because they
 are present.
@@ -181,22 +252,22 @@ does not accept unreviewed hinge geometry.
 | `f16c` | Missing elevator, aileron, flaps | Focused geometry, topology and mixed flap/roll poses accepted; mechanics fitted |
 | `f104` | Missing elevator, aileron, flaps | Focused geometry, hook and mixed flap/roll poses accepted; mechanics fitted |
 | `mig17f` | Missing elevator, rudder, aileron, flaps | Focused geometry and topology accepted; mechanics fitted |
-| `a10` | Missing elevator, rudder, aileron, flaps | Queued |
-| `c130` | Missing elevator, rudder, aileron, flaps | Queued |
-| `ac130` | Missing elevator, rudder, aileron, flaps, hook | Queued |
-| `e3` | Missing elevator, aileron, flaps | Queued |
+| `a10` | Missing elevator, rudder, aileron, flaps | Controls and gear reviewed; exposed main-wheel stow is fitted |
+| `c130` | Missing elevator, rudder, aileron, flaps | Controls, rigid gear and propeller overlay reviewed |
+| `ac130` | Missing elevator, rudder, aileron, flaps, hook | Controls, gear, props and gun overlays reviewed; visual hook unresolved |
+| `e3` | Missing elevator, aileron, flaps | Controls, rigid gear and 25 flap/roll combinations reviewed |
 | `il76` | Missing elevator, rudder, aileron, flaps | Queued |
 | `e2` | Missing elevator, rudder, aileron, flaps | Queued |
 | `b747` | Missing elevator, aileron, flaps | Queued |
 | `a310` | Missing elevator, aileron, flaps | Focused geometry and topology accepted; mechanics fitted |
-| `av8` | Missing elevator, rudder, aileron, flaps, vector-pitch | Queued |
+| `av8` | Missing elevator, rudder, aileron, flaps, vector-pitch | Controls, all central/outrigger gear and 25 nozzle combinations reviewed |
 | `yak141` | Missing elevator, rudder, aileron, flaps, vector-pitch | Queued |
 | `v22` | Missing elevator, rudder, aileron, flaps | Queued |
-| `ah64` | Motion survey captured; hinges unreviewed | Queued |
-| `mi24` | Motion survey captured; hinges unreviewed | Queued |
-| `ch47` | Motion survey captured; hinges unreviewed | Queued |
-| `f18` | Motion survey captured | Visual review found inward-folding main gear crossing; repair pending |
-| `rafale` | Motion survey captured; hinges unreviewed | Queued |
+| `ah64` | Motion survey captured | Cyclic and rotor geometry reviewed; blade feathering unresolved |
+| `mi24` | Motion survey captured | Cyclic, rotor and rigid gear reviewed; blade feathering unresolved |
+| `ch47` | Motion survey captured | Cyclic, differential yaw and tandem separation reviewed; blade feathering unresolved |
+| `f18` | Motion survey captured | Main-wheel crossing and attachment repairs in progress |
+| `rafale` | Motion survey captured; hinges unreviewed | Visual review found crossed main gear and detached thick flap fronts; repair pending |
 | `f14` | Motion survey captured; hinges unreviewed | Queued |
 | `a4e` | Motion survey captured; hinges unreviewed | Queued |
 | `x31` | Motion survey captured; hinges unreviewed | Queued |

@@ -220,12 +220,18 @@ struct Group {
 }
 enum SpecificRig {
     A7(crate::a7_animation::Rig),
+    A10(crate::a10_animation::Rig),
+    Av8(crate::av8_animation::Rig),
+    Awacs(crate::awacs_animation::Rig),
     A310(crate::a310_animation::Rig),
+    C130(crate::c130_animation::Rig),
+    Ac130(crate::ac130_animation::Rig),
     F4(Box<crate::f4_animation::Rig>),
     F15(crate::f15_animation::Rig),
     F16(crate::f16_animation::Rig),
     F104(crate::f104_animation::Rig),
     Mig17(crate::mig17_animation::Rig),
+    Mi24(crate::mi24_animation::Rig),
 }
 pub struct Rig {
     id: Id,
@@ -238,6 +244,60 @@ impl Rig {
         let spec = specification(id).ok_or("unreviewed variety aircraft rig")?;
         let mut shape = Shape::parse(bytes)?;
         match id {
+            Id::E3 => {
+                let (rig, shape) = crate::awacs_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Awacs(rig),
+                    shape,
+                ));
+            }
+            Id::A10 => {
+                let (rig, shape) = crate::a10_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::A10(rig),
+                    shape,
+                ));
+            }
+            Id::Av8 => {
+                let (rig, shape) = crate::av8_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Av8(rig),
+                    shape,
+                ));
+            }
+            Id::Ac130 => {
+                let (rig, shape) = crate::ac130_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Ac130(rig),
+                    shape,
+                ));
+            }
+            Id::Mi24 => {
+                let (rig, shape) = crate::mi24_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::Mi24(rig),
+                    shape,
+                ));
+            }
+            Id::C130 => {
+                let (rig, shape) = crate::c130_animation::Rig::load(bytes, shape)?;
+                return Ok(Self::with_specific(
+                    id,
+                    spec.scale,
+                    SpecificRig::C130(rig),
+                    shape,
+                ));
+            }
             Id::A7 => {
                 let (rig, shape) = crate::a7_animation::Rig::load(bytes, shape)?;
                 return Ok(Self::with_specific(
@@ -396,7 +456,13 @@ impl Rig {
         if let Some(rig) = &self.specific {
             return match rig {
                 SpecificRig::A7(_) => crate::a7_animation::flame(address),
-                SpecificRig::A310(_) => false,
+                SpecificRig::A10(_) => crate::a10_animation::flame(address),
+                SpecificRig::Av8(_) => crate::av8_animation::flame(address),
+                SpecificRig::Awacs(_) => false,
+                SpecificRig::A310(_)
+                | SpecificRig::C130(_)
+                | SpecificRig::Ac130(_)
+                | SpecificRig::Mi24(_) => false,
                 SpecificRig::F4(rig) => rig.flame(address),
                 SpecificRig::F15(_) => crate::f15_animation::flame(address),
                 SpecificRig::F16(_) => crate::f16_animation::flame(address),
@@ -425,12 +491,18 @@ impl Rig {
         if let Some(rig) = &self.specific {
             return match rig {
                 SpecificRig::A7(rig) => rig.animate(source, state),
+                SpecificRig::A10(rig) => rig.animate(source, state),
+                SpecificRig::Av8(rig) => rig.animate(source, state),
+                SpecificRig::Awacs(rig) => rig.animate(source, state),
                 SpecificRig::A310(rig) => rig.animate(source, state),
+                SpecificRig::C130(rig) => rig.animate(source, state),
+                SpecificRig::Ac130(rig) => rig.animate(source, state),
                 SpecificRig::F4(rig) => rig.animate(source, state),
                 SpecificRig::F15(rig) => rig.animate(source, state),
                 SpecificRig::F16(rig) => rig.animate(source, state),
                 SpecificRig::F104(rig) => rig.animate(source, state),
                 SpecificRig::Mig17(rig) => rig.animate(source, state),
+                SpecificRig::Mi24(rig) => rig.animate(source, state),
             };
         }
         let mut face = source.clone();

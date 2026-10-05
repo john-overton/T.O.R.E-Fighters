@@ -4,12 +4,19 @@
 use crate::{AppResult, aircraft::Airframe, flight::State};
 use std::{collections::BTreeMap, fmt::Write as _, fs, path::Path};
 use tore_formats::{aircraft::AircraftId, shape::Face};
+mod a10;
 mod a310;
+mod ac130;
+mod av8;
+mod awacs;
+mod c130;
 mod f104;
 mod f15;
 mod f16;
 mod f4;
+mod mi24;
 mod mig17;
+mod rotorcraft;
 
 const EPSILON: f32 = 0.0001;
 const CELL_WIDTH: usize = 256;
@@ -130,12 +137,14 @@ impl Control {
         use AircraftId as Id;
         let helicopter = matches!(id, Id::Ah64 | Id::Mi24 | Id::Ch47);
         match self {
-            Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps if helicopter => {
-                Expectation::Unknown
-            }
+            Self::Rudder if id == Id::Ch47 => Expectation::Required,
+            Self::Rudder | Self::Flaps if helicopter => Expectation::Unknown,
             Self::Elevator | Self::Rudder | Self::Aileron | Self::Flaps => Expectation::Required,
             Self::Gear if matches!(id, Id::Ah64 | Id::Ch47) => Expectation::Unsupported,
             Self::Gear => Expectation::Required,
+            // PT enables the command, but whole-source review has not located
+            // corresponding AC130 hook geometry. Keep that gap explicit.
+            Self::Hook if id == Id::Ac130 => Expectation::Unknown,
             Self::Hook if state.hook_available() => Expectation::Required,
             Self::Hook => Expectation::Unsupported,
             Self::Brake
@@ -158,7 +167,8 @@ impl Control {
             Self::Bay if matches!(id, Id::F22 | Id::F22n | Id::Faxx) => Expectation::Required,
             Self::Bay => Expectation::Unknown,
             Self::VectorPitch if matches!(id, Id::Av8 | Id::Yak141) => Expectation::Required,
-            Self::VectorYaw if matches!(id, Id::Av8 | Id::Yak141) => Expectation::Unknown,
+            Self::VectorYaw if id == Id::Av8 => Expectation::Required,
+            Self::VectorYaw if id == Id::Yak141 => Expectation::Unknown,
             Self::VectorPitch | Self::VectorYaw => Expectation::Unsupported,
             Self::Conversion if id == Id::V22 => Expectation::Required,
             Self::Conversion => Expectation::Unsupported,
@@ -242,6 +252,34 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
         .get(&airframe.profile.shape)
         .ok_or_else(|| format!("missing {}", airframe.profile.shape))?;
     let raw = tore_formats::shape::Shape::parse(source_bytes)?;
+    let awacs_sources = if id == AircraftId::E3 {
+        Some(awacs::Sources::load(source_bytes)?)
+    } else {
+        None
+    };
+    let a10_sources = if id == AircraftId::A10 {
+        Some(a10::Sources::load(
+            source_bytes,
+            data.get("_A10.PIC").ok_or("missing A10 source atlas")?,
+        )?)
+    } else {
+        None
+    };
+    let ac130_sources = if id == AircraftId::Ac130 {
+        Some(ac130::Sources::load(source_bytes)?)
+    } else {
+        None
+    };
+    let mi24_sources = if id == AircraftId::Mi24 {
+        Some(mi24::Sources::load(source_bytes)?)
+    } else {
+        None
+    };
+    let c130_sources = if id == AircraftId::C130 {
+        Some(c130::Sources::load(source_bytes)?)
+    } else {
+        None
+    };
     let a310_sources = if id == AircraftId::A310 {
         Some(a310::Sources::load(source_bytes)?)
     } else {
@@ -267,7 +305,15 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
     let scope = if matches!(
         id,
         AircraftId::A7
+            | AircraftId::Av8
+            | AircraftId::A10
             | AircraftId::A310
+            | AircraftId::C130
+            | AircraftId::Ac130
+            | AircraftId::E3
+            | AircraftId::Ah64
+            | AircraftId::Mi24
+            | AircraftId::Ch47
             | AircraftId::F4B
             | AircraftId::F4J
             | AircraftId::F4E
@@ -359,6 +405,59 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        if let Some(source) = &awacs_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                awacs::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &a10_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                a10::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &ac130_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                ac130::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
+                    metric,
+                );
+            }
+        }
+        if let Some(source) = &mi24_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                mi24::check(control, *value, pose, scale, source, metric);
+            }
+        }
+        if let Some(source) = &c130_sources {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                c130::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
+                    source,
+                    metric,
+                );
+            }
+        }
         if let Some(source) = &a310_sources {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 a310::check(
@@ -379,6 +478,17 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                     (&raw.faces, reference, pose),
                     scale,
                     source,
+                    metric,
+                );
+            }
+        }
+        if id == AircraftId::Av8 {
+            for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+                av8::check(
+                    control,
+                    *value,
+                    (&raw.faces, reference, pose),
+                    scale,
                     metric,
                 );
             }
@@ -417,6 +527,9 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                 );
             }
         }
+        for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
+            rotorcraft::check(id, control, *value, reference, pose, scale, metric);
+        }
         if matches!(control, Control::Hook) {
             for ((value, pose), metric) in values.iter().zip(&poses).zip(&mut metrics) {
                 hook_stow_direction(*value, reference, pose, scale, metric);
@@ -450,10 +563,11 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
                     || metric.reviewed_direction_failures != 0
                     || metric.reviewed_neutral_mismatch
                     || metric.reviewed_wheel_failed
+                    || metric.reviewed_rigid_panel_error > EPSILON
                     || !metric.new_planar_crossings.is_empty()
             });
         if failed {
-            failures.push(format!("{}: status={status}, finite={all_finite}, reversible={reversible}, unique={unique}, anchor_missing={}, anchor_gap_ft={}, skin_gap_ft={}, direction_failures={}, neutral_mismatch={}, wheel_failed={}, new_planar_crossings={}", control.name(), metrics.iter().any(|m| m.reviewed_anchor_missing), metrics.iter().map(|m| m.max_reviewed_anchor_gap).fold(0_f32, f32::max), metrics.iter().map(|m| m.max_reviewed_skin_gap).fold(0_f32, f32::max), metrics.iter().map(|m| m.reviewed_direction_failures).sum::<usize>(), metrics.iter().any(|m| m.reviewed_neutral_mismatch), metrics.iter().any(|m| m.reviewed_wheel_failed), metrics.iter().map(|m| m.new_planar_crossings.len()).sum::<usize>()));
+            failures.push(format!("{}: status={status}, finite={all_finite}, reversible={reversible}, unique={unique}, anchor_missing={}, anchor_gap_ft={}, skin_gap_ft={}, direction_failures={}, neutral_mismatch={}, wheel_failed={}, new_planar_crossings={}, rigid_panel_error_ft={}", control.name(), metrics.iter().any(|m| m.reviewed_anchor_missing), metrics.iter().map(|m| m.max_reviewed_anchor_gap).fold(0_f32, f32::max), metrics.iter().map(|m| m.max_reviewed_skin_gap).fold(0_f32, f32::max), metrics.iter().map(|m| m.reviewed_direction_failures).sum::<usize>(), metrics.iter().any(|m| m.reviewed_neutral_mismatch), metrics.iter().any(|m| m.reviewed_wheel_failed), metrics.iter().map(|m| m.new_planar_crossings.len()).sum::<usize>(), metrics.iter().map(|m| m.reviewed_rigid_panel_error).fold(0_f32, f32::max)));
         }
         writeln!(
             notes,
@@ -490,12 +604,19 @@ pub(crate) fn run(data: &BTreeMap<String, Vec<u8>>, id: AircraftId, out: &Path) 
             &poses,
         )?;
     }
+    if let Some(source) = &awacs_sources {
+        failures.extend(awacs::combinations(&airframe, &neutral, out, source)?);
+    }
+    if id == AircraftId::Av8 {
+        failures.extend(av8::combinations(&airframe, &neutral, out)?);
+    }
     if id == AircraftId::F16C {
         failures.extend(f16::combinations(&airframe, &neutral, out)?);
     }
     if id == AircraftId::F104 {
         failures.extend(f104::combinations(&airframe, &neutral, out)?);
     }
+    failures.extend(rotorcraft::combinations(&airframe, &neutral, out)?);
     report.push_str("]}\n");
     fs::write(out.join("report.json"), report)?;
     fs::write(out.join("index.txt"), notes)?;
@@ -573,6 +694,7 @@ struct Metrics {
     reviewed_control_z_delta: [f32; 2],
     reviewed_min_wheel_gap: Option<f32>,
     reviewed_wheel_rigidity_error: f32,
+    reviewed_rigid_panel_error: f32,
     reviewed_wheel_failed: bool,
     seams: Vec<Seam>,
 }
@@ -1011,6 +1133,11 @@ fn shared_vertex_gaps(
 }
 impl Metrics {
     fn json(&self, out: &mut String) -> std::fmt::Result {
+        write!(
+            out,
+            "\"reviewed_rigid_panel_error_ft\":{},",
+            self.reviewed_rigid_panel_error
+        )?;
         write!(
             out,
             "\"hook_lowest_point_lift_ft\":{},",
