@@ -971,3 +971,7 @@ mod tests {
         assert_eq!(g.phase, Phase::Intercept);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "formation_checkpoint.rs"]
+mod checkpoint;

@@ -1756,3 +1756,7 @@ mod tests {
         assert_eq!(ai.target_deadline, None);
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "wing_checkpoint.rs"]
+mod checkpoint;

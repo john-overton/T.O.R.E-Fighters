@@ -275,3 +275,7 @@ mod tests {
         assert!(!cycle.advance(63, Some(2), true, 8, 30));
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "gunnery_checkpoint.rs"]
+mod checkpoint;

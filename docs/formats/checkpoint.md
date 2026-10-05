@@ -89,7 +89,9 @@ code it: a field that is coded needlessly costs bytes, a field skipped wrongly
 costs exactness. The surveys found several "caches" that are not:
 `Ownship::range_estimate` and `mounted_key` refresh only every 60 ticks or on
 a change, `AiWings::last_hp` triggers the next damage report, and the render
-history's devices are drawn again for an aircraft whose AI stopped.
+history's devices are drawn again for an aircraft whose AI stopped, and
+`formation::Guidance::trace`, a "hidden inspection hook" that `change_slot` and the
+other actors' traffic read.
 
 **Process switches.** One process-wide switch changes simulation results: the
 retail stall speeds (`tore_sim::flight::retail_stall_speeds`). The header

@@ -488,3 +488,7 @@ mod tests {
         assert!(matches!(r, Err(AiError::InvalidInput(_))));
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "pursuit_checkpoint.rs"]
+mod checkpoint;

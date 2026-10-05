@@ -2355,3 +2355,7 @@ mod tests {
         assert!(!passive_emitter_keeps_track(false, ScalarSpeed(500.0), t));
     }
 }
+
+// Exact checkpoints (docs/formats/checkpoint.md).
+#[path = "weapon_service_checkpoint.rs"]
+mod checkpoint;
