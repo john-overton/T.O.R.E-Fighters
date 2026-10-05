@@ -26,7 +26,8 @@ use tore_sim::sensors::FEET_PER_NAUTICAL_MILE;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Geometry {
     /// True bearing from the receiver to the target, whole degrees, 1 to 360
-    /// (a bearing that rounds to north is said "three six zero").
+    /// (a bearing that rounds to north is said "three six zero"). It is said
+    /// as three digits, one by one.
     pub bearing: u32,
     /// Distance in whole nautical miles; `None` under one mile, which the
     /// call leaves out.
@@ -102,8 +103,10 @@ fn addressee_phrase(addressee: Addressee) -> Phrase {
     }
 }
 
-/// "Two, attack bandit, bearing 270, 15 miles, angels 20". The last number of
-/// the bearing and of the height falls in pitch, as in the waypoint call.
+/// "Two, attack bandit, bearing 270, 15 miles, angels 20". The bearing is said
+/// as real-world brevity has it, always three digits one by one ("zero one
+/// six", "two seven zero"); the last digit of the bearing and the height's last
+/// number fall in pitch, as in the waypoint call.
 /// `phrases` gives the unit word of the range ("miles"); the rest of the text
 /// is the call's own.
 pub fn assignment_phrase(phrases: &Phrases, addressee: Addressee, geometry: Geometry) -> Phrase {
@@ -111,12 +114,29 @@ pub fn assignment_phrase(phrases: &Phrases, addressee: Addressee, geometry: Geom
         .raw(", attack ", Some("^ATTACK"))
         .raw("bandit", Some("^BANDIT"))
         .raw(", bearing ", Some("^BEARING"))
-        .join(comms::number(geometry.bearing, true));
+        .join(bearing_phrase(geometry.bearing));
     if let Some(miles) = geometry.miles {
         call = call.raw(", ", None).join(comms::miles(phrases, miles));
     }
     call.raw(", angels ", Some("^ANGELS"))
         .join(comms::number(geometry.angels, true))
+}
+
+/// A bearing as three digits, each its own recording (`^NUM00` is zero), the
+/// last one falling: 16 is "zero one six", 5 is "zero zero five" (John,
+/// 2026-10-05: real-world brevity, three digits). The text is the three digits.
+fn bearing_phrase(bearing: u32) -> Phrase {
+    let bearing = bearing.clamp(1, 360);
+    let digits = [bearing / 100, bearing / 10 % 10, bearing % 10];
+    let mut phrase = Phrase::default();
+    for (index, digit) in digits.into_iter().enumerate() {
+        let falling = if index == 2 { "D" } else { "" };
+        phrase = phrase.raw(
+            &digit.to_string(),
+            Some(&format!("^NUM{digit:02}{falling}")),
+        );
+    }
+    phrase
 }
 
 /// "Attack bandits": a blanket attack order that names no target and makes no
@@ -245,18 +265,27 @@ mod tests {
     }
 
     #[test]
-    fn bearings_say_their_digits_and_fall_on_the_last() {
+    fn bearings_are_three_digits_one_by_one_and_fall_on_the_last() {
         let bearing = |degrees| call(Addressee::Wingman(1), degrees, 15., 20_000.);
-        // Up to twelve is one word, larger numbers are said digit by digit.
-        let five = bearing(5.);
-        assert!(five.text.contains("bearing 5,"), "{}", five.text);
-        assert_eq!(&five.stems[3..5], ["^BEARING", "^NUM05D"]);
-        let ninety = bearing(90.);
-        assert!(ninety.text.contains("bearing 90,"));
-        assert_eq!(&ninety.stems[3..6], ["^BEARING", "^NUM09", "^NUM00D"]);
-        let north = bearing(0.2);
-        assert!(north.text.contains("bearing 360,"), "north is 360");
-        assert_eq!(&north.stems[4..7], ["^NUM03", "^NUM06", "^NUM00D"]);
+        // Real-world brevity (John, 2026-10-05): always three digits, with
+        // the original's zero recording (`^NUM00`) for a leading zero.
+        for (degrees, text, digits) in [
+            (5., "005", ["^NUM00", "^NUM00", "^NUM05D"]),
+            (16., "016", ["^NUM00", "^NUM01", "^NUM06D"]),
+            (90., "090", ["^NUM00", "^NUM09", "^NUM00D"]),
+            (270., "270", ["^NUM02", "^NUM07", "^NUM00D"]),
+            (0.2, "360", ["^NUM03", "^NUM06", "^NUM00D"]),
+            (123., "123", ["^NUM01", "^NUM02", "^NUM03D"]),
+        ] {
+            let phrase = bearing(degrees);
+            assert!(
+                phrase.text.contains(&format!("bearing {text},")),
+                "{degrees}: {}",
+                phrase.text
+            );
+            assert_eq!(&phrase.stems[3], "^BEARING");
+            assert_eq!(&phrase.stems[4..7], digits, "{degrees}");
+        }
         // The bearing is whole degrees, rounded, never 0 and never above 360.
         assert_eq!(
             Geometry::between([0.; 3], target(359.6, 5., 0.)).bearing,
