@@ -182,7 +182,7 @@ FAMILIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "revival, debrief, clean exit",
         (
             "net-server-fight", "net-server-chat", "net-server-kick", "net-server-observe", "net-server-scores",
-            "net-server-king", "net-server-pvp", "net-server-delay", "net-server-revive",
+            "net-server-king", "net-server-pvp", "net-server-delay", "net-server-revive", "net-server-results",
         ),
     ),
     "net-discovery": ("finding games on the local network", ("net-discovery",)),
@@ -330,7 +330,8 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-world/src/combat.rs", ("flight-combat", "ai-fights", "ai-damage", "combat-tapes"), "combat in the world"),
     _r("crates/tore-world/src/combat_tape.rs", ("combat-tapes", "flight-combat"), "combat tapes"),
     _r("crates/tore-world/src/terrain.rs", ("airports", "flight-environment", "ai-airfield", "menus-creator"), "terrain and airport lists"),
-    _r("crates/tore-world/src/debrief.rs", ("menus-screens", "ai-fights"), "debrief evaluator"),
+    _r("crates/tore-world/src/debrief.rs", ("menus-screens", "ai-fights") + NET_FAMILIES, "debrief evaluator; the multiplayer results rows"),
+    _r("crates/tore-world/src/debrief/*", ("menus-screens", "ai-fights") + NET_FAMILIES, "the multiplayer results rows' tests"),
     _r("crates/tore-world/src/seats.rs", ("ai-lead", "ai-fights"), "seats"),
     _r("crates/tore-world/src/frame.rs", ("flight-views", "instruments", "replay-recording"), "the flight frame"),
     _r("crates/tore-world/src/readout.rs", ("instruments", "flight-combat", "replay-live"), "the cockpit readout"),
@@ -400,6 +401,8 @@ RULES: tuple[Rule, ...] = (
         "the revival a game keeps, its words and the spawned planes (tore-bot prints them)",
     ),
     _r("crates/tore-session/src/host/revive.rs", NET_FAMILIES, "death and revival on the host"),
+    _r("crates/tore-session/src/client/results.rs", NET_FAMILIES, "the results a game keeps and their words (tore-bot prints them)"),
+    _r("crates/tore-session/src/host/results*", NET_FAMILIES, "the results message at a mission's end, and its tests"),
     _r(
         "crates/tore-session/src/host/king*",
         NET_FAMILIES + ("net-discovery",),

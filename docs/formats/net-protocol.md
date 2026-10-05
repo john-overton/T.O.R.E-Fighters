@@ -1306,6 +1306,20 @@ refused "The mission has changed; choose again.", as the lobby's requests are.
 - **Observe.** A subject's code 3 is invalid; a point's coordinates are
   signed varints that must fit 32 bits.
 
+*Built (F2-D), each an agent decision:*
+
+- **Results** goes once at the mission's end to every connection that is not
+  closing (observers and players in the lobby too), after the final Scores
+  and before Mission ended and each player's Debrief. The rows are every
+  plane of the mission, retired ones included, friendly side first and by
+  wing and member. A row's callsign is the last human who flew the plane,
+  kept after the player leaves. Aircraft kills are the kill table's first
+  three rows, other kills the rest; friendly fire counts by side; the
+  air-to-ground shots hold missiles and bombs together. A retired plane's
+  damage is 1,000. The final Scores ride along in PvP and are absent in
+  co-op. A client keeps the newest until the next mission or flight.
+  ([how it works](../ARCHITECTURE.md#the-multiplayer-debrief))
+
 *Built (F2-V), each an agent decision:*
 
 - **Revival** goes to a seated player at the tick the host finds its plane

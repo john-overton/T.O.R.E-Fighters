@@ -203,6 +203,38 @@ def scores_problems(text: str, callsigns: list[str]) -> list[str]:
     return problems
 
 
+def results_problems(text: str, callsigns: list[str]) -> list[str]:
+    """What each bot printed of the Results message (slice F2-D): exactly one line, before the mission's end, naming
+    every aircraft of the mission with the players' callsigns on their planes and the AI on the rest, and, in PvP,
+    the winner of the final scores."""
+    problems = []
+    for name in callsigns:
+        lines = re.findall(rf"^{name}: results: (.*)$", text, re.M)
+        if len(lines) != 1:
+            problems.append(f"{name} printed {len(lines)} results lines, not one")
+            continue
+        line = lines[0]
+        head = re.match(r"(\d+) aircraft, (\d+) flown by players: ", line)
+        if not head:
+            problems.append(f"{name}'s results line has no aircraft count: {line[:80]}")
+            continue
+        if int(head.group(2)) != len(callsigns):
+            problems.append(f"{name}'s results count {head.group(2)} players, not {len(callsigns)}")
+        if int(head.group(1)) <= len(callsigns):
+            problems.append(f"{name}'s results list only {head.group(1)} aircraft, none of them the AI's")
+        if not re.search(r"\d+ AI (alive|dead|ejected|retired) \d+k", line):
+            problems.append(f"{name}'s results list no AI aircraft")
+        for other in callsigns:
+            if not re.search(rf"\d+ {other} (alive|dead|ejected|retired) \d+k", line):
+                problems.append(f"{name}'s results list no row for {other}")
+        if not re.search(r"; (a draw|the \w+ side wins|\w+ wins)$", line):
+            problems.append(f"{name}'s results name no winner of the final scores")
+        ended = text.find(f"{name}: Mission ended")
+        if ended >= 0 and text.find(f"{name}: results: ") > ended:
+            problems.append(f"{name}'s results came after the mission's end")
+    return problems
+
+
 def pvp_end_problems(text: str, callsigns: list[str]) -> list[str]:
     """A PvP mission with a kill limit (slice F2-1's server keys, F2-S's scoring), from what the bots printed: the
     scores name the enemy side and the limit, and the end follows the kills. A kill by any player must end the
@@ -398,6 +430,26 @@ def drive_scores(d: Drive) -> None:
     for problem in scores_problems(bots.text(), ["Bot1", "Bot2"]):
         d.problem(problem)
     bots.forbid(NET_BAD, "a network problem")
+    server.forbid(NET_BAD, "a network problem")
+
+
+def drive_results(d: Drive) -> None:
+    """The results (slice F2-D): a PvP server with a one-minute time limit and a bot on each side; at the end each
+    bot hears one Results message, before the mission's end, with a row for every aircraft (the players' callsigns on
+    their planes, the AI on the rest) and the winner of the final scores."""
+    port = d.port()
+    server = start_server(d, port, guide_mission(separation_nm=5), mode="pvp", time_limit=1)
+    blue = start_bots(d, port, "blue", 100, "--callsign", "Blue", "--slot", "0")
+    red = start_bots(d, port, "red", 100, "--callsign", "Red", "--slot", "6")
+    if not server.wait_for(r"^mission ended: the time limit$", 150):
+        d.problem("the time limit did not end the mission")
+    blue.finish(60, None)
+    red.finish(60, None)
+    server.finish(40, 0)
+    for problem in results_problems(blue.text() + red.text(), ["Blue", "Red"]):
+        d.problem(problem)
+    for bot in (blue, red):
+        bot.forbid(NET_BAD, "a network problem")
     server.forbid(NET_BAD, "a network problem")
 
 
@@ -987,6 +1039,10 @@ def scenarios() -> list[Scenario]:
         Scenario(
             name="net-server-scores", lane="net", args=[], driver=drive_scores, uses=("server", "bot"), timeout=300,
             notes="a one-minute time limit with two bots: the scores while flying and the final ones at the end",
+        ),
+        Scenario(
+            name="net-server-results", lane="net", args=[], driver=drive_results, uses=("server", "bot"), timeout=300,
+            notes="PvP with a one-minute time limit: each bot hears the results, a row for every aircraft, and the winner",
         ),
         Scenario(
             name="net-server-king", lane="net", args=[], driver=drive_king, uses=("server", "bot"), timeout=300,

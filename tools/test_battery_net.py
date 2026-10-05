@@ -139,6 +139,32 @@ class ParsingTests(unittest.TestCase):
         alone = good.replace(", 2 Bot2 (friendly) 0/0 0.00", "")
         self.assertIn("no scores line of Bot1's lists every player", net.scores_problems(alone, ["Bot1", "Bot2"]))
 
+    def test_the_results_line_is_checked_per_bot(self):
+        row = "0 Blue alive 0k, 1 AI alive 0k, 2 AI dead 1k, 6 Red alive 0k, 7 AI alive 0k"
+        good = (
+            f"Blue: results: 5 aircraft, 2 flown by players: {row}; a draw\n"
+            "Blue: Mission ended: the time limit.\n"
+            f"Red: results: 5 aircraft, 2 flown by players: {row}; a draw\n"
+            "Red: Mission ended: the time limit.\n"
+        )
+        self.assertEqual(net.results_problems(good, ["Blue", "Red"]), [])
+        winner = good.replace("a draw", "the friendly side wins")
+        self.assertEqual(net.results_problems(winner, ["Blue", "Red"]), [])
+        self.assertEqual(
+            net.results_problems(good, ["Blue", "Hawk"]),
+            ["Blue's results list no row for Hawk", "Hawk printed 0 results lines, not one"],
+        )
+        twice = good + good.splitlines()[0] + "\n"
+        self.assertEqual(net.results_problems(twice, ["Blue"]), ["Blue printed 2 results lines, not one"])
+        no_ai = good.replace("1 AI alive 0k, 2 AI dead 1k, ", "").replace("7 AI alive 0k", "8 Red2 alive 0k")
+        self.assertIn("Blue's results list no AI aircraft", net.results_problems(no_ai, ["Blue", "Red"]))
+        no_winner = good.replace("; a draw", "")
+        self.assertIn("Blue's results name no winner of the final scores", net.results_problems(no_winner, ["Blue", "Red"]))
+        late = "Blue: Mission ended: the time limit.\n" + good.splitlines()[0] + "\n"
+        self.assertIn("Blue's results came after the mission's end", net.results_problems(late, ["Blue"]))
+        few = good.replace("5 aircraft, 2 flown", "2 aircraft, 2 flown")
+        self.assertIn("Blue's results list only 2 aircraft, none of them the AI's", net.results_problems(few, ["Blue", "Red"]))
+
     def test_the_pvp_end_follows_the_kills(self):
         line = "{who}: scores: players ranked by kills: 1 Blue (friendly) {b}/0 0.00, 2 Red (enemy) 0/{l} 0.00; " \
             "sides {b}/0 to 0/{l}; {left} left; ends at 1 kill in all{end}\n"

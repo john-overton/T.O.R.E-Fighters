@@ -426,14 +426,17 @@ A player who ended its own flight can press Join and fly it again, any number
 of times; a player the server removes reads "The server removed you from the
 game: REASON" (a game a player hosts says "The King").
 
-*Designed (phase 2):* a networked debrief adds, after its first page,
+*Built (F2-D, phase 2):* a networked debrief adds, after its first page,
 **SCORES** (PvP: the winner and each player's kills, losses, damage and ratio)
 and **RESULTS** (every aircraft, human and AI, with its pilot, status, kills,
 hit percentage and damage). Kills count as retail counts them: aircraft only,
 two for a human shot down with the pilot aboard. The **K** key opens the score
 board in flight for every player. After a loss a player's Join counts as flying
 again under the respawn rules, so leaving cannot dodge the lives
-([architecture](ARCHITECTURE.md#scoring)).
+([architecture](ARCHITECTURE.md#scoring)). Agent decisions: the RESULTS pages
+list each side apart, fifteen aircraft to a page, with the aircraft shot down
+(not the other kills) in the kills column, and SCORES appears in PvP only
+([how it works](ARCHITECTURE.md#the-multiplayer-debrief)).
 
 ## Architecture
 

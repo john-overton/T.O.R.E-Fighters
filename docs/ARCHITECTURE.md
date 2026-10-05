@@ -5658,6 +5658,66 @@ the ranking with each player's kills, losses, damage and ratio) and
 callsign or AI, aircraft, status, kills, hit percentage, damage). Single
 player's debrief is unchanged: the pages appear only with a Results message.
 
+*Built (F2-D, 2026-10-05).* What the build settled, each an agent decision
+unless the design above says it:
+
+- **The rows** are `tore_world::debrief::results(&World)`: one
+  `PlaneResult` for every plane of the roster and every retired wreck, from
+  the same `Ending::pilot` rule each seat's report uses, read for each plane
+  from its own side (the report's friendly-fire test is relative to a side).
+  Kills are the debrief's credit: the ledger's kill, else the last aircraft
+  to hit the lost one, a human's loss included (no plane is the viewer, so
+  none is left out). `aircraft_kills` are the kill table's first three rows
+  (fighter, bomber, helicopter), `other_kills` the other seven. Friendly fire
+  counts by side, so in a free-for-all two humans of one side count as friends
+  here, which the scores do not. Air-to-ground missiles and bombs share the
+  row's air-to-ground shots. A retired wreck is a row of status `Retired`
+  with damage 100 percent; its aircraft comes from its wing, since its
+  ownship is gone. Rows are ordered friendly side first, then wing, then
+  member.
+- **The message.** At the mission's end `send_results` (`host/results.rs`)
+  sends one Results to every connection that is not closing, observers and
+  players in the lobby included, after the final Scores and before Mission
+  ended and each player's debrief. The rows carry the callsign of the last
+  human who flew the plane, remembered by the plane when its player leaves
+  (`Scoring::callsigns`, noted every tick and again at the end); the wire
+  holds one callsign, so a plane flown by several players names the last. The
+  final scores ride along in PvP only: co-op sends none.
+- **The client** keeps the newest Results (`Client::results`) until the next
+  mission or flight starts, logs a `results` line (the words of
+  `tore_session::client::results::summary`), and `tore-bot` prints it
+  (`NAME: results: ...`).
+- **The pages** (`net/debrief.rs`, drawn by `debrief.rs`): the debrief screen
+  turns **SCORES** and **RESULTS** in after the first page when the client
+  holds Results, in that order, then the retail pages 2 to 5. SCORES is PvP
+  only: the winner (or "No winner was named."), the heading of the tally, then
+  rank, pilot, side, kills, lost, damage in aircraft and ratio for fifteen
+  players a page, and each side's totals under the last when the fight is by
+  sides. RESULTS lists every aircraft fifteen to a page, **a page never mixing
+  the two sides** (so 20 against 10 is three pages, not two), headed
+  "RESULTS : FRIENDLY SIDE" or "ENEMY SIDE": wing and member, callsign or AI,
+  aircraft (its short name), status, aircraft shot down, hit percentage over
+  every shot and damage. A callsign is cut to nine characters to fit its
+  column. The clipboard's markup gained a `.columns X1 X2 ...` directive for
+  these pages (cell n of a line starts at the n-th x, whatever the cells before
+  it hold); the retail pages never use it. The pages are fitted to the retail
+  fonts (fitted: the retail layout of this page is unknown). Connections that
+  have no debrief of their own (observers, a player in the lobby) hold the
+  results but no screen shows them yet.
+- **Tests.** `debrief/results_tests.rs` in the world (30 aircraft in page
+  order, every kind of row, a revived player's two planes, a retired wreck,
+  the same ledger twice), `host/results_tests.rs` on the simulator (every
+  connection gets one Results, a row for every plane, callsigns kept after a
+  player leaves its flight, co-op without scores, a revival's wreck and new
+  plane, a retired plane), `client/results.rs` (the words, and the real client
+  keeping them until the next flight), the pages' cells and layout in
+  `net/debrief.rs` and `debrief.rs` (30 aircraft and a dozen players in the
+  bundled font, thirty players over two score pages, a lopsided mission, the
+  `.columns` directive, the five retail pages unchanged), the ignored
+  `debrief::net_pages::retail_art_draws_the_multiplayer_pages`, which draws
+  every page with an imported profile's fonts and checks each cell against its
+  column, and the net lane's `net-server-results`.
+
 ##### Friend or foe
 
 - **The lock box's X.** Drawn today when the displayed target is on the
@@ -5948,7 +6008,7 @@ every message below; no later slice changes the wire without the lead.
 | F2-V Death and revival | Opus | F2-0 | `tore-world` `world/revive.rs`, `world/handoff.rs`, `ai_wings.rs` (the spawned aircraft), new `world/revive_tests.rs`; `host/revive.rs`, new `host/revive_tests.rs`; the client's revival state and its own copy's spawn; `tore-app` `net/play.rs` (the prompt and Enter); `tore-bot --revive` | Abandon and Revive; the revival point and loadout; retiring; lives, delay and the three rules; Join after a loss; replaces the host's orphans | World tests: a revived plane's place, heading, speed, stores under each weapons rule and its handoff invariants; Abandon keeps a wreck falling; 100 revivals in one mission stay within 64 planes; host tests for each rule, lives, the delay, the lobby's Join, lock sides; a client copy that adds the spawned plane; a `net` scenario where a bot ejects, revives and flies on. Single-player baseline SAME. **Built (F2-V, 2026-10-05):** as [described above](#death-revival-and-lives); Abandon and Revive, the revival point, the loadout and the weapons rule, retiring and the `Book` in `world/revive.rs` (with a new aircraft for the AI in `ai_wings.rs`, three roster calls in `seats.rs`, and in `world.rs` the field, Abandon in the input check, the lost planes' neutral input and silent radios, and the wrecks' rest each tick); the host's rules, lives, delay, held seats, Join after a loss and Spawned in `host/revive.rs`, replacing the orphans in `host/mod.rs`; the client's Revival, prompt and spawned planes (`client/revival.rs`); `tore-bot --revive`; the game's prompt and Enter (`net/play.rs`, one guard in `main.rs`). Tests: `world/revive_tests.rs` (the point, the stores under each rule, the handoff's invariants, Abandon's falling wreck, a client's copy, the 30 seconds, 100 revivals within 64 planes, the same twice), `host/revive_tests.rs` (each rule, lives, the delay, Join after a loss, lock sides, a late joiner, the held seat), `client/revival_tests.rs` and the prompt's words, the game's copies, the `net-server-revive` scenario (the server's file sets `respawn revive` by F2-1's keys), and for checkpoints `world/revive_checkpoint.rs` and the equivalence scenario "revivals and wrecks". The ai-slot rule keeps to F2-1's slot locks and lock sides but not to join in progress. A real-data run (dedicated server, a bot ejecting) revived the bot into plane 12 under `revive` and into plane 1 under `ai-slot` |
 | F2-O1 The observer stream | Opus | F2-0 | `host/observe.rs`, new `host/observe_tests.rs`; the observer flight in `wire/connection.rs` and `wire/from_world.rs`; new `client/observe.rs`; `tore-bot --observe` | Observe and Observing, snapshots with no own plane, relevance by the camera, the delay ring | Simulator tests: an observer gets entities near its subject at the full rate and far ones twice a second; with a delay nothing newer than now less the delay is ever sent, events included; the stream stops at seating and at the end; bandwidth and the ring's memory measured and recorded; a `net` scenario with an observing bot. Quick guard. **Built (F2-O1, 2026-10-05):** as [described above](#the-observer-view): the host's watches and stream (`host/observe.rs`, the hooks in `host/mod.rs`: the watch on each connection, the stream on the host, the stop before Seated and at the end, the lobby's observing mark), `from_world::observer_picture`, `HostConnection::observer_snapshot`, the client's `watch`, `stop_watching` and `observer_frame` (`client/observe.rs`), `Host::send_as_of` for the slices that send news at a tick, and `tore-bot --observe`. Delayed observers' snapshot ticks are the ring's (agent decision). Tests: `host/observe_tests.rs` (rates by the camera, a point and none, the camera's limit, refusals, human-flown planes and events, the delay for snapshots, events and held messages, the stops, measurements; the 60-second ring `#[ignore]`d for the full run), `client/observe_tests.rs`, `from_world`'s observer picture; the `net-server-observe` scenario. Measured: 8.4 MB at a 60-second delay for 30 aircraft; about 12 KB/s to an observer of 30 |
 | F2-L The lobby screen | Sonnet | F2-1 | `tore-app` `lobby_screen/` (new `settings_panel.rs` and `players_panel.rs`), `ordnance.rs` (lobby Cheat loading under the rule), the lobby's glue in `net/` | Settings..., Players..., slot locks, the seven buttons, Watch, the head's summary, greying | `facts` tests for who may press what; headless renders of each Settings page as King and not; a windowed run (through `tools/agent-run.sh`) hosting with a bot: settings changed and seen by the bot, the crown passed and taken back, a slot closed |
-| F2-D The multiplayer debrief | Sonnet | F2-S | `tore-world` `debrief.rs` (`results`); `host/results.rs`; the client's Results; `tore-app` `debrief.rs` and `net/debrief.rs` (the SCORES and RESULTS pages) | Results rows, the message at the end, the pages | A world test with rows for every plane, human and AI, retired included; a host test that every connection gets Results; headless renders of both pages with 30 aircraft; the existing single-player page tests unchanged; quick guard |
+| F2-D The multiplayer debrief | Sonnet | F2-S | `tore-world` `debrief.rs` (`results`); `host/results.rs`; the client's Results; `tore-app` `debrief.rs` and `net/debrief.rs` (the SCORES and RESULTS pages) | Results rows, the message at the end, the pages | A world test with rows for every plane, human and AI, retired included; a host test that every connection gets Results; headless renders of both pages with 30 aircraft; the existing single-player page tests unchanged; quick guard. **Built (F2-D, 2026-10-05):** as [described above](#the-multiplayer-debrief): `debrief::results` and its rows, `host/results.rs`, the client's kept Results (`client/results.rs`) and `tore-bot`'s results line, the SCORES and RESULTS pages (`net/debrief.rs`, the `.columns` directive in `debrief.rs`, two lines in `net/play.rs` to hand them over), the `net-server-results` scenario. Single-player debrief unchanged (the full baseline is in the run's notes) |
 | F2-A The AI flies an idle aircraft | Opus | F2-1, F2-O1 | `host/away.rs`, new `host/away_tests.rs`; away detection in `tore-app` `net/play.rs` and the banner; `tore-bot --away` | Away and Back, the stall's count, the reservation, the handoff both ways | Simulator tests: away for the setting's seconds hands the plane to the AI and reserves it; another player's take is refused; Back retakes it with its stores and damage; a stalled game the same; `never` does nothing; a `net` scenario with a bot away and back |
 | F2-O2 The observer screen | Sonnet | F2-O1, F2-L, stage E's replays | `tore-app` new `net/observe.rs`; the viewer's live mode in `replay/`; the routing in `main.rs` | The live recording, the viewer's live mode, Watch and Esc | Tests of the growing recording, live, pause, scrub and End; a headless render; a windowed run watching a server with bots. Single-player replays byte-identical (the replay lane's `--changed` scenarios) |
 | F2-X Acceptance | lead, then John | all | | The lead's smoke test: a hosting game, a joining game and bots in PvP with a kill limit, revivals, an observer with a delay, the crown passed, the idle AI; then John on three machines | John plays a PvP and a co-op game from the menus |
