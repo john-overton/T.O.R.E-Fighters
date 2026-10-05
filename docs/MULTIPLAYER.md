@@ -611,7 +611,10 @@ works:
 the host together, and the relay is asked for when none answers within 3
 seconds, or at once when the master's router test shows punching cannot
 work. A join through the relay takes about 4 seconds; most take well under
-one.
+one. *Built (J2):* the introduction, the host's punches and the race, so far
+for `tore-bot --master --listing` and on the network simulator, where every
+pair of routers that can punch connects in about half a second at a 100 ms
+round trip ([the punching table](ARCHITECTURE.md#hole-punching)).
 
 ```mermaid
 flowchart LR
