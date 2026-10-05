@@ -122,6 +122,9 @@ pub(super) struct Scoring {
     /// The connection that flew each plane last, for a lost plane's late
     /// kills.
     flyers: BTreeMap<PlaneId, u64>,
+    /// The callsign of the last human who flew each plane, for the results
+    /// (`results.rs`), kept after the player leaves.
+    pub(super) callsigns: super::results::Callsigns,
     /// The tallies changed since Scores last went out.
     changed: bool,
     /// The players and sides the last Scores listed.
@@ -176,6 +179,7 @@ impl Host {
                 self.score.players.entry(peer.lobby.order).or_default().side = side;
             }
         }
+        self.results_note_flyers();
         for fact in facts.facts {
             self.tally(fact, &seats);
         }

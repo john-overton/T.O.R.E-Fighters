@@ -124,6 +124,8 @@ struct TestClient {
     errors: Vec<String>,
     /// Every Scores message (phase 2, slice F2-S).
     scores: Vec<crate::wire::messages::Scores>,
+    /// Every Results message (phase 2, slice F2-D).
+    results: Vec<crate::wire::messages::Results>,
     /// Every Revival and Spawned message (phase 2, slice F2-V).
     revivals: Vec<crate::wire::messages::Revival>,
     spawned: Vec<crate::wire::messages::Spawned>,
@@ -170,6 +172,7 @@ impl TestClient {
             events: Vec::new(),
             errors: Vec::new(),
             scores: Vec::new(),
+            results: Vec::new(),
             revivals: Vec::new(),
             spawned: Vec::new(),
         }
@@ -334,6 +337,7 @@ impl TestClient {
             Message::MissionEnded(ended) => self.ended = Some(ended),
             Message::Notice(_) => {}
             Message::Scores(scores) => self.scores.push(*scores),
+            Message::Results(results) => self.results.push(*results),
             Message::Revival(revival) => self.revivals.push(*revival),
             Message::Spawned(spawned) => self.spawned.push(*spawned),
             other => self.errors.push(format!("unexpected {other:?}")),
@@ -1474,3 +1478,6 @@ mod score_tests;
 
 #[path = "revive_tests.rs"]
 mod revive_tests;
+
+#[path = "results_tests.rs"]
+mod results_tests;

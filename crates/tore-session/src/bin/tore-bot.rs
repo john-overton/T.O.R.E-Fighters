@@ -1056,7 +1056,11 @@ fn main() -> ExitCode {
                         spawned.wing.index + 1,
                         spawned.member + 1
                     ),
-                    ClientEvent::Results(_) => {}
+                    ClientEvent::Results(results) => println!(
+                        "{}: results: {}",
+                        r.name,
+                        tore_session::client::results::summary(&results)
+                    ),
                 }
             }
         }

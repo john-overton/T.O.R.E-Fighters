@@ -53,6 +53,7 @@ mod phase2_seams_tests;
 pub mod prediction;
 #[cfg(test)]
 mod relay_tests;
+pub mod results;
 pub mod revival;
 #[cfg(test)]
 mod revival_tests;
@@ -663,6 +664,8 @@ pub struct Client {
     lobby: Option<LobbyState>,
     /// The newest scores of the mission flying (slice F2-S).
     scores: Option<scores::Kept>,
+    /// The results of the mission that ended (slice F2-D).
+    results: Option<Box<Results>>,
     /// The newest Revival since the player's plane was lost, and the
     /// revivals' new planes of the mission (slice F2-V, [`revival`]).
     revival: Option<revival::Kept>,
@@ -791,6 +794,7 @@ impl Client {
             margin_input: 0,
             lobby: None,
             scores: None,
+            results: None,
             revival: None,
             spawned: Vec::new(),
             number: None,
@@ -1630,6 +1634,7 @@ impl Client {
         match message {
             Message::Mission(mission) => {
                 self.scores = None;
+                self.results = None;
                 self.revival = None;
                 self.spawned.clear();
                 self.mission_arrived(mission);
@@ -1720,6 +1725,7 @@ impl Client {
                 // A mission starts flying: its scores and revivals start
                 // afresh.
                 self.scores = None;
+                self.results = None;
                 self.revival = None;
                 self.spawned.clear();
                 self.flight_loadouts(loadouts);
@@ -1736,7 +1742,8 @@ impl Client {
                 self.event(ClientEvent::Scores(scores));
             }
             Message::Results(results) => {
-                self.log("results", &[&results.rows.len().to_string()]);
+                self.log("results", &[&results::summary(&results)]);
+                self.results = Some(results.clone());
                 self.event(ClientEvent::Results(results));
             }
             Message::Observing(observing) => self.observing_message(*observing),
