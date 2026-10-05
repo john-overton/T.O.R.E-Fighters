@@ -6,8 +6,9 @@
 //!
 //! The password is never kept (as on Direct Connection). The two switches
 //! and the master's address are kept in `network-v1.conf` beside the rest
-//! ([`crate::net::settings::Remembered`]). The port-forward switch only keeps
-//! the choice until slice J4b builds the mapper that reads it.
+//! ([`crate::net::settings::Remembered`]). The port-forward switch is read
+//! by every game the player hosts (slice J4b), from either screen, and the
+//! Direct Connection panel has it too.
 use crate::menu::{Canvas, text_width};
 use crate::net::settings::{Remembered, master_ok};
 use crate::ui_text;

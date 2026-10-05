@@ -669,6 +669,53 @@ fn options_hold_the_port_password_and_name_and_save_all_but_the_password() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Slice J4b: "Forward the game port on my router" is on by default, turns by
+/// key and by mouse, is kept in the settings file, and Cancel keeps nothing.
+#[test]
+fn the_port_forward_switch_turns_by_key_and_mouse_and_is_kept() {
+    let dir = scratch("forward");
+    let mut s = DirectScreen::new(Arc::new(test_kit::kit()), Vec::new(), Some(dir.clone()));
+    assert!(s.settings.port_forward, "on by default");
+    s.open_options();
+    // Port, Password, Name, then the switch; Space turns it off. Enter on the
+    // switch turns it and does not accept the panel; two Tabs reach OK.
+    for _ in 0..3 {
+        s.key("Tab", false);
+    }
+    s.key("Space", false);
+    s.key("Tab", false);
+    s.key("Tab", false);
+    s.key("Enter", false);
+    assert!(!s.options_open());
+    assert!(!s.settings.port_forward);
+    assert!(
+        std::fs::read_to_string(Remembered::path(&dir))
+            .unwrap()
+            .contains("port-forward no")
+    );
+    // The panel shows the saved choice; a click turns it on again and OK
+    // keeps it.
+    s.open_options();
+    s.moved(Some((126.0, 257.0)));
+    s.button(true);
+    s.button(false);
+    s.key("Tab", false);
+    s.key("Tab", false);
+    s.key("Enter", false);
+    assert!(!s.options_open());
+    assert!(s.settings.port_forward);
+    assert!(Remembered::load(&dir).port_forward);
+    // Cancel keeps nothing.
+    s.open_options();
+    s.key("Tab", false);
+    s.key("Tab", false);
+    s.key("Tab", false);
+    s.key("Space", false);
+    s.key("Escape", false);
+    assert!(s.settings.port_forward);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn a_bad_port_in_options_is_refused_in_the_panel_and_cancel_discards() {
     let mut s = screen();

@@ -407,6 +407,9 @@ impl DirectScreen {
         self.games.advance(at);
         self.players.advance(at);
         self.full.advance(at);
+        if let Some(panel) = &mut self.panel {
+            panel.advance();
+        }
         self.refresh_buttons();
         outcome
     }
@@ -862,6 +865,7 @@ impl DirectScreen {
             &self.password,
             self.settings.game_name.as_deref(),
             &default_name,
+            self.settings.port_forward,
             &self.quick,
         ));
     }
@@ -874,6 +878,7 @@ impl DirectScreen {
                 self.panel = None;
                 self.password = values.password;
                 self.settings.port = values.port;
+                self.settings.port_forward = values.port_forward;
                 match values.name {
                     Some(name) => self.settings.remember_game_name(&name),
                     None => self.settings.game_name = None,

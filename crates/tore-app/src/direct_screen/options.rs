@@ -1,13 +1,15 @@
 //! The Direct Connection screen's Options panel: the port, the password and
-//! the name of the game being hosted, and the retail quick messages read only
-//! (slice EF7). Built of the widget kit and drawn over the screen, which stops
+//! the name of the game being hosted, "Forward the game port on my router"
+//! (slice J4b; the Internet Lobby's Options has the same switch, kept in the
+//! same place), and the retail quick messages read only (slice EF7). Built of the widget kit and drawn over the screen, which stops
 //! listening while it is up.
 use crate::menu::{Canvas, text_width};
 use crate::ui_text;
 use crate::widgets::{
-    Button, Filter, Focus, Kit, MessageBox, Outcome, Point, Rect, Route, TextField, Widget,
-    draw_panel, tone,
+    Button, CheckBox, Filter, Focus, Kit, MessageBox, Outcome, Point, Rect, Route, TextField,
+    Widget, draw_panel, tone,
 };
+use std::time::Instant;
 use tore_formats::chat::{QuickMessage, Receiver};
 
 /// The panel's rectangle: a sibling of the screen's panel, smaller, centred.
@@ -22,6 +24,7 @@ enum Id {
     Port,
     Password,
     Name,
+    Forward,
     Quick,
     Ok,
     Cancel,
@@ -35,6 +38,8 @@ pub struct Values {
     pub password: String,
     /// The game's name when hosting; `None` for "CALLSIGN's game".
     pub name: Option<String>,
+    /// Ask the router to forward the game port while hosting.
+    pub port_forward: bool,
 }
 
 /// What the screen does after an event reaches the panel.
@@ -49,6 +54,7 @@ pub struct OptionsPanel {
     port: TextField,
     password: TextField,
     name: TextField,
+    forward: CheckBox,
     pub(super) quick: MessageBox,
     ok: Button,
     cancel: Button,
@@ -63,6 +69,7 @@ impl OptionsPanel {
         password: &str,
         name: Option<&str>,
         default_name: &str,
+        port_forward: bool,
         quick: &[QuickMessage],
     ) -> Self {
         let mut port_field = TextField::line((FIELD_X, 139), 60, Filter::Port);
@@ -75,7 +82,7 @@ impl OptionsPanel {
             .with_max(MAX_NAME)
             .with_hint(default_name.to_owned());
         name_field.set_text(name.unwrap_or(""));
-        let mut messages = MessageBox::new((LABEL_X, 262, 410, 128));
+        let mut messages = MessageBox::new((LABEL_X, 314, 410, 76));
         if quick.iter().all(|m| m.text.is_empty()) {
             messages.push(kit, "No quick messages were imported.", tone::SYSTEM);
         }
@@ -99,6 +106,7 @@ impl OptionsPanel {
                 Id::Port,
                 Id::Password,
                 Id::Name,
+                Id::Forward,
                 Id::Quick,
                 Id::Ok,
                 Id::Cancel,
@@ -110,6 +118,11 @@ impl OptionsPanel {
             port: port_field,
             password: password_field,
             name: name_field,
+            forward: CheckBox::new(
+                (LABEL_X, 248),
+                "Forward the game port on my router",
+                port_forward,
+            ),
             quick: messages,
             ok: Button::new("OK", (190, 408), 85).default_button(),
             cancel: Button::new("Cancel", (330, 408), 85),
@@ -144,6 +157,7 @@ impl OptionsPanel {
             port,
             password: self.password.text().to_owned(),
             name: (!name.is_empty()).then(|| name.to_owned()),
+            port_forward: self.forward.checked(),
         })
     }
 
@@ -164,6 +178,7 @@ impl OptionsPanel {
             return Answer::Cancel;
         }
         let usable = |_: Id| true;
+        let now = Instant::now();
         match self.focus.key(name, shift, usable) {
             Route::Moved => Answer::None,
             Route::Ignored | Route::Default(_) => {
@@ -178,6 +193,13 @@ impl OptionsPanel {
                     Id::Port => self.port.key(name),
                     Id::Password => self.password.key(name),
                     Id::Name => self.name.key(name),
+                    // Enter turns the check box; it does not accept the panel.
+                    Id::Forward => {
+                        if self.forward.key(name, now) == Outcome::Changed {
+                            self.error = None;
+                        }
+                        return Answer::None;
+                    }
                     Id::Quick => {
                         self.quick.key(name);
                         if name == "Enter" {
@@ -212,6 +234,11 @@ impl OptionsPanel {
         }
     }
 
+    /// Walks the check box's lamp; the screen calls it every frame.
+    pub fn advance(&mut self) {
+        self.forward.advance(Instant::now());
+    }
+
     pub fn moved(&mut self, point: Option<Point>) {
         self.ok.pointer_move(point);
         self.cancel.pointer_move(point);
@@ -224,10 +251,12 @@ impl OptionsPanel {
     }
 
     pub fn button(&mut self, kit: &Kit, point: Option<Point>, pressed: bool) -> Answer {
+        let now = Instant::now();
         let Some(point) = point else {
             if !pressed {
                 self.ok.release((-1, -1));
                 self.cancel.release((-1, -1));
+                self.forward.release((-1, -1), now);
             }
             return Answer::None;
         };
@@ -242,6 +271,10 @@ impl OptionsPanel {
                     field.press(point, kit);
                 }
             }
+            if self.forward.hit(point) {
+                self.focus.set(Id::Forward);
+                self.forward.press(point);
+            }
             if self.quick.hit(point) {
                 self.focus.set(Id::Quick);
                 self.quick.press(point);
@@ -250,6 +283,7 @@ impl OptionsPanel {
             self.cancel.press(point);
             return Answer::None;
         }
+        self.forward.release(point, now);
         let ok = self.ok.release(point) == Outcome::Activated;
         let cancel = self.cancel.release(point) == Outcome::Activated;
         if ok {
@@ -288,7 +322,7 @@ impl OptionsPanel {
             kit,
             dim,
             "The password is sent when you join and used when you host. It is never saved.",
-            (LABEL_X, 230),
+            (LABEL_X, 228),
             None,
             None,
         );
@@ -297,7 +331,7 @@ impl OptionsPanel {
             kit,
             font,
             "Quick messages (read only): F1 to F12 while typing a message in flight",
-            (LABEL_X, 248),
+            (LABEL_X, 290),
             None,
             None,
         );
@@ -305,6 +339,7 @@ impl OptionsPanel {
         self.port.draw(canvas, kit, self.focus.is(Id::Port));
         self.password.draw(canvas, kit, self.focus.is(Id::Password));
         self.name.draw(canvas, kit, self.focus.is(Id::Name));
+        self.forward.draw(canvas, kit, marked(Id::Forward));
         self.quick.draw(canvas, kit, marked(Id::Quick));
         if let Some(error) = self.error {
             text(
