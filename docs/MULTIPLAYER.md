@@ -921,6 +921,35 @@ Made by John on 2026-10-01 for stages E and F
 | Platform beside the name | John, 2026-10-05: the lobby shows each player's platform, a Windows, macOS or Linux mark, next to the player's name. *Built (agent decisions):* each game sends the system it was built for when it joins (Windows, macOS, Linux, or unknown for any other), and the host lists it with each player in the lobby state (protocol 7, [the wire](formats/net-protocol.md#connecting)). It is only shown; nothing in the session depends on it. Drawing the marks is the lobby screen's part, a separate change |
 | Three-machine test | John, 2026-10-05: ran the local three-platform test (macOS, Linux and Windows, protocol 7 builds from `48d62dac`) and confirmed it works. Recorded from his report: no logs, frame figures or list of what was flown were kept, and which machine hosted was not noted |
 
+Made by John on 2026-10-05 on the designs for the rest of the milestone: the
+data link ([DATALINK.md](DATALINK.md)), stage F phase 2
+([phase 2](ARCHITECTURE.md#phase-2-the-rest-of-stage-f)) and the master server
+and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity),
+[operations](MASTER-SERVER.md)):
+
+| Question | Decision |
+| --- | --- |
+| Who has the data link | Every friendly aircraft, whatever its type: the design's Voice, Flight and Network tiers are dropped. An aircraft with no radar is still linked, but its player sees no link cues on displays it does not have |
+| Single-player AI changes of the data link | Approved, each landing with its own baseline report: the AI counts the player's lock, linked wingmen take a target only a flightmate tracks, AI leads share and sort, linked AI yield |
+| Order voice | An assignment is called with its geometry ("Two, attack bandit, bearing 270, 15 miles, angels 20"); a blanket attack order to the wingmen is called "Attack bandits" |
+| Battle net | In v1: tracks and locks shared across flights of a side, flight leads' reports by voice to seats that monitor it (off by default); the AWACS report waits for sentry aircraft |
+| Data link keys | Alt+A sorts the flight's targets; Alt+N monitors the battle net |
+| Where the master runs | John's own Linode at jroverton.com, `master.jroverton.com` (A and AAAA records), UDP 26901 and 26902; John opens the ports and deploys it |
+| Telemetry | On by default, with a switch and a one-time notice, sending only what [Replay and telemetry](#replay-and-telemetry) lists |
+| A dedicated server's listing | Off by default; the operator turns broadcasting on in its configuration (as OpenRA's servers do) |
+| Port mapping | On by default while hosting, with a switch; the mapping is removed when hosting stops |
+| Relay cap | New relay channels are refused at 95 percent of 800 GB a month; John confirms the plan's transfer allowance on the account |
+| Master abuse limits | Approved as in the [master protocol's limits](formats/master-protocol.md) |
+| Internet Lobby title | Lettered like DIRECT NETWORK CONNECTION; a player's own `InternetLobby.png` takes its place |
+| Master in releases | The release workflow also publishes a Linux `tore-master`, built on Ubuntu |
+| Respawn | Retail's revival (a new aircraft out of the battle, with the revival weapons), beside taking a free AI aircraft (`ai-slot`) and no respawn (`none`); pressing Join after a loss obeys the same rules |
+| Retail features in single player | U answers IFF, Show Target Info works (off by default), and the reply keys say "You lead this flight." when the player leads |
+| Phase 2 defaults | As designed, to start: PvP revives with unlimited lives, no delay, 10 nm, missiles, scored by sides on total kills, kill limit 5, 10 minutes, sides locked; co-op has no revival and friendly fire on |
+| Idle aircraft | The AI flies an aircraft whose player has been away 10 seconds (a menu, lost focus, a lost controller, a stall), reserved for the player; a King's setting that can be set to never |
+| A dedicated server's King | None by default; `king first-player` makes the first player King, and the mission can be locked |
+| Realism in flight | Fixed for the flight: no in-flight Cheat menu changes, so every client's prediction stays exact |
+| Phase 2 keys | Replies Alt+Shift+E (Engaging), Alt+Shift+W (Winchester), Alt+Shift+B (Bingo fuel), Alt+Shift+H (Need help); K the score board; U and Ctrl+T as retail; Enter flies again after a loss |
+
 ## Open questions
 
 From the feature spec. Mission start, PvP scoring and collisions were settled by
