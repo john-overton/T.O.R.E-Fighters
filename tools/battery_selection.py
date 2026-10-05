@@ -490,6 +490,7 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-app/src/replay/*", ("replay-recording", "ai-regression", "replay-live"), "recording and replay screens"),
     _r("crates/tore-app/src/net/hosting*", ("net-window",), "the game's host thread; the hosted-game scenario reaches it", windowed=True),
     _r("crates/tore-app/src/net/keepalive_tests.rs", (), "the joined game's keepalive tests (real time, cargo test only)"),
+    _r("crates/tore-app/src/net/join_tests.rs", (), "the join through the master's tests (real time on loopback, cargo test only)"),
     _r("crates/tore-app/src/widgets/*", ("menus-screens", "net-window"), "the multiplayer widget kit; the Direct Connection and Internet Lobby screens draw it (menus-snap-direct*, menus-snap-internet*)", windowed=True),
     _r("crates/tore-app/src/direct_screen/*", ("menus-screens", "net-window"), "the Direct Connection screen; its snapshot states are menus-snap-direct*", windowed=True),
     _r("crates/tore-app/src/internet_screen/*", ("menus-screens", "net-window", "net-listing"), "the Internet Lobby screen; its snapshot states are menus-snap-internet*; `--browse` is judged by net-master-listing", windowed=True),

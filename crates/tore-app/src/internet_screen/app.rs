@@ -15,7 +15,7 @@ use crate::menu::Action;
 use crate::net::{
     browse::MasterJoin,
     options::HostOptions,
-    session::{Join, MasterTransport, Transport},
+    session::{Introduction, Join, MasterTransport, ThroughFacts, Transport},
     telemetry::{self, PlayerTally},
 };
 use crate::{App, Screen};
@@ -33,8 +33,55 @@ struct Reporting {
     master: String,
     install_id: Option<u64>,
     tally: PlayerTally,
-    /// The path the join took has been said in Messages.
+    /// The path the join took has been counted.
     said: bool,
+    /// From pressing Join to the master's answer.
+    asked: Duration,
+    /// From the session's start to the host accepting the join, once it has.
+    connected: Option<Duration>,
+    /// The player's mapping type and the bytes relayed, as last seen.
+    facts: ThroughFacts,
+}
+
+impl Reporting {
+    /// The Report for the session that ended, under `install_id`: the
+    /// tally's, with what the join through the master adds (slice J5): the
+    /// time from asking for the introduction to the handshake's end (when it
+    /// ended), the player's mapping type and the kilobytes relayed.
+    fn report(&self, install_id: u64, version: &str) -> tore_net::master::Report {
+        let mut report = self.tally.report(install_id, version);
+        if let Some(connected) = self.connected {
+            let tenths = (self.asked + connected).as_millis() / 100;
+            report.connect_tenths = u8::try_from(tenths).unwrap_or(u8::MAX);
+        }
+        report.mapping = self.facts.mapping;
+        report.relayed_kb = u32::try_from(self.facts.relayed_bytes / 1_000).unwrap_or(u32::MAX);
+        report
+    }
+}
+
+/// The session's join for a join the Internet Lobby started: the socket and
+/// joiner the master's introduction ran on, the host's addresses to race and
+/// the relay when the race finds nothing (slice J5). A join the screen starts
+/// opens the lobby, which shows the joining, and a refusal ends it back on
+/// the screen.
+pub(crate) fn session_join(request: &InternetJoin, through: MasterJoin) -> Join {
+    let (socket, joiner) = through.into_parts();
+    let introduction = Introduction {
+        race: request.race.clone(),
+        relay_now: request.relay_now,
+        path: request.path,
+        asked: request.asked,
+    };
+    Join {
+        server: request.join.address,
+        transport: Transport::Internet(MasterTransport::new(socket, joiner, introduction)),
+        callsign: request.join.callsign.clone(),
+        slot: None,
+        password: request.join.password.clone(),
+        label: request.join.label.clone(),
+        lobby: true,
+    }
 }
 
 /// What the game keeps for the screen: the screen while it is open, the kit it
@@ -141,25 +188,24 @@ impl App {
         }
     }
 
-    /// Counts a joined session's humans, says how it connected, and sends
-    /// its Report once it ends.
+    /// Counts a joined session's humans, the path it took and what its join
+    /// through the master saw, and sends its Report once it ends. The session
+    /// itself says in Messages how it connected (slice J5).
     fn report_tick(&mut self) {
         let Some(report) = &mut self.internet.report else {
             return;
         };
         if let Some(session) = &self.net {
-            let mut said = None;
+            if let Some(facts) = session.through_facts() {
+                report.facts = facts;
+            }
+            report.connected = report.connected.or(session.connected_after());
             if let Some(lobby) = session.client.lobby() {
                 report.tally.present(lobby.players.len());
                 if !report.said {
                     report.said = true;
-                    let path = session.client.path();
-                    report.tally.set_path(path);
-                    said = Some(telemetry::path_line(path));
+                    report.tally.set_path(session.client.path());
                 }
-            }
-            if let Some(line) = said {
-                self.message(line);
             }
             return;
         }
@@ -170,7 +216,7 @@ impl App {
             && let Some(install_id) = report.install_id
         {
             let version = crate::version::version();
-            telemetry::send(&report.master, report.tally.report(install_id, version));
+            telemetry::send(&report.master, report.report(install_id, version));
         }
     }
 
@@ -192,48 +238,28 @@ impl App {
     }
 
     fn internet_join(&mut self, request: InternetJoin) {
-        let InternetJoin {
-            join:
-                crate::direct_screen::JoinRequest {
-                    address,
-                    label,
-                    callsign,
-                    password,
-                },
-            race,
-            asked,
-            master,
-            install_id,
-        } = request;
-        let Some((socket, joiner)) = self
+        let Some(through) = self
             .internet
             .screen
             .as_mut()
             .and_then(|screen| screen.take_through())
-            .map(MasterJoin::into_parts)
         else {
             self.message("Cannot join: the Internet Lobby's introduction was lost.");
             return;
         };
-        let join = Join {
-            server: address,
-            transport: Transport::Internet(MasterTransport::new(socket, joiner, race)),
-            callsign,
-            slot: None,
-            password,
-            label: label.clone(),
-            // A join the screen starts opens the lobby, which shows the
-            // joining and a refusal ends it back here.
-            lobby: true,
-        };
+        let join = session_join(&request, through);
+        let label = request.join.label.clone();
         // `start_join` says "Joining ..." and any failure in Messages.
         if self.start_join(join, &label) {
             self.open_lobby(&label, false);
             self.internet.report = Some(Reporting {
-                master,
-                install_id,
-                tally: PlayerTally::begin(address, asked),
+                master: request.master,
+                install_id: request.install_id,
+                tally: PlayerTally::begin(request.join.address, request.asked),
                 said: false,
+                asked: request.asked,
+                connected: None,
+                facts: ThroughFacts::default(),
             });
         }
     }

@@ -371,7 +371,7 @@ impl App {
                 let text = self
                     .net
                     .as_ref()
-                    .map(|s| s.client.close_text(&reason))
+                    .map(|s| s.close_text(&reason))
                     .unwrap_or_default();
                 self.net_ending = Some(if left { String::new() } else { text });
                 return false;

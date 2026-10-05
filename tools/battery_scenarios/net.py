@@ -1014,6 +1014,108 @@ def drive_master_relay(d: Drive) -> None:
     log_must(d, server_log(d), r"joined as Bot", r"Bot( \(plane \d+\))? left: left", forbid=NET_BAD)
 
 
+# The script of a relayed join from the Internet Lobby: open the screen, select the listed server, Join, take a
+# plane, Ready, fly a few seconds and exit.
+INTERNET_RELAY_SCRIPT = """wait 10
+movemenu 150 48
+wait 0.6
+click
+wait 0.6
+movemenu 150 90
+wait 0.6
+click
+wait 5
+movemenu 100 194
+wait 0.6
+click
+wait 2
+movemenu 200 432
+wait 0.6
+click
+wait 12
+snapshot SHOTS/relay-joined.ppm
+movemenu 150 176
+wait 0.6
+click
+click
+wait 2
+movemenu 460 434
+wait 0.6
+click
+wait 3
+waittick 720 40
+shot SHOTS/relay-flight.ppm
+exit
+"""
+
+
+def drive_internet_relay(d: Drive) -> None:
+    """The game's Internet Lobby joins a `tore-server` listed on a master on this machine through the master's relay
+    (slice J5): `TORE_JOIN_PATH=relay` makes the game ask for the relay at once and send nothing to the server's own
+    address, since on one machine every direct path works. The screen's and the session's lines say each step, the
+    game joins the channel's relayed address, takes a plane, readies and flies a few seconds; the master logs the
+    channel and the net log names the path."""
+    master, mport = start_master(d)
+    port = d.port()
+    server = start_server(d, port, broadcast="on", master=f"{LOCALHOST}:{mport}")
+    if not wait_count(d, master, rf'^listed id=[0-9a-f]{{16}} from=127\.0\.0\.1:{port} name="T\.O\.R\.E server"', 1, 10):
+        d.problem("the master never listed the server")
+    (d.data / "network-v1.conf").write_text(
+        f"tore-network 1\ncallsign Viper\nport {d.port()}\nmaster {LOCALHOST}:{mport}\n"
+    )
+    shots = d.work / "shots"
+    shots.mkdir(exist_ok=True)
+    opened = r"Internet Lobby: Asking the Internet Lobby at"
+    d.env["TORE_JOIN_PATH"] = "relay"
+    # A scripted click on a window that is slow to come up can land before the menu answers; one more try,
+    # starting later, tells that from a real failure.
+    for attempt, start_wait in enumerate((10, 25), start=1):
+        for old in (d.data / "logs").glob("tore-*.log"):
+            old.unlink()
+        script = d.work / f"relay{attempt}.txt"
+        script.write_text(INTERNET_RELAY_SCRIPT.replace("SHOTS", str(shots)).replace("wait 10\n", f"wait {start_wait}\n", 1))
+        game = d.start(f"game{attempt}", [d.app, *GAME_FLAGS, "--input-script", script], window=True)
+        game.finish(200, 0)
+        log = "\n".join(p.read_text(errors="replace") for p in sorted((d.data / "logs").glob("tore-*.log")))
+        if opened in log:
+            break
+        d.log(f"attempt {attempt}: the scripted clicks did not open the screen")
+    for pattern, what in (
+        (r"Internet Lobby: Asking the Internet Lobby to introduce you to 'T\.O\.R\.E server'\.\.\.", "Join asking"),
+        (r"Internet Lobby: Joining 'T\.O\.R\.E server' through the relay only \(TORE_JOIN_PATH=relay\)\.\.\.", "the introduction, not raced"),
+        (r"Network: Asking for the relay\.\.\.", "the relay asked for"),
+        (r"Network: The relay is open; joining through it\.\.\.", "the channel open"),
+        (r"Network: Connected through the relay\.", "the path the join took"),
+        (r"Network: joined \[100::1:[0-9a-f]+:[0-9a-f]+\]:0, path relay", "the relayed address joined"),
+        (r"Network: seated in plane 0", "a seating after Join, a slot and Ready"),
+        (r"Network: lobby: Flying, .* Viper plane 0", "the mission flying"),
+    ):
+        if not re.search(pattern, log):
+            d.problem(f"the game's log lacks {what}: /{pattern}/")
+    if re.search(r"master\.jroverton\.com|master\.invalid", log):
+        d.problem("the game talked about a master other than the scenario's own")
+    if re.search(r"Connected directly|path punched", log):
+        d.problem("the game joined directly although only the relay was allowed")
+    tsv = "\n".join(p.read_text(errors="replace") for p in sorted((d.data / "logs").glob("net-*.tsv")))
+    if not re.search(r"^[\d.]+\tpath\trelay\t\[100::1:", tsv, re.M):
+        d.problem("the net log has no `path relay` line")
+    for name in ("relay-joined", "relay-flight"):
+        if not (shots / f"{name}.ppm").exists():
+            d.problem(f"the script's {name}.ppm was not written")
+    game.forbid(NET_BAD, "a network problem")
+    stop_server(d, server)
+    master.send("status")
+    master.send("quit")
+    master.finish(20, 0)
+    master.expect(
+        rf"^relay opened channel=[0-9a-f]{{8}} host=127\.0\.0\.1:{port} player=127\.0\.0\.1:\d+ channels=1$",
+        "the channel opened",
+    )
+    master.expect(r"^status listings=\d+ sources=\d+ .* relayed=1 ", "the status line counting the channel")
+    master.forbid(r"relay refused|reason=over its rate", "a refused or flooded channel")
+    log_must(d, server_log(d), r"joined as Viper", r"Viper took the slot of plane 0", forbid=NET_BAD)
+
+
 def scenarios() -> list[Scenario]:
     return [
         Scenario(
@@ -1097,5 +1199,12 @@ def scenarios() -> list[Scenario]:
             timeout=180,
             notes="tore-bot --path relay joins a listed tore-server through the relay of a tore-master on this "
             "machine, flies 30 seconds with no drop, and the master counts the channel and its bytes (slice J3)",
+        ),
+        Scenario(
+            name="net-window-internet-relay", lane="net", args=[], driver=drive_internet_relay, uses=("server",),
+            window=True, timeout=360,
+            notes="the Internet Lobby screen joins a listed tore-server through the relay of a master on this machine "
+            "(TORE_JOIN_PATH=relay): the steps in Messages, a plane, a few seconds of flight, the path in the net log "
+            "(slice J5)",
         ),
     ]

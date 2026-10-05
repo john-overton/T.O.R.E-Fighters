@@ -20,9 +20,10 @@
 //! - **Join** joins the selected game: a [`MasterJoin`] (the mapping test and
 //!   the master's introduction, on a socket of its own) and, when the master
 //!   introduces the player, a join that races the host's addresses from that
-//!   socket while the host punches back (slice J2). Enter presses it when a
-//!   game is selected, New otherwise (*agent decision*, as on Direct
-//!   Connection).
+//!   socket while the host punches back (slice J2), and asks for the relay
+//!   when none answers in 3 seconds (slice J5; the session's part,
+//!   [`crate::net::session::MasterTransport`]). Enter presses it when a game
+//!   is selected, New otherwise (*agent decision*, as on Direct Connection).
 //! - **Refresh** (or F5) asks for the list again now (*agent decision*).
 //! - **Options** opens the panel of [`options`]; **Cancel** (or Esc) stops an
 //!   introduction, leaves a session, or leaves the screen, in that order.
@@ -41,6 +42,7 @@ use crate::net::{
     browse::{Browse, MasterJoin, News},
     hosting::Listing,
     options::{DEFAULT_CALLSIGN, callsign_problem},
+    session::JoinPath,
     settings::Remembered,
     telemetry,
 };
@@ -92,7 +94,12 @@ pub struct InternetJoin {
     pub join: JoinRequest,
     /// The host's addresses and the introduction, for the session's race.
     pub race: tore_session::client::Race,
-    /// From pressing Join to the master's answer, for the player's Report.
+    /// The master's hint said only the relay reaches the host.
+    pub relay_now: bool,
+    /// How the join may reach the host (`TORE_JOIN_PATH`).
+    pub path: JoinPath,
+    /// From pressing Join to the master's answer: the whole join gives up
+    /// 15 seconds after the press.
     pub asked: Duration,
     /// The master that introduced the player, for the player's Report.
     pub master: String,
@@ -175,6 +182,9 @@ pub struct InternetScreen {
     /// The join the master introduced, until the game takes it with
     /// [`InternetScreen::take_through`].
     introduced: Option<MasterJoin>,
+    /// How a join may reach the host: `TORE_JOIN_PATH`, read when the screen
+    /// opens (slice J5).
+    join_path: JoinPath,
     /// The time of the screen's last turn, on the browse's clock.
     last: Duration,
     /// A session this screen's join or host started is running.
@@ -290,6 +300,7 @@ impl InternetScreen {
             said_count: None,
             said_trouble: false,
             joining: None,
+            join_path: JoinPath::from_env(),
             introduced: None,
             last: Duration::ZERO,
             session: false,
@@ -362,6 +373,23 @@ impl InternetScreen {
                 _ => None,
             })
             .collect()
+    }
+    /// A screen on the synthetic kit that browses `master`, as `callsign`,
+    /// and joins along `path`: the session's tests (`net/join_tests.rs`).
+    #[cfg(test)]
+    pub(crate) fn for_join_tests(master: &str, callsign: &str, path: JoinPath) -> Self {
+        let mut s = Self::new(Arc::new(crate::widgets::test_kit::kit()), None);
+        s.settings.master = Some(master.to_owned());
+        s.callsign.set_text(callsign);
+        s.join_path = path;
+        s
+    }
+    /// Selects the game in row `index` and presses Join, as Enter does.
+    #[cfg(test)]
+    pub(crate) fn join_row(&mut self, index: usize) -> Outcome {
+        self.select_game(index);
+        self.focus.set(Id::Games);
+        self.key("Enter", false)
     }
     /// True when text typed now goes to a field.
     pub fn typing(&self) -> bool {
@@ -612,13 +640,14 @@ impl InternetScreen {
                     ));
                     failed = true;
                 }
-                // The screen never asks for the relay; joining through it is
-                // slice J5's. Logged in case a master sends one anyway.
+                // The relay is asked for by the session, after the
+                // introduction (slice J5); logged in case a master sends one
+                // before.
                 event @ (JoinEvent::Relayed { .. }
                 | JoinEvent::RelayRefused { .. }
                 | JoinEvent::RelaySilent
                 | JoinEvent::RelayClosed(_)) => {
-                    log::info!("Internet Lobby: relay event before J5: {event:?}");
+                    log::info!("Internet Lobby: relay event before the join: {event:?}");
                 }
             }
         }
@@ -957,11 +986,19 @@ impl InternetScreen {
         };
         let address = first.address;
         let count = found.targets.len();
-        self.say(&format!(
-            "Trying {count} address{} for '{}'...",
-            if count == 1 { "" } else { "es" },
-            joining.name
-        ));
+        if self.join_path == JoinPath::Relay {
+            self.say(&format!(
+                "Joining '{}' through the relay only ({}=relay)...",
+                joining.name,
+                JoinPath::VARIABLE
+            ));
+        } else {
+            self.say(&format!(
+                "Trying {count} address{} for '{}'...",
+                if count == 1 { "" } else { "es" },
+                joining.name
+            ));
+        }
         self.introduced = joining.through.take();
         // The join takes over from the browse.
         self.browse = None;
@@ -976,6 +1013,8 @@ impl InternetScreen {
                 targets: found.targets,
                 introduction: found.introduction_id,
             },
+            relay_now: found.hint == tore_net::master::Hint::RelayNow,
+            path: self.join_path,
             asked: now.saturating_sub(joining.asked),
             master: self.master_text(),
             install_id: self.install_id(),

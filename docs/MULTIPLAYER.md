@@ -588,9 +588,9 @@ the [master's wire](formats/master-protocol.md) and
   the master's address, "Forward the game port on my router" and "Send
   anonymous statistics". *Built (slice I4, 2026-10-05):* the screen is in the
   game; Join asks the master to introduce the player and races the host's
-  addresses from the same socket (J2), so a game whose host is reachable
-  joins; the relay and the full set of join messages are J3 and J5
-  ([the build's notes](ARCHITECTURE.md#the-internet-lobby-screen)).
+  addresses from the same socket (J2); *built (J5):* when no address answers
+  within 3 seconds the game asks for the relay and joins through it, and
+  Messages says each step ([the build's notes](ARCHITECTURE.md#joining-through-the-master)).
 - **What is listed.** A game hosted from the Internet Lobby is listed; one
   hosted from Direct Connection is not. Once the King's Visibility setting
   exists (stage F phase 2), *public* lists, *private* does not and
@@ -637,10 +637,12 @@ works:
 the host together, and the relay is asked for when none answers within 3
 seconds, or at once when the master's router test shows punching cannot
 work. A join through the relay takes about 4 seconds; most take well under
-one. *Built (J2):* the introduction, the host's punches and the race, so far
-for `tore-bot --master --listing` and on the network simulator, where every
+one. *Built (J2):* the introduction, the host's punches and the race, for
+`tore-bot --master --listing` and on the network simulator, where every
 pair of routers that can punch connects in about half a second at a 100 ms
-round trip ([the punching table](ARCHITECTURE.md#hole-punching)).
+round trip ([the punching table](ARCHITECTURE.md#hole-punching)). *Built
+(J3, J5):* the relay, for `tore-bot` and for the game's Internet Lobby; the
+whole join gives up 15 seconds after Join is pressed.
 
 ```mermaid
 flowchart LR
@@ -655,7 +657,9 @@ flowchart LR
 player connected ("Connected directly (IPv6).", "Connected through the
 relay."), the lobby marks a relayed player beside the platform mark, and the
 path is in the network log, the dedicated server's log and the anonymous
-statistics. The paths: local network, by address, mapped port, IPv6,
+statistics. *Built (J5):* the join's lines, a `path` line in the game's
+network log and the path in the player's statistics; the lobby's mark and the
+server's log lines are J6. The paths: local network, by address, mapped port, IPv6,
 punched, relay. A port forwarded by hand reads "punched", since the game
 cannot tell the two apart. A relayed player is never the calculated host
 (John, 2026-09-28).
