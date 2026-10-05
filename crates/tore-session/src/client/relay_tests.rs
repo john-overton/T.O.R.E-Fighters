@@ -111,13 +111,7 @@ impl Relay {
     /// A bot at `address` that joins through the relay: introduced, the
     /// relay asked for at once (as `tore-bot --path relay`), then the
     /// ordinary join to the channel's relayed address. Its number.
-    fn join(
-        &mut self,
-        rig: &mut Rig,
-        address: &str,
-        callsign: &str,
-        script: Script,
-    ) -> usize {
+    fn join(&mut self, rig: &mut Rig, address: &str, callsign: &str, script: Script) -> usize {
         let mut socket = rig.net.bind(a(address)).unwrap();
         let listing_id = match self.rendezvous.state() {
             ListingState::Listed { listing_id, .. } => listing_id,
