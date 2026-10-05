@@ -155,6 +155,23 @@ def free_port() -> int:
     raise DriveError("no free UDP port")
 
 
+def stop_group(popen: subprocess.Popen, hard: bool) -> None:
+    """Asks a process started with `start_new_session` to end (`hard`: kills it), with its whole group.
+
+    Windows has no process groups: there the process alone is ended (its children are not), which is
+    enough for the tools' own tests; the battery itself runs on Linux and macOS.
+    """
+    try:
+        if os.name != "nt":
+            os.killpg(popen.pid, signal.SIGKILL if hard else signal.SIGTERM)
+        elif hard:
+            popen.kill()
+        else:
+            popen.terminate()
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 class Proc:
     """One process a driver started: its output is captured (merged, line by line) as it runs."""
 
@@ -270,20 +287,14 @@ class Proc:
         """Asks the process group to end, and kills it after `grace` seconds."""
         self.stopped = True
         if self.alive():
-            self._signal(signal.SIGTERM)
+            stop_group(self.popen, hard=False)
             try:
                 self.popen.wait(grace)
             except subprocess.TimeoutExpired:
-                self._signal(signal.SIGKILL)
+                stop_group(self.popen, hard=True)
                 self.popen.wait()
         self._reader.join(5)
         return self.code
-
-    def _signal(self, sig: int) -> None:
-        try:
-            os.killpg(self.popen.pid, sig)
-        except (ProcessLookupError, PermissionError):
-            pass
 
 
 class Drive:
@@ -354,13 +365,13 @@ class Drive:
         """The scenario's time ran out: stop every process (from the timer's thread)."""
         self.timed_out = True
         for proc in list(self.procs):
-            proc._signal(signal.SIGTERM)
+            stop_group(proc.popen, hard=False)
 
         def reap() -> None:
             time.sleep(10)
             for proc in list(self.procs):
                 if proc.alive():
-                    proc._signal(signal.SIGKILL)
+                    stop_group(proc.popen, hard=True)
 
         threading.Thread(target=reap, daemon=True).start()
 
@@ -533,14 +544,11 @@ def run_one(s: Scenario, opts: argparse.Namespace, run_dir: Path, window_slots: 
                 output, _ = proc.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
                 timed_out = True
-                try:
-                    os.killpg(proc.pid, 15)
-                except ProcessLookupError:
-                    pass
+                stop_group(proc, hard=False)
                 try:
                     output, _ = proc.communicate(timeout=10)
                 except subprocess.TimeoutExpired:
-                    os.killpg(proc.pid, 9)
+                    stop_group(proc, hard=True)
                     output, _ = proc.communicate()
             returncode = proc.returncode
             output = run_steps(s, opts, env, work, output, step_problems, window_slots)

@@ -174,17 +174,17 @@ class DriverTests(unittest.TestCase):
         self.assertTrue(result.ok, result.problems)
 
     def test_a_process_left_running_is_a_problem_and_is_stopped(self):
-        pids = []
+        procs = []
 
         def driver(d):
             proc = d.start("stray", [d.app, "-c", "import time; time.sleep(60)"])
-            pids.append(proc.popen.pid)
+            procs.append(proc.popen)
             d.sleep(0.2)
 
         result, _ = run_driver_scenario(driver)
         self.assertFalse(result.ok)
         self.assertIn("stray was still running when the driver finished", result.problems)
-        self.assert_gone(pids[0])
+        self.assert_gone(procs[0])
 
     def test_a_process_the_driver_stopped_is_not_a_problem(self):
         def driver(d):
@@ -205,11 +205,11 @@ class DriverTests(unittest.TestCase):
     def test_the_timeout_stops_every_process_and_the_driver(self):
         import time
 
-        pids = []
+        procs = []
 
         def driver(d):
-            pids.append(d.start("a", [d.app, "-c", "import time; time.sleep(60)"]).popen.pid)
-            pids.append(d.start("b", [d.app, "-c", "import time; time.sleep(60)"]).popen.pid)
+            procs.append(d.start("a", [d.app, "-c", "import time; time.sleep(60)"]).popen)
+            procs.append(d.start("b", [d.app, "-c", "import time; time.sleep(60)"]).popen)
             d.sleep(60)
 
         started = time.time()
@@ -218,8 +218,8 @@ class DriverTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIsNone(result.exit_code)
         self.assertTrue(any("timed out" in p for p in result.problems), result.problems)
-        for pid in pids:
-            self.assert_gone(pid)
+        for popen in procs:
+            self.assert_gone(popen)
 
     def test_a_driver_that_fails_or_gives_up_is_reported(self):
         def broken(d):
@@ -271,23 +271,15 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(battery.missing_binaries([sc, plain], opts), ["/nonexistent/tore-server"])
         self.assertEqual(battery.missing_binaries([plain], opts), [])
 
-    def assert_gone(self, pid):
-        import os
+    def assert_gone(self, popen):
         import time
 
+        # Polling collects an exited child, so this works the same on Windows.
         for _ in range(100):
-            try:
-                os.kill(pid, 0)
-            except (ProcessLookupError, PermissionError):
+            if popen.poll() is not None:
                 return
-            # A child that has exited but is not yet collected still answers signal 0.
-            try:
-                if os.waitpid(pid, os.WNOHANG)[0] == pid:
-                    return
-            except ChildProcessError:
-                pass
             time.sleep(0.05)
-        self.fail(f"process {pid} is still running")
+        self.fail(f"process {popen.pid} is still running")
 
 
 if __name__ == "__main__":
