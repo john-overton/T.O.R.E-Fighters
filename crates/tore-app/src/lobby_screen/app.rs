@@ -77,6 +77,16 @@ pub struct Lobby {
 impl Lobby {}
 
 impl App {
+    /// The right mouse button on the lobby screen: the King's slot locks and
+    /// the Settings panel's turn back.
+    pub(crate) fn lobby_right_button(&mut self, pressed: bool) -> Action {
+        let Some(screen) = &mut self.lobby.screen else {
+            return Action::None;
+        };
+        let request = screen.right_button(pressed);
+        self.lobby_outcome(request)
+    }
+
     /// Opens the lobby screen over the session a join or New just started.
     /// `label` names the game until its lobby state arrives.
     pub(crate) fn open_lobby(&mut self, label: &str, hosting: bool) {
@@ -129,6 +139,7 @@ impl App {
                 screen.say(note);
             }
             screen.update(client.lobby(), client.unable());
+            screen.set_cheats(client.spec().map(|spec| spec.cheats));
         }
         // The pages are the only reason to look further.
         if self.lobby.page.is_none() {
@@ -137,6 +148,7 @@ impl App {
         let Some(lobby) = client.lobby().cloned() else {
             return;
         };
+        let cheat_allowed = client.spec().is_some_and(|spec| spec.cheat_loadouts);
         match &mut self.lobby.page {
             Some(Page::Creator {
                 sent: Some(number), ..
@@ -154,6 +166,10 @@ impl App {
                 let armed = lobby.me().is_some_and(|m| m.loadout);
                 let (plane, mission) = (*plane, *mission);
                 let closed = self.quick.ordnance.as_ref().is_none_or(|o| !o.visible);
+                // The King can change the loadout rule while the page is up.
+                if let Some(page) = self.quick.ordnance.as_mut() {
+                    page.set_cheat_rule(cheat_allowed);
+                }
                 if lobby.phase != LobbyPhase::Lobby
                     || holds != Some(plane)
                     || lobby.mission != mission
@@ -197,6 +213,14 @@ impl App {
             }
             _ => {}
         }
+        // A settings or cheats change the Settings panel asked for is
+        // answered in the panel.
+        if matches!(request, kind::SETTINGS | kind::CHANGE_MISSION)
+            && let Some(screen) = &mut self.lobby.screen
+            && screen.refused_in_panel(reason)
+        {
+            return;
+        }
         if let Some(screen) = &mut self.lobby.screen {
             screen.say(reason);
         }
@@ -216,7 +240,11 @@ impl App {
         match request {
             Request::Take(plane) => client.take_slot(plane),
             Request::LeaveSlot => client.leave_slot(),
-            Request::SetReady(ready) => client.set_ready(ready),
+            Request::SetReady(ready) => {
+                // A player who takes a plane stops watching first.
+                client.stop_watching();
+                client.set_ready(ready)
+            }
             Request::Start => client.start_mission(),
             Request::EndMission => client.end_mission(),
             Request::Kick { player, reason } => {
@@ -235,6 +263,28 @@ impl App {
                 {
                     screen.say(refusal.text());
                 }
+            }
+            Request::Settings(change) => client.change_settings(change),
+            Request::Cheats(cheats) => {
+                // The lobby mission again, with its cheats changed.
+                if let Some(mut spec) = client.spec().cloned() {
+                    spec.cheats = cheats;
+                    client.change_mission(&spec);
+                }
+            }
+            Request::PassCrown(player) => {
+                client.pass_crown(player);
+            }
+            Request::Lock { plane, lock } => client.lock_slot(plane, lock),
+            Request::Watch => {
+                client.watch(tore_session::wire::messages::Subject::None);
+                self.say("Watching the mission. Stop Watch ends it; Join takes a plane.");
+                return Action::Click;
+            }
+            Request::StopWatch => {
+                client.stop_watching();
+                self.say("You stopped watching.");
+                return Action::Click;
             }
             Request::Mission => {
                 self.open_creator();
@@ -314,6 +364,12 @@ impl App {
         };
         page.lobby = true;
         page.visible = true;
+        let cheat_allowed = self
+            .net
+            .as_ref()
+            .and_then(|s| s.client.spec())
+            .is_some_and(|spec| spec.cheat_loadouts);
+        page.set_cheat_rule(cheat_allowed);
         if guns_only {
             page.loadout.restrict_to_guns();
         }
@@ -426,13 +482,20 @@ impl App {
         let Some(session) = &mut self.net else {
             return;
         };
-        let guns_only = session.client.spec().is_some_and(|s| s.guns_only);
+        let mission = session.client.spec();
         let checked = AircraftType::load(&*self.theater_resources, aircraft)
             .map_err(|e| e.to_string())
             .and_then(|kind| {
-                spec.check_for_plane(&kind.profile, &*self.theater_resources, guns_only)
-                    .map(|_| ())
-                    .map_err(|e| e.to_string())
+                // The host's own rule: the mission's Guns only and the King's
+                // loadout rule (`loadouts any` allows a Cheat loading).
+                match mission {
+                    Some(mission) => {
+                        spec.check_in(&kind.profile, &*self.theater_resources, mission)
+                    }
+                    None => spec.check_for_plane(&kind.profile, &*self.theater_resources, false),
+                }
+                .map(|_| ())
+                .map_err(|e| e.to_string())
             });
         if let Err(reason) = checked {
             page.message = Some(reason);

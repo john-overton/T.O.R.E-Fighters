@@ -7,11 +7,12 @@ use crate::widgets::KitSource;
 use tore_formats::aircraft::AircraftId;
 use tore_session::wire::Platform;
 use tore_session::wire::chat::{ChatFrom, Receiver, Standing};
-use tore_session::wire::messages::{LobbyPhase, LobbyPlayer, LobbySlot, StartRule};
+use tore_session::wire::messages::{LobbyPhase, LobbyPlayer, LobbySlot, Lock, StartRule};
 use tore_sim::ai::launch::{Side, WingId};
+use tore_sim::cheats::{Cheats, Damage};
 
 /// The states a snapshot can show.
-pub const STATES: [&str; 8] = [
+pub const STATES: [&str; 20] = [
     "lobby-king",
     "lobby-joiner",
     "lobby-unable",
@@ -20,6 +21,21 @@ pub const STATES: [&str; 8] = [
     "lobby-kick",
     "lobby-leave",
     "lobby-ready",
+    // Stage F phase 2 (slice F2-L): the Settings panel's four pages as the
+    // King and as a joiner, in PvP, and with the mission flying; the Players
+    // panel; the King's slot locks; a joiner who watches.
+    "lobby-settings",
+    "lobby-settings-revival",
+    "lobby-settings-scoring",
+    "lobby-settings-realism",
+    "lobby-settings-joiner",
+    "lobby-settings-pvp",
+    "lobby-settings-flying",
+    "lobby-players",
+    "lobby-players-house",
+    "lobby-locks",
+    "lobby-watch",
+    "lobby-pvp",
 ];
 
 /// A player of the sample lobby, on a platform picked by its id so the
@@ -88,7 +104,28 @@ pub(crate) fn sample(you: u8) -> LobbyState {
         you,
         players: vec![maverick, goose],
         slots: slots(&[(0, 1), (1, 2)]),
-        settings: Vec::new(),
+        settings: tore_session::settings::Store::defaults(tore_session::settings::Mode::Coop)
+            .lobby_list(),
+    }
+}
+
+/// The sample lobby in PvP: the PvP defaults (a 10 minute and 5 kill limit,
+/// revival with unlimited lives, sides locked).
+pub(crate) fn sample_pvp(you: u8) -> LobbyState {
+    let mut lobby = sample(you);
+    lobby.settings =
+        tore_session::settings::Store::defaults(tore_session::settings::Mode::Pvp).lobby_list();
+    lobby
+}
+
+/// The sample mission's cheats: a few on, so the Realism page shows both
+/// states.
+pub(crate) fn sample_cheats() -> Cheats {
+    Cheats {
+        unlimited_fuel: true,
+        no_spins: true,
+        damage: Damage::Normal,
+        ..Cheats::default()
     }
 }
 
@@ -161,9 +198,41 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         "lobby-ready" => {
             lobby.players[0].ready = true;
         }
+        "lobby-settings-joiner" => {
+            lobby = sample(2);
+            hosting = false;
+        }
+        "lobby-settings-pvp" | "lobby-pvp" => {
+            lobby = sample_pvp(1);
+        }
+        "lobby-settings-flying" => {
+            lobby = sample_pvp(1);
+            lobby.phase = LobbyPhase::Flying;
+            lobby.players[0].flying = true;
+        }
+        "lobby-players" | "lobby-players-house" => {
+            lobby.players.push(player(3, "Hollywood", None));
+        }
+        "lobby-locks" => {
+            lobby.players.push(player(3, "Hollywood", None));
+            lobby.slots[2].lock = Lock::Closed;
+            lobby.slots[3].lock = Lock::Reserved("Hollywood".into());
+            lobby.slots[4].lock = Lock::Reserved("Goose".into());
+        }
+        "lobby-watch" => {
+            lobby = sample(2);
+            hosting = false;
+            lobby.phase = LobbyPhase::Flying;
+            lobby.players[0].flying = true;
+            lobby.players[1].slot = None;
+            lobby.players[1].ready = false;
+            lobby.players[1].observing = true;
+            lobby.slots = slots(&[(0, 1)]);
+        }
         _ => {}
     }
     let mut screen = LobbyScreen::sample(Arc::clone(&kit), lobby.clone(), hosting);
+    screen.set_cheats(Some(sample_cheats()));
     if lobby.players.len() > 1 && state != "lobby-server" {
         screen.say("Goose joined the game.");
     }
@@ -183,7 +252,7 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         "lobby-kick" => {
             screen.players.select(1);
             screen.refresh();
-            screen.press(Id::Kick);
+            screen.modal = Some(modal::Modal::kick(2, "Goose"));
         }
         "lobby-leave" => {
             screen.press(Id::Leave);
@@ -195,6 +264,39 @@ pub fn render(source: &KitSource, state: &str, pixels: &mut [u8]) -> AppResult<(
         "lobby-unable" => {
             screen.players.select(2);
             screen.refresh();
+        }
+        "lobby-settings"
+        | "lobby-settings-joiner"
+        | "lobby-settings-pvp"
+        | "lobby-settings-flying" => {
+            screen.press(Id::Settings);
+        }
+        "lobby-settings-revival" | "lobby-settings-scoring" | "lobby-settings-realism" => {
+            screen.press(Id::Settings);
+            if let Some(panel) = screen.settings_panel.as_mut() {
+                panel.show_page(match state {
+                    "lobby-settings-revival" => settings_panel::Page::Revival,
+                    "lobby-settings-scoring" => settings_panel::Page::Scoring,
+                    _ => settings_panel::Page::Realism,
+                });
+            }
+        }
+        "lobby-players" => {
+            screen.players.select(1);
+            screen.refresh();
+            screen.press(Id::PlayersPanel);
+        }
+        "lobby-players-house" => {
+            // The house is another player than the King: Goose runs the game.
+            let mut state = lobby.clone();
+            state.host = Some(2);
+            screen.update(Some(&state), None);
+            screen.players.select(1);
+            screen.refresh();
+            screen.press(Id::PlayersPanel);
+        }
+        "lobby-locks" => {
+            screen.slots.select(2);
         }
         _ => {}
     }

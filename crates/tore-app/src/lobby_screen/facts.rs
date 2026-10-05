@@ -4,7 +4,10 @@
 //! data in and out, so every rule is tested without a window, a kit or a
 //! session.
 use crate::widgets::{Cell, Icon, Row, tone};
-use tore_session::wire::messages::{LobbyPhase, LobbyPlayer, LobbyState, StartRule};
+use tore_session::settings::{self, number};
+use tore_session::wire::messages::{
+    LobbyPhase, LobbyPlayer, LobbySlot, LobbyState, Lock, StartRule,
+};
 
 /// What a button does to the player: it is not there, there but cannot be
 /// pressed, or can.
@@ -55,6 +58,8 @@ pub struct Facts {
     pub armed: bool,
     /// This player flies the mission now.
     pub flying: bool,
+    /// This player watches the flying mission with no plane (protocol 8).
+    pub observing: bool,
     /// Why this player's game cannot play the mission, when it cannot.
     pub unable: Option<String>,
     /// Callsigns of the players holding a slot who are not ready.
@@ -78,6 +83,7 @@ impl Facts {
                 ready: false,
                 armed: false,
                 flying: false,
+                observing: false,
                 unable: unable.map(str::to_owned),
                 waiting: Vec::new(),
                 holders: 0,
@@ -96,6 +102,7 @@ impl Facts {
             ready: me.is_some_and(|m| m.ready),
             armed: me.is_some_and(|m| m.loadout),
             flying: me.is_some_and(|m| m.flying),
+            observing: me.is_some_and(|m| m.observing),
             unable: unable
                 .map(str::to_owned)
                 .or_else(|| me.and_then(|m| m.unable.clone())),
@@ -114,21 +121,35 @@ impl Facts {
     }
 }
 
+/// What the Loadout button's place says and does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoadoutAs {
+    /// Opens Load Ordnance for the slot held (the lobby, between missions).
+    Loadout,
+    /// The mission flies: asks the host to stream it to a player with no
+    /// plane (slice F2-O1's stream).
+    Watch,
+    /// The player watches: stops it.
+    StopWatch,
+}
+
 /// The state of every button for one player.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Buttons {
     pub mission: Show,
+    pub settings: Show,
+    pub players: Show,
     pub loadout: Show,
+    pub loadout_as: LoadoutAs,
     pub ready: Show,
-    pub kick: Show,
     pub fly: Show,
     pub fly_as: FlyAs,
     pub leave: Show,
 }
 
-/// Which buttons the player may press. `kickable` is a player other than the
-/// King is selected in Players.
-pub fn buttons(facts: &Facts, kickable: bool) -> Buttons {
+/// Which buttons the player may press. `target` is a player other than
+/// oneself selected in Players, whom the King's Players... acts on.
+pub fn buttons(facts: &Facts, target: bool) -> Buttons {
     let lobby_phase = facts.phase == LobbyPhase::Lobby;
     let flying = facts.phase == LobbyPhase::Flying;
     let on = |yes: bool| if yes { Show::Enabled } else { Show::Disabled };
@@ -137,11 +158,23 @@ pub fn buttons(facts: &Facts, kickable: bool) -> Buttons {
     Buttons {
         // The mission changes only in the lobby.
         mission: king_only(on(facts.connected && lobby_phase)),
-        // Loadouts are chosen in the lobby only, for the slot one holds.
-        loadout: on(may_play && lobby_phase && facts.holds.is_some()),
+        // Every player sees the settings (greyed unless the King's).
+        settings: on(facts.connected),
+        players: king_only(on(facts.connected && target)),
+        // Loadouts are chosen in the lobby only, for the slot one holds; while
+        // the mission flies the same place watches it.
+        loadout: if flying {
+            on(facts.connected && !facts.flying)
+        } else {
+            on(may_play && lobby_phase && facts.holds.is_some())
+        },
+        loadout_as: match (flying, facts.observing) {
+            (false, _) => LoadoutAs::Loadout,
+            (true, false) => LoadoutAs::Watch,
+            (true, true) => LoadoutAs::StopWatch,
+        },
         // Ready takes a slot; in flight it joins the flight.
         ready: on(may_play && facts.holds.is_some() && facts.phase != LobbyPhase::Ended),
-        kick: king_only(on(facts.connected && kickable)),
         fly: king_only(on(
             facts.connected && ((lobby_phase && facts.all_ready()) || flying)
         )),
@@ -350,7 +383,7 @@ pub fn slot_rows(lobby: &LobbyState) -> Vec<Row> {
                         u32::from(slot.member) + 1
                     )),
                     Cell::Text(slot.aircraft.label().to_owned()),
-                    Cell::Text(holder.map_or_else(|| "AI".to_owned(), |p| p.callsign.clone())),
+                    Cell::Text(slot_holder_text(slot, holder)),
                     if holder.is_some_and(|p| p.ready || p.flying) {
                         Cell::Icon(Icon::Ready)
                     } else {
@@ -358,10 +391,14 @@ pub fn slot_rows(lobby: &LobbyState) -> Vec<Row> {
                     },
                 ],
             );
-            match holder {
-                Some(_) if !mine => row.dimmed(),
-                Some(_) => row.tinted(tone::OWN_SIDE),
-                None => row,
+            match (holder, &slot.lock) {
+                (Some(_), _) if !mine => row.dimmed(),
+                (Some(_), _) => row.tinted(tone::OWN_SIDE),
+                // A slot the King closed, or keeps for another, cannot be
+                // taken: dimmed as one someone holds.
+                (None, Lock::Closed) => row.dimmed(),
+                (None, Lock::Reserved(callsign)) if !is_me(lobby, callsign) => row.dimmed(),
+                (None, _) => row,
             }
         })
         .collect()
@@ -369,35 +406,49 @@ pub fn slot_rows(lobby: &LobbyState) -> Vec<Row> {
 
 /// What a click on a slot asks for: take it, free one's own, or nothing (a
 /// slot someone else holds, or a click that cannot be honoured).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SlotClick {
     Take(u32),
     Leave,
     /// The reason in words, for Messages.
-    Refused(&'static str),
+    Refused(String),
+}
+
+/// Whether `callsign` is the receiving player's own.
+fn is_me(lobby: &LobbyState, callsign: &str) -> bool {
+    lobby.me().is_some_and(|m| m.callsign == callsign)
 }
 
 pub fn slot_click(lobby: &LobbyState, facts: &Facts, plane: u32) -> SlotClick {
     let Some(slot) = lobby.slots.iter().find(|s| s.plane == plane) else {
-        return SlotClick::Refused("There is no such slot.");
+        return SlotClick::Refused("There is no such slot.".into());
     };
     if slot.holder == Some(lobby.you) {
         return if facts.flying {
-            SlotClick::Refused("Leave your aircraft before you change your slot.")
+            SlotClick::Refused("Leave your aircraft before you change your slot.".into())
         } else {
             SlotClick::Leave
         };
     }
     if slot.holder.is_some() {
-        return SlotClick::Refused("Another player holds that slot.");
+        return SlotClick::Refused("Another player holds that slot.".into());
     }
     if facts.flying {
-        return SlotClick::Refused("Leave your aircraft before you change your slot.");
+        return SlotClick::Refused("Leave your aircraft before you change your slot.".into());
     }
     if facts.unable.is_some() {
         return SlotClick::Refused(
-            "Your game cannot play this mission, so you cannot take a slot.",
+            "Your game cannot play this mission, so you cannot take a slot.".into(),
         );
+    }
+    match &slot.lock {
+        Lock::Closed => {
+            return SlotClick::Refused(format!("Plane {plane} is closed: the AI flies it."));
+        }
+        Lock::Reserved(callsign) if !is_me(lobby, callsign) => {
+            return SlotClick::Refused(format!("Plane {plane} is kept for {callsign}."));
+        }
+        _ => {}
     }
     SlotClick::Take(plane)
 }
@@ -437,6 +488,30 @@ pub fn change_lines(old: Option<&LobbyState>, new: &LobbyState) -> Vec<String> {
     if new.mission != old.mission {
         lines.push(format!("The mission is now: {}", new.summary));
     }
+    if new.name != old.name {
+        lines.push(format!("The game is now called {}.", new.name));
+    }
+    let changed: Vec<(u8, u32)> = new
+        .settings
+        .iter()
+        .filter(|(n, v)| {
+            old.settings.iter().any(|(k, _)| k == n) && !old.settings.contains(&(*n, *v))
+        })
+        .copied()
+        .collect();
+    if !changed.is_empty() {
+        lines.push(format!("Settings: {}.", settings::words(&changed)));
+    }
+    for slot in &new.slots {
+        if old
+            .slots
+            .iter()
+            .find(|s| s.plane == slot.plane)
+            .is_some_and(|before| before.lock != slot.lock)
+        {
+            lines.push(lock_line(slot.plane, &slot.lock));
+        }
+    }
     if new.king != old.king
         && let Some(king) = new.king.and_then(|id| new.player(id))
     {
@@ -470,14 +545,18 @@ pub fn player_detail(lobby: &LobbyState, id: u8) -> Option<String> {
 
 /// Why a button that cannot be pressed cannot, in words, for Messages when
 /// the player clicks it. `None` for a button that can, or has no reason.
-pub fn disabled_reason(facts: &Facts, id: super::Id, kickable: bool) -> Option<String> {
+/// `target` is a player other than oneself selected in Players.
+pub fn disabled_reason(facts: &Facts, id: super::Id, target: bool) -> Option<String> {
     use super::Id;
     if !facts.connected {
         return Some("Not connected yet.".into());
     }
     let lobby_only = facts.phase != LobbyPhase::Lobby;
+    let flying = facts.phase == LobbyPhase::Flying;
     match id {
         Id::Mission if lobby_only => Some("The mission can change only in the lobby.".into()),
+        Id::Loadout if flying && facts.flying => Some("You are flying.".into()),
+        Id::Loadout if flying => None,
         Id::Loadout | Id::Ready if facts.unable.is_some() => facts
             .unable
             .as_ref()
@@ -487,8 +566,102 @@ pub fn disabled_reason(facts: &Facts, id: super::Id, kickable: bool) -> Option<S
         }
         Id::Loadout | Id::Ready if facts.holds.is_none() => Some("Take a slot first.".into()),
         Id::Ready if facts.flying => Some("You are flying.".into()),
-        Id::Kick if !kickable => Some("Select another player in Players to kick.".into()),
+        Id::PlayersPanel if !target => Some("Select another player in Players first.".into()),
         Id::Fly => fly_block(facts),
         _ => None,
     }
+}
+
+// ---- slot locks ----
+
+/// What a slot's holder column says: who holds it, or "AI", or the King's
+/// lock on it.
+pub fn slot_holder_text(slot: &LobbySlot, holder: Option<&LobbyPlayer>) -> String {
+    match (&slot.lock, holder) {
+        (_, Some(p)) => p.callsign.clone(),
+        (Lock::Closed, None) => "Closed (AI)".to_owned(),
+        (Lock::Reserved(callsign), None) => format!("Reserved: {callsign}"),
+        (Lock::Open, None) => "AI".to_owned(),
+    }
+}
+
+/// What a King's right click on a slot asks for. With a player selected in
+/// Players the slot is reserved for that player (or opened again when it is
+/// reserved for that player already); with none it cycles open and closed
+/// (a reserved slot opens).
+pub fn lock_click(slot: &LobbySlot, selected: Option<&str>) -> Lock {
+    match (&slot.lock, selected) {
+        (Lock::Reserved(now), Some(callsign)) if now == callsign => Lock::Open,
+        (_, Some(callsign)) => Lock::Reserved(callsign.to_owned()),
+        (Lock::Open, None) => Lock::Closed,
+        (_, None) => Lock::Open,
+    }
+}
+
+/// The line that tells the King what a lock did.
+pub fn lock_line(plane: u32, lock: &Lock) -> String {
+    match lock {
+        Lock::Open => format!("Plane {plane}'s slot is open."),
+        Lock::Closed => format!("Plane {plane}'s slot is closed: the AI flies it."),
+        Lock::Reserved(callsign) => format!("Plane {plane}'s slot is kept for {callsign}."),
+    }
+}
+
+// ---- the head's summary of the settings ----
+
+/// The settings in words, one line, for the lobby's head: "Co-op, friendly
+/// fire on, no revival" or "PvP by sides, 5 kills or 10 minutes, revival
+/// with unlimited lives". `None` before the host has sent any.
+pub fn settings_summary(lobby: &LobbyState) -> Option<String> {
+    if lobby.settings.is_empty() {
+        return None;
+    }
+    let get = |n: u8| {
+        lobby
+            .settings
+            .iter()
+            .find(|(k, _)| *k == n)
+            .map(|(_, v)| *v)
+    };
+    let pvp = get(number::MODE) == Some(1);
+    let mut parts: Vec<String> = Vec::new();
+    parts.push(if !pvp {
+        "Co-op".to_owned()
+    } else if get(number::FIGHT) == Some(1) {
+        "PvP, every player for itself".to_owned()
+    } else {
+        "PvP by sides".to_owned()
+    });
+    let fire = get(number::FRIENDLY_FIRE).unwrap_or(1) != 0;
+    if !pvp || !fire {
+        parts.push(format!("friendly fire {}", if fire { "on" } else { "off" }));
+    }
+    let mut limits: Vec<String> = Vec::new();
+    if pvp && let Some(kills) = get(number::KILL_LIMIT).filter(|k| *k > 0) {
+        limits.push(format!("{kills} kill{}", if kills == 1 { "" } else { "s" }));
+    }
+    if let Some(seconds) = get(number::TIME_LIMIT).filter(|t| *t > 0) {
+        limits.push(
+            settings::setting(number::TIME_LIMIT).map_or_else(String::new, |s| s.text(seconds)),
+        );
+    }
+    if !limits.is_empty() {
+        parts.push(limits.join(" or "));
+    }
+    parts.push(match get(number::RESPAWN) {
+        Some(1) => "revival in a free AI aircraft".to_owned(),
+        Some(2) => match get(number::LIVES) {
+            Some(1) => "revival with 1 life".to_owned(),
+            Some(n) if n <= 10 => format!("revival with {n} lives"),
+            _ => "revival with unlimited lives".to_owned(),
+        },
+        _ => "no revival".to_owned(),
+    });
+    if get(number::LOCK_SIDES) == Some(1) {
+        parts.push("sides locked".to_owned());
+    }
+    if get(number::LOADOUTS) == Some(1) {
+        parts.push("any loadout".to_owned());
+    }
+    Some(parts.join(", "))
 }

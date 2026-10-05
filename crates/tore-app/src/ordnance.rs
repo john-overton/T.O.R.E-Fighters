@@ -75,8 +75,13 @@ pub struct Ordnance {
     menu: bool,
     /// The page is open from a multiplayer lobby (EF8): Fly reads Accept and
     /// sends the loadout for the player's own slot, Select Plane reads
-    /// Cancel, and Cheat loading is not offered (a game's host refuses it).
+    /// Cancel, and Cheat loading is not offered unless the King's `loadouts`
+    /// setting allows it ([`Ordnance::lobby_cheat`]; the host refuses it
+    /// otherwise).
     pub lobby: bool,
+    /// The King's loadout rule allows Cheat loading on a lobby page
+    /// (`loadouts any`, slice F2-L); set through [`Ordnance::set_cheat_rule`].
+    lobby_cheat: bool,
 }
 impl Ordnance {
     pub fn new(mut loadout: Loadout, data: &BTreeMap<String, Vec<u8>>) -> AppResult<Self> {
@@ -167,9 +172,32 @@ impl Ordnance {
             message: None,
             menu: false,
             lobby: false,
+            lobby_cheat: false,
         };
         ordnance.rebuild_catalog();
         Ok(ordnance)
+    }
+    /// Sets the King's loadout rule on a lobby page: `allowed` is `loadouts
+    /// any`. Under `own` the page refuses Cheat loading, and a loading that
+    /// is a Cheat one is dropped to unloaded stations with Cheat off (the
+    /// host drops a kept cheat loadout to the standard load in the same
+    /// way). Returns true when the rule took a Cheat loading away.
+    pub fn set_cheat_rule(&mut self, allowed: bool) -> bool {
+        self.lobby_cheat = allowed;
+        if allowed || !self.loadout.cheat {
+            return false;
+        }
+        self.loadout.quantities.fill(0);
+        self.loadout.cheat = false;
+        self.rebuild_catalog();
+        self.message = Some(
+            "The King turned Cheat loading off: your stations are unloaded. Choose again.".into(),
+        );
+        true
+    }
+    /// Whether the lobby's page may use Cheat loading.
+    pub fn cheat_allowed(&self) -> bool {
+        !self.lobby || self.lobby_cheat
     }
     fn rebuild_catalog(&mut self) {
         let load = &self.loadout;
@@ -432,7 +460,7 @@ impl Ordnance {
                 self.loadout.quantities.fill(0);
                 self.menu = false;
             }
-            13 if self.lobby => {
+            13 if !self.cheat_allowed() => {
                 self.menu = false;
                 self.message = Some(LOBBY_CHEAT_NOTICE.into());
             }
@@ -711,7 +739,7 @@ impl Ordnance {
                 &self.sprites["MENUFONT.PIC"],
                 if self.loadout.cheat {
                     "Cheat  On"
-                } else if self.lobby {
+                } else if !self.cheat_allowed() {
                     "Cheat  Off (not allowed)"
                 } else {
                     "Cheat  Off"
@@ -1466,6 +1494,7 @@ mod tests {
             message: None,
             menu: false,
             lobby: false,
+            lobby_cheat: false,
         };
         ui.render(&mut vec![0; WIDTH * HEIGHT * 4]);
         ui
@@ -1573,6 +1602,34 @@ mod tests {
         let mut sp = fixture();
         sp.activate(13);
         assert!(sp.loadout.cheat);
+    }
+    #[test]
+    fn the_lobbys_page_allows_cheat_loading_under_the_kings_any_rule_and_drops_it_under_own() {
+        let mut ui = fixture();
+        ui.lobby = true;
+        // `loadouts any`: the Cheat row works as single player's does, and
+        // its menu no longer says "not allowed".
+        assert!(!ui.set_cheat_rule(true));
+        assert!(ui.cheat_allowed());
+        ui.activate(11);
+        ui.activate(13);
+        assert!(ui.loadout.cheat);
+        assert_eq!(ui.message.as_deref(), Some("Cheat loading on."));
+        // The King turns the rule back to `own`: the page unloads the Cheat
+        // loading and turns it off, and refuses it again.
+        ui.loadout.quantities = vec![1, 1, 1];
+        assert!(ui.set_cheat_rule(false));
+        assert!(!ui.loadout.cheat);
+        assert!(ui.loadout.quantities.iter().all(|n| *n == 0));
+        assert!(!ui.cheat_allowed());
+        ui.activate(11);
+        ui.activate(13);
+        assert!(!ui.loadout.cheat);
+        assert_eq!(ui.message.as_deref(), Some(LOBBY_CHEAT_NOTICE));
+        // Setting the rule on a page with no Cheat loading changes nothing.
+        assert!(!ui.set_cheat_rule(false));
+        // Single player's page is not a lobby page: it always allows Cheat.
+        assert!(fixture().cheat_allowed());
     }
     #[test]
     fn normal_catalog_hides_unimplemented_weapons_even_when_they_fit() {

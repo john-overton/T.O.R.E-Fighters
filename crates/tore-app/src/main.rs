@@ -3313,6 +3313,15 @@ impl ApplicationHandler for App {
                 };
                 self.replays_result(result)
             }
+            // The lobby's right button: the King's slot locks and the Settings
+            // panel's turn back (slice F2-L).
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Right,
+                ..
+            } if self.screen == Screen::Main && self.lobby.screen.is_some() => {
+                self.lobby_right_button(state == ElementState::Pressed)
+            }
             WindowEvent::MouseInput { state, button, .. }
                 if self.screen == Screen::Main && self.direct.screen.is_some() =>
             {

@@ -20,6 +20,10 @@ NORMAL_STATES = [
     "internet", "internet-games", "internet-joining", "internet-options", "internet-unreachable",
     "lobby-king", "lobby-joiner", "lobby-unable", "lobby-flying", "lobby-server", "lobby-kick",
     "lobby-leave", "lobby-ready",
+    # Stage F phase 2 (slice F2-L): the Settings panel's pages, the Players panel, slot locks, Watch, PvP's head line.
+    "lobby-settings", "lobby-settings-revival", "lobby-settings-scoring", "lobby-settings-realism",
+    "lobby-settings-joiner", "lobby-settings-pvp", "lobby-settings-flying", "lobby-players", "lobby-players-house",
+    "lobby-locks", "lobby-watch", "lobby-pvp",
 ]
 # Quick Mission mode states, the loadout page states and the debrief pages.
 QUICK_STATES = [

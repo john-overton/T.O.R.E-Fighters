@@ -2,7 +2,7 @@
 //! slot clicks, the words that say why Fly cannot be pressed, the Leave
 //! confirmation, Kick, chat, and the lines a change of state puts in Messages.
 //! Built on the kit of synthetic pieces; no window, no session.
-use super::facts::{self, FlyAs, Show, SlotClick};
+use super::facts::{self, FlyAs, LoadoutAs, Show, SlotClick};
 use super::preview::{player, sample, slots};
 use super::*;
 use crate::widgets::test_kit;
@@ -26,7 +26,7 @@ fn click(screen: &mut LobbyScreen, at: Point) -> Option<Request> {
 }
 
 fn button_centre(place: usize) -> Point {
-    (SLOT_X[place] + 40, BUTTON_Y + 12)
+    (SLOT_X[place] + 37, BUTTON_Y + 12)
 }
 
 fn slot_row(index: i32) -> Point {
@@ -38,22 +38,29 @@ fn the_king_in_a_lobby_has_every_button_and_the_joiner_only_his_own() {
     let state = king();
     let king = facts::buttons(&Facts::of(Some(&state), None), false);
     assert!(king.mission.is_enabled(), "Mission... in the lobby");
+    assert!(king.settings.is_enabled(), "Settings... for everyone");
+    assert_eq!(king.players, Show::Disabled, "nobody is selected");
     assert!(king.loadout.is_enabled(), "the King holds a slot");
+    assert_eq!(king.loadout_as, LoadoutAs::Loadout);
     assert!(king.ready.is_enabled());
-    assert_eq!(king.kick, Show::Disabled, "nobody is selected to kick");
     assert_eq!(king.fly, Show::Disabled, "the King is not ready yet");
     assert!(king.leave.is_enabled());
     assert!(
         facts::buttons(&Facts::of(Some(&state), None), true)
-            .kick
+            .players
             .is_enabled()
     );
 
     let joiner = facts::buttons(&Facts::of(Some(&sample(2)), None), true);
-    for hidden in [joiner.mission, joiner.kick, joiner.fly] {
+    for hidden in [joiner.mission, joiner.players, joiner.fly] {
         assert_eq!(hidden, Show::Hidden, "the King's buttons are not offered");
     }
-    assert!(joiner.loadout.is_enabled() && joiner.ready.is_enabled() && joiner.leave.is_enabled());
+    assert!(
+        joiner.settings.is_enabled()
+            && joiner.loadout.is_enabled()
+            && joiner.ready.is_enabled()
+            && joiner.leave.is_enabled()
+    );
 }
 
 #[test]
@@ -118,15 +125,15 @@ fn while_the_mission_flies_fly_ends_it_and_ready_joins_it() {
         "the mission changes only in the lobby"
     );
     assert_eq!(
-        b.loadout,
-        Show::Disabled,
-        "loadouts are chosen in the lobby"
+        (b.loadout, b.loadout_as),
+        (Show::Enabled, LoadoutAs::Watch),
+        "the Loadout button's place watches the flying mission"
     );
     assert_eq!(facts::ready_label(&facts), "Join");
     assert!(b.ready.is_enabled());
     let mut screen = screen_of(&state, true);
     assert_eq!(
-        click(&mut screen, button_centre(4)),
+        click(&mut screen, button_centre(5)),
         Some(Request::EndMission)
     );
 }
@@ -219,7 +226,7 @@ fn ready_toggles_and_says_when_the_standard_stores_are_flown() {
     state.players[1].loadout = false;
     let mut screen = screen_of(&state, false);
     assert_eq!(
-        click(&mut screen, button_centre(4)),
+        click(&mut screen, button_centre(5)),
         Some(Request::SetReady(true))
     );
     assert!(
@@ -234,7 +241,7 @@ fn ready_toggles_and_says_when_the_standard_stores_are_flown() {
     state.players[1].loadout = true;
     let mut screen = screen_of(&state, false);
     assert_eq!(
-        click(&mut screen, button_centre(4)),
+        click(&mut screen, button_centre(5)),
         Some(Request::SetReady(true))
     );
     assert!(
@@ -246,7 +253,7 @@ fn ready_toggles_and_says_when_the_standard_stores_are_flown() {
     state.players[1].ready = true;
     screen.update(Some(&state), None);
     assert_eq!(
-        click(&mut screen, button_centre(4)),
+        click(&mut screen, button_centre(5)),
         Some(Request::SetReady(false))
     );
 }
@@ -255,7 +262,7 @@ fn ready_toggles_and_says_when_the_standard_stores_are_flown() {
 fn the_kings_leave_asks_first_and_a_joiners_does_not() {
     let state = king();
     let mut screen = screen_of(&state, true);
-    assert_eq!(click(&mut screen, button_centre(5)), None);
+    assert_eq!(click(&mut screen, button_centre(6)), None);
     assert!(screen.modal_open());
     assert!(screen.modal.as_ref().is_some_and(|m| {
         m.lines()
@@ -277,7 +284,7 @@ fn the_kings_leave_asks_first_and_a_joiners_does_not() {
     assert!(!screen.modal_open());
 
     let mut joiner = screen_of(&sample(2), false);
-    assert_eq!(click(&mut joiner, button_centre(5)), Some(Request::Leave));
+    assert_eq!(click(&mut joiner, button_centre(6)), Some(Request::Leave));
     assert_eq!(joiner.key("Escape", false), Some(Request::Leave));
 }
 
@@ -291,26 +298,32 @@ fn a_host_that_has_not_answered_yet_is_still_asked_before_leaving() {
 }
 
 #[test]
-fn kick_asks_for_a_reason_and_names_the_player() {
+fn players_opens_for_the_selected_player_and_kick_asks_for_a_reason() {
     let state = king();
     let mut screen = screen_of(&state, true);
-    // Nobody selected: Kick says what to do.
-    assert_eq!(click(&mut screen, button_centre(3)), None);
+    // Nobody selected: Players... says what to do.
+    assert_eq!(click(&mut screen, button_centre(2)), None);
     assert!(
         screen
             .message_lines()
             .last()
             .is_some_and(|l| l.contains("Select another player"))
     );
-    // The King's own row is not kickable.
+    // The King's own row is not a target.
     screen.players.select(0);
     screen.refresh();
-    assert_eq!(screen.buttons().kick, Show::Disabled);
+    assert_eq!(screen.buttons().players, Show::Disabled);
     screen.players.select(1);
     screen.refresh();
-    assert_eq!(screen.buttons().kick, Show::Enabled);
-    assert_eq!(click(&mut screen, button_centre(3)), None);
-    assert!(screen.modal_open() && screen.typing());
+    assert_eq!(screen.buttons().players, Show::Enabled);
+    assert_eq!(click(&mut screen, button_centre(2)), None);
+    let panel = screen.players_open().expect("the Players panel is open");
+    assert_eq!((panel.player(), panel.callsign()), (2, "Goose"));
+    assert!(!screen.typing(), "the panel has no text line");
+    // Kick... in the panel opens EF8's reason panel.
+    assert_eq!(screen.key("Tab", true), None);
+    assert_eq!(screen.key("Enter", false), None);
+    assert!(screen.players_open().is_none() && screen.modal_open() && screen.typing());
     screen.text_input("AFK too long");
     assert_eq!(
         screen.key("Enter", false),
@@ -321,7 +334,9 @@ fn kick_asks_for_a_reason_and_names_the_player() {
     );
     assert!(!screen.modal_open());
     // Cancel keeps everyone.
-    click(&mut screen, button_centre(3));
+    click(&mut screen, button_centre(2));
+    screen.key("Tab", true);
+    screen.key("Enter", false);
     assert!(screen.modal_open());
     assert_eq!(screen.key("Escape", false), None);
     assert!(!screen.modal_open());
@@ -331,7 +346,7 @@ fn kick_asks_for_a_reason_and_names_the_player() {
 fn a_button_that_cannot_be_pressed_says_why_when_clicked() {
     let state = king();
     let mut screen = screen_of(&state, true);
-    assert_eq!(click(&mut screen, button_centre(4)), None);
+    assert_eq!(click(&mut screen, button_centre(5)), None);
     assert_eq!(
         screen.message_lines().last().map(String::as_str),
         Some("Not ready: Maverick.")
@@ -364,15 +379,19 @@ fn a_dedicated_servers_lobby_has_no_kings_controls_and_states_its_rule() {
     assert!(facts.server && !facts.king);
     let b = facts::buttons(&facts, true);
     assert_eq!(
-        [b.mission, b.kick, b.fly],
+        [b.mission, b.players, b.fly],
         [Show::Hidden, Show::Hidden, Show::Hidden]
+    );
+    assert!(
+        b.settings.is_enabled(),
+        "a server's players see its settings too"
     );
     assert!(facts::rule_text(&state).contains("first player holding a slot"));
     state.start = StartRule::Flying;
     assert!(facts::rule_text(&state).contains("always flying"));
     // Leave never asks on a server.
     let mut screen = screen_of(&state, false);
-    assert_eq!(click(&mut screen, button_centre(5)), Some(Request::Leave));
+    assert_eq!(click(&mut screen, button_centre(6)), Some(Request::Leave));
     // The rows have no crown: the King's column is empty for everyone.
     let rows = facts::player_rows(&state);
     assert!(

@@ -23,13 +23,20 @@
 //!   when a player's game cannot play the mission.
 //! - **Messages and the chat line** (EF6's [`LobbyChat`]): the game's words
 //!   and chat; Enter in the line sends to All.
-//! - **Buttons**: Mission... and Fly (the King; Fly reads End Mission while
-//!   the mission flies), Loadout, Ready (Join while the mission flies), Kick
-//!   (the King, on a player selected in Players) and Leave. A dedicated
-//!   server's lobby has no King, so it shows only Loadout, Ready and Leave.
-//!   A button that cannot be pressed says why when it is clicked.
-//! - Two small panels: Kick (with the reason the player sees) and the King's
-//!   Leave ("Leaving ends the game for everyone. Leave?").
+//! - **Buttons**: Mission..., Players... and Fly (the King; Fly reads End
+//!   Mission while the mission flies), Settings... (everyone; greyed rows
+//!   unless the King's), Loadout (Watch while the mission flies), Ready (Join
+//!   while the mission flies) and Leave. A dedicated server's lobby has no
+//!   King, so it shows only Settings..., Loadout, Ready and Leave. A button
+//!   that cannot be pressed says why when it is clicked.
+//! - **Panels**: Settings... (four pages of the King's settings, see
+//!   [`settings_panel`]), Players... (the King's Give crown and Kick for the
+//!   player selected in Players, see [`players_panel`]), Kick (with the
+//!   reason the player sees) and the King's Leave ("Leaving ends the game
+//!   for everyone. Leave?").
+//! - **Slot locks**: the King's right click on a slot closes it to the AI,
+//!   opens it again, or, with a player selected in Players, keeps it for that
+//!   player.
 //!
 //! # Keys
 //!
@@ -40,7 +47,11 @@
 pub mod app;
 pub mod facts;
 mod modal;
+#[cfg(test)]
+mod phase2_tests;
+pub mod players_panel;
 pub mod preview;
+pub mod settings_panel;
 #[cfg(test)]
 mod tests;
 
@@ -51,12 +62,15 @@ use crate::widgets::{
     Align, Backdrop, Background, Button, Column, Focus, Kit, List, Outcome as Wo, Pager, Point,
     Route, Widget, draw_panel, fit, inside,
 };
-use facts::{Buttons, DefaultButton, Facts, FlyAs, SlotClick};
+use facts::{Buttons, DefaultButton, Facts, FlyAs, LoadoutAs, SlotClick};
 use modal::{Answer, Modal, Purpose};
+use players_panel::PlayersPanel;
+use settings_panel::{Context as SettingsContext, Edit, SettingsPanel};
 use std::sync::Arc;
 use std::time::Instant;
 use tore_session::wire::chat::ChatLine;
-use tore_session::wire::messages::LobbyState;
+use tore_session::wire::messages::{LobbyState, Lock, SettingsChange};
+use tore_sim::cheats::Cheats;
 
 /// The screen's own frame lines: the colour measured on John's screenshot.
 const LINE: [u8; 4] = [174, 174, 174, 255];
@@ -69,11 +83,29 @@ pub enum Id {
     Messages,
     Line,
     Mission,
+    /// The Settings... button.
+    Settings,
+    /// The Players... button (the list is [`Id::Players`]).
+    PlayersPanel,
     Loadout,
     Ready,
-    Kick,
     Fly,
     Leave,
+}
+
+impl Id {
+    /// How many controls Tab visits.
+    const COUNT: usize = 11;
+    /// The buttons, in the order of their places for the King.
+    const BUTTONS: [Id; 7] = [
+        Id::Mission,
+        Id::Settings,
+        Id::PlayersPanel,
+        Id::Loadout,
+        Id::Ready,
+        Id::Fly,
+        Id::Leave,
+    ];
 }
 
 /// What the player asked the game to do. The game sends it through the
@@ -94,6 +126,24 @@ pub enum Request {
         player: u8,
         reason: String,
     },
+    /// The King changes settings, the name or the password (the Settings
+    /// panel); the host checks it whole.
+    Settings(SettingsChange),
+    /// The King sends the lobby mission again with these cheats (the
+    /// Settings panel's Realism page).
+    Cheats(Cheats),
+    /// The King gives the crown to this lobby id.
+    PassCrown(u8),
+    /// The King opens, closes or reserves a slot (a right click on it).
+    Lock {
+        plane: u32,
+        lock: Lock,
+    },
+    /// Watch the flying mission with no plane (slice F2-O1's stream; the
+    /// observer screen is slice F2-O2's).
+    Watch,
+    /// Stop watching.
+    StopWatch,
     /// Open the Quick Mission creator in Accept mode (the King).
     Mission,
     /// Open Load Ordnance for the player's own slot.
@@ -105,9 +155,10 @@ pub enum Request {
 }
 
 const BUTTON_Y: i32 = 419;
-const BUTTON_W: i32 = 85;
-/// The six places of the button row.
-const SLOT_X: [i32; 6] = [45, 138, 231, 324, 417, 510];
+const BUTTON_W: i32 = 75;
+/// The seven places of the button row: 75 wide on a 79 pitch across the
+/// 549 wide row.
+const SLOT_X: [i32; 7] = [45, 124, 203, 282, 361, 440, 519];
 
 /// The slots list's pager: its rocker, the PREV and NEXT labels and the page
 /// box, to the right of the list (the Players box starts at 399).
@@ -131,13 +182,20 @@ pub struct LobbyScreen {
     /// Messages and the chat line (slice EF6).
     pub chat: LobbyChat,
     mission: Button,
+    settings: Button,
+    players_button: Button,
     loadout: Button,
     ready: Button,
-    kick: Button,
     fly: Button,
     leave: Button,
     focus: Focus<Id>,
     modal: Option<Modal>,
+    /// The Settings... panel, while open.
+    settings_panel: Option<SettingsPanel>,
+    /// The Players... panel, while open.
+    players_panel: Option<PlayersPanel>,
+    /// The lobby mission's cheats, for the Settings panel's Realism page.
+    cheats: Option<Cheats>,
     state: Option<LobbyState>,
     unable: Option<String>,
     facts: Facts,
@@ -170,16 +228,16 @@ impl LobbyScreen {
             },
             Column {
                 x: 70,
-                width: 104,
+                width: 84,
                 align: Align::Left,
             },
             Column {
-                x: 176,
-                width: 62,
+                x: 156,
+                width: 100,
                 align: Align::Left,
             },
             Column {
-                x: 242,
+                x: 258,
                 width: 12,
                 align: Align::Centre,
             },
@@ -224,9 +282,10 @@ impl LobbyScreen {
             Id::Messages,
             Id::Line,
             Id::Mission,
+            Id::Settings,
+            Id::PlayersPanel,
             Id::Loadout,
             Id::Ready,
-            Id::Kick,
             Id::Fly,
             Id::Leave,
         ];
@@ -247,13 +306,17 @@ impl LobbyScreen {
             players: List::new((404, 168), 186, 5).with_columns(player_columns),
             chat: LobbyChat::new((45, 294, 549, 78), (45, 377), 549),
             mission: button("Mission...", 0),
-            loadout: button("Loadout", 1),
-            ready: button("Ready", 2),
-            kick: button("Kick", 3),
-            fly: button("Fly", 4),
-            leave: button("Leave", 5),
+            settings: button("Settings...", 1),
+            players_button: button("Players...", 2),
+            loadout: button("Loadout", 3),
+            ready: button("Ready", 4),
+            fly: button("Fly", 5),
+            leave: button("Leave", 6),
             focus,
             modal: None,
+            settings_panel: None,
+            players_panel: None,
+            cheats: None,
             state: None,
             unable: None,
             facts,
@@ -284,15 +347,64 @@ impl LobbyScreen {
     pub fn modal_open(&self) -> bool {
         self.modal.is_some()
     }
+    /// The Settings... panel, when open.
+    #[cfg(test)]
+    pub fn settings_open(&self) -> Option<&SettingsPanel> {
+        self.settings_panel.as_ref()
+    }
+    /// The Players... panel, when open.
+    #[cfg(test)]
+    pub fn players_open(&self) -> Option<&PlayersPanel> {
+        self.players_panel.as_ref()
+    }
+    /// A Settings or Players panel is open, or the Kick and Leave panels.
+    fn overlaid(&self) -> bool {
+        self.modal.is_some() || self.settings_panel.is_some() || self.players_panel.is_some()
+    }
     /// What the screen shows to be read: the game's name.
     pub fn game_name(&self) -> &str {
         self.state.as_ref().map_or(&self.label, |s| &s.name)
     }
     /// True when typed text goes to a field.
     pub fn typing(&self) -> bool {
-        match &self.modal {
-            Some(modal) => modal.typing(),
-            None => self.focus.is(Id::Line),
+        if let Some(modal) = &self.modal {
+            return modal.typing();
+        }
+        if let Some(panel) = &self.settings_panel {
+            return panel.typing();
+        }
+        if self.players_panel.is_some() {
+            return false;
+        }
+        self.focus.is(Id::Line)
+    }
+
+    /// The host refused a settings or mission change the panel asked for:
+    /// its words go in the panel, else in Messages. True when a panel took
+    /// them.
+    pub fn refused_in_panel(&mut self, reason: &str) -> bool {
+        match &mut self.settings_panel {
+            Some(panel) => {
+                panel.refused(reason);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The lobby mission's cheats, for the Settings panel's Realism page; the
+    /// game gives them each frame.
+    pub fn set_cheats(&mut self, cheats: Option<Cheats>) {
+        if cheats != self.cheats {
+            self.cheats = cheats;
+            self.sync_panel();
+        }
+    }
+
+    /// The Settings panel reads the lobby's state again.
+    fn sync_panel(&mut self) {
+        if let (Some(panel), Some(state)) = (&mut self.settings_panel, &self.state) {
+            panel.set_context(SettingsContext::of(state, self.cheats));
         }
     }
     /// The lines in Messages, oldest first.
@@ -378,19 +490,37 @@ impl LobbyScreen {
             self.players.set_rows(Vec::new());
         }
         self.refresh();
+        self.sync_panel();
+        // The Players panel is for a player who is still there, and only the
+        // King's.
+        if let Some(panel) = &self.players_panel
+            && (!self.facts.king
+                || self
+                    .state
+                    .as_ref()
+                    .is_none_or(|s| s.player(panel.player()).is_none()))
+        {
+            self.players_panel = None;
+        }
     }
 
     /// The facts, the button states, their labels and the blue button, from
     /// what the screen holds now.
     fn refresh(&mut self) {
         self.facts = Facts::of(self.state.as_ref(), self.unable.as_deref());
-        self.buttons = facts::buttons(&self.facts, self.kick_target().is_some());
+        self.buttons = facts::buttons(&self.facts, self.player_target().is_some());
         self.default = facts::default_button(&self.facts, &self.buttons);
         let b = self.buttons;
         self.mission.set_enabled(b.mission.is_enabled());
+        self.settings.set_enabled(b.settings.is_enabled());
+        self.players_button.set_enabled(b.players.is_enabled());
         self.loadout.set_enabled(b.loadout.is_enabled());
+        self.loadout.set_label(match b.loadout_as {
+            LoadoutAs::Loadout => "Loadout",
+            LoadoutAs::Watch => "Watch",
+            LoadoutAs::StopWatch => "Stop Watch",
+        });
         self.ready.set_enabled(b.ready.is_enabled());
-        self.kick.set_enabled(b.kick.is_enabled());
         self.fly.set_enabled(b.fly.is_enabled());
         self.ready.set_label(facts::ready_label(&self.facts));
         self.fly.set_label(match b.fly_as {
@@ -406,14 +536,20 @@ impl LobbyScreen {
         let places: &[(Id, usize)] = if b.mission.is_shown() {
             &[
                 (Id::Mission, 0),
-                (Id::Loadout, 1),
-                (Id::Ready, 2),
-                (Id::Kick, 3),
-                (Id::Fly, 4),
-                (Id::Leave, 5),
+                (Id::Settings, 1),
+                (Id::PlayersPanel, 2),
+                (Id::Loadout, 3),
+                (Id::Ready, 4),
+                (Id::Fly, 5),
+                (Id::Leave, 6),
             ]
         } else {
-            &[(Id::Loadout, 3), (Id::Ready, 4), (Id::Leave, 5)]
+            &[
+                (Id::Settings, 3),
+                (Id::Loadout, 4),
+                (Id::Ready, 5),
+                (Id::Leave, 6),
+            ]
         };
         for (id, place) in places {
             self.button_mut(*id).place((SLOT_X[*place], BUTTON_Y));
@@ -423,9 +559,10 @@ impl LobbyScreen {
     fn button_mut(&mut self, id: Id) -> &mut Button {
         match id {
             Id::Mission => &mut self.mission,
+            Id::Settings => &mut self.settings,
+            Id::PlayersPanel => &mut self.players_button,
             Id::Loadout => &mut self.loadout,
             Id::Ready => &mut self.ready,
-            Id::Kick => &mut self.kick,
             Id::Fly => &mut self.fly,
             _ => &mut self.leave,
         }
@@ -434,18 +571,19 @@ impl LobbyScreen {
     fn button_ref(&self, id: Id) -> &Button {
         match id {
             Id::Mission => &self.mission,
+            Id::Settings => &self.settings,
+            Id::PlayersPanel => &self.players_button,
             Id::Loadout => &self.loadout,
             Id::Ready => &self.ready,
-            Id::Kick => &self.kick,
             Id::Fly => &self.fly,
             _ => &self.leave,
         }
     }
 
     /// For each control, indexed by [`Id`], whether Tab may stop on it.
-    fn usable(&self) -> [bool; 10] {
-        let mut ok = [true; 10];
-        for id in [Id::Mission, Id::Loadout, Id::Ready, Id::Kick, Id::Fly] {
+    fn usable(&self) -> [bool; Id::COUNT] {
+        let mut ok = [true; Id::COUNT];
+        for id in Id::BUTTONS {
             ok[id as usize] = self.shown(id) && Widget::enabled(self.button_ref(id));
         }
         ok
@@ -453,23 +591,16 @@ impl LobbyScreen {
 
     /// The buttons drawn now, which are the ones the pointer can reach.
     fn shown_buttons(&self) -> Vec<Id> {
-        [
-            Id::Mission,
-            Id::Loadout,
-            Id::Ready,
-            Id::Kick,
-            Id::Fly,
-            Id::Leave,
-        ]
-        .into_iter()
-        .filter(|id| self.shown(*id))
-        .collect()
+        Id::BUTTONS
+            .into_iter()
+            .filter(|id| self.shown(*id))
+            .collect()
     }
 
     /// Which buttons are drawn, and so can be reached.
     fn shown(&self, id: Id) -> bool {
         match id {
-            Id::Mission | Id::Kick | Id::Fly => self.buttons.mission.is_shown(),
+            Id::Mission | Id::PlayersPanel | Id::Fly => self.buttons.mission.is_shown(),
             _ => true,
         }
     }
@@ -479,12 +610,12 @@ impl LobbyScreen {
         self.slots.selected_row()?.key.parse().ok()
     }
 
-    /// The player selected in Players that the King may kick: anyone but
-    /// themself, with the King the only one who has the button.
-    fn kick_target(&self) -> Option<(u8, String)> {
+    /// The player selected in Players that the King may act on with
+    /// Players...: anyone but themself.
+    fn player_target(&self) -> Option<(u8, String)> {
         let state = self.state.as_ref()?;
         let id: u8 = self.players.selected_row()?.key.parse().ok()?;
-        if id == state.you || state.king == Some(id) {
+        if id == state.you {
             return None;
         }
         Some((id, state.player(id)?.callsign.clone()))
@@ -498,14 +629,16 @@ impl LobbyScreen {
         }
         let enabled = match id {
             Id::Mission => self.buttons.mission.is_enabled(),
+            Id::Settings => self.buttons.settings.is_enabled(),
+            Id::PlayersPanel => self.buttons.players.is_enabled(),
             Id::Loadout => self.buttons.loadout.is_enabled(),
             Id::Ready => self.buttons.ready.is_enabled(),
-            Id::Kick => self.buttons.kick.is_enabled(),
             Id::Fly => self.buttons.fly.is_enabled(),
             _ => true,
         };
         if !enabled {
-            if let Some(why) = facts::disabled_reason(&self.facts, id, self.kick_target().is_some())
+            if let Some(why) =
+                facts::disabled_reason(&self.facts, id, self.player_target().is_some())
             {
                 self.say(&why);
             }
@@ -513,7 +646,23 @@ impl LobbyScreen {
         }
         match id {
             Id::Mission => Some(Request::Mission),
-            Id::Loadout => Some(Request::Loadout),
+            Id::Settings => {
+                let state = self.state.as_ref()?;
+                self.settings_panel =
+                    Some(SettingsPanel::new(SettingsContext::of(state, self.cheats)));
+                None
+            }
+            Id::PlayersPanel => {
+                let (player, callsign) = self.player_target()?;
+                let house = self.state.as_ref()?.host == Some(player);
+                self.players_panel = Some(PlayersPanel::new(player, &callsign, house));
+                None
+            }
+            Id::Loadout => Some(match self.buttons.loadout_as {
+                LoadoutAs::Loadout => Request::Loadout,
+                LoadoutAs::Watch => Request::Watch,
+                LoadoutAs::StopWatch => Request::StopWatch,
+            }),
             Id::Ready => {
                 let ready = !self.facts.ready;
                 if ready && !self.facts.armed {
@@ -526,11 +675,6 @@ impl LobbyScreen {
                     );
                 }
                 Some(Request::SetReady(ready))
-            }
-            Id::Kick => {
-                let (player, callsign) = self.kick_target()?;
-                self.modal = Some(Modal::kick(player, &callsign));
-                None
             }
             Id::Fly => Some(match self.buttons.fly_as {
                 FlyAs::Fly => Request::Start,
@@ -567,7 +711,7 @@ impl LobbyScreen {
             SlotClick::Take(plane) => Some(Request::Take(plane)),
             SlotClick::Leave => Some(Request::LeaveSlot),
             SlotClick::Refused(why) => {
-                self.say(why);
+                self.say(&why);
                 None
             }
         }
@@ -590,6 +734,42 @@ impl LobbyScreen {
         }
     }
 
+    /// What the Settings panel answered.
+    fn settings_answer(&mut self, answer: settings_panel::Answer) -> Option<Request> {
+        match answer {
+            settings_panel::Answer::None => None,
+            settings_panel::Answer::Close => {
+                self.settings_panel = None;
+                None
+            }
+            settings_panel::Answer::Edit(Edit::Settings(change)) => Some(Request::Settings(change)),
+            settings_panel::Answer::Edit(Edit::Cheats(cheats)) => Some(Request::Cheats(cheats)),
+        }
+    }
+
+    /// What the Players panel answered.
+    fn players_answer(&mut self, answer: players_panel::Answer) -> Option<Request> {
+        match answer {
+            players_panel::Answer::None => None,
+            players_panel::Answer::Close => {
+                self.players_panel = None;
+                None
+            }
+            players_panel::Answer::Crown(player) => {
+                self.players_panel = None;
+                Some(Request::PassCrown(player))
+            }
+            players_panel::Answer::Kick(player) => {
+                let callsign = self
+                    .players_panel
+                    .take()
+                    .map(|panel| panel.callsign().to_owned())?;
+                self.modal = Some(Modal::kick(player, &callsign));
+                None
+            }
+        }
+    }
+
     // ---- events ----
 
     /// A key press by the window's name for it.
@@ -597,6 +777,14 @@ impl LobbyScreen {
         if let Some(modal) = &mut self.modal {
             let answer = modal.key(name, shift);
             return self.modal_answer(answer);
+        }
+        if let Some(panel) = &mut self.settings_panel {
+            let answer = panel.key(name, shift);
+            return self.settings_answer(answer);
+        }
+        if let Some(panel) = &mut self.players_panel {
+            let answer = panel.key(name, shift);
+            return self.players_answer(answer);
         }
         if name == "Escape" {
             return self.leave_pressed();
@@ -658,6 +846,13 @@ impl LobbyScreen {
             modal.text_input(text);
             return;
         }
+        if let Some(panel) = &mut self.settings_panel {
+            panel.text_input(text);
+            return;
+        }
+        if self.players_panel.is_some() {
+            return;
+        }
         if self.focus.is(Id::Line) {
             self.chat.text_input(text);
         }
@@ -671,14 +866,15 @@ impl LobbyScreen {
             modal.moved(point);
             return;
         }
-        for id in [
-            Id::Mission,
-            Id::Loadout,
-            Id::Ready,
-            Id::Kick,
-            Id::Fly,
-            Id::Leave,
-        ] {
+        if let Some(panel) = &mut self.settings_panel {
+            panel.moved(point);
+            return;
+        }
+        if let Some(panel) = &mut self.players_panel {
+            panel.moved(point);
+            return;
+        }
+        for id in Id::BUTTONS {
             self.button_mut(id).pointer_move(point);
         }
     }
@@ -689,6 +885,14 @@ impl LobbyScreen {
         if let Some(modal) = &mut self.modal {
             let answer = modal.button(&self.kit, point, pressed);
             return self.modal_answer(answer);
+        }
+        if let Some(panel) = &mut self.settings_panel {
+            let answer = panel.button(&self.kit, point, pressed, false);
+            return self.settings_answer(answer);
+        }
+        if let Some(panel) = &mut self.players_panel {
+            let answer = panel.button(point, pressed);
+            return self.players_answer(answer);
         }
         let now = Instant::now();
         let Some(p) = point else {
@@ -770,14 +974,7 @@ impl LobbyScreen {
     pub fn cancel_press(&mut self) {
         let off = (-1, -1);
         self.slots.release(Instant::now());
-        for id in [
-            Id::Mission,
-            Id::Loadout,
-            Id::Ready,
-            Id::Kick,
-            Id::Fly,
-            Id::Leave,
-        ] {
+        for id in Id::BUTTONS {
             let button = self.button_mut(id);
             button.release(off);
             button.pointer_move(None);
@@ -791,7 +988,7 @@ impl LobbyScreen {
         let Some(p) = self.pointer else {
             return;
         };
-        if self.modal.is_some() {
+        if self.overlaid() {
             return;
         }
         if self.chat.messages.hit(p) {
@@ -803,6 +1000,37 @@ impl LobbyScreen {
         } else if self.slots.hit(p) {
             self.slots.wheel(notches);
         }
+    }
+
+    /// The right mouse button went down or up at the pointer. Over the
+    /// Settings panel it turns a row back; over a slot it is the King's lock
+    /// (open, closed, or kept for the player selected in Players).
+    pub fn right_button(&mut self, pressed: bool) -> Option<Request> {
+        let point = self.pointer;
+        if self.modal.is_some() || self.players_panel.is_some() {
+            return None;
+        }
+        if let Some(panel) = &mut self.settings_panel {
+            let answer = panel.button(&self.kit, point, pressed, true);
+            return self.settings_answer(answer);
+        }
+        let p = point?;
+        if !pressed || !self.facts.king {
+            return None;
+        }
+        let index = self.slots.row_at(p)?;
+        let plane: u32 = self.slots.rows().get(index)?.key.parse().ok()?;
+        let state = self.state.as_ref()?;
+        let slot = state.slots.iter().find(|s| s.plane == plane)?;
+        let selected = self
+            .players
+            .selected_row()
+            .and_then(|row| row.key.parse().ok())
+            .and_then(|id: u8| state.player(id))
+            .map(|p| p.callsign.as_str());
+        let lock = facts::lock_click(slot, selected);
+        self.slots.select(index);
+        Some(Request::Lock { plane, lock })
     }
 
     // ---- drawing ----
@@ -867,7 +1095,7 @@ impl LobbyScreen {
             kit,
             font,
             &fit(font, &game, 549),
-            (45, 106),
+            (45, 102),
             None,
             None,
         );
@@ -879,12 +1107,17 @@ impl LobbyScreen {
                     kit,
                     font,
                     &fit(font, &mission, 549),
-                    (45, 120),
+                    (45, 115),
                     None,
                     None,
                 );
                 let rule = fit(dim, &facts::rule_text(state), 549);
-                text(canvas, kit, dim, &rule, (45, 134), None, None);
+                text(canvas, kit, dim, &rule, (45, 128), None, None);
+                // The King's settings in words (slice F2-L).
+                if let Some(summary) = facts::settings_summary(state) {
+                    let summary = fit(font, &format!("Rules: {summary}"), 549);
+                    text(canvas, kit, font, &summary, (45, 141), None, None);
+                }
             }
             None => {
                 text(
@@ -892,7 +1125,7 @@ impl LobbyScreen {
                     kit,
                     dim,
                     "Waiting for the game's lobby...",
-                    (45, 120),
+                    (45, 115),
                     None,
                     None,
                 );
@@ -918,17 +1151,16 @@ impl LobbyScreen {
         self.players.draw(canvas, kit, marked(Id::Players));
         self.chat
             .draw(canvas, kit, marked(Id::Messages), self.focus.is(Id::Line));
-        for id in [
-            Id::Mission,
-            Id::Loadout,
-            Id::Ready,
-            Id::Kick,
-            Id::Fly,
-            Id::Leave,
-        ] {
+        for id in Id::BUTTONS {
             if self.shown(id) {
                 self.button_ref(id).draw(canvas, kit, marked(id));
             }
+        }
+        if let Some(panel) = &self.settings_panel {
+            panel.draw(canvas, kit);
+        }
+        if let Some(panel) = &self.players_panel {
+            panel.draw(canvas, kit);
         }
         if let Some(modal) = &self.modal {
             modal.draw(canvas, kit);
