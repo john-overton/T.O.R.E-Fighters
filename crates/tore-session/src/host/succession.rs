@@ -17,8 +17,9 @@
 //!   report within [`REACH_ROUND_LIMIT`] reached nobody.
 //! - **Upload tests**, in the lobby only, one at a time: the best untested
 //!   eligible candidate of the three best is asked for a 1-second burst of
-//!   Filler at the rate the game needs ([`upload_need`]), and passes when
-//!   90 percent of it arrives.
+//!   Filler at the rate the game needs ([`upload_need`]: 28 KB/s for every
+//!   other player and each standby's [`standby_need`], warm and cold
+//!   apart), and passes when 90 percent of it arrives.
 //! - **The house** (the game that hosts now) cannot test its own upload in
 //!   the lobby; it is judged from its flights instead: the share of its
 //!   packets its direct players' games acknowledge (agent decision).
@@ -73,8 +74,26 @@ pub const UPLOAD_GAP: Duration = Duration::from_secs(2);
 /// The upload need for every other player, bytes a second: the stage D
 /// peak per player (docs/baselines/net-2026-09-30.md).
 pub const NEED_PER_PLAYER: u32 = 28_000;
-/// The upload need for each standby, bytes a second.
-pub const NEED_PER_STANDBY: u32 = 10_000;
+/// The upload a warm standby needs besides its humans' share, bytes a
+/// second: the state parts, the Checks and the transport's framing, at
+/// three humans (slice KP, from protocol 14's figures in
+/// docs/baselines/standby-stream-2026-10-05.md).
+pub const WARM_STANDBY_BASE: u32 = 3_000;
+/// The upload a warm standby needs for each human flying, bytes a second:
+/// 3.4 to 5.6 bytes a seat a tick at 120 ticks a second is 410 to 670, and
+/// 12.8 KB/s of stream (16.2 KB/s on the wire) with 30 humans, 3.9 KB/s on
+/// the wire with 3; the fit through both ends with a margin of 15 percent
+/// (slice KP). *Fitted.*
+pub const WARM_STANDBY_PER_HUMAN: u32 = 520;
+/// What a cold standby's checkpoints need besides the journal, bytes a
+/// second: the real-data 15 against 15 mission's stream averaged 64 KB/s
+/// (72 KB/s on the wire, framing and resends in) on four humans, its
+/// checkpoints of 0.52 to 1.1 MB each taking 8 to 11 seconds; its busiest
+/// second was 126 KB/s, the 1 Mbit/s line the stream is held to. The need
+/// is the average on the wire, 70 KB/s, since the busy second comes only
+/// now and then and the transport queues across it (slice KP).
+/// *Fitted.*
+pub const COLD_STANDBY_CHECKPOINTS: u32 = 70_000;
 /// A candidate passes the upload test when this share of the burst arrives,
 /// per mille.
 pub const UPLOAD_PASS: u16 = 900;
@@ -95,12 +114,29 @@ pub const CPU_BUSY_PER_MILLE: u32 = 850;
 /// The house's flight figure: one sample a second, the last this many.
 pub const HOUSE_SAMPLES: usize = 10;
 
+/// The upload one standby needs, bytes a second, with `humans` flying: a
+/// warm one the journal's share of each human, a cold one that and its
+/// checkpoints besides.
+pub fn standby_need(humans: usize, cold: bool) -> u32 {
+    let journal = WARM_STANDBY_BASE + WARM_STANDBY_PER_HUMAN * humans.min(64) as u32;
+    if cold {
+        journal + COLD_STANDBY_CHECKPOINTS
+    } else {
+        journal
+    }
+}
+
 /// The upload a host needs, bytes a second, for `players` players (itself
-/// included): 28 KB/s for every other player and 10 KB/s for each standby,
-/// of which there are up to two.
-pub fn upload_need(players: usize) -> u32 {
-    let others = players.saturating_sub(1) as u32;
-    NEED_PER_PLAYER * others + NEED_PER_STANDBY * others.min(limits::STANDBYS as u32)
+/// included): 28 KB/s for every other player, and for each standby, of
+/// which there are up to two, [`standby_need`]: `cold_standbys` of them
+/// cold (the others warm).
+pub fn upload_need(players: usize, cold_standbys: usize) -> u32 {
+    let others = players.saturating_sub(1);
+    let standbys = others.min(limits::STANDBYS);
+    let cold = cold_standbys.min(standbys);
+    NEED_PER_PLAYER * others as u32
+        + (standbys - cold) as u32 * standby_need(players, false)
+        + cold as u32 * standby_need(players, true)
 }
 
 /// How open a router is, best first: no translation or a mapped port, one
@@ -716,7 +752,7 @@ impl Host {
         let Some((connection, _)) = self.peer_of_order(order) else {
             return;
         };
-        let rate = upload_need(players);
+        let rate = upload_need(players, self.cold_standbys_for(order));
         let round_trip = self
             .server
             .stats(connection)
@@ -963,6 +999,23 @@ impl Host {
     fn reach_test_key(&self, order: u64) -> (u8, u8, u32, u64) {
         let (upload, _, router, cpu, order) = self.candidate_rank(order);
         (upload, router, cpu, order)
+    }
+
+    /// How many standbys `order`'s game would have as the host that are cold
+    /// (slice KP, agent decision): the worst case, the other direct players
+    /// who may host and whose class (platform and processor) is not its
+    /// own, as many as there are standby roles. Which of the others stand
+    /// by is only known when the game moves.
+    fn cold_standbys_for(&self, order: u64) -> usize {
+        let Some(class) = self.candidate_of(order).map(|r| (r.platform, r.processor)) else {
+            return 0;
+        };
+        self.live_peers()
+            .filter(|(_, p)| p.lobby.order != order && p.path != Path::Relay)
+            .filter_map(|(_, p)| self.candidate_of(p.lobby.order))
+            .filter(|r| r.may_host && (r.platform, r.processor) != class)
+            .count()
+            .min(limits::STANDBYS)
     }
 
     /// The machine that carried the most of `players`' need, and its share

@@ -596,10 +596,10 @@ fn an_upload_test_on_a_link_at_half_the_need_fails_and_at_the_full_need_passes()
         rig.join_at(HOUSE, "Viper");
         let delta = rig.join_at("198.51.100.21:40000", "Delta");
         rig.settle();
-        // 38 KB/s for two players: one other player and one standby. The
-        // full need is the filler's rate plus its packets' headers.
-        let need = upload_need(2);
-        assert_eq!(need, 38_000);
+        // 32 KB/s for two players: one other player and one warm standby.
+        // The full need is the filler's rate plus its packets' headers.
+        let need = upload_need(2, 0);
+        assert_eq!(need, 28_000 + 3_000 + 2 * 520);
         rig.games[delta].throttle = Some(Throttle::new((f64::from(need) * share) as u32));
         assert!(rig.run_until(Duration::from_secs(10), |r| {
             r.host.succession.measures[&r.order(delta)].upload.is_some()
@@ -703,9 +703,35 @@ fn the_cpu_and_pinned_host_warnings_read_as_designed() {
 
 #[test]
 fn the_need_the_router_and_the_cpu_share_follow_the_design() {
-    assert_eq!(upload_need(1), 0);
-    assert_eq!(upload_need(2), 28_000 + 10_000);
-    assert_eq!(upload_need(12), 28_000 * 11 + 20_000);
+    assert_eq!(upload_need(1, 0), 0);
+    assert_eq!(upload_need(1, 2), 0, "no other player, no standby");
+    assert_eq!(upload_need(2, 0), 28_000 + 3_000 + 2 * 520);
+    assert_eq!(upload_need(12, 0), 28_000 * 11 + 2 * (3_000 + 12 * 520));
+    // A cold standby adds its checkpoints; one other player has one standby
+    // at most, and a third cold standby is not a role.
+    assert_eq!(upload_need(2, 1) - upload_need(2, 0), 70_000);
+    assert_eq!(upload_need(2, 2), upload_need(2, 1));
+    assert_eq!(upload_need(12, 2) - upload_need(12, 0), 2 * 70_000);
+    // The need follows the measured streams (docs/baselines/
+    // standby-stream-2026-10-05.md): what the host's transport sent a
+    // standby, protocol 14, on the simulator.
+    assert!(standby_need(3, false) >= 3_900, "3 humans, warm: 3.9 KB/s");
+    assert!(
+        standby_need(30, false) >= 16_200,
+        "30 humans, warm: 16.2 KB/s"
+    );
+    assert!(
+        standby_need(4, true) >= 72_000,
+        "real 15 v 15, cold: 72 KB/s"
+    );
+    assert!(
+        standby_need(30, true) >= 34_600,
+        "30 humans, cold: 34.6 KB/s"
+    );
+    assert!(
+        standby_need(30, false) > 12_800 && standby_need(30, false) < 30_000,
+        "above the old 10 KB/s, not far above the 12.8 KB/s measured"
+    );
     let report = |mapping, mapped: bool| CandidateReport {
         may_host: true,
         platform: crate::wire::Platform::Linux,
@@ -735,6 +761,40 @@ fn the_need_the_router_and_the_cpu_share_follow_the_design() {
     assert_eq!(router_rank(&report(MappingType::Unknown, false)), 3);
     assert!(cpu_percent(CPU_BUDGET_MICROS * 1_000 / CPU_BUSY_PER_MILLE) <= 100);
     assert!(cpu_percent(CPU_BUDGET_MICROS * 1_000 / CPU_BUSY_PER_MILLE + 50) > 100);
+}
+
+/// A candidate's upload test asks for the cold standbys it would have: the
+/// other players that may host and are of another class, at most two.
+#[test]
+fn the_upload_need_counts_the_cold_standbys_a_candidate_would_have() {
+    let mut rig = four();
+    let order = |n: usize, rig: &Rig| rig.order(n);
+    let (a1, b2, c3) = (order(1, &rig), order(2, &rig), order(3, &rig));
+    let other = crate::wire::Platform::ALL
+        .into_iter()
+        .find(|p| *p != crate::wire::Platform::current() && *p != crate::wire::Platform::Unknown)
+        .unwrap();
+    assert_eq!(rig.host.cold_standbys_for(a1), 0, "one class: all warm");
+    // Bravo is another class: cold for Alpha's game, and Alpha for Bravo's.
+    m(&mut rig, b2).report.as_mut().unwrap().platform = other;
+    assert_eq!(rig.host.cold_standbys_for(a1), 1);
+    assert_eq!(rig.host.cold_standbys_for(c3), 1);
+    // Bravo's game sees every other as cold, but only two roles.
+    assert_eq!(rig.host.cold_standbys_for(b2), 2);
+    // A player who switched hosting off is no standby.
+    m(&mut rig, c3).report.as_mut().unwrap().may_host = false;
+    assert_eq!(rig.host.cold_standbys_for(a1), 1);
+    m(&mut rig, a1).report.as_mut().unwrap().platform = other;
+    assert_eq!(
+        rig.host.cold_standbys_for(b2),
+        1,
+        "Alpha is now of its class"
+    );
+    assert_eq!(
+        rig.host.cold_standbys_for(1_000),
+        0,
+        "a game with no report"
+    );
 }
 
 #[test]
