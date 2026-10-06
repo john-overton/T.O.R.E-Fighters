@@ -749,8 +749,9 @@ player connected ("Connected directly (IPv6).", "Connected through the
 relay."), the lobby marks a relayed player beside the platform mark, and the
 path is in the network log, the dedicated server's log and the anonymous
 statistics. *Built (J5):* the join's lines, a `path` line in the game's
-network log and the path in the player's statistics; the lobby's mark and the
-server's log lines are J6. The paths: local network, by address, mapped port, IPv6,
+network log and the path in the player's statistics. *Built (J6):* the lobby's
+mark for a relayed player, the selected player's line and the dedicated
+server's join lines. The paths: local network, by address, mapped port, IPv6,
 punched, relay. A port forwarded by hand reads "punched", since the game
 cannot tell the two apart. A relayed player is never the calculated host
 (John, 2026-09-28).

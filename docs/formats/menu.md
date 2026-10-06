@@ -557,8 +557,8 @@ this on 2026-10-05: easier to read, the same size, not fuzzy (*opinionated*).
   (`text_cells`) keeps every glyph in its retail cell so the caret, which a
   field places from the retail widths, stays between the letters.
 - **Icons.** The marks in list rows (padlock, crown, ready tick, house, the
-  player's own arrow, the unable cross and the Windows, macOS and Linux
-  platform marks) are hand drawn minimalist SVGs in one colour
+  player's own arrow, the unable cross, the Windows, macOS and Linux
+  platform marks and the relay mark of slice J6, two dots joined through a hub) are hand drawn minimalist SVGs in one colour
   (`assets/icons/*.svg`, John, 2026-10-05, *opinionated*), baked at 64 by 64 into
   the same atlas and drawn the same way: recorded and drawn sharp over the
   canvas, 12 pixels square, in one light grey (a dimmed row's tint darkens
@@ -592,7 +592,7 @@ template):
 | Title | "Lobby" centred on the panel at y 87 | |
 | Game, Mission, start rule, rules | `PANELFNT` lines at (45, 102), (45, 115), (45, 128) and (45, 141), up to 549 wide; the start rule in `PANELFND` | The game's name, the mission's summary, the start rule in words and, since F2-L, "Rules: " and the King's settings in words (they were at 106, 120, 134 before) |
 | Slots | heading (45, 152); list (45, 168), 286 wide, five rows; frame (40, 164, 355, 97) | Columns from the text origin: own mark (centred, 11 wide, x 0), "Wing 1 #3" (x 14, 54), aircraft (x 70, 84), holder, AI, "Closed (AI)" or "Reserved: Hawk" (x 156, 100), ready tick (x 258, 12) (F2-L widened the holder column; EF8 had the aircraft at x 70, 104, the holder at x 176, 62 and the tick at x 242). Pager: PREV (336, 184), NEXT (336, 207), rocker (364, 183), PAGE (336, 226), page box (336, 240) |
-| Players | heading (400, 152); list (404, 168), 186 wide, five rows, no pager; grey box (400, 165, 194, 95) | Columns: crown (x 0, 11), house (x 12, 10), ready tick or red cross (x 24, 10), callsign (x 37, 78), state word (x 118, 40) |
+| Players | heading (400, 152); list (404, 168), 186 wide, five rows, no pager; grey box (400, 165, 194, 95) | Columns (J6): crown (x 0, 12), house (x 13, 12), ready tick or red cross (x 26, 12), platform (x 39, 12), relay mark (x 52, 12, a relayed player only), callsign (x 66, 60), state word (x 128, 40). The hint line under the lists says how the selected player connected, or its reason when it cannot play the mission |
 | Hint line | `PANELFNT` at (45, 266), up to 549 wide | |
 | Messages | heading (45, 282); EF6's box (45, 294), 549 by 78 (seven lines) | |
 | Chat line | grey box (45, 377), 549 by 18 | Hint "type a message, Enter sends to all"; 80 characters |
@@ -621,7 +621,9 @@ Headless renders, `--snapshot-state` `lobby-king`, `lobby-joiner`,
 `lobby-ready`, and (F2-L) `lobby-settings`, `lobby-settings-revival`,
 `lobby-settings-scoring`, `lobby-settings-realism`, `lobby-settings-joiner`,
 `lobby-settings-pvp`, `lobby-settings-flying`, `lobby-players`,
-`lobby-players-house`, `lobby-locks`, `lobby-watch` and `lobby-pvp`, and with `--quick-mission` `lobby-creator`,
+`lobby-players-house`, `lobby-locks`, `lobby-watch` and `lobby-pvp`, and (J6)
+`lobby-relay` (a relayed player selected: the relay mark and the hint line's
+path) and `lobby-away` (a slot reading "AI (Goose away)"), and with `--quick-mission` `lobby-creator`,
 `lobby-creator-refused`, `lobby-ordnance`, `lobby-ordnance-refused` and
 `lobby-ordnance-cheat`, are in the lead's notes
 (`.local/mp-notes/stage-ef/ef8/`).

@@ -444,9 +444,11 @@ relayed address with an ordinary `Client::connect`, so the path reads
 the player reached the host, the codes the master's
 [reports](master-protocol.md#reports) use: 0 local network, 1 by address, 2
 mapped port, 3 IPv6, 4 punched, 5 relay. Any other code makes the answer
-malformed. The host keeps it with the player, and a later protocol version
-puts it in the lobby's player list (3 bits) so every player sees it. A host
-takes a relayed address as relay whatever the byte says.
+malformed. The host keeps it with the player, and *protocol 12 (slice J6)*
+puts it in the lobby's player list, 3 bits after the player's platform and
+before its build (6 and 7 are invalid), so every player sees how every other
+reached the host. A host takes a relayed address as relay whatever the byte
+says.
 
 | The address the race chose | Path |
 | --- | --- |
@@ -460,9 +462,10 @@ takes a relayed address as relay whatever the byte says.
 
 *As built (J2):* the host's transport puts the path in its join details
 (`ConnectDetails::path`), a relayed address as the relay whatever the byte
-says. Nothing shows it yet: the lobby's player list carries it from slice J6,
-and a host's Report still counts its players by their addresses
-(`rendezvous::path_of`) until the hosts keep each player's path.
+says. *Built (J6):* the lobby's player list carries it, the lobby screen
+marks a relayed player and `tore-server`'s log names it on every join. A
+host's Report still counts its players by their addresses
+(`rendezvous::path_of`) until the hosts' Reports read the path the host keeps.
 
 **Discovery stays IPv4.** *Agent proposal:* local networks carry IPv4
 broadcast, and the master covers the internet, so the game does not look for
@@ -1175,7 +1178,9 @@ host left the game (4); the King's End mission is reason 3.
   callsign, a presence bit and the slot's plane, ready, armed with its own
   loadout, flying (one bit each), a presence bit and why its import cannot
   play the mission, and, since protocol 7, its platform in 3 bits with the
-  Challenge answer's codes, 4 to 7 invalid, and, since protocol 10, its
+  Challenge answer's codes, 4 to 7 invalid, since protocol 12 its connection
+  path in 3 bits, the codes of [the path](#the-path-in-the-challenge-answer),
+  6 and 7 invalid, and, since protocol 10, its
   Fighters Anthology build in 2 bits, as [Content](#content) codes it), the
   slots in plane order (a count, then each: plane
   varint, side 1 bit, wing 2, member 8, aircraft 4, a presence bit and the
@@ -1819,7 +1824,9 @@ again with an observer; the capture format did not change for it.
   9 since the transport's [Punch](#punch) and the
   [path byte](#the-path-in-the-challenge-answer) of the Challenge answer,
   J2, 10 since [stage L](#compatibility-stage-l)'s Content and Content gaps
-  and each lobby player's Fighters Anthology build, L2).
+  and each lobby player's Fighters Anthology build, L2, 12 since each lobby
+  player's [connection path](#the-path-in-the-challenge-answer), J6; 11 is
+  stage K's).
   Any change to the bytes raises it. A test
   (`wire_golden`) encodes a fixed set of sections and messages and compares
   them with a committed copy, `crates/tore-session/wire-golden.txt` (since
