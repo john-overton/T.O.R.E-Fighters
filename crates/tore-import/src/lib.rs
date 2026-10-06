@@ -16,6 +16,8 @@
 //!   generations. Behaviour: `docs/spec/import-cache.md`.
 //! - [`selection`]: the resource lists the import keeps for the menus, the
 //!   debrief and the multiplayer screens.
+//! - [`source`]: the pack entry that records the Fighters Anthology build and the
+//!   T.O.R.E that made the import.
 //! - [`files`]: the two bounded file helpers the settings files also use.
 //! - [`set_log`]: where this crate's notes go (it has no logging dependency).
 
@@ -26,6 +28,7 @@ pub mod import;
 pub mod media_source;
 pub mod pack;
 pub mod selection;
+pub mod source;
 
 pub use import::{Imported, Progress, import_with_progress};
 pub use media_source::{DetectError, Kind, MediaSource};

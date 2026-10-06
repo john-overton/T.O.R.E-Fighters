@@ -343,6 +343,11 @@ RULES: tuple[Rule, ...] = (
         "mission spec; its friendly-fire and loadouts lines and the loadout rule are a networked mission's",
     ),
     _r("crates/tore-world/src/resources.rs", ("ai-missions", "menus-creator", "airports"), "mission resource reads"),
+    _r(
+        "crates/tore-world/src/content.rs", (),
+        "the content digests (stage L): computed by the lobby and the dedicated server, which later slices wire in; "
+        "no scenario reads them yet",
+    ),
     _r("crates/tore-world/src/target_window.rs", ("instruments",), "target window"),
     _r("crates/tore-world/src/aircraft_type.rs", ("ai-fights", "menus-creator"), "aircraft types"),
     # Stage F phase 2's shared types (F2-0); single player never uses them.
@@ -391,6 +396,10 @@ RULES: tuple[Rule, ...] = (
     _r("crates/tore-diagnostics-native/*", ("replay-settings",), "diagnostics"),
     _r("crates/tore-extract/*", ("replay-settings", "menus-validate"), "extractor"),
     # Stage D crates. Until networked scenarios exist, only the import reaches a battery scenario.
+    _r(
+        "crates/tore-import/src/source.rs", ("menus-validate", "replay-settings"),
+        "the import's source entry (build and importer); nothing in single player reads it",
+    ),
     _r("crates/tore-import/*", ("menus-validate", "replay-settings"), "importer and data folder"),
     _r("crates/tore-codec/*", NET_FAMILIES, "network encoding"),
     _r("crates/tore-net/src/master/*", ("net-master",), "the master server's wire and the browse client"),

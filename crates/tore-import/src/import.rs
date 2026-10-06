@@ -14,6 +14,7 @@ use crate::{
         CHAT_FILE, CHAT_RESOURCE, DEBRIEF_ART, DEBRIEF_DATA, MENU_ART, MENU_DATA, MULTIPLAYER_ART,
         MULTIPLAYER_DATA,
     },
+    source::{Build, RESOURCE as SOURCE_RESOURCE, Source},
 };
 use std::{fs, path::Path};
 
@@ -88,6 +89,11 @@ pub fn import_with_progress<T>(
         tore_formats::executable::sha256(&executable)
     ));
     summary.push(format!("Build read: FA.EXE {}", layout.name));
+    // Where this import came from, for the multiplayer lobby. The reviewed
+    // builds are the two `Build` names; `identify` refuses any other.
+    let build = Build::from_name(layout.name)
+        .ok_or_else(|| format!("FA.EXE build {} has no source entry", layout.name))?;
+    resources.insert(SOURCE_RESOURCE.into(), Source::of_import(build).encode());
     progress(Progress::Preparing("Finding aircraft and theaters"));
     let aircraft_libs = [source.archive("FA_1.LIB")?, source.archive("FA_2.LIB")?];
     let aircraft_names = tore_formats::aircraft::dependencies(

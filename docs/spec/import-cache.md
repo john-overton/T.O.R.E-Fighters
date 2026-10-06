@@ -58,4 +58,15 @@ keeps running on a pack an older import made, and `check_markers` does not
 require it. A player's existing import therefore asks to be redone once, and the
 server's does not.
 
+`TORE_SOURCE_V1` (slice L1, 2026-10-05) is not a marker: it records where the
+import came from, three short text lines (`tore-source 1`, `build 1.02F`,
+`tore <version> <commit>`). The build is the one `FA.EXE` identified as
+(`1.0 (disc)` or `1.02F`); the other line is the T.O.R.E that made the import.
+Nothing in single player reads it, and no pack is refused for lacking it: a
+pack made before it reads its build from the `FA.EXE:` line of
+`import-report.txt` beside the pack and its importer as unknown
+(`tore_import::source::Source::read`). The multiplayer lobby uses it to show
+each player's build and to name an import made by an earlier T.O.R.E
+([compatibility](../ARCHITECTURE.md#compatibility)).
+
 Validation: [import cache cleanup](../baselines/import-cache.md).
