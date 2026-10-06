@@ -1039,6 +1039,21 @@ def make_check_eject(maneuver: str):
             problems.append("the pilot died ejecting at 5,000 ft in level flight")
         if abs(position[1]) > 60:
             problems.append(f"the pilot came to rest at {position[1]:.0f} ft above the ground")
+        # A two-seater ejects its second crew member too (John, 2026-10-06):
+        # a second chute, down by the end like the pilot's. A single seat
+        # prints neither line.
+        crew = re.search(r"^crew_ejection=(\w+) crew_position=\[([^\]]+)\]", output, re.M)
+        two_seater = re.search(r"^two_seater=true", output, re.M) is not None
+        if two_seater and not crew:
+            problems.append("a two-seater ejected only its pilot")
+        if crew and not two_seater:
+            problems.append("a single seat ejected a second crew member")
+        if crew:
+            if crew.group(1) != "Landed":
+                problems.append(f"the second crew member was still {crew.group(1)} after the run")
+            height = float(crew.group(2).split(",")[1])
+            if abs(height) > 60:
+                problems.append(f"the second crew member came to rest at {height:.0f} ft above the ground")
         return problems
 
     return check

@@ -151,6 +151,11 @@ pub struct State {
     pub damage_regions: [f64; crate::combat::live::DAMAGE_SECTIONS],
     pub autopilot: crate::autopilot::Autopilot,
     pub escape: Option<crate::ejection::Escape>,
+    /// A two-seater's second crew member, ejected ahead of the pilot
+    /// ([`crate::ejection::CREW_LEAD_TICKS`]). Drawn and recorded, never read
+    /// by a step of flight, and not part of the exact state (see
+    /// [`crate::flight::exact`]).
+    pub crew_escape: Option<crate::ejection::Escape>,
     pub(crate) eject_armed_at: Option<u64>,
     pub crashed: bool,
     pub wreck: Option<crate::wreck::Wreck>,
@@ -277,6 +282,7 @@ impl State {
             damage_regions: [0.; crate::combat::live::DAMAGE_SECTIONS],
             autopilot: Default::default(),
             escape: None,
+            crew_escape: None,
             eject_armed_at: None,
             crashed: false,
             wreck: None,

@@ -42,6 +42,7 @@ tore_sim::checkpoint_struct!(Pose {
     wreck,
     crashed,
     escape,
+    crew_escape,
 });
 
 /// The two snapshots, the current one against the previous one (each target

@@ -8,6 +8,10 @@ use crate::{
 pub const CONFIRM_TICKS: u64 = 240;
 pub const SEAT_TICKS: u64 = 90;
 pub const INFLATE_TICKS: u64 = 120;
+/// A two-seater's second crew member leaves this long before the pilot: the
+/// rear seat fires first, as real two-seaters sequence it, 0.4 seconds ahead
+/// (agent decision, 2026-10-06; the retail game's own interval is unknown).
+pub const CREW_LEAD_TICKS: u64 = 48;
 const GRAVITY: f64 = 32.174;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +43,25 @@ impl Escape {
             ticks: 0,
             inflation_started: 0,
         }
+    }
+    /// The second crew member's escape at the moment the pilot ejects: the
+    /// seat left [`CREW_LEAD_TICKS`] ago from where the aircraft was then
+    /// (straight back along its velocity), so it is already part way up its
+    /// rail, a little behind the pilot's seat, while the pilot's own escape
+    /// starts this tick as for a single seat.
+    pub fn crew(position: [f64; 3], velocity: [f64; 3], basis: Basis) -> Self {
+        let lead = CREW_LEAD_TICKS as f64 * DT;
+        let mut escape = Self::new(
+            std::array::from_fn(|i| position[i] - velocity[i] * lead),
+            velocity,
+            basis,
+        );
+        // Nothing to hit in the first 0.4 seconds: the aircraft is above the
+        // ground, and the real ground is read from the next tick on.
+        for _ in 0..CREW_LEAD_TICKS {
+            escape.step(|_, _| f64::NEG_INFINITY);
+        }
+        escape
     }
     pub fn step(&mut self, ground: impl Fn(f64, f64) -> f64) {
         if matches!(self.phase, Phase::Landed | Phase::Impact) {
@@ -331,11 +354,14 @@ impl State {
         if !self.can_eject() {
             return false;
         }
-        self.escape = Some(Escape::new(
-            self.position,
-            self.velocity,
-            Basis::new(self.yaw, self.pitch, self.bank),
-        ));
+        let basis = Basis::new(self.yaw, self.pitch, self.bank);
+        self.escape = Some(Escape::new(self.position, self.velocity, basis));
+        // A two-seater's second crew member goes first, with the pilot.
+        self.crew_escape = self
+            .model()
+            .configuration()
+            .multi_crew
+            .then(|| Escape::crew(self.position, self.velocity, basis));
         self.systems.pilot.ejected = true;
         self.eject_armed_at = None;
         self.autopilot.disengage();
@@ -351,7 +377,7 @@ impl State {
             return;
         };
         let before = escape.phase;
-        escape.step(ground);
+        escape.step(&ground);
         if escape.phase == Phase::Impact && self.systems.pilot.kill() {
             self.systems.notify("Pilot killed during ejection");
         }
@@ -361,6 +387,19 @@ impl State {
         }
         if landed && before != Phase::Landed && !self.systems.pilot.dead {
             self.systems.notify("Pilot landed safely");
+        }
+        // The second crew member falls on his own chute. His fate is a HUD
+        // line and nothing else: the pilot's alone is the debrief's and the
+        // survival rules' (agent decision, 2026-10-06).
+        if let Some(crew) = &mut self.crew_escape {
+            let before = crew.phase;
+            crew.step(&ground);
+            match (before, crew.phase) {
+                (a, b) if a == b => {}
+                (_, Phase::Landed) => self.systems.notify("Crew member landed safely"),
+                (_, Phase::Impact) => self.systems.notify("Crew member killed during ejection"),
+                _ => {}
+            }
         }
     }
 }
@@ -496,6 +535,99 @@ mod tests {
         }
         assert_eq!(s.escape.as_ref().unwrap().phase, Phase::Impact);
         assert!(s.systems.pilot.dead);
+    }
+    fn two_seater() -> State {
+        // PLANE flags: 0x10 ejection seat, 0x4 multi-crew.
+        let mut a = crate::flight::integration_tests::profile();
+        a.fields.get_mut("flags").unwrap().value = "20".into();
+        State::new(&a, [0., 10000., 0.]).unwrap()
+    }
+    /// John, 2026-10-06: in a two-seater two seats and two chutes leave, the
+    /// second crew member first, a short interval ahead of the pilot.
+    #[test]
+    fn a_two_seaters_second_crew_member_ejects_ahead_of_the_pilot() {
+        let mut s = two_seater();
+        s.position[1] = 1000.;
+        s.velocity = [0., 0., 400.];
+        s.speed = 400.;
+        assert!(s.eject());
+        let pilot = s.escape.clone().unwrap();
+        let crew = s.crew_escape.clone().expect("a second chute");
+        assert_eq!(
+            pilot.ticks, 0,
+            "the pilot's own escape starts with the press"
+        );
+        assert_eq!(
+            crew.ticks, CREW_LEAD_TICKS,
+            "the crew member left 0.4 s before"
+        );
+        assert_eq!(crew.phase, Phase::Seat);
+        assert!(
+            crew.position[1] > pilot.position[1] + 20.,
+            "already part way up its rail: {:?} against {:?}",
+            crew.position,
+            pilot.position
+        );
+        assert!(
+            crew.position[2] < pilot.position[2],
+            "and a little astern of the aircraft, which it has left behind"
+        );
+        // Both seats separate, open and land.
+        for _ in 0..120 * 120 {
+            s.step(&PilotInput::default(), |_, _| 0.);
+        }
+        assert_eq!(s.escape.as_ref().unwrap().phase, Phase::Landed);
+        assert_eq!(s.crew_escape.as_ref().unwrap().phase, Phase::Landed);
+        assert!(!s.systems.pilot.dead);
+    }
+    #[test]
+    fn a_single_seater_has_one_chute() {
+        let mut s = state();
+        assert!(s.eject());
+        assert!(s.escape.is_some() && s.crew_escape.is_none());
+    }
+    /// The crew member is told on the HUD, and the pilot's survival is the
+    /// pilot's own: a low inverted launch kills both, a high one neither.
+    #[test]
+    fn the_second_crew_members_fate_is_a_hud_line_and_not_the_pilots() {
+        let mut s = two_seater();
+        s.position[1] = 15.;
+        s.bank = std::f64::consts::PI;
+        s.velocity = [0.; 3];
+        assert!(s.eject());
+        for _ in 0..60 {
+            s.step_escape(|_, _| 0.);
+        }
+        assert_eq!(s.crew_escape.as_ref().unwrap().phase, Phase::Impact);
+        assert!(s.systems.pilot.dead);
+        let notices = &s.systems.messages;
+        assert!(
+            notices
+                .iter()
+                .any(|m| m == "Crew member killed during ejection"),
+            "{notices:?}"
+        );
+    }
+    /// The second chute is the host's to draw: no step reads it, so it is not
+    /// in the exact state, which keeps the wire and the checkpoints as they
+    /// were.
+    #[test]
+    fn the_second_chute_is_not_part_of_the_exact_state() {
+        use tore_codec::{BitReader, BitWriter};
+        let mut s = two_seater();
+        assert!(s.eject());
+        let model = s.model().clone();
+        let mut w = BitWriter::new();
+        s.write_exact(&mut w, None).unwrap();
+        let copy = State::read_exact(&mut BitReader::new(&w.finish()), None, &model).unwrap();
+        assert_eq!(copy.escape, s.escape);
+        assert!(copy.crew_escape.is_none());
+        let mut plain = s.clone();
+        plain.crew_escape = None;
+        let (mut a, mut b) = (BitWriter::new(), BitWriter::new());
+        s.write_exact(&mut a, None).unwrap();
+        plain.write_exact(&mut b, None).unwrap();
+        assert_eq!(a.finish(), b.finish(), "the same bytes either way");
     }
     #[test]
     fn escape_wounds_progress_and_landing_does_not_revive_a_dead_pilot() {

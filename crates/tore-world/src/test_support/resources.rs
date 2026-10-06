@@ -159,6 +159,12 @@ struct Hardpoint {
 /// The aircraft record of the F/A-18D: a gun, a radar, a visual sensor, a
 /// jammer and a missile, with the flight fields of `test_support::profile`.
 fn aircraft(hardpoints: &[Hardpoint]) -> Vec<u8> {
+    aircraft_with_flags(hardpoints, 0)
+}
+
+/// [`aircraft`] with the PLANE record's flags set: 0x10 an ejection seat, 0x4
+/// a second crew member.
+fn aircraft_with_flags(hardpoints: &[Hardpoint], plane_flags: i64) -> Vec<u8> {
     let profile = crate::test_support::profile();
     let value = |name: &str| -> i64 {
         if let Some(token) = profile.fields.get(name) {
@@ -189,7 +195,14 @@ fn aircraft(hardpoints: &[Hardpoint]) -> Vec<u8> {
         &object,
     );
     text += &fields(schema::NPC, &["hards"], "_PLANEProc", &value);
-    text += &fields(schema::PLANE, &["hards", "env"], "_PLANEProc", &value);
+    let plane = |name: &str| {
+        if name == "flags" {
+            plane_flags
+        } else {
+            value(name)
+        }
+    };
+    text += &fields(schema::PLANE, &["hards", "env"], "_PLANEProc", &plane);
     text += ":hards\n";
     for (index, point) in hardpoints.iter().enumerate() {
         let value = |name: &str| match name {
@@ -449,6 +462,32 @@ pub fn resources() -> BTreeMap<String, Vec<u8>> {
                 count: 2,
             },
         ]),
+    );
+    resources
+}
+
+/// [`resources`] with the F/A-18D a two-seater with an ejection seat (PLANE
+/// flags 0x10 and 0x4), for the tests of a crew that ejects together. No other
+/// test sees it.
+pub fn two_seat_resources() -> BTreeMap<String, Vec<u8>> {
+    let mut resources = resources();
+    let hardpoint = |flags, store, count| Hardpoint {
+        flags,
+        store,
+        count,
+    };
+    resources.insert(
+        "F18.PT".to_owned(),
+        aircraft_with_flags(
+            &[
+                hardpoint(8, "M61.JT", 500),
+                hardpoint(8, "F18R.SEE", 1),
+                hardpoint(8, "F18V.SEE", 1),
+                hardpoint(8, "F18.ECM", 1),
+                hardpoint(0x80, "AIM9M.JT", 2),
+            ],
+            0x14,
+        ),
     );
     resources
 }

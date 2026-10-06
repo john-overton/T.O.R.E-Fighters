@@ -171,6 +171,7 @@ tore_sim::checkpoint_struct!(PilotPose {
     position,
     heading,
     phase,
+    crew,
 });
 
 #[cfg(test)]
@@ -303,6 +304,7 @@ mod tests {
                 position: [n as f64, 100. - n as f64, t],
                 heading: 0.25 * n as f64,
                 phase,
+                crew: n % 2 == 1,
             })
             .collect(),
             models: vec![AircraftId::F18, AircraftId::Mig29, AircraftId::F22n],

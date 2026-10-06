@@ -298,11 +298,13 @@ impl Interpolator {
                     })
                 }
                 (EntityKind::Pilot, Sample::Pilot(p, pos, heading)) => {
+                    let (owner, crew) = crate::wire::entity::pilot_owner(p.owner);
                     drawn.pilots.push(PilotPose {
-                        owner: p.owner,
+                        owner,
                         position: pos,
                         heading,
                         phase: p.phase,
+                        crew,
                     });
                 }
                 _ => {}
@@ -590,6 +592,38 @@ mod tests {
         assert!((drawn.aircraft[0].position[0] - 14.).abs() < 1e-9);
         let drawn = interp.draw(100., 0, &no_names);
         assert!((drawn.aircraft[0].position[0] - 34.).abs() < 1e-9);
+    }
+
+    /// A two-seater's second chute arrives under an id of its own and is
+    /// drawn as its aircraft's second crew member, beside its pilot.
+    #[test]
+    fn a_pilot_and_the_second_crew_member_of_one_aircraft_are_drawn_apart() {
+        use crate::wire::entity::{CREW_PILOT_BIT, PilotState, pilot_id};
+        let pilot = |owner: u32, x: f64| {
+            EntityState::Pilot(PilotState {
+                owner,
+                motion: Motion::of([x, 3000., 0.], [0.; 3]),
+                heading: 0,
+                phase: tore_sim::ejection::Phase::Parachute,
+            })
+        };
+        let mut interp = Interpolator::new(4);
+        interp.receive(&snapshot(
+            0,
+            &[
+                (5, pilot(5, 0.)),
+                (pilot_id(5, true), pilot(pilot_id(5, true), 40.)),
+            ],
+        ));
+        let drawn = interp.draw(0., 5, &no_names);
+        let mut seen: Vec<(u32, bool, f64)> = drawn
+            .pilots
+            .iter()
+            .map(|p| (p.owner, p.crew, p.position[0]))
+            .collect();
+        seen.sort_by(|a, b| a.2.total_cmp(&b.2));
+        assert_eq!(seen, [(5, false, 0.), (5, true, 40.)]);
+        assert!(pilot_id(5, true) & CREW_PILOT_BIT != 0);
     }
 
     #[test]

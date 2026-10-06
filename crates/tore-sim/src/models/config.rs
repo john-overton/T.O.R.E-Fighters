@@ -60,6 +60,9 @@ pub struct Configuration {
     /// Reviewed carrier hook or explicitly authored concept equipment.
     pub hook_available: bool,
     pub ejection_seat: bool,
+    /// A second crew member (PLANE flags bit 0x4, the multi-crew mark the
+    /// crew voice reads): the RIO or co-pilot, who ejects with the pilot.
+    pub multi_crew: bool,
     pub tuning: Tuning,
     /// Required PT turbulence coefficient; mutable event state lives outside configuration.
     pub turbulence_percent: i16,
@@ -85,6 +88,13 @@ impl Configuration {
                 .ok_or_else(|| std::io::Error::other("missing PLANE flags"))?
                 .number()?
                 & 0x10
+                != 0,
+            multi_crew: a
+                .fields
+                .get("flags")
+                .ok_or_else(|| std::io::Error::other("missing PLANE flags"))?
+                .number()?
+                & 0x4
                 != 0,
             hook_available: matches!(
                 a.id,

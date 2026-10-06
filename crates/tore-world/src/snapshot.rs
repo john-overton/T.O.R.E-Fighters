@@ -217,6 +217,9 @@ pub struct PilotPose {
     pub position: Vector,
     pub heading: f64,
     pub phase: Phase,
+    /// The aircraft's second crew member rather than its pilot: a two-seater
+    /// ejects two seats (see [`flight::State::crew_escape`]).
+    pub crew: bool,
 }
 
 pub fn devices(s: &flight::State) -> [f64; DEVICES] {

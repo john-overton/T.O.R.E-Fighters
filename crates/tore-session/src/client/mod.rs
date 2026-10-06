@@ -1633,6 +1633,7 @@ impl Client {
                 position: escape.position,
                 heading: escape.heading,
                 phase: escape.phase,
+                crew: false,
             })
             .chain(drawn.pilots)
             .collect();

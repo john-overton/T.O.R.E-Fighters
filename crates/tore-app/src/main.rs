@@ -10305,6 +10305,16 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
                 pilot.phase, !state.systems.pilot.dead, pilot.position
             );
         }
+        // A two-seater's second crew member comes down on his own chute.
+        if let Some(crew) = &state.crew_escape {
+            println!(
+                "crew_ejection={:?} crew_position={:?}",
+                crew.phase, crew.position
+            );
+        }
+        if state.model().configuration().multi_crew {
+            println!("two_seater=true");
+        }
         return Ok(Outcome::Done);
     }
     if let Some(path) = panel_snapshot {
@@ -11380,6 +11390,13 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         };
         // Isolate the original pilot model from the abandoned aircraft in this art fixture.
         pilot.position[0] += 300.;
+        // A two-seater's second crew member leaves with him: the same phase,
+        // beside him and clear of the aircraft.
+        let escape_phase = pilot.phase;
+        if let Some(crew) = flight.crew_escape.as_mut() {
+            crew.phase = escape_phase;
+            crew.position[0] += 300. + 40.;
+        }
         flight_view = 1;
         println!(
             "Ejection preview: {phase}, pilot_alive={}",

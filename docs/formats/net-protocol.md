@@ -1091,7 +1091,14 @@ a pilot's is its escape phase (3 bits).
 - **Ids.** A debris piece's and an ejected pilot's id is the aircraft it came
   from: each aircraft breaks off at most one piece and ejects at most one
   pilot. The player's own pilot is not sent; its escape is part of its plane's
-  exact state.
+  exact state. *Built (B5, 2026-10-06, no protocol change):* a two-seater's
+  second crew member ejects too, and his chute is a pilot entity of its own:
+  its id, and the `owner` field of its full record, is the aircraft's id with
+  bit 31 set (`wire::entity::CREW_PILOT_BIT`). Unlike the pilot's, it is sent
+  to the seat that flies the plane as well, since the exact state does not
+  carry it (it is drawn only and nothing steps from it). A build that does not
+  know the bit sees a pilot of an aircraft that does not exist and draws it
+  there; a client that knows it draws two chutes for one aircraft.
 - **Removals.** The host sends Removed for every entity the client may know
   that is gone, in every snapshot until a packet carrying the removal is
   delivered; one that comes back is sent in full. On the client the newest of

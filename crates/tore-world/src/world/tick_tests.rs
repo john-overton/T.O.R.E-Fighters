@@ -1025,6 +1025,119 @@ fn a_result_call_waiting_when_the_aircraft_is_lost_is_dropped() {
     );
 }
 
+/// The mission with the player flying a two-seater with an ejection seat
+/// (PLANE flags 0x10 seat, 0x4 multi-crew), at 5,000 ft.
+fn two_seater_mission() -> World {
+    let mut world = mission();
+    let mut profile = player_aircraft();
+    profile.fields.get_mut("flags").unwrap().value = "20".into();
+    let mut flight = flight::State::new(&profile, [0., 5000., -2000.]).unwrap();
+    flight.speed = 600.;
+    let cockpit = &mut world.cockpits[0];
+    cockpit.previous_flight = flight.clone();
+    cockpit.flight = flight;
+    world
+}
+
+/// John, 2026-10-06: Shift+E twice in a two-seater ejects the crew too: two
+/// seats and two chutes, the second crew member's ahead of the pilot's, both
+/// in the picture the recording and every presenter read, and both land. The
+/// crew's own voice is silent from the tick of the ejection.
+#[test]
+fn shift_e_twice_in_a_two_seater_ejects_two_chutes_and_silences_the_crew() {
+    use tore_sim::ejection::{CREW_LEAD_TICKS, Phase};
+    let mut world = two_seater_mission();
+    let mut out = TickOutput::default();
+    let mut radio_after: Vec<(usize, comms::Call)> = Vec::new();
+    let mut ejected_at = None;
+    let mut pictures = Vec::new();
+    for tick in 0..2400 {
+        let mut input = SeatInput {
+            tick: world.tick(),
+            ..SeatInput::default()
+        };
+        if tick == 60 || tick == 100 {
+            input.pilot.commands.push(PilotCommand::Eject);
+        }
+        world.step(&[input], &mut out).unwrap();
+        let flight = &world.cockpits[0].flight;
+        if ejected_at.is_none() && flight.escape.is_some() {
+            ejected_at = Some(tick);
+            assert_eq!(tick, 100, "the second press confirms");
+        }
+        if ejected_at.is_some() {
+            for cue in &out.cues {
+                if let Cue::Radio { call, .. } = cue {
+                    radio_after.push((tick, call.clone()));
+                }
+            }
+            let snapshot =
+                world
+                    .combat
+                    .snapshot(0, &world.cockpits[0].flight, world.ai_wings.as_ref());
+            pictures.push(snapshot.pilots);
+        }
+    }
+    assert!(ejected_at.is_some(), "the pilot ejected");
+    // Two chutes, the pilot's first in the list and the crew member's after
+    // every pilot, both owned by plane 0; the crew member started earlier.
+    let first = &pictures[0];
+    let mine: Vec<_> = first.iter().filter(|p| p.owner == 0).collect();
+    assert_eq!(
+        mine.iter().map(|p| p.crew).collect::<Vec<_>>(),
+        [false, true],
+        "{mine:?}"
+    );
+    let flight = &world.cockpits[0].flight;
+    assert_eq!(
+        flight.crew_escape.as_ref().unwrap().ticks,
+        flight.escape.as_ref().unwrap().ticks + CREW_LEAD_TICKS
+    );
+    let last = pictures.last().unwrap();
+    assert!(
+        last.iter()
+            .filter(|p| p.owner == 0)
+            .all(|p| matches!(p.phase, Phase::Parachute | Phase::Landed)),
+        "both hang under open chutes by the end: {last:?}"
+    );
+    // No crew line after the ejection: only the radio of other aircraft.
+    for (tick, call) in &radio_after {
+        assert_ne!(
+            call.origin.source,
+            comms::journal::Source::Crew,
+            "the crew spoke at tick {tick}: {call:?}"
+        );
+        assert_ne!(call.label, "RIO", "at tick {tick}: {call:?}");
+    }
+}
+
+/// A single seat ejects one chute, as before.
+#[test]
+fn a_single_seater_still_ejects_one_chute() {
+    let mut world = mission();
+    // The fixture aircraft has no seat; give it one by its flags.
+    let mut profile = player_aircraft();
+    profile.fields.get_mut("flags").unwrap().value = "16".into();
+    let flight = flight::State::new(&profile, [0., 5000., -2000.]).unwrap();
+    world.cockpits[0].previous_flight = flight.clone();
+    world.cockpits[0].flight = flight;
+    let mut out = TickOutput::default();
+    for tick in 0..130 {
+        let mut input = SeatInput {
+            tick: world.tick(),
+            ..SeatInput::default()
+        };
+        if tick == 60 || tick == 100 {
+            input.pilot.commands.push(PilotCommand::Eject);
+        }
+        world.step(&[input], &mut out).unwrap();
+    }
+    let flight = &world.cockpits[0].flight;
+    assert!(flight.escape.is_some() && flight.crew_escape.is_none());
+    let snapshot = world.combat.snapshot(0, flight, world.ai_wings.as_ref());
+    assert_eq!(snapshot.pilots.iter().filter(|p| p.owner == 0).count(), 1);
+}
+
 /// A mission whose result is decided before the flight starts (the fixture's
 /// enemies are down at the first check), or a flight with no mission, never
 /// sends the calls.

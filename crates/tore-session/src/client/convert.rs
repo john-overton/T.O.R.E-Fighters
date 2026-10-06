@@ -671,7 +671,7 @@ impl Conversion {
                     }
                     (EntityKind::Pilot, Sample::Pilot(p, position, heading)) => {
                         frame.escapees.push(replay::EscapeeState {
-                            owner: key.id,
+                            owner: crate::wire::entity::pilot_owner(key.id).0,
                             position,
                             heading,
                             phase: escape_code(p.phase),

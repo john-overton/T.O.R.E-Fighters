@@ -423,6 +423,9 @@ pub fn pilot_pose(state: &replay::EscapeeState) -> PilotPose {
         position: state.position,
         heading: state.heading,
         phase: escape_phase(state.phase),
+        // A recording lists the second crew member of a two-seater as a
+        // second escapee of the same owner; nothing draws them differently.
+        crew: false,
     }
 }
 
@@ -1407,6 +1410,7 @@ mod tests {
                         position: escape.position,
                         heading: escape.heading,
                         phase: escape.phase,
+                        crew: false,
                     })
                     .collect();
                 // Live flight sets the player's damage variant from the combat

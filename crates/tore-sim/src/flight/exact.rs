@@ -9,11 +9,12 @@
 //! coder names each of its fields, with no `..`, through [`exact_struct`], so a
 //! field added to a state without coding it fails to compile.
 //!
-//! Not coded: the write-only trace, which equality ignores and the next step
-//! rewrites, and the imported tables (the aircraft model and its raw envelope
-//! polygons), which the decoder takes from the caller. The weight-scaled
-//! envelopes are rebuilt from those tables and the coded scale exactly as the
-//! step builds them. The native research adapter is refused.
+//! Not coded: the second crew member's chute (`crew_escape`, drawn only), the
+//! write-only trace, which equality ignores and the next step rewrites, and
+//! the imported tables (the aircraft model and its raw envelope polygons),
+//! which the decoder takes from the caller. The weight-scaled envelopes are
+//! rebuilt from those tables and the coded scale exactly as the step builds
+//! them. The native research adapter is refused.
 
 use crate::flight::State;
 use crate::models::FlightModel;
@@ -403,6 +404,11 @@ impl State {
             failure_rng,
             cheats,
             jolt,
+            // The second crew member's chute is only drawn, and no step of
+            // flight reads it, so it is not coded: the wire and the
+            // checkpoints are unchanged. A client draws it from the host's
+            // pilot entities (slice B5, docs/ARCHITECTURE.md).
+            crew_escape: _,
             // Write-only, outside equality; the next step rewrites it.
             trace: _,
         } = self;
@@ -562,6 +568,7 @@ impl State {
             failure_rng: get!(failure_rng),
             cheats: get!(cheats),
             jolt: get!(jolt),
+            crew_escape: None,
             trace: Default::default(),
         };
         if scaled {

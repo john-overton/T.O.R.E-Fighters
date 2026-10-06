@@ -252,12 +252,25 @@ fn targets_picture(world: &World) -> RenderSnapshot {
         pilots: world
             .ai_wings
             .iter()
-            .flat_map(|wings| wings.escapees())
-            .map(|(owner, escape)| PilotPose {
+            .flat_map(|wings| {
+                [
+                    wings
+                        .escapees()
+                        .map(|(owner, e)| (owner, false, e))
+                        .collect::<Vec<_>>(),
+                    wings
+                        .crew_escapees()
+                        .map(|(owner, e)| (owner, true, e))
+                        .collect(),
+                ]
+                .concat()
+            })
+            .map(|(owner, crew, escape)| PilotPose {
                 owner,
                 position: escape.position,
                 heading: escape.heading,
                 phase: escape.phase,
+                crew,
             })
             .collect(),
         ..RenderSnapshot::default()
@@ -331,18 +344,29 @@ pub fn entities(
             )),
         });
     }
-    for pose in current.pilots.iter().filter(|p| p.owner != player) {
+    // The own pilot's escape is part of its plane's exact state, but the
+    // second crew member of its plane is not: he is sent like any other.
+    for pose in current
+        .pilots
+        .iter()
+        .filter(|p| p.owner != player || p.crew)
+    {
+        let id = super::entity::pilot_id(pose.owner, pose.crew);
         let then = previous
-            .and_then(|p| p.pilots.iter().find(|q| q.owner == pose.owner))
+            .and_then(|p| {
+                p.pilots
+                    .iter()
+                    .find(|q| (q.owner, q.crew) == (pose.owner, pose.crew))
+            })
             .map(|q| q.position);
         if out
             .iter()
-            .any(|e| e.id == pose.owner && e.state.kind() == EntityKind::Pilot)
+            .any(|e| e.id == id && e.state.kind() == EntityKind::Pilot)
         {
             continue;
         }
         out.push(Entity {
-            id: pose.owner,
+            id,
             state: EntityState::Pilot(pilot_state(
                 pose,
                 velocity_between(pose.position, then, ticks),
@@ -371,7 +395,7 @@ pub fn debris_state(
 /// An ejected pilot, quantized.
 pub fn pilot_state(pose: &PilotPose, velocity: [f64; 3]) -> PilotState {
     PilotState {
-        owner: pose.owner,
+        owner: super::entity::pilot_id(pose.owner, pose.crew),
         motion: Motion::of(pose.position, velocity),
         heading: turn16(pose.heading),
         phase: pose.phase,
@@ -593,6 +617,66 @@ mod tests {
             *lead.state.motion(),
             Motion::of(cockpit.flight.position, cockpit.flight.velocity)
         );
+    }
+
+    /// John, 2026-10-06: a two-seater's second crew member has a chute of his
+    /// own. Every client gets it, the flying seat's own plane's too (the own
+    /// pilot's chute is in the plane's exact state, his is not), under an id
+    /// of its own, and a client reads the plane and the seat back.
+    #[test]
+    fn a_two_seaters_second_chute_has_an_id_of_its_own_and_reaches_every_client() {
+        use tore_sim::ejection::Phase;
+        let pose = |owner: u32, crew: bool, x: f64| PilotPose {
+            owner,
+            position: [x, 3000., 0.],
+            heading: 0.5,
+            phase: Phase::Seat,
+            crew,
+        };
+        let current = RenderSnapshot {
+            pilots: vec![
+                pose(7, false, 0.),
+                pose(9, false, 10.),
+                pose(7, true, 20.),
+                pose(9, true, 30.),
+            ],
+            ..RenderSnapshot::default()
+        };
+        let sent = entities(&current, None, 7, &mut NameTable::new()).unwrap();
+        let pilots: Vec<(u32, u32)> = sent
+            .iter()
+            .filter_map(|e| match e.state {
+                EntityState::Pilot(p) => Some((e.id, p.owner)),
+                _ => None,
+            })
+            .collect();
+        let crew = |owner| crate::wire::entity::pilot_id(owner, true);
+        assert_eq!(
+            pilots,
+            [(9, 9), (crew(7), crew(7)), (crew(9), crew(9))],
+            "the own pilot is in the exact state; the three others are sent, in id order"
+        );
+        assert!(crew(7) != 7 && crew(9) != 9);
+        for (id, owner, seat) in [(9, 9, false), (crew(7), 7, true), (crew(9), 9, true)] {
+            assert_eq!(crate::wire::entity::pilot_owner(id), (owner, seat));
+        }
+        // Other clients get the own plane's two chutes.
+        let other = entities(&current, None, 3, &mut NameTable::new()).unwrap();
+        assert_eq!(
+            other
+                .iter()
+                .filter(|e| e.state.kind() == EntityKind::Pilot)
+                .count(),
+            4
+        );
+        // Through the wire coder both survive.
+        let again: Vec<Entity> = other
+            .iter()
+            .filter(|e| e.state.kind() == EntityKind::Pilot)
+            .copied()
+            .collect();
+        assert_eq!(again.len(), 4);
+        assert!(again.windows(2).all(|w| w[0].key() < w[1].key()));
     }
 
     #[test]

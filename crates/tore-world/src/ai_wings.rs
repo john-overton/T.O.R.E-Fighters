@@ -2437,6 +2437,17 @@ impl AiWings {
             .filter_map(|a| a.flight().escape.as_ref().map(|escape| (a.id(), escape)))
     }
 
+    /// The second crew members of the ejected two-seaters among them, in
+    /// roster order, each with the aircraft it left.
+    pub fn crew_escapees(&self) -> impl Iterator<Item = (u32, &tore_sim::ejection::Escape)> {
+        self.mission.actors().iter().filter_map(|a| {
+            a.flight()
+                .crew_escape
+                .as_ref()
+                .map(|escape| (a.id(), escape))
+        })
+    }
+
     /// A missile blast knocks an AI aircraft around, like the player's.
     pub fn jolt(&mut self, id: u32, from: [f64; 3], strength: f64) {
         if let Some(actor) = self.mission.actor_mut(id) {
@@ -4941,6 +4952,43 @@ mod tests {
         );
         assert_eq!(targets[0].hp, 0);
         assert_eq!(wings.escapees().count(), 1);
+    }
+
+    /// The same rule as the player's for every two-seater (agent decision,
+    /// 2026-10-06): an AI two-seater that ejects sends both crew, the second
+    /// first, and the radio hears one ejection.
+    #[test]
+    fn an_ai_two_seater_ejects_both_crew_and_a_single_seater_one() {
+        for (flags, crew) in [("16", 0), ("20", 1)] {
+            let mut targets = spawned();
+            let mut wings = AiWings::build_with(&payload(None), &targets, 0, |_| {
+                let mut profile = aircraft();
+                profile.fields.get_mut("flags").unwrap().value = flags.into();
+                Ok((profile, None))
+            })
+            .unwrap();
+            targets[0].hp = 0;
+            targets[1].hp = 0;
+            targets[1].localized_damage.structural_section = Some(live::DamageSection::Cockpit);
+            run(&mut wings, &mut targets, 1200);
+            assert_eq!(wings.escapees().count(), 1, "flags {flags}");
+            assert_eq!(wings.crew_escapees().count(), crew, "flags {flags}");
+            assert_eq!(
+                wings
+                    .ejection_events
+                    .iter()
+                    .filter(|(id, _, _)| *id == 1)
+                    .count(),
+                1,
+                "one ejection call for the aircraft, whatever its crew"
+            );
+            if crew == 1 {
+                let (owner, second) = wings.crew_escapees().next().unwrap();
+                let (_, pilot) = wings.escapees().next().unwrap();
+                assert_eq!(owner, 1);
+                assert!(second.ticks > pilot.ticks, "the second seat left first");
+            }
+        }
     }
 
     #[test]

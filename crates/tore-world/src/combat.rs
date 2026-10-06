@@ -63,6 +63,7 @@ struct Pose {
     wreck: Option<tore_sim::wreck::Phase>,
     crashed: bool,
     escape: Option<tore_sim::ejection::Escape>,
+    crew_escape: Option<tore_sim::ejection::Escape>,
 }
 /// Yaw, pitch and bank for one drawn airborne target.
 ///
@@ -505,6 +506,11 @@ impl Combat {
             position: escape.position,
             heading: escape.heading,
             phase: escape.phase,
+            crew: false,
+        };
+        let crew = |owner: u32, escape: &tore_sim::ejection::Escape| PilotPose {
+            crew: true,
+            ..pilot(owner, escape)
         };
         RenderSnapshot {
             tick: self.state.tick(),
@@ -666,6 +672,20 @@ impl Combat {
                         .into_iter()
                         .flat_map(|wings| wings.escapees())
                         .map(|(owner, escape)| pilot(owner, escape)),
+                )
+                // The second crew members of the ejected two-seaters follow
+                // every pilot, in the same order.
+                .chain(player.crew_escape.iter().map(|escape| crew(own_id, escape)))
+                .chain(others.iter().filter_map(|(own, pose)| {
+                    pose.crew_escape
+                        .as_ref()
+                        .map(|escape| crew(own.aircraft, escape))
+                }))
+                .chain(
+                    wings
+                        .into_iter()
+                        .flat_map(|wings| wings.crew_escapees())
+                        .map(|(owner, escape)| crew(owner, escape)),
                 )
                 .collect(),
             models: {
@@ -1382,6 +1402,7 @@ impl Pose {
             wreck: s.wreck.as_ref().map(|wreck| wreck.phase),
             crashed: s.crashed,
             escape: s.escape.clone(),
+            crew_escape: s.crew_escape.clone(),
         }
     }
 }

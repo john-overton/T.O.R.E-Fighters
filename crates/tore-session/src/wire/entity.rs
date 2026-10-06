@@ -223,10 +223,31 @@ pub struct DebrisState {
     pub attitude: [u16; 3],
 }
 
+/// The bit a two-seater's second crew member adds to the aircraft's id to
+/// name his own chute: an entity's id is its key, so both seats of one
+/// aircraft need ids of their own, and the wire's ids have room above any
+/// aircraft's (docs/formats/net-protocol.md, "Ejected pilots"). It changes no
+/// message layout: a build that does not know it sees a pilot of an aircraft
+/// that does not exist.
+pub const CREW_PILOT_BIT: u32 = 1 << 31;
+
+/// The id of an ejected pilot's entity: the aircraft's, with
+/// [`CREW_PILOT_BIT`] set for its second crew member.
+pub fn pilot_id(owner: u32, crew: bool) -> u32 {
+    if crew { owner | CREW_PILOT_BIT } else { owner }
+}
+
+/// The aircraft a pilot entity left, and whether it is the second crew
+/// member, from the entity's id.
+pub fn pilot_owner(id: u32) -> (u32, bool) {
+    (id & !CREW_PILOT_BIT, id & CREW_PILOT_BIT != 0)
+}
+
 /// An ejected pilot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PilotState {
-    /// The aircraft it left; full records only.
+    /// The aircraft it left, with [`CREW_PILOT_BIT`] set for the second crew
+    /// member of a two-seater; full records only.
     pub owner: u32,
     pub motion: Motion,
     pub heading: u16,

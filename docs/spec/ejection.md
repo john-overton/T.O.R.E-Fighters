@@ -50,8 +50,40 @@ and inability to raise the nose and sustain lift. The numerical rules below are
   separated pilot. Restart clears confirmation, pilot and aircraft escape state.
 - The camera follows the separated pilot in exterior view. Ejection itself does
   not end or pause the mission. A cockpit view cannot reattach to the abandoned
-  aircraft. The host represents the player's pilot, not separately simulated
-  additional crew members.
+  aircraft.
+
+### Two-seaters
+
+John, 2026-10-06 (Q60): in a two-seater Shift+E twice ejects the RIO or
+co-pilot too, which the first build did not (it simulated the pilot alone).
+Both chutes are drawn and recorded. A two-seater is an aircraft whose PLANE
+flags carry bit 0x4, the multi-crew mark the cockpit voice reads, with a seat
+(bit 0x10). The details are agent decisions:
+
+- The second crew member's seat leaves first, as real two-seaters sequence it,
+  **0.4 seconds (48 ticks)** ahead of the pilot's. The pilot's own escape
+  starts on the press exactly as before, so a single player's view, timing and
+  sounds are unchanged; the crew member's starts as if it had left 48 ticks
+  earlier (from where the aircraft then was, straight back along its velocity)
+  and is stepped those 48 ticks at once. A frame later it is about 35 feet
+  above and a few feet astern of the pilot's seat, further along its flight.
+- It is the same seat and chute as the pilot's: the same 6 foot start along
+  aircraft up and 80 ft/s impulse, 90 ticks of seat flight, the chute opening
+  below 4,000 feet AGL, the same landing rule. A low or inverted ejection that
+  kills the pilot kills the crew member too.
+- The same rule applies to every two-seater, the AI's included: an AI aircraft
+  that ejects (the fitted recovery decision above, unchanged) sends both crew.
+  The ejection speech, the ejection score and the radio's single "ejected"
+  call are once per aircraft, not per seat.
+- The pilot alone decides the debrief and any survival logic: the pilot's
+  status, the aircraft's wreck rules and a player's own HUD lines about the
+  pilot. The crew member's fate is one HUD line when his chute comes down,
+  "Crew member landed safely" or "Crew member killed during ejection". No
+  debrief row, kill credit or rescue counts him; campaign rescue is not built.
+- The crew member's chute is not part of the plane's exact state: nothing
+  steps from it, so the wire's own-state coding and the checkpoints are
+  unchanged. A host taking over a flight mid-descent therefore loses the crew
+  member's chute (the pilot's continues), a cosmetic limit.
 
 ## Fitted AI decision
 
@@ -126,8 +158,10 @@ unknown where marked in the source notes.
 Art uses the imported indexed textures and pose geometry. Source BC/0x96 line
 records provide the fitted suspension-cord interpretation; GPU ribbons are
 0.05 feet wide. Camera distance is 60 feet aft and 22 feet up, pitched down
-0.34 radians, all fitted presentation choices. Independent extra crew,
-post-separation weapon damage to pilots and rendered pilot shadows remain open.
+0.34 radians, all fitted presentation choices. Post-separation weapon damage to
+pilots and rendered pilot shadows remain open. A two-seater's second crew
+member uses the same art and has no ejection speech or sound of his own: one
+set of ejection sounds plays for the aircraft (agent decision).
 
 The pilot renderer selects the camera-facing skin of each imported panel, as
 aircraft rendering does. Opposing skins keep their own UV coordinates and atlas

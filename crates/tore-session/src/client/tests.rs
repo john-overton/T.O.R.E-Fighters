@@ -827,3 +827,62 @@ fn no_exact_state_arrives_before_the_seated_message() {
         assert_eq!(early, 0, "seed {seed}: own states arrived before Seated");
     }
 }
+
+/// John, 2026-10-06: in a networked two-seater Shift+E twice ejects the crew
+/// too. The host sends the second chute under an id of its own to every
+/// client, the flying seat's own included (its pilot's is part of the
+/// plane's exact state, the crew member's is not), and each draws two chutes
+/// for the one aircraft.
+#[test]
+fn a_two_seaters_crew_ejects_both_chutes_and_every_client_draws_them() {
+    let mut rig = Rig::with_import(
+        spec(2, 2, 50),
+        LinkConfig::for_round_trip(Duration::from_millis(60), 0.05, 0.0, 0.0),
+        41,
+        tore_world::test_support::resources::two_seat_resources(),
+        |_| {},
+    );
+    // Alpha pulls the handle at 6 seconds and again half a second later.
+    let mut presses = 0;
+    let eject: Script = Box::new(move |now, _, _| {
+        let mut controls = weave(now.as_secs_f64());
+        let at = |s: f64| now.as_secs_f64() >= s;
+        if (presses == 0 && at(6.)) || (presses == 1 && at(6.5)) {
+            presses += 1;
+            controls
+                .pilot
+                .commands
+                .push(tore_sim::flight::PilotCommand::Eject);
+        }
+        controls
+    });
+    let a = rig.join(|c| c.callsign = "Alpha".into(), eject);
+    let b = rig.join(|c| c.callsign = "Bravo".into(), weave_script());
+    // What a client's picture holds of the ejected aircraft.
+    let chutes = |rig: &Rig, who: usize| -> Vec<(u32, bool)> {
+        let mut seen: Vec<(u32, bool)> = rig.players[who]
+            .picture
+            .iter()
+            .flat_map(|p| p.pilots.iter().map(|p| (p.owner, p.crew)))
+            .collect();
+        seen.sort_unstable();
+        seen
+    };
+    let both = rig.run_until(Duration::from_secs(20), |rig| {
+        chutes(rig, a).len() == 2 && chutes(rig, b).len() == 2
+    });
+    let (alpha, bravo) = (chutes(&rig, a), chutes(&rig, b));
+    assert!(both, "alpha sees {alpha:?}, bravo sees {bravo:?}");
+    let plane = alpha[0].0;
+    assert_eq!(alpha, [(plane, false), (plane, true)]);
+    assert_eq!(bravo, alpha, "the same two chutes of the same aircraft");
+    // The host's picture of the plane has the same two.
+    let host = rig.host.world();
+    let flight = &host
+        .cockpits
+        .iter()
+        .find(|c| c.plane.0 == plane)
+        .unwrap()
+        .flight;
+    assert!(flight.escape.is_some() && flight.crew_escape.is_some());
+}
