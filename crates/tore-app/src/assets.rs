@@ -55,13 +55,15 @@ fn check_multiplayer_art(resources: &tore_import::Resources) -> AppResult<()> {
 
 /// True for what the multiplayer slice (EF1) added to the pack: the pieces in
 /// `MULTIPLAYER_ART` and `MULTIPLAYER_DATA`, the quick-message file and the
-/// marker.
+/// marker, and the import's source entry (slice L1: the build and importer,
+/// which no flight depends on).
 fn is_multiplayer_resource(name: &str) -> bool {
     use tore_import::selection::{CHAT_RESOURCE, MULTIPLAYER_ART, MULTIPLAYER_DATA};
     MULTIPLAYER_ART.contains(&name)
         || MULTIPLAYER_DATA.contains(&name)
         || name == CHAT_RESOURCE
         || name == tore_import::pack::MULTIPLAYER_MARKER
+        || name == tore_import::source::RESOURCE
 }
 
 impl Assets {
@@ -328,6 +330,7 @@ mod tests {
         }
         assert!(is_multiplayer_resource(selection::CHAT_RESOURCE));
         assert!(is_multiplayer_resource("TORE_MULTIPLAYER_V1"));
+        assert!(is_multiplayer_resource(tore_import::source::RESOURCE));
         // What flights already depended on is not touched.
         for name in [
             "PANELFNT.PIC",
