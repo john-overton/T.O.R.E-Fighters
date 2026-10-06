@@ -213,9 +213,10 @@ pub fn stop(audio: &Audio) {
 
 /// The listener for a frame drawn from `camera`: its position and right
 /// hand, built as live flight builds it from the main view, and outside
-/// unless it sits in the player's cockpit. `cut` changes whenever the
-/// camera cuts, so a cut is never heard as something flying past.
-pub fn listener(camera: &Camera, cut: u8) -> Listener {
+/// unless it sits in the cockpit of `player`, the plane the recording is
+/// for. `cut` changes whenever the camera cuts, so a cut is never heard as
+/// something flying past.
+pub fn listener(camera: &Camera, cut: u8, player: u32) -> Listener {
     let basis = Basis::new(
         f64::from(camera.yaw),
         f64::from(camera.pitch),
@@ -225,7 +226,7 @@ pub fn listener(camera: &Camera, cut: u8) -> Listener {
         position: camera.position,
         right: basis.right,
         view: cut,
-        external: camera.hidden_target != Some(0),
+        external: camera.hidden_target != Some(player),
         own: None,
     }
 }
@@ -303,6 +304,16 @@ impl ReplaySound {
         }
     }
 
+    /// The recording has grown (an observer's live recording): the sound
+    /// reads the newer read of it from here on.
+    pub fn extend(&mut self, recording: Arc<Recording>) {
+        if recording.events().len() != self.recording.events().len() {
+            (self.tones, self.stalls) = timelines(recording.events());
+        }
+        self.playback.extend(Arc::clone(&recording));
+        self.recording = recording;
+    }
+
     /// Schedules one frame's sound and plays it on `audio`, if there is a
     /// sound device.
     pub fn frame(&mut self, audio: Option<&Audio>, moment: &Moment<'_>) {
@@ -349,7 +360,8 @@ impl ReplaySound {
                 State::Playing => from.floor() + 1.,
             };
             self.state = State::Playing;
-            let listener = listener(moment.camera, self.cuts);
+            let player = self.playback.presentation.player;
+            let listener = listener(moment.camera, self.cuts, player);
             self.play(first, to.floor(), listener, moment.selected, &mut cues);
             // Playback stops by itself at the end.
             if clock.paused() {
@@ -422,8 +434,9 @@ impl ReplaySound {
         // Inside a gap the last frame before it holds.
         let frame = self.playback.frame(tick);
         let frame = frame.as_ref().map(|(frames, at)| &frames[*at]);
+        let player = self.playback.presentation.player;
         let down = frame
-            .and_then(|frame| frame.aircraft.iter().find(|a| a.id == 0))
+            .and_then(|frame| frame.aircraft.iter().find(|a| a.id == player))
             .is_some_and(|p| p.flags.crashed || p.flags.ejected || !p.flags.alive);
         if down && !self.player_down {
             cues.push((tick, Cue::TowerCancelled));
@@ -437,7 +450,7 @@ impl ReplaySound {
             }
             match event.kind.as_str() {
                 vocab::kind::AUDIO_EFFECT => emissions.extend(emission(event)),
-                vocab::kind::AUDIO_RELEASE if event.subject == Some(0) => {
+                vocab::kind::AUDIO_RELEASE if event.subject == Some(player) => {
                     releases.extend(event.string(vocab::field::SOUND).map(str::to_owned));
                 }
                 _ => {}
@@ -1295,7 +1308,7 @@ mod tests {
         let mut camera = Camera::new();
         camera.position = [100., 2_000., -300.];
         [camera.yaw, camera.pitch, camera.roll] = [0.7, -0.2, 0.3];
-        let heard = listener(&camera, 4);
+        let heard = listener(&camera, 4, 0);
         assert_eq!(heard.position, [100., 2_000., -300.]);
         let basis = Basis::new(f64::from(0.7f32), f64::from(-0.2f32), -f64::from(0.3f32));
         assert_eq!(heard.right, basis.right);
@@ -1303,15 +1316,20 @@ mod tests {
         assert!(heard.external);
         // Only a camera in the player's own cockpit is inside.
         camera.hidden_target = Some(0);
-        assert!(!listener(&camera, 0).external);
+        assert!(!listener(&camera, 0, 0).external);
         camera.hidden_target = Some(3);
-        assert!(listener(&camera, 0).external);
+        assert!(listener(&camera, 0, 0).external);
+        // The player is the plane the recording is for, not plane 0.
+        assert!(!listener(&camera, 0, 3).external);
+        camera.hidden_target = Some(0);
+        assert!(listener(&camera, 0, 3).external);
+        camera.hidden_target = Some(3);
         // Looking north, an explosion to the east is on the right.
         let mut north = Camera::new();
         [north.yaw, north.pitch, north.roll] = [0.; 3];
         north.position = [0., 1_000., 0.];
         let mix =
-            tore_sim::acoustics::mix(Kind::Explosion, [800., 1_000., 0.], listener(&north, 0));
+            tore_sim::acoustics::mix(Kind::Explosion, [800., 1_000., 0.], listener(&north, 0, 0));
         assert!(mix.pan > 0.9, "{}", mix.pan);
         // Every tick is heard from the frame's camera, and a cut to another
         // view, aircraft or the drone is a new view for the pass detector.

@@ -84,6 +84,11 @@ impl WeatherTrack {
         }
     }
 
+    /// The recording grew (an observer's): it now ends at `end`.
+    pub fn set_end(&mut self, end: u64) {
+        self.end = self.end.max(end);
+    }
+
     /// The newest tick with snapshots up to it.
     #[cfg(test)]
     pub fn built(&self) -> u64 {

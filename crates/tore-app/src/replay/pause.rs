@@ -12,6 +12,9 @@ use tore_formats::ui::MenuNode;
 /// The `?` row that returns to the Replays screen, in place of retail End
 /// mission. Label chosen by John on 2026-09-28.
 pub const END_REPLAY: &str = "End Replay";
+/// The same row in the live view of a mission being flown (an observer's):
+/// it stops the watch and returns to the lobby.
+pub const STOP_WATCHING: &str = "Stop Watching";
 /// The retail `?` row that quits the game, shown as Exit to Desktop.
 pub const EXIT: &str = "Exit to Windows";
 /// Authored Pref rows: the same switches as the N, T, R and C keys.
@@ -195,7 +198,7 @@ pub enum Choice {
     None,
     /// The menu moved: a click sound.
     Click,
-    /// Back to the Replays screen.
+    /// Back to the Replays screen, or from a live view to the lobby.
     Leave,
     /// Quit the game.
     Exit,
@@ -213,6 +216,9 @@ pub struct Menu {
     pub tree: Vec<MenuNode>,
     /// While open: whether playback goes on when it closes.
     open: Option<bool>,
+    /// The playhead was at the live edge when the menu opened, and returns
+    /// there when it closes (a live view's paused time is not worth keeping).
+    was_live: bool,
 }
 
 impl Menu {
@@ -221,7 +227,19 @@ impl Menu {
             widget: PauseMenu::default(),
             tree: tree(imported),
             open: None,
+            was_live: false,
         }
+    }
+
+    /// The menu of a live view: End Replay reads Stop Watching.
+    pub fn watching(imported: &[MenuNode]) -> Self {
+        let mut menu = Self::new(imported);
+        for node in menu.tree.iter_mut().flat_map(|tab| tab.children.iter_mut()) {
+            if node.label == END_REPLAY {
+                node.label = STOP_WATCHING.into();
+            }
+        }
+        menu
     }
 
     pub fn is_open(&self) -> bool {
@@ -232,6 +250,7 @@ impl Menu {
     /// was playing.
     pub fn open(&mut self, clock: &mut Clock) {
         if self.open.is_none() {
+            self.was_live = clock.following();
             self.open = Some(!clock.paused());
             clock.pause();
         }
@@ -271,6 +290,9 @@ impl Menu {
             && clock.paused()
         {
             clock.toggle();
+            if std::mem::take(&mut self.was_live) {
+                clock.end();
+            }
         }
     }
 
@@ -375,7 +397,7 @@ impl Menu {
                 self.close(clock);
                 Choice::Click
             }
-            END_REPLAY => Choice::Leave,
+            END_REPLAY | STOP_WATCHING => Choice::Leave,
             EXIT => Choice::Exit,
             "Graphics..." => Choice::Graphics,
             "Sound..." => Choice::Sound,

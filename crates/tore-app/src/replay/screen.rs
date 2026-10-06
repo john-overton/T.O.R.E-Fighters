@@ -209,19 +209,22 @@ impl Details {
         }
         sides.sort_by_key(|(side, ..)| side.code());
         let events = recording.events();
+        // The plane the recording is for: plane 0 unless its header names
+        // another (a networked flight's seat).
+        let seat = super::convert::Presentation::from_header(recording.header()).player;
         let kills = events
             .iter()
             .filter(|e| {
                 e.event.kind == kind::COMBAT_DESTROYED
-                    && e.event.object == Some(0)
+                    && e.event.object == Some(seat)
                     && e.event
                         .subject
-                        .is_some_and(|s| s != 0 && recording.aircraft_info(s).is_some())
+                        .is_some_and(|s| s != seat && recording.aircraft_info(s).is_some())
             })
             .count();
         Ok(Self {
             player: recording
-                .aircraft_info(0)
+                .aircraft_info(seat)
                 .map(|info| info.name.clone())
                 .filter(|name| !name.is_empty()),
             sides: sides

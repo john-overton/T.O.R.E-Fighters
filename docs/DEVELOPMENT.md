@@ -636,10 +636,12 @@ does both against a real server.
 
 `Down` is nose up and `Up` nose down, as in the game. Set `TORE_RECORD_MISSIONS=1` to record the
 flight. The battery's hand-flown scenarios (`replay-script-*`, scripts in
-`tools/battery_scenarios/scripts/`) use it. The replay viewer takes its own events, so scripted
-keys do not reach it; its mouse events do. `tools/battery_scenarios/_replay_drive.py`, which
-sends keys to a window through Hyprland by process id, remains for the viewer and for
-quitting with Alt+F4; see the [replay lane](testing/lane-replay.md#how-the-checks-work).
+`tools/battery_scenarios/scripts/`) use it. The replay viewer takes its own events, but a script's
+keys reach it too since the observer screen (slice F2-O2: the same names, `Escape`, `End`, `Tab`,
+`Enter` and the letters, with no Alt or Command), and `shot` writes the viewer's picture there.
+`tools/battery_scenarios/_replay_drive.py`, which sends keys to a window through Hyprland by
+process id, remains for the replay lane and for quitting with Alt+F4; see the
+[replay lane](testing/lane-replay.md#how-the-checks-work).
 
 In PowerShell, create `.local/headless` with `New-Item -ItemType Directory -Force .local/headless`,
 set `$env:TORE_DATA_DIR` to the absolute `.local/dev-profile` path, and run the

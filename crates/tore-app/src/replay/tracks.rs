@@ -69,7 +69,12 @@ fn sampled(tick: u64, seen: bool) -> bool {
 
 /// Everything `frames` hold for the tracks. `guns` are the weapon ids of
 /// gun rounds, which have no trail.
-fn batch(frames: &[Frame], guns: &BTreeSet<u32>, seen: &mut BTreeSet<(bool, u32)>) -> Batch {
+fn batch(
+    frames: &[Frame],
+    guns: &BTreeSet<u32>,
+    player: u32,
+    seen: &mut BTreeSet<(bool, u32)>,
+) -> Batch {
     let mut out = Batch {
         first: frames.first().map_or(0, |f| f.tick),
         last: frames.last().map_or(0, |f| f.tick),
@@ -83,7 +88,7 @@ fn batch(frames: &[Frame], guns: &BTreeSet<u32>, seen: &mut BTreeSet<(bool, u32)
                     .push((state.id, tick, state.position.map(|v| v as f32)));
             }
             seen.insert((false, state.id));
-            if state.id == 0 {
+            if state.id == player {
                 out.player.push((
                     tick,
                     View {
@@ -203,16 +208,23 @@ impl Tracks {
     pub fn scan(recording: &Recording) -> Self {
         let mut tracks = Self::new(recording.first_tick().unwrap_or(0));
         let guns = guns(recording);
+        let player = player_of(recording);
         let mut seen = BTreeSet::new();
         for index in 0..recording.chunks().len() {
             match recording.decode_chunk(index) {
-                Ok(frames) => tracks.merge(batch(&frames, &guns, &mut seen)),
+                Ok(frames) => tracks.merge(batch(&frames, &guns, player, &mut seen)),
                 Err(error) => log::warn!("Replay: chunk {index} is unreadable: {error}"),
             }
         }
         tracks.done = true;
         tracks
     }
+}
+
+/// The plane a recording is for: `draw.player` in its header, otherwise
+/// plane 0. A recording with no player (an observer's) names none.
+fn player_of(recording: &Recording) -> u32 {
+    crate::replay::convert::Presentation::from_header(recording.header()).player
 }
 
 /// Weapon ids of gun rounds.
@@ -232,6 +244,8 @@ enum Message {
 /// The background pass. Dropping it stops the pass at its next chunk.
 pub struct Scanner {
     receiver: mpsc::Receiver<Message>,
+    /// A live pass is handed each newer read of the recording here.
+    feed: Option<mpsc::Sender<Arc<Recording>>>,
 }
 
 impl Scanner {
@@ -242,6 +256,7 @@ impl Scanner {
             .name("replay tracks".into())
             .spawn(move || {
                 let guns = guns(&recording);
+                let player = player_of(&recording);
                 let mut seen = BTreeSet::new();
                 for index in 0..recording.chunks().len() {
                     let frames = match recording.decode_chunk(index) {
@@ -252,7 +267,7 @@ impl Scanner {
                         }
                     };
                     if sender
-                        .send(Message::Batch(batch(&frames, &guns, &mut seen)))
+                        .send(Message::Batch(batch(&frames, &guns, player, &mut seen)))
                         .is_err()
                     {
                         return;
@@ -263,7 +278,65 @@ impl Scanner {
         if let Err(error) = spawned {
             log::warn!("Replay: could not start the track pass: {error}");
         }
-        Self { receiver }
+        Self {
+            receiver,
+            feed: None,
+        }
+    }
+
+    /// The pass over a recording that is still growing (an observer's): it
+    /// reads the chunks there are, then waits for [`Scanner::feed`] to hand
+    /// it a newer read of the same recording and reads the chunks added
+    /// since, and so on until it is dropped. It never says it is done.
+    pub fn start_live(recording: Arc<Recording>) -> Self {
+        let (sender, receiver) = mpsc::sync_channel(8);
+        let (feed, fed) = mpsc::channel::<Arc<Recording>>();
+        let spawned = std::thread::Builder::new()
+            .name("replay tracks".into())
+            .spawn(move || {
+                let mut recording = recording;
+                let mut seen = BTreeSet::new();
+                let mut next = 0;
+                loop {
+                    let guns = guns(&recording);
+                    let player = player_of(&recording);
+                    while next < recording.chunks().len() {
+                        match recording.decode_chunk(next) {
+                            Ok(frames) => {
+                                let batch =
+                                    Message::Batch(batch(&frames, &guns, player, &mut seen));
+                                if sender.send(batch).is_err() {
+                                    return;
+                                }
+                            }
+                            Err(error) => log::warn!("Replay: chunk {next} is unreadable: {error}"),
+                        }
+                        next += 1;
+                    }
+                    // The newest read waiting, or the next to arrive.
+                    let Ok(mut newest) = fed.recv() else {
+                        return;
+                    };
+                    while let Ok(later) = fed.try_recv() {
+                        newest = later;
+                    }
+                    recording = newest;
+                }
+            });
+        if let Err(error) = spawned {
+            log::warn!("Replay: could not start the track pass: {error}");
+        }
+        Self {
+            receiver,
+            feed: Some(feed),
+        }
+    }
+
+    /// Hands a live pass a newer read of its recording.
+    pub fn feed(&self, recording: Arc<Recording>) {
+        if let Some(feed) = &self.feed {
+            let _ = feed.send(recording);
+        }
     }
 
     /// Merges whatever has arrived. True when anything did.
@@ -285,6 +358,18 @@ impl Scanner {
             match self.receiver.recv() {
                 Ok(Message::Batch(batch)) => tracks.merge(batch),
                 Ok(Message::Done) | Err(_) => tracks.done = true,
+            }
+        }
+    }
+
+    /// Waits until the pass has read every chunk of `recording`, for tests.
+    #[cfg(test)]
+    pub fn wait_for(&mut self, tracks: &mut Tracks, recording: &Recording) {
+        let wanted = recording.last_tick().map_or(0, |last| last + 1);
+        while tracks.scanned < wanted {
+            match self.receiver.recv() {
+                Ok(Message::Batch(batch)) => tracks.merge(batch),
+                Ok(Message::Done) | Err(_) => break,
             }
         }
     }
@@ -343,6 +428,42 @@ pub(crate) mod tests {
         // Ticks before the first read as the first.
         assert_eq!(tracks.view(0), tracks.view(fixture::FIRST));
         assert!(tracks.view(fixture::LAST + 10).is_some());
+    }
+
+    /// A pass over a growing recording reads each new chunk once and ends
+    /// with what a pass over the finished recording finds.
+    #[test]
+    fn the_live_pass_reads_a_growing_recording_chunk_by_chunk() {
+        let dir = crate::replay::tests::TempDir::new("tracks-live");
+        let mut growing = fixture::Growing::new(dir.path(), "live");
+        growing.push(5, 300);
+        let early = growing.open();
+        let mut scanner = Scanner::start_live(Arc::clone(&early));
+        let mut tracks = Tracks::new(early.first_tick().unwrap());
+        scanner.wait_for(&mut tracks, &early);
+        assert_eq!(tracks.scanned(), early.last_tick().unwrap() + 1);
+        assert!(!tracks.done(), "a live pass is never done");
+        // The view waits where the pass has not been.
+        assert!(tracks.view(early.last_tick().unwrap() + 1).is_none());
+        growing.push(301, 900);
+        let later = growing.open();
+        scanner.feed(Arc::clone(&later));
+        // Handing it the same read again changes nothing.
+        scanner.feed(Arc::clone(&later));
+        scanner.wait_for(&mut tracks, &later);
+        assert_eq!(tracks.scanned(), later.last_tick().unwrap() + 1);
+        let finished = growing.finish();
+        let direct = Tracks::scan(&finished);
+        let read = later.last_tick().unwrap();
+        assert_eq!(tracks.aircraft.keys().collect::<Vec<_>>(), [&0, &1, &2, &3]);
+        for (id, samples) in &tracks.aircraft {
+            let all = &direct.aircraft[id];
+            assert_eq!(samples[..], all[..samples.len()], "aircraft {id}");
+            assert!(samples.last().unwrap().0 + SAMPLE_TICKS > read);
+        }
+        assert_eq!(tracks.missiles.len(), direct.missiles.len());
+        assert_eq!(tracks.destroyed(read), direct.destroyed(read));
+        assert_eq!(tracks.view(read), direct.view(read));
     }
 
     #[test]

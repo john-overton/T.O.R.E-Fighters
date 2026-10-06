@@ -329,6 +329,9 @@ struct App {
     /// A networked flight on screen, with the single-player state it set
     /// aside.
     net_flight: Option<net::play::NetFlight>,
+    /// The game's watch of a flying mission while it has no plane, and the
+    /// replay viewer's live view of it (slice F2-O2).
+    observing: Option<net::observe::Observing>,
     /// Why the session ended, in plain words, for the player.
     net_ending: Option<String>,
     /// The Direct Connection screen, open over the main menu (EF7).
@@ -2602,14 +2605,25 @@ impl App {
                             let _ = std::fs::create_dir_all(parent);
                         }
                         // The 3D view with the cockpit, HUD and instruments as
-                        // the last frame drew them.
-                        if let Err(error) = renderer.capture_sim(
-                            &path,
-                            &self.camera,
-                            &self.world.terrain,
-                            &self.scenery,
-                            true,
-                        ) {
+                        // the last frame drew them; in the replay viewer (the
+                        // observer screen too), its camera, world and scenery.
+                        let result = match &self.replay {
+                            Some(replay) => renderer.capture_sim(
+                                &path,
+                                replay.viewer.camera(),
+                                &replay.viewer.world,
+                                &replay.viewer.scenery,
+                                true,
+                            ),
+                            None => renderer.capture_sim(
+                                &path,
+                                &self.camera,
+                                &self.world.terrain,
+                                &self.scenery,
+                                true,
+                            ),
+                        };
+                        if let Err(error) = result {
                             self.error = Some(format!("{}: {error}", path.display()).into());
                         }
                     }
@@ -2641,6 +2655,22 @@ impl App {
             if !event.repeat {
                 self.toggle_fullscreen();
             }
+            return Action::None;
+        }
+        // The replay viewer takes the window's keys itself (`replay_event`);
+        // a script's come here.
+        if self.screen == Screen::Replay
+            && self.script.is_some()
+            && !self.modifiers.alt_key()
+            && !self.modifiers.super_key()
+        {
+            self.replay_script_key(
+                event_loop,
+                &event.physical,
+                &name,
+                event.pressed,
+                event.repeat,
+            );
             return Action::None;
         }
         // Exit to desktop keeps its meaning over every screen, the
@@ -11504,6 +11534,7 @@ Weather: --weather-condition 0..5 selects one of the six source choices (clear, 
         net_built: None,
         net_flight: None,
         net_ending: None,
+        observing: None,
         direct: Default::default(),
         internet: Default::default(),
         lobby: Default::default(),

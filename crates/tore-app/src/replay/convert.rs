@@ -46,6 +46,10 @@ pub const SLOTS_KEY: &str = "draw.slots";
 /// Header extra: the recording's player is this plane. Absent when it is
 /// plane 0, single player's, so those recordings are as they always were.
 pub const PLAYER_KEY: &str = "draw.player";
+/// The player of a recording that has none, an observer's: no plane has
+/// this id, so nothing is drawn as the player's aircraft. It is what a
+/// networked observer's frames carry as their own plane.
+pub const NO_PLAYER: u32 = u32::MAX;
 
 /// How a recording draws the aircraft other than the player, kept in the
 /// header's extras because it holds for the whole flight.
@@ -756,7 +760,10 @@ pub fn snapshot(
             .iter()
             .find(|state| state.id == presentation.player)
             .map(pose)
-            .unwrap_or_default(),
+            .unwrap_or_else(|| AircraftPose {
+                id: presentation.player,
+                ..AircraftPose::default()
+            }),
         targets: frame
             .aircraft
             .iter()

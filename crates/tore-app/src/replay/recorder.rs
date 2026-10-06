@@ -2418,7 +2418,7 @@ mod tests {
         assert_eq!((views[3].1, views[3].2), (None, Some(false)));
         assert!(views[2].0 > views[1].0 && views[3].0 > views[2].0);
         // The replay viewer follows them for the player.
-        let targets = super::super::viewer::targets(recording.events());
+        let targets = super::super::viewer::targets(recording.events(), 0);
         let player: Vec<(u64, Option<u32>)> = views.iter().map(|v| (v.0, v.1)).collect();
         assert_eq!(targets[&0], player);
         // The summary's bookmark window says so in words.

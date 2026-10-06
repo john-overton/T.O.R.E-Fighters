@@ -328,6 +328,7 @@ screen. "View + RB" means hold View, then press RB. A dash means no default.
 | Replay viewer | P | Save the view, without the interface, as a PNG in `screenshots/` |
 | Replay viewer | Esc | The pause menu, over the view even with the interface hidden: pauses playback; Esc again or Resume replay plays on as before, ? > End Replay goes back to the Replays screen, and the Control tab opens the controls screen |
 | Replay viewer, pause menu open | Arrow keys, Tab, Enter / Space, Esc, left click | Move, choose and back out, as in the flight menu; every other key and click waits until it closes |
+| Watching a networked mission (slice F2-O2) | The replay viewer's keys | As in the viewer; the bar reads LIVE at the live edge, Space, J and the scrub keys leave it, End returns to it, and nothing goes past live. Esc opens the pause menu, whose first row, Stop Watching, returns to the lobby |
 
 ## Multiplayer phase 2
 
@@ -348,6 +349,5 @@ the tables above and remappable like any other key):
 | --- | --- | --- |
 | Networked flight, aircraft lost | Enter | Fly again, when the respawn rule, lives and delay allow (retail's key; slice F2-V) |
 | Networked flight, the AI flying for the player | Any flight control | Take the aircraft back (slice F2-A) |
-| Watching a networked mission | The replay viewer's keys | As in the viewer; End returns to live, and nothing goes past live; Esc returns to the lobby (slice F2-O2) |
 
 Alt+A and Alt+N stay free for stage G's data link sort and battle net.

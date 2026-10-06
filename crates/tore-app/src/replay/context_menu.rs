@@ -577,6 +577,8 @@ pub fn pickables(
 ) -> Vec<Pickable> {
     std::iter::once(&picture.player)
         .chain(&picture.targets)
+        // An observer's recording has no player: its empty pose is nobody.
+        .filter(|pose| pose.id != crate::replay::convert::NO_PLAYER)
         .filter(|pose| (pose.airborne || !pose.crashed) && aircraft(pose))
         .map(|pose| Pickable {
             target: Target::Aircraft(pose.id),

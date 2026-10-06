@@ -207,7 +207,9 @@ impl App {
                 return;
             }
         }
-        // Stage F phase 2: the AI flies an idle player's aircraft (F2-A).
+        // Stage F phase 2: the observer screen (F2-O2), and the AI flying an
+        // idle player's aircraft (F2-A).
+        self.observe_turn();
         self.net_idle(&controls);
         // A game hosted from the command line starts each mission as soon as
         // everyone holding a slot is ready and its player has closed the
@@ -373,7 +375,12 @@ impl App {
                 }
             }
             // The slices that build each part show them.
-            ClientEvent::Scores(_) | ClientEvent::Results(_) | ClientEvent::Observing(_) => {}
+            ClientEvent::Scores(_) | ClientEvent::Results(_) => {}
+            // The observer screen (slice F2-O2).
+            ClientEvent::Observing(observing) => self.observe_event(matches!(
+                *observing,
+                tore_session::wire::messages::Observing::Started(_)
+            )),
             ClientEvent::Closed(reason) => {
                 let left = self.net.as_ref().is_some_and(|s| s.left_at.is_some());
                 let text = self
@@ -803,6 +810,7 @@ impl App {
     /// words on the main menu.
     pub(crate) fn end_session(&mut self, event_loop: &ActiveEventLoop) {
         let reason = self.net_ending.take().unwrap_or_default();
+        self.end_observing();
         // The lobby goes with the session: its pages are put away, and the
         // reason shows on Direct Connection.
         self.close_lobby();

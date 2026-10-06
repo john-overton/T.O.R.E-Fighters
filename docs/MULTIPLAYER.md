@@ -290,7 +290,15 @@ back through the last 10 minutes and return to live, never past it. A player
 whose aircraft is lost flies again by the King's respawn rule and lives, or
 watches when none is left ([architecture](ARCHITECTURE.md#the-observer-view)).
 Rejoining with a token is stage K. *Built (F2-O1, 2026-10-05):* the stream, as
-described; the live mode of the viewer is slice F2-O2's.
+described. *Built (F2-O2, 2026-10-05):* the screen: pressing Watch in the lobby
+opens the replay viewer on a recording the game grows from the stream. The
+playhead follows the newest moment (LIVE on the bar), the last 10 minutes can
+be scrubbed, End returns to live and nothing goes past it; Esc opens the
+viewer's menu, whose Stop Watching returns to the lobby. Every aircraft is
+another's (the observer has no plane), the camera tells the host what to send
+at the full rate, and smoke, contrails and gun rounds are not drawn yet
+([how it works](ARCHITECTURE.md#the-observer-view)). An away player's own plane
+still shows on the flight screen.
 
 *Designed (stage K, 2026-10-05; agent proposals awaiting John unless
 credited):*
@@ -1138,7 +1146,7 @@ and connectivity ([architecture](ARCHITECTURE.md#master-server-and-connectivity)
 | Realism in flight | Fixed for the flight: no in-flight Cheat menu changes, so every client's prediction stays exact |
 | Phase 2 keys | Replies Alt+Shift+E (Engaging), Alt+Shift+W (Winchester), Alt+Shift+B (Bingo fuel), Alt+Shift+H (Need help); K the score board; U and Ctrl+T as retail; Enter flies again after a loss |
 | Converted replays' effects | John, 2026-10-05: a replay converted from a capture shows smoke, contrails and gun rounds, regenerated as the live client does (a follow-up to the conversion; built, slice E2) |
-| Whose plane a converted replay follows | John, 2026-10-05: the conversion swaps plane numbers so the player's plane is plane 0, as the viewer expects, and records the real plane in the header; the viewer learns to follow any seat with the observer screen, which needs it anyway |
+| Whose plane a converted replay follows | John, 2026-10-05: first the conversion swapped plane numbers so the player's plane was plane 0, as the viewer expected, and recorded the real plane in the header; then, the same day, the viewer learned to follow any seat with the observer screen, which needed it anyway, and the swap ended (built in F2-O2: every plane keeps its id, `draw.player` names the player's) |
 | A converted replay checked by ear and eye | John watches a converted replay of a real two-player flight, with sound, once the conversion is merged |
 | Checkpoints and presentation | John, 2026-10-05: smoke, contrail and flare puffs are coded exactly in a checkpoint; revisited only if the measured size is over the budget |
 | Explanations after a migration | John, 2026-10-05: accepted that the replay's and debug panels' explanations of calls and decisions begun before the checkpoint can be missing on the new host; nothing in play changes |

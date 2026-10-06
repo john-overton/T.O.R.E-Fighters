@@ -145,10 +145,14 @@ recorder does the same things with that plane's id:
   the viewer's reconstruction shows the recorded seat's plane as the player.
   A recording of plane 0 has no such entry and is byte for byte what it was.
 
-The viewer, the sound, the tracks and the panels still look for the player
-under id 0 when they read a decoded recording: the picture and the roster
-follow `draw.player`, and the rest is a later slice. This is an *agent
-decision*, 2026-09-29.
+The viewer, the sound, the tracks, the panels and the Replays screen's details
+follow `draw.player` too (John, 2026-10-05; slice F2-O2): the first aircraft
+watched, the weather's player, the target the views follow, the listener's
+cockpit, the telemetry and thinking panels' `You` and the details' aircraft
+are that plane's. A recording with no `draw.player` is plane 0's, as it was.
+A recording can also have no player at all: `draw.player` is then `4294967295`
+(the observer screen's live recording, below), no aircraft is drawn as the
+player's ownship, and the first aircraft is the one watched.
 
 ### What is recorded now
 
@@ -864,11 +868,43 @@ agent choices too.
   viewer was started from the command line. The game's own world and
   aircraft come back as they were.
 
+- **Live**, from the lobby of a multiplayer game while its mission flies: press
+  **Watch** (see [watching a mission live](#watching-a-mission-live)).
+
 The viewer builds the recorded world (map, weather choice, time of day,
 wind and cloud deck) from the header, so a replay looks the same whatever
 the viewer's own settings are. It loads the recorded player's aircraft and a
 model for every other aircraft type the flight drew, and every weapon shape
 the recording names.
+
+### Watching a mission live
+
+A player with no plane can watch the mission as it is flown (stage F phase 2,
+slice F2-O2, [the design](ARCHITECTURE.md#the-observer-view)): in the lobby of
+a game whose mission flies, the Loadout button reads **Watch**. The game
+records what the host sends an observer into a recording of its own, which
+grows as the mission flies, and the viewer plays it in a **live mode**. It is
+the same viewer: every key, view, drone, label, panel, trail and the pause
+menu work as on any replay, on the aircraft of both sides in their real plane
+ids, and the player has no plane of its own.
+
+- The transport bar reads **LIVE** while the playhead follows the newest
+  frame, a second behind it. **Space**, **J** and the other transport keys,
+  the bar and **Left** leave live; the last ten minutes can be scrubbed, and
+  **End** returns to live. The playhead never passes the newest frame.
+- With a delay set by the King (PvP only), the stream and the live view are
+  that many seconds behind the host.
+- The view asks the host to send what is near its camera at the full rate:
+  the selected aircraft (Tab chooses another), or where the free drone is.
+  Aircraft far from the camera move twice a second, as for any observer.
+- **Esc** opens the pause menu, whose first row is **Stop Watching**: it tells
+  the host and returns to the lobby. A mission that ends, or a host that stops
+  the watch, returns to the lobby too, and Messages says why.
+- Not there yet: smoke, contrails and gun rounds, radio and HUD lines, the AI's
+  thinking, and each aircraft's fuel, G and controls (the observer stream does
+  not carry them). The recording is a file in `observer/` in the data folder
+  while the watch lasts (about 16 MB for ten minutes of 30 aircraft) and is
+  removed when it ends; it is not listed on the Replays screen.
 
 ### Playing
 

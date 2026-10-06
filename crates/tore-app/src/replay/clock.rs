@@ -16,6 +16,14 @@ pub const SPEEDS: [f64; 9] = [0.125, 0.25, 0.5, 0.75, 1., 2., 4., 8., 16.];
 const NORMAL: usize = 4;
 /// Ladder index where fast forward starts.
 const FAST: usize = 5;
+/// A live playhead plays this far behind the newest frame, ticks (one
+/// second): the newest frames arrive in bursts, and the playhead must not
+/// run dry between them.
+pub const LIVE_LAG: f64 = 120.;
+/// A following playhead that falls this far behind the newest frame, ticks
+/// (three seconds), when frames arrive late and all at once, is brought back
+/// to the live edge.
+pub const LIVE_SLACK: f64 = 360.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
@@ -43,6 +51,14 @@ pub struct Clock {
     /// Index into [`SPEEDS`].
     speed: usize,
     paused: bool,
+    /// The recording grows as it plays (an observer's): its end is the
+    /// newest frame, and a playhead that reaches it waits for more instead
+    /// of stopping.
+    live: bool,
+    /// A live playhead the viewer has not moved: it stays at the live edge.
+    /// Scrubbing, pausing, reversing or changing the speed clears it, and End
+    /// sets it.
+    follow: bool,
 }
 
 /// The ladder speed at least twice as fast as `index`, capped at the top.
@@ -65,6 +81,45 @@ impl Clock {
             direction: Direction::Forward,
             speed: NORMAL,
             paused: false,
+            live: false,
+            follow: false,
+        }
+    }
+
+    /// A clock over a recording that is still growing, playing forwards at
+    /// the live edge: [`LIVE_LAG`] behind the newest frame `last`.
+    pub fn new_live(first: u64, last: u64) -> Self {
+        let mut clock = Self::new(first, last);
+        clock.live = true;
+        clock.follow = true;
+        clock.position = (clock.last as f64 - LIVE_LAG).max(first as f64);
+        clock
+    }
+
+    /// The recording grows as it plays.
+    pub fn is_live(&self) -> bool {
+        self.live
+    }
+
+    /// A live playhead that stays at the live edge, playing forwards at
+    /// normal speed: what the transport bar calls LIVE. Its speed is trimmed
+    /// a little (see [`Clock::advance`]) to keep it [`LIVE_LAG`] behind the
+    /// newest frame.
+    pub fn following(&self) -> bool {
+        self.live && self.follow && !self.paused
+    }
+
+    /// The newest frames and the oldest still kept are now `first` and
+    /// `last`, in a live recording. A playhead that fell off the old end
+    /// stays on the oldest frame; one that follows the live edge and has
+    /// fallen more than [`LIVE_SLACK`] behind it (frames that came late, all
+    /// at once) is brought back to [`LIVE_LAG`] behind.
+    pub fn grow(&mut self, first: u64, last: u64) {
+        self.first = first;
+        self.last = last.max(first);
+        self.position = self.position.clamp(self.first as f64, self.last as f64);
+        if self.following() && self.last as f64 - self.position > LIVE_SLACK {
+            self.position = (self.last as f64 - LIVE_LAG).max(self.first as f64);
         }
     }
 
@@ -113,13 +168,25 @@ impl Clock {
             return false;
         }
         let before = self.position;
-        let delta = self.direction.sign() * self.speed() * TICKS_PER_SECOND * seconds;
+        let mut rate = self.speed();
+        if self.following() {
+            // Bursts of new frames: a little slower when the playhead runs
+            // near the edge, a little faster when it has fallen behind.
+            let behind = self.last as f64 - self.position;
+            if behind < LIVE_LAG / 2. {
+                rate *= 0.9;
+            } else if behind > LIVE_LAG * 1.5 {
+                rate *= 1.1;
+            }
+        }
+        let delta = self.direction.sign() * rate * TICKS_PER_SECOND * seconds;
         self.position = (self.position + delta).clamp(self.first as f64, self.last as f64);
         let at_end = match self.direction {
             Direction::Forward => self.position >= self.last as f64,
             Direction::Reverse => self.position <= self.first as f64,
         };
-        if at_end {
+        // A live recording's end is only the newest frame so far.
+        if at_end && !(self.live && self.direction == Direction::Forward) {
             self.paused = true;
         }
         self.position != before
@@ -131,10 +198,11 @@ impl Clock {
     pub fn toggle(&mut self) {
         if !self.paused {
             self.paused = true;
+            self.follow = false;
             return;
         }
         match self.direction {
-            Direction::Forward if self.position >= self.last as f64 => {
+            Direction::Forward if self.position >= self.last as f64 && !self.live => {
                 self.position = self.first as f64;
             }
             Direction::Reverse if self.position <= self.first as f64 => {
@@ -148,6 +216,7 @@ impl Clock {
     /// K and the pause button.
     pub fn pause(&mut self) {
         self.paused = true;
+        self.follow = false;
     }
 
     /// The play button: forwards at normal speed.
@@ -187,6 +256,7 @@ impl Clock {
     }
 
     fn run(&mut self, direction: Direction, speed: usize) {
+        self.follow = false;
         self.direction = direction;
         self.speed = speed;
         self.paused = true;
@@ -210,11 +280,13 @@ impl Clock {
 
     /// Up: the next faster speed in the current direction.
     pub fn faster(&mut self) {
+        self.follow = false;
         self.speed = (self.speed + 1).min(SPEEDS.len() - 1);
     }
 
     /// Down: the next slower speed in the current direction.
     pub fn slower(&mut self) {
+        self.follow = false;
         self.speed = self.speed.saturating_sub(1);
     }
 
@@ -237,6 +309,7 @@ impl Clock {
     /// Puts the playhead at `position`, a fractional tick, within the
     /// recording.
     pub fn seek(&mut self, position: f64) {
+        self.follow = false;
         if position.is_finite() {
             self.position = position.clamp(self.first as f64, self.last as f64);
         }
@@ -247,9 +320,18 @@ impl Clock {
         self.seek(self.first as f64);
     }
 
-    /// End.
+    /// End. In a live recording it is the live edge: playing forwards at
+    /// normal speed, [`LIVE_LAG`] behind the newest frame.
     pub fn end(&mut self) {
-        self.seek(self.last as f64);
+        if self.live {
+            self.direction = Direction::Forward;
+            self.speed = NORMAL;
+            self.paused = false;
+            self.seek((self.last as f64 - LIVE_LAG).max(self.first as f64));
+            self.follow = true;
+        } else {
+            self.seek(self.last as f64);
+        }
     }
 
     /// PageUp and PageDown: the previous or next timeline marker. `markers`
@@ -281,8 +363,11 @@ impl Clock {
     }
 
     /// The speed readout: "1x", "0.25x", "Reverse 2x", with "paused" added
-    /// while paused.
+    /// while paused, and "LIVE" at the live edge of a growing recording.
     pub fn label(&self) -> String {
+        if self.following() {
+            return "LIVE".into();
+        }
         let speed = SPEEDS[self.speed];
         let number = if speed == 0.125 {
             "1/8x".to_owned()
@@ -509,5 +594,87 @@ mod tests {
         assert_eq!(grouped(999), "999");
         assert_eq!(grouped(86_808), "86,808");
         assert_eq!(grouped(1_234_567), "1,234,567");
+    }
+
+    /// A live clock over a recording that grows: it starts a second behind
+    /// the newest frame and keeps there.
+    #[test]
+    fn a_live_playhead_follows_a_growing_recording_and_never_passes_it() {
+        let mut clock = Clock::new_live(1_000, 2_000);
+        assert!(clock.is_live() && clock.following());
+        assert_eq!(clock.position(), 2_000. - LIVE_LAG);
+        assert_eq!(clock.label(), "LIVE");
+        // Playing at 1x with the recording growing 1x keeps the lag.
+        let mut last = 2_000;
+        for _ in 0..600 {
+            last += 2;
+            clock.grow(1_000, last);
+            assert!(clock.advance(1. / 60.));
+        }
+        let behind = last as f64 - clock.position();
+        assert!(
+            (LIVE_LAG / 2. ..=LIVE_LAG * 1.5).contains(&behind),
+            "{behind}"
+        );
+        assert!(clock.following());
+        // Frames that stop arriving: the playhead waits at the newest
+        // frame and does not pause, then goes on when more come.
+        for _ in 0..600 {
+            clock.advance(1. / 60.);
+        }
+        assert_eq!(clock.position(), last as f64);
+        assert!(!clock.paused());
+        clock.grow(1_000, last + 240);
+        assert!(clock.advance(0.5));
+        assert!(clock.position() > last as f64);
+        // Play from the end of a live recording does not start over.
+        clock.pause();
+        clock.seek(clock.last() as f64);
+        clock.toggle();
+        assert_eq!(clock.position(), clock.last() as f64);
+    }
+
+    /// Leaving the live edge and coming back with End.
+    #[test]
+    fn pausing_and_scrubbing_leave_live_and_end_returns_to_it() {
+        let mut clock = Clock::new_live(0, 10_000);
+        clock.pause();
+        assert!(!clock.following());
+        assert_eq!(clock.label(), "1x paused");
+        clock.grow(0, 11_000);
+        assert_eq!(clock.position(), 10_000. - LIVE_LAG);
+        // Stepping back and scrubbing keep the recording growing under it.
+        clock.step(-1);
+        assert!(!clock.following());
+        clock.seek(100.);
+        clock.play();
+        assert!(!clock.following());
+        assert_eq!(clock.label(), "1x");
+        // A fast playhead is not live even at the edge.
+        clock.end();
+        assert!(clock.following());
+        clock.faster();
+        assert!(!clock.following());
+        // End: the edge again, forwards at normal speed.
+        clock.reverse();
+        clock.end();
+        assert!(clock.following());
+        assert_eq!((clock.direction(), clock.speed()), (Direction::Forward, 1.));
+        assert_eq!(clock.position(), 11_000. - LIVE_LAG);
+        // The oldest frames fall out of the window: a playhead behind them
+        // waits at the new start.
+        clock.pause();
+        clock.seek(500.);
+        clock.grow(2_000, 12_000);
+        assert_eq!((clock.first(), clock.position()), (2_000, 2_000.));
+        // A recording that is not live ends where it ends.
+        let mut plain = Clock::new(0, 100);
+        assert!(!plain.is_live());
+        plain.seek(100.);
+        plain.end();
+        assert_eq!(plain.position(), 100.);
+        assert!(!plain.following());
+        plain.advance(1.);
+        assert!(plain.paused());
     }
 }

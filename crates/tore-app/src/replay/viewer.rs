@@ -17,6 +17,7 @@ use crate::replay::clock::{self, Clock, Direction};
 use crate::replay::context_menu::{
     self, Action, Item, Menu, Outcome, Pickable, RightClick, Target,
 };
+use crate::replay::convert;
 use crate::replay::devices::DeviceTrack;
 use crate::replay::drone::{Drone, Mode};
 use crate::replay::overlay::{self, Control, Marker, MarkerKind, Model, Placement};
@@ -470,6 +471,16 @@ fn compose(
     }
 }
 
+/// Every aircraft in `picture`: the plane the recording is for first, then
+/// the others. A recording with no player (an observer's) has only the
+/// others, so its empty player pose is never taken for an aircraft.
+fn everyone(picture: &RenderSnapshot) -> impl Iterator<Item = &crate::snapshot::AircraftPose> {
+    (picture.player.id != convert::NO_PLAYER)
+        .then_some(&picture.player)
+        .into_iter()
+        .chain(&picture.targets)
+}
+
 /// Straight-line feet between two points.
 fn feet(a: [f64; 3], b: [f64; 3]) -> f64 {
     (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt()
@@ -519,6 +530,8 @@ struct ReplayData<'a> {
     missiles: &'a BTreeMap<u32, (u32, String)>,
     comms: &'a [TimedEvent],
     now: u64,
+    /// The plane the recording is for.
+    player: u32,
 }
 
 impl Data for ReplayData<'_> {
@@ -552,7 +565,9 @@ impl Data for ReplayData<'_> {
     fn missing(&self, kind: Kind, subject: u32) -> String {
         let who = self.name(subject);
         match kind {
-            Kind::Thought if subject == 0 || self.info.get(&subject).is_some_and(|a| a.human) => {
+            Kind::Thought
+                if subject == self.player || self.info.get(&subject).is_some_and(|a| a.human) =>
+            {
                 format!("{who} is flown by a person, so there is no AI thinking to show.")
             }
             Kind::Thought => format!("No AI thinking recorded for {who} up to this moment."),
@@ -650,7 +665,10 @@ fn markers(events: &[TimedEvent]) -> Vec<Marker> {
 /// player's is the view target live flight's target views followed, sight
 /// hold included; a recording from before those were recorded has the
 /// player's designation, noted with every command the player gives.
-pub(super) fn targets(events: &[TimedEvent]) -> BTreeMap<u32, Vec<(u64, Option<u32>)>> {
+pub(super) fn targets(
+    events: &[TimedEvent],
+    player: u32,
+) -> BTreeMap<u32, Vec<(u64, Option<u32>)>> {
     let viewed = events
         .iter()
         .any(|e| e.event.kind == vocab::kind::PLAYER_VIEW_TARGET);
@@ -662,7 +680,7 @@ pub(super) fn targets(events: &[TimedEvent]) -> BTreeMap<u32, Vec<(u64, Option<u
         let target = match e.event.kind.as_str() {
             vocab::kind::PLAYER_VIEW_TARGET => e.event.object,
             // With view targets recorded, they alone give the player's.
-            _ if viewed && subject == 0 => continue,
+            _ if viewed && subject == player => continue,
             vocab::kind::AI_TARGET => e.event.object.or_else(|| e.event.id(vocab::field::TO)),
             vocab::kind::PLAYER_COMMAND => e.event.object,
             _ => continue,
@@ -688,6 +706,9 @@ pub struct Viewer {
     template: flight::State,
     scratch: flight::State,
     playback: Playback,
+    /// The plane the recording is for (`draw.player`, plane 0 in single
+    /// player's), or [`convert::NO_PLAYER`] for an observer's.
+    player: u32,
     tracks: Tracks,
     scanner: Scanner,
     weather: WeatherTrack,
@@ -768,6 +789,24 @@ pub struct Viewer {
     /// The renderer holds this viewer's world and models.
     entered: bool,
     last_frame: Option<Instant>,
+    /// Set while the recording grows as it plays (an observer's).
+    growth: Option<Growth>,
+}
+
+/// How much of a growing recording can be scrubbed: the last ten minutes
+/// (the design's rule for the observer view). Older frames stay in the file
+/// and are never shown.
+pub const LIVE_WINDOW_TICKS: u64 = 10 * 60 * 120;
+
+/// What a viewer on a growing recording keeps beyond a finished one's.
+struct Growth {
+    /// The import, for the art of weapons that appear later.
+    resources: Arc<BTreeMap<String, Vec<u8>>>,
+    /// The weapon shapes already loaded.
+    shapes: BTreeSet<String>,
+    /// How many events the viewer has read, to read them again when more
+    /// come.
+    events: usize,
 }
 
 impl Viewer {
@@ -783,6 +822,38 @@ impl Viewer {
         for problem in recording.problems() {
             log::warn!("Replay {}: {problem}", path.display());
         }
+        Self::load(path, recording, resources, options, None)
+    }
+
+    /// Opens the live view of a mission being flown: `recording` is the
+    /// first read of the observer's growing recording, and [`Viewer::grow`]
+    /// is given each newer read of it. The playhead follows the newest frame.
+    pub fn open_live(
+        recording: Arc<Recording>,
+        resources: Arc<BTreeMap<String, Vec<u8>>>,
+        options: &Options,
+    ) -> AppResult<Self> {
+        let growth = Growth {
+            resources: Arc::clone(&resources),
+            shapes: BTreeSet::new(),
+            events: 0,
+        };
+        Self::load(
+            Path::new("observer"),
+            recording,
+            &resources,
+            options,
+            Some(growth),
+        )
+    }
+
+    fn load(
+        path: &Path,
+        recording: Arc<Recording>,
+        resources: &BTreeMap<String, Vec<u8>>,
+        options: &Options,
+        growth: Option<Growth>,
+    ) -> AppResult<Self> {
         if recording.first_tick().is_none() {
             return Err(format!("{}: the recording holds no frames", path.display()).into());
         }
@@ -790,10 +861,12 @@ impl Viewer {
         let scenery = Scenery::build(resources, &world)?;
         let identities = crate::replay::convert::Identities::of(&recording);
         let presentation = crate::replay::convert::Presentation::from_header(recording.header());
-        let player = match identities.aircraft.get(&0) {
+        let player = match identities.aircraft.get(&presentation.player) {
             Some(id) => *id,
             None => {
-                log::warn!("Replay: the recording has no player aircraft; drawing an F/A-18D");
+                if presentation.player != convert::NO_PLAYER {
+                    log::warn!("Replay: the recording has no player aircraft; drawing an F/A-18D");
+                }
                 AircraftId::F18
             }
         };
@@ -813,10 +886,9 @@ impl Viewer {
             path,
             recording,
             (world, scenery),
-            ownship,
-            models,
-            art,
+            (ownship, models, art),
             options,
+            growth,
         )
     }
 
@@ -825,26 +897,21 @@ impl Viewer {
         path: &Path,
         recording: Arc<Recording>,
         (world, scenery): (Terrain, Scenery),
-        ownship: Airframe,
-        models: Vec<Airframe>,
-        art: CombatArt,
+        (ownship, models, art): (Airframe, Vec<Airframe>, CombatArt),
         options: &Options,
+        growth: Option<Growth>,
     ) -> AppResult<Self> {
         let (Some(first), Some(last)) = (recording.first_tick(), recording.last_tick()) else {
             return Err(format!("{}: the recording holds no frames", path.display()).into());
         };
         let playback = Playback::new(Arc::clone(&recording));
+        let player = playback.presentation.player;
         let template = ownship.start(&world);
-        let events = recording.events();
-        let markers = markers(events);
-        let mut marker_ticks: Vec<u64> = markers.iter().map(|m| m.tick).collect();
-        marker_ticks.dedup();
-        let comms = events
-            .iter()
-            .filter(|e| panels::Channel::of(&e.event.kind).is_some())
-            .cloned()
-            .collect();
-        let mut clock = Clock::new(first, last);
+        let mut clock = if growth.is_some() {
+            Clock::new_live(first.max(last.saturating_sub(LIVE_WINDOW_TICKS)), last)
+        } else {
+            Clock::new(first, last)
+        };
         if let Some(speed) = options.speed {
             if speed < 0. {
                 clock.end();
@@ -864,16 +931,30 @@ impl Viewer {
         }
         let info: BTreeMap<u32, AircraftInfo> =
             recording.aircraft().map(|a| (a.id, a.clone())).collect();
-        let selected = options.aircraft.unwrap_or(0);
+        // The recorded player is watched first; an observer's recording has
+        // none, and starts on its first aircraft.
+        let selected = options
+            .aircraft
+            .or_else(|| (player != convert::NO_PLAYER).then_some(player))
+            .or_else(|| info.keys().next().copied())
+            .unwrap_or(0);
         if options.aircraft.is_some() && !info.contains_key(&selected) {
             return Err(format!("the recording has no aircraft {selected}").into());
         }
-        let mut rig = Rig::default();
+        let mut rig = Rig::for_plane(player);
         rig.select(Reference::Aircraft(selected));
-        let pause = pause::Menu::new(&ownship.flight_menu);
+        let pause = if growth.is_some() {
+            pause::Menu::watching(&ownship.flight_menu)
+        } else {
+            pause::Menu::new(&ownship.flight_menu)
+        };
         let mut viewer = Self {
             path: path.to_path_buf(),
-            scanner: Scanner::start(Arc::clone(&recording)),
+            scanner: if growth.is_some() {
+                Scanner::start_live(Arc::clone(&recording))
+            } else {
+                Scanner::start(Arc::clone(&recording))
+            },
             tracks: Tracks::new(first),
             // A headless probe never steps the weather, so its recording
             // keeps the launch sky throughout.
@@ -890,9 +971,10 @@ impl Viewer {
                 Arc::clone(&recording),
                 std::iter::once(&ownship.profile).chain(models.iter().map(|m| &m.profile)),
             ),
-            targets: targets(events),
-            missiles: missiles(&recording),
-            devices: DeviceTrack::new(events),
+            // Read from the events by `read_events` below.
+            targets: BTreeMap::new(),
+            missiles: BTreeMap::new(),
+            devices: DeviceTrack::new(&[]),
             outlets: (
                 ownship.contrail_offsets.clone(),
                 models
@@ -909,11 +991,12 @@ impl Viewer {
             models,
             art,
             playback,
+            player,
             clock,
             info,
-            markers,
-            marker_ticks,
-            comms,
+            markers: Vec::new(),
+            marker_ticks: Vec::new(),
+            comms: Vec::new(),
             panels: Panels::default(),
             trees: RecordedTrees::default(),
             menu: None,
@@ -955,7 +1038,9 @@ impl Viewer {
             layer: vec![0; overlay::WIDTH * overlay::HEIGHT * 4],
             entered: false,
             last_frame: None,
+            growth,
         };
+        viewer.read_events();
         if options.drone {
             viewer.drone_mode(Some(Mode::Follow));
         }
@@ -969,8 +1054,91 @@ impl Viewer {
         Ok(viewer)
     }
 
+    /// What the events say, read from the recording: the timeline's markers,
+    /// the Comms panel's entries, each aircraft's target, the weapons and
+    /// the chaff and flares. Read again when a growing recording has more.
+    fn read_events(&mut self) {
+        let events = self.recording.events();
+        self.markers = markers(events);
+        self.marker_ticks = self.markers.iter().map(|m| m.tick).collect();
+        self.marker_ticks.dedup();
+        self.comms = events
+            .iter()
+            .filter(|e| panels::Channel::of(&e.event.kind).is_some())
+            .cloned()
+            .collect();
+        self.targets = targets(events, self.player);
+        self.missiles = missiles(&self.recording);
+        self.devices = DeviceTrack::new(events);
+        if let Some(growth) = &mut self.growth {
+            growth.events = events.len();
+        }
+    }
+
+    /// What a live view's camera is on, for the host to send what is near
+    /// it at the full rate: the selected aircraft, or the point the camera
+    /// is at when it is free of every aircraft (the free drone, or the
+    /// selected aircraft is not in the mission).
+    pub fn camera_subject(&self) -> tore_session::wire::messages::Subject {
+        use tore_session::wire::messages::Subject;
+        let free = self.drone.as_ref().is_some_and(|d| d.mode == Mode::Free);
+        if !free && self.info.contains_key(&self.selected) {
+            return Subject::Aircraft(self.selected);
+        }
+        if self.shown {
+            Subject::Point(self.camera.position.map(|feet| feet as i32))
+        } else {
+            Subject::None
+        }
+    }
+
+    /// Whether the view is of a mission being flown, a recording that grows
+    /// as it plays.
+    pub fn live(&self) -> bool {
+        self.growth.is_some() && self.clock.is_live()
+    }
+
+    /// The recording this view reads has grown: `recording` is a newer read
+    /// of it (the same frames, then more). The playhead keeps its place; a
+    /// live one stays a second behind the newest frame. Frames older than
+    /// ten minutes are no longer scrubbable.
+    pub fn grow(&mut self, recording: Arc<Recording>) {
+        let (Some(first), Some(last)) = (recording.first_tick(), recording.last_tick()) else {
+            return;
+        };
+        if self.growth.is_none() || last <= self.recording.last_tick().unwrap_or(0) {
+            return;
+        }
+        self.playback.extend(Arc::clone(&recording));
+        self.sound.extend(Arc::clone(&recording));
+        self.scanner.feed(Arc::clone(&recording));
+        self.weather.set_end(last);
+        self.clock
+            .grow(first.max(last.saturating_sub(LIVE_WINDOW_TICKS)), last);
+        self.info = recording.aircraft().map(|a| (a.id, a.clone())).collect();
+        if let Some(growth) = &mut self.growth {
+            let new: Vec<&str> = recording
+                .weapons()
+                .filter_map(|w| w.shape.as_deref())
+                .filter(|shape| growth.shapes.insert((*shape).to_owned()))
+                .collect();
+            self.art.add_shapes(new, &growth.resources);
+        }
+        let more = self
+            .growth
+            .as_ref()
+            .is_some_and(|g| g.events != recording.events().len());
+        self.recording = recording;
+        if more {
+            self.read_events();
+        }
+    }
+
     /// The window title.
     pub fn title(&self) -> String {
+        if self.growth.is_some() {
+            return "T.O.R.E-Fighters - Observing".into();
+        }
         let name = self
             .path
             .file_name()
@@ -1014,8 +1182,8 @@ impl Viewer {
     }
 
     fn side(&self, id: u32) -> Side {
-        if id == 0 {
-            return self.info.get(&0).map_or(Side::Friendly, |a| match a.side {
+        if id == self.player {
+            return self.info.get(&id).map_or(Side::Friendly, |a| match a.side {
                 Side::Unknown => Side::Friendly,
                 side => side,
             });
@@ -1170,7 +1338,7 @@ impl Viewer {
     /// weapon in flight.
     fn body_of(&self, picture: &RenderSnapshot, tick: u64, object: Target) -> Option<Body> {
         match object {
-            Target::Aircraft(0) => Some(Body::posed(&picture.player, 1.)),
+            Target::Aircraft(id) if id == self.player => Some(Body::posed(&picture.player, 1.)),
             Target::Aircraft(id) => picture
                 .target(id)
                 .filter(|pose| pose.airborne || pose.damage.hp > 0)
@@ -1235,9 +1403,9 @@ impl Viewer {
         let tick = self.clock.tick();
         let picture = self.playback.picture(tick, self.clock.alpha());
         let from = self.from();
-        let mut out: Vec<Target> = std::iter::once(&picture.player)
-            .chain(&picture.targets)
-            .filter(|pose| pose.id == 0 || pose.airborne || pose.damage.hp > 0)
+        let player = self.player;
+        let mut out: Vec<Target> = everyone(&picture)
+            .filter(|pose| pose.id == player || pose.airborne || pose.damage.hp > 0)
             .map(|pose| Target::Aircraft(pose.id))
             .chain(
                 self.ground_objects(tick)
@@ -1294,8 +1462,7 @@ impl Viewer {
         {
             return Some(target);
         }
-        std::iter::once(&picture.player)
-            .chain(&picture.targets)
+        everyone(&picture)
             .map(|pose| Target::Aircraft(pose.id))
             .filter(|t| *t != from)
             .filter_map(|t| Some((t, self.body_of(&picture, tick, t)?.position())))
@@ -1305,7 +1472,7 @@ impl Viewer {
 
     /// Where the selected aircraft is drawn in `picture`.
     fn anchor(&self, picture: &RenderSnapshot) -> Option<[f64; 3]> {
-        if self.selected == 0 {
+        if self.selected == self.player {
             return Some(picture.player.position);
         }
         picture.target(self.selected).map(|t| t.position)
@@ -1727,6 +1894,7 @@ impl Viewer {
                     missiles: &self.missiles,
                     comms: &self.comms,
                     now: self.clock.tick(),
+                    player: self.player,
                 };
                 self.panels.up(self.layout, at, &data);
                 self.ui.comms = self.panels.comms_open();
@@ -1798,6 +1966,7 @@ impl Viewer {
             missiles: &self.missiles,
             comms: &self.comms,
             now: self.clock.tick(),
+            player: self.player,
         };
         if self.panels.wheel(self.layout, self.point, notches, &data) {
             return;
@@ -1910,7 +2079,7 @@ impl Viewer {
             side: self.side(id),
             wing: info.map_or(0, |a| a.wing),
             member: info.map_or(0, |a| a.member),
-            ai: id != 0 && info.is_some_and(|a| !a.human),
+            ai: id != self.player && info.is_some_and(|a| !a.human),
         }
     }
 
@@ -2186,7 +2355,7 @@ impl Viewer {
     /// when the recording knows it, otherwise the player's.
     fn view_target(&self, tick: u64) -> Option<u32> {
         self.target_of(self.selected, tick)
-            .or_else(|| self.target_of(0, tick))
+            .or_else(|| self.target_of(self.player, tick))
             .flatten()
     }
 
@@ -2311,7 +2480,7 @@ impl Viewer {
                 // last camera shown, or at first the player from outside.
                 let mut outside = self.rig.clone();
                 let mut player = Rig::default();
-                player.select(Reference::Aircraft(0));
+                player.select(Reference::Aircraft(self.player));
                 outside
                     .camera(EXTERNAL, &scene, Camera::new(), self.look, self.zoom)
                     .or_else(|error| {
@@ -2356,7 +2525,8 @@ impl Viewer {
             self.camera_error = Some(reason);
             self.toast(reason);
         }
-        let player = (!self.shown).then(|| Body::posed(&picture.player, 1.));
+        let player = (!self.shown && self.player != convert::NO_PLAYER)
+            .then(|| Body::posed(&picture.player, 1.));
         match from.or(player) {
             Some(from) => {
                 let mut camera = flight_views::outside(from);
@@ -2371,11 +2541,11 @@ impl Viewer {
     /// the recorded load factor and the roll rate its attitudes imply.
     fn player_state(&mut self, picture: &RenderSnapshot, tick: u64) -> flight::State {
         let mut state = snapshot::pose_state(&self.template, &picture.player);
-        if let Some(now) = self.playback.aircraft(tick, 0) {
+        if let Some(now) = self.playback.aircraft(tick, self.player) {
             state.g = now.g;
             state.roll_rate = tick
                 .checked_sub(1)
-                .and_then(|t| self.playback.aircraft(t, 0))
+                .and_then(|t| self.playback.aircraft(t, self.player))
                 .map_or(0., |before| roll_rate(before.attitude, now.attitude));
         }
         state
@@ -2391,7 +2561,7 @@ impl Viewer {
         out: &mut Vec<f32>,
     ) {
         let seconds = trails::LENGTHS[self.ui.trail_length];
-        for pose in std::iter::once(&picture.player).chain(&picture.targets) {
+        for pose in everyone(picture) {
             let Some(samples) = self.tracks.aircraft.get(&pose.id) else {
                 continue;
             };
@@ -2419,7 +2589,7 @@ impl Viewer {
     /// bracketed; an aircraft the camera sits inside has none.
     fn labels(&self, picture: &RenderSnapshot, camera: &Camera, size: [u32; 2]) -> Vec<Label> {
         name_labels(
-            std::iter::once(&picture.player).chain(&picture.targets),
+            everyone(picture),
             camera,
             size,
             &self.ownship.font,
@@ -2580,12 +2750,13 @@ impl Viewer {
             Body::posed(&picture.player, 1.).basis(),
         );
         let listening = (self.drone.is_none()
+            && self.player != convert::NO_PLAYER
             && self.view == 3
             && camera.hidden_target.is_none()
             && feet(camera.position, seat) < 1.)
             .then(|| {
                 let mut inside = copy(&camera);
-                inside.hidden_target = Some(0);
+                inside.hidden_target = Some(self.player);
                 inside
             });
         let moment = sound::Moment {
@@ -2681,7 +2852,7 @@ impl Viewer {
         renderer.aircraft(
             &self.ownship,
             &player,
-            camera.hidden_target != Some(0),
+            self.player != convert::NO_PLAYER && camera.hidden_target != Some(self.player),
             &camera,
             &self.world,
             &self.scenery,
@@ -2760,6 +2931,7 @@ impl Viewer {
                 missiles: &self.missiles,
                 comms: &self.comms,
                 now: tick,
+                player: self.player,
             };
             panel_rects = self
                 .panels
@@ -3055,6 +3227,7 @@ mod tests {
 
     use crate::replay::fixture as f;
     use crate::replay::tests::TempDir;
+    use tore_session::wire::messages::Subject;
 
     /// A viewer over the synthetic recording, with synthetic art and world.
     fn viewer(dir: &TempDir, options: &Options) -> Viewer {
@@ -3064,6 +3237,13 @@ mod tests {
         viewer_recording(recording, options)
     }
     fn viewer_recording(recording: Arc<Recording>, options: &Options) -> Viewer {
+        viewer_growing(recording, options, None)
+    }
+    fn viewer_growing(
+        recording: Arc<Recording>,
+        options: &Options,
+        growth: Option<Growth>,
+    ) -> Viewer {
         let art = CombatArt::synthetic(BTreeMap::new());
         let mut ownship = crate::combat_view::render_hash_tests::hornet_airframe(true);
         // Menus measure their text, so the font needs its glyphs.
@@ -3075,10 +3255,9 @@ mod tests {
                 tore_world::test_support::terrain(),
                 crate::scenery::tests::scenery(),
             ),
-            ownship,
-            Vec::new(),
-            art,
+            (ownship, Vec::new(), art),
             options,
+            growth,
         )
         .unwrap()
     }
@@ -3506,6 +3685,7 @@ mod tests {
             missiles: &v.missiles,
             comms: &v.comms,
             now,
+            player: v.player,
         }
     }
 
@@ -4317,10 +4497,13 @@ mod tests {
                     tore_world::test_support::terrain(),
                     crate::scenery::tests::scenery(),
                 ),
-                crate::combat_view::render_hash_tests::hornet_airframe(true),
-                Vec::new(),
-                art,
+                (
+                    crate::combat_view::render_hash_tests::hornet_airframe(true),
+                    Vec::new(),
+                    art,
+                ),
                 &bad,
+                None,
             )
             .is_err()
         );
@@ -4391,7 +4574,7 @@ mod tests {
                 },
             ]
         );
-        let found = targets(recording.events());
+        let found = targets(recording.events(), 0);
         assert_eq!(found[&1], [(20, Some(0))]);
         assert_eq!(found[&0], [(100, Some(2))]);
         // The player's designation rides on its commands.
@@ -4405,7 +4588,7 @@ mod tests {
                 }
             },
         };
-        let player = targets(&[command(5, Some(3)), command(9, None)]);
+        let player = targets(&[command(5, Some(3)), command(9, None)], 0);
         assert_eq!(player[&0], [(5, Some(3)), (9, None)]);
         // A recording with view targets follows them alone for the player,
         // sight hold and drop included; AI aircraft keep their own.
@@ -4427,19 +4610,232 @@ mod tests {
                 .with_subject(1)
                 .with_object(0),
         };
-        let viewed = targets(&[
-            view(0, None, false),
-            command(5, Some(3)),
-            view(5, Some(3), false),
-            ai,
-            command(8, None),
-            view(8, Some(3), true),
-            view(12, None, false),
-        ]);
+        let viewed = targets(
+            &[
+                view(0, None, false),
+                command(5, Some(3)),
+                view(5, Some(3), false),
+                ai,
+                command(8, None),
+                view(8, Some(3), true),
+                view(12, None, false),
+            ],
+            0,
+        );
         assert_eq!(
             viewed[&0],
             [(0, None), (5, Some(3)), (8, Some(3)), (12, None)]
         );
         assert_eq!(viewed[&1], [(6, Some(0))]);
+    }
+
+    /// A viewer on a recording made for the seat that flew plane 2: the
+    /// plane's own pose is the picture's player, and everything that was
+    /// plane 0's in single player's recordings (the first selection, the
+    /// weather's player, the target the views follow, the telemetry) is
+    /// plane 2's.
+    #[test]
+    fn a_recording_for_another_seat_follows_that_plane() {
+        let dir = TempDir::new("viewer-seat");
+        let recording = Arc::new(f::recording_seat(dir.path(), "seat", 2));
+        let mut v = viewer_recording(Arc::clone(&recording), &Options::default());
+        assert_eq!((v.player, v.selected), (2, 2));
+        assert_eq!(v.label(2), "You");
+        assert_ne!(v.label(0), "You");
+        // Plane 2 is an enemy in the fixture, and the player is shown as
+        // what its roster entry says; plane 0 is no longer the exception.
+        assert_eq!(v.side(2), Side::Enemy);
+        assert_eq!(v.side(0), Side::Friendly);
+        let picture = v.playback.picture(300, 1.);
+        assert_eq!(picture.player.id, 2);
+        assert!(picture.targets.iter().all(|t| t.id != 2));
+        assert!(picture.targets.iter().any(|t| t.id == 0));
+        // The camera starts on the player: its anchor, and its flight state
+        // (the load factor the fixture gives plane 0 only is not borrowed).
+        assert_eq!(v.anchor(&picture), Some(picture.player.position));
+        let state = v.player_state(&picture, 300);
+        assert_eq!(state.position, picture.player.position);
+        assert_eq!(state.g, 2.);
+        // The object view's list and the labels count the player once.
+        v.look_at = None;
+        let objects = v.objects_now();
+        assert!(objects.contains(&Target::Aircraft(0)));
+        assert!(
+            !objects.contains(&Target::Aircraft(2)),
+            "it is where the view starts from"
+        );
+        assert_eq!(
+            v.body_of(&picture, 300, Target::Aircraft(2))
+                .map(|b| b.position()),
+            Some(picture.player.position)
+        );
+        let outside = camera_on(2, 300);
+        let labels = v.labels(&picture, &outside, [1280, 960]);
+        assert_eq!(labels.iter().filter(|l| l.id == 2).count(), 1);
+        // The weather follows the player's path, which the tracks read from
+        // plane 2's frames.
+        v.finish_tracks();
+        let at = v.playback.aircraft(300, 2).unwrap().position;
+        let view = v.tracks.view(300).unwrap().position;
+        assert!((0..3).all(|i| (at[i] - view[i]).abs() < 1e-9));
+        // The menus list plane 2 as a person flying, not as an AI.
+        assert!(!v.menu_entry(2).ai);
+        assert!(v.menu_entry(0).ai || v.info[&0].human);
+    }
+
+    /// An observer's recording has no player: no pose is the player's, no
+    /// aircraft is drawn as the ownship, and the first aircraft is watched.
+    #[test]
+    fn an_observers_recording_has_no_player_pose_to_mistake_for_an_aircraft() {
+        let dir = TempDir::new("viewer-observer");
+        let mut growing = f::Growing::watching(dir.path(), "observer", convert::NO_PLAYER);
+        growing.push(5, 300);
+        let mut v = viewer_growing(
+            growing.open(),
+            &Options::default(),
+            Some(Growth {
+                resources: Arc::new(BTreeMap::new()),
+                shapes: BTreeSet::new(),
+                events: 0,
+            }),
+        );
+        assert_eq!(v.player, convert::NO_PLAYER);
+        assert_eq!(v.selected, 0, "the first aircraft");
+        let tick = v.clock.tick();
+        let picture = v.playback.picture(tick, 1.);
+        assert_eq!(picture.player.id, convert::NO_PLAYER);
+        let everyone: Vec<u32> = everyone(&picture).map(|pose| pose.id).collect();
+        assert_eq!(everyone, [0, 1, 2]);
+        // Labels, the object list and what a click picks name real planes.
+        let outside = camera_on(1, tick);
+        let labels = v.labels(&picture, &outside, [1280, 960]);
+        assert!(labels.iter().all(|l| l.id != convert::NO_PLAYER));
+        let objects = v.objects_now();
+        assert!(
+            objects
+                .iter()
+                .all(|t| *t != Target::Aircraft(convert::NO_PLAYER))
+        );
+        let picks = Viewer::pickables_for(&picture, &[], &[]);
+        assert!(
+            picks
+                .iter()
+                .all(|p| p.target != Target::Aircraft(convert::NO_PLAYER))
+        );
+        // The camera's subject is the aircraft watched, or where the free
+        // drone is.
+        assert_eq!(v.camera_subject(), Subject::Aircraft(0));
+        v.drone_mode(Some(Mode::Free));
+        v.shown = true;
+        v.camera.position = [1_000.7, 2_000., -3_000.2];
+        assert_eq!(v.camera_subject(), Subject::Point([1_000, 2_000, -3_000]));
+        v.drone_mode(None);
+        v.select(9);
+        assert!(
+            matches!(v.camera_subject(), Subject::Point(_)),
+            "9 is not in the mission"
+        );
+    }
+
+    /// The live view: it opens a second behind the newest frame, grows with
+    /// the recording, keeps ten minutes, leaves live when scrubbed and
+    /// returns to it with End; its menu stops the watch.
+    #[test]
+    fn the_live_view_follows_a_growing_recording() {
+        let dir = TempDir::new("viewer-live");
+        let mut growing = f::Growing::watching(dir.path(), "live", convert::NO_PLAYER);
+        growing.push(5, 300);
+        let first = growing.open();
+        let mut v = viewer_growing(
+            Arc::clone(&first),
+            &Options::default(),
+            Some(Growth {
+                resources: Arc::new(BTreeMap::new()),
+                shapes: BTreeSet::new(),
+                events: 0,
+            }),
+        );
+        assert!(v.live() && v.clock.following());
+        let last = first.last_tick().unwrap();
+        assert_eq!(v.clock.position(), last as f64 - clock::LIVE_LAG);
+        assert_eq!(v.model(v.clock.tick()).speed, "LIVE");
+        assert_eq!(v.title(), "T.O.R.E-Fighters - Observing");
+        // The recording grows by a read of it with more frames, a new
+        // aircraft and a new marker.
+        growing.push(301, 700);
+        growing.register(&tore_replay::AircraftInfo {
+            id: 9,
+            pt: "MIG29.PT".into(),
+            label: "Newcomer".into(),
+            ..Default::default()
+        });
+        growing.push(701, 760);
+        let later = growing.open();
+        let newest = later.last_tick().unwrap();
+        v.grow(Arc::clone(&later));
+        assert_eq!(v.clock.last(), newest);
+        // Frames that came late and all at once: a following playhead is
+        // brought back to the edge.
+        assert_eq!(v.clock.position(), newest as f64 - clock::LIVE_LAG);
+        assert!(v.info.contains_key(&9));
+        assert_eq!(v.label(9), "Newcomer");
+        assert!(v.clock.following());
+        // Time passing moves the playhead on, and never past the newest.
+        for _ in 0..200 {
+            v.clock.advance(0.1);
+        }
+        assert_eq!(v.clock.position(), newest as f64);
+        assert!(!v.clock.paused() && v.clock.following());
+        // The same read again, or an older one, changes nothing.
+        v.grow(Arc::clone(&later));
+        v.grow(Arc::clone(&first));
+        assert_eq!(v.clock.last(), newest);
+        // Scrubbing leaves live; End comes back.
+        press(&mut v, "Home");
+        assert!(!v.clock.following());
+        assert_eq!(v.model(v.clock.tick()).speed, "1x");
+        press(&mut v, "End");
+        assert!(v.clock.following());
+        assert_eq!(v.clock.position(), newest as f64 - clock::LIVE_LAG);
+        // Space pauses, and plays on from where it was, not from the start.
+        press(&mut v, "Space");
+        assert!(v.clock.paused());
+        press(&mut v, "Space");
+        assert!(!v.clock.paused() && v.clock.position() > 100.);
+        // The Escape menu stops the watch where a replay's ends the replay.
+        press(&mut v, "Escape");
+        assert!(v.pause.is_open());
+        let rows = &v.pause.tree[0].children;
+        assert_eq!(rows[0].label, pause::STOP_WATCHING);
+        assert_eq!(click(&mut v, menu_row(0)), Command::Leave);
+        // A recording that is not live has no such row.
+        let still = viewer(&dir, &Options::default());
+        assert!(!still.live());
+        assert_eq!(still.pause.tree[0].children[0].label, pause::END_REPLAY);
+    }
+
+    /// Ten minutes can be scrubbed: the oldest frames are not reachable.
+    #[test]
+    fn only_the_last_ten_minutes_of_a_live_recording_can_be_scrubbed() {
+        let dir = TempDir::new("viewer-window");
+        let mut growing = f::Growing::watching(dir.path(), "window", convert::NO_PLAYER);
+        growing.push(5, 300);
+        let mut v = viewer_growing(
+            growing.open(),
+            &Options::default(),
+            Some(Growth {
+                resources: Arc::new(BTreeMap::new()),
+                shapes: BTreeSet::new(),
+                events: 0,
+            }),
+        );
+        assert_eq!(v.clock.first(), 5);
+        // Frames far later (the fixture has none past tick 900, so the
+        // window is tested on the clock the view drives).
+        let far = LIVE_WINDOW_TICKS + 5_000;
+        v.clock.grow(far.saturating_sub(LIVE_WINDOW_TICKS), far);
+        assert_eq!(v.clock.first(), 5_000);
+        v.clock.start();
+        assert_eq!(v.clock.position(), 5_000.);
     }
 }

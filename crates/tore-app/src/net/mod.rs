@@ -19,6 +19,7 @@ pub mod guns;
 pub mod hosting;
 pub mod lobby_chat;
 pub mod lookup;
+pub mod observe;
 pub mod options;
 pub mod play;
 pub mod scoreboard;

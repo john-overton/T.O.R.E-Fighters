@@ -764,7 +764,7 @@ planes included, the way it records an AI aircraft (`Tick::others` gives it
 their cockpits). A comms entry whose `heard_by` names only other seats is left
 out of the recording, and `heard_by` itself is not written. The header carries
 `draw.player` when the plane is not plane 0, and `convert::snapshot` reads it.
-The viewer's own id 0 assumptions are still to change. See
+The viewer follows `draw.player` (slice F2-O2). See
 [REPLAYS.md](REPLAYS.md#whose-flight-it-is).
 
 The reasons live beside the capture: `replay/recorder/why.rs` reads the AI's
@@ -6295,6 +6295,99 @@ otherwise.
   the handshake's capacity (the lesser of the player limit and the open
   planes): a game full of players takes no observer.
 
+*Built (F2-O2, 2026-10-05): the screen.* The game's part is
+`tore-app` `net/observe.rs`, the viewer's live mode is in `replay/` and the
+routing is `net/play.rs`, `replay/host.rs` and `main.rs`. Each choice below is
+an agent decision unless it says otherwise.
+
+```mermaid
+flowchart LR
+  client["Client::observer_frame<br/>(a drawn picture, real plane ids)"] --> feeder["Feeder<br/>one replay frame per host tick"]
+  feeder --> store["Store thread<br/>writes the growing file,<br/>reads it again"]
+  store --> viewer["Viewer::grow<br/>(the playhead follows the newest frame)"]
+  viewer --> subject["camera subject<br/>(Client::watch, twice a second at most)"]
+  subject --> client
+```
+
+- **The live recording** (`Feeder`, `Store`). Each observer frame becomes one
+  replay frame for every host tick the picture has passed (a tick between two
+  drawn pictures is the two blended as flight blends its ticks; a silence of
+  more than two seconds is left as a gap). The frames hold every aircraft in
+  its real plane id, the weapons in flight (registered as they first appear,
+  by the mission's station weapon of that name, else a plain missile), debris,
+  ejected pilots, the effects, craters and fires that started, the ground
+  objects that fell, and two kinds of event for the timeline's markers: a
+  launch, and the loss of an aircraft seen flying. The header has no player
+  (`draw.player` is `u32::MAX`, `convert::NO_PLAYER`), the mission's models,
+  and `draw.slots` high enough for planes a revival adds later. The writer
+  writes chunks of a fifth of a second to `observer/` in the data folder (not
+  the system's temporary folder, which can be memory), on a thread of its
+  own, which reads the file again a quarter of a second after new frames
+  (three times as long as the last read took, when that is longer) and hands
+  the viewer the new read. The file keeps the whole mission and goes when the
+  watch ends; a crash's leftover goes the next day. Measured (debug build):
+  ten minutes of 30 aircraft is 3,000 chunks and 16 MB, and a read takes
+  0.18 s. Rotating the file to keep only ten minutes is not built.
+- **The viewer's live mode** (`Viewer::open_live`, `Viewer::grow`). The same
+  viewer, its cameras, views, labels, panels, trails and weather. It opens at
+  the first read with the playhead a second behind the newest frame
+  (`Clock::new_live`); `grow` takes each newer read: the playback, the
+  sound and the track pass read only what was added (`Playback::extend`,
+  `Scanner::start_live`, `ReplaySound::extend`), the registry and the markers
+  follow, and the clock's range is the newest frame and ten minutes back (the
+  rest stays in the file, out of reach). The playhead plays at 1x and is
+  trimmed 10 percent to keep a second behind the newest frame while frames
+  arrive in bursts; it waits at the newest frame when none come and never
+  passes it. The transport bar reads **LIVE** while it follows. Pausing,
+  scrubbing, reversing and changing speed leave live; **End** returns to it
+  (forwards at 1x, a second behind), as does closing the Escape menu on a
+  playhead that was live when it opened. A following playhead that frames
+  late and all at once left more than three seconds behind is brought back.
+- **No player.** Every aircraft is another: the first aircraft is selected,
+  no pose is drawn as the player's ownship, and the weather steps from a view
+  at the origin (an observer has no player's path to follow; the sky is the
+  launch sky plus time). The camera's subject goes to the host
+  (`Viewer::camera_subject`): the selected aircraft, or the free drone's
+  point, so what is near the camera is sent at the full rate.
+- **Seat-aware viewer** (John, 2026-10-05). The viewer follows the plane the
+  recording is for (`draw.player`, plane 0 when absent) wherever it looked
+  for plane 0: the first selection, the anchor and the object lists, the
+  panels' roster, the weather's player view and the tracks, the target the
+  views follow, the sound's listener, down tone and releases, the Replays
+  screen's details and the scripted director's anchor. A single-player
+  recording has no `draw.player`, so none of it changes. The capture
+  conversion no longer swaps ids ([converting a capture](#converting-a-capture-into-a-replay)).
+- **Watch and Esc.** Pressing the lobby's Watch asks the host as before. The
+  host's Observing message starts a watch; when the first frames have been
+  recorded the game opens the viewer over the lobby (`Screen::Replay`), and
+  the session keeps its turn from the viewer's redraw. The Escape menu is the
+  replay viewer's, with its first row reading **Stop Watching**: it tells the
+  host, puts the recording away and shows the lobby. A mission that ends, a
+  watch the host ends, a seat taken and a session that ends do the same, and
+  the lobby says why in Messages. Agent decision: the design said "Esc leaves
+  the view for the lobby"; Esc opens the viewer's menu, which pauses and also
+  holds Graphics, Sound and Control, and Enter on its first row leaves.
+- **What is not there yet.** Smoke, contrails and gun rounds (as in converted
+  captures: slice E2 regenerates them there and the same can follow here);
+  radio lines, HUD messages and the AI's thinking (the observer stream does not
+  carry them); each aircraft's fuel, G and controls. An **away** player's own
+  plane (slice F2-A) still shows on the flight screen's last picture with the
+  banner: the observer screen opens for a game in its lobby only, so the AI's
+  flight of the plane is not shown live to the player who is away (the idle
+  rule needs the flight screen to see the first flight input). The Replays
+  list does not list the observer's file (it is not a replay; nothing keeps it).
+- **Tests.** `net::observe` (the frames for every tick a picture passes and
+  their blends, the registry once, effects and craters and losses once, a real
+  observer's frames from a host and a bot on the simulator becoming a recording
+  with every tick and each plane where the observer drew it, the store and the
+  playback, and the ignored ten-minute measurement), `replay::clock` (live
+  follows, waits, never passes, leaves and returns), `replay::playback`
+  and `replay::tracks` (a growing recording plays and scans as the finished one),
+  `replay::viewer` (a recording for another seat, an observer's with no
+  player, the live view's growth, window, End and menu, the camera's subject),
+  the conversion's plane-1 tests (`client::convert_tests`, `replay::net_convert`)
+  and the net lane's `net-window-observe`.
+
 ##### The AI flies an idle player's aircraft
 
 The open question since 2026-09-28 (the guide's agent proposal: after 10
@@ -6385,8 +6478,8 @@ the design above says it.
   a lobby state without the away mark clear it. `away()` and `back()` send
   once each.
 - **The game.** While the AI flies the plane the flight screen keeps its last
-  picture (the live view of the plane flying on is the observer screen's,
-  slice F2-O2) and says "The AI is flying your aircraft. Move the stick or
+  picture (the live view of the plane flying on would be the observer
+  screen's, slice F2-O2, which opens for a game in its lobby only) and says "The AI is flying your aircraft. Move the stick or
   press any flight key to take it back." every five seconds; Back's Seated
   starts the flight again as a revival's does. A refusal of Away or Back is
   said on the HUD. If the host stops keeping the plane and no Seated follows
@@ -6495,9 +6588,9 @@ otherwise.
   player with no plane (**Stop Watch** while watching, **Loadout** in the
   lobby). Pressing it asks the host for the observer stream with no camera
   subject (`client.watch`) and says so in Messages; Ready (Join) stops the
-  watch first. The observer *screen* is slice F2-O2's: until it lands the
-  stream arrives and nothing draws it, so a player who presses Watch before
-  F2-O2 sees only the line in Messages and the lobby's "observing" mark.
+  watch first. The stream shows in the replay viewer's live mode once the
+  first frames are recorded ([the observer screen](#the-observer-view), slice
+  F2-O2); Stop Watching in its Escape menu returns here.
 - **The head.** A fourth line, "Rules: Co-op, friendly fire on, no revival" or
   "Rules: PvP by sides, 5 kills or 10 minutes, revival with unlimited lives,
   sides locked", sums the settings up (`facts::settings_summary`: game type and
@@ -6586,7 +6679,7 @@ every message below; no later slice changes the wire without the lead.
 | F2-L The lobby screen | Sonnet | F2-1 | `tore-app` `lobby_screen/` (new `settings_panel.rs` and `players_panel.rs`), `ordnance.rs` (lobby Cheat loading under the rule), the lobby's glue in `net/` | Settings..., Players..., slot locks, the seven buttons, Watch, the head's summary, greying | `facts` tests for who may press what; headless renders of each Settings page as King and not; a windowed run (through `tools/agent-run.sh`) hosting with a bot: settings changed and seen by the bot, the crown passed and taken back, a slot closed. **Built (F2-L, 2026-10-05):** as [the lobby panels as built](#the-lobby-panels-as-built-f2-l); the seven buttons with Kick inside the Players panel, the Settings panel's four pages, the King's right click on a slot, Watch, the head's "Rules" line, Messages' lines for settings and locks, and Load Ordnance under the loadout rule. Tests: `lobby_screen/phase2_tests.rs`, `ordnance.rs`, twelve snapshot states, and the net lane's `net-window-lobby` (a window hosting with a bot: settings turned and seen by the bot, a slot closed and opened, the crown given and back). Single-player SAME |
 | F2-D The multiplayer debrief | Sonnet | F2-S | `tore-world` `debrief.rs` (`results`); `host/results.rs`; the client's Results; `tore-app` `debrief.rs` and `net/debrief.rs` (the SCORES and RESULTS pages) | Results rows, the message at the end, the pages | A world test with rows for every plane, human and AI, retired included; a host test that every connection gets Results; headless renders of both pages with 30 aircraft; the existing single-player page tests unchanged; quick guard. **Built (F2-D, 2026-10-05):** as [described above](#the-multiplayer-debrief): `debrief::results` and its rows, `host/results.rs`, the client's kept Results (`client/results.rs`) and `tore-bot`'s results line, the SCORES and RESULTS pages (`net/debrief.rs`, the `.columns` directive in `debrief.rs`, two lines in `net/play.rs` to hand them over), the `net-server-results` scenario. Single-player debrief unchanged (the full baseline is in the run's notes) |
 | F2-A The AI flies an idle aircraft | Opus | F2-1, F2-O1 | `host/away.rs`, new `host/away_tests.rs`; away detection in `tore-app` `net/play.rs` and the banner; `tore-bot --away` | Away and Back, the stall's count, the reservation, the handoff both ways | Simulator tests: away for the setting's seconds hands the plane to the AI and reserves it; another player's take is refused; Back retakes it with its stores and damage; a stalled game the same; `never` does nothing; a `net` scenario with a bot away and back. **Built (F2-A, 2026-10-05):** as [described above](#the-ai-flies-an-idle-players-aircraft): the host's Away and Back, its count of a game that sends nothing, the handoff with the player watching its plane, the reservation and its end (`host/away.rs`, hooks in `host/mod.rs`: the take refusal, `reserved`, the lobby's away mark, the empty timeout, the mission's end; three lobby log events in `host/lobby.rs`); the client's `ai_flies` and its once-only `away` and `back` (new `client/away.rs`, one hook in `client/mod.rs`); the game's count, flight inputs, banner and End Mission while away (new `net/away.rs`, short hunks in `net/play.rs` and `main.rs`); `tore-bot --away SECONDS,FOR`. Tests: `host/away_tests.rs` (7 on the simulator), `client/away_tests.rs` (4), the game's `net::away` (7), `tore-bot`'s option, the net lane's `net-server-away`. No wire change. Single player unchanged |
-| F2-O2 The observer screen | Sonnet | F2-O1, F2-L, stage E's replays | `tore-app` new `net/observe.rs`; the viewer's live mode in `replay/`; the routing in `main.rs` | The live recording, the viewer's live mode, Watch and Esc | Tests of the growing recording, live, pause, scrub and End; a headless render; a windowed run watching a server with bots. Single-player replays byte-identical (the replay lane's `--changed` scenarios) |
+| F2-O2 The observer screen | Sonnet | F2-O1, F2-L, stage E's replays | `tore-app` new `net/observe.rs`; the viewer's live mode in `replay/`; the routing in `main.rs` | The live recording, the viewer's live mode, Watch and Esc | Tests of the growing recording, live, pause, scrub and End; a headless render; a windowed run watching a server with bots. Single-player replays byte-identical (the replay lane's `--changed` scenarios). **Built (F2-O2, 2026-10-05):** as [described above](#the-observer-view): the live recording (`net/observe.rs`: the feeder, the store thread and the watch), the viewer's live mode (`Viewer::open_live` and `grow`, the clock's live edge, the growing playback, track pass and sound), the seat-aware viewer that ends the conversion's id swap, Watch opening the screen and Stop Watching in the Escape menu leaving it, the camera's subject to the host, and a script's keys and `shot` reaching the viewer. Tests: `net::observe` (five, and the ignored ten-minute measurement), `replay::clock`, `playback`, `tracks`, `viewer` and `net_convert` additions, `client::convert_tests` and the net lane's `net-window-observe` (a window joins a server flown by two bots, presses Watch, and looks, scrubs and returns to live). Single-player baseline SAME (the recorder and the simulation are untouched; see the slice's baseline report). Not built: an away player's own plane on this screen, smoke, contrails and gun rounds, and rotating the file to ten minutes |
 | F2-X Acceptance | lead, then John | all | | The lead's smoke test: a hosting game, a joining game and bots in PvP with a kill limit, revivals, an observer with a delay, the crown passed, the idle AI; then John on three machines | John plays a PvP and a co-op game from the menus |
 
 ```mermaid

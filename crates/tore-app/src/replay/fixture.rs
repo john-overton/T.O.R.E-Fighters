@@ -132,7 +132,7 @@ fn projectile(id: u32, owner: u32, weapon: u32, tick: u64, from: u64) -> Project
     }
 }
 
-fn frame(tick: u64) -> Frame {
+pub(crate) fn frame(tick: u64) -> Frame {
     let mut frame = Frame {
         tick,
         aircraft: [0, 1, 2]
@@ -255,12 +255,27 @@ pub fn recording(dir: &Path, name: &str) -> Recording {
     recording_with_weapons(dir, name, false)
 }
 
+/// The synthetic recording made for the seat that flies `player`: its
+/// header says `draw.player`, and that aircraft is the roster's `You`.
+pub fn recording_seat(dir: &Path, name: &str, player: u32) -> Recording {
+    written(dir, name, false, Some(player))
+}
+
 /// Extra overlapping missile and bomb lifetimes for replay object selection.
 pub fn recording_with_weapons(dir: &Path, name: &str, extra: bool) -> Recording {
+    written(dir, name, extra, None)
+}
+
+fn written(dir: &Path, name: &str, extra: bool, seat: Option<u32>) -> Recording {
     let path = dir.join(format!("{name}.tore-replay"));
+    let player = seat.unwrap_or(0);
+    let mut header = replay::Header::default();
+    if let Some(seat) = seat {
+        header.extra.push(("draw.player".into(), seat.to_string()));
+    }
     let mut writer = replay::Writer::create_with(
         &path,
-        &replay::Header::default(),
+        &header,
         WriterOptions {
             chunk_ticks: 120,
             sync_ticks: 3_600,
@@ -271,15 +286,15 @@ pub fn recording_with_weapons(dir: &Path, name: &str, extra: bool) -> Recording 
         id,
         pt: pt.into(),
         name: name.into(),
-        label: label.into(),
+        label: if id == player { "You" } else { label }.into(),
         side,
         wing: 1,
         member: id as u16,
-        human: id == 0,
+        human: id == player,
         ..Default::default()
     };
     for aircraft in [
-        info(0, "F18.PT", "F/A-18D", "You", Side::Friendly),
+        info(0, "F18.PT", "F/A-18D", "Friendly 1-1", Side::Friendly),
         info(1, "MIG29.PT", "MiG-29", "Enemy 1-1", Side::Enemy),
         info(2, "SU27.PT", "Su-27", "Enemy 1-2", Side::Enemy),
         info(LATE, "MIG29.PT", "MiG-29", "Enemy 1-3", Side::Enemy),
@@ -332,4 +347,103 @@ pub fn recording_with_weapons(dir: &Path, name: &str, extra: bool) -> Recording 
     let recording = Recording::open(path).unwrap();
     assert!(recording.complete() && recording.problems().is_empty());
     recording
+}
+
+/// The synthetic recording written a stretch at a time, as an observer's
+/// live recording is: it can be read again while it is still being
+/// written. The fixture's gap is left out (a live recording has none) and
+/// its debug trees and events are not written; a crater is dropped at ticks
+/// 140 and 640.
+pub(crate) struct Growing {
+    writer: replay::Writer,
+    path: std::path::PathBuf,
+}
+
+impl Growing {
+    pub(crate) fn new(dir: &Path, name: &str) -> Self {
+        Self::watching(dir, name, 0)
+    }
+
+    /// The same for an observer: `player` is the header's `draw.player`
+    /// (the app's `NO_PLAYER` for none).
+    pub(crate) fn watching(dir: &Path, name: &str, player: u32) -> Self {
+        let path = dir.join(format!("{name}.tore-replay"));
+        let mut header = replay::Header::default();
+        if player != 0 {
+            header
+                .extra
+                .push(("draw.player".into(), player.to_string()));
+        }
+        let mut writer = replay::Writer::create_with(
+            &path,
+            &header,
+            WriterOptions {
+                chunk_ticks: 40,
+                sync_ticks: u64::MAX / 2,
+            },
+        )
+        .unwrap();
+        for id in [0, 1, 2, LATE] {
+            writer
+                .register_aircraft(&AircraftInfo {
+                    id,
+                    pt: "F18.PT".into(),
+                    name: "F/A-18D".into(),
+                    label: format!("Plane {id}"),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        for (id, name, class) in [
+            (0, "GUN", WeaponClass::Gun),
+            (1, "AA10", WeaponClass::Missile),
+        ] {
+            writer
+                .register_weapon(&WeaponInfo {
+                    id,
+                    source: format!("{name}.JT"),
+                    shape: None,
+                    name: name.into(),
+                    class,
+                })
+                .unwrap();
+        }
+        Self { writer, path }
+    }
+
+    /// Writes the frames `from` to `to`.
+    pub(crate) fn push(&mut self, from: u64, to: u64) {
+        for tick in from..=to {
+            if (GAP.0..=GAP.1).contains(&tick) {
+                continue;
+            }
+            let mut frame = frame(tick);
+            frame.trees.clear();
+            frame.events.clear();
+            frame.new_effects.clear();
+            if tick == 140 || tick == 640 {
+                frame.new_effects.push(EffectSpawn {
+                    kind: EffectKind::Crater(3),
+                    position: [1_000. + tick as f64, 0., 2_000.],
+                    duration_ticks: u32::MAX,
+                });
+            }
+            self.writer.push(&frame).unwrap();
+        }
+    }
+
+    pub(crate) fn register(&mut self, info: &AircraftInfo) {
+        self.writer.register_aircraft(info).unwrap();
+    }
+
+    /// The recording as it stands, read again from the file.
+    pub(crate) fn open(&self) -> std::sync::Arc<Recording> {
+        std::sync::Arc::new(Recording::open(replay::partial_path(&self.path)).unwrap())
+    }
+
+    /// The finished recording.
+    pub(crate) fn finish(self) -> Recording {
+        let path = self.writer.finish(&replay::Footer::default()).unwrap();
+        Recording::open(path).unwrap()
+    }
 }

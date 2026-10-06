@@ -31,15 +31,22 @@ pub fn native_ticks(tick: u64) -> i64 {
 /// previous commit, as live flight's vapor does.
 fn commit_ticks(last: u64) -> Vec<u64> {
     let mut commits = vec![0];
-    let mut committed = 0;
-    for tick in 1..=last {
+    extend_commits(&mut commits, 0, last);
+    commits
+}
+
+/// Adds the commit ticks after tick `done` up to `last` to `commits`, which
+/// holds every one up to `done`: a recording that grows (an observer's)
+/// needs only its new ticks.
+fn extend_commits(commits: &mut Vec<u64>, done: u64, last: u64) {
+    let mut committed = commits.last().map_or(0, |tick| native_ticks(*tick));
+    for tick in done + 1..=last {
         let native = native_ticks(tick);
         if native >= committed + COMMIT_TICKS {
             commits.push(tick);
             committed = native;
         }
     }
-    commits
 }
 
 /// Moves `state` to a recorded aircraft's pose: what the wing vapor's
@@ -91,6 +98,35 @@ impl Playback {
     #[cfg(test)]
     pub fn recording(&self) -> &Arc<Recording> {
         &self.recording
+    }
+
+    /// The recording has grown: `recording` is the same one read again with
+    /// more frames after the old last (an observer's live recording). The
+    /// decoded chunks stay, since a finished chunk never changes; what the
+    /// newest ticks hold (the picture, smoke, the vapor) is rebuilt on next
+    /// use, and the registry, the vapor's commit ticks and the craters and
+    /// fires follow the new frames.
+    pub fn extend(&mut self, recording: Arc<Recording>) {
+        let old = self.last;
+        self.first = recording.first_tick().unwrap_or(self.first);
+        self.last = recording.last_tick().unwrap_or(old).max(old);
+        extend_commits(&mut self.commits, old, self.last);
+        if self.last > old
+            && let Ok(spawns) = recording.spawns(old + 1, self.last)
+        {
+            self.marks
+                .extend(spawns.effects.into_iter().filter(|(_, e)| {
+                    matches!(
+                        e.kind,
+                        tore_replay::EffectKind::Crater(_) | tore_replay::EffectKind::Fire
+                    )
+                }));
+        }
+        self.identities = Identities::of(&recording);
+        self.recording = recording;
+        self.pair = None;
+        self.smoke = None;
+        self.vapor = None;
     }
 
     fn chunk(&mut self, index: usize) -> Option<Arc<Vec<Frame>>> {
@@ -236,7 +272,8 @@ impl Playback {
         let start = self.commits[self.commits.partition_point(|c| *c <= back) - 1];
         let (first, last) = (self.first, self.last);
         let mut points = |this: &mut Self, at: u64| {
-            let recorded = this.aircraft(at, 0)?;
+            let player = this.presentation.player;
+            let recorded = this.aircraft(at, player)?;
             place(scratch, &recorded);
             ownship.streamer_points(scratch)
         };
@@ -532,5 +569,49 @@ mod tests {
             assert!(native_ticks(pair[1]) - native_ticks(pair[0]) >= COMMIT_TICKS);
             assert!(native_ticks(pair[1] - 1) - native_ticks(pair[0]) < COMMIT_TICKS);
         }
+    }
+
+    /// A recording read again while it is still being written: what the
+    /// playback shows at every tick is what the finished recording shows,
+    /// and the craters and fires, the registry and the vapor's commits
+    /// follow the new frames.
+    #[test]
+    fn a_growing_recording_plays_as_the_finished_one_does() {
+        let dir = TempDir::new("playback-grow");
+        let mut growing = fixture::Growing::new(dir.path(), "growing");
+        growing.push(5, 300);
+        let early = growing.open();
+        let mut grown = Playback::new(Arc::clone(&early));
+        let before = early.last_tick().unwrap();
+        assert!((260..300).contains(&before), "{before}");
+        assert_eq!(grown.marks_at(before).len(), 1, "the first crater");
+        // The newest tick of the early read, drawn and cached.
+        assert!(grown.picture(before, 1.).targets.len() >= 2);
+        // More frames, and the recording is read again.
+        growing.push(301, 700);
+        growing.register(&tore_replay::AircraftInfo {
+            id: 9,
+            pt: "MIG29.PT".into(),
+            ..Default::default()
+        });
+        growing.push(701, 760);
+        let later = growing.open();
+        let newest = later.last_tick().unwrap();
+        assert!(newest > 700);
+        grown.extend(Arc::clone(&later));
+        let mut finished = Playback::new(Arc::new(growing.finish()));
+        // Every kind of tick: before the first read, the first read's
+        // newest, just after it, either side of the second crater.
+        for tick in [5, 100, before, before + 1, 450, 639, 640, newest] {
+            assert_eq!(
+                grown.picture(tick, 1.),
+                finished.picture(tick, 1.),
+                "{tick}"
+            );
+            assert_eq!(grown.marks_at(tick), finished.marks_at(tick), "{tick}");
+        }
+        assert_eq!(grown.marks_at(newest).len(), 2);
+        assert_eq!(grown.commits, commit_ticks(newest));
+        assert!(grown.identities.aircraft.contains_key(&9));
     }
 }

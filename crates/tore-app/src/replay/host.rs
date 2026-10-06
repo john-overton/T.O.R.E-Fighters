@@ -91,6 +91,27 @@ impl App {
     /// Closes the viewer and gives the renderer back the game's own world
     /// and aircraft.
     pub(crate) fn leave_replay(&mut self) {
+        self.close_viewer();
+        // Back to the recordings list, re-read, even when the viewer was
+        // started from the command line.
+        self.return_to_replays();
+    }
+
+    /// Closes the live view of a mission being flown (the observer screen)
+    /// and shows the lobby it was opened from.
+    pub(crate) fn leave_live_replay(&mut self) {
+        self.close_viewer();
+        if let Some(renderer) = &self.renderer {
+            renderer
+                .window
+                .set_title("T.O.R.E-Fighters - Choose Activity");
+            renderer.window.request_redraw();
+        }
+    }
+
+    /// Puts the viewer away and gives the renderer back the game's own world
+    /// and aircraft.
+    fn close_viewer(&mut self) {
         let entered = self.replay.take().is_some_and(|r| r.viewer.entered());
         if let Some(audio) = &self.audio {
             crate::replay::sound::stop(audio);
@@ -103,9 +124,31 @@ impl App {
             renderer.window.set_cursor_visible(true);
         }
         self.screen = Screen::Main;
-        // Back to the recordings list, re-read, even when the viewer was
-        // started from the command line.
-        self.return_to_replays();
+    }
+
+    /// A key of `--input-script` while the viewer shows: the viewer's own
+    /// keys, as `replay_event` gives them for the window's. `physical` makes a
+    /// letter's name its physical key's, as the window's do.
+    pub(crate) fn replay_script_key(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        physical: &PhysicalKey,
+        name: &str,
+        pressed: bool,
+        repeat: bool,
+    ) {
+        let name = crate::flight_key(*physical, name);
+        let modifiers = self.modifiers;
+        let Some(replay) = self.replay.as_mut() else {
+            return;
+        };
+        if replay.viewer.bound_key(&name, pressed, repeat, modifiers) {
+            return;
+        }
+        let command = replay
+            .viewer
+            .key(&name, pressed, repeat, modifiers.shift_key());
+        self.replay_command(event_loop, command);
     }
 
     fn replay_command(&mut self, event_loop: &ActiveEventLoop, command: Command) {
@@ -113,7 +156,12 @@ impl App {
             Command::None => {}
             Command::Click => self.action(event_loop, Action::Click),
             Command::Leave => {
-                self.leave_replay();
+                // Stop Watching, in the live view of a mission being flown.
+                if self.replay.as_ref().is_some_and(|r| r.viewer.live()) {
+                    self.stop_observing();
+                } else {
+                    self.leave_replay();
+                }
                 self.action(event_loop, Action::Click);
             }
             // Escape > ? > Exit to Desktop quits as flight's does.
@@ -310,6 +358,11 @@ impl App {
     /// Draws one replay frame and, for `--capture-replay`, saves it and
     /// exits once it has been presented.
     fn replay_redraw(&mut self, event_loop: &ActiveEventLoop) {
+        // The live view of a mission being flown is fed by the session: its
+        // turn comes first, as the other screens' does in `window_event`.
+        if self.replay.as_ref().is_some_and(|r| r.viewer.live()) {
+            self.net_tick(event_loop);
+        }
         let (Some(replay), Some(renderer)) = (self.replay.as_mut(), self.renderer.as_mut()) else {
             return;
         };

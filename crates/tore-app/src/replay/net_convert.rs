@@ -245,7 +245,7 @@ mod tests {
     use crate::replay::convert::{self, Presentation};
     use crate::replay::playback::Playback;
     use crate::replay::tests::TempDir;
-    use tore_session::fixture::{Fight, bot_fight};
+    use tore_session::fixture::{Fight, bot_fight, bot_fight_as};
 
     /// A synthetic fight's capture in a folder, named as the game names it.
     fn capture_in(dir: &TempDir, fight: &Fight) -> PathBuf {
@@ -330,6 +330,47 @@ mod tests {
             text.starts_with("\u{feff}FileType=text/acmi/tacview")
                 || text.contains("FileType=text/acmi")
         );
+    }
+
+    /// The viewer follows the plane the seat flew (John, 2026-10-05): a
+    /// player on plane 1 is plane 1 in the replay, in its picture, its
+    /// tracks and its panels' roster, and plane 0 is another aircraft.
+    #[test]
+    fn a_player_on_plane_one_is_plane_one_in_the_replay_and_its_playback() {
+        let fight = bot_fight_as(12, true);
+        assert_eq!(fight.plane, 1);
+        let dir = TempDir::new("net-convert-seat");
+        let capture = capture_in(&dir, &fight);
+        let converted = convert(&capture, None, Arc::clone(&fight.resources)).unwrap();
+        let recording = Arc::new(tore_replay::Recording::open(&converted.written[0].path).unwrap());
+        assert!(recording.complete() && recording.problems().is_empty());
+        let header = recording.header();
+        assert_eq!(header.extra(convert::PLAYER_KEY), Some("1"));
+        assert_eq!(header.extra("net.player_plane"), Some("1"));
+        let presentation = Presentation::from_header(header);
+        assert_eq!(presentation.player, 1);
+        assert_eq!(recording.aircraft_info(1).unwrap().label, "You");
+        assert_ne!(recording.aircraft_info(0).unwrap().label, "You");
+
+        let first = recording.first_tick().unwrap();
+        let last = recording.last_tick().unwrap();
+        let mut playback = Playback::new(Arc::clone(&recording));
+        for tick in [first, (first + last) / 2, last] {
+            let picture = playback.picture(tick, 1.);
+            assert_eq!(picture.player.id, 1, "tick {tick}");
+            assert!(picture.player.aircraft.is_some());
+            assert_eq!(picture.targets.len(), 3, "tick {tick}");
+            assert!(picture.targets.iter().any(|t| t.id == 0), "tick {tick}");
+        }
+        // The tracks' player view, which drives the weather, is plane 1's.
+        let tracks = crate::replay::tracks::Tracks::scan(&recording);
+        let at = (first + last) / 2;
+        let mine = playback.aircraft(at, 1).unwrap().position;
+        let view = tracks.view(at).unwrap().position;
+        assert!((0..3).all(|i| (mine[i] - view[i]).abs() < 1e-9));
+        // The Replays screen's details name the seat's aircraft.
+        let details = crate::replay::screen::Details::read(&converted.written[0].path).unwrap();
+        assert_eq!(details.player.as_deref(), Some("F/A-18D Hornet"));
     }
 
     #[test]

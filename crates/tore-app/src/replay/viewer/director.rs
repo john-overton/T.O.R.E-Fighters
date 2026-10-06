@@ -76,7 +76,7 @@ impl Viewer {
                 .ok_or("theater has no runway camera anchor")?;
             (runway.surface.center, runway.heading)
         } else {
-            let pose = if frame.anchor == 0 {
+            let pose = if frame.anchor == self.player {
                 &picture.player
             } else {
                 picture
@@ -108,7 +108,7 @@ impl Viewer {
             }
             _ => place,
         };
-        let watched_pose = if frame.anchor == 0 {
+        let watched_pose = if frame.anchor == self.player {
             Some(&picture.player)
         } else {
             picture.target(frame.anchor)
@@ -161,7 +161,7 @@ impl Viewer {
         // HUD/cockpit sound is heard inside the watched aircraft.
         let mut listener = copy(&camera);
         if cockpit_view {
-            listener.hidden_target = Some(0);
+            listener.hidden_target = Some(self.player);
         }
         let forward = previous.is_some_and(|p| (frame.tick - p.tick - 2.).abs() < 0.001);
         if frame.view == 3 {
@@ -407,7 +407,7 @@ impl Viewer {
                         .vertices(&player, &camera, &self.world, &self.scenery),
                 );
             }
-            if frame.anchor == 0 {
+            if frame.anchor == self.player {
                 gpu.sim.hide_aircraft();
             }
         } else {
