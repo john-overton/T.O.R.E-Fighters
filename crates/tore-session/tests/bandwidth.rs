@@ -6,7 +6,8 @@
 //! turn, and encodes seat 0's snapshot packets as a host would: the entities
 //! with their relevance, the seat's events, and the exact own state once a
 //! second and whenever its ownship terms change. Three connections are coded
-//! side by side: a clean link and one losing 5 percent of its packets, both
+//! side by side at each snapshot rate, 60 a second (the default since slice
+//! D12) and 30: a clean link and one losing 5 percent of its packets, both
 //! keeping 256 bytes of each packet for reliable messages as in flight, and a
 //! clean one keeping none; each is acknowledged 100 ms later.
 //!
@@ -37,10 +38,13 @@ use tore_world::seats::{PlaneId, SeatId, SeatInput};
 use tore_world::world::plane::{ExactState, OwnPlane, OwnshipTerms};
 use tore_world::world::{Seating, TickOutput, World};
 
-const TICKS_PER_SNAPSHOT: u64 = 4;
+/// The snapshot rates measured side by side, as ticks per snapshot.
+const RATES: [u64; 2] = [2, 4];
 const MINUTES: u64 = 3;
-/// Snapshots before an acknowledgement comes back (100 ms).
-const ACK_DELAY: u64 = 3;
+/// Ticks before an acknowledgement comes back (100 ms).
+const ACK_DELAY: u64 = 12;
+/// Ticks before a lost packet is reported lost.
+const LOSS_DELAY: u64 = 44;
 
 #[derive(Default)]
 struct Stat {
@@ -69,6 +73,11 @@ impl Stat {
 #[derive(Default)]
 struct Link {
     host: Option<HostConnection>,
+    /// Ticks per snapshot.
+    tps: u64,
+    /// The ownship terms changed since the last exact state, and its tick.
+    terms_dirty: bool,
+    last_own_state: u64,
     loss: u64,
     /// Bytes kept for reliable messages in each snapshot packet.
     messages: usize,
@@ -94,9 +103,10 @@ struct Link {
 }
 
 impl Link {
-    fn new(loss: u64, messages: usize) -> Self {
+    fn new(tps: u64, loss: u64, messages: usize) -> Self {
         Self {
-            host: Some(HostConnection::new(TICKS_PER_SNAPSHOT as u32)),
+            host: Some(HostConnection::new(tps as u32)),
+            tps,
             loss,
             messages,
             ..Self::default()
@@ -107,15 +117,15 @@ impl Link {
         self.host.as_mut().unwrap()
     }
 
-    /// Sends the staged packet of `bytes` at snapshot `k`; a lost one is
-    /// reported lost 33 packets on, a delivered one after the round trip.
+    /// Sends the staged packet of `bytes` at tick `k`; a lost one is
+    /// reported lost 44 ticks on, a delivered one after the round trip.
     fn send(&mut self, k: u64, bytes: usize, rng: &mut SplitMix64) {
         let sequence = self.sequence;
         self.sequence = self.sequence.wrapping_add(1);
         self.host().sent(sequence);
         self.total_bytes += bytes;
         let lost = rng.below(100) < self.loss;
-        let at = if lost { k + 11 } else { k + ACK_DELAY };
+        let at = if lost { k + LOSS_DELAY } else { k + ACK_DELAY };
         self.pending.push_back((at, sequence, !lost));
     }
 
@@ -172,14 +182,22 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
     );
 
     let mut rng = SplitMix64::new(30);
-    let mut links = [Link::new(0, 256), Link::new(5, 256), Link::new(0, 0)];
+    let mut links: Vec<Link> = RATES
+        .iter()
+        .flat_map(|&tps| {
+            [
+                Link::new(tps, 0, 256),
+                Link::new(tps, 5, 256),
+                Link::new(tps, 0, 0),
+            ]
+        })
+        .collect();
     let mut out = TickOutput::default();
     let mut known_projectiles: BTreeSet<u32> = BTreeSet::new();
     let mut gun_last: HashMap<u32, u64> = HashMap::new();
     let mut known_effects: Vec<(u8, [i64; 3])> = Vec::new();
     let mut known_marks: usize = 0;
     let mut last_terms: Option<OwnshipTerms> = None;
-    let mut last_own_state_tick = 0u64;
     let mut peak_entities = BTreeMap::new();
     let ticks = MINUTES * 60 * 120;
     let mut plain = Stat::default();
@@ -363,11 +381,13 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
             }
         }
 
-        if !tick.is_multiple_of(TICKS_PER_SNAPSHOT) {
+        for link in &mut links {
+            link.terms_dirty |= terms_changed;
+        }
+        if !RATES.iter().any(|tps| tick.is_multiple_of(*tps)) {
             previous_picture = picture;
             continue;
         }
-        let k = tick / TICKS_PER_SNAPSHOT;
         let own = world.cockpits[0].flight.position;
         let exact = ExactState::of(&OwnPlane::of(&world.cockpits[0]), terms.as_ref());
         let readout = world
@@ -388,12 +408,16 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
             commands_applied: 0,
             own_hash: Some(exact.hash().unwrap()),
         };
-        let own_state_due = terms_changed || tick - last_own_state_tick >= 120;
-        if own_state_due {
-            last_own_state_tick = tick;
-        }
-        for link in &mut links {
-            link.hear(k);
+        for link in links.iter_mut().filter(|l| tick.is_multiple_of(l.tps)) {
+            let k = tick / link.tps;
+            // The exact state at the link's next snapshot after its terms
+            // change, and at least once a second.
+            let own_state_due = link.terms_dirty || tick - link.last_own_state >= 120;
+            if own_state_due {
+                link.terms_dirty = false;
+                link.last_own_state = tick;
+            }
+            link.hear(tick);
             let host = link.host.as_mut().unwrap();
             let mut entities =
                 from_world::entities(&picture, Some(&previous_picture), player.0, &mut host.names)
@@ -447,7 +471,7 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
             link.entities_sent.push(packet.entities.sent);
             link.entities_full.push(packet.entities.full);
             link.waiting.push(packet.entities.waiting);
-            if packet.entities.waiting > 0 && k > 30 {
+            if packet.entities.waiting > 0 && tick > 120 {
                 link.late_waits += 1;
                 if link.late_waits <= 2 {
                     println!(
@@ -460,14 +484,14 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
                 }
             }
             link.packet.push(bytes);
-            link.send(k, bytes, &mut rng);
+            link.send(tick, bytes, &mut rng);
             if own_state_due {
                 let section = link.host().own_state(tick32, &exact).unwrap();
                 link.own_state.push(section.len());
                 let bytes = tore_net::packet::PAYLOAD_HEADER_LEN
                     + tore_net::packet::SECTION_HEADER_LEN
                     + section.len();
-                link.send(k, bytes, &mut rng);
+                link.send(tick, bytes, &mut rng);
             }
         }
         previous_picture = picture;
@@ -484,8 +508,9 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
     println!("most scope, visual and map contacts at once: {busiest}");
     let seconds = (ticks as f64) / 120.;
     for link in &links {
+        let rate = 120 / link.tps as usize;
         println!(
-            "--- link with {} percent loss, {} bytes kept for messages ---",
+            "--- {rate} snapshots a second, {} percent loss, {} bytes kept for messages ---",
             link.loss, link.messages
         );
         for (name, stat) in [
@@ -522,9 +547,9 @@ fn bytes_per_snapshot_on_a_15_against_15_mission() {
         let link_bytes = link.link_parts.values.iter().sum::<usize>()
             + link.link_events.values.iter().sum::<usize>();
         // After the first second, which brings the whole share across.
-        let settled = &link.link_parts.values[30.min(link.link_parts.values.len())..];
+        let settled = &link.link_parts.values[rate.min(link.link_parts.values.len())..];
         let busiest_second = settled
-            .windows(30)
+            .windows(rate)
             .map(|w| w.iter().sum::<usize>())
             .max()
             .unwrap_or(0);

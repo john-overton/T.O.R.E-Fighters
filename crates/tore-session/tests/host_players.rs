@@ -17,8 +17,10 @@
 //! ```
 //!
 //! `TORE_MEASURE_BOTS` is the number of bots (default 2), `TORE_MEASURE_OPEN`
-//! is `friendly` (default) or `all` (needed above 15), and
-//! `TORE_MEASURE_SECONDS` is the simulated flying time (default 300).
+//! is `friendly` (default) or `all` (needed above 15),
+//! `TORE_MEASURE_SECONDS` is the simulated flying time (default 300) and
+//! `TORE_MEASURE_RATE` the snapshot rate (default the host's, 60 since slice
+//! D12).
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -121,6 +123,9 @@ fn host_cost_and_bandwidth_with_bots_on_a_15_against_15_mission() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(300);
+    let rate: Option<u32> = std::env::var("TORE_MEASURE_RATE")
+        .ok()
+        .and_then(|v| v.parse().ok());
     let open = match std::env::var("TORE_MEASURE_OPEN").as_deref() {
         Ok("all") => OpenPlanes::All,
         _ => OpenPlanes::Friendly,
@@ -139,10 +144,12 @@ fn host_cost_and_bandwidth_with_bots_on_a_15_against_15_mission() {
             open_planes: open.clone(),
             start: StartMode::Now,
             entropy: Entropy::Seeded(11),
+            snapshot_rate: rate.unwrap_or(HostConfig::new(build()).snapshot_rate),
             ..HostConfig::new(build())
         },
     )
     .expect("the host starts");
+    let snapshot_rate = host.config().snapshot_rate;
     let planes = host.world().roster.planes().len();
     let mut players: Vec<(tore_net::sim::SimSocket, Bot)> = (0..bots)
         .map(|i| {
@@ -259,8 +266,8 @@ fn host_cost_and_bandwidth_with_bots_on_a_15_against_15_mission() {
     tick_calls.sort_unstable();
     let ms_per_tick = host_ns as f64 / ticks.max(1) as f64 / 1e6;
     println!(
-        "{planes} planes, {bots} bots ({}), {seconds} s flown, {ticks} ticks, elapsed clock, \
-         wall {:.0} s",
+        "{planes} planes, {bots} bots ({}), {snapshot_rate} snapshots a second, {seconds} s \
+         flown, {ticks} ticks, elapsed clock, wall {:.0} s",
         if matches!(open, OpenPlanes::All) {
             "all planes open"
         } else {
