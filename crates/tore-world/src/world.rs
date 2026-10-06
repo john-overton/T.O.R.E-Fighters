@@ -579,7 +579,11 @@ impl World {
             .collect();
         for command in mission {
             match *command {
-                MissionCommand::Take { seat, .. } if !flying.contains(&seat) => flying.push(seat),
+                MissionCommand::Take { seat, .. } | MissionCommand::ReviveLost { seat, .. }
+                    if !flying.contains(&seat) =>
+                {
+                    flying.push(seat)
+                }
                 MissionCommand::GiveBack { seat } | MissionCommand::Abandon { seat } => {
                     flying.retain(|s| *s != seat)
                 }

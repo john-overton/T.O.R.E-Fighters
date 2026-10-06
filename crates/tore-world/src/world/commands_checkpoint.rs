@@ -59,6 +59,12 @@ impl Checkpoint for MissionCommand {
                 seat.save(s, None)?;
                 spawn.save(s, None)
             }
+            MissionCommand::ReviveLost { seat, plane, spawn } => {
+                s.writer().write_varint(5);
+                seat.save(s, None)?;
+                plane.save(s, None)?;
+                spawn.save(s, None)
+            }
         }
     }
 
@@ -77,6 +83,11 @@ impl Checkpoint for MissionCommand {
             },
             4 => MissionCommand::Revive {
                 seat: Checkpoint::load(l, None)?,
+                spawn: Checkpoint::load(l, None)?,
+            },
+            5 => MissionCommand::ReviveLost {
+                seat: Checkpoint::load(l, None)?,
+                plane: Checkpoint::load(l, None)?,
                 spawn: Checkpoint::load(l, None)?,
             },
             other => return invalid(format!("a mission command has no variant {other}")),
@@ -136,6 +147,11 @@ mod tests {
             MissionCommand::Abandon { seat: SeatId(254) },
             MissionCommand::Revive {
                 seat: SeatId(7),
+                spawn: Box::new(spawn()),
+            },
+            MissionCommand::ReviveLost {
+                seat: SeatId(8),
+                plane: PlaneId(1_001),
                 spawn: Box::new(spawn()),
             },
         ]

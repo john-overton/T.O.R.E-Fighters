@@ -605,6 +605,21 @@ impl World {
     ) -> WorldResult<Spawn> {
         let index = self.lost_cockpit_of(seat)?;
         let plane = self.cockpits[index].plane;
+        self.revival_spawn_from(plane, start, distance_ft, chosen, weapons)
+    }
+
+    /// [`Self::revival_spawn`] for a lost plane no seat holds: an AI aircraft
+    /// the AI lost while its player was away, or a wreck already abandoned
+    /// (slice K5, a rejoining player). Refuses a plane that is not gone.
+    pub fn revival_spawn_from(
+        &self,
+        plane: PlaneId,
+        start: [f64; 3],
+        distance_ft: f64,
+        chosen: Option<&LoadoutSpec>,
+        weapons: RevivalWeapons,
+    ) -> WorldResult<Spawn> {
+        self.plane_gone(plane)?;
         let aircraft = self
             .aircraft_of(plane)
             .ok_or_else(|| format!("plane {} has no aircraft", plane.0))?;
@@ -656,6 +671,33 @@ impl World {
     fn revival_check(&self, seat: SeatId, spawn: &Spawn) -> WorldResult<Plan> {
         let index = self.lost_cockpit_of(seat)?;
         let old = self.cockpits[index].plane;
+        self.revival_check_from(old, spawn)
+    }
+
+    /// Whether `plane` is gone for good, which is what a revival needs of the
+    /// plane it replaces: a human's plane that is lost (flown or abandoned),
+    /// or an AI aircraft the AI cannot hand over any more (destroyed, crashed
+    /// or its pilot gone). A living aircraft, or one not in the mission, is
+    /// refused.
+    fn plane_gone(&self, plane: PlaneId) -> WorldResult<()> {
+        let entry = self
+            .roster
+            .plane(plane)
+            .ok_or_else(|| format!("plane {} is not in the mission", plane.0))?;
+        let gone = match self.cockpits.iter().position(|c| c.plane == plane) {
+            Some(index) => self.cockpit_lost(index),
+            None => entry.pilot == Pilot::Ai && self.can_take(NOBODY, plane).is_err(),
+        };
+        if gone {
+            Ok(())
+        } else {
+            Err(format!("plane {} is not lost", plane.0).into())
+        }
+    }
+
+    /// The checks of a revival from the lost plane `old`, whoever held it.
+    fn revival_check_from(&self, old: PlaneId, spawn: &Spawn) -> WorldResult<Plan> {
+        self.plane_gone(old)?;
         let wing = self
             .roster
             .plane(old)
@@ -713,6 +755,37 @@ impl World {
         self.add_plane(&new)?;
         self.take_plane(seat, new.plane)?;
         Ok(new.plane)
+    }
+
+    /// Revives a seat that holds no plane, in a new plane of the lost
+    /// `plane`'s aircraft and wing: what a player returning to a game whose
+    /// AI lost the aircraft reserved for it gets (slice K5,
+    /// [`super::MissionCommand::ReviveLost`]). `plane` is an AI aircraft the
+    /// AI lost or a wreck already abandoned, which stays as it is. The seat
+    /// flies no plane (a seat that does not exist yet joins by this). A
+    /// refusal changes nothing. Returns the new plane.
+    pub fn revive_lost_plane(
+        &mut self,
+        seat: SeatId,
+        plane: PlaneId,
+        spawn: &Spawn,
+    ) -> WorldResult<PlaneId> {
+        if self.roster.seat(seat).is_some_and(|s| s.plane.is_some()) {
+            return Err(format!("seat {} already flies a plane", seat.0).into());
+        }
+        let Plan { new, retire } = self.revival_check_from(plane, spawn)?;
+        if let Some(wreck) = retire {
+            self.retire_plane(wreck)?;
+        }
+        self.add_plane(&new)?;
+        self.take_plane(seat, new.plane)?;
+        Ok(new.plane)
+    }
+
+    /// What [`Self::revive_lost_plane`] would add: the new plane's id, slot
+    /// and aircraft, for the host's Spawned message.
+    pub fn revival_plane_from(&self, plane: PlaneId, spawn: &Spawn) -> WorldResult<NewPlane> {
+        self.revival_check_from(plane, spawn).map(|plan| plan.new)
     }
 
     /// The checks of [`Self::add_plane`].
@@ -897,6 +970,11 @@ mod checkpoint;
 #[cfg(test)]
 #[path = "revive_tests.rs"]
 mod revive_tests;
+
+// The world tests of reviving from a plane nobody holds (slice K5).
+#[cfg(test)]
+#[path = "revive_lost_tests.rs"]
+mod revive_lost_tests;
 
 #[cfg(test)]
 mod tests {

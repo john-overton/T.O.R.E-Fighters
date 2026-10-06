@@ -288,7 +288,9 @@ pub(super) fn open_handoffs() -> Scenario {
             .collect();
         for command in &commands {
             match *command {
-                MissionCommand::Take { seat, .. } => flying.push(seat),
+                MissionCommand::Take { seat, .. } | MissionCommand::ReviveLost { seat, .. } => {
+                    flying.push(seat)
+                }
                 MissionCommand::GiveBack { seat } => flying.retain(|s| *s != seat),
                 MissionCommand::Settings(_)
                 | MissionCommand::Abandon { .. }
@@ -361,7 +363,9 @@ fn flying_after(world: &World, commands: &[MissionCommand]) -> Vec<SeatId> {
         .collect();
     for command in commands {
         match *command {
-            MissionCommand::Take { seat, .. } => flying.push(seat),
+            MissionCommand::Take { seat, .. } | MissionCommand::ReviveLost { seat, .. } => {
+                flying.push(seat)
+            }
             MissionCommand::GiveBack { seat } => flying.retain(|s| *s != seat),
             MissionCommand::Settings(_)
             | MissionCommand::Abandon { .. }

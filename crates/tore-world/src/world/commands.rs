@@ -36,6 +36,16 @@ pub enum MissionCommand {
         seat: SeatId,
         spawn: Box<super::revive::Spawn>,
     },
+    /// Stage K (slice K5): seats `seat`, which flies no plane, in a new
+    /// plane of the lost `plane`'s aircraft and wing at `spawn`
+    /// ([`World::revive_lost_plane`]): a player who returns to a game whose
+    /// AI lost the aircraft reserved for it. The lost plane stays as it is.
+    /// The seat sends input for this tick.
+    ReviveLost {
+        seat: SeatId,
+        plane: PlaneId,
+        spawn: Box<super::revive::Spawn>,
+    },
 }
 
 /// What became of a wing order the step applied.
@@ -94,6 +104,9 @@ impl World {
             }
             MissionCommand::Revive { seat, spawn } => {
                 self.revive_plane(*seat, spawn)?;
+            }
+            MissionCommand::ReviveLost { seat, plane, spawn } => {
+                self.revive_lost_plane(*seat, *plane, spawn)?;
             }
         }
         Ok(())
