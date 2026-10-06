@@ -232,17 +232,32 @@ def drive_host_leave_confirm(d: Drive) -> None:
     drive_host_leave(d, False)
 
 
+# The player's F/A-18D alone against ten aces 50 nm away: the AI that flies it for the away player is shot down about
+# 50 seconds after the handoff (the same loss every run, 110 seconds into the mission), where the guide's mission's
+# AI wings sometimes win. At 20 nm the enemy would arrive before the idle minute is up.
+LONE_MISSION = """tore-mission 1
+theater UKR
+condition clear
+start airborne 20000
+separation-nm 50
+preset free
+guns-only no
+wing friendly 1 F18.PT 1 experienced
+wing enemy 1 SU27.PT 5 ace
+wing enemy 2 MIG29.PT 5 ace
+cheats none
+"""
+
 # The game flies plane 0 for four seconds and opens its flight menu (the controls go neutral); once the server's
-# minute is up the AI flies the plane and the game watches it; the enemy, 50 nm away on the guide's mission and flying
-# free, arrives about two minutes later and shoots it down (at 20 nm it arrives before the minute is up). The observer menu's first row is then Spawn in Aircraft: Enter flies
-# the player again.
+# minute is up the AI flies the plane and the game watches it; the enemy arrives about 50 seconds later and shoots it
+# down. The observer menu's first row is then Spawn in Aircraft: Enter flies the player again.
 AWAY_LOST_SCRIPT = """wait 1
 waittick 480 60
 shot SHOTS/lost-1-flying.ppm
 key Escape
 wait 2
 shot SHOTS/lost-2-menu.ppm
-wait 195
+wait 150
 shot SHOTS/lost-3-watching.ppm
 key Escape
 wait 2
@@ -289,9 +304,10 @@ def away_lost_problems(game: str, server: str) -> list[str]:
 
 def drive_away_lost(d: Drive) -> None:
     port = d.port()
-    # Co-op on the guide's mission with the AI flying free, revival on (the registry's `respawn revive`) and the idle
-    # time at its shortest.
-    server = start_server(d, port, guide_mission(separation_nm=50), respawn="revive", idle_ai=1, empty_timeout=300)
+    # Co-op against aces flying free, revival on (the registry's `respawn revive`), the idle time at its shortest and
+    # no empty timeout, as a game a player hosts has it: without slice F2-X's fix the mission ended when the AI lost
+    # the plane of its only player.
+    server = start_server(d, port, LONE_MISSION, respawn="revive", idle_ai=1, empty_timeout=0)
     shots = d.work / "shots"
     shots.mkdir(exist_ok=True)
     script = d.work / "awaylost.txt"
