@@ -25,8 +25,8 @@
 //!
 //! [`journal`] is stage K's one door into a host's world: each tick's
 //! changes, which the host steps with and a standby replays, and the
-//! standby stream's records. [`standby`] is the standby's side, which slice
-//! K2 builds.
+//! standby stream's records. [`standby`] is the standby's side (slice K2):
+//! the state machine that replays the stream and its worker thread.
 
 pub mod bot;
 pub mod client;

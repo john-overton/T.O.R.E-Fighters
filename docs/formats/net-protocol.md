@@ -1841,6 +1841,18 @@ choice below is an agent decision.
   (`Client::take_standby_records`), and takes Token, Reach test, Reach
   peers, Upload test, Succession, Resumed and Host moving without acting on
   them.
+- **The standby's side** (slice K2, `tore_session::standby`). A Check's
+  tick is the world's `tick()` when the host hashed it: the tick the next
+  step runs, as a checkpoint's tick is. Appointed in flight, a standby gets
+  Appoint and then a checkpoint, with no Flight record; it builds the flight
+  it holds for the Appoint's mission and the checkpoint's identity checks
+  it. An Appoint starts the standby afresh, its parts too, so the host sends
+  every part after one; Ended keeps them. A checkpoint's chunks are exactly
+  4,096 bytes but the last, may come in any order, each once, and the whole
+  is checked by its container's CRC-32, tick and mission identity: damage
+  sets "needs a checkpoint" in the next Standby status, and another mission
+  is state 3. A Ticks record that cannot be read, or that does not start
+  where the last ended, is state 3 too, until an Appoint or a Flight.
 
 ## Limits
 
