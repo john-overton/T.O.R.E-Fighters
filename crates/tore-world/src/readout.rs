@@ -84,9 +84,8 @@ pub struct CockpitReadout {
     pub target_window: Option<TargetBrief>,
     /// The situation music's inputs and the mission result.
     pub music: MusicReadout,
-    /// The seat's share of the flight data link. Empty (and with no radar,
-    /// so no cue is drawn) until the world fills it in
-    /// ([`crate::World::cockpit_readout`]); not yet on the wire (slice G7).
+    /// The seat's share of the flight data link. Empty until the world fills
+    /// it in ([`crate::World::cockpit_readout`]); not yet on the wire (slice G7).
     pub link: LinkReadout,
 }
 
@@ -389,14 +388,13 @@ pub const MAX_LINK_MARKS: usize = 32;
 /// picture by [`crate::datalink::DataLink::readout`] and holds only what the
 /// seat's displays need.
 ///
-/// `radar` is the aircraft's radar flag: an aircraft with no radar shows none
-/// of this, so every cue asks [`LinkReadout::shown`] first.
+/// `radar` is the aircraft's radar flag. John, 2026-10-05: an aircraft with no
+/// radar has no radar scope, so the scope's link marks are the one cue it lacks
+/// ([`LinkReadout::on_scope`]); the target window, the HUD and the sort warning
+/// keep every cue.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LinkReadout {
-    /// The plane's aircraft has a radar. Agent decision: it is the one gate
-    /// for every cue, on the scope, the target window and the HUD, because
-    /// John's rule of 2026-10-05 is that the player of an aircraft with no
-    /// radar does not see the link.
+    /// The plane's aircraft has a radar, and so a radar scope to mark.
     pub radar: bool,
     /// The target the lead assigned to this plane.
     pub assigned: Option<LinkAssigned>,
@@ -412,27 +410,21 @@ pub struct LinkReadout {
 }
 
 impl LinkReadout {
-    /// Whether the seat's displays show link cues at all.
-    pub fn shown(&self) -> bool {
+    /// Whether the plane has a radar scope to draw the link's marks on.
+    pub fn on_scope(&self) -> bool {
         self.radar
     }
-    /// The marks on `target`, when the displays are to show any.
+    /// The marks on `target`.
     pub fn mark(&self, target: u32) -> Option<&LinkMark> {
-        if !self.shown() {
-            return None;
-        }
         self.marks.iter().find(|mark| mark.target == target)
     }
-    /// The flightmate `plane`, when the displays are to show it.
+    /// The flightmate `plane`.
     pub fn mate(&self, plane: u32) -> Option<&LinkMate> {
-        if !self.shown() {
-            return None;
-        }
         self.mates.iter().find(|mate| mate.plane == plane)
     }
-    /// The assignment the plane holds, when the displays are to show it.
+    /// The assignment the plane holds.
     pub fn assignment(&self) -> Option<&LinkAssigned> {
-        self.assigned.as_ref().filter(|_| self.shown())
+        self.assigned.as_ref()
     }
 }
 

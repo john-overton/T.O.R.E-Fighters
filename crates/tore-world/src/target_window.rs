@@ -69,8 +69,8 @@ impl TargetBrief {
 /// target `id` (docs/DATALINK.md, "What the player sees"), or nothing. One tag
 /// shows, the first that applies: the target the lead assigned to the player,
 /// one the flight was assigned, one flightmates have locked, one a plane of
-/// another flight has locked over the battle net. A readout with no radar
-/// has none.
+/// another flight has locked over the battle net. An aircraft with no radar
+/// has the tag all the same (John, 2026-10-05).
 pub fn link_tag(link: &LinkReadout, id: u32) -> Option<String> {
     if link.assignment().is_some_and(|given| given.target == id) {
         return Some("ASSIGNED BY LEAD".into());
@@ -424,12 +424,15 @@ mod tests {
     }
 
     #[test]
-    fn an_aircraft_with_no_radar_shows_no_tag_and_no_state() {
-        let link = link(false);
-        for id in [10, 11, 12, 13] {
-            assert_eq!(link_tag(&link, id), None, "target {id}");
+    fn an_aircraft_with_no_radar_keeps_the_tag_and_the_state() {
+        // John, 2026-10-05: only the radar scope's marks go without a radar.
+        let (with, without) = (link(true), link(false));
+        for id in [10, 11, 12, 13, 14, 99] {
+            assert_eq!(link_tag(&with, id), link_tag(&without, id), "target {id}");
         }
-        assert!(mate_state(&link, 1).is_empty());
+        assert_eq!(link_tag(&without, 10).as_deref(), Some("ASSIGNED BY LEAD"));
+        assert_eq!(mate_state(&without, 1), mate_state(&with, 1));
+        assert!(!mate_state(&without, 1).is_empty());
     }
 
     #[test]

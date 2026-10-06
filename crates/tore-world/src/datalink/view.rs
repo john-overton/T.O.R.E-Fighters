@@ -572,12 +572,15 @@ mod tests {
     }
 
     #[test]
-    fn a_plane_with_no_radar_still_gets_the_readout_with_the_flag_down() {
+    fn a_plane_with_no_radar_gets_the_whole_readout_with_the_flag_down() {
         let readout = link().readout(2);
-        assert!(!readout.radar && !readout.shown());
+        assert!(!readout.radar && !readout.on_scope(), "no scope to mark");
         assert_eq!(readout.tracks.len(), 3, "linked all the same");
-        assert!(readout.mark(10).is_none(), "but no display reads a mark");
-        assert!(readout.mate(1).is_none() && readout.assignment().is_none());
+        assert!(
+            readout.mark(10).is_some(),
+            "the target window reads the marks"
+        );
+        assert!(readout.mate(1).is_some());
         assert_eq!(link().readout(99), LinkReadout::default());
     }
 }

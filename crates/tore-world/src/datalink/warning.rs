@@ -11,8 +11,9 @@
 //!
 //! Agent decisions: a pair the lead meant is never warned of, which is both
 //! members assigned the aircraft, or one of them assigned it by the other. A
-//! seat in an aircraft with no radar is never warned: its player sees no link
-//! cue ([`crate::readout::LinkReadout::shown`]).
+//! seat in an aircraft with no radar is warned like any other (John,
+//! 2026-10-05: only the radar scope's marks go without a radar; such an
+//! aircraft holds no lock, so in practice it is never in a pair).
 
 use super::DataLink;
 use crate::{
@@ -135,7 +136,7 @@ impl DataLink {
         target: u32,
     ) -> Option<SortWarning> {
         let member = self.member(plane)?;
-        if !member.human || !member.radar {
+        if !member.human {
             return None;
         }
         let Pilot::Human(seat) = roster.plane(PlaneId(plane))?.pilot else {
@@ -400,7 +401,8 @@ mod tests {
     }
 
     #[test]
-    fn a_seat_with_no_radar_hears_nothing_and_the_pair_is_still_recorded() {
+    fn a_seat_with_no_radar_is_warned_like_any_other() {
+        // John, 2026-10-05: only the radar scope's marks go without a radar.
         let (mut link, roster) = fixture();
         link.members[0].radar = false;
         lock(&mut link, 0, 50);
@@ -408,7 +410,10 @@ mod tests {
         let warnings = link.sort_warnings(&roster);
         assert_eq!(
             texts(&warnings),
-            [(1, "Sort: Red one is locked on your target.")]
+            [
+                (0, "Sort: Red two is locked on your target."),
+                (1, "Sort: Red one is locked on your target.")
+            ]
         );
         assert!(link.warned().contains(&(0, 1, 50)));
     }

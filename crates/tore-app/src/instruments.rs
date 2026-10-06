@@ -2375,7 +2375,7 @@ mod link_cue_tests {
     }
 
     #[test]
-    fn a_linked_scene_draws_its_cues_and_one_with_no_radar_draws_none() {
+    fn a_linked_scene_draws_its_cues_and_one_with_no_radar_has_none_on_its_scope() {
         let pages = [9, 4];
         let draw = |radar, linked| pages.map(|page| render(page, scene(radar, linked)));
         let unlinked = draw(true, false);
@@ -2390,14 +2390,21 @@ mod link_cue_tests {
                 pages[page]
             );
         }
-        // An aircraft with no radar draws exactly what it drew with no link.
-        for (page, (bare, plain)) in without_radar.iter().zip(&unlinked).enumerate() {
-            assert!(
-                differing(bare, plain).is_empty(),
-                "page {} draws a cue with no radar",
-                pages[page]
-            );
-        }
+        // John, 2026-10-05: an aircraft with no radar has no scope marks, so
+        // its radar page is the unlinked one, but its target window keeps the
+        // tag, exactly as an aircraft with a radar draws it.
+        assert!(
+            differing(&without_radar[0], &unlinked[0]).is_empty(),
+            "the radar page draws a link cue with no radar"
+        );
+        assert!(
+            !differing(&without_radar[1], &unlinked[1]).is_empty(),
+            "the target window lost its tag"
+        );
+        assert!(
+            differing(&without_radar[1], &with_radar[1]).is_empty(),
+            "the target window differs with the radar flag"
+        );
         if let Some(dir) = std::env::var_os("TORE_LINK_CAPTURE_DIR") {
             // A look for the slice report: the raster of each page in each
             // state, as PPMs.

@@ -23,8 +23,9 @@ go at once; every assignment is also a radio call, with bearing and range from
 the receiver. John first asked for older aircraft to get assignments by voice
 only and for a mixed flight to share what its least capable member could
 receive. He dropped that on 2026-10-05: **all friendlies get the data link
-whatever their aircraft type**, unless the aircraft has no radar, whose player
-then does not see it ([decisions](MULTIPLAYER.md#decisions)). Everything else
+whatever their aircraft type**, and an aircraft with no radar only lacks the
+radar scope's marks ([decisions](MULTIPLAYER.md#decisions); John's ruling of
+2026-10-05, below). Everything else
 on this page is an **agent proposal** awaiting John's review unless it says
 otherwise.
 Fighters Anthology had no flight data link; its nearest feature, remote
@@ -57,8 +58,8 @@ targeting through a friendly sentry aircraft, is described
   locks, never assignments.
 - The one thing that depends on the aircraft type is whether it has a
   **radar**. An aircraft with no radar is still linked, and its AI uses the
-  picture like any other; its player sees no link cues on the displays the
-  aircraft does not have (John, 2026-10-05). Every aircraft ported so far has
+  picture like any other; its player sees every cue except the radar scope's
+  marks, because the aircraft has no scope (John, 2026-10-05). Every aircraft ported so far has
   a radar.
 - A flight lead **assigns** targets: one wingman, the whole flight, or a
   **sort** that gives each wingman a different bandit. Every assignment is a
@@ -119,12 +120,12 @@ An aircraft with no radar:
 - is a member like any other: its AI reads the picture, takes assignments
   and shares what it holds, and the other members see its locks, tracks and
   state;
-- gives its player no link cues at all. Agent decision (slice G6): John's
-  words are that the player of an aircraft with no radar does not see the
-  link, so the radar flag is the one gate for every cue, on the scope, the
-  target window and the HUD, and for the sort warning. The aircraft still
-  receives the whole picture in its readout and the flag is one place to
-  change if John wants the target window or the HUD to keep some cues.
+- gives its player every cue except the radar scope's marks. **John,
+  2026-10-05:** "keep target window and hud cues, just we can't see the
+  radar." The target window's tag and flightmate state, the HUD's brackets
+  and the sort warning stay; the scope is the one display it does not have.
+  (Slice G6 first gated every cue on the radar flag, an agent decision that
+  John narrowed the same day.)
 
 ```mermaid
 flowchart LR
@@ -141,7 +142,8 @@ flowchart LR
 ## What the player sees
 
 Cues are about the members of the player's side. An aircraft with no radar
-shows none of them (John, 2026-10-05; see [who shares it](#who-shares-it)).
+shows all of them but the radar scope's marks (John, 2026-10-05; see
+[who shares it](#who-shares-it)).
 
 | Where | Cue |
 | --- | --- |

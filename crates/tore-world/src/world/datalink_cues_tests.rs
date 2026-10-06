@@ -37,7 +37,7 @@ fn a_seats_readout_carries_its_planes_share_of_the_picture() {
     }
     for plane in [F_LEAD, F_HUMAN] {
         let link = readout_of(&world, plane).link;
-        assert!(link.radar && link.shown(), "the F/A-18D has a radar");
+        assert!(link.radar && link.on_scope(), "the F/A-18D has a radar");
         assert_eq!(
             lock_marks_differ(&link, &world, plane),
             "",

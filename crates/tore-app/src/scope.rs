@@ -306,7 +306,7 @@ pub fn scope(readout: &CockpitReadout, s: &flight::State, controls: sensors::Con
 }
 
 /// The link's marks and remote tracks for the scope: nothing when the aircraft
-/// has no radar. A target gets marks when a flightmate locked or was assigned
+/// has no radar, so no scope (John, 2026-10-05). A target gets marks when a flightmate locked or was assigned
 /// it, or the lead assigned it to the player. A track is remote when another
 /// member holds it and the player's own radar contacts do not.
 fn link_cues(
@@ -315,7 +315,7 @@ fn link_cues(
     basis: &Basis,
 ) -> (Vec<LinkMarks>, Vec<RemoteTrack>) {
     let link = &readout.link;
-    if !link.shown() {
+    if !link.on_scope() {
         return (Vec::new(), Vec::new());
     }
     let sensors = &readout.sensors;
@@ -623,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn an_aircraft_with_no_radar_has_no_link_cue_on_its_scope() {
+    fn an_aircraft_with_no_radar_has_no_link_mark_on_its_scope() {
         let link = tore_world::readout::LinkReadout {
             radar: false,
             assigned: Some(tore_world::readout::LinkAssigned {

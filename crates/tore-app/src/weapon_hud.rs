@@ -381,7 +381,7 @@ pub(crate) fn replay_target(
 }
 /// The target to wear the assignment brackets now: the one the lead assigned
 /// to the plane, while the plane has not locked it and the blink is lit.
-/// Nothing for an aircraft with no radar. Locking it ends the brackets; the
+/// Locking it ends the brackets; the
 /// sensors know a tick before the picture marks the assignment acknowledged.
 fn bracketed(readout: &CockpitReadout) -> Option<u32> {
     let given = readout.link.assignment()?;
@@ -899,10 +899,11 @@ mod tests {
     }
 
     #[test]
-    fn an_aircraft_with_no_radar_draws_no_brackets() {
+    fn an_aircraft_with_no_radar_keeps_its_brackets() {
+        // John, 2026-10-05: only the radar scope's marks go without a radar.
         let mut readout = assigned_readout(false, false);
         readout.sensors.tick = 0;
-        assert_eq!(bracketed(&readout), None);
+        assert_eq!(bracketed(&readout), Some(7));
     }
 
     #[test]
