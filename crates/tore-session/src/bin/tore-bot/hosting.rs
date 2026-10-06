@@ -134,10 +134,7 @@ pub fn host_config(
     config.start = StartMode::King;
     config.after_end = AfterEnd::Restart;
     config.restart_delay = Duration::ZERO;
-    // Not zero as the game's: a host that took the game over has its players
-    // absent for a moment, and with no timeout it would end the mission as
-    // "everyone left" (reported to the lead, K9).
-    config.empty_timeout = Duration::from_secs(20);
+    config.empty_timeout = Duration::ZERO;
     config.entropy = Entropy::System;
     config.content = Some(content);
     config
